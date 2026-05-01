@@ -17,11 +17,16 @@
 </head>
 <body>
 <div id="app">
-  <header id="topbar">
+  <header id="global-header">
     <div class="brand">
       <span class="dot"></span>
       <span class="title">git diff preview</span>
     </div>
+    <nav class="app-menu" aria-label="Views">
+      <a class="app-menu-item active" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
+    </nav>
+  </header>
+  <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">
       <input class="ref-input" id="ref-from" placeholder="from…" autocomplete="off" readonly />

@@ -1,0 +1,49 @@
+import { describe, expect, test } from 'bun:test';
+import {
+  buildRawFileUrl,
+  buildRoute,
+  parseRoute,
+} from '../routes';
+
+describe('routes', () => {
+  const defaultRange = { from: 'HEAD', to: 'worktree' };
+
+  test('builds canonical diff and file detail URLs', () => {
+    const range = { from: 'HEAD', to: 'worktree' };
+    expect(buildRoute({ screen: 'diff', range })).toBe('/todif?from=HEAD&to=worktree');
+    expect(buildRoute({ screen: 'file', path: 'src/a b.ts', ref: 'feat/foo', range }))
+      .toBe('/file?path=src%2Fa%20b.ts&ref=feat%2Ffoo&from=HEAD&to=worktree');
+  });
+
+  test('parses file routes with branch refs containing slashes', () => {
+    expect(parseRoute('/file', '?path=src%2Fa.ts&ref=feat%2Ffoo&from=main&to=feat%2Ffoo', defaultRange))
+      .toEqual({ screen: 'file', path: 'src/a.ts', ref: 'feat/foo', range: { from: 'main', to: 'feat/foo' } });
+  });
+
+  test('reads legacy compact range URLs but writes canonical from and to params', () => {
+    expect(parseRoute('/todif', '?range=HEAD~1..worktree', defaultRange))
+      .toEqual({ screen: 'diff', range: { from: 'HEAD~1', to: 'worktree' } });
+    expect(buildRoute(parseRoute('/todif', '?range=HEAD~1..worktree', defaultRange)))
+      .toBe('/todif?from=HEAD~1&to=worktree');
+  });
+
+  test('returns explicit unknown routes instead of silently falling back', () => {
+    expect(parseRoute('/file', '?ref=worktree', defaultRange))
+      .toEqual({ screen: 'unknown', reason: 'missing-path', rawPathname: '/file', rawSearch: '?ref=worktree', range: defaultRange });
+    expect(parseRoute('/blame', '?from=main&to=worktree', defaultRange))
+      .toEqual({ screen: 'unknown', reason: 'unknown-pathname', rawPathname: '/blame', rawSearch: '?from=main&to=worktree', range: { from: 'main', to: 'worktree' } });
+  });
+
+  test('builds deterministic URLs for round trips and todiff aliases', () => {
+    expect(buildRoute(parseRoute('/todiff', '?from=main&to=feat%2Ffoo', defaultRange)))
+      .toBe('/todif?from=main&to=feat%2Ffoo');
+    const route = { screen: 'file' as const, path: 'src/a?b&c=1.ts', ref: 'feat/foo', range: { from: 'HEAD^', to: 'worktree' } };
+    expect(buildRoute(parseRoute('/file', buildRoute(route).slice('/file'.length), defaultRange)))
+      .toBe(buildRoute(route));
+  });
+
+  test('builds raw file API URLs from path and ref only', () => {
+    expect(buildRawFileUrl({ path: 'src/a.ts', ref: 'worktree' }))
+      .toBe('/_file?path=src%2Fa.ts&ref=worktree');
+  });
+});

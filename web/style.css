@@ -40,8 +40,11 @@
   --diff-del-word-bg:   #ff818266;
   --diff-hunk-bg:       #ddf4ff;
   --diff-hunk-fg:       #0550ae;
+  --blob-tab-active:    #fd8c73;
   /* sizing */
+  --global-header-h: 44px;
   --topbar-h: 56px;
+  --chrome-h: calc(var(--global-header-h) + var(--topbar-h));
   --sidebar-w: 308px;
   /* shadows */
   --shadow-sm: 0 1px 0 rgba(31,35,40,0.04);
@@ -80,6 +83,7 @@
   --diff-del-word-bg:   rgba(248,81,73,0.40);
   --diff-hunk-bg:       rgba(56,139,253,0.10);
   --diff-hunk-fg:       #58a6ff;
+  --blob-tab-active:    #ec775c;
 }
 
 /* ===== Reset / base ===== */
@@ -97,13 +101,27 @@ html, body {
   -moz-osx-font-smoothing: auto;
 }
 
-/* Window scrolls; topbar + sidebar are fixed */
+/* Window scrolls; global header + topbar + sidebar are fixed */
 #app { display: block; }
+
+/* ===== Global header ===== */
+#global-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--global-header-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  z-index: 60;
+}
 
 /* ===== Topbar ===== */
 #topbar {
   position: fixed;
-  top: 0; left: 0; right: 0;
+  top: var(--global-header-h); left: 0; right: 0;
   height: var(--topbar-h);
   display: flex;
   align-items: center;
@@ -118,12 +136,46 @@ html, body {
   font-weight: 600;
   font-size: 14px;
   color: var(--fg);
+  flex-shrink: 0;
 }
 .brand .dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);
 }
 .brand .title { letter-spacing: -0.005em; }
+
+.app-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  margin-left: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-muted);
+  flex-shrink: 0;
+}
+.app-menu-item {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.app-menu-item:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+  text-decoration: none;
+}
+.app-menu-item.active {
+  background: var(--accent-subtle);
+  color: var(--accent-emph);
+}
 
 #meta {
   display: flex; align-items: center; gap: 10px;
@@ -558,7 +610,7 @@ html, body {
 /* ===== Top-edge loading bar (indeterminate) ===== */
 #load-bar {
   position: fixed;
-  top: var(--topbar-h);
+  top: var(--chrome-h);
   left: 0; right: 0;
   height: 2px;
   z-index: 49;
@@ -586,7 +638,7 @@ html, body {
 #sidebar {
   position: fixed;
   left: 0;
-  top: var(--topbar-h);
+  top: var(--chrome-h);
   bottom: 0;
   width: var(--sidebar-w);
   background: var(--bg-soft);
@@ -841,8 +893,8 @@ body.gdp-resizing * { user-select: none !important; }
 /* ===== Main content area ===== */
 #content {
   margin-left: var(--sidebar-w);
-  padding: calc(var(--topbar-h) + 18px) 24px 80px;
-  min-height: calc(100vh - var(--topbar-h));
+  padding: calc(var(--chrome-h) + 18px) 24px 80px;
+  min-height: calc(100vh - var(--chrome-h));
 }
 
 #diff > *:first-child { margin-top: 0; }
@@ -922,8 +974,8 @@ body.gdp-resizing * { user-select: none !important; }
   isolation: isolate;
   box-shadow: var(--shadow-sm);
   /* When scrolled to (e.g. from sidebar click), leave room for the fixed
-     topbar so the file header doesn't get hidden behind it. */
-  scroll-margin-top: calc(var(--topbar-h) + 8px);
+     fixed headers so the file header doesn't get hidden behind them. */
+  scroll-margin-top: calc(var(--chrome-h) + 8px);
 }
 
 .d2h-file-header,
@@ -937,10 +989,10 @@ body.gdp-resizing * { user-select: none !important; }
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Keep this in sync with --topbar-h. This selector must also cover
+  /* Keep this in sync with --chrome-h. This selector must also cover
    * .d2h-sticky-header because Diff2Html's vendor CSS sets top: 0 there. */
   position: sticky;
-  top: 56px;
+  top: var(--chrome-h);
   z-index: 20;
   font-size: 14px;
   line-height: 21px;
@@ -1180,6 +1232,40 @@ table.d2h-diff-table .d2h-code-line-prefix {
   color: var(--accent);
   background: var(--accent-subtle);
 }
+.gdp-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.gdp-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 26px;
+}
+.gdp-btn:hover {
+  background: var(--bg-mute);
+  text-decoration: none;
+}
+.gdp-btn[aria-pressed="true"] {
+  background: var(--bg-mute);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.gdp-btn:disabled {
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
 .d2h-file-collapse-input {
   width: 13px;
   height: 13px;
@@ -1207,6 +1293,285 @@ table.d2h-diff-table .d2h-code-line-prefix {
 [data-theme="dark"] .gdp-stat-squares .sq.add { background: #2ea043; }
 [data-theme="dark"] .gdp-stat-squares .sq.del { background: #da3633; }
 [data-theme="dark"] .gdp-stat-squares .sq.nu  { background: var(--border-strong); }
+
+.gdp-source-viewer {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  overflow: auto;
+  box-shadow: var(--shadow-sm);
+}
+.gdp-standalone-source .gdp-source-viewer {
+  margin-top: 0;
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+  overflow: visible;
+}
+.gdp-source-viewer.loading,
+.gdp-source-viewer.error,
+.gdp-source-viewer.binary {
+  padding: 16px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.gdp-source-viewer.error {
+  background: var(--diff-del-bg);
+  color: var(--danger);
+}
+.gdp-source-viewer.media {
+  padding: 16px;
+}
+.gdp-source-viewer.media img,
+.gdp-source-viewer.media video {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  background: var(--bg);
+}
+.gdp-source-meta {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gdp-standalone-source .gdp-source-meta {
+  display: none;
+}
+.gdp-source-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-muted);
+}
+.gdp-source-tabs button {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gdp-source-tabs button:hover {
+  color: var(--fg);
+}
+.gdp-source-tabs button.active {
+  color: var(--fg);
+  border-bottom-color: var(--blob-tab-active);
+}
+.gdp-source-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 20px;
+}
+.gdp-standalone-source .gdp-source-table {
+  display: block;
+  overflow: auto;
+}
+.gdp-source-tabs + .gdp-source-table,
+.gdp-source-viewer > .gdp-source-table:first-child {
+  border-radius: 6px;
+}
+.gdp-source-line-number {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 1%;
+  min-width: 50px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--fg-muted);
+  background: var(--bg);
+  box-shadow: inset -1px 0 0 var(--border-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  white-space: nowrap;
+}
+.gdp-source-line-code {
+  padding: 0 12px;
+  color: var(--fg);
+  white-space: pre;
+}
+.gdp-source-line-code.hljs {
+  background: var(--bg);
+}
+.gdp-standalone-source.gdp-file-shell {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  content-visibility: visible;
+}
+.gdp-file-shell.gdp-source-mode {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+.gdp-file-detail-wrapper {
+  display: block;
+  margin: 0;
+}
+.gdp-file-detail-sticky {
+  position: sticky;
+  top: var(--global-header-h);
+  z-index: 35;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-muted);
+}
+.gdp-file-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  margin-bottom: 0;
+  padding: 8px 0 10px;
+  border: 0;
+}
+.gdp-file-detail-tabs[hidden] {
+  display: none !important;
+}
+.gdp-file-detail-tabs .gdp-source-tabs {
+  border-bottom: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+.gdp-file-detail-path {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  gap: 6px;
+}
+.gdp-file-breadcrumb {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  padding-top: 2px;
+  overflow: hidden;
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+}
+.gdp-file-breadcrumb-part,
+.gdp-file-breadcrumb-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gdp-file-breadcrumb-current {
+  color: var(--fg);
+  font-weight: 600;
+}
+.gdp-file-breadcrumb-sep {
+  color: var(--fg-muted);
+  font-weight: 400;
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+.gdp-file-detail-header .gdp-view-file {
+  flex-shrink: 0;
+}
+.gdp-file-detail-header .gdp-copy-path {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.gdp-markdown-preview {
+  width: 100%;
+  max-width: none;
+  padding: 24px 32px 40px;
+  color: var(--fg);
+  overflow-wrap: break-word;
+}
+.gdp-markdown-preview h1,
+.gdp-markdown-preview h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+.gdp-markdown-preview h1 {
+  margin: 0 0 16px;
+  font-size: 2em;
+  line-height: 1.25;
+}
+.gdp-markdown-preview h2 {
+  margin: 24px 0 16px;
+  font-size: 1.5em;
+  line-height: 1.25;
+}
+.gdp-markdown-preview h3 {
+  margin: 24px 0 16px;
+  font-size: 1.25em;
+}
+.gdp-markdown-preview p,
+.gdp-markdown-preview ul,
+.gdp-markdown-preview ol,
+.gdp-markdown-preview blockquote,
+.gdp-markdown-preview pre {
+  margin: 0 0 16px;
+}
+.gdp-markdown-preview ul,
+.gdp-markdown-preview ol {
+  padding-left: 2em;
+}
+.gdp-markdown-preview blockquote {
+  padding: 0 1em;
+  color: var(--fg-muted);
+  border-left: 0.25em solid var(--border);
+}
+.gdp-markdown-preview code {
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+  background: var(--bg-mute);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 85%;
+}
+.gdp-markdown-preview pre {
+  padding: 16px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+.gdp-markdown-preview pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 100%;
+}
+
+body.gdp-file-detail-page #sidebar,
+body.gdp-file-detail-page #sidebar-resizer {
+  display: none;
+}
+body.gdp-file-detail-page {
+  --chrome-h: var(--global-header-h);
+}
+body.gdp-file-detail-page #topbar {
+  display: none;
+}
+body.gdp-file-detail-page #load-bar {
+  top: var(--global-header-h);
+}
+body.gdp-file-detail-page #content {
+  margin-left: 0;
+  padding-top: calc(var(--global-header-h) + 18px);
+  min-height: calc(100vh - var(--global-header-h));
+}
+body.gdp-file-detail-page #diff > .gdp-file-shell:not(.gdp-standalone-source),
+body.gdp-file-detail-page #empty {
+  display: none !important;
+}
 
 .d2h-tag {
   font-size: 10px;
@@ -1466,7 +1831,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  #content { margin-left: 0; max-width: none; padding-top: calc(var(--topbar-h) + 240px); }
+  #content { margin-left: 0; max-width: none; padding-top: calc(var(--chrome-h) + 240px); }
   .controls input[type="search"] { width: 130px; }
 }
 
@@ -1476,7 +1841,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
   border: 1px solid var(--border);
   border-radius: 6px;
   margin: 0 0 16px;
-  scroll-margin-top: calc(var(--topbar-h) + 8px);
+  scroll-margin-top: calc(var(--chrome-h) + 8px);
   isolation: isolate;
   box-shadow: 0 1px 0 rgba(31,35,40,0.04);
   content-visibility: auto;
@@ -1491,7 +1856,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
   border-bottom: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
   position: sticky;
-  top: var(--topbar-h);
+  top: var(--chrome-h);
   z-index: 20;
   font-size: 13px;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
