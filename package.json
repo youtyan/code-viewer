@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local browser-based git diff viewer",
   "type": "module",
   "bin": {

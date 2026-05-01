@@ -47,6 +47,12 @@ describe('view file UI', () => {
     expect(app.includes('renderStandaloneSource(target)')).toBe(true);
   });
 
+  test('repository blob routes render source without waiting for diff metadata', () => {
+    expect(app.includes("STATE.route.screen === 'file' && STATE.route.view === 'blob'")).toBe(true);
+    expect(app.includes("setStatus('live');\n    applySourceRouteToShell();")).toBe(true);
+    expect(app.includes("if (STATE.route.screen === 'file') {\n        empty.classList.add('hidden');\n        applySourceRouteToShell();")).toBe(true);
+  });
+
   test('source view renders file text as textContent, not HTML', () => {
     expect(app.includes('code.textContent = line')).toBe(true);
     expect(app.includes('num.textContent = String(index + 1)')).toBe(true);
