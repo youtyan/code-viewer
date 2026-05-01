@@ -1,0 +1,1584 @@
+/* git-diff-preview — GitHub-Primer-aligned theme
+ * Light + dark, color tokens borrowed from GitHub Primer.
+ */
+
+:root {
+  /* canvas */
+  --bg:        #ffffff;
+  --bg-soft:   #f6f8fa;   /* subtle */
+  --bg-mute:   #eaeef2;   /* inset */
+  --bg-emph:   #d0d7de;
+  /* borders */
+  --border:        #d0d7de;
+  --border-muted:  #d8dee4;
+  --border-strong: #afb8c1;
+  /* text */
+  --fg:        #1f2328;
+  --fg-muted:  #59636e;
+  --fg-subtle: #6e7781;
+  --fg-onemphasis: #ffffff;
+  /* accent */
+  --accent:        #0969da;
+  --accent-emph:   #0550ae;
+  --accent-subtle: #ddf4ff;
+  --accent-muted:  #54aeff66;
+  /* success / danger / attention / done */
+  --success:        #1a7f37;
+  --success-emph:   #1f883d;
+  --danger:         #cf222e;
+  --danger-emph:    #cf222e;
+  --attn:           #9a6700;
+  --done:           #8250df;
+  /* diff colors (GitHub exact) */
+  --diff-add-bg:        #dafbe1;
+  --diff-add-num-bg:    #ccffd8;
+  --diff-add-word-bg:   #aceebb;
+  --diff-del-bg:        #ffebe9;
+  --diff-del-num-bg:    #ffd7d5;
+  --diff-del-word-bg:   #ff818266;
+  --diff-hunk-bg:       #ddf4ff;
+  --diff-hunk-fg:       #0550ae;
+  /* sizing */
+  --topbar-h: 56px;
+  --sidebar-w: 308px;
+  /* shadows */
+  --shadow-sm: 0 1px 0 rgba(31,35,40,0.04);
+  --shadow-md: 0 3px 6px rgba(140,149,159,0.15);
+}
+
+[data-theme="dark"] {
+  --bg:        #0d1117;
+  --bg-soft:   #161b22;
+  --bg-mute:   #21262d;
+  --bg-emph:   #30363d;
+  --border:        #30363d;
+  --border-muted:  #21262d;
+  --border-strong: #6e7681;
+  --fg:        #e6edf3;
+  --fg-muted:  #9198a1;
+  --fg-subtle: #6e7681;
+  --fg-onemphasis: #ffffff;
+  --accent:        #2f81f7;
+  --accent-emph:   #1f6feb;
+  --accent-subtle: rgba(56,139,253,0.10);
+  --accent-muted:  rgba(56,139,253,0.40);
+  --success:        #3fb950;
+  --success-emph:   #238636;
+  --danger:         #f85149;
+  --danger-emph:    #da3633;
+  --attn:           #d29922;
+  --done:           #a371f7;
+  --diff-add-bg:        rgba(46,160,67,0.15);
+  --diff-add-num-bg:    rgba(46,160,67,0.30);
+  --diff-add-word-bg:   rgba(46,160,67,0.40);
+  --diff-del-bg:        rgba(248,81,73,0.15);
+  --diff-del-num-bg:    rgba(248,81,73,0.30);
+  --diff-del-word-bg:   rgba(248,81,73,0.40);
+  --diff-hunk-bg:       rgba(56,139,253,0.10);
+  --diff-hunk-fg:       #58a6ff;
+}
+
+/* ===== Reset / base ===== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+               Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 14px;
+  line-height: 1.5;
+  /* GitHub uses subpixel rendering (the macOS default) on the diff page,
+   * which renders text slightly thicker than -webkit-font-smoothing:antialiased */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Window scrolls; topbar + sidebar are fixed */
+#app { display: block; }
+
+/* ===== Topbar ===== */
+#topbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  z-index: 50;
+}
+.brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg);
+}
+.brand .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+}
+.brand .title { letter-spacing: -0.005em; }
+
+#meta {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+#meta .ref {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  color: var(--fg);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#meta .num {
+  display: inline-flex; gap: 8px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+#meta .num .add { color: var(--success); font-weight: 600; }
+#meta .num .del { color: var(--danger); font-weight: 600; }
+#meta .updated-at {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-muted);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ref-pickers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+.ref-input {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  width: 130px;
+  height: 26px;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+}
+.ref-input::placeholder { color: var(--fg-subtle); }
+.ref-input:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.ref-dots {
+  color: var(--fg-subtle);
+  font-size: 14px;
+  padding: 0 2px;
+  user-select: none;
+}
+.ref-pickers > button {
+  width: 24px; height: 26px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s, color 0.12s;
+}
+.ref-pickers > button:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+#ref-reset:hover { background: var(--bg-mute); color: var(--danger); border-color: var(--danger); }
+#reload-prom {
+  width: 28px; height: 26px;
+  font-size: 14px;
+  margin-left: 6px;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+#reload-prom:hover { background: var(--accent-emph); border-color: var(--accent-emph); }
+#reload-prom.spinning { animation: gdp-spin 0.7s linear infinite; }
+@keyframes gdp-spin { to { transform: rotate(360deg); } }
+#auto-reload {
+  height: 26px; padding: 0 8px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em;
+  width: auto;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+#auto-reload:hover { background: var(--bg-soft); color: var(--fg); }
+#auto-reload.active {
+  background: #2da44e;
+  color: #fff;
+  border-color: #2da44e;
+  animation: gdp-auto-pulse 2.4s ease-in-out infinite;
+}
+@keyframes gdp-auto-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 164, 78, 0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(46, 164, 78, 0); }
+}
+#hide-tests {
+  width: auto !important;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+#hide-tests.active {
+  background: var(--attn);
+  color: #fff;
+  border-color: var(--attn);
+}
+.hidden-by-tests { display: none !important; }
+
+/* ===== Ref picker popover ===== */
+#ref-popover[hidden] { display: none !important; }
+#ref-popover {
+  position: fixed;
+  z-index: 80;
+  width: 560px;
+  max-width: 90vw;
+  max-height: min(640px, 75vh);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(31,35,40,0.20);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Quick-fill chips for the most common refs */
+.rp-quick {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  background: var(--bg-soft);
+}
+.rp-chip {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.10s, color 0.10s, border-color 0.10s;
+}
+.rp-chip:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Tab bar */
+.rp-tabs {
+  display: flex;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  padding: 0 6px;
+}
+.rp-tab {
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  padding: 9px 14px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.rp-tab:hover { color: var(--fg); }
+.rp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.rp-search-wrap {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.rp-search {
+  width: 100%;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.rp-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+.rp-body { overflow-y: auto; padding: 4px 0 8px; flex: 1; }
+
+/* Commit item — two-line layout, plenty of room for time/author */
+.rp-item-commit {
+  display: block;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.10s, border-color 0.10s;
+}
+.rp-item-commit:hover {
+  background: var(--bg-mute);
+  border-left-color: var(--accent);
+}
+.rp-item-commit .row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.rp-item-commit .sha {
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  flex-shrink: 0;
+  width: 60px;
+}
+.rp-item-commit .subject {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+.rp-item-commit .row2 {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  padding-left: 70px;
+}
+.rp-item-commit .author {
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.rp-item-commit .when { color: var(--fg-subtle); }
+
+/* Branch / tag / special items */
+.rp-item-ref {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.10s, border-color 0.10s;
+  font-size: 12.5px;
+}
+.rp-item-ref:hover {
+  background: var(--bg-mute);
+  border-left-color: var(--accent);
+}
+.rp-item-ref .name {
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+.rp-item-ref .badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  background: var(--bg-mute);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.rp-item-ref .badge.cur { background: var(--accent-subtle); color: var(--accent); }
+.rp-item-ref .desc {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+.rp-empty {
+  padding: 36px 14px;
+  text-align: center;
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+
+/* Currently-selected ref highlight (matches focused input's value) */
+#ref-popover .rp-item-commit.current,
+#ref-popover .rp-item-ref.current {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-left-color: var(--accent);
+}
+#ref-popover .rp-item-commit.current .sha,
+#ref-popover .rp-item-commit.current .subject,
+#ref-popover .rp-item-ref.current   .name {
+  color: var(--accent);
+  font-weight: 700;
+}
+#ref-popover .rp-item-ref.current .badge {
+  background: var(--accent-subtle);
+  color: var(--accent-emph);
+}
+.rp-chip.current {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.spacer { flex: 1; }
+
+.controls {
+  display: flex; gap: 6px; align-items: center;
+}
+.controls input[type="search"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.controls input[type="search"]::placeholder { color: var(--fg-subtle); }
+.controls input[type="search"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+.seg {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 28px;
+}
+.seg button {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 0 11px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button:hover { background: var(--bg-soft); color: var(--fg); }
+.seg button.active {
+  background: var(--accent);
+  color: #fff;
+}
+.seg button.active + button,
+.seg button + button.active { border-left-color: transparent; }
+
+.controls > button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.controls > button:hover { background: var(--bg-soft); border-color: var(--border-strong); }
+.controls > button.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.controls > button.active:hover { background: var(--accent-emph); border-color: var(--accent-emph); }
+#ignore-ws,
+#syntax-highlight {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+#syntax-highlight.loading {
+  color: var(--fg-muted);
+}
+#reload { font-size: 14px; }
+#reload.spinning { animation: gdp-spin 0.7s linear infinite; }
+@keyframes gdp-spin { to { transform: rotate(360deg); } }
+
+#status {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--fg-subtle);
+  margin-left: 4px;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+#status.live { background: #2ea043; box-shadow: 0 0 0 3px rgba(46,160,67,0.20); }
+#status.refreshing { background: #d29922; box-shadow: 0 0 0 3px rgba(210,153,34,0.25); }
+#status.error { background: var(--danger); box-shadow: 0 0 0 3px rgba(207,34,46,0.20); }
+
+/* ===== Top-edge loading bar (indeterminate) ===== */
+#load-bar {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0; right: 0;
+  height: 2px;
+  z-index: 49;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  background: transparent;
+}
+#load-bar.active { opacity: 1; }
+#load-bar::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: gdp-loadbar 1.1s linear infinite;
+}
+@keyframes gdp-loadbar {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(450%); }
+}
+
+/* ===== Sidebar ===== */
+#sidebar {
+  position: fixed;
+  left: 0;
+  top: var(--topbar-h);
+  bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 0 0 32px;
+  z-index: 30;
+}
+.sb-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px 10px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  position: sticky; top: 0;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.sb-title { letter-spacing: 0.01em; }
+#totals {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+  margin-left: 6px;
+}
+.sb-view-seg { height: 22px; }
+.sb-view-seg button { padding: 0 8px; font-size: 11px; }
+.sb-filter-wrap {
+  position: sticky;
+  top: 36px;
+  background: var(--bg-soft);
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--border-muted);
+  z-index: 1;
+}
+#sb-filter {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 10px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+#sb-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+#sb-filter::placeholder { color: var(--fg-subtle); }
+
+/* ===== Sidebar resizer (drag right edge to resize) ===== */
+#sidebar-resizer {
+  position: absolute;
+  top: 0; right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 31;
+  background: transparent;
+  transition: background 0.12s;
+}
+#sidebar-resizer:hover,
+body.gdp-resizing #sidebar-resizer {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* Lightweight preview line shown only while dragging — avoids reflowing the
+ * (very tall) diff content on every mousemove. */
+#sidebar-resize-preview {
+  display: none;
+  position: fixed;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+#sidebar { position: fixed; }  /* ensure relative ancestor for resizer */
+body.gdp-resizing { cursor: col-resize !important; user-select: none; }
+body.gdp-resizing * { user-select: none !important; }
+
+/* ===== Tree view ===== */
+#filelist.tree {
+  padding: 4px 0 0;
+}
+#filelist.tree .tree-dir {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px 4px var(--lvl-pad, 12px);
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  user-select: none;
+}
+#filelist.tree .tree-dir:hover { background: var(--bg-mute); color: var(--fg); }
+#filelist.tree .tree-dir .chev {
+  display: inline-block;
+  width: 14px; text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  transition: transform 0.15s, color 0.15s;
+  color: var(--fg-muted);
+}
+#filelist.tree .tree-dir.collapsed .chev { transform: rotate(-90deg); }
+#filelist.tree .tree-dir:hover .chev { color: var(--accent); }
+#filelist.tree .tree-dir .dir-name {
+  font-size: 12px;
+  color: var(--fg);
+  font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#filelist.tree .tree-dir .dir-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+  font-size: 12px;
+  width: 14px; text-align: center;
+}
+#filelist.tree .tree-dir.collapsed { color: var(--fg-subtle); }
+#filelist.tree .tree-dir.collapsed .dir-name { color: var(--fg-muted); font-weight: 400; }
+#filelist.tree .tree-children { list-style: none; padding: 0; margin: 0; }
+#filelist.tree .tree-dir.collapsed + .tree-children { display: none; }
+
+#filelist.tree .tree-file {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px var(--lvl-pad, 12px);
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--fg);
+  border-left: 2px solid transparent;
+  transition: background 0.10s, border-color 0.10s;
+}
+#filelist.tree .tree-file:hover { background: var(--bg-mute); }
+#filelist.tree .tree-file.active {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+}
+#filelist.tree .tree-file.hidden,
+#filelist.tree .tree-dir.hidden { display: none; }
+#filelist.tree .tree-file .name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px;
+}
+#filelist.tree .tree-file .stat {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+#filelist.tree .tree-file .stat .a { color: var(--success); }
+#filelist.tree .tree-file .stat .d { color: var(--danger); }
+#filelist { list-style: none; margin: 0; padding: 6px 0 0; }
+#filelist li {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--fg);
+  border-left: 2px solid transparent;
+  transition: background 0.10s, border-color 0.10s;
+}
+#filelist li:hover { background: var(--bg-mute); }
+#filelist li.active {
+  background: var(--accent-subtle);
+  border-left-color: var(--accent);
+  color: var(--fg);
+}
+#filelist li.hidden { display: none; }
+#filelist li .name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left;
+}
+#filelist li .name::before { content: "\200E"; }
+#filelist li .stat {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+#filelist li .stat .a { color: var(--success); }
+#filelist li .stat .d { color: var(--danger); }
+.bar {
+  display: inline-flex; gap: 1px;
+  margin-left: 4px;
+}
+.bar > span {
+  width: 6px; height: 8px;
+  background: var(--bg-emph);
+  border-radius: 1px;
+}
+.bar > span.a { background: var(--success); }
+.bar > span.d { background: var(--danger); }
+
+.badge {
+  width: 16px; height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  background: var(--bg-emph);
+  color: var(--fg);
+  flex-shrink: 0;
+}
+.badge.M { background: #f9d97a55; color: #7d4e00; }
+.badge.A { background: #ccffd866; color: var(--success); }
+.badge.D { background: #ffd7d566; color: var(--danger); }
+.badge.R { background: #d8b9ff66; color: var(--done); }
+
+[data-theme="dark"] .badge.M { background: rgba(210,153,34,0.20); color: var(--attn); }
+[data-theme="dark"] .badge.A { background: rgba(46,160,67,0.20); color: var(--success); }
+[data-theme="dark"] .badge.D { background: rgba(248,81,73,0.20); color: var(--danger); }
+[data-theme="dark"] .badge.R { background: rgba(163,113,247,0.20); color: var(--done); }
+
+/* ===== Main content area ===== */
+#content {
+  margin-left: var(--sidebar-w);
+  padding: calc(var(--topbar-h) + 18px) 24px 80px;
+  min-height: calc(100vh - var(--topbar-h));
+}
+
+#diff > *:first-child { margin-top: 0; }
+
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 80px 16px; color: var(--fg-muted); text-align: center;
+}
+.empty .emoji { font-size: 40px; margin-bottom: 8px; }
+.empty h2 { color: var(--fg); margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.empty.hidden { display: none; }
+
+/* ===== diff2html overrides ===== */
+
+/* Force overflow:visible to keep paint tree intact (see earlier fix) */
+.d2h-file-wrapper,
+.d2h-files-diff,
+.d2h-file-diff,
+.d2h-code-wrapper {
+  overflow: visible !important;
+  contain: none !important;
+  content-visibility: visible !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+.d2h-code-wrapper { overflow-x: auto !important; }
+
+.d2h-wrapper {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.d2h-file-list-wrapper { display: none !important; }
+
+.d2h-file-wrapper {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 16px;
+  isolation: isolate;
+  box-shadow: var(--shadow-sm);
+  /* When scrolled to (e.g. from sidebar click), leave room for the fixed
+     topbar so the file header doesn't get hidden behind it. */
+  scroll-margin-top: calc(var(--topbar-h) + 8px);
+}
+
+.d2h-file-header {
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Hard-coded value (var(--topbar-h) was being resolved to 0 by some
+     browser quirk on this nested element, breaking sticky). */
+  position: sticky;
+  top: 56px;
+  z-index: 5;
+  font-size: 13px;
+}
+.d2h-file-name-wrapper {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1; min-width: 0;
+  font-size: 13px;
+}
+.d2h-file-name {
+  color: var(--fg) !important;
+  font-weight: 600;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d2h-icon-wrapper { display: inline-flex; color: var(--fg-muted); }
+.d2h-icon-wrapper svg, .d2h-file-name-wrapper svg { fill: var(--fg-muted); }
+
+.d2h-file-stats { display: none !important; } /* replaced by .gdp-stat-text */
+.d2h-lines-added {
+  color: var(--success); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.d2h-lines-deleted {
+  color: var(--danger); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Hunk expand row — single-line 20px to match github.com. The class
+ * `gdp-hunk-row` is added by setupHunkExpand() on every paired @@ row
+ * (left + right in split, single in unified) so CSS targeting is
+ * deterministic regardless of d2h's underlying class names. */
+/* Hunk row sizes to its tallest cell content (1 arrow = 20px, 2 stacked
+ * arrows = 40px). No max-height clamp here — let the stack drive it. */
+tr.gdp-hunk-row,
+tr.gdp-hunk-row > td {
+  line-height: 0 !important;
+}
+tr.gdp-hunk-row > td {
+  padding: 0 !important;
+  vertical-align: middle !important;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 0 !important;
+}
+/* Force the inner div to act as a 20px block. d2h ships
+ * `.d2h-code-side-line { display: inline-block }`, and inline-blocks
+ * sitting next to whitespace text nodes inside a table-cell create a
+ * second line box (~20px). Switching to `display: block` leaves only
+ * the div in the cell's flow. */
+tr.gdp-hunk-row > td > .d2h-code-line,
+tr.gdp-hunk-row > td > .d2h-code-side-line,
+tr.gdp-hunk-row > td > .gdp-expand-stack {
+  /* Stack auto-sizes: 1 button = 20px, 2 buttons (↑+↓) = 40px. */
+  font-size: 12px;
+  line-height: 20px;
+}
+tr.gdp-hunk-row .d2h-code-line,
+tr.gdp-hunk-row .d2h-code-side-line,
+tr.gdp-hunk-row .d2h-code-line-ctn {
+  height: 20px !important;
+  line-height: 20px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden;
+}
+/* Hide any d2h placeholder children inside the hunk-row line-number cell
+ * (e.g. the empty old/new line-num divs) so only the expand stack shows
+ * and the cell collapses to 20px. */
+tr.gdp-hunk-row td.d2h-code-linenumber > :not(.gdp-expand-stack),
+tr.gdp-hunk-row td.d2h-code-side-linenumber > :not(.gdp-expand-stack) {
+  display: none !important;
+}
+/* d2h ships `td.d2h-code-linenumber { position: absolute; ... }` and
+ * `.d2h-code-line { padding: 0 8em; width: calc(100% - 16em); }` so the
+ * line-number cell floats over an empty padded area inside the code cell.
+ * That leaves a real ~175px horizontal gap between the line-num column and
+ * the actual code text. Reset to a normal table layout: line-num is a real
+ * table-cell, code-line has no horizontal padding/width override. */
+/* Line-number column: min-width fits 3-digit numbers; the cell grows
+ * automatically when content (e.g. 4-5 digit lines on big files) needs
+ * more space, matching github.com which never clips line numbers. */
+table.d2h-diff-table td.d2h-code-linenumber,
+table.d2h-diff-table td.d2h-code-side-linenumber {
+  position: static !important;
+  display: table-cell !important;
+  width: 1%;            /* shrink-to-fit while still respecting min-width */
+  min-width: 50px;
+  padding: 0 4px !important;
+  text-align: center;
+  direction: ltr;
+  line-height: 20px;
+  white-space: nowrap;
+}
+/* Unified line-num cell holds two numbers (old, new) side-by-side via d2h's
+ * `.line-num1{float:left}` / `.line-num2{float:right}`. Inner numbers are
+ * inline-block min-width 30px (fits 3 digits) and grow with content. */
+table.d2h-diff-table td.d2h-code-linenumber {
+  min-width: 78px;
+  text-align: left;
+}
+/* d2h ships `width: 3.5em` + `overflow: hidden; text-overflow: ellipsis`
+ * which clips 4-5 digit line numbers. Override to auto width with a
+ * monospace tabular floor so 1-3 digits stay aligned and bigger numbers
+ * just push the cell wider. */
+table.d2h-diff-table td.d2h-code-linenumber > .line-num1,
+table.d2h-diff-table td.d2h-code-linenumber > .line-num2 {
+  display: inline-block;
+  width: auto !important;
+  min-width: 28px;
+  padding: 0 2px !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+table.d2h-diff-table td.d2h-code-linenumber > .line-num1 { float: left; }
+table.d2h-diff-table td.d2h-code-linenumber > .line-num2 { float: right; }
+/* Match GitHub's 20px row height: remove td padding, let line-height fill. */
+table.d2h-diff-table td.d2h-cntx,
+table.d2h-diff-table td.d2h-ins,
+table.d2h-diff-table td.d2h-del,
+table.d2h-diff-table td.d2h-info {
+  padding: 0 !important;
+  line-height: 20px;
+}
+table.d2h-diff-table .d2h-code-line,
+table.d2h-diff-table .d2h-code-side-line {
+  padding: 0 !important;
+  width: auto !important;
+  line-height: 20px;
+}
+table.d2h-diff-table .d2h-code-line-prefix {
+  display: inline-block;
+  width: 1.5em;
+  padding-left: 4px;
+}
+/* Stack height = number of buttons * 20px. With 1 button = 20px row,
+ * with 2 (↑+↓) = 40px row, matching GitHub. */
+.gdp-expand-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+.gdp-expand-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 100%;
+  height: 20px;
+  min-height: 0;
+  border: 0;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  transition: background 0.10s, color 0.10s;
+}
+.gdp-expand-btn svg {
+  display: block;
+}
+.gdp-expand-btn + .gdp-expand-btn { border-top: 1px solid var(--bg); }
+.gdp-expand-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.gdp-inserted-ctx td { background: var(--bg) !important; }
+
+/* GitHub-style "+10 -113" stats appended to the file header. */
+.gdp-stat-text {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.gdp-stat-text .a { color: #1a7f37; }
+.gdp-stat-text .d { color: #d1242f; }
+[data-theme="dark"] .gdp-stat-text .a { color: #3fb950; }
+[data-theme="dark"] .gdp-stat-text .d { color: #f85149; }
+
+/* GitHub-style diff squares appended to the file header. */
+.gdp-stat-squares {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.gdp-stat-squares .sq {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #d0d7de; /* fallback / neutral */
+}
+.gdp-stat-squares .sq.add { background: #1f883d; } /* Primer success-emphasis */
+.gdp-stat-squares .sq.del { background: #cf222e; } /* Primer danger-emphasis */
+.gdp-stat-squares .sq.nu  { background: var(--bg-emph); }
+[data-theme="dark"] .gdp-stat-squares .sq.add { background: #2ea043; }
+[data-theme="dark"] .gdp-stat-squares .sq.del { background: #da3633; }
+[data-theme="dark"] .gdp-stat-squares .sq.nu  { background: var(--border-strong); }
+
+.d2h-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.4;
+}
+.d2h-changed-tag { background: #fff8c5; border-color: #d4a72c80; color: var(--attn); }
+.d2h-added-tag   { background: #ccffd866; border-color: #2da44e44; color: var(--success); }
+.d2h-deleted-tag { background: #ffebe9; border-color: #cf222e44; color: var(--danger); }
+.d2h-moved-tag   { background: #d8b9ff44; border-color: #8250df44; color: var(--done); }
+
+[data-theme="dark"] .d2h-changed-tag { background: rgba(210,153,34,0.15); border-color: rgba(210,153,34,0.40); color: var(--attn); }
+[data-theme="dark"] .d2h-added-tag   { background: rgba(46,160,67,0.15);  border-color: rgba(46,160,67,0.40);  color: var(--success); }
+[data-theme="dark"] .d2h-deleted-tag { background: rgba(248,81,73,0.15);  border-color: rgba(248,81,73,0.40);  color: var(--danger); }
+[data-theme="dark"] .d2h-moved-tag   { background: rgba(163,113,247,0.15);border-color: rgba(163,113,247,0.40);color: var(--done); }
+
+/* ===== Diff body / table ===== */
+.d2h-file-wrapper .d2h-file-diff,
+.d2h-file-wrapper .d2h-files-diff {
+  border-radius: 0 0 6px 6px;
+}
+.d2h-diff-table {
+  border: 0 !important;
+  border-collapse: collapse;
+  width: 100%;
+  /* match GitHub Primer exactly */
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--fg);
+  tab-size: 4;
+  -moz-tab-size: 4;
+  font-variant-ligatures: none;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+.d2h-code-line, .d2h-code-side-line, .d2h-code-line-ctn, .d2h-code-side-emptyplaceholder {
+  font-family: inherit !important;
+  font-size: 12px !important;
+  line-height: 20px !important;
+  font-weight: 400 !important;
+}
+/* Force the line wrappers (NOT the inner highlighted spans) to use Primer's
+ * full-strength fg color so the text feels as solid as github.com. */
+.d2h-code-line, .d2h-code-side-line { color: #1f2328 !important; }
+[data-theme="dark"] .d2h-code-line,
+[data-theme="dark"] .d2h-code-side-line { color: #e6edf3 !important; }
+
+/* highlight.js's .hljs class adds a white background — let the parent
+ * add/del/cntx/info row color show through instead. */
+.d2h-code-line-ctn,
+.d2h-code-line-ctn.hljs {
+  background: transparent !important;
+}
+
+/* Override highlight.js github theme with the actual Primer "prettylights"
+ * token colors used on github.com — the vendored `github.min.css` palette is
+ * notably more muted/grey, which made our diff feel washed out. */
+.d2h-code-line-ctn .hljs-keyword,
+.d2h-code-line-ctn .hljs-selector-tag,
+.d2h-code-line-ctn .hljs-built_in,
+.d2h-code-line-ctn .hljs-builtin-name,
+.d2h-code-line-ctn .hljs-tag,
+.d2h-code-line-ctn .hljs-meta-keyword           { color: #cf222e !important; }
+
+.d2h-code-line-ctn .hljs-string,
+.d2h-code-line-ctn .hljs-symbol,
+.d2h-code-line-ctn .hljs-bullet,
+.d2h-code-line-ctn .hljs-attr,
+.d2h-code-line-ctn .hljs-template-tag,
+.d2h-code-line-ctn .hljs-template-variable      { color: #0a3069 !important; }
+
+.d2h-code-line-ctn .hljs-comment,
+.d2h-code-line-ctn .hljs-quote,
+.d2h-code-line-ctn .hljs-deletion               { color: #6e7781 !important; }
+
+.d2h-code-line-ctn .hljs-number,
+.d2h-code-line-ctn .hljs-literal,
+.d2h-code-line-ctn .hljs-doctag,
+.d2h-code-line-ctn .hljs-meta                   { color: #0550ae !important; }
+
+.d2h-code-line-ctn .hljs-title,
+.d2h-code-line-ctn .hljs-section,
+.d2h-code-line-ctn .hljs-function .hljs-title,
+.d2h-code-line-ctn .hljs-name                   { color: #8250df !important; }
+
+.d2h-code-line-ctn .hljs-variable,
+.d2h-code-line-ctn .hljs-template-variable,
+.d2h-code-line-ctn .hljs-type,
+.d2h-code-line-ctn .hljs-class .hljs-title,
+.d2h-code-line-ctn .hljs-attribute              { color: #953800 !important; }
+
+.d2h-code-line-ctn .hljs-emphasis               { font-style: italic; }
+.d2h-code-line-ctn .hljs-strong                 { font-weight: 600; }
+
+[data-theme="dark"] .d2h-code-line-ctn .hljs-keyword,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-selector-tag,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-built_in,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-tag                { color: #ff7b72 !important; }
+[data-theme="dark"] .d2h-code-line-ctn .hljs-string,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-attr,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-symbol             { color: #a5d6ff !important; }
+[data-theme="dark"] .d2h-code-line-ctn .hljs-comment,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-quote              { color: #8b949e !important; }
+[data-theme="dark"] .d2h-code-line-ctn .hljs-number,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-literal,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-meta               { color: #79c0ff !important; }
+[data-theme="dark"] .d2h-code-line-ctn .hljs-title,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-name,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-function .hljs-title { color: #d2a8ff !important; }
+[data-theme="dark"] .d2h-code-line-ctn .hljs-variable,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-type,
+[data-theme="dark"] .d2h-code-line-ctn .hljs-attribute          { color: #ffa657 !important; }
+
+/* Line number column */
+.d2h-code-linenumber {
+  background: var(--bg) !important;
+  color: var(--fg-subtle) !important;
+  border-right: 1px solid var(--border-muted) !important;
+  font-size: 12px !important;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.d2h-code-side-linenumber {
+  background: var(--bg) !important;
+  color: var(--fg-subtle) !important;
+  border-right: 1px solid var(--border-muted) !important;
+  font-size: 12px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hunk headers (@@) — GitHub style: blue tint */
+.d2h-info {
+  background: var(--diff-hunk-bg) !important;
+  color: var(--diff-hunk-fg) !important;
+  border-color: var(--diff-hunk-bg) !important;
+}
+.d2h-info .d2h-code-line,
+.d2h-info .d2h-code-side-line {
+  color: var(--diff-hunk-fg) !important;
+}
+
+/* Context (unchanged) lines */
+.d2h-cntx { background: var(--bg) !important; color: var(--fg) !important; }
+
+/* Addition rows */
+.d2h-ins,
+.d2h-ins .d2h-code-line,
+.d2h-ins .d2h-code-side-line,
+.d2h-ins.d2h-change.d2h-code-line {
+  background: var(--diff-add-bg) !important;
+  color: var(--fg) !important;
+}
+.d2h-ins .d2h-code-linenumber,
+.d2h-ins.d2h-code-linenumber,
+.d2h-ins .d2h-code-side-linenumber {
+  background: var(--diff-add-num-bg) !important;
+  color: var(--fg) !important;
+  border-right-color: rgba(46,160,67,0.30) !important;
+}
+
+/* Deletion rows */
+.d2h-del,
+.d2h-del .d2h-code-line,
+.d2h-del .d2h-code-side-line,
+.d2h-del.d2h-change.d2h-code-line {
+  background: var(--diff-del-bg) !important;
+  color: var(--fg) !important;
+}
+.d2h-del .d2h-code-linenumber,
+.d2h-del.d2h-code-linenumber,
+.d2h-del .d2h-code-side-linenumber {
+  background: var(--diff-del-num-bg) !important;
+  color: var(--fg) !important;
+  border-right-color: rgba(207,34,46,0.30) !important;
+}
+
+/* Word-level highlights inside add/del lines */
+.d2h-ins.d2h-change ins,
+.d2h-ins ins {
+  background: var(--diff-add-word-bg) !important;
+  color: var(--fg);
+  text-decoration: none;
+  border-radius: 1px;
+  padding: 0 1px;
+}
+.d2h-del.d2h-change del,
+.d2h-del del {
+  background: var(--diff-del-word-bg) !important;
+  color: var(--fg);
+  text-decoration: none;
+  border-radius: 1px;
+  padding: 0 1px;
+}
+
+/* Empty placeholder cells (for split view) */
+.d2h-emptyplaceholder,
+.d2h-code-side-emptyplaceholder {
+  background: var(--bg-soft) !important;
+  border-color: var(--border-muted) !important;
+}
+.d2h-code-side-emptyplaceholder { color: var(--fg-subtle) !important; }
+
+/* Side-by-side divider */
+.d2h-file-side-diff > div { border-color: var(--border-muted) !important; }
+.d2h-files-diff > div { background: var(--bg) !important; }
+
+/* Prefix coloring (use diff2html's default layout) */
+.d2h-code-line-prefix { color: var(--fg-subtle); user-select: none; }
+.d2h-ins .d2h-code-line-prefix { color: var(--success); }
+.d2h-del .d2h-code-line-prefix { color: var(--danger); }
+
+/* ===== Viewed checkbox (top-right of file header) ===== */
+.d2h-file-collapse {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+/* ===== Scrollbars ===== */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-emph);
+  border-radius: 6px;
+  border: 3px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+::-webkit-scrollbar-track { background: var(--bg); }
+[data-theme="dark"] ::-webkit-scrollbar-thumb { border-color: var(--bg); }
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  #sidebar {
+    position: static;
+    width: auto;
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  #content { margin-left: 0; max-width: none; padding-top: calc(var(--topbar-h) + 240px); }
+  .controls input[type="search"] { width: 130px; }
+}
+
+/* ===== File shell (placeholder + loaded card) ===== */
+.gdp-file-shell {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 16px;
+  scroll-margin-top: calc(var(--topbar-h) + 8px);
+  isolation: isolate;
+  box-shadow: 0 1px 0 rgba(31,35,40,0.04);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+.gdp-shell-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+.gdp-shell-header .status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: -apple-system, sans-serif;
+  background: var(--bg-mute);
+  color: var(--fg-muted);
+}
+.gdp-shell-header .status-pill.M { background: #f9d97a55; color: #7d4e00; }
+.gdp-shell-header .status-pill.A { background: #ccffd866; color: var(--success); }
+.gdp-shell-header .status-pill.D { background: #ffd7d566; color: var(--danger); }
+.gdp-shell-header .status-pill.R { background: #d8b9ff66; color: var(--done); }
+.gdp-shell-header .path {
+  color: var(--fg);
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gdp-shell-header .stats {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.gdp-shell-header .stats .a { color: var(--success); font-weight: 600; }
+.gdp-shell-header .stats .d { color: var(--danger);  font-weight: 600; }
+.gdp-shell-header .size-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--fg-subtle);
+  background: var(--bg-mute);
+  font-family: -apple-system, sans-serif;
+}
+.gdp-shell-header .size-tag.large,
+.gdp-shell-header .size-tag.huge {
+  background: #fff8c5;
+  color: var(--attn);
+}
+[data-theme="dark"] .gdp-shell-header .size-tag.large,
+[data-theme="dark"] .gdp-shell-header .size-tag.huge {
+  background: rgba(210,153,34,0.15);
+  color: var(--attn);
+}
+.gdp-shell-header .size-tag.binary {
+  background: #ddf4ff;
+  color: var(--accent-emph);
+}
+.gdp-shell-header .loading-indicator {
+  font-family: -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+.gdp-shell-body {
+  /* Diff2HtmlUI mounts here */
+}
+
+.gdp-file-shell.loaded {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.gdp-file-shell.loaded .d2h-file-wrapper {
+  margin-bottom: 0;
+}
+
+/* Pending shell: subtle pulse so user knows it's still loading */
+.gdp-file-shell.pending .gdp-shell-body {
+  background: linear-gradient(90deg, transparent, var(--bg-soft), transparent);
+  background-size: 200% 100%;
+  animation: gdp-shimmer 1.4s ease-in-out infinite;
+  opacity: 0.5;
+}
+.gdp-file-shell.manual-load .gdp-shell-body {
+  background: var(--bg);
+  animation: none;
+  opacity: 1;
+}
+@keyframes gdp-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.gdp-file-shell.error .gdp-shell-body { background: var(--diff-del-bg); }
+
+/* "Show next / Show all" buttons after a hunk preview */
+.gdp-show-full-wrap {
+  padding: 10px 14px;
+  background: var(--bg-soft);
+  border-top: 1px dashed var(--border);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.gdp-hunk-note {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  margin-right: auto;
+}
+.gdp-show-full {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.gdp-show-full:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.gdp-show-full.secondary { background: transparent; color: var(--fg-muted); }
+.gdp-show-full.secondary:hover { color: var(--fg); border-color: var(--border-strong); background: var(--bg); }
+.gdp-show-full:disabled { opacity: 0.6; cursor: wait; }
+
+.gdp-manual-load {
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gdp-manual-note {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  margin-right: auto;
+}
+
+.gdp-error {
+  padding: 14px;
+  color: var(--danger);
+  font-family: -apple-system, sans-serif;
+}
+.gdp-error .retry {
+  margin-left: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gdp-info {
+  padding: 14px;
+  color: var(--fg-subtle);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ===== Media (binary image/video) ===== */
+.gdp-media {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg);
+  border-radius: 0 0 6px 6px;
+  flex-wrap: wrap;
+}
+.gdp-media .media-side {
+  flex: 1 1 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.gdp-media .media-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.gdp-media .media-label.add {
+  background: var(--diff-add-bg);
+  border-color: rgba(46,160,67,0.4);
+  color: var(--success);
+}
+.gdp-media .media-label.del {
+  background: var(--diff-del-bg);
+  border-color: rgba(207,34,46,0.4);
+  color: var(--danger);
+}
+.gdp-media img,
+.gdp-media video {
+  max-width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--bg-soft);
+  background-image:
+    linear-gradient(45deg, var(--bg-mute) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-mute) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-mute) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-mute) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  object-fit: contain;
+}
+.gdp-media .media-empty {
+  width: 100%;
+  min-height: 120px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  font-style: italic;
+  background: var(--bg-soft);
+}

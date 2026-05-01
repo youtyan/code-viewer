@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git diff preview</title>
+
+<!-- diff2html/highlight.js assets are vendored so the preview works offline
+     and does not make network requests from the browser. The highlighter JS is
+     loaded on demand from the toolbar. -->
+<link rel="stylesheet" href="/vendor/diff2html/diff2html.min.css" />
+<link rel="stylesheet" href="/vendor/highlight.js/styles/github.min.css" id="hljs-light" />
+<link rel="stylesheet" href="/vendor/highlight.js/styles/github-dark.min.css" id="hljs-dark" disabled />
+<script src="/vendor/diff2html/diff2html-ui.min.js"></script>
+
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="title">git diff preview</span>
+    </div>
+    <div id="meta"></div>
+    <div class="ref-pickers">
+      <input class="ref-input" id="ref-from" placeholder="from…" autocomplete="off" />
+      <span class="ref-dots">…</span>
+      <input class="ref-input" id="ref-to"   placeholder="to…"   autocomplete="off" />
+      <button id="ref-apply" title="apply range (Enter)">→</button>
+      <button id="ref-reset" title="reset to HEAD .. worktree">×</button>
+      <button id="reload-prom" title="reload diff (R)">↻</button>
+      <button id="auto-reload" title="auto refresh every 3s">auto</button>
+    </div>
+    <div id="ref-popover" hidden>
+      <div class="rp-quick">
+        <button class="rp-chip" data-val="worktree">worktree</button>
+        <button class="rp-chip" data-val="HEAD">HEAD</button>
+        <button class="rp-chip" data-val="--staged">--staged</button>
+      </div>
+      <div class="rp-tabs" role="tablist">
+        <button class="rp-tab active" data-tab="commits">Commits</button>
+        <button class="rp-tab" data-tab="branches">Branches</button>
+        <button class="rp-tab" data-tab="tags">Tags</button>
+      </div>
+      <div class="rp-search-wrap">
+        <input class="rp-search" placeholder="filter…" autocomplete="off" />
+      </div>
+      <div class="rp-body"></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="controls">
+      <input id="filter" type="search" placeholder="filter files…" />
+      <div class="seg" role="group" aria-label="layout">
+        <button data-layout="line-by-line" class="active">unified</button>
+        <button data-layout="side-by-side">split</button>
+      </div>
+      <button id="ignore-ws" title="ignore whitespace changes (-w)">ws</button>
+      <button id="syntax-highlight" title="syntax highlighting on">syntax on</button>
+      <button id="hide-tests" title="hide test files (test|spec)">no test</button>
+      <button id="theme" title="toggle theme">🌗</button>
+      <button id="collapse" title="collapse/expand all">▤</button>
+      <span id="status" class="status"></span>
+    </div>
+  </header>
+
+  <div id="load-bar" aria-hidden="true"></div>
+
+  <aside id="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">Files</span>
+      <span id="totals"></span>
+      <div class="seg sb-view-seg" role="group" aria-label="view">
+        <button data-view="tree" class="active" title="tree view">tree</button>
+        <button data-view="flat" title="flat list">flat</button>
+      </div>
+    </div>
+    <div class="sb-filter-wrap">
+      <input id="sb-filter" type="search" placeholder="filter files… (/)" autocomplete="off" />
+    </div>
+    <ul id="filelist"></ul>
+    <div id="sidebar-resizer" aria-hidden="true"></div>
+  </aside>
+
+  <main id="content">
+    <div id="empty" class="empty hidden">
+      <div class="emoji">✨</div>
+      <h2>No changes</h2>
+      <p>The working tree is clean against this ref.</p>
+    </div>
+    <div id="diff"></div>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

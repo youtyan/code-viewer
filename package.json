@@ -1,0 +1,54 @@
+{
+  "name": "@youtyan/code-viewer",
+  "version": "0.1.0",
+  "description": "Local browser-based git diff viewer",
+  "type": "module",
+  "bin": {
+    "code-viewer": "web-src/server/preview.ts",
+    "git-diff-preview": "web-src/server/preview.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/youtyan/code-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/youtyan/code-viewer/issues"
+  },
+  "homepage": "https://github.com/youtyan/code-viewer#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "web",
+    "web-src/server",
+    "web-src/types.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts",
+    "check": "tsc --noEmit",
+    "check:bundle": "bun build --target=browser --format=iife --outfile=/tmp/code-viewer-app.js web-src/app.ts && cmp /tmp/code-viewer-app.js web/app.js",
+    "dev": "bun build --watch --target=browser --format=iife --outfile=web/app.js web-src/app.ts",
+    "preview": "bun run web-src/server/preview.ts",
+    "test": "bun test",
+    "verify": "bun run check && bun run build && bun run check:bundle && bun run test && node --check web/app.js",
+    "pack:dry": "npm pack --dry-run",
+    "prepublishOnly": "bun run verify"
+  },
+  "keywords": [
+    "git",
+    "diff",
+    "viewer",
+    "bun"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
