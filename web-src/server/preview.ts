@@ -99,6 +99,7 @@ function requestAllowed(req: Request) {
 
 function staticFile(pathname: string): Response | null {
   const map: Record<string, [string, string]> = {
+    '/favicon.png': ['favicon.png', 'image/png'],
     '/style.css': ['style.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'application/javascript; charset=utf-8'],
     '/vendor/diff2html/diff2html.min.css': ['vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
