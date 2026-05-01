@@ -56,6 +56,22 @@ export function mapNewToOld(newLine: number, prevHunkEndNew: number, prevHunkEnd
   return prevHunkEndOld + (newLine - prevHunkEndNew);
 }
 
+export function trailingClickRange(hunkEndNew: number, step: number): LineRange {
+  return { start: hunkEndNew, end: hunkEndNew + step - 1 };
+}
+
+export function applyTrailingResult(
+  state: { newStart: number; oldStart: number },
+  receivedCount: number,
+  step: number,
+): { newStart: number; oldStart: number; eof: boolean } {
+  return {
+    newStart: state.newStart + receivedCount,
+    oldStart: state.oldStart + receivedCount,
+    eof: receivedCount === 0 || receivedCount < step,
+  };
+}
+
 export const GdpExpandLogic = {
   initExpandState,
   remainingGap,
@@ -65,4 +81,6 @@ export const GdpExpandLogic = {
   applyUp,
   applyDown,
   mapNewToOld,
+  trailingClickRange,
+  applyTrailingResult,
 };

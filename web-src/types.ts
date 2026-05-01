@@ -33,6 +33,24 @@ export type DiffMeta = {
   generation?: number;
 };
 
+export type RepoTreeEntry = {
+  name: string;
+  path: string;
+  type: 'tree' | 'blob' | 'commit';
+};
+
+export type RepoTreeResponse = {
+  ref: string;
+  path: string;
+  project: string;
+  branch?: string;
+  entries: RepoTreeEntry[];
+  readme?: {
+    path: string;
+    text: string;
+  } | null;
+};
+
 export type FileDiffResponse = {
   path: string;
   old_path?: string;
