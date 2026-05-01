@@ -31,12 +31,12 @@
   --done:           #8250df;
   /* diff colors (GitHub exact) */
   --diff-add-bg:        #dafbe1;
-  --diff-add-num-bg:    #ccffd8;
-  --diff-add-num-sticky-bg: #ccffd8;
+  --diff-add-num-bg:    #aceebb;
+  --diff-add-num-sticky-bg: #aceebb;
   --diff-add-word-bg:   #aceebb;
   --diff-del-bg:        #ffebe9;
-  --diff-del-num-bg:    #ffd7d5;
-  --diff-del-num-sticky-bg: #ffd7d5;
+  --diff-del-num-bg:    #ffcecb;
+  --diff-del-num-sticky-bg: #ffcecb;
   --diff-del-word-bg:   #ff818266;
   --diff-hunk-bg:       #ddf4ff;
   --diff-hunk-fg:       #0550ae;
@@ -1331,7 +1331,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
 /* Line number column */
 .d2h-code-linenumber {
   background: var(--bg) !important;
-  color: var(--fg-subtle) !important;
+  color: var(--fg-muted) !important;
   border-right: 0 !important;
   box-shadow: inset -1px 0 0 var(--border-muted);
   font-size: 12px !important;
@@ -1340,7 +1340,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
 }
 .d2h-code-side-linenumber {
   background: var(--bg) !important;
-  color: var(--fg-subtle) !important;
+  color: var(--fg-muted) !important;
   border-right: 0 !important;
   box-shadow: inset -1px 0 0 var(--border-muted);
   font-size: 12px !important;
@@ -1350,16 +1350,21 @@ table.d2h-diff-table .d2h-code-line-prefix {
 /* Hunk headers (@@) — GitHub style: blue tint */
 .d2h-info {
   background: var(--diff-hunk-bg) !important;
-  color: var(--diff-hunk-fg) !important;
+  color: var(--fg-muted) !important;
   border-color: var(--diff-hunk-bg) !important;
 }
 .d2h-info .d2h-code-line,
 .d2h-info .d2h-code-side-line {
-  color: var(--diff-hunk-fg) !important;
+  color: var(--fg-muted) !important;
 }
 
 /* Context (unchanged) lines */
 .d2h-cntx { background: var(--bg) !important; color: var(--fg) !important; }
+.d2h-cntx.d2h-code-linenumber,
+.d2h-cntx.d2h-code-side-linenumber {
+  background: var(--bg) !important;
+  color: var(--fg-muted) !important;
+}
 
 /* Addition rows */
 .d2h-ins,
@@ -1371,7 +1376,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
 }
 .d2h-ins .d2h-code-linenumber,
 .d2h-ins.d2h-code-linenumber,
-.d2h-ins .d2h-code-side-linenumber {
+.d2h-ins .d2h-code-side-linenumber,
+.d2h-ins.d2h-code-side-linenumber {
   background: var(--diff-add-num-sticky-bg) !important;
   color: var(--fg) !important;
   box-shadow: inset -1px 0 0 rgba(46,160,67,0.30);
@@ -1387,7 +1393,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
 }
 .d2h-del .d2h-code-linenumber,
 .d2h-del.d2h-code-linenumber,
-.d2h-del .d2h-code-side-linenumber {
+.d2h-del .d2h-code-side-linenumber,
+.d2h-del.d2h-code-side-linenumber {
   background: var(--diff-del-num-sticky-bg) !important;
   color: var(--fg) !important;
   box-shadow: inset -1px 0 0 rgba(207,34,46,0.30);
