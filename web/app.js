@@ -764,8 +764,13 @@
       const target = $("#diff");
       const empty = $("#empty");
       if (!newFiles.length) {
-        empty.classList.remove("hidden");
-        target.replaceChildren();
+        if (STATE.route.screen === "file") {
+          empty.classList.add("hidden");
+          applySourceRouteToShell();
+        } else {
+          empty.classList.remove("hidden");
+          target.replaceChildren();
+        }
         LOAD_QUEUE.length = 0;
         return;
       }
@@ -2693,7 +2698,10 @@
     }
     if (STATE.route.screen === "repo")
       loadRepo();
-    else
+    else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
+      setStatus("live");
+      applySourceRouteToShell();
+    } else
       load();
     function syncRefInputs() {
       const fi = $("#ref-from"), ti = $("#ref-to");
