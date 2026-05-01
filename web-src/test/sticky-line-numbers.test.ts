@@ -24,4 +24,20 @@ describe('sticky line number styles', () => {
     expect(block.includes('border-right: 0 !important')).toBe(true);
     expect(block.includes('box-shadow: inset -1px 0 0 var(--border-muted)')).toBe(true);
   });
+
+  test('context line numbers match GitHub neutral line colors', () => {
+    expect(style.includes('.d2h-cntx.d2h-code-linenumber')).toBe(true);
+    expect(style.includes('.d2h-cntx.d2h-code-side-linenumber')).toBe(true);
+    expect(style.includes('background: var(--bg) !important')).toBe(true);
+    expect(style.includes('color: var(--fg-muted) !important')).toBe(true);
+  });
+
+  test('split diff add/delete line numbers use current GitHub number backgrounds', () => {
+    expect(style.includes('--diff-add-num-bg:    #aceebb;')).toBe(true);
+    expect(style.includes('--diff-del-num-bg:    #ffcecb;')).toBe(true);
+    expect(style.includes('.d2h-ins.d2h-code-side-linenumber')).toBe(true);
+    expect(style.includes('background: var(--diff-add-num-sticky-bg) !important')).toBe(true);
+    expect(style.includes('.d2h-del.d2h-code-side-linenumber')).toBe(true);
+    expect(style.includes('background: var(--diff-del-num-sticky-bg) !important')).toBe(true);
+  });
 });
