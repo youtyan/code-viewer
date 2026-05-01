@@ -262,8 +262,13 @@ function safeRepoPath(path: string) {
   return path === '' || safePath(path);
 }
 
+function isGitInternalPath(path: string): boolean {
+  return path === '.git' || path.startsWith('.git/');
+}
+
 function safeWorktreePath(path: string): string | null {
   if (!safePath(path)) return null;
+  if (isGitInternalPath(path)) return null;
   const full = join(cwd, path);
   if (!existsSync(full)) return null;
   const realCwd = realpathSync(cwd);
@@ -296,6 +301,7 @@ function handleTree(url: URL) {
   const target = url.searchParams.get('ref') || url.searchParams.get('target') || 'worktree';
   const path = (url.searchParams.get('path') || '').replace(/^\/+|\/+$/g, '');
   if (!safeRepoPath(path)) return text('invalid path', 400);
+  if ((target === 'worktree' || target === '') && isGitInternalPath(path)) return text('forbidden', 403);
   if (target !== 'worktree' && !git.verifyTreeRef(target, cwd)) return text('invalid target', 400);
   const recursive = url.searchParams.get('recursive') === '1';
   const entries = git.listTree(target, path, cwd, { recursive }).entries;

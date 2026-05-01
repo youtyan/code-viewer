@@ -40,11 +40,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     files: SidebarItem[];
     path: string;
     minOrder: number;
+    explicit?: boolean;
   };
   type SidebarItem = {
     order?: number;
     path: string;
     display_path?: string;
+    type?: RepoTreeEntry['type'];
     status?: string;
     additions?: number;
     deletions?: number;
@@ -301,18 +303,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
 
-  // Build a directory trie from file list, collapsing single-child chains.
-  // Each dir node tracks `minOrder` = lowest server-assigned `order` of any
-  // file beneath it. That index is used as the tree sort key so the visit
-  // order matches the right-panel order *byte-for-byte*, regardless of
-  // Lua/JS string-comparison differences (UTF-8 vs UTF-16).
+  // Build a directory trie from server tree entries. Explicit directory
+  // entries are kept even when they have no visible file children, so the
+  // worktree sidebar matches the repository tree screen.
   function buildTree(files: SidebarItem[]): TreeNode {
-    const root = { name: '', dirs: {}, files: [], path: '', minOrder: Infinity };
+    const root = { name: '', dirs: {}, files: [], path: '', minOrder: Infinity, explicit: true };
     for (const f of files) {
       const parts = f.path.split('/');
       let node = root;
       let acc = '';
-      for (let i = 0; i < parts.length - 1; i++) {
+      const dirPartCount = f.type === 'tree' ? parts.length : parts.length - 1;
+      for (let i = 0; i < dirPartCount; i++) {
         const p = parts[i];
         acc = acc ? acc + '/' + p : p;
         if (!node.dirs[p]) {
@@ -321,11 +322,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         node = node.dirs[p];
         if (typeof f.order === 'number' && f.order < node.minOrder) node.minOrder = f.order;
       }
+      if (f.type === 'tree') {
+        node.explicit = true;
+        continue;
+      }
       node.files.push(f);
     }
     function compress(node: TreeNode) {
       const ks = Object.keys(node.dirs);
-      while (ks.length === 1 && node.files.length === 0 && node !== root) {
+      while (ks.length === 1 && node.files.length === 0 && !node.explicit && node !== root) {
         const only = node.dirs[ks[0]];
         node.name = node.name ? node.name + '/' + only.name : only.name;
         node.dirs = only.dirs;
@@ -342,10 +347,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function renderTreeNode(node: TreeNode, depth: number, ul: HTMLElement, onFileClick?: (file: SidebarItem) => void) {
-    // Sort by server-assigned numeric `order` (server set it after sorting
-    // files by path on the Lua side). This way the tree visit order is a
-    // bijection with the right-panel order, regardless of Lua/JS string
-    // comparison differences.
+    // Sort by server-assigned order so the sidebar preserves the same root
+    // ordering as the repository tree response.
     const items = [];
     for (const k of Object.keys(node.dirs)) {
       const d = node.dirs[k];
@@ -362,6 +365,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const li = document.createElement('li');
         li.className = 'tree-dir';
         li.dataset.dirpath = dir.path;
+        if (dir.explicit) li.dataset.explicit = 'true';
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
         const chev = document.createElement('span');
         chev.className = 'chev';
@@ -583,16 +587,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       const match = matches(card.dataset.path || '');
       card.classList.toggle('hidden-by-filter', !match);
     });
-    updateTreeDirVisibility();
+    updateTreeDirVisibility(matches, filter.kind !== 'empty' && !invalid);
     if (typeof applyViewedState === 'function') applyViewedState();
   }
 
-  function updateTreeDirVisibility() {
+  function updateTreeDirVisibility(dirMatches?: (path: string) => boolean, filterActive = false) {
     $$('#filelist .tree-dir').forEach(dir => {
       const childUl = dir.nextElementSibling;
       if (!childUl || !childUl.classList.contains('tree-children')) return;
       const anyVisible = !!childUl.querySelector('.tree-file:not(.hidden):not(.hidden-by-tests)');
-      dir.classList.toggle('hidden', !anyVisible);
+      const explicitVisible = dir.dataset.explicit === 'true' && !filterActive;
+      const selfMatches = filterActive && !!dirMatches && dirMatches(dir.dataset.dirpath || '');
+      dir.classList.toggle('hidden', !anyVisible && !explicitVisible && !selfMatches);
     });
   }
 
@@ -995,10 +1001,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!r.ok) throw new Error('failed to load repository tree');
       return r.json();
     })).then(meta => {
-      const files = meta.entries.filter(entry => entry.type !== 'tree').map((entry, index) => ({
+      const files = meta.entries.map((entry, index) => ({
         order: index + 1,
         path: entry.path,
         display_path: entry.path,
+        type: entry.type,
       } satisfies SidebarItem));
       renderSidebar(files, file => {
         setRoute({ screen: 'file', path: file.path, ref, view: 'blob', range: currentRange() });
