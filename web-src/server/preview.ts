@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, extname, join, normalize, relative } from 'node:path';
+import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse } from '../types';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
@@ -98,8 +99,6 @@ function requestAllowed(req: Request) {
 
 function staticFile(pathname: string): Response | null {
   const map: Record<string, [string, string]> = {
-    '/': ['index.html', 'text/html; charset=utf-8'],
-    '/index.html': ['index.html', 'text/html; charset=utf-8'],
     '/style.css': ['style.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'application/javascript; charset=utf-8'],
     '/vendor/diff2html/diff2html.min.css': ['vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
@@ -108,6 +107,9 @@ function staticFile(pathname: string): Response | null {
     '/vendor/highlight.js/styles/github.min.css': ['vendor/highlight.js/styles/github.min.css', 'text/css; charset=utf-8'],
     '/vendor/highlight.js/styles/github-dark.min.css': ['vendor/highlight.js/styles/github-dark.min.css', 'text/css; charset=utf-8'],
   };
+  for (const spaPath of [...APP_ENTRY_PATHS, ...SPA_PATHS]) {
+    map[spaPath] = ['index.html', 'text/html; charset=utf-8'];
+  }
   const spec = map[pathname];
   if (!spec) return null;
   const full = join(WEB_ROOT, spec[0]);
