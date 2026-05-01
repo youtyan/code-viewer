@@ -241,7 +241,6 @@
         collapsed: false,
         files: [],
         activeFile: null,
-        autoReload: localStorage.getItem("gdp:auto-reload") !== "0",
         hideTests: localStorage.getItem("gdp:hide-tests") === "1",
         syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
         viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
@@ -2677,7 +2676,7 @@
         syncHeaderMenu();
       }).catch(() => setStatus("error"));
     }
-    function load(opts) {
+    function load() {
       if (STATE.route.screen === "repo")
         return loadRepo();
       setStatus("refreshing");
@@ -2688,8 +2687,6 @@
         params.set("from", STATE.from);
       if (STATE.to)
         params.set("to", STATE.to);
-      if (opts && opts.nocache)
-        params.set("nocache", "1");
       const url = "/diff.json" + (params.toString() ? "?" + params.toString() : "");
       return trackLoad(fetch(url).then((r) => r.json())).then((data) => {
         renderShell(data);
@@ -2978,31 +2975,7 @@
         setTimeout(() => btn.classList.remove("spinning"), 200);
       });
     });
-    const AUTO_RELOAD_MS = 3000;
-    let autoTimer = null;
-    function setAutoReload(on) {
-      STATE.autoReload = on;
-      localStorage.setItem("gdp:auto-reload", on ? "1" : "0");
-      const btn = $("#auto-reload");
-      if (btn) {
-        btn.classList.toggle("active", on);
-        btn.setAttribute("aria-pressed", on ? "true" : "false");
-      }
-      if (autoTimer) {
-        clearInterval(autoTimer);
-        autoTimer = null;
-      }
-      if (on)
-        autoTimer = setInterval(() => {
-          if (!document.hidden)
-            load({ nocache: true });
-        }, AUTO_RELOAD_MS);
-    }
-    setAutoReload(STATE.autoReload);
-    $("#auto-reload").addEventListener("click", () => setAutoReload(!STATE.autoReload));
     window.addEventListener("storage", (e) => {
-      if (e.key === "gdp:auto-reload")
-        setAutoReload(e.newValue !== "0");
       if (e.key === "gdp:syntax-highlight")
         setSyntaxHighlight(e.newValue !== "0");
     });
