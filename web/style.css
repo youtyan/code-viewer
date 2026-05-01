@@ -714,10 +714,11 @@ html, body {
 
 /* ===== Sidebar resizer (drag right edge to resize) ===== */
 #sidebar-resizer {
-  position: absolute;
-  top: 0; right: -3px;
-  width: 6px;
-  height: 100%;
+  position: fixed;
+  top: var(--chrome-h);
+  bottom: 0;
+  left: calc(var(--sidebar-w) - 4px);
+  width: 8px;
   cursor: col-resize;
   z-index: 31;
   background: transparent;
@@ -741,7 +742,6 @@ body.gdp-resizing #sidebar-resizer {
   pointer-events: none;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
 }
-#sidebar { position: fixed; }  /* ensure relative ancestor for resizer */
 body.gdp-resizing { cursor: col-resize !important; user-select: none; }
 body.gdp-resizing * { user-select: none !important; }
 
