@@ -1470,11 +1470,14 @@
 `).split(`
 `) : [""];
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
+      const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
       view.className = "gdp-source-viewer";
-      const header = document.createElement("div");
-      header.className = "gdp-source-meta";
-      header.textContent = target.path + " @ " + target.ref;
+      const header = isStandalone ? null : document.createElement("div");
+      if (header) {
+        header.className = "gdp-source-meta";
+        header.textContent = target.path + " @ " + target.ref;
+      }
       const table = document.createElement("table");
       table.className = "gdp-source-table";
       const tbody = document.createElement("tbody");
@@ -1529,7 +1532,8 @@
         });
         tabs.appendChild(previewButton);
         tabs.appendChild(codeButton);
-        view.appendChild(header);
+        if (header)
+          view.appendChild(header);
         if (tabsHost) {
           tabsHost.hidden = false;
           tabsHost.replaceChildren(tabs);
@@ -1542,7 +1546,8 @@
           card.appendChild(view);
         return;
       }
-      view.appendChild(header);
+      if (header)
+        view.appendChild(header);
       view.appendChild(table);
       if (body)
         body.replaceWith(view);
@@ -1551,12 +1556,15 @@
     }
     function renderSourceMedia(card, target, mediaKind) {
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
+      const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
       view.className = "gdp-source-viewer media";
-      const meta = document.createElement("div");
-      meta.className = "gdp-source-meta";
-      meta.textContent = target.path + " @ " + target.ref;
-      view.appendChild(meta);
+      if (!isStandalone) {
+        const meta = document.createElement("div");
+        meta.className = "gdp-source-meta";
+        meta.textContent = target.path + " @ " + target.ref;
+        view.appendChild(meta);
+      }
       const url = buildRawFileUrl(target);
       if (mediaKind === "video") {
         const video = document.createElement("video");
@@ -1577,17 +1585,20 @@
     }
     function renderSourceBinary(card, target) {
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
+      const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
       view.className = "gdp-source-viewer binary";
-      const meta = document.createElement("div");
-      meta.className = "gdp-source-meta";
-      meta.textContent = target.path + " @ " + target.ref;
       const link = document.createElement("a");
       link.href = buildRawFileUrl(target);
       link.textContent = "Open raw file";
       link.target = "_blank";
       link.rel = "noreferrer";
-      view.appendChild(meta);
+      if (!isStandalone) {
+        const meta = document.createElement("div");
+        meta.className = "gdp-source-meta";
+        meta.textContent = target.path + " @ " + target.ref;
+        view.appendChild(meta);
+      }
       view.appendChild(link);
       if (body)
         body.replaceWith(view);

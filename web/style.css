@@ -1339,9 +1339,6 @@ table.d2h-diff-table .d2h-code-line-prefix {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gdp-standalone-source .gdp-source-meta {
-  display: none;
-}
 .gdp-source-tabs {
   display: flex;
   align-items: center;
