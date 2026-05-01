@@ -709,8 +709,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     const target = $('#diff');
     const empty = $('#empty');
     if (!newFiles.length) {
-      empty.classList.remove('hidden');
-      target.replaceChildren();
+      if (STATE.route.screen === 'file') {
+        empty.classList.add('hidden');
+        applySourceRouteToShell();
+      } else {
+        empty.classList.remove('hidden');
+        target.replaceChildren();
+      }
       LOAD_QUEUE.length = 0;
       return;
     }
@@ -2655,7 +2660,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     }).catch(() => setStatus('error'));
   }
   if (STATE.route.screen === 'repo') loadRepo();
-  else load();
+  else if (STATE.route.screen === 'file' && STATE.route.view === 'blob') {
+    setStatus('live');
+    applySourceRouteToShell();
+  } else load();
 
   // Ref picker (from / to)
   function syncRefInputs() {
