@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type GitFileMeta = {
@@ -130,25 +130,70 @@ function normalizeTreePath(path: string): string {
   return path.replace(/^\/+|\/+$/g, '');
 }
 
-function directChildren(paths: string[], basePath: string): GitTreeEntry[] {
-  const base = normalizeTreePath(basePath);
-  const prefix = base ? `${base}/` : '';
-  const entries = new Map<string, GitTreeEntry>();
-  for (const rawPath of paths) {
-    if (!rawPath || (prefix && !rawPath.startsWith(prefix))) continue;
-    const rest = prefix ? rawPath.slice(prefix.length) : rawPath;
-    if (!rest) continue;
-    const slash = rest.indexOf('/');
-    const name = slash >= 0 ? rest.slice(0, slash) : rest;
-    const childPath = prefix + name;
-    const type = slash >= 0 ? 'tree' : 'blob';
-    const existing = entries.get(childPath);
-    if (!existing || existing.type !== 'tree') entries.set(childPath, { name, path: childPath, type });
-  }
-  return [...entries.values()].sort((a, b) => {
+function sortTreeEntries(entries: GitTreeEntry[]): GitTreeEntry[] {
+  return [...entries].sort((a, b) => {
     if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+function worktreeDirectChildren(cwd: string, path: string): GitTreeEntry[] {
+  const base = normalizeTreePath(path);
+  const dir = join(cwd, base);
+  try {
+    return sortTreeEntries(readdirSync(dir, { withFileTypes: true }).map((entry) => {
+      const entryPath = base ? `${base}/${entry.name}` : entry.name;
+      return {
+        name: entry.name,
+        path: entryPath,
+        type: entry.isDirectory() ? 'tree' as const : 'blob' as const,
+      };
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function worktreeRecursiveFiles(cwd: string, path: string): GitTreeEntry[] {
+  const base = normalizeTreePath(path);
+  const trackedArgs = ['git', '-c', 'core.quotepath=false', 'ls-files', '-z'];
+  if (base) trackedArgs.push('--', `${base}/`);
+  const tracked = run(trackedArgs, cwd);
+  const paths = tracked.code === 0 ? tracked.stdout.split('\0').filter(Boolean) : [];
+  paths.push(...untracked(cwd, base));
+  return [...new Set(paths)].filter(Boolean).sort().map((entryPath) => ({
+    name: entryPath.split('/').pop() || entryPath,
+    path: entryPath,
+    type: 'blob' as const,
+  }));
+}
+
+function gitTreeEntries(ref: string, path: string, cwd: string, recursive: boolean): { code: number; entries: GitTreeEntry[]; stderr: string } {
+  const base = normalizeTreePath(path);
+  const args = ['git', '-c', 'core.quotepath=false', 'ls-tree'];
+  if (recursive) args.push('-r');
+  args.push('-z', '--full-tree', ref, '--');
+  if (base) args.push(`${base}/`);
+  const res = run(args, cwd);
+  if (res.code !== 0) return { code: res.code, entries: [], stderr: res.stderr };
+  const allowedTypes = recursive ? 'blob|commit' : 'tree|blob|commit';
+  let entries = res.stdout.split('\0').filter(Boolean).map((rec) => {
+    const match = rec.match(new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`));
+    if (!match) return null;
+    const entryPath = match[2];
+    return { name: entryPath.split('/').pop() || entryPath, path: entryPath, type: match[1] as GitTreeEntry['type'] };
+  }).filter((entry): entry is GitTreeEntry => !!entry);
+  if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
+  else entries = sortTreeEntries(entries);
+  return { code: 0, entries, stderr: '' };
+}
+
+function combineDirectAndRecursiveFiles(directEntries: GitTreeEntry[], fileEntries: GitTreeEntry[]): GitTreeEntry[] {
+  const seen = new Set(directEntries.map((entry) => entry.path));
+  return [
+    ...directEntries,
+    ...fileEntries.filter((entry) => !seen.has(entry.path)),
+  ];
 }
 
 export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
@@ -175,41 +220,16 @@ export function listTree(
 ): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
   if (ref === 'worktree') {
-    const trackedArgs = ['git', '-c', 'core.quotepath=false', 'ls-files', '-z'];
-    if (!options.recursive) trackedArgs.push('--', base ? `${base}/` : '.');
-    const tracked = run(trackedArgs, cwd);
-    const paths = tracked.code === 0 ? tracked.stdout.split('\0').filter(Boolean) : [];
-    paths.push(...untracked(cwd, options.recursive ? '' : base));
-    const uniquePaths = [...new Set(paths)].filter(Boolean);
-    const entries = options.recursive
-      ? uniquePaths.sort().map((entryPath) => ({
-        name: entryPath.split('/').pop() || entryPath,
-        path: entryPath,
-        type: 'blob' as const,
-      }))
-      : directChildren(uniquePaths, base);
-    return { code: 0, entries, stderr: '' };
+    const directEntries = worktreeDirectChildren(cwd, base);
+    if (!options.recursive) return { code: 0, entries: directEntries, stderr: '' };
+    return { code: 0, entries: combineDirectAndRecursiveFiles(directEntries, worktreeRecursiveFiles(cwd, base)), stderr: '' };
   }
 
-  const args = ['git', '-c', 'core.quotepath=false', 'ls-tree'];
-  if (options.recursive) args.push('-r');
-  args.push('-z', '--full-tree', ref, '--');
-  if (!options.recursive && base) args.push(`${base}/`);
-  const res = run(args, cwd);
-  if (res.code !== 0) return { code: res.code, entries: [], stderr: res.stderr };
-  const allowedTypes = options.recursive ? 'blob|commit' : 'tree|blob|commit';
-  const entries = res.stdout.split('\0').filter(Boolean).map((rec) => {
-    const match = rec.match(new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`));
-    if (!match) return null;
-    const entryPath = match[2];
-    return { name: entryPath.split('/').pop() || entryPath, path: entryPath, type: match[1] as GitTreeEntry['type'] };
-  }).filter((entry): entry is GitTreeEntry => !!entry);
-  entries.sort((a, b) => {
-    if (options.recursive) return a.path.localeCompare(b.path);
-    if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-  return { code: 0, entries, stderr: '' };
+  const direct = gitTreeEntries(ref, base, cwd, false);
+  if (direct.code !== 0 || !options.recursive) return direct;
+  const recursive = gitTreeEntries(ref, base, cwd, true);
+  if (recursive.code !== 0) return recursive;
+  return { code: 0, entries: combineDirectAndRecursiveFiles(direct.entries, recursive.entries), stderr: '' };
 }
 
 export function untrackedMeta(cwd: string): GitFileMeta[] {
