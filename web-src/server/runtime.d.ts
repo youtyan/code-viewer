@@ -1,5 +1,8 @@
 declare const Bun: {
-  spawn(args: string[], opts?: Record<string, unknown>): unknown;
+  spawn(args: string[], opts?: Record<string, unknown>): {
+    kill(signal?: string): void;
+    exited: Promise<number>;
+  };
   spawnSync(args: string[], opts?: Record<string, unknown>): {
     exitCode: number;
     stdout: Uint8Array;
@@ -16,6 +19,7 @@ declare const process: {
   argv: string[];
   cwd(): string;
   platform: 'darwin' | 'win32' | string;
+  on(event: 'SIGINT' | 'SIGTERM', listener: () => void): void;
   exit(code?: number): never;
 };
 
@@ -25,6 +29,7 @@ interface ImportMeta {
 
 declare module 'node:fs' {
   export function existsSync(path: string): boolean;
+  export function readdirSync(path: string): string[];
   export function readFileSync(path: string): Buffer;
   export function readFileSync(path: string, encoding: BufferEncoding): string;
   export function realpathSync(path: string): string;

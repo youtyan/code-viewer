@@ -2,8 +2,10 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, extname, join, normalize, relative } from 'node:path';
-import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse } from '../types';
+import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
+import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
 import * as git from './git';
+import { isSameWorktreeRange } from './range';
 
 const ROOT = normalize(join(import.meta.dir, '..', '..'));
 const WEB_ROOT = join(ROOT, 'web');
@@ -18,6 +20,7 @@ const SIZE_LARGE = 20000;
 let generation = 1;
 let cwd = git.repoRoot(process.cwd()) || process.cwd();
 let cliArgs = DEFAULT_ARGS;
+let listenPort = 0;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -32,7 +35,7 @@ function parseCli() {
       console.log(`code-viewer ${VERSION}
 
 Usage:
-  code-viewer [--cwd <repo>] [--open] [git-diff-args...]
+  code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
 
 Examples:
   code-viewer --open
@@ -51,6 +54,14 @@ Examples:
         process.exit(1);
       }
       cwd = git.repoRoot(next) || cwd;
+    } else if (arg === '--port') {
+      const next = process.argv[++i];
+      const parsed = Number(next);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+        console.error('--port requires a TCP port number');
+        process.exit(1);
+      }
+      listenPort = parsed;
     } else if (arg === '--open') {
       setTimeout(() => openBrowser(`http://127.0.0.1:${server.port}/`), 0);
     } else {
@@ -88,8 +99,7 @@ function requestAllowed(req: Request) {
 
 function staticFile(pathname: string): Response | null {
   const map: Record<string, [string, string]> = {
-    '/': ['index.html', 'text/html; charset=utf-8'],
-    '/index.html': ['index.html', 'text/html; charset=utf-8'],
+    '/favicon.png': ['favicon.png', 'image/png'],
     '/style.css': ['style.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'application/javascript; charset=utf-8'],
     '/vendor/diff2html/diff2html.min.css': ['vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
@@ -98,6 +108,9 @@ function staticFile(pathname: string): Response | null {
     '/vendor/highlight.js/styles/github.min.css': ['vendor/highlight.js/styles/github.min.css', 'text/css; charset=utf-8'],
     '/vendor/highlight.js/styles/github-dark.min.css': ['vendor/highlight.js/styles/github-dark.min.css', 'text/css; charset=utf-8'],
   };
+  for (const spaPath of [...APP_ENTRY_PATHS, ...SPA_PATHS]) {
+    map[spaPath] = ['index.html', 'text/html; charset=utf-8'];
+  }
   const spec = map[pathname];
   if (!spec) return null;
   const full = join(WEB_ROOT, spec[0]);
@@ -180,6 +193,16 @@ function fileToMeta(file: git.GitFileMeta, range: { from?: string; to?: string }
 }
 
 function computePayload(extras: string[], range: { from?: string; to?: string }): DiffMeta {
+  if (isSameWorktreeRange(range)) {
+    return {
+      files: [],
+      totals: { files: 0, additions: 0, deletions: 0 },
+      range: 'worktree .. worktree',
+      project: basename(cwd),
+      branch: git.currentBranch(cwd) || undefined,
+      generation,
+    };
+  }
   const { args, refs } = buildRangeArgs(range);
   const fullArgs = [...extras, ...args];
   const files = git.fileMeta(fullArgs, cwd, false);
@@ -231,7 +254,12 @@ function handleDiffJson(url: URL) {
 }
 
 function safePath(path: string) {
-  return path && !path.includes('../') && !path.includes('..\\') && !path.startsWith('/') && !path.startsWith('\\');
+  if (!path || path.startsWith('/') || path.startsWith('\\') || path.includes('\0')) return false;
+  return !path.split(/[\\/]+/).includes('..');
+}
+
+function safeRepoPath(path: string) {
+  return path === '' || safePath(path);
 }
 
 function safeWorktreePath(path: string): string | null {
@@ -245,6 +273,42 @@ function safeWorktreePath(path: string): string | null {
   return realFull;
 }
 
+function readReadme(target: string, dirPath: string): RepoTreeResponse['readme'] {
+  const candidates = ['README.md', 'readme.md', 'README.markdown', 'README'];
+  for (const name of candidates) {
+    const path = dirPath ? `${dirPath}/${name}` : name;
+    if (target === 'worktree' || target === '') {
+      const full = safeWorktreePath(path);
+      if (!full) continue;
+      try {
+        return { path, text: readFileSync(full, 'utf8') };
+      } catch {
+        continue;
+      }
+    }
+    const res = git.show(target, path, cwd);
+    if (res.code === 0) return { path, text: res.stdout };
+  }
+  return null;
+}
+
+function handleTree(url: URL) {
+  const target = url.searchParams.get('ref') || url.searchParams.get('target') || 'worktree';
+  const path = (url.searchParams.get('path') || '').replace(/^\/+|\/+$/g, '');
+  if (!safeRepoPath(path)) return text('invalid path', 400);
+  if (target !== 'worktree' && !git.verifyTreeRef(target, cwd)) return text('invalid target', 400);
+  const recursive = url.searchParams.get('recursive') === '1';
+  const entries = git.listTree(target, path, cwd, { recursive }).entries;
+  return json({
+    ref: target,
+    path,
+    project: basename(cwd),
+    branch: git.currentBranch(cwd) || undefined,
+    entries,
+    readme: readReadme(target, path),
+  } satisfies RepoTreeResponse);
+}
+
 function handleFileDiff(url: URL) {
   const path = url.searchParams.get('path') || '';
   if (!safePath(path)) return text('invalid path', 400);
@@ -253,6 +317,21 @@ function handleFileDiff(url: URL) {
   if (url.searchParams.get('ignore_blank') === '1') extras.push('--ignore-blank-lines');
   const isUntracked = url.searchParams.get('untracked') === '1';
   const range = { from: url.searchParams.get('from') || '', to: url.searchParams.get('to') || '' };
+  if (isSameWorktreeRange(range)) {
+    return json({
+      path,
+      old_path: url.searchParams.get('old_path') || '',
+      status: url.searchParams.get('status') || '',
+      mode: url.searchParams.get('mode') || 'full',
+      diff: '',
+      hunk_count: 0,
+      rendered_hunk_count: 0,
+      line_count: 0,
+      truncated: false,
+      binary: false,
+      generation,
+    });
+  }
   const { args } = buildRangeArgs(range);
   const oldPath = url.searchParams.get('old_path');
   const cacheKey = isUntracked
@@ -305,6 +384,7 @@ function handleFileRange(url: URL) {
     if (!full) return text('no file', 404);
     content = readFileSync(full, 'utf8');
   } else {
+    if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
     const res = git.show(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
     content = res.stdout;
@@ -322,6 +402,7 @@ function handleRawFile(url: URL) {
   const ref = url.searchParams.get('ref') || 'worktree';
   let body: BodyInit;
   if (ref !== 'worktree' && ref !== '') {
+    if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
     const res = git.show(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
     body = res.stdout;
@@ -355,13 +436,14 @@ parseCli();
 
 const server = Bun.serve({
   hostname: '127.0.0.1',
-  port: 0,
+  port: listenPort,
   fetch(req) {
     if (!requestAllowed(req)) return text('forbidden', 403);
     const url = new URL(req.url);
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
     if (url.pathname === '/diff.json') return handleDiffJson(url);
+    if (url.pathname === '/_tree') return handleTree(url);
     if (url.pathname === '/file_diff') return handleFileDiff(url);
     if (url.pathname === '/file_range') return handleFileRange(url);
     if (url.pathname === '/_file') return handleRawFile(url);
