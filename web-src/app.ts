@@ -436,7 +436,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       li.dataset.index = String(i);
       li.dataset.path = f.path;
       li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
-      if (f.status) li.appendChild(fileBadge(f.status));
+      if (f.status) {
+        li.appendChild(fileBadge(f.status));
+      } else {
+        const icon = document.createElement('span');
+        icon.className = 'd2h-icon-wrapper';
+        icon.innerHTML = fileEntryIcon();
+        li.appendChild(icon);
+      }
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = f.path;

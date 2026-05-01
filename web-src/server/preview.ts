@@ -383,6 +383,7 @@ function handleFileRange(url: URL) {
     if (!full) return text('no file', 404);
     content = readFileSync(full, 'utf8');
   } else {
+    if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
     const res = git.show(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
     content = res.stdout;
@@ -400,6 +401,7 @@ function handleRawFile(url: URL) {
   const ref = url.searchParams.get('ref') || 'worktree';
   let body: BodyInit;
   if (ref !== 'worktree' && ref !== '') {
+    if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
     const res = git.show(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
     body = res.stdout;
