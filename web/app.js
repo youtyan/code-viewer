@@ -133,15 +133,22 @@
     switch (pathname) {
       case "/":
       case "/index.html":
+        return {
+          screen: "repo",
+          ref: params.get("ref") || params.get("target") || "worktree",
+          path: params.get("path") || "",
+          range
+        };
       case "/todif":
       case "/todiff":
         return { screen: "diff", range };
       case "/file": {
         const path = params.get("path") || "";
-        const ref = params.get("ref") || "worktree";
+        const target = params.get("target") || "";
+        const ref = target || params.get("ref") || "worktree";
         if (!path)
           return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
-        return { screen: "file", path, ref, range };
+        return { screen: "file", path, ref, range, view: target ? "blob" : "detail" };
       }
       default:
         return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
@@ -149,7 +156,19 @@
   }
   function buildRoute(route) {
     switch (route.screen) {
+      case "repo": {
+        const params = new URLSearchParams;
+        if (route.ref && route.ref !== "worktree")
+          params.set("ref", route.ref);
+        if (route.path)
+          params.set("path", route.path);
+        const qs = params.toString();
+        return "/" + (qs ? "?" + qs : "");
+      }
       case "file":
+        if (route.view === "blob") {
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree");
+        }
         return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
       case "diff":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
@@ -191,6 +210,7 @@
       "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z",
       "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
     ];
+    const FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
     const UNFOLD_16_PATH = "m8.177.677 2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25a.75.75 0 0 1-1.5 0V4H5.104a.25.25 0 0 1-.177-.427L7.823.677a.25.25 0 0 1 .354 0ZM7.25 10.75a.75.75 0 0 1 1.5 0V12h2.146a.25.25 0 0 1 .177.427l-2.896 2.896a.25.25 0 0 1-.354 0l-2.896-2.896A.25.25 0 0 1 5.104 12H7.25v-1.25Zm-5-2a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z";
     const FOLD_16_PATH = "M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z";
     const $ = (sel) => document.querySelector(sel);
@@ -225,7 +245,8 @@
         hideTests: localStorage.getItem("gdp:hide-tests") === "1",
         syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
         viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
-        route
+        route,
+        repoRef: route.screen === "repo" ? route.ref : "worktree"
       };
     })();
     function setStatus(s) {
@@ -396,7 +417,7 @@
       Object.values(root.dirs).forEach(compress);
       return root;
     }
-    function renderTreeNode(node, depth, ul) {
+    function renderTreeNode(node, depth, ul, onFileClick) {
       const items = [];
       for (const k of Object.keys(node.dirs)) {
         const d = node.dirs[k];
@@ -434,7 +455,7 @@
           updateIcon();
           const childUl = document.createElement("ul");
           childUl.className = "tree-children";
-          renderTreeNode(dir, depth + 1, childUl);
+          renderTreeNode(dir, depth + 1, childUl, onFileClick);
           li.addEventListener("click", (e) => {
             e.stopPropagation();
             li.classList.toggle("collapsed");
@@ -454,45 +475,68 @@
           li.dataset.path = f.path;
           li.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
           li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
-          li.appendChild(fileBadge(f.status));
+          const spacer = document.createElement("span");
+          spacer.className = "chev-spacer";
+          li.appendChild(spacer);
+          if (f.status) {
+            li.appendChild(fileBadge(f.status));
+          } else {
+            const icon = document.createElement("span");
+            icon.className = "d2h-icon-wrapper";
+            icon.innerHTML = fileEntryIcon();
+            li.appendChild(icon);
+          }
           const name = document.createElement("span");
           name.className = "name";
           name.textContent = f.path.split("/").pop();
           name.title = f.path;
           li.appendChild(name);
-          li.addEventListener("click", () => scrollToFile(f.path));
-          li.addEventListener("mouseenter", () => prefetchByPath(f.path), { passive: true });
+          li.addEventListener("click", () => {
+            if (onFileClick)
+              onFileClick(f);
+            else
+              scrollToFile(f.path);
+          });
+          if (!onFileClick)
+            li.addEventListener("mouseenter", () => prefetchByPath(f.path), { passive: true });
           ul.appendChild(li);
         }
       }
     }
-    function renderFlat(files, ul) {
+    function renderFlat(files, ul, onFileClick) {
       files.forEach((f, i) => {
         const li = document.createElement("li");
         li.dataset.index = String(i);
         li.dataset.path = f.path;
         li.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
-        li.appendChild(fileBadge(f.status));
+        if (f.status)
+          li.appendChild(fileBadge(f.status));
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = f.path;
         name.title = f.path;
         li.appendChild(name);
-        li.addEventListener("click", () => scrollToFile(f.path));
-        li.addEventListener("mouseenter", () => prefetchByPath(f.path), { passive: true });
+        li.addEventListener("click", () => {
+          if (onFileClick)
+            onFileClick(f);
+          else
+            scrollToFile(f.path);
+        });
+        if (!onFileClick)
+          li.addEventListener("mouseenter", () => prefetchByPath(f.path), { passive: true });
         ul.appendChild(li);
       });
     }
-    function renderSidebar(files) {
+    function renderSidebar(files, onFileClick) {
       const ul = $("#filelist");
       ul.innerHTML = "";
       ul.classList.toggle("tree", STATE.sbView === "tree");
       STATE.files = files;
       if (STATE.sbView === "tree") {
         const root = buildTree(files);
-        renderTreeNode(root, 0, ul);
+        renderTreeNode(root, 0, ul, onFileClick);
       } else {
-        renderFlat(files, ul);
+        renderFlat(files, ul, onFileClick);
       }
       $("#totals").textContent = files.length ? files.length + " file" + (files.length === 1 ? "" : "s") : "";
       $$(".sb-view-seg button").forEach((b) => {
@@ -501,6 +545,14 @@
       if (STATE.activeFile)
         markActive(STATE.activeFile);
       applyFilter();
+    }
+    function syncRepoTargetInput(ref) {
+      const input = document.querySelector("#repo-target");
+      const wrap = document.querySelector("#repo-target-wrap");
+      if (!input || !wrap)
+        return;
+      input.value = ref || "worktree";
+      wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
     }
     function renderMeta(meta) {
       const el = $("#meta");
@@ -653,13 +705,19 @@
     function sourceTargetFromRoute() {
       return STATE.route.screen === "file" ? { path: STATE.route.path, ref: STATE.route.ref } : null;
     }
+    function repoFileTargetFromRoute() {
+      return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
+    }
     function setRoute(route, replace = false) {
       const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
       STATE.route = nextRoute;
       STATE.from = nextRoute.range.from;
       STATE.to = nextRoute.range.to;
+      if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
+        STATE.repoRef = nextRoute.ref || "worktree";
+      }
       const url = buildRoute(nextRoute);
-      const state = nextRoute.screen === "file" ? { view: "file", path: nextRoute.path, ref: nextRoute.ref } : { view: "diff" };
+      const state = nextRoute.screen === "file" ? { screen: "file", path: nextRoute.path, ref: nextRoute.ref, view: nextRoute.view || "detail" } : { view: nextRoute.screen };
       if (replace)
         history.replaceState(state, "", url);
       else
@@ -668,12 +726,19 @@
     }
     function setPageMode() {
       document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
+      document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
+      document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
+      syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
     }
     function syncHeaderMenu() {
       document.querySelectorAll(".app-menu-item").forEach((link) => {
-        const active = link.dataset.route === STATE.route.screen || link.dataset.route === "diff" && STATE.route.screen === "file";
+        const fileRouteOwner = STATE.route.screen === "file" && STATE.route.view === "blob" ? "repo" : "diff";
+        const active = link.dataset.route === STATE.route.screen || STATE.route.screen === "file" && link.dataset.route === fileRouteOwner;
         link.classList.toggle("active", active);
         link.setAttribute("aria-current", active ? "page" : "false");
+        if (link.dataset.route === "repo") {
+          link.href = buildRoute({ screen: "repo", ref: STATE.repoRef || "worktree", path: "", range: currentRange() });
+        }
         if (link.dataset.route === "diff") {
           link.href = buildRoute({ screen: "diff", range: currentRange() });
         }
@@ -681,6 +746,7 @@
     }
     function removeStandaloneSource() {
       document.querySelectorAll(".gdp-standalone-source").forEach((el) => el.remove());
+      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => el.remove());
     }
     function renderShell(meta) {
       const newFiles = meta.files || [];
@@ -752,6 +818,223 @@
         applyHideTests();
       applyFilter();
       applyViewedState();
+    }
+    function fileEntryIcon() {
+      return iconSvg("octicon-file", FILE_16_PATH);
+    }
+    function repoRoute(ref, path) {
+      return { screen: "repo", ref: ref || "worktree", path, range: currentRange() };
+    }
+    function wireRepoTargetPicker(input, onPick) {
+      input.addEventListener("focus", () => openPopover(input));
+      input.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPopover(input);
+      });
+      input.addEventListener("mousedown", (e) => {
+        if (popover.hidden) {
+          e.preventDefault();
+          input.focus();
+        }
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          closePopover();
+        } else if (e.key === "Escape") {
+          closePopover();
+          input.blur();
+        }
+      });
+      input.addEventListener("change", () => onPick(input.value || "worktree"));
+    }
+    function createRepoBreadcrumb(target, path) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
+      const root = document.createElement("button");
+      root.type = "button";
+      root.className = path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current";
+      root.textContent = PROJECT_NAME || "repository";
+      root.addEventListener("click", () => {
+        setRoute(repoRoute(target, ""));
+        loadRepo();
+      });
+      nav.appendChild(root);
+      const parts = path ? path.split("/") : [];
+      parts.forEach((part, index) => {
+        const sep = document.createElement("span");
+        sep.className = "gdp-file-breadcrumb-sep";
+        sep.textContent = "/";
+        nav.appendChild(sep);
+        const currentPath = parts.slice(0, index + 1).join("/");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = index === parts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        button.textContent = part;
+        button.disabled = index === parts.length - 1;
+        button.addEventListener("click", () => {
+          setRoute(repoRoute(target, currentPath));
+          loadRepo();
+        });
+        nav.appendChild(button);
+      });
+      return nav;
+    }
+    function renderRepo(meta) {
+      PROJECT_NAME = meta.project || PROJECT_NAME;
+      setPageMode();
+      removeStandaloneSource();
+      $("#empty").classList.add("hidden");
+      $("#diff").replaceChildren();
+      $("#filelist").replaceChildren();
+      $("#totals").textContent = "";
+      STATE.files = [];
+      LOAD_QUEUE.length = 0;
+      const target = $("#diff");
+      const shell = document.createElement("section");
+      shell.className = "gdp-repo-shell";
+      const targetPicker = document.createElement("input");
+      targetPicker.className = "ref-input gdp-repo-target";
+      targetPicker.id = "repo-ref";
+      targetPicker.readOnly = true;
+      targetPicker.autocomplete = "off";
+      targetPicker.value = meta.ref || "worktree";
+      targetPicker.placeholder = "ref...";
+      targetPicker.title = "repository ref";
+      wireRepoTargetPicker(targetPicker, (ref) => {
+        setRoute(repoRoute(ref, ""));
+        loadRepo();
+      });
+      const toolbar = document.createElement("div");
+      toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
+      toolbar.append(createRepoBreadcrumb(meta.ref, meta.path || ""), targetPicker);
+      shell.appendChild(toolbar);
+      const listCard = document.createElement("section");
+      listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
+      const listWrapper = document.createElement("div");
+      listWrapper.className = "d2h-file-wrapper";
+      const listHeader = document.createElement("div");
+      listHeader.className = "d2h-file-header";
+      const listName = document.createElement("div");
+      listName.className = "d2h-file-name-wrapper";
+      const listIcon = document.createElement("span");
+      listIcon.className = "dir-icon";
+      setFolderIcon(listIcon, false);
+      const listTitle = document.createElement("span");
+      listTitle.className = "d2h-file-name";
+      listTitle.textContent = meta.path || meta.project || "Files";
+      listName.append(listIcon, listTitle);
+      listHeader.appendChild(listName);
+      listWrapper.appendChild(listHeader);
+      const list = document.createElement("div");
+      list.className = "gdp-source-viewer gdp-repo-file-list";
+      if (meta.path) {
+        const parent = meta.path.split("/").slice(0, -1).join("/");
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "gdp-repo-row parent";
+        const parentIcon = document.createElement("span");
+        parentIcon.className = "dir-icon";
+        setFolderIcon(parentIcon, false);
+        const parentName = document.createElement("span");
+        parentName.className = "name";
+        parentName.textContent = "..";
+        const parentKind = document.createElement("span");
+        parentKind.className = "kind";
+        parentKind.textContent = "parent";
+        row.append(parentIcon, parentName, parentKind);
+        row.addEventListener("click", () => {
+          setRoute(repoRoute(meta.ref, parent));
+          loadRepo();
+        });
+        list.appendChild(row);
+      }
+      meta.entries.forEach((entry) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "gdp-repo-row " + entry.type;
+        const icon = document.createElement("span");
+        icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
+        if (entry.type === "tree")
+          setFolderIcon(icon, true);
+        else
+          icon.innerHTML = fileEntryIcon();
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = entry.name;
+        const kind = document.createElement("span");
+        kind.className = "kind";
+        kind.textContent = entry.type === "tree" ? "directory" : entry.type === "commit" ? "submodule" : "file";
+        row.append(icon, name, kind);
+        row.addEventListener("click", () => {
+          if (entry.type === "tree") {
+            setRoute(repoRoute(meta.ref, entry.path));
+            loadRepo();
+          } else if (entry.type === "blob") {
+            setRoute({ screen: "file", path: entry.path, ref: meta.ref, view: "blob", range: currentRange() });
+            renderStandaloneSource({ path: entry.path, ref: meta.ref });
+          }
+        });
+        list.appendChild(row);
+      });
+      if (!meta.entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "gdp-repo-empty";
+        empty.textContent = "No files in this directory.";
+        list.appendChild(empty);
+      }
+      listWrapper.appendChild(list);
+      listCard.appendChild(listWrapper);
+      shell.appendChild(listCard);
+      if (meta.readme && meta.readme.text) {
+        const readme = document.createElement("section");
+        readme.className = "gdp-file-shell loaded gdp-repo-readme";
+        const wrapper = document.createElement("div");
+        wrapper.className = "d2h-file-wrapper";
+        const readmeHeader = document.createElement("div");
+        readmeHeader.className = "d2h-file-header";
+        const nameWrapper = document.createElement("div");
+        nameWrapper.className = "d2h-file-name-wrapper";
+        const icon = document.createElement("span");
+        icon.className = "d2h-icon-wrapper";
+        icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
+        const name = document.createElement("span");
+        name.className = "d2h-file-name";
+        name.textContent = meta.readme.path;
+        nameWrapper.append(icon, name);
+        readmeHeader.appendChild(nameWrapper);
+        wrapper.appendChild(readmeHeader);
+        wrapper.appendChild(renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, getHljs()));
+        readme.appendChild(wrapper);
+        shell.appendChild(readme);
+      }
+      target.appendChild(shell);
+    }
+    function renderRepoBlobSidebar(currentPath, ref) {
+      syncRepoTargetInput(ref);
+      const params = new URLSearchParams;
+      params.set("ref", ref || "worktree");
+      params.set("recursive", "1");
+      return trackLoad(fetch("/_tree?" + params.toString()).then((r) => {
+        if (!r.ok)
+          throw new Error("failed to load repository tree");
+        return r.json();
+      })).then((meta) => {
+        const files = meta.entries.filter((entry) => entry.type !== "tree").map((entry, index) => ({
+          order: index + 1,
+          path: entry.path,
+          display_path: entry.path
+        }));
+        renderSidebar(files, (file) => {
+          setRoute({ screen: "file", path: file.path, ref, view: "blob", range: currentRange() });
+          renderStandaloneSource({ path: file.path, ref });
+        });
+        markActive(currentPath);
+        applyFilter();
+      }).catch(() => {
+        renderSidebar([], undefined);
+        $("#totals").textContent = "Cannot load tree";
+      });
     }
     function createPlaceholder(f) {
       const card = document.createElement("div");
@@ -1634,8 +1917,10 @@
     async function renderStandaloneSource(target) {
       const req = ++SOURCE_REQ_SEQ;
       const root = $("#diff");
+      const repoTarget = repoFileTargetFromRoute();
       setPageMode();
       removeStandaloneSource();
+      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => el.remove());
       const card = document.createElement("article");
       card.className = "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
       card.dataset.path = target.path;
@@ -1669,17 +1954,19 @@
         }
       });
       name.appendChild(copy);
-      const back = document.createElement("button");
-      back.type = "button";
-      back.className = "gdp-view-file gdp-btn gdp-btn-sm";
-      setViewFileButtonState(back, true);
-      back.addEventListener("click", () => {
-        setRoute({ screen: "diff", range: currentRange() });
-        setPageMode();
-        removeStandaloneSource();
-      });
       header.appendChild(name);
-      header.appendChild(back);
+      if (!repoTarget) {
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "gdp-view-file gdp-btn gdp-btn-sm";
+        setViewFileButtonState(back, true);
+        back.addEventListener("click", () => {
+          setRoute({ screen: "diff", range: currentRange() });
+          setPageMode();
+          removeStandaloneSource();
+        });
+        header.appendChild(back);
+      }
       sticky.appendChild(header);
       const tabsHost = document.createElement("div");
       tabsHost.className = "gdp-file-detail-tabs";
@@ -1690,7 +1977,15 @@
       detailBody.className = "gdp-file-detail-body";
       wrapper.appendChild(detailBody);
       card.appendChild(wrapper);
-      root.prepend(card);
+      if (repoTarget) {
+        const layout = document.createElement("div");
+        layout.className = "gdp-repo-blob-layout";
+        renderRepoBlobSidebar(target.path, repoTarget);
+        layout.appendChild(card);
+        root.replaceChildren(layout);
+      } else {
+        root.prepend(card);
+      }
       renderSourceLoading(card, target);
       try {
         const mediaKind = isVideo(target.path) ? "video" : isMedia(target.path) ? "image" : null;
@@ -2349,10 +2644,31 @@
     });
     applyTheme();
     setLayout(STATE.layout);
+    setPageMode();
     if (window.location.pathname === "/") {
       setRoute(STATE.route, true);
     }
+    function loadRepo() {
+      if (STATE.route.screen !== "repo")
+        return Promise.resolve();
+      setStatus("refreshing");
+      const params = new URLSearchParams;
+      params.set("ref", STATE.route.ref || "worktree");
+      if (STATE.route.path)
+        params.set("path", STATE.route.path);
+      return trackLoad(fetch("/_tree?" + params.toString()).then((r) => {
+        if (!r.ok)
+          throw new Error("failed to load repository tree");
+        return r.json();
+      })).then((data) => {
+        renderRepo(data);
+        setStatus("live");
+        syncHeaderMenu();
+      }).catch(() => setStatus("error"));
+    }
     function load(opts) {
+      if (STATE.route.screen === "repo")
+        return loadRepo();
       setStatus("refreshing");
       const params = new URLSearchParams;
       if (STATE.ignoreWs)
@@ -2369,7 +2685,10 @@
         setStatus("live");
       }).catch(() => setStatus("error"));
     }
-    load();
+    if (STATE.route.screen === "repo")
+      loadRepo();
+    else
+      load();
     function syncRefInputs() {
       const fi = $("#ref-from"), ti = $("#ref-to");
       if (fi)
@@ -2476,7 +2795,8 @@
       });
       popover.hidden = false;
       const r = input.getBoundingClientRect();
-      popover.style.left = Math.max(8, r.left) + "px";
+      const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
+      popover.style.left = Math.max(8, Math.min(r.left, window.innerWidth - popWidth - 8)) + "px";
       popover.style.top = r.bottom + 4 + "px";
       setTimeout(() => popSearch.focus(), 0);
     }
@@ -2493,6 +2813,10 @@
           el.focus();
         }
       });
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPopover(el);
+      });
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -2502,6 +2826,17 @@
           el.blur();
         }
       });
+    });
+    wireRepoTargetPicker($("#repo-target"), (ref) => {
+      if (STATE.route.screen !== "file")
+        return;
+      setRoute({ screen: "file", path: STATE.route.path, ref, view: "blob", range: currentRange() });
+      renderStandaloneSource({ path: STATE.route.path, ref });
+    });
+    document.addEventListener("focusin", (e) => {
+      const el = e.target;
+      if (el instanceof HTMLInputElement && (el.id === "repo-ref" || el.id === "repo-target"))
+        openPopover(el);
     });
     popSearch.addEventListener("input", () => buildPopBody(popSearch.value));
     popSearch.addEventListener("keydown", (e) => {
@@ -2517,8 +2852,19 @@
     function handlePicked(val) {
       if (!popTarget || !val)
         return;
-      popTarget.value = val;
-      const targetWasFrom = popTarget.id === "ref-from";
+      const pickedTarget = popTarget;
+      pickedTarget.value = val;
+      if (pickedTarget.id === "repo-ref") {
+        closePopover();
+        pickedTarget.dispatchEvent(new Event("change"));
+        return;
+      }
+      if (pickedTarget.id === "repo-target") {
+        closePopover();
+        pickedTarget.dispatchEvent(new Event("change"));
+        return;
+      }
+      const targetWasFrom = pickedTarget.id === "ref-from";
       const otherEmpty = !$("#ref-to").value;
       closePopover();
       setRange($("#ref-from").value, $("#ref-to").value);
@@ -2549,7 +2895,7 @@
       const target = e.target;
       if (popover.contains(target))
         return;
-      if (target.id === "ref-from" || target.id === "ref-to")
+      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
         return;
       closePopover();
     });
@@ -2559,12 +2905,22 @@
       STATE.route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
       STATE.from = STATE.route.range.from;
       STATE.to = STATE.route.range.to;
+      if (STATE.route.screen === "repo")
+        STATE.repoRef = STATE.route.ref || "worktree";
       syncRefInputs();
       syncHeaderMenu();
+      if (STATE.route.screen === "repo") {
+        SOURCE_REQ_SEQ++;
+        setPageMode();
+        removeStandaloneSource();
+        loadRepo();
+        return;
+      }
       if (STATE.route.screen !== "file") {
         SOURCE_REQ_SEQ++;
         setPageMode();
         removeStandaloneSource();
+        load();
         return;
       }
       applySourceRouteToShell();

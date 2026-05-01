@@ -13,6 +13,12 @@ export type GitFileMeta = {
   untracked?: boolean;
 };
 
+export type GitTreeEntry = {
+  name: string;
+  path: string;
+  type: 'tree' | 'blob' | 'commit';
+};
+
 function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
   return {
@@ -34,6 +40,13 @@ export function currentBranch(cwd: string): string | null {
 
 export function show(ref: string, path: string, cwd: string): { code: number; stdout: string; stderr: string } {
   return run(['git', 'show', `${ref}:${path}`], cwd);
+}
+
+export function verifyTreeRef(ref: string, cwd: string): boolean {
+  if (!ref || ref === 'worktree') return false;
+  if (ref.startsWith('-')) return false;
+  const res = run(['git', 'rev-parse', '--verify', `${ref}^{tree}`], cwd);
+  return res.code === 0;
 }
 
 export function refs(cwd: string): { branches: string[]; tags: string[]; commits: string[]; current: string } {
@@ -106,9 +119,97 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
   return files;
 }
 
-export function untracked(cwd: string): string[] {
-  const res = run(['git', 'ls-files', '--others', '--exclude-standard'], cwd);
+export function untracked(cwd: string, path = ''): string[] {
+  const args = ['git', 'ls-files', '--others', '--exclude-standard'];
+  if (path) args.push('--', `${path}/`);
+  const res = run(args, cwd);
   return res.code === 0 ? res.stdout.split('\n').filter(Boolean) : [];
+}
+
+function normalizeTreePath(path: string): string {
+  return path.replace(/^\/+|\/+$/g, '');
+}
+
+function directChildren(paths: string[], basePath: string): GitTreeEntry[] {
+  const base = normalizeTreePath(basePath);
+  const prefix = base ? `${base}/` : '';
+  const entries = new Map<string, GitTreeEntry>();
+  for (const rawPath of paths) {
+    if (!rawPath || (prefix && !rawPath.startsWith(prefix))) continue;
+    const rest = prefix ? rawPath.slice(prefix.length) : rawPath;
+    if (!rest) continue;
+    const slash = rest.indexOf('/');
+    const name = slash >= 0 ? rest.slice(0, slash) : rest;
+    const childPath = prefix + name;
+    const type = slash >= 0 ? 'tree' : 'blob';
+    const existing = entries.get(childPath);
+    if (!existing || existing.type !== 'tree') entries.set(childPath, { name, path: childPath, type });
+  }
+  return [...entries.values()].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
+  return listTree('worktree', path, cwd).entries;
+}
+
+export function worktreeFiles(cwd: string): GitTreeEntry[] {
+  return listTree('worktree', '', cwd, { recursive: true }).entries;
+}
+
+export function treeEntries(ref: string, path: string, cwd: string): { code: number; entries: GitTreeEntry[]; stderr: string } {
+  return listTree(ref, path, cwd);
+}
+
+export function treeFiles(ref: string, cwd: string): { code: number; entries: GitTreeEntry[]; stderr: string } {
+  return listTree(ref, '', cwd, { recursive: true });
+}
+
+export function listTree(
+  ref: string,
+  path: string,
+  cwd: string,
+  options: { recursive?: boolean } = {},
+): { code: number; entries: GitTreeEntry[]; stderr: string } {
+  const base = normalizeTreePath(path);
+  if (ref === 'worktree') {
+    const trackedArgs = ['git', '-c', 'core.quotepath=false', 'ls-files', '-z'];
+    if (!options.recursive) trackedArgs.push('--', base ? `${base}/` : '.');
+    const tracked = run(trackedArgs, cwd);
+    const paths = tracked.code === 0 ? tracked.stdout.split('\0').filter(Boolean) : [];
+    paths.push(...untracked(cwd, options.recursive ? '' : base));
+    const uniquePaths = [...new Set(paths)].filter(Boolean);
+    const entries = options.recursive
+      ? uniquePaths.sort().map((entryPath) => ({
+        name: entryPath.split('/').pop() || entryPath,
+        path: entryPath,
+        type: 'blob' as const,
+      }))
+      : directChildren(uniquePaths, base);
+    return { code: 0, entries, stderr: '' };
+  }
+
+  const args = ['git', '-c', 'core.quotepath=false', 'ls-tree'];
+  if (options.recursive) args.push('-r');
+  args.push('-z', '--full-tree', ref, '--');
+  if (!options.recursive && base) args.push(`${base}/`);
+  const res = run(args, cwd);
+  if (res.code !== 0) return { code: res.code, entries: [], stderr: res.stderr };
+  const allowedTypes = options.recursive ? 'blob|commit' : 'tree|blob|commit';
+  const entries = res.stdout.split('\0').filter(Boolean).map((rec) => {
+    const match = rec.match(new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`));
+    if (!match) return null;
+    const entryPath = match[2];
+    return { name: entryPath.split('/').pop() || entryPath, path: entryPath, type: match[1] as GitTreeEntry['type'] };
+  }).filter((entry): entry is GitTreeEntry => !!entry);
+  entries.sort((a, b) => {
+    if (options.recursive) return a.path.localeCompare(b.path);
+    if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return { code: 0, entries, stderr: '' };
 }
 
 export function untrackedMeta(cwd: string): GitFileMeta[] {

@@ -9,8 +9,9 @@ export type SourceFileTarget = {
 };
 
 export type AppRoute =
+  | { screen: 'repo'; ref: string; path: string; range: DiffRange }
   | { screen: 'diff'; range: DiffRange }
-  | { screen: 'file'; path: string; ref: string; range: DiffRange }
+  | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail' }
   | { screen: 'unknown'; reason: 'unknown-pathname' | 'missing-path'; rawPathname: string; rawSearch: string; range: DiffRange };
 
 export const SPA_PATHS = ['/todif', '/todiff', '/file'] as const;
@@ -40,14 +41,21 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
   switch (pathname) {
     case '/':
     case '/index.html':
+      return {
+        screen: 'repo',
+        ref: params.get('ref') || params.get('target') || 'worktree',
+        path: params.get('path') || '',
+        range,
+      };
     case '/todif':
     case '/todiff':
       return { screen: 'diff', range };
     case '/file': {
       const path = params.get('path') || '';
-      const ref = params.get('ref') || 'worktree';
+      const target = params.get('target') || '';
+      const ref = target || params.get('ref') || 'worktree';
       if (!path) return { screen: 'unknown', reason: 'missing-path', rawPathname: pathname, rawSearch: search, range };
-      return { screen: 'file', path, ref, range };
+      return { screen: 'file', path, ref, range, view: target ? 'blob' : 'detail' };
     }
     default:
       return { screen: 'unknown', reason: 'unknown-pathname', rawPathname: pathname, rawSearch: search, range };
@@ -56,7 +64,18 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
 
 export function buildRoute(route: AppRoute): string {
   switch (route.screen) {
+    case 'repo': {
+      const params = new URLSearchParams();
+      if (route.ref && route.ref !== 'worktree') params.set('ref', route.ref);
+      if (route.path) params.set('path', route.path);
+      const qs = params.toString();
+      return '/' + (qs ? '?' + qs : '');
+    }
     case 'file':
+      if (route.view === 'blob') {
+        return '/file?path=' + encodeURIComponent(route.path) +
+          '&target=' + encodeURIComponent(route.ref || 'worktree');
+      }
       return '/file?path=' + encodeURIComponent(route.path) +
         '&ref=' + encodeURIComponent(route.ref || 'worktree') +
         '&from=' + encodeURIComponent(route.range.from || '') +

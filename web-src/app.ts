@@ -17,6 +17,8 @@ import type {
   DiffMeta,
   FileDiffResponse,
   FileMeta,
+  RepoTreeResponse,
+  RepoTreeEntry,
   RefResponse,
 } from './types';
 
@@ -36,9 +38,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   type TreeNode = {
     name: string;
     dirs: Record<string, TreeNode>;
-    files: FileMeta[];
+    files: SidebarItem[];
     path: string;
     minOrder: number;
+  };
+  type SidebarItem = {
+    order?: number;
+    path: string;
+    display_path?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
   };
   type HunkInfo = {
     oldStart: number;
@@ -79,6 +89,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syntaxHighlight: boolean;
     viewedFiles: Set<string>;
     route: AppRoute;
+    repoRef: string;
   };
   type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
@@ -92,6 +103,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z',
     'M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z',
   ];
+  const FILE_16_PATH = 'M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z';
   const UNFOLD_16_PATH = 'm8.177.677 2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25a.75.75 0 0 1-1.5 0V4H5.104a.25.25 0 0 1-.177-.427L7.823.677a.25.25 0 0 1 .354 0ZM7.25 10.75a.75.75 0 0 1 1.5 0V12h2.146a.25.25 0 0 1 .177.427l-2.896 2.896a.25.25 0 0 1-.354 0l-2.896-2.896A.25.25 0 0 1 5.104 12H7.25v-1.25Zm-5-2a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
   const FOLD_16_PATH = 'M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
 
@@ -130,6 +142,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       syntaxHighlight: localStorage.getItem('gdp:syntax-highlight') !== '0',
       viewedFiles: new Set<string>(JSON.parse(localStorage.getItem('gdp:viewed-files') || '[]')),
       route,
+      repoRef: route.screen === 'repo' ? route.ref : 'worktree',
     };
   })();
 
@@ -296,7 +309,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // file beneath it. That index is used as the tree sort key so the visit
   // order matches the right-panel order *byte-for-byte*, regardless of
   // Lua/JS string-comparison differences (UTF-8 vs UTF-16).
-  function buildTree(files: FileMeta[]): TreeNode {
+  function buildTree(files: SidebarItem[]): TreeNode {
     const root = { name: '', dirs: {}, files: [], path: '', minOrder: Infinity };
     for (const f of files) {
       const parts = f.path.split('/');
@@ -331,7 +344,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     return root;
   }
 
-  function renderTreeNode(node: TreeNode, depth: number, ul: HTMLElement) {
+  function renderTreeNode(node: TreeNode, depth: number, ul: HTMLElement, onFileClick?: (file: SidebarItem) => void) {
     // Sort by server-assigned numeric `order` (server set it after sorting
     // files by path on the Lua side). This way the tree visit order is a
     // bijection with the right-panel order, regardless of Lua/JS string
@@ -373,7 +386,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         updateIcon();
         const childUl = document.createElement('ul');
         childUl.className = 'tree-children';
-        renderTreeNode(dir, depth + 1, childUl);
+        renderTreeNode(dir, depth + 1, childUl, onFileClick);
         li.addEventListener('click', (e) => {
           e.stopPropagation();
           li.classList.toggle('collapsed');
@@ -391,47 +404,63 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.dataset.path = f.path;
         li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
-        li.appendChild(fileBadge(f.status));
+        const spacer = document.createElement('span');
+        spacer.className = 'chev-spacer';
+        li.appendChild(spacer);
+        if (f.status) {
+          li.appendChild(fileBadge(f.status));
+        } else {
+          const icon = document.createElement('span');
+          icon.className = 'd2h-icon-wrapper';
+          icon.innerHTML = fileEntryIcon();
+          li.appendChild(icon);
+        }
         const name = document.createElement('span');
         name.className = 'name';
         name.textContent = f.path.split('/').pop();
         name.title = f.path;
         li.appendChild(name);
-        li.addEventListener('click', () => scrollToFile(f.path));
-        li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
+        li.addEventListener('click', () => {
+          if (onFileClick) onFileClick(f);
+          else scrollToFile(f.path);
+        });
+        if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
         ul.appendChild(li);
       }
     }
   }
 
-  function renderFlat(files: FileMeta[], ul: HTMLElement) {
+  function renderFlat(files: SidebarItem[], ul: HTMLElement, onFileClick?: (file: SidebarItem) => void) {
     files.forEach((f, i) => {
       const li = document.createElement('li');
       li.dataset.index = String(i);
       li.dataset.path = f.path;
       li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
-      li.appendChild(fileBadge(f.status));
+      if (f.status) li.appendChild(fileBadge(f.status));
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = f.path;
       name.title = f.path;
       li.appendChild(name);
-      li.addEventListener('click', () => scrollToFile(f.path));
-      li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
+      li.addEventListener('click', () => {
+        if (onFileClick) onFileClick(f);
+        else scrollToFile(f.path);
+      });
+      if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
       ul.appendChild(li);
     });
   }
 
-  function renderSidebar(files: FileMeta[]) {
+  function renderSidebar(files: SidebarItem[], onFileClick?: (file: SidebarItem) => void) {
     const ul = $('#filelist');
     ul.innerHTML = '';
     ul.classList.toggle('tree', STATE.sbView === 'tree');
-    STATE.files = files;
+    STATE.files = files as FileMeta[];
     if (STATE.sbView === 'tree') {
       const root = buildTree(files);
-      renderTreeNode(root, 0, ul);
+      renderTreeNode(root, 0, ul, onFileClick);
     } else {
-      renderFlat(files, ul);
+      renderFlat(files, ul, onFileClick);
     }
     $('#totals').textContent = files.length
       ? files.length + ' file' + (files.length === 1 ? '' : 's')
@@ -443,6 +472,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     // Re-apply active highlight if any
     if (STATE.activeFile) markActive(STATE.activeFile);
     applyFilter();
+  }
+
+  function syncRepoTargetInput(ref: string) {
+    const input = document.querySelector<HTMLInputElement>('#repo-target');
+    const wrap = document.querySelector<HTMLElement>('#repo-target-wrap');
+    if (!input || !wrap) return;
+    input.value = ref || 'worktree';
+    wrap.hidden = !(STATE.route.screen === 'file' && STATE.route.view === 'blob');
   }
 
   function renderMeta(meta: DiffMeta | null) {
@@ -606,15 +643,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     return STATE.route.screen === 'file' ? { path: STATE.route.path, ref: STATE.route.ref } : null;
   }
 
+  function repoFileTargetFromRoute(): string | null {
+    return STATE.route.screen === 'file' && STATE.route.view === 'blob' ? STATE.route.ref : null;
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute = route.screen === 'unknown' ? { screen: 'diff' as const, range: route.range } : route;
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
+    if (nextRoute.screen === 'repo' || (nextRoute.screen === 'file' && nextRoute.view === 'blob')) {
+      STATE.repoRef = nextRoute.ref || 'worktree';
+    }
     const url = buildRoute(nextRoute);
     const state = nextRoute.screen === 'file'
-      ? { view: 'file', path: nextRoute.path, ref: nextRoute.ref }
-      : { view: 'diff' };
+      ? { screen: 'file', path: nextRoute.path, ref: nextRoute.ref, view: nextRoute.view || 'detail' }
+      : { view: nextRoute.screen };
     if (replace) history.replaceState(state, '', url);
     else history.pushState(state, '', url);
     syncHeaderMenu();
@@ -622,13 +666,20 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function setPageMode() {
     document.body.classList.toggle('gdp-file-detail-page', STATE.route.screen === 'file');
+    document.body.classList.toggle('gdp-repo-blob-page', STATE.route.screen === 'file' && STATE.route.view === 'blob');
+    document.body.classList.toggle('gdp-repo-page', STATE.route.screen === 'repo');
+    syncRepoTargetInput(repoFileTargetFromRoute() || 'worktree');
   }
 
   function syncHeaderMenu() {
     document.querySelectorAll<HTMLAnchorElement>('.app-menu-item').forEach(link => {
-      const active = link.dataset.route === STATE.route.screen || (link.dataset.route === 'diff' && STATE.route.screen === 'file');
+      const fileRouteOwner = STATE.route.screen === 'file' && STATE.route.view === 'blob' ? 'repo' : 'diff';
+      const active = link.dataset.route === STATE.route.screen || (STATE.route.screen === 'file' && link.dataset.route === fileRouteOwner);
       link.classList.toggle('active', active);
       link.setAttribute('aria-current', active ? 'page' : 'false');
+      if (link.dataset.route === 'repo') {
+        link.href = buildRoute({ screen: 'repo', ref: STATE.repoRef || 'worktree', path: '', range: currentRange() });
+      }
       if (link.dataset.route === 'diff') {
         link.href = buildRoute({ screen: 'diff', range: currentRange() });
       }
@@ -637,6 +688,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function removeStandaloneSource() {
     document.querySelectorAll('.gdp-standalone-source').forEach(el => el.remove());
+    document.querySelectorAll('.gdp-repo-blob-layout').forEach(el => el.remove());
   }
 
   function renderShell(meta: DiffMeta) {
@@ -724,6 +776,231 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (typeof applyHideTests === 'function') applyHideTests();
     applyFilter();
     applyViewedState();
+  }
+
+  function fileEntryIcon(): string {
+    return iconSvg('octicon-file', FILE_16_PATH);
+  }
+
+  function repoRoute(ref: string, path: string): AppRoute {
+    return { screen: 'repo', ref: ref || 'worktree', path, range: currentRange() };
+  }
+
+  function wireRepoTargetPicker(input: HTMLInputElement, onPick: (ref: string) => void) {
+    input.addEventListener('focus', () => openPopover(input));
+    input.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(input);
+    });
+    input.addEventListener('mousedown', (e) => {
+      if (popover.hidden) {
+        e.preventDefault();
+        input.focus();
+      }
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        closePopover();
+      } else if (e.key === 'Escape') {
+        closePopover();
+        input.blur();
+      }
+    });
+    input.addEventListener('change', () => onPick(input.value || 'worktree'));
+  }
+
+  function createRepoBreadcrumb(target: string, path: string): HTMLElement {
+    const nav = document.createElement('nav');
+    nav.className = 'gdp-file-breadcrumb gdp-repo-breadcrumb';
+    const root = document.createElement('button');
+    root.type = 'button';
+    root.className = path ? 'gdp-file-breadcrumb-part' : 'gdp-file-breadcrumb-current';
+    root.textContent = PROJECT_NAME || 'repository';
+    root.addEventListener('click', () => {
+      setRoute(repoRoute(target, ''));
+      loadRepo();
+    });
+    nav.appendChild(root);
+    const parts = path ? path.split('/') : [];
+    parts.forEach((part, index) => {
+      const sep = document.createElement('span');
+      sep.className = 'gdp-file-breadcrumb-sep';
+      sep.textContent = '/';
+      nav.appendChild(sep);
+      const currentPath = parts.slice(0, index + 1).join('/');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = index === parts.length - 1 ? 'gdp-file-breadcrumb-current' : 'gdp-file-breadcrumb-part';
+      button.textContent = part;
+      button.disabled = index === parts.length - 1;
+      button.addEventListener('click', () => {
+        setRoute(repoRoute(target, currentPath));
+        loadRepo();
+      });
+      nav.appendChild(button);
+    });
+    return nav;
+  }
+
+  function renderRepo(meta: RepoTreeResponse) {
+    PROJECT_NAME = meta.project || PROJECT_NAME;
+    setPageMode();
+    removeStandaloneSource();
+    $('#empty').classList.add('hidden');
+    $('#diff').replaceChildren();
+    $('#filelist').replaceChildren();
+    $('#totals').textContent = '';
+    STATE.files = [];
+    LOAD_QUEUE.length = 0;
+
+    const target = $('#diff');
+    const shell = document.createElement('section');
+    shell.className = 'gdp-repo-shell';
+
+    const targetPicker = document.createElement('input');
+    targetPicker.className = 'ref-input gdp-repo-target';
+    targetPicker.id = 'repo-ref';
+    targetPicker.readOnly = true;
+    targetPicker.autocomplete = 'off';
+    targetPicker.value = meta.ref || 'worktree';
+    targetPicker.placeholder = 'ref...';
+    targetPicker.title = 'repository ref';
+    wireRepoTargetPicker(targetPicker, (ref) => {
+      setRoute(repoRoute(ref, ''));
+      loadRepo();
+    });
+    const toolbar = document.createElement('div');
+    toolbar.className = 'gdp-file-detail-header gdp-repo-toolbar';
+    toolbar.append(createRepoBreadcrumb(meta.ref, meta.path || ''), targetPicker);
+    shell.appendChild(toolbar);
+
+    const listCard = document.createElement('section');
+    listCard.className = 'gdp-file-shell loaded gdp-repo-list-shell';
+    const listWrapper = document.createElement('div');
+    listWrapper.className = 'd2h-file-wrapper';
+    const listHeader = document.createElement('div');
+    listHeader.className = 'd2h-file-header';
+    const listName = document.createElement('div');
+    listName.className = 'd2h-file-name-wrapper';
+    const listIcon = document.createElement('span');
+    listIcon.className = 'dir-icon';
+    setFolderIcon(listIcon, false);
+    const listTitle = document.createElement('span');
+    listTitle.className = 'd2h-file-name';
+    listTitle.textContent = meta.path || meta.project || 'Files';
+    listName.append(listIcon, listTitle);
+    listHeader.appendChild(listName);
+    listWrapper.appendChild(listHeader);
+    const list = document.createElement('div');
+    list.className = 'gdp-source-viewer gdp-repo-file-list';
+    if (meta.path) {
+      const parent = meta.path.split('/').slice(0, -1).join('/');
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'gdp-repo-row parent';
+      const parentIcon = document.createElement('span');
+      parentIcon.className = 'dir-icon';
+      setFolderIcon(parentIcon, false);
+      const parentName = document.createElement('span');
+      parentName.className = 'name';
+      parentName.textContent = '..';
+      const parentKind = document.createElement('span');
+      parentKind.className = 'kind';
+      parentKind.textContent = 'parent';
+      row.append(parentIcon, parentName, parentKind);
+      row.addEventListener('click', () => {
+        setRoute(repoRoute(meta.ref, parent));
+        loadRepo();
+      });
+      list.appendChild(row);
+    }
+    meta.entries.forEach(entry => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'gdp-repo-row ' + entry.type;
+      const icon = document.createElement('span');
+      icon.className = entry.type === 'tree' ? 'dir-icon' : 'd2h-icon-wrapper';
+      if (entry.type === 'tree') setFolderIcon(icon, true);
+      else icon.innerHTML = fileEntryIcon();
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = entry.name;
+      const kind = document.createElement('span');
+      kind.className = 'kind';
+      kind.textContent = entry.type === 'tree' ? 'directory' : entry.type === 'commit' ? 'submodule' : 'file';
+      row.append(icon, name, kind);
+      row.addEventListener('click', () => {
+        if (entry.type === 'tree') {
+          setRoute(repoRoute(meta.ref, entry.path));
+          loadRepo();
+        } else if (entry.type === 'blob') {
+          setRoute({ screen: 'file', path: entry.path, ref: meta.ref, view: 'blob', range: currentRange() });
+          renderStandaloneSource({ path: entry.path, ref: meta.ref });
+        }
+      });
+      list.appendChild(row);
+    });
+    if (!meta.entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'gdp-repo-empty';
+      empty.textContent = 'No files in this directory.';
+      list.appendChild(empty);
+    }
+    listWrapper.appendChild(list);
+    listCard.appendChild(listWrapper);
+    shell.appendChild(listCard);
+
+    if (meta.readme && meta.readme.text) {
+      const readme = document.createElement('section');
+      readme.className = 'gdp-file-shell loaded gdp-repo-readme';
+      const wrapper = document.createElement('div');
+      wrapper.className = 'd2h-file-wrapper';
+      const readmeHeader = document.createElement('div');
+      readmeHeader.className = 'd2h-file-header';
+      const nameWrapper = document.createElement('div');
+      nameWrapper.className = 'd2h-file-name-wrapper';
+      const icon = document.createElement('span');
+      icon.className = 'd2h-icon-wrapper';
+      icon.innerHTML = iconSvg('octicon-file', FILE_16_PATH);
+      const name = document.createElement('span');
+      name.className = 'd2h-file-name';
+      name.textContent = meta.readme.path;
+      nameWrapper.append(icon, name);
+      readmeHeader.appendChild(nameWrapper);
+      wrapper.appendChild(readmeHeader);
+      wrapper.appendChild(renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, getHljs()));
+      readme.appendChild(wrapper);
+      shell.appendChild(readme);
+    }
+
+    target.appendChild(shell);
+  }
+
+  function renderRepoBlobSidebar(currentPath: string, ref: string) {
+    syncRepoTargetInput(ref);
+    const params = new URLSearchParams();
+    params.set('ref', ref || 'worktree');
+    params.set('recursive', '1');
+    return trackLoad<RepoTreeResponse>(fetch('/_tree?' + params.toString()).then(r => {
+      if (!r.ok) throw new Error('failed to load repository tree');
+      return r.json();
+    })).then(meta => {
+      const files = meta.entries.filter(entry => entry.type !== 'tree').map((entry, index) => ({
+        order: index + 1,
+        path: entry.path,
+        display_path: entry.path,
+      } satisfies SidebarItem));
+      renderSidebar(files, file => {
+        setRoute({ screen: 'file', path: file.path, ref, view: 'blob', range: currentRange() });
+        renderStandaloneSource({ path: file.path, ref });
+      });
+      markActive(currentPath);
+      applyFilter();
+    }).catch(() => {
+      renderSidebar([], undefined);
+      $('#totals').textContent = 'Cannot load tree';
+    });
   }
 
   function createPlaceholder(f: FileMeta): DiffCardElement {
@@ -1653,8 +1930,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   async function renderStandaloneSource(target: SourceFileTarget) {
     const req = ++SOURCE_REQ_SEQ;
     const root = $('#diff');
+    const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
+    document.querySelectorAll('.gdp-repo-blob-layout').forEach(el => el.remove());
     const card = document.createElement('article') as DiffCardElement;
     card.className = 'gdp-file-shell loaded gdp-standalone-source gdp-source-mode';
     card.dataset.path = target.path;
@@ -1684,17 +1963,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
     });
     name.appendChild(copy);
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'gdp-view-file gdp-btn gdp-btn-sm';
-    setViewFileButtonState(back, true);
-    back.addEventListener('click', () => {
-      setRoute({ screen: 'diff', range: currentRange() });
-      setPageMode();
-      removeStandaloneSource();
-    });
     header.appendChild(name);
-    header.appendChild(back);
+    if (!repoTarget) {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'gdp-view-file gdp-btn gdp-btn-sm';
+      setViewFileButtonState(back, true);
+      back.addEventListener('click', () => {
+        setRoute({ screen: 'diff', range: currentRange() });
+        setPageMode();
+        removeStandaloneSource();
+      });
+      header.appendChild(back);
+    }
     sticky.appendChild(header);
     const tabsHost = document.createElement('div');
     tabsHost.className = 'gdp-file-detail-tabs';
@@ -1705,7 +1986,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     detailBody.className = 'gdp-file-detail-body';
     wrapper.appendChild(detailBody);
     card.appendChild(wrapper);
-    root.prepend(card);
+    if (repoTarget) {
+      const layout = document.createElement('div');
+      layout.className = 'gdp-repo-blob-layout';
+      renderRepoBlobSidebar(target.path, repoTarget);
+      layout.appendChild(card);
+      root.replaceChildren(layout);
+    } else {
+      root.prepend(card);
+    }
     renderSourceLoading(card, target);
     try {
       const mediaKind = isVideo(target.path) ? 'video' : (isMedia(target.path) ? 'image' : null);
@@ -2320,11 +2609,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ----- initial state + live updates -----
   applyTheme();
   setLayout(STATE.layout);
+  setPageMode();
   if (window.location.pathname === '/') {
     setRoute(STATE.route, true);
   }
 
+  function loadRepo(): Promise<void> {
+    if (STATE.route.screen !== 'repo') return Promise.resolve();
+    setStatus('refreshing');
+    const params = new URLSearchParams();
+    params.set('ref', STATE.route.ref || 'worktree');
+    if (STATE.route.path) params.set('path', STATE.route.path);
+    return trackLoad<RepoTreeResponse>(fetch('/_tree?' + params.toString()).then(r => {
+      if (!r.ok) throw new Error('failed to load repository tree');
+      return r.json();
+    })).then(data => {
+      renderRepo(data);
+      setStatus('live');
+      syncHeaderMenu();
+    }).catch(() => setStatus('error'));
+  }
+
   function load(opts?: LoadOptions): Promise<void> {
+    if (STATE.route.screen === 'repo') return loadRepo();
     setStatus('refreshing');
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set('ignore_ws', '1');
@@ -2340,7 +2647,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus('live');
     }).catch(() => setStatus('error'));
   }
-  load();
+  if (STATE.route.screen === 'repo') loadRepo();
+  else load();
 
   // Ref picker (from / to)
   function syncRefInputs() {
@@ -2468,7 +2776,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     popover.hidden = false;
     const r = input.getBoundingClientRect();
-    popover.style.left = Math.max(8, r.left) + 'px';
+    const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
+    popover.style.left = Math.max(8, Math.min(r.left, window.innerWidth - popWidth - 8)) + 'px';
     popover.style.top = (r.bottom + 4) + 'px';
     setTimeout(() => popSearch.focus(), 0);
   }
@@ -2487,6 +2796,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         el.focus();
       }
     });
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(el);
+    });
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -2496,6 +2809,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         el.blur();
       }
     });
+  });
+  wireRepoTargetPicker($<HTMLInputElement>('#repo-target'), (ref) => {
+    if (STATE.route.screen !== 'file') return;
+    setRoute({ screen: 'file', path: STATE.route.path, ref, view: 'blob', range: currentRange() });
+    renderStandaloneSource({ path: STATE.route.path, ref });
+  });
+  document.addEventListener('focusin', (e) => {
+    const el = e.target as Element | null;
+    if (el instanceof HTMLInputElement && (el.id === 'repo-ref' || el.id === 'repo-target')) openPopover(el);
   });
 
   popSearch.addEventListener('input', () => buildPopBody(popSearch.value));
@@ -2509,8 +2831,19 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   function handlePicked(val?: string) {
     if (!popTarget || !val) return;
-    popTarget.value = val;
-    const targetWasFrom = (popTarget.id === 'ref-from');
+    const pickedTarget = popTarget;
+    pickedTarget.value = val;
+    if (pickedTarget.id === 'repo-ref') {
+      closePopover();
+      pickedTarget.dispatchEvent(new Event('change'));
+      return;
+    }
+    if (pickedTarget.id === 'repo-target') {
+      closePopover();
+      pickedTarget.dispatchEvent(new Event('change'));
+      return;
+    }
+    const targetWasFrom = (pickedTarget.id === 'ref-from');
     const otherEmpty = !$<HTMLInputElement>('#ref-to').value;
     closePopover();
     setRange($<HTMLInputElement>('#ref-from').value, $<HTMLInputElement>('#ref-to').value);
@@ -2544,7 +2877,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (popover.hidden) return;
     const target = e.target as Element;
     if (popover.contains(target)) return;
-    if (target.id === 'ref-from' || target.id === 'ref-to') return;
+    if (target.id === 'ref-from' || target.id === 'ref-to' || target.id === 'repo-ref' || target.id === 'repo-target') return;
     closePopover();
   });
 
@@ -2554,12 +2887,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.route = parsedRoute.screen === 'unknown' ? { screen: 'diff', range: parsedRoute.range } : parsedRoute;
     STATE.from = STATE.route.range.from;
     STATE.to = STATE.route.range.to;
+    if (STATE.route.screen === 'repo') STATE.repoRef = STATE.route.ref || 'worktree';
     syncRefInputs();
     syncHeaderMenu();
+    if (STATE.route.screen === 'repo') {
+      SOURCE_REQ_SEQ++;
+      setPageMode();
+      removeStandaloneSource();
+      loadRepo();
+      return;
+    }
     if (STATE.route.screen !== 'file') {
       SOURCE_REQ_SEQ++;
       setPageMode();
       removeStandaloneSource();
+      load();
       return;
     }
     applySourceRouteToShell();
