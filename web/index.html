@@ -18,13 +18,18 @@
 <body>
 <div id="app">
   <header id="global-header">
-    <div class="brand">
+    <a class="brand" href="/" aria-label="Repository home">
       <span class="dot"></span>
       <span class="title">git diff preview</span>
-    </div>
+    </a>
     <nav class="app-menu" aria-label="Views">
+      <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
       <a class="app-menu-item active" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
     </nav>
+    <div class="global-actions">
+      <button id="theme" title="toggle theme">🌗</button>
+      <span id="status" class="status"></span>
+    </div>
   </header>
   <header id="topbar">
     <div id="meta"></div>
@@ -36,22 +41,6 @@
       <button id="reload-prom" title="reload diff (R)">↻</button>
       <button id="auto-reload" title="auto refresh every 3s">auto</button>
     </div>
-    <div id="ref-popover" hidden>
-      <div class="rp-quick">
-        <button class="rp-chip" data-val="worktree">worktree</button>
-        <button class="rp-chip" data-val="HEAD">HEAD</button>
-        <button class="rp-chip" data-val="--staged">--staged</button>
-      </div>
-      <div class="rp-tabs" role="tablist">
-        <button class="rp-tab active" data-tab="commits">Commits</button>
-        <button class="rp-tab" data-tab="branches">Branches</button>
-        <button class="rp-tab" data-tab="tags">Tags</button>
-      </div>
-      <div class="rp-search-wrap">
-        <input class="rp-search" placeholder="filter…" autocomplete="off" />
-      </div>
-      <div class="rp-body"></div>
-    </div>
     <div class="spacer"></div>
     <div class="controls">
       <div class="seg" role="group" aria-label="layout">
@@ -61,14 +50,32 @@
       <button id="ignore-ws" title="ignore whitespace changes (-w)">ws</button>
       <button id="syntax-highlight" title="syntax highlighting on">syntax on</button>
       <button id="hide-tests" title="hide test files (test|spec)">no test</button>
-      <button id="theme" title="toggle theme">🌗</button>
-      <span id="status" class="status"></span>
     </div>
   </header>
+
+  <div id="ref-popover" hidden>
+    <div class="rp-quick">
+      <button class="rp-chip" data-val="worktree">worktree</button>
+      <button class="rp-chip" data-val="HEAD">HEAD</button>
+      <button class="rp-chip" data-val="--staged">--staged</button>
+    </div>
+    <div class="rp-tabs" role="tablist">
+      <button class="rp-tab active" data-tab="commits">Commits</button>
+      <button class="rp-tab" data-tab="branches">Branches</button>
+      <button class="rp-tab" data-tab="tags">Tags</button>
+    </div>
+    <div class="rp-search-wrap">
+      <input class="rp-search" placeholder="filter…" autocomplete="off" />
+    </div>
+    <div class="rp-body"></div>
+  </div>
 
   <div id="load-bar" aria-hidden="true"></div>
 
   <aside id="sidebar">
+    <div id="repo-target-wrap" class="sb-repo-target" hidden>
+      <input id="repo-target" class="ref-input" type="text" placeholder="target…" title="repository target" autocomplete="off" readonly />
+    </div>
     <div class="sb-head">
       <span class="sb-title">Files</span>
       <span id="totals"></span>

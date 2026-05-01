@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
-import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse } from '../types';
+import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
 
@@ -253,7 +253,12 @@ function handleDiffJson(url: URL) {
 }
 
 function safePath(path: string) {
-  return path && !path.includes('../') && !path.includes('..\\') && !path.startsWith('/') && !path.startsWith('\\');
+  if (!path || path.startsWith('/') || path.startsWith('\\') || path.includes('\0')) return false;
+  return !path.split(/[\\/]+/).includes('..');
+}
+
+function safeRepoPath(path: string) {
+  return path === '' || safePath(path);
 }
 
 function safeWorktreePath(path: string): string | null {
@@ -265,6 +270,42 @@ function safeWorktreePath(path: string): string | null {
   const rel = relative(realCwd, realFull);
   if (rel === '' || rel.startsWith('..') || rel.startsWith('/') || rel.startsWith('\\')) return null;
   return realFull;
+}
+
+function readReadme(target: string, dirPath: string): RepoTreeResponse['readme'] {
+  const candidates = ['README.md', 'readme.md', 'README.markdown', 'README'];
+  for (const name of candidates) {
+    const path = dirPath ? `${dirPath}/${name}` : name;
+    if (target === 'worktree' || target === '') {
+      const full = safeWorktreePath(path);
+      if (!full) continue;
+      try {
+        return { path, text: readFileSync(full, 'utf8') };
+      } catch {
+        continue;
+      }
+    }
+    const res = git.show(target, path, cwd);
+    if (res.code === 0) return { path, text: res.stdout };
+  }
+  return null;
+}
+
+function handleTree(url: URL) {
+  const target = url.searchParams.get('ref') || url.searchParams.get('target') || 'worktree';
+  const path = (url.searchParams.get('path') || '').replace(/^\/+|\/+$/g, '');
+  if (!safeRepoPath(path)) return text('invalid path', 400);
+  if (target !== 'worktree' && !git.verifyTreeRef(target, cwd)) return text('invalid target', 400);
+  const recursive = url.searchParams.get('recursive') === '1';
+  const entries = git.listTree(target, path, cwd, { recursive }).entries;
+  return json({
+    ref: target,
+    path,
+    project: basename(cwd),
+    branch: git.currentBranch(cwd) || undefined,
+    entries,
+    readme: readReadme(target, path),
+  } satisfies RepoTreeResponse);
 }
 
 function handleFileDiff(url: URL) {
@@ -399,6 +440,7 @@ const server = Bun.serve({
     const staticResponse = staticFile(url.pathname);
     if (staticResponse) return staticResponse;
     if (url.pathname === '/diff.json') return handleDiffJson(url);
+    if (url.pathname === '/_tree') return handleTree(url);
     if (url.pathname === '/file_diff') return handleFileDiff(url);
     if (url.pathname === '/file_range') return handleFileRange(url);
     if (url.pathname === '/_file') return handleRawFile(url);
