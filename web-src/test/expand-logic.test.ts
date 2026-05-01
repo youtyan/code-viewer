@@ -8,6 +8,8 @@ import {
   applyUp,
   applyDown,
   mapNewToOld,
+  trailingClickRange,
+  applyTrailingResult,
 } from '../expand-logic';
 
 const STEP = 20;
@@ -182,5 +184,37 @@ describe('mapNewToOld', () => {
   test('first hunk: prevEnds = 0, mapping is identity', () => {
     expect(mapNewToOld(1, 0, 0)).toBe(1);
     expect(mapNewToOld(20, 0, 0)).toBe(20);
+  });
+});
+
+describe('trailingClickRange', () => {
+  test('last hunk down button fetches lines immediately after the hunk', () => {
+    expect(trailingClickRange(63, STEP)).toEqual({ start: 63, end: 82 });
+  });
+});
+
+describe('applyTrailingResult', () => {
+  test('advances old and new cursors by the received line count', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 20, STEP)).toEqual({
+      newStart: 83,
+      oldStart: 82,
+      eof: false,
+    });
+  });
+
+  test('marks eof when the server returns fewer lines than requested', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 7, STEP)).toEqual({
+      newStart: 70,
+      oldStart: 69,
+      eof: true,
+    });
+  });
+
+  test('marks eof when the server returns no lines', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 0, STEP)).toEqual({
+      newStart: 63,
+      oldStart: 62,
+      eof: true,
+    });
   });
 });
