@@ -61,6 +61,13 @@ describe('view file UI', () => {
     expect(style.includes('#auto-reload')).toBe(false);
   });
 
+  test('repository blob sidebar keeps a resize hit area on the visible edge', () => {
+    expect(style.includes('#sidebar-resizer {\n  position: fixed;')).toBe(true);
+    expect(style.includes('left: calc(var(--sidebar-w) - 4px);')).toBe(true);
+    expect(style.includes('width: 8px;')).toBe(true);
+    expect(style.includes('body.gdp-file-detail-page.gdp-repo-blob-page #sidebar-resizer {\n  display: block;')).toBe(true);
+  });
+
   test('source view renders file text as textContent, not HTML', () => {
     expect(app.includes('code.textContent = line')).toBe(true);
     expect(app.includes('num.textContent = String(index + 1)')).toBe(true);
