@@ -147,3 +147,16 @@ git ls-remote --heads origin main
 
 For a newly published package, also inspect the npm access page and confirm the Trusted Publisher card is visible.
 
+## Post-Release Local Cleanup
+
+After the GitHub Release workflow completes and npm shows the new version, leave the local workspace on an up-to-date `main` branch:
+
+```sh
+gh run view <run-id> --json status,conclusion,url,displayTitle,headSha
+npm view @youtyan/code-viewer version --json
+git switch main
+git pull --ff-only
+git status --short --branch
+```
+
+Do not use `git stash`, `git commit --amend`, or force-push while cleaning up. If a follow-up documentation or skill update is needed, use a new topic branch and PR, then return to `main` and fast-forward again.
