@@ -1,4 +1,7 @@
 import { GdpExpandLogic } from './expand-logic';
+import { nextVisibleFileIndex } from './file-navigation';
+import { filePathClipboardText } from './file-path-copy';
+import { compileFileFilter } from './file-filter';
 import { suppressWhitespaceOnlyInlineHighlights } from './ws-highlight';
 import type {
   AssetVersionResponse,
@@ -66,8 +69,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     autoReload: boolean;
     hideTests: boolean;
     syntaxHighlight: boolean;
+    viewedFiles: Set<string>;
   };
   type ScrollSpyHandler = EventListener & { _raf?: number | null };
+
+  const FOLDER_ICON_PATHS = {
+    closed: 'M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z',
+    open: 'M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z',
+  };
+  const CHEVRON_DOWN_12_PATH = 'M6 8.825c-.2 0-.4-.1-.5-.2l-3.3-3.3c-.3-.3-.3-.8 0-1.1.3-.3.8-.3 1.1 0l2.7 2.7 2.7-2.7c.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1l-3.2 3.2c-.2.2-.4.3-.6.3Z';
+  const CHEVRON_DOWN_16_PATH = 'M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z';
+  const COPY_16_PATHS = [
+    'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z',
+    'M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z',
+  ];
+  const UNFOLD_16_PATH = 'm8.177.677 2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25a.75.75 0 0 1-1.5 0V4H5.104a.25.25 0 0 1-.177-.427L7.823.677a.25.25 0 0 1 .354 0ZM7.25 10.75a.75.75 0 0 1 1.5 0V12h2.146a.25.25 0 0 1 .177.427l-2.896 2.896a.25.25 0 0 1-.354 0l-2.896-2.896A.25.25 0 0 1 5.104 12H7.25v-1.25Zm-5-2a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
+  const FOLD_16_PATH = 'M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
 
   const $ = <T extends Element = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
   const $$ = <T extends Element = HTMLElement>(sel: string): T[] => Array.from(document.querySelectorAll(sel)) as T[];
@@ -94,6 +111,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       autoReload: localStorage.getItem('gdp:auto-reload') !== '0',
       hideTests: localStorage.getItem('gdp:hide-tests') === '1',
       syntaxHighlight: localStorage.getItem('gdp:syntax-highlight') !== '0',
+      viewedFiles: new Set<string>(JSON.parse(localStorage.getItem('gdp:viewed-files') || '[]')),
     };
   })();
 
@@ -216,6 +234,44 @@ window.GdpExpandLogic = GdpExpandLogic;
     return span;
   }
 
+  function persistViewedFiles() {
+    localStorage.setItem('gdp:viewed-files', JSON.stringify([...STATE.viewedFiles]));
+  }
+
+  function setFileViewed(path: string, viewed: boolean) {
+    if (viewed) STATE.viewedFiles.add(path);
+    else STATE.viewedFiles.delete(path);
+    persistViewedFiles();
+    applyViewedState();
+  }
+
+  function setFolderIcon(el: HTMLElement, collapsed: boolean) {
+    const path = collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open;
+    el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? 'fill' : 'open-fill') + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' +
+      '<path fill="currentColor" d="' + path + '"></path></svg>';
+  }
+
+  function setChevronIcon(el: HTMLElement) {
+    el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' +
+      '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
+  }
+
+  function iconSvg(className: string, paths: string | string[]): string {
+    const pathList = Array.isArray(paths) ? paths : [paths];
+    return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' +
+      pathList.map(path => '<path fill="currentColor" d="' + path + '"></path>').join('') +
+      '</svg>';
+  }
+
+  function setUnfoldButtonState(button: HTMLButtonElement | null, expanded: boolean) {
+    if (!button) return;
+    button.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    button.title = expanded ? 'Collapse expanded lines' : 'Expand all lines';
+    button.innerHTML = expanded
+      ? iconSvg('octicon-fold', FOLD_16_PATH)
+      : iconSvg('octicon-unfold', UNFOLD_16_PATH);
+  }
+
 
   // Build a directory trie from file list, collapsing single-child chains.
   // Each dir node tracks `minOrder` = lowest server-assigned `order` of any
@@ -280,7 +336,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.dataset.dirpath = dir.path;
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
         const chev = document.createElement('span');
-        chev.className = 'chev'; chev.textContent = '▾';
+        chev.className = 'chev';
+        setChevronIcon(chev);
         li.appendChild(chev);
         const dirIcon = document.createElement('span');
         dirIcon.className = 'dir-icon';
@@ -293,7 +350,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const collapsed = STATE.collapsedDirs.has(dir.path);
         if (collapsed) li.classList.add('collapsed');
         const updateIcon = () => {
-          dirIcon.textContent = li.classList.contains('collapsed') ? '📁' : '📂';
+          setFolderIcon(dirIcon, li.classList.contains('collapsed'));
         };
         updateIcon();
         const childUl = document.createElement('ul');
@@ -314,6 +371,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const li = document.createElement('li');
         li.className = 'tree-file';
         li.dataset.path = f.path;
+        li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
         li.appendChild(fileBadge(f.status));
         const name = document.createElement('span');
@@ -333,6 +391,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const li = document.createElement('li');
       li.dataset.index = String(i);
       li.dataset.path = f.path;
+      li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
       li.appendChild(fileBadge(f.status));
       const name = document.createElement('span');
       name.className = 'name';
@@ -373,12 +432,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!meta) { el.textContent = ''; return; }
     document.title = (meta.project ? meta.project + ' - ' : '') + 'git diff preview';
     el.innerHTML = '';
-    if (meta.range) {
-      const r = document.createElement('span');
-      r.className = 'ref';
-      r.textContent = meta.range;
-      el.appendChild(r);
-    }
     if (meta.branch) {
       const b = document.createElement('span');
       b.className = 'ref';
@@ -440,19 +493,46 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
+  function applyViewedState() {
+    $$<HTMLElement>('#filelist li[data-path]').forEach(li => {
+      const path = li.dataset.path || '';
+      li.classList.toggle('viewed', STATE.viewedFiles.has(path));
+    });
+    $$<HTMLElement>('.gdp-file-shell[data-path]').forEach(card => {
+      const path = card.dataset.path || '';
+      const viewed = STATE.viewedFiles.has(path);
+      card.classList.toggle('viewed', viewed);
+      card.querySelectorAll<HTMLInputElement>('.d2h-file-collapse-input').forEach(checkbox => {
+        checkbox.checked = viewed;
+      });
+    });
+  }
+
   function applyFilter() {
-    const q = ($<HTMLInputElement>('#filter').value || '').toLowerCase().trim();
+    const input = $<HTMLInputElement>('#sb-filter');
+    const filter = compileFileFilter(input.value);
+    const invalid = filter.kind === 'invalid';
+    input.toggleAttribute('aria-invalid', invalid);
+    input.title = invalid ? filter.error || 'invalid regular expression' : '';
+    const matches = invalid ? () => true : filter.match;
     $$('#filelist li[data-path]').forEach(li => {
-      const match = !q || li.dataset.path.toLowerCase().includes(q);
+      const match = matches(li.dataset.path || '');
       li.classList.toggle('hidden', !match);
     });
-    // For tree view: hide dir rows whose subtree has no visible files
+    document.querySelectorAll<HTMLElement>('.gdp-file-shell').forEach(card => {
+      const match = matches(card.dataset.path || '');
+      card.classList.toggle('hidden-by-filter', !match);
+    });
+    updateTreeDirVisibility();
+    if (typeof applyViewedState === 'function') applyViewedState();
+  }
+
+  function updateTreeDirVisibility() {
     $$('#filelist .tree-dir').forEach(dir => {
       const childUl = dir.nextElementSibling;
       if (!childUl || !childUl.classList.contains('tree-children')) return;
-      const anyVisible = !!childUl.querySelector('.tree-file:not(.hidden)');
-      const fullVisible = !q;
-      dir.classList.toggle('hidden', !(fullVisible || anyVisible));
+      const anyVisible = !!childUl.querySelector('.tree-file:not(.hidden):not(.hidden-by-tests)');
+      dir.classList.toggle('hidden', !anyVisible);
     });
   }
 
@@ -568,6 +648,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     enqueueInitialLoads();
     setupScrollSpy();
     if (typeof applyHideTests === 'function') applyHideTests();
+    applyFilter();
+    applyViewedState();
   }
 
   function createPlaceholder(f: FileMeta): DiffCardElement {
@@ -577,6 +659,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     card.dataset.key = f.key || f.path;
     card.dataset.sizeClass = f.size_class || 'small';
     card.dataset.status = f.status || 'M';
+    card.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
     if (f.estimated_height_px) {
       card.style.minHeight = f.estimated_height_px + 'px';
     }
@@ -794,6 +877,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       synchronisedScroll: true,
       highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
       fileListToggle: false,
+      fileContentToggle: false,
     }, hljsRef);
     ui.draw();
     if (STATE.ignoreWs) suppressWhitespaceOnlyInlineHighlights(body);
@@ -982,70 +1066,146 @@ window.GdpExpandLogic = GdpExpandLogic;
     const remainingSize = remainingEnd - remainingStart + 1;
     const isFirst = (prevHunkEndNew === 0);
     const buildStack = () => {
-      const stack = document.createElement('div');
-      stack.className = 'gdp-expand-stack';
-      const mkBtn = (path: string, title: string, fn: () => void) => {
-        const b = document.createElement('button');
-        b.className = 'gdp-expand-btn';
-        b.title = title;
-        b.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
-          '<path fill="currentColor" d="' + path + '"/></svg>';
-        b.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (b.disabled) return;
-          fn();
-        });
-        return b;
-      };
       // GitHub semantics: ↑ button shows more lines ABOVE @@ in the file
       // (closer to the previous hunk = lower line numbers). ↓ shows more
       // lines BELOW @@ (closer to this hunk = higher line numbers).
-      const upPath = 'M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z';
-      const downPath = 'M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z';
       // ↑ : pull lines just after the previous hunk (low end of gap).
       //     Only meaningful when there IS a previous hunk; otherwise it's
       //     equivalent to ↓ and we hide it to match github.com which only
       //     shows ↑ at the FIRST hunk and ↓ at the LAST hunk respectively.
+      const buttons: ExpandButtonSpec[] = [];
       if (isFirst) {
         // First hunk: only one button. Behaviour matches a mid-hunk's ↓
         // (pull high end of gap, insert below @@) but the icon shows ↑
         // because conceptually the lines we expand into are ABOVE this
         // hunk in the file. Repeated clicks walk further up the file.
-        stack.appendChild(mkBtn(upPath, 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
-          () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, 'after')));
+        buttons.push({ direction: 'up', title: 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
+          onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, 'after') });
       } else {
         // Mid hunks: ↑ pulls low end (toward prev hunk, above @@),
         //            ↓ pulls high end (toward this hunk, below @@).
-        stack.appendChild(mkBtn(upPath, 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
-          () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), 'before')));
-        stack.appendChild(mkBtn(downPath, 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
-          () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, 'after')));
+        buttons.push({ direction: 'up', title: 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
+          onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), 'before') });
+        buttons.push({ direction: 'down', title: 'Show ' + Math.min(STEP, remainingSize) + ' more lines',
+          onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, 'after') });
       }
-      return stack;
+      return createExpandStack(buttons);
     };
 
-    const firstSib = (item.siblings && item.siblings[0]) || { tr: item.tr };
-    const ln = firstSib.tr.querySelector('.d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info');
-    if (ln && !ln.querySelector('.gdp-expand-stack')) {
-      ln.appendChild(buildStack());
-    }
-    // In split view the @@ row is duplicated across two tables. The side
-    // holding the stack is 20px (1 btn) or 40px (↑+↓); the other side has
-    // no content and renders at 20px, breaking vertical alignment between
-    // the two panes. Sync sibling row heights once layout is computed.
-    const syncHeight = () => {
-      const stack = firstSib.tr.querySelector('.gdp-expand-stack');
-      const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
-      for (const sib of (item.siblings || [{ tr: item.tr }])) {
-        sib.tr.style.setProperty('height', targetH + 'px', 'important');
+    const siblings = item.siblings || [{ tr: item.tr }];
+    siblings.forEach(sib => {
+      const ln = sib.tr.querySelector('.d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info');
+      if (ln && !ln.querySelector('.gdp-expand-stack')) {
+        ln.appendChild(buildStack());
       }
+    });
+    const firstSib = siblings[0];
+    if (firstSib) {
+      syncExpandRowHeights(siblings.map(sib => sib.tr), firstSib.tr);
+    }
+  }
+
+  type ExpandButtonSpec = {
+    direction: 'up' | 'down';
+    title: string;
+    onClick: () => void;
+  };
+
+  const EXPAND_ICON_PATHS = {
+    up: 'M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z',
+    down: 'M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z',
+  };
+
+  function createExpandStack(buttons: ExpandButtonSpec[]) {
+    const stack = document.createElement('div');
+    stack.className = 'gdp-expand-stack';
+    buttons.forEach(spec => {
+      const button = document.createElement('button');
+      button.className = 'gdp-expand-btn';
+      button.title = spec.title;
+      button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
+        '<path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (button.disabled) return;
+        spec.onClick();
+      });
+      stack.appendChild(button);
+    });
+    return stack;
+  }
+
+  function syncExpandRowHeights(rows: HTMLTableRowElement[], stackRow: HTMLTableRowElement) {
+    const syncHeight = () => {
+      const stack = stackRow.querySelector('.gdp-expand-stack');
+      const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
+      rows.forEach(row => row.style.setProperty('height', targetH + 'px', 'important'));
     };
     requestAnimationFrame(syncHeight);
-    // Layout sometimes isn't ready on first frame for newly-rendered cards
-    // (image / lazy load shifts). Schedule a follow-up tick.
     setTimeout(syncHeight, 100);
   }
 
+  function attachTrailingExpandControls(item: HunkRow, file: FileMeta, ref: string, refPath: string) {
+    const STEP = 20;
+    let nextNewStart = nextNewLine(item.hunk);
+    let nextOldStart = nextOldLine(item.hunk);
+    const rows = (item.siblings || [{ tr: item.tr, sideIndex: 0 }]).map(sib => {
+      const tbody = sib.tr.parentElement;
+      if (!tbody) return null;
+      const isSplit = !!sib.tr.querySelector('td.d2h-code-side-linenumber');
+      const tr = document.createElement('tr');
+      tr.className = 'gdp-hunk-row gdp-trailing-expand-row';
+      const ln = document.createElement('td');
+      ln.className = isSplit ? 'd2h-code-side-linenumber d2h-info' : 'd2h-code-linenumber d2h-info';
+      const info = document.createElement('td');
+      info.className = 'd2h-info';
+      const spacer = document.createElement('div');
+      spacer.className = isSplit ? 'd2h-code-side-line' : 'd2h-code-line';
+      info.appendChild(spacer);
+      tr.appendChild(ln);
+      tr.appendChild(info);
+      tbody.appendChild(tr);
+      return { tr, ln, sideIndex: sib.sideIndex || 0 };
+    }).filter(Boolean);
+    if (!rows.length) return;
+
+    const setBusy = (busy: boolean) => {
+      rows.forEach(row => row.ln.querySelectorAll<HTMLButtonElement>('.gdp-expand-btn').forEach(btn => { btn.disabled = busy; }));
+    };
+    const fetchAndInsert = () => {
+      const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, STEP);
+      setBusy(true);
+      const url = '/file_range?path=' + refPath +
+                  '&ref=' + encodeURIComponent(ref) +
+                  '&start=' + range.start + '&end=' + range.end;
+      trackLoad<{ lines?: string[] }>(fetch(url).then(r => r.json())).then(data => {
+        const lines = (data && data.lines) || [];
+        if (!lines.length) {
+          rows.forEach(row => row.tr.remove());
+          return;
+        }
+        const card = item.tr.closest('.d2h-file-wrapper');
+        rows.forEach(row => insertContextRows(row.tr, lines, range.start, nextOldStart, 'before', row.sideIndex));
+        const next = window.GdpExpandLogic.applyTrailingResult(
+          { newStart: nextNewStart, oldStart: nextOldStart },
+          lines.length,
+          STEP,
+        );
+        nextNewStart = next.newStart;
+        nextOldStart = next.oldStart;
+        if (card) highlightInsertedSpans(card, file);
+        if (next.eof) {
+          rows.forEach(row => row.tr.remove());
+          return;
+        }
+        setBusy(false);
+      }).catch(() => { setBusy(false); });
+    };
+    rows.forEach(row => {
+      row.ln.appendChild(createExpandStack([{ direction: 'down', title: 'Show more lines', onClick: fetchAndInsert }]));
+    });
+    syncExpandRowHeights(rows.map(row => row.tr), rows[0].tr);
+  }
 
   // Insert context rows around the `@@` info row.
   //   dir='before' (↑, low line nums after prev hunk): insert ABOVE @@.
@@ -1096,11 +1256,116 @@ window.GdpExpandLogic = GdpExpandLogic;
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function setFileCollapsed(card: DiffCardElement, collapsed: boolean) {
+    card.classList.toggle('gdp-file-collapsed', collapsed);
+    card.querySelectorAll<HTMLElement>('.d2h-files-diff, .d2h-file-diff').forEach(body => {
+      body.classList.toggle('d2h-d-none', collapsed);
+    });
+    const button = card.querySelector<HTMLButtonElement>('.gdp-file-toggle');
+    if (button) {
+      button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      button.title = collapsed ? 'Expand file' : 'Collapse file';
+    }
+    const unfold = card.querySelector<HTMLButtonElement>('.gdp-file-unfold');
+    if (unfold) unfold.disabled = collapsed;
+  }
+
+  async function expandAllFileContext(card: DiffCardElement, file: FileMeta) {
+    if (card.classList.contains('gdp-context-expanded')) {
+      const data = card._diffData;
+      if (!data) return;
+      card.classList.remove('gdp-context-expanded');
+      mountDiff(card, file, data);
+      if (data.truncated && data.mode === 'preview') addExpandHunksUI(file, data, card);
+      scheduleIdleHighlight(card, file);
+      setUnfoldButtonState(card.querySelector<HTMLButtonElement>('.gdp-file-unfold'), false);
+      return;
+    }
+    if (card._diffData && (card._diffData.truncated || card._diffData.mode === 'preview')) {
+      await loadFile(file, card, file.load_url);
+      card.classList.add('gdp-context-expanded');
+      setUnfoldButtonState(card.querySelector<HTMLButtonElement>('.gdp-file-unfold'), true);
+      return;
+    }
+    const button = card.querySelector<HTMLButtonElement>('.gdp-file-unfold');
+    if (button) button.disabled = true;
+    try {
+      for (let i = 0; i < 200; i++) {
+        const next = card.querySelector<HTMLButtonElement>('.gdp-expand-btn:not(:disabled)');
+        if (!next) break;
+        next.click();
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
+      card.classList.add('gdp-context-expanded');
+      setUnfoldButtonState(button || null, true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   // GitHub-style diff squares: 5 small filled boxes (green/red/grey)
   // appended to the right edge of the file header.
   function appendStatSquaresToHeader(card: DiffCardElement, file: FileMeta) {
     const header = card.querySelector('.d2h-file-header');
-    if (!header || header.querySelector('.gdp-stat-squares')) return;
+    if (!header) return;
+    if (!header.querySelector('.gdp-file-toggle')) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'gdp-file-header-icon gdp-file-toggle';
+      toggle.title = 'Collapse file';
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.innerHTML = iconSvg('octicon-chevron-down', CHEVRON_DOWN_16_PATH);
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setFileCollapsed(card, !card.classList.contains('gdp-file-collapsed'));
+      });
+      header.insertBefore(toggle, header.firstChild);
+    }
+    header.querySelectorAll<HTMLInputElement>('.d2h-file-collapse-input').forEach(checkbox => {
+      checkbox.checked = STATE.viewedFiles.has(file.path);
+      if (checkbox.dataset.gdpBound !== '1') {
+        checkbox.dataset.gdpBound = '1';
+        checkbox.addEventListener('change', () => setFileViewed(file.path, checkbox.checked));
+      }
+    });
+    if (!header.querySelector('.gdp-copy-path')) {
+      const nameWrapper = header.querySelector('.d2h-file-name-wrapper');
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'gdp-file-header-icon gdp-copy-path';
+      copy.title = 'copy file path';
+      copy.innerHTML = iconSvg('octicon-copy', COPY_16_PATHS);
+      copy.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const path = filePathClipboardText(file.path);
+        if (!path) return;
+        try {
+          await navigator.clipboard.writeText(path);
+          copy.classList.add('copied');
+          setTimeout(() => { copy.classList.remove('copied'); }, 1200);
+        } catch {
+          copy.classList.add('failed');
+          setTimeout(() => { copy.classList.remove('failed'); }, 1200);
+        }
+      });
+      const statusTag = nameWrapper ? nameWrapper.querySelector('.d2h-tag') : null;
+      if (statusTag) statusTag.insertAdjacentElement('afterend', copy);
+      else if (nameWrapper) nameWrapper.insertAdjacentElement('beforeend', copy);
+      else header.insertBefore(copy, header.firstChild);
+    }
+    if (!header.querySelector('.gdp-file-unfold')) {
+      const unfold = document.createElement('button');
+      unfold.type = 'button';
+      unfold.className = 'gdp-file-header-icon gdp-file-unfold';
+      setUnfoldButtonState(unfold, card.classList.contains('gdp-context-expanded'));
+      unfold.addEventListener('click', (e) => {
+        e.stopPropagation();
+        expandAllFileContext(card, file);
+      });
+      const copy = header.querySelector('.gdp-copy-path');
+      if (copy) copy.insertAdjacentElement('afterend', unfold);
+      else header.appendChild(unfold);
+    }
     // Numeric counts (matches GitHub: "+10 -113 ▰▰▰▰▰")
     if (!header.querySelector('.gdp-stat-text')) {
       const stats = document.createElement('span');
@@ -1491,26 +1756,65 @@ window.GdpExpandLogic = GdpExpandLogic;
     localStorage.setItem('gdp:theme', STATE.theme);
     applyTheme();
   });
-  $('#collapse').addEventListener('click', () => collapseAll());
-  // The sidebar has its own filter for proximity to the file list. Keep it
-  // in sync with the topbar filter so either control works the same way.
-  function syncFilters(srcEl: HTMLInputElement) {
-    const v = srcEl.value;
-    ['#filter', '#sb-filter'].forEach(sel => {
-      const el = $<HTMLInputElement>(sel);
-      if (el && el !== srcEl) el.value = v;
-    });
-    applyFilter();
+  function visibleFileItems() {
+    return $$<HTMLElement>('#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)');
   }
-  $('#filter').addEventListener('input', (e) => syncFilters(e.target as HTMLInputElement));
-  const sbFilter = $('#sb-filter');
-  if (sbFilter) sbFilter.addEventListener('input', (e) => syncFilters(e.target as HTMLInputElement));
+  function moveActiveVisibleFile(direction: 1 | -1) {
+    const items = visibleFileItems();
+    if (!items.length) return;
+    const current = items.findIndex(li => li.classList.contains('active'));
+    const idx = nextVisibleFileIndex(current, items.length, direction);
+    const target = items[idx];
+    if (!target) return;
+    if (target.dataset.path) markActive(target.dataset.path);
+    target.scrollIntoView({ block: 'nearest' });
+    if (target.dataset.path) prefetchByPath(target.dataset.path);
+  }
+  function jumpToActiveOrFirstFilteredFile() {
+    const items = visibleFileItems();
+    const active = items.find(li => li.classList.contains('active'));
+    const target = active || items[0];
+    if (target) {
+      target.click();
+      $<HTMLInputElement>('#sb-filter').blur();
+    }
+  }
+  const sbFilter = $<HTMLInputElement>('#sb-filter');
+  if (sbFilter) {
+    sbFilter.addEventListener('input', () => applyFilter());
+    sbFilter.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        jumpToActiveOrFirstFilteredFile();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveActiveVisibleFile(e.key === 'ArrowDown' ? 1 : -1);
+      } else if (e.key === 'Escape') {
+        if (sbFilter.value) {
+          sbFilter.value = '';
+          applyFilter();
+        } else {
+          sbFilter.blur();
+        }
+      }
+    });
+  }
+  function focusFileFilter() {
+    const input = $<HTMLInputElement>('#sb-filter');
+    input.focus();
+    input.select();
+  }
   document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      focusFileFilter();
+      return;
+    }
     const targetEl = e.target as Element | null;
     if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA')) return;
-    if (e.key === '/') { e.preventDefault(); $('#filter').focus(); }
+    if (e.key === '/') { e.preventDefault(); focusFileFilter(); }
     else if (e.key === 'j' || e.key === 'k') {
-      const items = $$<HTMLElement>('#filelist li[data-path]:not(.hidden)');
+      const items = visibleFileItems();
       if (!items.length) return;
       let idx = items.findIndex(li => li.classList.contains('active'));
       if (idx < 0) idx = 0;
@@ -1690,7 +1994,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (e.key === 'Enter') {
         e.preventDefault();
         closePopover();
-        setRange($<HTMLInputElement>('#ref-from').value, $<HTMLInputElement>('#ref-to').value);
       } else if (e.key === 'Escape') {
         closePopover();
         el.blur();
@@ -1748,7 +2051,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     closePopover();
   });
 
-  $('#ref-apply').addEventListener('click', () => setRange($<HTMLInputElement>('#ref-from').value, $<HTMLInputElement>('#ref-to').value));
   $('#ref-reset').addEventListener('click', () => setRange('HEAD', 'worktree'));
 
   // Ignore-whitespace toggle
@@ -1832,13 +2134,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       const isTest = TEST_RE.test(li.dataset.path || '');
       li.classList.toggle('hidden-by-tests', STATE.hideTests && isTest);
     });
-    // Hide empty tree dirs
-    document.querySelectorAll<HTMLElement>('#filelist .tree-dir').forEach(dir => {
-      const childUl = dir.nextElementSibling;
-      if (!childUl) return;
-      const anyVisible = !!childUl.querySelector('.tree-file:not(.hidden):not(.hidden-by-tests)');
-      dir.classList.toggle('hidden-by-tests', STATE.hideTests && !anyVisible);
-    });
+    updateTreeDirVisibility();
+    if (typeof applyViewedState === 'function') applyViewedState();
   }
   applyHideTests();
   $('#hide-tests').addEventListener('click', () => {

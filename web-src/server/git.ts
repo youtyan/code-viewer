@@ -187,7 +187,7 @@ export function truncateToNHunks(diffText: string, n: number): {
     return { text: diffText, totalHunks: 0, renderedHunks: 0, lineCount: (diffText.match(/\n/g) || []).length };
   }
   const renderedHunks = Math.min(n, hunks.length);
-  const text = header + hunks.slice(0, renderedHunks).join('');
+  const text = header + hunks.slice(0, renderedHunks).join('\n');
   return {
     text,
     totalHunks: hunks.length,

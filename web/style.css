@@ -32,9 +32,11 @@
   /* diff colors (GitHub exact) */
   --diff-add-bg:        #dafbe1;
   --diff-add-num-bg:    #ccffd8;
+  --diff-add-num-sticky-bg: #ccffd8;
   --diff-add-word-bg:   #aceebb;
   --diff-del-bg:        #ffebe9;
   --diff-del-num-bg:    #ffd7d5;
+  --diff-del-num-sticky-bg: #ffd7d5;
   --diff-del-word-bg:   #ff818266;
   --diff-hunk-bg:       #ddf4ff;
   --diff-hunk-fg:       #0550ae;
@@ -70,9 +72,11 @@
   --done:           #a371f7;
   --diff-add-bg:        rgba(46,160,67,0.15);
   --diff-add-num-bg:    rgba(46,160,67,0.30);
+  --diff-add-num-sticky-bg: #173d20;
   --diff-add-word-bg:   rgba(46,160,67,0.40);
   --diff-del-bg:        rgba(248,81,73,0.15);
   --diff-del-num-bg:    rgba(248,81,73,0.30);
+  --diff-del-num-sticky-bg: #58211f;
   --diff-del-word-bg:   rgba(248,81,73,0.40);
   --diff-hunk-bg:       rgba(56,139,253,0.10);
   --diff-hunk-fg:       #58a6ff;
@@ -251,7 +255,8 @@ html, body {
   color: #fff;
   border-color: var(--attn);
 }
-.hidden-by-tests { display: none !important; }
+.hidden-by-tests,
+.hidden-by-filter { display: none !important; }
 
 /* ===== Ref picker popover ===== */
 #ref-popover[hidden] { display: none !important; }
@@ -635,6 +640,10 @@ html, body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
+#sb-filter[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(207,34,46,0.20);
+}
 #sb-filter::placeholder { color: var(--fg-subtle); }
 
 /* ===== Sidebar resizer (drag right edge to resize) ===== */
@@ -675,40 +684,56 @@ body.gdp-resizing * { user-select: none !important; }
   padding: 4px 0 0;
 }
 #filelist.tree .tree-dir {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px 16px minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
-  padding: 4px 12px 4px var(--lvl-pad, 12px);
+  gap: 8px;
+  padding: 5.6px 8px 5.6px var(--lvl-pad, 12px);
   cursor: pointer;
-  color: var(--fg-muted);
-  font-size: 12.5px;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 21px;
   user-select: none;
+  border-radius: 6px;
 }
 #filelist.tree .tree-dir:hover { background: var(--bg-mute); color: var(--fg); }
 #filelist.tree .tree-dir .chev {
-  display: inline-block;
-  width: 14px; text-align: center;
-  font-size: 11px;
+  display: flex;
+  width: 16px;
+  height: 20.8px;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4.4px;
   font-weight: 700;
   transition: transform 0.15s, color 0.15s;
-  color: var(--fg-muted);
+  color: #59636e;
 }
 #filelist.tree .tree-dir.collapsed .chev { transform: rotate(-90deg); }
-#filelist.tree .tree-dir:hover .chev { color: var(--accent); }
+#filelist.tree .tree-dir:hover .chev { color: #59636e; }
+#filelist.tree .tree-dir .chev .octicon {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
 #filelist.tree .tree-dir .dir-name {
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 21px;
   color: var(--fg);
-  font-weight: 500;
+  font-weight: 400;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #filelist.tree .tree-dir .dir-icon {
-  color: var(--accent);
+  color: #54aeff;
   flex-shrink: 0;
-  font-size: 12px;
-  width: 14px; text-align: center;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  align-items: center;
+  justify-content: center;
 }
-#filelist.tree .tree-dir.collapsed { color: var(--fg-subtle); }
-#filelist.tree .tree-dir.collapsed .dir-name { color: var(--fg-muted); font-weight: 400; }
+#filelist.tree .tree-dir .dir-icon .octicon { display: block; }
+#filelist.tree .tree-dir.collapsed { color: var(--fg); }
+#filelist.tree .tree-dir.collapsed .dir-name { color: var(--fg); font-weight: 400; }
 #filelist.tree .tree-children { list-style: none; padding: 0; margin: 0; }
 #filelist.tree .tree-dir.collapsed + .tree-children { display: none; }
 
@@ -728,6 +753,9 @@ body.gdp-resizing * { user-select: none !important; }
 #filelist.tree .tree-file.active {
   background: var(--accent-subtle);
   border-left-color: var(--accent);
+}
+#filelist li.viewed {
+  color: var(--fg-subtle);
 }
 #filelist.tree .tree-file.hidden,
 #filelist.tree .tree-dir.hidden { display: none; }
@@ -840,7 +868,45 @@ body.gdp-resizing * { user-select: none !important; }
   transform: none !important;
   will-change: auto !important;
 }
-.d2h-code-wrapper { overflow-x: auto !important; }
+.d2h-code-wrapper,
+.d2h-file-side-diff {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+.d2h-code-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+.d2h-file-side-diff::-webkit-scrollbar {
+  height: 8px;
+}
+.d2h-code-wrapper::-webkit-scrollbar-thumb {
+  background: #d0d7de;
+  border: 0;
+  border-radius: 4px;
+}
+.d2h-file-side-diff::-webkit-scrollbar-thumb {
+  background: #d0d7de;
+  border: 0;
+  border-radius: 4px;
+}
+.d2h-code-wrapper::-webkit-scrollbar-track {
+  background: var(--bg-soft);
+}
+.d2h-file-side-diff::-webkit-scrollbar-track {
+  background: var(--bg-soft);
+}
+[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-thumb {
+  background: #6e7681;
+}
+[data-theme="dark"] .d2h-file-side-diff::-webkit-scrollbar-thumb {
+  background: #6e7681;
+}
+[data-theme="dark"] .d2h-code-wrapper::-webkit-scrollbar-track {
+  background: var(--bg-soft);
+}
+[data-theme="dark"] .d2h-file-side-diff::-webkit-scrollbar-track {
+  background: var(--bg-soft);
+}
 
 .d2h-wrapper {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -860,31 +926,35 @@ body.gdp-resizing * { user-select: none !important; }
   scroll-margin-top: calc(var(--topbar-h) + 8px);
 }
 
-.d2h-file-header {
+.d2h-file-header,
+.d2h-file-header.d2h-sticky-header {
   background: var(--bg-soft);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
-  padding: 8px 16px;
+  margin: 0 0 -1px;
+  padding: 6px 8px;
+  min-height: 46px;
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Hard-coded value (var(--topbar-h) was being resolved to 0 by some
-     browser quirk on this nested element, breaking sticky). */
+  /* Keep this in sync with --topbar-h. This selector must also cover
+   * .d2h-sticky-header because Diff2Html's vendor CSS sets top: 0 there. */
   position: sticky;
   top: 56px;
-  z-index: 5;
-  font-size: 13px;
+  z-index: 20;
+  font-size: 14px;
+  line-height: 21px;
 }
 .d2h-file-name-wrapper {
   display: flex; align-items: center; gap: 8px;
   flex: 1; min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .d2h-file-name {
   color: var(--fg) !important;
-  font-weight: 600;
+  font-weight: 400;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .d2h-icon-wrapper { display: inline-flex; color: var(--fg-muted); }
@@ -942,6 +1012,20 @@ tr.gdp-hunk-row .d2h-code-line-ctn {
   padding-bottom: 0 !important;
   overflow: hidden;
 }
+tr.gdp-trailing-expand-row,
+tr.gdp-trailing-expand-row > td,
+tr.gdp-trailing-expand-row .d2h-code-line,
+tr.gdp-trailing-expand-row .d2h-code-side-line {
+  height: 18px !important;
+  line-height: 18px !important;
+}
+tr.gdp-trailing-expand-row > td.d2h-info {
+  background: var(--bg-soft) !important;
+}
+tr.gdp-trailing-expand-row .gdp-expand-btn {
+  height: 18px;
+  flex-basis: 18px;
+}
 /* Hide any d2h placeholder children inside the hunk-row line-number cell
  * (e.g. the empty old/new line-num divs) so only the expand stack shows
  * and the cell collapses to 20px. */
@@ -960,7 +1044,9 @@ tr.gdp-hunk-row td.d2h-code-side-linenumber > :not(.gdp-expand-stack) {
  * more space, matching github.com which never clips line numbers. */
 table.d2h-diff-table td.d2h-code-linenumber,
 table.d2h-diff-table td.d2h-code-side-linenumber {
-  position: static !important;
+  position: sticky !important;
+  left: 0;
+  z-index: 2;
   display: table-cell !important;
   width: 1%;            /* shrink-to-fit while still respecting min-width */
   min-width: 50px;
@@ -1064,6 +1150,43 @@ table.d2h-diff-table .d2h-code-line-prefix {
 [data-theme="dark"] .gdp-stat-text .a { color: #3fb950; }
 [data-theme="dark"] .gdp-stat-text .d { color: #f85149; }
 
+.gdp-file-header-icon {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 6px;
+  padding: 0 8px;
+  cursor: pointer;
+  flex: 0 0 28px;
+}
+.gdp-file-header-icon:hover {
+  color: var(--fg);
+  background: var(--bg-mute);
+}
+.gdp-file-header-icon svg {
+  display: block;
+}
+.gdp-file-collapsed .gdp-file-toggle svg {
+  transform: rotate(-90deg);
+}
+.gdp-copy-path.copied { color: var(--success); }
+.gdp-copy-path.failed { color: var(--danger); }
+.gdp-file-unfold[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.d2h-file-collapse-input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 /* GitHub-style diff squares appended to the file header. */
 .gdp-stat-squares {
   display: inline-flex;
@@ -1109,6 +1232,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .d2h-file-wrapper .d2h-file-diff,
 .d2h-file-wrapper .d2h-files-diff {
   border-radius: 0 0 6px 6px;
+  border: 0;
+  overflow: hidden !important;
 }
 .d2h-diff-table {
   border: 0 !important;
@@ -1207,7 +1332,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .d2h-code-linenumber {
   background: var(--bg) !important;
   color: var(--fg-subtle) !important;
-  border-right: 1px solid var(--border-muted) !important;
+  border-right: 0 !important;
+  box-shadow: inset -1px 0 0 var(--border-muted);
   font-size: 12px !important;
   font-variant-numeric: tabular-nums;
   user-select: none;
@@ -1215,7 +1341,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .d2h-code-side-linenumber {
   background: var(--bg) !important;
   color: var(--fg-subtle) !important;
-  border-right: 1px solid var(--border-muted) !important;
+  border-right: 0 !important;
+  box-shadow: inset -1px 0 0 var(--border-muted);
   font-size: 12px !important;
   font-variant-numeric: tabular-nums;
 }
@@ -1245,9 +1372,9 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .d2h-ins .d2h-code-linenumber,
 .d2h-ins.d2h-code-linenumber,
 .d2h-ins .d2h-code-side-linenumber {
-  background: var(--diff-add-num-bg) !important;
+  background: var(--diff-add-num-sticky-bg) !important;
   color: var(--fg) !important;
-  border-right-color: rgba(46,160,67,0.30) !important;
+  box-shadow: inset -1px 0 0 rgba(46,160,67,0.30);
 }
 
 /* Deletion rows */
@@ -1261,9 +1388,9 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .d2h-del .d2h-code-linenumber,
 .d2h-del.d2h-code-linenumber,
 .d2h-del .d2h-code-side-linenumber {
-  background: var(--diff-del-num-bg) !important;
+  background: var(--diff-del-num-sticky-bg) !important;
   color: var(--fg) !important;
-  border-right-color: rgba(207,34,46,0.30) !important;
+  box-shadow: inset -1px 0 0 rgba(207,34,46,0.30);
 }
 
 /* Word-level highlights inside add/del lines */
@@ -1303,7 +1430,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
 
 /* ===== Viewed checkbox (top-right of file header) ===== */
 .d2h-file-collapse {
-  margin-left: auto;
+  margin-left: 8px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1356,6 +1483,9 @@ table.d2h-diff-table .d2h-code-line-prefix {
   background: var(--bg-soft);
   border-bottom: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 20;
   font-size: 13px;
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
