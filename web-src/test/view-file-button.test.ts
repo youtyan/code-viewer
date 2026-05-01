@@ -53,6 +53,14 @@ describe('view file UI', () => {
     expect(app.includes("if (STATE.route.screen === 'file') {\n        empty.classList.add('hidden');\n        applySourceRouteToShell();")).toBe(true);
   });
 
+  test('toolbar does not expose the removed auto reload poller', () => {
+    const html = readFileSync('web/index.html', 'utf8');
+    expect(html.includes('id="auto-reload"')).toBe(false);
+    expect(app.includes('gdp:auto-reload')).toBe(false);
+    expect(app.includes('AUTO_RELOAD_MS')).toBe(false);
+    expect(style.includes('#auto-reload')).toBe(false);
+  });
+
   test('source view renders file text as textContent, not HTML', () => {
     expect(app.includes('code.textContent = line')).toBe(true);
     expect(app.includes('num.textContent = String(index + 1)')).toBe(true);
