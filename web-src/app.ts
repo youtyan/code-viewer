@@ -28,7 +28,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   type LayoutMode = 'side-by-side' | 'line-by-line';
   type SidebarView = 'tree' | 'flat';
   type ThemeMode = 'light' | 'dark';
-  type LoadOptions = { nocache?: boolean };
   type LoadQueueItem = { file: FileMeta; card: DiffCardElement; priority: number };
   type HljsApi = {
     configure?: (options: Record<string, unknown>) => void;
@@ -84,7 +83,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     collapsed: boolean;
     files: FileMeta[];
     activeFile: string | null;
-    autoReload: boolean;
     hideTests: boolean;
     syntaxHighlight: boolean;
     viewedFiles: Set<string>;
@@ -137,7 +135,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       collapsed: false,
       files: [],
       activeFile: null,
-      autoReload: localStorage.getItem('gdp:auto-reload') !== '0',
       hideTests: localStorage.getItem('gdp:hide-tests') === '1',
       syntaxHighlight: localStorage.getItem('gdp:syntax-highlight') !== '0',
       viewedFiles: new Set<string>(JSON.parse(localStorage.getItem('gdp:viewed-files') || '[]')),
@@ -2642,17 +2639,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     }).catch(() => setStatus('error'));
   }
 
-  function load(opts?: LoadOptions): Promise<void> {
+  function load(): Promise<void> {
     if (STATE.route.screen === 'repo') return loadRepo();
     setStatus('refreshing');
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set('ignore_ws', '1');
     if (STATE.from) params.set('from', STATE.from);
     if (STATE.to)   params.set('to',   STATE.to);
-    // The auto-reload poll passes { nocache: true } so the server bypasses
-    // its generation cache and re-runs `git diff` (picks up commits / checkout
-    // made from another shell without waiting for nvim FocusGained).
-    if (opts && opts.nocache) params.set('nocache', '1');
     const url = '/diff.json' + (params.toString() ? '?' + params.toString() : '');
     return trackLoad<DiffMeta>(fetch(url).then(r => r.json())).then(data => {
       renderShell(data);
@@ -2965,28 +2958,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   });
 
-  // Auto-reload toggle: poll /diff.json every AUTO_RELOAD_MS while enabled.
-  // Stacks on top of SSE so external changes (rebase, checkout) get picked up
-  // without needing nvim's BufWritePost to fire.
-  const AUTO_RELOAD_MS = 3000;
-  let autoTimer: ReturnType<typeof setInterval> | null = null;
-  function setAutoReload(on: boolean) {
-    STATE.autoReload = on;
-    localStorage.setItem('gdp:auto-reload', on ? '1' : '0');
-    const btn = $('#auto-reload');
-    if (btn) {
-      btn.classList.toggle('active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    }
-    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-    if (on) autoTimer = setInterval(() => {
-      if (!document.hidden) load({ nocache: true });
-    }, AUTO_RELOAD_MS);
-  }
-  setAutoReload(STATE.autoReload);
-  $('#auto-reload').addEventListener('click', () => setAutoReload(!STATE.autoReload));
   window.addEventListener('storage', (e) => {
-    if (e.key === 'gdp:auto-reload') setAutoReload(e.newValue !== '0');
     if (e.key === 'gdp:syntax-highlight') setSyntaxHighlight(e.newValue !== '0');
   });
 
