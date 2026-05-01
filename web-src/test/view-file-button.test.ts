@@ -61,6 +61,30 @@ describe('view file UI', () => {
     expect(style.includes('.gdp-source-tabs')).toBe(true);
   });
 
+  test('file detail keeps preview tabs in the sticky header instead of the source viewer', () => {
+    expect(app.includes("sticky.className = 'gdp-file-detail-sticky'")).toBe(true);
+    expect(app.includes("tabsHost.className = 'gdp-file-detail-tabs'")).toBe(true);
+    expect(app.includes('sticky.appendChild(tabsHost)')).toBe(true);
+    expect(app.includes('tabsHost.replaceChildren(tabs)')).toBe(true);
+    expect(app.includes('view.appendChild(tabs)')).toBe(false);
+    expect(style.includes('.gdp-file-detail-sticky')).toBe(true);
+    expect(style.includes('position: sticky')).toBe(true);
+    expect(style.includes('top: var(--global-header-h)')).toBe(true);
+  });
+
+  test('file detail avoids doubled borders between the sticky header and source body', () => {
+    expect(style.includes('.gdp-standalone-source .gdp-source-viewer')).toBe(true);
+    expect(style.includes('border-top: 0')).toBe(true);
+    expect(style.includes('border-radius: 0 0 6px 6px')).toBe(true);
+    expect(style.includes('body.gdp-file-detail-page {\n  --chrome-h: var(--global-header-h);')).toBe(true);
+  });
+
+  test('file detail does not create hidden standalone source metadata', () => {
+    expect(app.includes("const isStandalone = card.classList.contains('gdp-standalone-source')")).toBe(true);
+    expect(app.includes("const header = isStandalone ? null : document.createElement('div')")).toBe(true);
+    expect(style.includes('.gdp-standalone-source .gdp-source-meta')).toBe(false);
+  });
+
   test('file detail header renders a breadcrumb path with copy action', () => {
     expect(app.includes('function createFileBreadcrumb(path: string): HTMLElement')).toBe(true);
     expect(app.includes("nav.className = 'gdp-file-breadcrumb'")).toBe(true);
