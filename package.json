@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local browser-based git diff viewer",
   "type": "module",
   "bin": {
@@ -22,6 +22,7 @@
   "files": [
     "web",
     "web-src/server",
+    "web-src/routes.ts",
     "web-src/types.ts",
     "README.md",
     "LICENSE"
