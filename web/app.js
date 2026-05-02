@@ -109,6 +109,21 @@
     };
   }
 
+  // web-src/catch-up.ts
+  function shouldCatchUpDiff(route) {
+    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  }
+  function createCatchUpGate(now, minIntervalMs) {
+    let lastForceAt = 0;
+    return function shouldRun() {
+      const current = now();
+      if (current - lastForceAt < minIntervalMs)
+        return false;
+      lastForceAt = current;
+      return true;
+    };
+  }
+
   // web-src/routes.ts
   function assertNever(value) {
     throw new Error("unhandled route: " + JSON.stringify(value));
@@ -2686,7 +2701,7 @@
         syncHeaderMenu();
       }).catch(() => setStatus("error"));
     }
-    function load() {
+    function load(options = {}) {
       if (STATE.route.screen === "repo")
         return loadRepo();
       setStatus("refreshing");
@@ -2697,6 +2712,8 @@
         params.set("from", STATE.from);
       if (STATE.to)
         params.set("to", STATE.to);
+      if (options.force)
+        params.set("nocache", "1");
       const url = "/diff.json" + (params.toString() ? "?" + params.toString() : "");
       return trackLoad(fetch(url).then((r) => r.json())).then((data) => {
         renderShell(data);
@@ -3033,24 +3050,30 @@
       }, 350);
     }
     const es = new EventSource("/events");
+    const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
+    let openedOnce = false;
     es.addEventListener("update", () => scheduleSseLoad());
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("error", () => setStatus("error"));
-    es.addEventListener("open", () => setStatus("live"));
-    let assetVersion = null;
-    function pollAssetVersion() {
-      fetch("/_asset_version").then((r) => r.ok ? r.json() : null).then((data) => {
-        if (!data || !data.version)
-          return;
-        if (assetVersion == null) {
-          assetVersion = data.version;
-          return;
-        }
-        if (data.version !== assetVersion)
-          location.reload();
-      }).catch(() => {});
+    es.addEventListener("open", () => {
+      setStatus("live");
+      if (!openedOnce) {
+        openedOnce = true;
+        return;
+      }
+      catchUpDiff();
+    });
+    function catchUpDiff() {
+      if (!shouldCatchUpDiff(STATE.route))
+        return;
+      if (!catchUpGate())
+        return;
+      load({ force: true });
     }
-    pollAssetVersion();
-    setInterval(pollAssetVersion, 1500);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden)
+        catchUpDiff();
+    });
+    window.addEventListener("focus", catchUpDiff);
   })();
 })();
