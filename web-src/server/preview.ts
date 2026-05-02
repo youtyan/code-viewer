@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
-import { basename, extname, join, normalize, relative } from 'node:path';
+import { closeSync, constants, existsSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
 import { cacheFresh, type TimedCacheEntry } from './cache';
@@ -18,11 +18,22 @@ const WATCHED_ASSET_FILES = ['index.html', 'style.css', 'app.js'];
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
 const SIZE_LARGE = 20000;
+const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
+const MAX_UPLOAD_FILES = 50;
+const SAFE_UPLOAD_EXTENSIONS = new Set([
+  '.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.yaml', '.yml', '.toml',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf',
+  '.ts', '.tsx', '.js', '.jsx', '.css', '.scss', '.html',
+]);
 
 let generation = 1;
 let cwd = git.repoRoot(process.cwd()) || process.cwd();
 let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
+let allowUpload = false;
+let uploadAllowedByCli = false;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -66,11 +77,15 @@ Examples:
       listenPort = parsed;
     } else if (arg === '--open') {
       setTimeout(() => openBrowser(`http://127.0.0.1:${server.port}/`), 0);
+    } else if (arg === '--allow-upload') {
+      allowUpload = true;
+      uploadAllowedByCli = true;
     } else {
       rest.push(arg);
     }
   }
   if (rest.length) cliArgs = rest;
+  if (!uploadAllowedByCli) allowUpload = loadProjectConfigUploadEnabled();
 }
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -97,6 +112,17 @@ function requestAllowed(req: Request) {
   const okHost = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host);
   const okOrigin = !origin || origin === 'null' || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(origin);
   return okHost && okOrigin;
+}
+
+function sideEffectRequestAllowed(req: Request) {
+  const host = req.headers.get('host') || '';
+  const origin = req.headers.get('origin');
+  const fetchSite = req.headers.get('sec-fetch-site');
+  const requestedBy = req.headers.get('x-code-viewer-action');
+  return /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(host) &&
+    origin === `http://${host}` &&
+    (!fetchSite || fetchSite === 'same-origin') &&
+    requestedBy === '1';
 }
 
 function staticFile(pathname: string): Response | null {
@@ -264,8 +290,31 @@ function safeRepoPath(path: string) {
   return path === '' || safePath(path);
 }
 
+function loadProjectConfigUploadEnabled(): boolean {
+  const full = join(cwd, '.code-viewer.json');
+  if (!existsSync(full)) return false;
+  let realCwd: string;
+  let realConfig: string;
+  try {
+    realCwd = realpathSync(cwd);
+    realConfig = realpathSync(full);
+  } catch {
+    return false;
+  }
+  if (dirname(realConfig) !== realCwd || basename(realConfig) !== '.code-viewer.json') return false;
+  try {
+    const config = JSON.parse(readFileSync(realConfig, 'utf8')) as {
+      upload?: { enabled?: unknown };
+    };
+    if (!config.upload) return false;
+    return config.upload.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 function isGitInternalPath(path: string): boolean {
-  return path === '.git' || path.startsWith('.git/');
+  return path.split(/[\\/]+/).some(part => part.toLowerCase() === '.git');
 }
 
 function safeWorktreePath(path: string): string | null {
@@ -273,11 +322,36 @@ function safeWorktreePath(path: string): string | null {
   if (isGitInternalPath(path)) return null;
   const full = join(cwd, path);
   if (!existsSync(full)) return null;
-  const realCwd = realpathSync(cwd);
-  const realFull = realpathSync(full);
+  let realCwd: string;
+  let realFull: string;
+  try {
+    realCwd = realpathSync(cwd);
+    realFull = realpathSync(full);
+  } catch {
+    return null;
+  }
   const rel = relative(realCwd, realFull);
   if (rel === '' || rel.startsWith('..') || rel.startsWith('/') || rel.startsWith('\\')) return null;
+  if (isGitInternalPath(rel)) return null;
   return realFull;
+}
+
+function safeOpenWorktreePath(path: string): string | null {
+  if (path === '') {
+    try {
+      const realCwd = realpathSync(cwd);
+      if (isGitInternalPath(realCwd)) return null;
+      return realCwd;
+    } catch {
+      return null;
+    }
+  }
+  return safeWorktreePath(path);
+}
+
+function parentRepoPath(path: string): string {
+  const parent = dirname(path);
+  return parent === '.' ? '' : parent;
 }
 
 function readReadme(target: string, dirPath: string): RepoTreeResponse['readme'] {
@@ -314,6 +388,7 @@ function handleTree(url: URL) {
     branch: git.currentBranch(cwd) || undefined,
     entries,
     readme: readReadme(target, path),
+    upload_enabled: allowUpload && (target === 'worktree' || target === ''),
   } satisfies RepoTreeResponse);
 }
 
@@ -429,6 +504,170 @@ function handleRawFile(url: URL) {
   return new Response(body, { headers: { 'Content-Type': mime[extname(path).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' } });
 }
 
+function isForbiddenUploadName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.startsWith('.') ||
+    lower === 'package.json' ||
+    lower === 'package-lock.json' ||
+    lower === 'bun.lock' ||
+    lower === 'bun.lockb' ||
+    lower === 'yarn.lock' ||
+    lower === 'pnpm-lock.yaml' ||
+    lower === 'makefile' ||
+    lower === 'dockerfile' ||
+    lower.endsWith('.dockerfile') ||
+    /^(tsconfig|jsconfig|bunfig|vercel|netlify|wrangler|next|vite|webpack|rollup|esbuild|astro|svelte|tailwind|postcss|babel|prettier|eslint)\./.test(lower) ||
+    lower.endsWith('.config.js') ||
+    lower.endsWith('.config.jsx') ||
+    lower.endsWith('.config.ts') ||
+    lower.endsWith('.config.tsx') ||
+    lower.endsWith('.config.mjs') ||
+    lower.endsWith('.config.cjs') ||
+    lower.includes('credential') ||
+    lower.includes('secret') ||
+    lower.endsWith('.exe') ||
+    lower.endsWith('.dll') ||
+    lower.endsWith('.dylib') ||
+    lower.endsWith('.so') ||
+    lower.endsWith('.sh') ||
+    lower.endsWith('.bash') ||
+    lower.endsWith('.zsh') ||
+    lower.endsWith('.fish') ||
+    lower.endsWith('.ps1') ||
+    lower.endsWith('.bat') ||
+    lower.endsWith('.cmd');
+}
+
+function safeUploadFileName(name: string): string | null {
+  if (!name || name.includes('\0') || name.includes('/') || name.includes('\\')) return null;
+  if (name === '.' || name === '..') return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,180}$/.test(name)) return null;
+  if (isGitInternalPath(name) || isForbiddenUploadName(name)) return null;
+  if (!SAFE_UPLOAD_EXTENSIONS.has(extname(name).toLowerCase())) return null;
+  return name;
+}
+
+function uploadOpenFlags() {
+  return constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW || 0);
+}
+
+async function handleUploadFiles(req: Request) {
+  if (!allowUpload) return text('upload disabled', 403);
+  if (req.method !== 'POST') return text('method not allowed', 405);
+  if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);
+  if (req.headers.get('content-encoding')) return text('unsupported media type', 415);
+  const lengthHeader = req.headers.get('content-length');
+  if (!lengthHeader) return text('content length required', 411);
+  const length = Number(lengthHeader);
+  if (!Number.isSafeInteger(length) || length < 0) return text('invalid content length', 400);
+  if (length > MAX_UPLOAD_BODY_BYTES) return text('upload too large', 413);
+  const contentType = req.headers.get('content-type') || '';
+  if (!/^multipart\/form-data;\s*boundary=/i.test(contentType)) return text('unsupported media type', 415);
+
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return text('invalid form data', 400);
+  }
+
+  const dir = String(form.get('dir') || '').replace(/^\/+|\/+$/g, '');
+  if (!safeRepoPath(dir)) return text('invalid dir', 400);
+  if (dir && isGitInternalPath(dir)) return text('forbidden', 403);
+  const realDir = safeOpenWorktreePath(dir);
+  if (!realDir) return text('not found', 404);
+  const stats = statSync(realDir) as unknown as { isDirectory(): boolean };
+  if (!stats.isDirectory()) return text('not a directory', 400);
+
+  const files = form.getAll('files').filter((item): item is File => item instanceof File);
+  if (!files.length) return text('no files', 400);
+  if (files.length > MAX_UPLOAD_FILES) return text('too many files', 413);
+
+  let total = 0;
+  const names = new Set<string>();
+  const uploads: Array<{ file: File; name: string; target: string }> = [];
+  for (const file of files) {
+    const safeName = safeUploadFileName(file.name);
+    if (!safeName) return text('invalid filename', 400);
+    const lowerName = safeName.toLowerCase();
+    if (names.has(lowerName)) return text('duplicate filename', 409);
+    names.add(lowerName);
+    if (file.size > MAX_UPLOAD_FILE_BYTES) return text('file too large', 413);
+    total += file.size;
+    if (total > MAX_UPLOAD_TOTAL_BYTES) return text('upload too large', 413);
+    const target = join(realDir, safeName);
+    if (relative(realDir, dirname(target)) !== '') return text('invalid filename', 400);
+    if (existsSync(target)) return text('file exists', 409);
+    uploads.push({ file, name: safeName, target });
+  }
+
+  const written: string[] = [];
+  try {
+    for (const upload of uploads) {
+      const fd = openSync(upload.target, uploadOpenFlags(), 0o644);
+      try {
+        writeFileSync(fd, new Uint8Array(await upload.file.arrayBuffer()));
+      } finally {
+        closeSync(fd);
+      }
+      written.push(upload.target);
+    }
+  } catch (error) {
+    for (const path of written) {
+      try { unlinkSync(path); } catch { /* best-effort cleanup */ }
+    }
+    if ((error as { code?: string }).code === 'EEXIST') return text('file exists', 409);
+    return text('upload failed', 500);
+  }
+
+  generation++;
+  fileCache.clear();
+  metaCache.clear();
+  sendSse('update');
+  return json({ ok: true, files: uploads.map(upload => upload.name), generation });
+}
+
+function openOsPath(path: string) {
+  const cmd = process.platform === 'darwin' ? ['open', '--', path]
+    : process.platform === 'win32' ? ['explorer.exe', path]
+      : ['xdg-open', path];
+  Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' });
+}
+
+async function handleOpenPath(req: Request) {
+  if (req.method !== 'POST') return text('method not allowed', 405);
+  if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);
+  const contentType = req.headers.get('content-type') || '';
+  if (!/^application\/json(?:;|$)/i.test(contentType)) return text('unsupported media type', 415);
+  const length = Number(req.headers.get('content-length') || '0');
+  if (length > 1024) return text('payload too large', 413);
+
+  let body: { path?: unknown; kind?: unknown } = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > 1024) return text('payload too large', 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text('invalid json', 400);
+  }
+
+  const path = typeof body.path === 'string' ? body.path.replace(/^\/+|\/+$/g, '') : '';
+  const kind = body.kind;
+  if (kind !== 'directory' && kind !== 'file-parent') return text('invalid kind', 400);
+  if (kind === 'file-parent' && !path) return text('invalid path', 400);
+  if (!safeRepoPath(path)) return text('invalid path', 400);
+  if (path && isGitInternalPath(path)) return text('forbidden', 403);
+
+  const targetPath = kind === 'file-parent' ? parentRepoPath(path) : path;
+  const target = safeOpenWorktreePath(targetPath);
+  if (!target) return text('not found', 404);
+
+  const stats = statSync(target) as unknown as { isDirectory(): boolean };
+  if (!stats.isDirectory()) return text('not a directory', 400);
+  openOsPath(target);
+  return json({ ok: true });
+}
+
 function sendSse(event: string, data = 'tick') {
   const payload = enc.encode(`event: ${event}\ndata: ${data}\n\n`);
   for (const client of [...sseClients]) {
@@ -448,7 +687,7 @@ parseCli();
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: listenPort,
-  fetch(req) {
+  async fetch(req) {
     if (!requestAllowed(req)) return text('forbidden', 403);
     const url = new URL(req.url);
     const staticResponse = staticFile(url.pathname);
@@ -458,8 +697,11 @@ const server = Bun.serve({
     if (url.pathname === '/file_diff') return handleFileDiff(url);
     if (url.pathname === '/file_range') return handleFileRange(url);
     if (url.pathname === '/_file') return handleRawFile(url);
+    if (url.pathname === '/_open_path') return handleOpenPath(req);
+    if (url.pathname === '/_upload_files') return handleUploadFiles(req);
     if (url.pathname === '/_refs') return json(git.refs(cwd));
     if (url.pathname === '/refresh' && req.method === 'POST') {
+      if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);
       generation++;
       fileCache.clear();
       metaCache.clear();

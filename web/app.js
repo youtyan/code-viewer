@@ -226,6 +226,7 @@
       "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
     ];
     const FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
+    const OPEN_EXTERNAL_16_PATH = "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
     const UNFOLD_16_PATH = "m8.177.677 2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25a.75.75 0 0 1-1.5 0V4H5.104a.25.25 0 0 1-.177-.427L7.823.677a.25.25 0 0 1 .354 0ZM7.25 10.75a.75.75 0 0 1 1.5 0V12h2.146a.25.25 0 0 1 .177.427l-2.896 2.896a.25.25 0 0 1-.354 0l-2.896-2.896A.25.25 0 0 1 5.104 12H7.25v-1.25Zm-5-2a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z";
     const FOLD_16_PATH = "M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z";
     const $ = (sel) => document.querySelector(sel);
@@ -396,6 +397,14 @@
       button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
       button.innerHTML = expanded ? iconSvg("octicon-fold", FOLD_16_PATH) : iconSvg("octicon-unfold", UNFOLD_16_PATH);
     }
+    function setSidebarTreeActionIcons() {
+      const expand = document.querySelector("#sb-expand-all");
+      const collapse = document.querySelector("#sb-collapse-all");
+      if (expand)
+        expand.innerHTML = iconSvg("octicon-unfold", UNFOLD_16_PATH);
+      if (collapse)
+        collapse.innerHTML = iconSvg("octicon-fold", FOLD_16_PATH);
+    }
     function buildTree(files) {
       const root = { name: "", dirs: {}, files: [], path: "", minOrder: Infinity, explicit: true };
       for (const f of files) {
@@ -415,6 +424,8 @@
         }
         if (f.type === "tree") {
           node.explicit = true;
+          if (f.children_omitted === true)
+            node.children_omitted = true;
           continue;
         }
         node.files.push(f);
@@ -454,6 +465,10 @@
           li.dataset.dirpath = dir.path;
           if (dir.explicit)
             li.dataset.explicit = "true";
+          if (dir.children_omitted) {
+            li.classList.add("children-omitted");
+            li.title = "Directory contents are intentionally not listed";
+          }
           li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
           const chev = document.createElement("span");
           chev.className = "chev";
@@ -462,11 +477,22 @@
           const dirIcon = document.createElement("span");
           dirIcon.className = "dir-icon";
           li.appendChild(dirIcon);
+          const label = document.createElement("span");
+          label.className = "dir-label";
           const dn = document.createElement("span");
           dn.className = "dir-name";
           dn.textContent = dir.name;
           dn.title = dir.path;
-          li.appendChild(dn);
+          label.appendChild(dn);
+          if (dir.children_omitted) {
+            const omitted = document.createElement("span");
+            omitted.className = "dir-omitted";
+            omitted.textContent = "skipped";
+            omitted.title = "Directory contents are intentionally not listed";
+            label.appendChild(omitted);
+          }
+          li.appendChild(label);
+          li.appendChild(createOpenPathButton(dir.path, "directory", "open this folder in OS"));
           const collapsed = STATE.collapsedDirs.has(dir.path);
           if (collapsed)
             li.classList.add("collapsed");
@@ -477,7 +503,7 @@
           const childUl = document.createElement("ul");
           childUl.className = "tree-children";
           renderTreeNode(dir, depth + 1, childUl, onFileClick);
-          li.addEventListener("click", (e) => {
+          const toggleDir = (e) => {
             e.stopPropagation();
             li.classList.toggle("collapsed");
             updateIcon();
@@ -486,7 +512,17 @@
             else
               STATE.collapsedDirs.delete(dir.path);
             localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-          });
+          };
+          chev.addEventListener("click", toggleDir);
+          dirIcon.addEventListener("click", toggleDir);
+          if (onFileClick) {
+            li.addEventListener("click", (e) => {
+              e.stopPropagation();
+              onFileClick({ path: dir.path, display_path: dir.path, type: "tree", children_omitted: dir.children_omitted });
+            });
+          } else {
+            li.addEventListener("click", toggleDir);
+          }
           ul.appendChild(li);
           ul.appendChild(childUl);
         } else {
@@ -569,9 +605,28 @@
       $$(".sb-view-seg button").forEach((b) => {
         b.classList.toggle("active", b.dataset.view === STATE.sbView);
       });
+      $$(".sb-tree-action").forEach((b) => {
+        b.disabled = STATE.sbView !== "tree" || !STATE.files.length;
+      });
       if (STATE.activeFile)
         markActive(STATE.activeFile);
       applyFilter();
+    }
+    function setAllSidebarDirsCollapsed(collapsed) {
+      if (!collapsed)
+        STATE.collapsedDirs.clear();
+      $$("#filelist .tree-dir[data-dirpath]").forEach((li) => {
+        const path = li.dataset.dirpath || "";
+        if (!path)
+          return;
+        li.classList.toggle("collapsed", collapsed);
+        const dirIcon = li.querySelector(".dir-icon");
+        if (dirIcon)
+          setFolderIcon(dirIcon, collapsed);
+        if (collapsed)
+          STATE.collapsedDirs.add(path);
+      });
+      localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
     }
     function syncRepoTargetInput(ref) {
       const input = document.querySelector("#repo-target");
@@ -639,8 +694,9 @@
     function markActive(path) {
       STATE.activeFile = path;
       $$("#filelist li").forEach((li) => {
-        if (li.dataset.path)
-          li.classList.toggle("active", li.dataset.path === path);
+        const itemPath = li.dataset.path || li.dataset.dirpath;
+        if (itemPath)
+          li.classList.toggle("active", itemPath === path);
       });
     }
     function applyViewedState() {
@@ -668,10 +724,12 @@
         const match = matches(li.dataset.path || "");
         li.classList.toggle("hidden", !match);
       });
-      document.querySelectorAll(".gdp-file-shell").forEach((card) => {
-        const match = matches(card.dataset.path || "");
-        card.classList.toggle("hidden-by-filter", !match);
-      });
+      if (!isRepositorySidebarMode()) {
+        document.querySelectorAll(".gdp-file-shell").forEach((card) => {
+          const match = matches(card.dataset.path || "");
+          card.classList.toggle("hidden-by-filter", !match);
+        });
+      }
       updateTreeDirVisibility(matches, filter.kind !== "empty" && !invalid);
       if (typeof applyViewedState === "function")
         applyViewedState();
@@ -856,6 +914,118 @@
     function fileEntryIcon() {
       return iconSvg("octicon-file", FILE_16_PATH);
     }
+    async function openPathInOs(path, kind, button) {
+      const oldTitle = button?.title;
+      if (button) {
+        button.disabled = true;
+        button.classList.remove("failed");
+      }
+      try {
+        const res = await fetch("/_open_path", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Code-Viewer-Action": "1" },
+          body: JSON.stringify({ path, kind })
+        });
+        if (!res.ok)
+          throw new Error(await res.text());
+        button?.classList.add("opened");
+        setTimeout(() => {
+          button?.classList.remove("opened");
+        }, 1200);
+      } catch {
+        if (button) {
+          button.classList.add("failed");
+          button.title = "failed to open in OS";
+          setTimeout(() => {
+            button.classList.remove("failed");
+            button.title = oldTitle || "open in OS";
+          }, 1600);
+        }
+      } finally {
+        if (button)
+          button.disabled = false;
+      }
+    }
+    function createOpenPathButton(path, kind, title = "open folder in OS") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-open-path";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPathInOs(path, kind, button);
+      });
+      return button;
+    }
+    async function uploadFiles(path, files) {
+      const list = Array.from(files);
+      if (!list.length)
+        return;
+      const label = path || PROJECT_NAME || "repository root";
+      if (!window.confirm("Upload " + list.length + " file" + (list.length === 1 ? "" : "s") + " into " + label + "?"))
+        return;
+      const form = new FormData;
+      form.set("dir", path);
+      list.forEach((file) => form.append("files", file, file.name));
+      const res = await fetch("/_upload_files", {
+        method: "POST",
+        headers: { "X-Code-Viewer-Action": "1" },
+        body: form
+      });
+      if (!res.ok)
+        throw new Error(await res.text());
+      await loadRepo();
+    }
+    function createRepoUploadPanel(path) {
+      const dropPanel = document.createElement("div");
+      dropPanel.className = "gdp-upload-panel";
+      const copy = document.createElement("div");
+      copy.className = "gdp-upload-copy";
+      copy.textContent = "Drop files into " + (path || PROJECT_NAME || "repository");
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.hidden = true;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-btn gdp-btn-sm";
+      button.textContent = "Upload files";
+      button.addEventListener("click", () => input.click());
+      const fail = () => {
+        dropPanel.classList.add("failed");
+        setTimeout(() => dropPanel.classList.remove("failed"), 1600);
+      };
+      input.addEventListener("change", async () => {
+        try {
+          if (input.files && input.files.length)
+            await uploadFiles(path, input.files);
+        } catch {
+          fail();
+        } finally {
+          input.value = "";
+        }
+      });
+      dropPanel.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropPanel.classList.add("dragging");
+      });
+      dropPanel.addEventListener("dragleave", () => dropPanel.classList.remove("dragging"));
+      dropPanel.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        dropPanel.classList.remove("dragging");
+        try {
+          const files = event.dataTransfer?.files;
+          if (files && files.length)
+            await uploadFiles(path, files);
+        } catch {
+          fail();
+        }
+      });
+      dropPanel.append(copy, button, input);
+      return dropPanel;
+    }
     function repoRoute(ref, path) {
       return { screen: "repo", ref: ref || "worktree", path, range: currentRange() };
     }
@@ -924,6 +1094,7 @@
       $("#totals").textContent = "";
       STATE.files = [];
       LOAD_QUEUE.length = 0;
+      renderRepoBlobSidebar(meta.path || "", meta.ref);
       const target = $("#diff");
       const shell = document.createElement("section");
       shell.className = "gdp-repo-shell";
@@ -941,7 +1112,7 @@
       });
       const toolbar = document.createElement("div");
       toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
-      toolbar.append(createRepoBreadcrumb(meta.ref, meta.path || ""), targetPicker);
+      toolbar.append(createRepoBreadcrumb(meta.ref, meta.path || ""), createOpenPathButton(meta.path || "", "directory", "open this folder in OS"), targetPicker);
       shell.appendChild(toolbar);
       const listCard = document.createElement("section");
       listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
@@ -959,7 +1130,11 @@
       listTitle.textContent = meta.path || meta.project || "Files";
       listName.append(listIcon, listTitle);
       listHeader.appendChild(listName);
+      listHeader.appendChild(createOpenPathButton(meta.path || "", "directory", "open this folder in OS"));
       listWrapper.appendChild(listHeader);
+      if (meta.upload_enabled && (meta.ref === "worktree" || meta.ref === "")) {
+        listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
+      }
       const list = document.createElement("div");
       list.className = "gdp-source-viewer gdp-repo-file-list";
       if (meta.path) {
@@ -1058,9 +1233,15 @@
           order: index + 1,
           path: entry.path,
           display_path: entry.path,
-          type: entry.type
+          type: entry.type,
+          children_omitted: entry.children_omitted
         }));
         renderSidebar(files, (file) => {
+          if (file.type === "tree") {
+            setRoute(repoRoute(ref, file.path));
+            loadRepo();
+            return;
+          }
           setRoute({ screen: "file", path: file.path, ref, view: "blob", range: currentRange() });
           renderStandaloneSource({ path: file.path, ref });
         });
@@ -1923,7 +2104,7 @@
       else
         card.appendChild(view);
     }
-    function createFileBreadcrumb(path) {
+    function createFileBreadcrumb(path, ref) {
       const nav = document.createElement("nav");
       nav.className = "gdp-file-breadcrumb";
       nav.setAttribute("aria-label", "File path");
@@ -1936,9 +2117,19 @@
           sep.textContent = "/";
           nav.appendChild(sep);
         }
-        const crumb = document.createElement("span");
+        const isCurrent = index === allParts.length - 1;
+        const crumb = document.createElement(isCurrent ? "span" : "button");
         crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
         crumb.textContent = part;
+        if (!isCurrent && crumb instanceof HTMLButtonElement) {
+          crumb.type = "button";
+          crumb.addEventListener("click", () => {
+            const projectOffset = PROJECT_NAME ? 1 : 0;
+            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
+            setRoute(repoRoute(ref || "worktree", currentPath));
+            loadRepo();
+          });
+        }
         nav.appendChild(crumb);
       });
       if (!allParts.length) {
@@ -1967,7 +2158,7 @@
       header.className = "gdp-file-detail-header";
       const name = document.createElement("div");
       name.className = "gdp-file-detail-path";
-      name.appendChild(createFileBreadcrumb(target.path));
+      name.appendChild(createFileBreadcrumb(target.path, target.ref));
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "gdp-file-header-icon gdp-copy-path";
@@ -1989,6 +2180,7 @@
         }
       });
       name.appendChild(copy);
+      name.appendChild(createOpenPathButton(target.path, "file-parent", "open parent folder in OS"));
       header.appendChild(name);
       if (!repoTarget) {
         const back = document.createElement("button");
@@ -2167,6 +2359,14 @@
           copy.insertAdjacentElement("afterend", unfold);
         else
           header.appendChild(unfold);
+      }
+      if (!header.querySelector(".gdp-open-path")) {
+        const unfold = header.querySelector(".gdp-file-unfold");
+        const openPath = createOpenPathButton(file.path, "file-parent", "open parent folder in OS");
+        if (unfold)
+          unfold.insertAdjacentElement("afterend", openPath);
+        else
+          header.appendChild(openPath);
       }
       if (!header.querySelector(".gdp-stat-text")) {
         const stats = document.createElement("span");
@@ -2517,6 +2717,7 @@
           body.style.display = STATE.collapsed ? "none" : "";
       });
     }
+    setSidebarTreeActionIcons();
     $$(".sb-view-seg button").forEach((b) => {
       b.addEventListener("click", () => {
         STATE.sbView = b.dataset.view || "tree";
@@ -2525,6 +2726,8 @@
           renderSidebar(STATE.files);
       });
     });
+    $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
+    $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
     function applySidebarWidth(w) {
       const cw = Math.max(180, Math.min(900, w));
       document.documentElement.style.setProperty("--sidebar-w", cw + "px");
@@ -2588,11 +2791,28 @@
       localStorage.setItem("gdp:theme", STATE.theme);
       applyTheme();
     });
-    function visibleFileItems() {
-      return $$("#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)");
+    function isSidebarRowVisible(row) {
+      if (row.classList.contains("hidden") || row.classList.contains("hidden-by-tests"))
+        return false;
+      let parent = row.parentElement;
+      while (parent && parent.id !== "filelist") {
+        if (parent.classList.contains("tree-children")) {
+          const dir = parent.previousElementSibling;
+          if (dir?.classList.contains("collapsed") || dir?.classList.contains("hidden"))
+            return false;
+        }
+        parent = parent.parentElement;
+      }
+      return true;
     }
-    function moveActiveVisibleFile(direction) {
-      const items = visibleFileItems();
+    function visibleSidebarItems() {
+      return $$("#filelist li[data-path], #filelist .tree-dir[data-dirpath]").filter(isSidebarRowVisible);
+    }
+    function isRepositorySidebarMode() {
+      return document.body.classList.contains("gdp-repo-page") || document.body.classList.contains("gdp-repo-blob-page");
+    }
+    function moveActiveSidebarItem(direction) {
+      const items = visibleSidebarItems();
       if (!items.length)
         return;
       const current = items.findIndex((li) => li.classList.contains("active"));
@@ -2600,14 +2820,30 @@
       const target = items[idx];
       if (!target)
         return;
-      if (target.dataset.path)
-        markActive(target.dataset.path);
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (path)
+        markActive(path);
       target.scrollIntoView({ block: "nearest" });
       if (target.dataset.path)
         prefetchByPath(target.dataset.path);
     }
+    function setActiveSidebarDirectoryCollapsed(collapsed) {
+      const active = document.querySelector("#filelist .tree-dir.active[data-dirpath]");
+      if (!active)
+        return;
+      if (active.classList.contains("collapsed") === collapsed)
+        return;
+      const control = active.querySelector(".chev");
+      if (control)
+        control.click();
+    }
+    function openActiveSidebarItem() {
+      const active = document.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+      if (active && isSidebarRowVisible(active))
+        active.click();
+    }
     function jumpToActiveOrFirstFilteredFile() {
-      const items = visibleFileItems();
+      const items = visibleSidebarItems().filter((item) => !!item.dataset.path);
       const active = items.find((li) => li.classList.contains("active"));
       const target = active || items[0];
       if (target) {
@@ -2624,7 +2860,7 @@
           jumpToActiveOrFirstFilteredFile();
         } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
-          moveActiveVisibleFile(e.key === "ArrowDown" ? 1 : -1);
+          moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
         } else if (e.key === "Escape") {
           if (sbFilter.value) {
             sbFilter.value = "";
@@ -2652,8 +2888,15 @@
       if (e.key === "/") {
         e.preventDefault();
         focusFileFilter();
+      } else if (e.key === "Enter") {
+        if (isRepositorySidebarMode()) {
+          e.preventDefault();
+          openActiveSidebarItem();
+        }
       } else if (e.key === "j" || e.key === "k") {
-        const items = visibleFileItems();
+        e.preventDefault();
+        const repoSidebar = isRepositorySidebarMode();
+        const items = repoSidebar ? visibleSidebarItems() : $$("#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)");
         if (!items.length)
           return;
         let idx = items.findIndex((li) => li.classList.contains("active"));
@@ -2662,14 +2905,28 @@
         else
           idx = e.key === "j" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
         const target = items[idx];
-        if (target) {
+        const path = target?.dataset.path || target?.dataset.dirpath;
+        if (!repoSidebar && target) {
           target.click();
+          target.scrollIntoView({ block: "nearest" });
+        } else if (path) {
+          markActive(path);
           target.scrollIntoView({ block: "nearest" });
         }
         const nextIdx = e.key === "j" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
         const nextItem = items[nextIdx];
         if (nextItem && nextItem !== target && nextItem.dataset.path)
           prefetchByPath(nextItem.dataset.path);
+      } else if (e.key === "l") {
+        if (isRepositorySidebarMode()) {
+          e.preventDefault();
+          setActiveSidebarDirectoryCollapsed(false);
+        }
+      } else if (e.key === "h") {
+        if (isRepositorySidebarMode()) {
+          e.preventDefault();
+          setActiveSidebarDirectoryCollapsed(true);
+        }
       } else if (e.key === "u")
         setLayout("line-by-line");
       else if (e.key === "s")

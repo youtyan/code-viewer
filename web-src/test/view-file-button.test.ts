@@ -107,10 +107,62 @@ describe('view file UI', () => {
   });
 
   test('file detail header renders a breadcrumb path with copy action', () => {
-    expect(app.includes('function createFileBreadcrumb(path: string): HTMLElement')).toBe(true);
+    expect(app.includes('function createFileBreadcrumb(path: string, ref?: string): HTMLElement')).toBe(true);
     expect(app.includes("nav.className = 'gdp-file-breadcrumb'")).toBe(true);
     expect(app.includes("copy.className = 'gdp-file-header-icon gdp-copy-path'")).toBe(true);
     expect(style.includes('.gdp-file-breadcrumb')).toBe(true);
+  });
+
+  test('file detail breadcrumb directory parts navigate to repository folders', () => {
+    expect(app.includes('function createFileBreadcrumb(path: string, ref?: string): HTMLElement')).toBe(true);
+    expect(app.includes("document.createElement(isCurrent ? 'span' : 'button')")).toBe(true);
+    expect(app.includes("crumb.className = index === allParts.length - 1 ? 'gdp-file-breadcrumb-current' : 'gdp-file-breadcrumb-part'")).toBe(true);
+    expect(app.includes("setRoute(repoRoute(ref || 'worktree', currentPath))")).toBe(true);
+    expect(app.includes('loadRepo()')).toBe(true);
+  });
+
+  test('repository blob sidebar directory entries navigate to folder detail', () => {
+    expect(app.includes("if (onFileClick) {\n          li.addEventListener('click'")).toBe(true);
+    expect(app.includes("onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted })")).toBe(true);
+    expect(app.includes("chev.addEventListener('click', toggleDir)")).toBe(true);
+    expect(app.includes("if (file.type === 'tree')")).toBe(true);
+    expect(app.includes("setRoute(repoRoute(ref, file.path))")).toBe(true);
+    expect(app.includes('loadRepo()')).toBe(true);
+  });
+
+  test('repository sidebar supports visible-row keyboard navigation', () => {
+    expect(app.includes('function visibleSidebarItems()')).toBe(true);
+    expect(app.includes('function isSidebarRowVisible')).toBe(true);
+    expect(app.includes("return $$<HTMLElement>('#filelist li[data-path], #filelist .tree-dir[data-dirpath]')")).toBe(true);
+    expect(app.includes('function isRepositorySidebarMode()')).toBe(true);
+    expect(app.includes('function moveActiveSidebarItem(direction: 1 | -1)')).toBe(true);
+    expect(app.includes('function setActiveSidebarDirectoryCollapsed(collapsed: boolean)')).toBe(true);
+    expect(app.includes('function openActiveSidebarItem()')).toBe(true);
+    expect(app.includes('const repoSidebar = isRepositorySidebarMode()')).toBe(true);
+    expect(app.includes("if (e.key === 'Enter')")).toBe(true);
+    expect(app.includes('openActiveSidebarItem()')).toBe(true);
+    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes('setActiveSidebarDirectoryCollapsed(false)')).toBe(true);
+    expect(app.includes("if (e.key === 'h')")).toBe(true);
+    expect(app.includes('setActiveSidebarDirectoryCollapsed(true)')).toBe(true);
+  });
+
+  test('repository sidebar filter does not hide the right-side detail pane', () => {
+    expect(app.includes('if (!isRepositorySidebarMode()) {')).toBe(true);
+    expect(app.includes("document.querySelectorAll<HTMLElement>('.gdp-file-shell').forEach(card => {")).toBe(true);
+    expect(app.includes("card.classList.toggle('hidden-by-filter', !match)")).toBe(true);
+  });
+
+  test('repository folder pages keep the tree sidebar visible', () => {
+    expect(app.includes("renderRepoBlobSidebar(meta.path || '', meta.ref)")).toBe(true);
+    expect(style.includes('body.gdp-repo-page #sidebar,\nbody.gdp-file-detail-page #sidebar-resizer')).toBe(false);
+    expect(style.includes('body.gdp-repo-page #content {\n  margin-left: var(--sidebar-w);')).toBe(true);
+    expect(style.includes('body.gdp-repo-page #sidebar-resizer {\n  display: none;')).toBe(false);
+  });
+
+  test('repository folder detail uses the available content width', () => {
+    expect(style.includes('.gdp-repo-shell {\n  width: 100%;\n  min-width: 0;')).toBe(true);
+    expect(style.includes('width: min(1120px, calc(100vw - 64px));')).toBe(false);
   });
 
   test('file detail mode ignores stale source fetches', () => {
