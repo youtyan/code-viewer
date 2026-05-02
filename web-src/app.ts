@@ -11,6 +11,7 @@ import {
   type AppRoute,
   type SourceFileTarget,
 } from './routes';
+import { renderMarkdownPreview } from './markdown-preview';
 import { suppressWhitespaceOnlyInlineHighlights } from './ws-highlight';
 import type {
   DiffCardElement,
@@ -116,6 +117,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     '.gdp-file-shell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(path) : path) + '"]';
   const HIGHLIGHT_SRC = '/vendor/highlight.js/highlight.min.js';
   const DEFAULT_RANGE: DiffRange = { from: 'HEAD', to: 'worktree' };
+  const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
+  const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
+  // Keep in sync with .gdp-source-virtual-row height/line-height in web/style.css.
+  const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
+  const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
   let highlightLoadPromise: Promise<HljsApi | null> | null = null;
   let highlightConfigured = false;
   let PROJECT_NAME = '';
@@ -276,6 +282,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     else STATE.viewedFiles.delete(path);
     persistViewedFiles();
     applyViewedState();
+    $$<HTMLElement>(diffCardSelector(path)).forEach(card => {
+      applyViewedToCard(card, viewed, true);
+    });
+  }
+
+  function syncViewedCardDisplay(card: HTMLElement, viewed: boolean) {
+    card.classList.toggle('viewed', viewed);
+    card.querySelectorAll<HTMLInputElement>('.d2h-file-collapse-input').forEach(checkbox => {
+      checkbox.checked = viewed;
+    });
+  }
+
+  function applyViewedToCard(card: HTMLElement, viewed: boolean, collapseLoaded = false) {
+    syncViewedCardDisplay(card, viewed);
+    if (collapseLoaded && card.classList.contains('loaded')) {
+      setFileCollapsed(card as DiffCardElement, viewed);
+    }
   }
 
   function setFolderIcon(el: HTMLElement, collapsed: boolean) {
@@ -439,7 +462,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const li = document.createElement('li');
         li.className = 'tree-file';
         li.dataset.path = f.path;
-        li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
+        li.classList.toggle('viewed', !onFileClick && STATE.viewedFiles.has(f.path));
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
         const spacer = document.createElement('span');
         spacer.className = 'chev-spacer';
@@ -472,7 +495,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const li = document.createElement('li');
       li.dataset.index = String(i);
       li.dataset.path = f.path;
-      li.classList.toggle('viewed', STATE.viewedFiles.has(f.path));
+      li.classList.toggle('viewed', !onFileClick && STATE.viewedFiles.has(f.path));
       if (f.status) {
         li.appendChild(fileBadge(f.status));
       } else {
@@ -546,7 +569,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const el = $('#meta');
     if (!meta) { el.textContent = ''; return; }
     PROJECT_NAME = meta.project || PROJECT_NAME;
-    document.title = (meta.project ? meta.project + ' - ' : '') + 'git diff preview';
+    document.title = (meta.project ? meta.project + ' - ' : '') + 'code viewer';
     el.innerHTML = '';
     if (meta.branch) {
       const b = document.createElement('span');
@@ -613,15 +636,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   function applyViewedState() {
     $$<HTMLElement>('#filelist li[data-path]').forEach(li => {
       const path = li.dataset.path || '';
-      li.classList.toggle('viewed', STATE.viewedFiles.has(path));
+      li.classList.toggle('viewed', !isRepositorySidebarMode() && STATE.viewedFiles.has(path));
     });
+    if (isRepositorySidebarMode()) return;
     $$<HTMLElement>('.gdp-file-shell[data-path]').forEach(card => {
       const path = card.dataset.path || '';
       const viewed = STATE.viewedFiles.has(path);
-      card.classList.toggle('viewed', viewed);
-      card.querySelectorAll<HTMLInputElement>('.d2h-file-collapse-input').forEach(checkbox => {
-        checkbox.checked = viewed;
-      });
+      syncViewedCardDisplay(card, viewed);
     });
   }
 
@@ -667,6 +688,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   const MAX_PARALLEL = 2;
   let lazyObserver: IntersectionObserver | null = null;
   let SOURCE_REQ_SEQ = 0;
+  let ACTIVE_SOURCE_LOAD: {
+    controller: AbortController;
+    req: number;
+    target: SourceFileTarget;
+    card: DiffCardElement;
+  } | null = null;
 
   // Top-edge loading indicator. Reflects any in-flight fetch (initial meta,
   // per-file diff, "show next", prefetch, ref-picker etc.).
@@ -690,6 +717,28 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function sourceTargetsEqual(a: SourceFileTarget | null, b: SourceFileTarget | null): boolean {
     return !!a && !!b && a.path === b.path && a.ref === b.ref;
+  }
+
+  function isAbortError(err: unknown): boolean {
+    return err instanceof DOMException
+      ? err.name === 'AbortError'
+      : !!err && typeof err === 'object' && 'name' in err && (err as { name?: unknown }).name === 'AbortError';
+  }
+
+  function finishSourceLoad(req: number) {
+    if (ACTIVE_SOURCE_LOAD?.req === req) ACTIVE_SOURCE_LOAD = null;
+  }
+
+  function cancelActiveSourceLoad(reason: 'user' | 'navigation' | 'esc'): boolean {
+    const active = ACTIVE_SOURCE_LOAD;
+    if (!active) return false;
+    ACTIVE_SOURCE_LOAD = null;
+    SOURCE_REQ_SEQ++;
+    active.controller.abort();
+    if (reason !== 'navigation' && sourceTargetsEqual(sourceTargetFromRoute(), active.target)) {
+      renderSourceCancelled(active.card, active.target);
+    }
+    return true;
   }
 
   function fileSourceTarget(file: FileMeta): SourceFileTarget {
@@ -1028,7 +1077,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     return nav;
   }
 
-  function renderRepo(meta: RepoTreeResponse) {
+  async function renderRepo(meta: RepoTreeResponse) {
     PROJECT_NAME = meta.project || PROJECT_NAME;
     setPageMode();
     removeStandaloneSource();
@@ -1159,7 +1208,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       nameWrapper.append(icon, name);
       readmeHeader.appendChild(nameWrapper);
       wrapper.appendChild(readmeHeader);
-      wrapper.appendChild(renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, getHljs()));
+      try {
+        wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
+          syntaxHighlight: STATE.syntaxHighlight,
+          onNavigateMarkdown: (path, ref) => {
+            setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() });
+            renderStandaloneSource({ path, ref });
+          },
+        }));
+      } catch {
+        const fallback = document.createElement('pre');
+        fallback.className = 'gdp-markdown-fallback';
+        fallback.textContent = meta.readme.text;
+        wrapper.appendChild(fallback);
+      }
       readme.appendChild(wrapper);
       shell.appendChild(readme);
     }
@@ -1326,9 +1388,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       loadFile(file, card, buildPreviewUrl(file, 3));
     });
 
+    const openFileBtn = document.createElement('button');
+    openFileBtn.className = 'gdp-show-full';
+    openFileBtn.textContent = 'Open as file';
+    openFileBtn.title = 'Open this file in the virtualized source viewer';
+    openFileBtn.addEventListener('click', () => {
+      const target = fileSourceTarget(file);
+      setRoute({ screen: 'file', path: target.path, ref: target.ref, range: currentRange() });
+      applySourceRouteToShell();
+    });
+
     const fullBtn = document.createElement('button');
     fullBtn.className = 'gdp-show-full secondary';
-    fullBtn.textContent = 'Load full';
+    fullBtn.textContent = 'Load full diff';
+    fullBtn.title = 'Render the full diff with Diff2Html. This can be slow for large files.';
     fullBtn.addEventListener('click', () => {
       body.innerHTML = '';
       card.dataset.manualLoad = '1';
@@ -1338,6 +1411,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
 
     wrap.appendChild(note);
+    if (file.status === 'A') wrap.appendChild(openFileBtn);
     wrap.appendChild(previewBtn);
     wrap.appendChild(fullBtn);
     body.appendChild(wrap);
@@ -1828,11 +1902,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     button.title = sourceMode ? 'View diff' : 'View file';
   }
 
-  function renderSourceLoading(card: DiffCardElement, target: SourceFileTarget) {
+  function renderSourceLoading(card: DiffCardElement, target: SourceFileTarget, onCancel?: () => void) {
     const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
     const view = document.createElement('div');
     view.className = 'gdp-source-viewer loading';
-    view.textContent = 'Loading ' + target.path + ' at ' + target.ref + '...';
+    const content = document.createElement('div');
+    content.className = 'gdp-source-loading-content';
+    const title = document.createElement('strong');
+    title.className = 'gdp-source-loading-title';
+    title.textContent = 'Loading file';
+    const message = document.createElement('div');
+    message.className = 'gdp-source-loading-message';
+    message.textContent = target.path + ' at ' + target.ref;
+    content.append(title, message);
+    if (onCancel) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'gdp-btn gdp-btn-sm gdp-source-cancel';
+      button.textContent = 'Cancel';
+      button.title = 'Cancel loading (Esc)';
+      button.addEventListener('click', e => {
+        e.stopPropagation();
+        onCancel();
+      });
+      content.appendChild(button);
+    }
+    view.appendChild(content);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }
@@ -1842,6 +1937,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     const view = document.createElement('div');
     view.className = 'gdp-source-viewer error';
     view.textContent = message || ('Cannot load ' + target.path + ' at ' + target.ref);
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+  }
+
+  function renderSourceCancelled(card: DiffCardElement, target: SourceFileTarget) {
+    const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
+    const view = document.createElement('div');
+    view.className = 'gdp-source-viewer cancelled';
+    const content = document.createElement('div');
+    content.className = 'gdp-source-loading-content';
+    const title = document.createElement('strong');
+    title.className = 'gdp-source-loading-title';
+    title.textContent = 'Loading cancelled';
+    const message = document.createElement('div');
+    message.className = 'gdp-source-loading-message';
+    message.textContent = target.path + ' at ' + target.ref;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'gdp-btn gdp-btn-sm';
+    retry.textContent = 'Reopen';
+    retry.addEventListener('click', () => renderStandaloneSource(sourceTargetFromRoute() || target));
+    content.append(title, message, retry);
+    view.appendChild(content);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }
@@ -1966,123 +2084,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     return { tabs, codeButton, previewButton };
   }
 
-  function appendInlineMarkdown(parent: HTMLElement, text: string) {
-    const parts = text.split(/(`[^`]+`)/g);
-    parts.forEach(part => {
-      if (part.startsWith('`') && part.endsWith('`') && part.length > 1) {
-        const code = document.createElement('code');
-        code.textContent = part.slice(1, -1);
-        parent.appendChild(code);
-      } else {
-        parent.appendChild(document.createTextNode(part));
-      }
-    });
-  }
-
-  function appendMarkdownParagraph(markdown: HTMLElement, lines: string[]) {
-    if (!lines.length) return;
-    const p = document.createElement('p');
-    appendInlineMarkdown(p, lines.join(' ').trim());
-    markdown.appendChild(p);
-  }
-
-  function renderMarkdownPreview(textValue: string, target: SourceFileTarget, hljsRef: HljsApi | null): HTMLElement {
-    const markdown = document.createElement('div');
-    markdown.className = 'gdp-markdown-preview markdown-body';
-    const lines = textValue.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    let paragraph: string[] = [];
-    let list: HTMLUListElement | HTMLOListElement | null = null;
-    const flushParagraph = () => {
-      appendMarkdownParagraph(markdown, paragraph);
-      paragraph = [];
-    };
-    const flushList = () => {
-      list = null;
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fence = line.match(/^```(\S*)\s*$/);
-      if (fence) {
-        flushParagraph();
-        flushList();
-        const codeLines: string[] = [];
-        i++;
-        while (i < lines.length && !/^```\s*$/.test(lines[i])) {
-          codeLines.push(lines[i]);
-          i++;
-        }
-        const pre = document.createElement('pre');
-        const code = document.createElement('code');
-        const lang = fence[1] || inferLang(target.path) || '';
-        const raw = codeLines.join('\n');
-        if (hljsRef && hljsRef.highlight && lang && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
-          try {
-            code.innerHTML = hljsRef.highlight(raw, { language: lang, ignoreIllegals: true }).value;
-            code.classList.add('hljs');
-          } catch {
-            code.textContent = raw;
-          }
-        } else {
-          code.textContent = raw;
-        }
-        pre.appendChild(code);
-        markdown.appendChild(pre);
-        continue;
-      }
-
-      if (!line.trim()) {
-        flushParagraph();
-        flushList();
-        continue;
-      }
-      const heading = line.match(/^(#{1,6})\s+(.+)$/);
-      if (heading) {
-        flushParagraph();
-        flushList();
-        const level = String(Math.min(heading[1].length, 6));
-        const h = document.createElement(('h' + level) as keyof HTMLElementTagNameMap);
-        appendInlineMarkdown(h, heading[2]);
-        markdown.appendChild(h);
-        continue;
-      }
-      if (/^\s*---+\s*$/.test(line)) {
-        flushParagraph();
-        flushList();
-        markdown.appendChild(document.createElement('hr'));
-        continue;
-      }
-      const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
-      const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
-      if (bullet || ordered) {
-        flushParagraph();
-        const tag = ordered ? 'ol' : 'ul';
-        if (!list || list.tagName.toLowerCase() !== tag) {
-          list = document.createElement(tag) as HTMLUListElement | HTMLOListElement;
-          markdown.appendChild(list);
-        }
-        const li = document.createElement('li');
-        appendInlineMarkdown(li, (bullet || ordered)![1]);
-        list.appendChild(li);
-        continue;
-      }
-      const quote = line.match(/^\s*>\s?(.*)$/);
-      if (quote) {
-        flushParagraph();
-        flushList();
-        const blockquote = document.createElement('blockquote');
-        appendInlineMarkdown(blockquote, quote[1]);
-        markdown.appendChild(blockquote);
-        continue;
-      }
-      flushList();
-      paragraph.push(line);
-    }
-    flushParagraph();
-    return markdown;
-  }
-
-  async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string) {
+  async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean> {
     const lines = textValue.length ? textValue.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n') : [''];
     const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
     const isStandalone = card.classList.contains('gdp-standalone-source');
@@ -2093,12 +2095,62 @@ window.GdpExpandLogic = GdpExpandLogic;
       header.className = 'gdp-source-meta';
       header.textContent = target.path + ' @ ' + target.ref;
     }
+    const lang = inferLang(target.path);
+    const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
+    if (signal?.aborted) return false;
+    const previewable = isPreviewableSource(target.path);
+    const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
+    if (shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled()) {
+      const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
+      if (previewable) {
+        const { tabs, codeButton, previewButton } = createSourceTabs('preview');
+        if (tabsHost) {
+          tabsHost.hidden = false;
+          tabsHost.replaceChildren(tabs);
+        }
+        const preview = await renderMarkdownPreview(textValue, target, {
+          syntaxHighlight: STATE.syntaxHighlight,
+          signal,
+          onNavigateMarkdown: (path, ref) => {
+            setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() });
+            renderStandaloneSource({ path, ref });
+          },
+        });
+        if (signal?.aborted) return false;
+        virtualCode.hidden = true;
+        previewButton?.addEventListener('click', () => {
+          previewButton.classList.add('active');
+          codeButton.classList.remove('active');
+          preview.hidden = false;
+          virtualCode.hidden = true;
+        });
+        codeButton.addEventListener('click', () => {
+          codeButton.classList.add('active');
+          previewButton.classList.remove('active');
+          preview.hidden = true;
+          virtualCode.hidden = false;
+        });
+        if (header) view.appendChild(header);
+        view.classList.add('virtual');
+        view.append(preview, virtualCode);
+        if (body) body.replaceWith(view);
+        else card.appendChild(view);
+        return true;
+      }
+      if (header) view.appendChild(header);
+      view.classList.add('virtual');
+      view.appendChild(virtualCode);
+      if (signal?.aborted) return false;
+      if (body) body.replaceWith(view);
+      else card.appendChild(view);
+      return true;
+    }
     const table = document.createElement('table');
     table.className = 'gdp-source-table';
     const tbody = document.createElement('tbody');
-    const hljsRef = await loadSyntaxHighlighter();
-    const lang = inferLang(target.path);
-    lines.forEach((line, index) => {
+    for (let index = 0; index < lines.length; index++) {
+      if (signal?.aborted) return false;
+      const line = lines[index];
       const tr = document.createElement('tr');
       const num = document.createElement('td');
       num.className = 'gdp-source-line-number';
@@ -2118,17 +2170,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       tr.appendChild(num);
       tr.appendChild(code);
       tbody.appendChild(tr);
-    });
+      if (index > 0 && index % 500 === 0) {
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        if (signal?.aborted) return false;
+      }
+    }
     table.appendChild(tbody);
-    const previewable = isPreviewableSource(target.path);
-    const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
     const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? 'preview' : 'code');
     if (tabsHost) {
       tabsHost.hidden = false;
       tabsHost.replaceChildren(tabs);
     }
     if (previewable) {
-      const preview = renderMarkdownPreview(textValue, target, hljsRef);
+      const preview = await renderMarkdownPreview(textValue, target, {
+        syntaxHighlight: STATE.syntaxHighlight,
+        signal,
+        onNavigateMarkdown: (path, ref) => {
+          setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() });
+          renderStandaloneSource({ path, ref });
+        },
+      });
+      if (signal?.aborted) return false;
       table.hidden = true;
       previewButton?.addEventListener('click', () => {
         previewButton.classList.add('active');
@@ -2145,14 +2207,148 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (header) view.appendChild(header);
       view.appendChild(preview);
       view.appendChild(table);
+      if (signal?.aborted) return false;
       if (body) body.replaceWith(view);
       else card.appendChild(view);
-      return;
+      return true;
     }
     if (header) view.appendChild(header);
     view.appendChild(table);
+    if (signal?.aborted) return false;
     if (body) body.replaceWith(view);
     else card.appendChild(view);
+    return true;
+  }
+
+  function shouldVirtualizeSource(textValue: string, lines: string[]): boolean {
+    return textValue.length >= VIRTUAL_SOURCE_SIZE_THRESHOLD || lines.length >= VIRTUAL_SOURCE_LINE_THRESHOLD;
+  }
+
+  function isVirtualSourceDisabled(): boolean {
+    return new URLSearchParams(window.location.search).get('virtual') === 'off';
+  }
+
+  function buildCurrentFileRouteWithVirtualMode(target: SourceFileTarget, virtualMode: 'auto' | 'off'): string {
+    const route: AppRoute = {
+      screen: 'file',
+      path: target.path,
+      ref: target.ref,
+      view: STATE.route.screen === 'file' ? STATE.route.view : 'blob',
+      range: currentRange(),
+    };
+    const url = new URL(buildRoute(route), window.location.origin);
+    if (virtualMode === 'off') url.searchParams.set('virtual', 'off');
+    else url.searchParams.delete('virtual');
+    return url.pathname + url.search;
+  }
+
+  function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'gdp-source-virtual';
+    const info = document.createElement('div');
+    info.className = 'gdp-source-virtual-info';
+    const badge = document.createElement('span');
+    badge.className = 'gdp-source-virtual-badge';
+    badge.textContent = 'Virtual mode';
+    const summary = document.createElement('span');
+    summary.className = 'gdp-source-virtual-summary';
+    summary.textContent = lines.length.toLocaleString() + ' lines, ' + formatBytes(textValue.length) +
+      '. Only visible rows are rendered. Highlighting is per-line.';
+    const actions = document.createElement('span');
+    actions.className = 'gdp-source-virtual-actions';
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'gdp-source-virtual-action';
+    copy.textContent = 'Copy all';
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(textValue);
+        copy.textContent = 'Copied';
+        setTimeout(() => { copy.textContent = 'Copy all'; }, 1200);
+      } catch {
+        copy.textContent = 'Copy failed';
+        setTimeout(() => { copy.textContent = 'Copy all'; }, 1600);
+      }
+    });
+    const full = document.createElement('a');
+    full.className = 'gdp-source-virtual-action';
+    full.href = buildCurrentFileRouteWithVirtualMode(target, 'off');
+    full.textContent = 'Open full view';
+    full.title = 'Render every line without virtualization. This can be slow for large files.';
+    full.addEventListener('click', (e) => {
+      e.preventDefault();
+      history.pushState(null, '', full.href);
+      renderStandaloneSource(target);
+    });
+    actions.append(copy, full);
+    info.append(badge, summary, actions);
+    const scroller = document.createElement('div');
+    scroller.className = 'gdp-source-virtual-scroller';
+    const spacer = document.createElement('div');
+    spacer.className = 'gdp-source-virtual-spacer';
+    spacer.style.height = Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px';
+    const windowEl = document.createElement('div');
+    windowEl.className = 'gdp-source-virtual-window';
+    spacer.appendChild(windowEl);
+    scroller.appendChild(spacer);
+    wrap.append(info, scroller);
+
+    let raf = 0;
+    let renderedStart = -1;
+    let renderedEnd = -1;
+    const render = () => {
+      raf = 0;
+      const viewportHeight = scroller.clientHeight || window.innerHeight;
+      const overscan = 20;
+      const start = Math.max(0, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan);
+      const end = Math.min(lines.length, Math.ceil((scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT) + overscan);
+      if (start === renderedStart && end === renderedEnd) return;
+      renderedStart = start;
+      renderedEnd = end;
+      windowEl.replaceChildren();
+      windowEl.style.transform = 'translateY(' + (start * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px)';
+      const fragment = document.createDocumentFragment();
+      for (let index = start; index < end; index++) {
+        const row = document.createElement('div');
+        row.className = 'gdp-source-virtual-row';
+        const num = document.createElement('span');
+        num.className = 'gdp-source-virtual-line-number';
+        num.textContent = String(index + 1);
+        const code = document.createElement('span');
+        code.className = 'gdp-source-virtual-line-code';
+        const line = lines[index] ?? '';
+        if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+          try {
+            code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
+            code.classList.add('hljs');
+          } catch {
+            code.textContent = line;
+          }
+        } else {
+          code.textContent = line;
+        }
+        row.append(num, code);
+        fragment.appendChild(row);
+      }
+      windowEl.appendChild(fragment);
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(render);
+    };
+    scroller.addEventListener('scroll', schedule, { passive: true });
+    let resizeObserver: ResizeObserver | null = null;
+    resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      if (!scroller.isConnected) {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        return;
+      }
+      schedule();
+    }) : null;
+    resizeObserver?.observe(scroller);
+    render();
+    schedule();
+    return wrap;
   }
 
   function renderSourceMedia(card: DiffCardElement, target: SourceFileTarget, mediaKind: string) {
@@ -2255,6 +2451,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function renderStandaloneSource(target: SourceFileTarget) {
+    cancelActiveSourceLoad('navigation');
     const req = ++SOURCE_REQ_SEQ;
     const root = $('#diff');
     const repoTarget = repoFileTargetFromRoute();
@@ -2323,32 +2520,45 @@ window.GdpExpandLogic = GdpExpandLogic;
     } else {
       root.prepend(card);
     }
-    renderSourceLoading(card, target);
+    const controller = new AbortController();
+    ACTIVE_SOURCE_LOAD = { controller, req, target, card };
+    renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'));
     try {
       const displayKind = sourceDisplayKind(target.path);
       if (displayKind === 'unsupported') {
         if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        finishSourceLoad(req);
         renderSourceUnsupported(card, target);
         return;
       }
       if (displayKind === 'image' || displayKind === 'video' || displayKind === 'pdf') {
         if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        finishSourceLoad(req);
         renderSourceMedia(card, target, displayKind);
         return;
       }
       if (displayKind === 'text') {
-      const response = await trackLoad(fetch(buildRawFileUrl(target)));
+      const response = await trackLoad(fetch(buildRawFileUrl(target), { signal: controller.signal }));
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
       if (!response.ok) {
+        finishSourceLoad(req);
         renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
         return;
       }
       const textValue = await response.text();
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      await renderSourceText(card, target, textValue);
-      }
-    } catch {
+      const rendered = await renderSourceText(card, target, textValue, controller.signal);
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+      if (!rendered) return;
+      finishSourceLoad(req);
+      }
+    } catch (err) {
+      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+      finishSourceLoad(req);
+      if (isAbortError(err)) {
+        renderSourceCancelled(card, target);
+        return;
+      }
       renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
     }
   }
@@ -2525,6 +2735,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     mountDiff(card, file, data);
     card.style.containIntrinsicSize = Math.max(card.offsetHeight, file.estimated_height_px || 200) + 'px';
+    applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
     if (data.truncated && data.mode === 'preview') {
       addExpandHunksUI(file, data, card);
@@ -2969,6 +3180,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     const targetEl = e.target as Element | null;
     if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA')) return;
+    if (e.key === 'Escape' && !document.querySelector('.mkdp-lightbox')) {
+      if (cancelActiveSourceLoad('esc')) {
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.key === '/') { e.preventDefault(); focusFileFilter(); }
     else if (e.key === 'Enter') {
       if (isRepositorySidebarMode()) {
@@ -3029,8 +3246,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     return trackLoad<RepoTreeResponse>(fetch('/_tree?' + params.toString()).then(r => {
       if (!r.ok) throw new Error('failed to load repository tree');
       return r.json();
-    })).then(data => {
-      renderRepo(data);
+    })).then(async data => {
+      await renderRepo(data);
       setStatus('live');
       syncHeaderMenu();
     }).catch(() => setStatus('error'));
@@ -3297,14 +3514,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncRefInputs();
     syncHeaderMenu();
     if (STATE.route.screen === 'repo') {
-      SOURCE_REQ_SEQ++;
+      cancelActiveSourceLoad('navigation');
       setPageMode();
       removeStandaloneSource();
       loadRepo();
       return;
     }
     if (STATE.route.screen !== 'file') {
-      SOURCE_REQ_SEQ++;
+      cancelActiveSourceLoad('navigation');
       setPageMode();
       removeStandaloneSource();
       load();

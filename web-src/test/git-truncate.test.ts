@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -30,6 +30,59 @@ describe('truncateToNHunks', () => {
 
     expect(result.includes('+new one\n@@ -10,2 +10,2 @@')).toBe(true);
     expect(result.includes('+new one@@ -10,2 +10,2 @@')).toBe(false);
+  });
+
+  test('caps preview output by line count even when a single hunk is huge', () => {
+    const diff = [
+      'diff --git a/generated.js b/generated.js',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/generated.js',
+      '@@ -0,0 +1,5000 @@',
+      ...Array.from({ length: 5000 }, (_, index) => '+line ' + index),
+      '',
+    ].join('\n');
+
+    const result = truncateToNHunks(diff, 3, 100);
+
+    expect(result.lineTruncated).toBe(true);
+    expect(result.renderedHunks).toBe(1);
+    expect(result.lineCount <= 100).toBe(true);
+    expect(result.text.includes('+line 4999')).toBe(false);
+  });
+
+  test('counts inserted separators when capping multi-hunk preview lines', () => {
+    const hunk = (offset: number) => [
+      '@@ -' + offset + ',4 +' + offset + ',4 @@',
+      ' context ' + offset,
+      '-old ' + offset,
+      '+new ' + offset,
+      ' tail ' + offset,
+    ].join('\n');
+    const diff = [
+      'diff --git a/file.ts b/file.ts',
+      '--- a/file.ts',
+      '+++ b/file.ts',
+      hunk(1),
+      hunk(20),
+      hunk(40),
+      '',
+    ].join('\n');
+
+    const result = truncateToNHunks(diff, 3, 14);
+
+    expect(result.lineTruncated).toBe(true);
+    expect(result.lineCount <= 14).toBe(true);
+    expect(result.text.includes('@@ -40,4 +40,4 @@')).toBe(false);
+  });
+
+  test('server preview keeps medium and large files eligible for split layout', () => {
+    const server = readFileSync('web-src/server/preview.ts', 'utf8');
+
+    expect(server.includes("const previewUrl = sizeClass !== 'small'")).toBe(true);
+    expect(server.includes("force_layout: sizeClass === 'huge' ? 'line-by-line' : undefined")).toBe(true);
+    expect(server.includes("force_layout: sizeClass === 'large' || sizeClass === 'huge'")).toBe(false);
+    expect(server.includes("force_layout: sizeClass !== 'small'")).toBe(false);
   });
 });
 
