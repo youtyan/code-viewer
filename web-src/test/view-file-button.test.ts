@@ -105,11 +105,18 @@ describe('view file UI', () => {
     expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
   });
 
+  test('raw file HEAD requests validate refs and paths before returning metadata', () => {
+    expect(server.includes("if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not in ref', 404);\n    if (req.method === 'HEAD')")).toBe(true);
+    expect(server.includes("const full = safeWorktreePath(path);\n    if (!full) return text('not found', 404);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not found', 404);\n    if (req.method === 'HEAD')")).toBe(true);
+  });
+
   test('binary and media file views show file metadata', () => {
     expect(app.includes('function formatBytes(bytes: number): string')).toBe(true);
     expect(app.includes('function humanFileKind(path: string, mime: string | undefined, fallback: string): string')).toBe(true);
     expect(app.includes('async function loadRawFileInfo(target: SourceFileTarget)')).toBe(true);
     expect(app.includes("method: 'HEAD'")).toBe(true);
+    expect(app.includes("const rawSize = res.headers.get('content-length')")).toBe(true);
+    expect(app.includes('size: rawSize != null && Number.isFinite(size) ? size : undefined')).toBe(true);
     expect(app.includes('function createSourceFileInfo')).toBe(true);
     expect(app.includes("type.textContent = humanFileKind(target.path, meta.type, kind)")).toBe(true);
     expect(app.includes("type.className = 'kind'")).toBe(true);
@@ -124,6 +131,8 @@ describe('view file UI', () => {
     expect(app.includes("previewButton.textContent = 'Preview'")).toBe(true);
     expect(app.includes("codeButton.textContent = 'Code'")).toBe(true);
     expect(app.includes("function createSourceTabs(active: 'preview' | 'code')")).toBe(true);
+    expect(app.includes("let previewButton: HTMLButtonElement | null = null")).toBe(true);
+    expect(app.includes('return { tabs, codeButton, previewButton }')).toBe(true);
     expect(app.includes('await loadSyntaxHighlighter()')).toBe(true);
     expect(style.includes('.gdp-markdown-preview')).toBe(true);
     expect(style.includes('.gdp-source-tabs')).toBe(true);

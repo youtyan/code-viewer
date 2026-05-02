@@ -1933,9 +1933,10 @@
         const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
         if (!res.ok)
           return {};
-        const size = Number(res.headers.get("content-length") || "");
+        const rawSize = res.headers.get("content-length");
+        const size = rawSize == null ? NaN : Number(rawSize);
         return {
-          size: Number.isFinite(size) ? size : undefined,
+          size: rawSize != null && Number.isFinite(size) ? size : undefined,
           type: res.headers.get("content-type") || undefined
         };
       } catch {
@@ -1967,14 +1968,15 @@
       codeButton.textContent = "Code";
       codeButton.classList.toggle("active", active === "code");
       tabs.appendChild(codeButton);
+      let previewButton = null;
       if (active === "preview") {
-        const previewButton = document.createElement("button");
+        previewButton = document.createElement("button");
         previewButton.type = "button";
         previewButton.className = "active";
         previewButton.textContent = "Preview";
         tabs.prepend(previewButton);
       }
-      return { tabs, codeButton, previewButton: tabs.querySelector("button:first-child") };
+      return { tabs, codeButton, previewButton };
     }
     function appendInlineMarkdown(parent, text) {
       const parts = text.split(/(`[^`]+`)/g);
@@ -2141,7 +2143,6 @@
         tabsHost.replaceChildren(tabs);
       }
       if (previewable) {
-        const tabsHost2 = card.querySelector(".gdp-file-detail-tabs");
         const preview = renderMarkdownPreview(textValue, target, hljsRef);
         table.hidden = true;
         previewButton?.addEventListener("click", () => {
