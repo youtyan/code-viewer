@@ -248,4 +248,52 @@ describe('view file UI', () => {
     expect(app.includes('let SOURCE_REQ_SEQ = 0')).toBe(true);
     expect(app.includes('if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return')).toBe(true);
   });
+
+  test('file detail source loading can be cancelled by button or Escape', () => {
+    expect(app.includes('let ACTIVE_SOURCE_LOAD:')).toBe(true);
+    expect(app.includes("function cancelActiveSourceLoad(reason: 'user' | 'navigation' | 'esc'): boolean")).toBe(true);
+    expect(app.includes("fetch(buildRawFileUrl(target), { signal: controller.signal })")).toBe(true);
+    expect(app.includes("renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'))")).toBe(true);
+    expect(app.includes("if (e.key === 'Escape' && !document.querySelector('.mkdp-lightbox'))")).toBe(true);
+    expect(app.includes("if (cancelActiveSourceLoad('esc'))")).toBe(true);
+    expect(app.includes('function renderSourceCancelled(card: DiffCardElement, target: SourceFileTarget)')).toBe(true);
+    expect(app.includes('async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean>')).toBe(true);
+    expect(app.includes('if (signal?.aborted) return false')).toBe(true);
+    expect(app.includes('const rendered = await renderSourceText(card, target, textValue, controller.signal)')).toBe(true);
+    expect(style.includes('.gdp-source-viewer.cancelled')).toBe(true);
+    expect(style.includes('.gdp-source-cancel')).toBe(true);
+  });
+
+  test('large source files use a virtualized source viewer instead of rendering every row', () => {
+    expect(app.includes('const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000')).toBe(true);
+    expect(app.includes('function shouldVirtualizeSource(textValue: string, lines: string[]): boolean')).toBe(true);
+    expect(app.includes('function isVirtualSourceDisabled(): boolean')).toBe(true);
+    expect(app.includes("new URLSearchParams(window.location.search).get('virtual') === 'off'")).toBe(true);
+    expect(app.includes("function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement")).toBe(true);
+    expect(app.includes("view.classList.add('virtual')")).toBe(true);
+    expect(app.includes("badge.textContent = 'Virtual mode'")).toBe(true);
+    expect(app.includes("const { tabs, codeButton, previewButton } = createSourceTabs('preview')")).toBe(true);
+    expect(app.includes('virtualCode.hidden = true')).toBe(true);
+    expect(app.includes("full.textContent = 'Open full view'")).toBe(true);
+    expect(app.includes('navigator.clipboard.writeText(textValue)')).toBe(true);
+    expect(app.includes('VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH')).toBe(true);
+    expect(app.includes("code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value")).toBe(true);
+    expect(app.includes("code.textContent = line")).toBe(true);
+    expect(app.includes('windowEl.replaceChildren()')).toBe(true);
+    expect(app.includes('render();')).toBe(true);
+    expect(app.includes('new ResizeObserver(() =>')).toBe(true);
+    expect(app.includes('resizeObserver?.disconnect()')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-row')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-badge')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-action')).toBe(true);
+    expect(style.includes('line-height: 20px;')).toBe(true);
+  });
+
+  test('huge added diffs can be opened through the virtualized file viewer', () => {
+    expect(app.includes("openFileBtn.textContent = 'Open as file'")).toBe(true);
+    expect(app.includes("openFileBtn.title = 'Open this file in the virtualized source viewer'")).toBe(true);
+    expect(app.includes("if (file.status === 'A') wrap.appendChild(openFileBtn)")).toBe(true);
+    expect(app.includes("fullBtn.textContent = 'Load full diff'")).toBe(true);
+  });
 });

@@ -14,6 +14,7 @@ const WEB_ROOT = join(ROOT, 'web');
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version as string;
 const DEFAULT_ARGS = ['HEAD'];
 const PREVIEW_HUNKS_DEFAULT = 3;
+const PREVIEW_LINES_DEFAULT = 1200;
 const WATCHED_ASSET_FILES = ['index.html', 'style.css', 'app.js'];
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
@@ -130,6 +131,8 @@ function staticFile(pathname: string): Response | null {
     '/favicon.png': ['favicon.png', 'image/png'],
     '/style.css': ['style.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'application/javascript; charset=utf-8'],
+    '/mermaid.js': ['mermaid.js', 'application/javascript; charset=utf-8'],
+    '/shiki.js': ['shiki.js', 'application/javascript; charset=utf-8'],
     '/vendor/diff2html/diff2html.min.css': ['vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
     '/vendor/diff2html/diff2html-ui.min.js': ['vendor/diff2html/diff2html-ui.min.js', 'application/javascript; charset=utf-8'],
     '/vendor/highlight.js/highlight.min.js': ['vendor/highlight.js/highlight.min.js', 'application/javascript; charset=utf-8'],
@@ -198,7 +201,7 @@ function fileToMeta(file: git.GitFileMeta, range: { from?: string; to?: string }
   const q = { path: file.path, old_path: file.old_path, status: file.status, from: range.from, to: range.to, ...extraQs };
   if (file.untracked) Object.assign(q, { untracked: '1' });
   const previewQ = { ...q, mode: 'preview', max_hunks: PREVIEW_HUNKS_DEFAULT };
-  const previewUrl = sizeClass === 'large' || sizeClass === 'huge' ? `/file_diff${buildQuery(previewQ)}` : null;
+  const previewUrl = sizeClass !== 'small' ? `/file_diff${buildQuery(previewQ)}` : null;
   return {
     order: file.order,
     key: `${file.status || 'M'}\0${file.old_path || ''}\0${file.path}`,
@@ -211,7 +214,7 @@ function fileToMeta(file: git.GitFileMeta, range: { from?: string; to?: string }
     binary: file.binary || false,
     media_kind: guessMediaKind(file.path),
     size_class: sizeClass,
-    force_layout: sizeClass === 'large' || sizeClass === 'huge' ? 'line-by-line' : undefined,
+    force_layout: sizeClass === 'huge' ? 'line-by-line' : undefined,
     highlight: sizeClass === 'small',
     load_url: `/file_diff${buildQuery(q)}`,
     preview_url: previewUrl,
@@ -437,7 +440,11 @@ function handleFileDiff(url: URL) {
   }
   const mode = url.searchParams.get('mode') || 'full';
   const truncated = mode === 'preview'
-    ? git.truncateToNHunks(diffText, Number(url.searchParams.get('max_hunks')) || PREVIEW_HUNKS_DEFAULT)
+    ? git.truncateToNHunks(
+      diffText,
+      Number(url.searchParams.get('max_hunks')) || PREVIEW_HUNKS_DEFAULT,
+      Number(url.searchParams.get('max_lines')) || PREVIEW_LINES_DEFAULT,
+    )
     : git.truncateToNHunks(diffText, 1e9);
   const body: FileDiffResponse & { line_count?: number; error?: string } = {
     path,
@@ -448,7 +455,7 @@ function handleFileDiff(url: URL) {
     hunk_count: truncated.totalHunks,
     rendered_hunk_count: truncated.renderedHunks,
     line_count: truncated.lineCount,
-    truncated: mode === 'preview' && truncated.totalHunks > truncated.renderedHunks,
+    truncated: mode === 'preview' && (truncated.totalHunks > truncated.renderedHunks || truncated.lineTruncated),
     binary: diffText.includes('Binary files'),
     error: errText,
     generation,

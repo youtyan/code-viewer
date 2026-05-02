@@ -28,14 +28,14 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts",
+    "build": "bun build --target=browser --format=iife --outfile=web/app.js web-src/app.ts && bun build --target=browser --format=esm --outfile=web/mermaid.js web-src/mermaid-entry.ts && bun build --target=browser --format=esm --outfile=web/shiki.js web-src/shiki-entry.ts",
     "check": "tsc --noEmit",
-    "check:bundle": "bun build --target=browser --format=iife --outfile=/tmp/code-viewer-app.js web-src/app.ts && cmp /tmp/code-viewer-app.js web/app.js",
+    "check:bundle": "bun build --target=browser --format=iife --outfile=/tmp/code-viewer-app.js web-src/app.ts && cmp /tmp/code-viewer-app.js web/app.js && bun build --target=browser --format=esm --outfile=/tmp/code-viewer-mermaid.js web-src/mermaid-entry.ts && cmp /tmp/code-viewer-mermaid.js web/mermaid.js && bun build --target=browser --format=esm --outfile=/tmp/code-viewer-shiki.js web-src/shiki-entry.ts && cmp /tmp/code-viewer-shiki.js web/shiki.js",
     "dev": "bun run web-src/server/dev.ts",
     "preview": "bun run web-src/server/dev.ts",
     "preview:raw": "bun run web-src/server/preview.ts",
     "test": "bun test",
-    "verify": "bun run check && bun run build && bun run check:bundle && bun run test && node --check web/app.js",
+    "verify": "bun run check && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js",
     "pack:dry": "npm pack --dry-run",
     "prepublishOnly": "bun run verify"
   },
@@ -52,5 +52,13 @@
   },
   "engines": {
     "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "markdown-it": "^14.1.1",
+    "markdown-it-anchor": "^9.2.0",
+    "markdown-it-footnote": "^4.0.0",
+    "mermaid": "^11.14.0",
+    "shiki": "^4.0.2"
   }
 }

@@ -361,17 +361,65 @@ export function truncateToNHunks(diffText: string, n: number): {
   totalHunks: number;
   renderedHunks: number;
   lineCount: number;
+  lineTruncated: boolean;
+};
+export function truncateToNHunks(diffText: string, n: number, maxLines: number): {
+  text: string;
+  totalHunks: number;
+  renderedHunks: number;
+  lineCount: number;
+  lineTruncated: boolean;
+};
+export function truncateToNHunks(diffText: string, n: number, maxLines = Number.POSITIVE_INFINITY): {
+  text: string;
+  totalHunks: number;
+  renderedHunks: number;
+  lineCount: number;
+  lineTruncated: boolean;
 } {
   const { header, hunks } = splitHunks(diffText);
   if (hunks.length === 0) {
-    return { text: diffText, totalHunks: 0, renderedHunks: 0, lineCount: (diffText.match(/\n/g) || []).length };
+    const lines = diffText.split('\n');
+    const lineTruncated = Number.isFinite(maxLines) && lines.length > maxLines;
+    const text = lineTruncated ? lines.slice(0, maxLines).join('\n') : diffText;
+    return {
+      text,
+      totalHunks: 0,
+      renderedHunks: 0,
+      lineCount: (text.match(/\n/g) || []).length,
+      lineTruncated,
+    };
   }
-  const renderedHunks = Math.min(n, hunks.length);
-  const text = header + hunks.slice(0, renderedHunks).join('\n');
+  const maxHunks = Math.min(n, hunks.length);
+  const rendered: string[] = [];
+  let renderedHunks = 0;
+  let usedLines = (header.match(/\n/g) || []).length;
+  let lineTruncated = false;
+  for (let index = 0; index < maxHunks; index++) {
+    const hunk = hunks[index];
+    const lines = hunk.split('\n');
+    const separatorLines = rendered.length > 0 ? 1 : 0;
+    const remaining = maxLines - usedLines - separatorLines;
+    if (remaining <= 0) {
+      lineTruncated = true;
+      break;
+    }
+    if (Number.isFinite(maxLines) && lines.length > remaining) {
+      rendered.push(lines.slice(0, remaining).join('\n'));
+      renderedHunks++;
+      lineTruncated = true;
+      break;
+    }
+    rendered.push(hunk);
+    renderedHunks++;
+    usedLines += separatorLines + lines.length;
+  }
+  const text = header + rendered.join('\n');
   return {
     text,
     totalHunks: hunks.length,
     renderedHunks,
     lineCount: (text.match(/\n/g) || []).length,
+    lineTruncated,
   };
 }
