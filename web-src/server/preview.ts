@@ -482,26 +482,56 @@ function handleFileRange(url: URL) {
   return json(body);
 }
 
-function handleRawFile(url: URL) {
+function handleRawFile(req: Request, url: URL) {
   const path = url.searchParams.get('path') || '';
   if (!safePath(path)) return text('forbidden', 403);
   const ref = url.searchParams.get('ref') || 'worktree';
+  const size = rawFileSize(path, ref);
+  if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
   let body: BodyInit;
   if (ref !== 'worktree' && ref !== '') {
     if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
-    const res = git.show(ref, path, cwd);
+    const res = git.showBytes(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
-    body = res.stdout;
+    body = res.stdout.buffer.slice(res.stdout.byteOffset, res.stdout.byteOffset + res.stdout.byteLength) as ArrayBuffer;
   } else {
     const full = safeWorktreePath(path);
     if (!full) return text('not found', 404);
-    body = new Uint8Array(readFileSync(full));
+    const bytes = new Uint8Array(readFileSync(full));
+    body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   }
+  return new Response(body, { headers: rawFileHeaders(path, size) });
+}
+
+function rawFileSize(path: string, ref: string): number | null {
+  if (ref !== 'worktree' && ref !== '') {
+    if (!git.verifyTreeRef(ref, cwd)) return null;
+    const res = git.objectSize(ref, path, cwd);
+    return res.code === 0 ? res.size : null;
+  }
+  const full = safeWorktreePath(path);
+  if (!full) return null;
+  try {
+    return (statSync(full) as unknown as { size: number }).size;
+  } catch {
+    return null;
+  }
+}
+
+function rawFileHeaders(path: string, size: number | null = null): HeadersInit {
   const mime: Record<string, string> = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm',
+    '.pdf': 'application/pdf',
   };
-  return new Response(body, { headers: { 'Content-Type': mime[extname(path).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' } });
+  const headers: Record<string, string> = {
+    'Content-Type': mime[extname(path).toLowerCase()] || 'application/octet-stream',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': 'sandbox',
+  };
+  if (size != null) headers['Content-Length'] = String(size);
+  return headers;
 }
 
 function isForbiddenUploadName(name: string): boolean {
@@ -696,7 +726,7 @@ const server = Bun.serve({
     if (url.pathname === '/_tree') return handleTree(url);
     if (url.pathname === '/file_diff') return handleFileDiff(url);
     if (url.pathname === '/file_range') return handleFileRange(url);
-    if (url.pathname === '/_file') return handleRawFile(url);
+    if (url.pathname === '/_file') return handleRawFile(req, url);
     if (url.pathname === '/_open_path') return handleOpenPath(req);
     if (url.pathname === '/_upload_files') return handleUploadFiles(req);
     if (url.pathname === '/_refs') return json(git.refs(cwd));

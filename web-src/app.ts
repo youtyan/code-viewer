@@ -1846,8 +1846,122 @@ window.GdpExpandLogic = GdpExpandLogic;
     else card.appendChild(view);
   }
 
+  function renderSourceUnsupported(card: DiffCardElement, target: SourceFileTarget) {
+    const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
+    const view = document.createElement('div');
+    view.className = 'gdp-source-viewer unsupported';
+    const content = document.createElement('div');
+    content.className = 'gdp-source-unsupported-content';
+    const title = document.createElement('strong');
+    title.className = 'gdp-source-unsupported-title';
+    title.textContent = 'Preview unavailable';
+    const message = document.createElement('div');
+    message.className = 'gdp-source-unsupported-message';
+    message.textContent = 'This file type cannot be previewed safely in the browser.';
+    const info = createSourceFileInfo(target, 'unsupported file');
+    const link = document.createElement('a');
+    link.className = 'gdp-btn gdp-btn-sm gdp-source-download';
+    link.href = buildRawFileUrl(target);
+    link.textContent = 'Download raw';
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    content.append(title, message, info, link);
+    view.appendChild(content);
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+  }
+
   function isPreviewableSource(path: string): boolean {
     return /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path);
+  }
+
+  function sourceDisplayKind(path: string): 'image' | 'video' | 'pdf' | 'text' | 'unsupported' {
+    if (isVideo(path)) return 'video';
+    if (isImage(path)) return 'image';
+    if (/\.pdf$/i.test(path)) return 'pdf';
+    if (/\.(txt|md|markdown|mdown|mkdn|mdx|json|jsonc|csv|tsv|ya?ml|toml|xml|html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|vue|svelte|astro|rs|go|py|rb|php|java|kt|kts|c|cc|cpp|cxx|h|hpp|cs|swift|sh|bash|zsh|fish|ps1|sql|graphql|gql|ini|conf|env|gitignore|dockerignore|editorconfig|lock|log)$/i.test(path)) return 'text';
+    if (/\/?(readme|license|notice|changelog|dockerfile|makefile)$/i.test(path)) return 'text';
+    return 'unsupported';
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes < 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, '')) + ' ' + units[unit];
+  }
+
+  function humanFileKind(path: string, mime: string | undefined, fallback: string): string {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    if (ext === 'png') return 'PNG image';
+    if (ext === 'jpg' || ext === 'jpeg') return 'JPEG image';
+    if (ext === 'gif') return 'GIF image';
+    if (ext === 'webp') return 'WebP image';
+    if (ext === 'svg') return 'SVG image';
+    if (ext === 'pdf') return 'PDF document';
+    if (ext === 'zip') return 'ZIP archive';
+    if (ext === 'mp4') return 'MP4 video';
+    if (ext === 'webm') return 'WebM video';
+    if (mime?.startsWith('image/')) return 'Image';
+    if (mime?.startsWith('video/')) return 'Video';
+    if (mime === 'application/pdf') return 'PDF document';
+    if (fallback === 'unsupported file') return 'Binary file';
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+
+  async function loadRawFileInfo(target: SourceFileTarget): Promise<{ size?: number; type?: string }> {
+    try {
+      const res = await fetch(buildRawFileUrl(target), { method: 'HEAD' });
+      if (!res.ok) return {};
+      const size = Number(res.headers.get('content-length') || '');
+      return {
+        size: Number.isFinite(size) ? size : undefined,
+        type: res.headers.get('content-type') || undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  function createSourceFileInfo(target: SourceFileTarget, kind: string): HTMLElement {
+    const info = document.createElement('div');
+    info.className = 'gdp-source-file-info';
+    const type = document.createElement('span');
+    type.className = 'kind';
+    type.textContent = humanFileKind(target.path, undefined, kind);
+    info.appendChild(type);
+    loadRawFileInfo(target).then(meta => {
+      type.textContent = humanFileKind(target.path, meta.type, kind);
+      if (meta.size != null) {
+        const size = document.createElement('span');
+        size.textContent = formatBytes(meta.size);
+        info.appendChild(size);
+      }
+    });
+    return info;
+  }
+
+  function createSourceTabs(active: 'preview' | 'code') {
+    const tabs = document.createElement('div');
+    tabs.className = 'gdp-source-tabs';
+    const codeButton = document.createElement('button');
+    codeButton.type = 'button';
+    codeButton.textContent = 'Code';
+    codeButton.classList.toggle('active', active === 'code');
+    tabs.appendChild(codeButton);
+    if (active === 'preview') {
+      const previewButton = document.createElement('button');
+      previewButton.type = 'button';
+      previewButton.className = 'active';
+      previewButton.textContent = 'Preview';
+      tabs.prepend(previewButton);
+    }
+    return { tabs, codeButton, previewButton: tabs.querySelector<HTMLButtonElement>('button:first-child') };
   }
 
   function appendInlineMarkdown(parent: HTMLElement, text: string) {
@@ -2004,20 +2118,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    if (isPreviewableSource(target.path)) {
+    const previewable = isPreviewableSource(target.path);
+    const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
+    const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? 'preview' : 'code');
+    if (tabsHost) {
+      tabsHost.hidden = false;
+      tabsHost.replaceChildren(tabs);
+    }
+    if (previewable) {
       const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
-      const tabs = document.createElement('div');
-      tabs.className = 'gdp-source-tabs';
-      const previewButton = document.createElement('button');
-      previewButton.type = 'button';
-      previewButton.className = 'active';
-      previewButton.textContent = 'Preview';
-      const codeButton = document.createElement('button');
-      codeButton.type = 'button';
-      codeButton.textContent = 'Code';
       const preview = renderMarkdownPreview(textValue, target, hljsRef);
       table.hidden = true;
-      previewButton.addEventListener('click', () => {
+      previewButton?.addEventListener('click', () => {
         previewButton.classList.add('active');
         codeButton.classList.remove('active');
         preview.hidden = false;
@@ -2029,13 +2141,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         preview.hidden = true;
         table.hidden = false;
       });
-      tabs.appendChild(previewButton);
-      tabs.appendChild(codeButton);
       if (header) view.appendChild(header);
-      if (tabsHost) {
-        tabsHost.hidden = false;
-        tabsHost.replaceChildren(tabs);
-      }
       view.appendChild(preview);
       view.appendChild(table);
       if (body) body.replaceWith(view);
@@ -2060,16 +2166,29 @@ window.GdpExpandLogic = GdpExpandLogic;
       view.appendChild(meta);
     }
     const url = buildRawFileUrl(target);
+    const info = createSourceFileInfo(target, mediaKind);
+    view.appendChild(info);
     if (mediaKind === 'video') {
       const video = document.createElement('video');
       video.src = url;
       video.controls = true;
       video.preload = 'metadata';
       view.appendChild(video);
+    } else if (mediaKind === 'pdf') {
+      const frame = document.createElement('iframe');
+      frame.src = url;
+      frame.title = target.path;
+      frame.loading = 'lazy';
+      view.appendChild(frame);
     } else {
       const img = document.createElement('img');
       img.src = url;
       img.alt = '';
+      img.addEventListener('load', () => {
+        const resolution = document.createElement('span');
+        resolution.textContent = img.naturalWidth + ' x ' + img.naturalHeight;
+        info.appendChild(resolution);
+      }, { once: true });
       view.appendChild(img);
     }
     if (body) body.replaceWith(view);
@@ -2205,12 +2324,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     renderSourceLoading(card, target);
     try {
-      const mediaKind = isVideo(target.path) ? 'video' : (isMedia(target.path) ? 'image' : null);
-      if (mediaKind === 'image' || mediaKind === 'video') {
+      const displayKind = sourceDisplayKind(target.path);
+      if (displayKind === 'unsupported') {
         if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-        renderSourceMedia(card, target, mediaKind);
+        renderSourceUnsupported(card, target);
         return;
       }
+      if (displayKind === 'image' || displayKind === 'video' || displayKind === 'pdf') {
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        renderSourceMedia(card, target, displayKind);
+        return;
+      }
+      if (displayKind === 'text') {
       const response = await trackLoad(fetch(buildRawFileUrl(target)));
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
       if (!response.ok) {
@@ -2220,6 +2345,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const textValue = await response.text();
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
       await renderSourceText(card, target, textValue);
+      }
     } catch {
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
       renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
@@ -2561,8 +2687,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // ---- media (image / video) embedding for binary file diffs ----
   const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov)(\?.*)?$/i;
+  const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
   const VIDEO_RE = /\.(mp4|webm|mov)$/i;
   function isMedia(p: string): boolean { return MEDIA_RE.test(p); }
+  function isImage(p: string): boolean { return IMAGE_RE.test(p); }
   function isVideo(p: string): boolean { return VIDEO_RE.test(p); }
   function fileURL(path: string, ref: string): string {
     return '/_file?path=' + encodeURIComponent(path) + '&ref=' + ref;
@@ -2788,12 +2916,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     const control = active.querySelector<HTMLElement>('.chev');
     if (control) control.click();
   }
+  function toggleActiveSidebarDirectoryCollapsed() {
+    const active = document.querySelector<HTMLElement>('#filelist .tree-dir.active[data-dirpath]');
+    if (!active) return;
+    const control = active.querySelector<HTMLElement>('.chev');
+    if (control) control.click();
+  }
   function openActiveSidebarItem() {
     const active = document.querySelector<HTMLElement>('#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]');
     if (active && isSidebarRowVisible(active)) active.click();
   }
-  function jumpToActiveOrFirstFilteredFile() {
-    const items = visibleSidebarItems().filter(item => !!item.dataset.path);
+  function jumpToActiveOrFirstFilteredItem() {
+    const items = visibleSidebarItems();
     const active = items.find(li => li.classList.contains('active'));
     const target = active || items[0];
     if (target) {
@@ -2807,7 +2941,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     sbFilter.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        jumpToActiveOrFirstFilteredFile();
+        jumpToActiveOrFirstFilteredItem();
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveActiveSidebarItem(e.key === 'ArrowDown' ? 1 : -1);
@@ -2865,7 +2999,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     } else if (e.key === 'l') {
       if (isRepositorySidebarMode()) {
         e.preventDefault();
-        setActiveSidebarDirectoryCollapsed(false);
+        toggleActiveSidebarDirectoryCollapsed();
       }
     } else if (e.key === 'h') {
       if (isRepositorySidebarMode()) {
