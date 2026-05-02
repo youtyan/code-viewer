@@ -56,7 +56,12 @@ function startServer() {
   firstStart = false;
   server = Bun.spawn([
     'bun', 'run', 'web-src/server/preview.ts', ...args,
-  ], { cwd: ROOT, stdout: 'inherit', stderr: 'inherit' }) as ChildProcess;
+  ], {
+    cwd: ROOT,
+    stdout: 'inherit',
+    stderr: 'inherit',
+    env: { ...process.env, CODE_VIEWER_DEV: '1' },
+  }) as ChildProcess;
 }
 
 async function restartServer() {

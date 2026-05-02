@@ -2,6 +2,7 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
+import { createCatchUpGate, shouldCatchUpDiff } from './catch-up';
 import {
   buildRawFileUrl,
   buildRoute,
@@ -12,7 +13,6 @@ import {
 } from './routes';
 import { suppressWhitespaceOnlyInlineHighlights } from './ws-highlight';
 import type {
-  AssetVersionResponse,
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
@@ -2646,13 +2646,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     }).catch(() => setStatus('error'));
   }
 
-  function load(): Promise<void> {
+  function load(options: { force?: boolean } = {}): Promise<void> {
     if (STATE.route.screen === 'repo') return loadRepo();
     setStatus('refreshing');
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set('ignore_ws', '1');
     if (STATE.from) params.set('from', STATE.from);
     if (STATE.to)   params.set('to',   STATE.to);
+    if (options.force) params.set('nocache', '1');
     const url = '/diff.json' + (params.toString() ? '?' + params.toString() : '');
     return trackLoad<DiffMeta>(fetch(url).then(r => r.json())).then(data => {
       renderShell(data);
@@ -3012,22 +3013,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   const es = new EventSource('/events');
+  const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
+  let openedOnce = false;
   es.addEventListener('update', () => scheduleSseLoad());
   es.addEventListener('reload', () => location.reload());
   es.addEventListener('error', () => setStatus('error'));
-  es.addEventListener('open',  () => setStatus('live'));
+  es.addEventListener('open',  () => {
+    setStatus('live');
+    if (!openedOnce) { openedOnce = true; return; }
+    catchUpDiff();
+  });
 
-  let assetVersion: number | null = null;
-  function pollAssetVersion() {
-    fetch('/_asset_version')
-      .then(r => r.ok ? r.json() : null)
-      .then((data: AssetVersionResponse | null) => {
-        if (!data || !data.version) return;
-        if (assetVersion == null) { assetVersion = data.version; return; }
-        if (data.version !== assetVersion) location.reload();
-      })
-      .catch(() => {});
+  function catchUpDiff() {
+    if (!shouldCatchUpDiff(STATE.route)) return;
+    if (!catchUpGate()) return;
+    void load({ force: true });
   }
-  pollAssetVersion();
-  setInterval(pollAssetVersion, 1500);
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) catchUpDiff();
+  });
+  window.addEventListener('focus', catchUpDiff);
 })();
