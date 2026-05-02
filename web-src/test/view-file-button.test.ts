@@ -73,13 +73,67 @@ describe('view file UI', () => {
     expect(app.includes('num.textContent = String(index + 1)')).toBe(true);
   });
 
+  test('repository file view does not render unsupported binary files as text', () => {
+    expect(app.includes('function sourceDisplayKind(path: string)')).toBe(true);
+    expect(app.includes("return 'unsupported'")).toBe(true);
+    expect(app.includes('renderSourceUnsupported(card, target)')).toBe(true);
+    expect(app.includes("const displayKind = sourceDisplayKind(target.path)")).toBe(true);
+    expect(app.includes("if (displayKind === 'unsupported')")).toBe(true);
+    expect(app.includes('Preview unavailable')).toBe(true);
+    expect(app.includes('This file type cannot be previewed safely in the browser.')).toBe(true);
+    expect(app.includes("if (displayKind === 'text')")).toBe(true);
+    expect(app.includes('await response.text()')).toBe(true);
+  });
+
+  test('unsupported file preview is styled as a file detail empty state', () => {
+    expect(app.includes("content.className = 'gdp-source-unsupported-content'")).toBe(true);
+    expect(app.includes("title.className = 'gdp-source-unsupported-title'")).toBe(true);
+    expect(app.includes("message.className = 'gdp-source-unsupported-message'")).toBe(true);
+    expect(app.includes("link.className = 'gdp-btn gdp-btn-sm gdp-source-download'")).toBe(true);
+    expect(style.includes('.gdp-source-viewer.unsupported')).toBe(true);
+    expect(style.includes('.gdp-source-unsupported-content')).toBe(true);
+    expect(style.includes('.gdp-source-download')).toBe(true);
+  });
+
+  test('raw file responses use explicit browser-safe headers', () => {
+    expect(server.includes('function rawFileHeaders(path: string, size: number | null = null): HeadersInit')).toBe(true);
+    expect(server.includes('function rawFileSize(path: string, ref: string): number | null')).toBe(true);
+    expect(server.includes("if (req.method === 'HEAD') return new Response(null")).toBe(true);
+    expect(server.includes("headers['Content-Length'] = String(size)")).toBe(true);
+    expect(server.includes("'X-Content-Type-Options': 'nosniff'")).toBe(true);
+    expect(server.includes("'Content-Security-Policy': 'sandbox'")).toBe(true);
+    expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
+  });
+
+  test('binary and media file views show file metadata', () => {
+    expect(app.includes('function formatBytes(bytes: number): string')).toBe(true);
+    expect(app.includes('function humanFileKind(path: string, mime: string | undefined, fallback: string): string')).toBe(true);
+    expect(app.includes('async function loadRawFileInfo(target: SourceFileTarget)')).toBe(true);
+    expect(app.includes("method: 'HEAD'")).toBe(true);
+    expect(app.includes('function createSourceFileInfo')).toBe(true);
+    expect(app.includes("type.textContent = humanFileKind(target.path, meta.type, kind)")).toBe(true);
+    expect(app.includes("type.className = 'kind'")).toBe(true);
+    expect(app.includes("'ZIP archive'")).toBe(true);
+    expect(app.includes("'PDF document'")).toBe(true);
+    expect(app.includes("resolution.textContent = img.naturalWidth + ' x ' + img.naturalHeight")).toBe(true);
+    expect(app.includes('This file type cannot be previewed safely in the browser.')).toBe(true);
+  });
+
   test('file detail supports markdown preview and code highlighting', () => {
     expect(app.includes('function isPreviewableSource(path: string): boolean')).toBe(true);
     expect(app.includes("previewButton.textContent = 'Preview'")).toBe(true);
     expect(app.includes("codeButton.textContent = 'Code'")).toBe(true);
+    expect(app.includes("function createSourceTabs(active: 'preview' | 'code')")).toBe(true);
     expect(app.includes('await loadSyntaxHighlighter()')).toBe(true);
     expect(style.includes('.gdp-markdown-preview')).toBe(true);
     expect(style.includes('.gdp-source-tabs')).toBe(true);
+  });
+
+  test('file detail shows a Code tab even when preview is unavailable', () => {
+    expect(app.includes('const previewable = isPreviewableSource(target.path)')).toBe(true);
+    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code')")).toBe(true);
+    expect(app.includes('if (tabsHost) {')).toBe(true);
+    expect(app.includes('tabsHost.hidden = false')).toBe(true);
   });
 
   test('file detail keeps preview tabs in the sticky header instead of the source viewer', () => {
@@ -142,9 +196,25 @@ describe('view file UI', () => {
     expect(app.includes("if (e.key === 'Enter')")).toBe(true);
     expect(app.includes('openActiveSidebarItem()')).toBe(true);
     expect(app.includes("if (e.key === 'l')")).toBe(true);
-    expect(app.includes('setActiveSidebarDirectoryCollapsed(false)')).toBe(true);
+    expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
     expect(app.includes("if (e.key === 'h')")).toBe(true);
     expect(app.includes('setActiveSidebarDirectoryCollapsed(true)')).toBe(true);
+  });
+
+  test('repository sidebar l toggles the active directory', () => {
+    expect(app.includes('function toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+    expect(app.includes("const active = document.querySelector<HTMLElement>('#filelist .tree-dir.active[data-dirpath]')")).toBe(true);
+    expect(app.includes("const control = active.querySelector<HTMLElement>('.chev')")).toBe(true);
+    expect(app.includes('if (control) control.click()')).toBe(true);
+    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+  });
+
+  test('repository sidebar filter enter can focus a visible directory match', () => {
+    expect(app.includes('function jumpToActiveOrFirstFilteredItem()')).toBe(true);
+    expect(app.includes('const items = visibleSidebarItems();')).toBe(true);
+    expect(app.includes('jumpToActiveOrFirstFilteredItem();')).toBe(true);
+    expect(app.includes('visibleSidebarItems().filter(item => !!item.dataset.path)')).toBe(false);
   });
 
   test('repository sidebar filter does not hide the right-side detail pane', () => {

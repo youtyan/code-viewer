@@ -29,6 +29,15 @@ function run(args: string[], cwd: string): { code: number; stdout: string; stder
   };
 }
 
+function runBytes(args: string[], cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
+  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  return {
+    code: proc.exitCode,
+    stdout: new Uint8Array(proc.stdout),
+    stderr: new TextDecoder().decode(proc.stderr),
+  };
+}
+
 export function repoRoot(cwd: string): string | null {
   const res = run(['git', 'rev-parse', '--show-toplevel'], cwd);
   return res.code === 0 ? res.stdout.trimEnd() : null;
@@ -41,6 +50,15 @@ export function currentBranch(cwd: string): string | null {
 
 export function show(ref: string, path: string, cwd: string): { code: number; stdout: string; stderr: string } {
   return run(['git', 'show', `${ref}:${path}`], cwd);
+}
+
+export function showBytes(ref: string, path: string, cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
+  return runBytes(['git', 'show', `${ref}:${path}`], cwd);
+}
+
+export function objectSize(ref: string, path: string, cwd: string): { code: number; size: number; stderr: string } {
+  const res = run(['git', 'cat-file', '-s', `${ref}:${path}`], cwd);
+  return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
 }
 
 export function verifyTreeRef(ref: string, cwd: string): boolean {
