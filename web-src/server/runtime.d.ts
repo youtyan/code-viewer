@@ -17,6 +17,7 @@ declare const Bun: {
 
 declare const process: {
   argv: string[];
+  env: Record<string, string | undefined>;
   cwd(): string;
   platform: 'darwin' | 'win32' | string;
   on(event: 'SIGINT' | 'SIGTERM', listener: () => void): void;
@@ -34,6 +35,11 @@ declare module 'node:fs' {
   export function readFileSync(path: string, encoding: BufferEncoding): string;
   export function realpathSync(path: string): string;
   export function statSync(path: string): { mtimeMs: number };
+  export function watch(
+    path: string,
+    options: { persistent?: boolean },
+    listener: (eventType: string, filename: string | Buffer | null) => void,
+  ): unknown;
 }
 
 declare module 'node:path' {

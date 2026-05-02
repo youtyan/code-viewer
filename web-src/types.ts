@@ -86,10 +86,6 @@ export type RefResponse = {
   current?: string;
 };
 
-export type AssetVersionResponse = {
-  version?: number;
-};
-
 declare global {
   interface Window {
     Diff2HtmlUI: any;

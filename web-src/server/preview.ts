@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
 import { basename, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
 import { cacheFresh, type TimedCacheEntry } from './cache';
+import { startDevAssetReload } from './dev-assets';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
 
@@ -458,10 +459,6 @@ const server = Bun.serve({
     if (url.pathname === '/file_range') return handleFileRange(url);
     if (url.pathname === '/_file') return handleRawFile(url);
     if (url.pathname === '/_refs') return json(git.refs(cwd));
-    if (url.pathname === '/_asset_version') {
-      const version = Math.max(...WATCHED_ASSET_FILES.map((name) => statSync(join(WEB_ROOT, name)).mtimeMs));
-      return json({ version });
-    }
     if (url.pathname === '/refresh' && req.method === 'POST') {
       generation++;
       fileCache.clear();
@@ -500,6 +497,14 @@ const server = Bun.serve({
     }
     return text('not found', 404);
   },
+});
+
+startDevAssetReload({
+  enabled: process.env.CODE_VIEWER_DEV === '1',
+  webRoot: WEB_ROOT,
+  watchedFiles: WATCHED_ASSET_FILES,
+  watch,
+  sendReload: () => sendSse('reload'),
 });
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
