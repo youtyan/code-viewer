@@ -486,21 +486,26 @@ function handleRawFile(req: Request, url: URL) {
   const path = url.searchParams.get('path') || '';
   if (!safePath(path)) return text('forbidden', 403);
   const ref = url.searchParams.get('ref') || 'worktree';
-  const size = rawFileSize(path, ref);
-  if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
   let body: BodyInit;
   if (ref !== 'worktree' && ref !== '') {
     if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
+    const size = rawFileSize(path, ref);
+    if (size == null) return text('not in ref', 404);
+    if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
     const res = git.showBytes(ref, path, cwd);
     if (res.code !== 0) return text('not in ref', 404);
     body = res.stdout.buffer.slice(res.stdout.byteOffset, res.stdout.byteOffset + res.stdout.byteLength) as ArrayBuffer;
+    return new Response(body, { headers: rawFileHeaders(path, size) });
   } else {
     const full = safeWorktreePath(path);
     if (!full) return text('not found', 404);
+    const size = rawFileSize(path, ref);
+    if (size == null) return text('not found', 404);
+    if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
     const bytes = new Uint8Array(readFileSync(full));
     body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    return new Response(body, { headers: rawFileHeaders(path, size) });
   }
-  return new Response(body, { headers: rawFileHeaders(path, size) });
 }
 
 function rawFileSize(path: string, ref: string): number | null {
