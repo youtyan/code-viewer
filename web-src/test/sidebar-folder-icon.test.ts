@@ -26,4 +26,14 @@ describe('sidebar folder icons', () => {
     expect(style.includes('gap: 8px')).toBe(true);
     expect(style.includes('padding: 5.6px 8px 5.6px var(--lvl-pad, 12px)')).toBe(true);
   });
+
+  test('marks intentionally omitted directory children in the sidebar', () => {
+    expect(appSource.includes('children_omitted?: true')).toBe(true);
+    expect(appSource.includes('f.children_omitted === true')).toBe(true);
+    expect(appSource.includes("li.classList.add('children-omitted')")).toBe(true);
+    expect(appSource.includes("omitted.className = 'dir-omitted'")).toBe(true);
+    expect(appSource.includes('children_omitted: entry.children_omitted')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir.children-omitted')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir .dir-omitted')).toBe(true);
+  });
 });

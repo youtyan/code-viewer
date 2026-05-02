@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type GitFileMeta = {
@@ -17,6 +17,7 @@ export type GitTreeEntry = {
   name: string;
   path: string;
   type: 'tree' | 'blob' | 'commit';
+  children_omitted?: true;
 };
 
 function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
@@ -24,6 +25,15 @@ function run(args: string[], cwd: string): { code: number; stdout: string; stder
   return {
     code: proc.exitCode,
     stdout: new TextDecoder().decode(proc.stdout),
+    stderr: new TextDecoder().decode(proc.stderr),
+  };
+}
+
+function runBytes(args: string[], cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
+  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  return {
+    code: proc.exitCode,
+    stdout: new Uint8Array(proc.stdout),
     stderr: new TextDecoder().decode(proc.stderr),
   };
 }
@@ -40,6 +50,15 @@ export function currentBranch(cwd: string): string | null {
 
 export function show(ref: string, path: string, cwd: string): { code: number; stdout: string; stderr: string } {
   return run(['git', 'show', `${ref}:${path}`], cwd);
+}
+
+export function showBytes(ref: string, path: string, cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
+  return runBytes(['git', 'show', `${ref}:${path}`], cwd);
+}
+
+export function objectSize(ref: string, path: string, cwd: string): { code: number; size: number; stderr: string } {
+  const res = run(['git', 'cat-file', '-s', `${ref}:${path}`], cwd);
+  return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
 }
 
 export function verifyTreeRef(ref: string, cwd: string): boolean {
@@ -143,14 +162,26 @@ function worktreeDirectChildren(cwd: string, path: string): GitTreeEntry[] {
   try {
     return sortTreeEntries(readdirSync(dir, { withFileTypes: true }).map((entry) => {
       const entryPath = base ? `${base}/${entry.name}` : entry.name;
+      const type = entry.isDirectory()
+        ? hasDotGitEntry(join(dir, entry.name)) ? 'commit' as const : 'tree' as const
+        : 'blob' as const;
       return {
         name: entry.name,
         path: entryPath,
-        type: entry.isDirectory() ? 'tree' as const : 'blob' as const,
+        type,
       };
     }));
   } catch {
     return [];
+  }
+}
+
+function hasDotGitEntry(dir: string): boolean {
+  try {
+    lstatSync(join(dir, '.git'));
+    return true;
+  } catch (err) {
+    return !!err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT';
   }
 }
 
@@ -196,6 +227,31 @@ function combineDirectAndRecursiveFiles(directEntries: GitTreeEntry[], fileEntri
   ];
 }
 
+function ignoredWorktreePaths(cwd: string, path: string): Set<string> {
+  const base = normalizeTreePath(path);
+  const args = ['git', '-c', 'core.quotepath=false', 'status', '--ignored', '--porcelain=v1', '-z', '--'];
+  if (base) args.push(`${base}/`);
+  const res = run(args, cwd);
+  const ignored = new Set<string>();
+  if (res.code !== 0) return ignored;
+  const records = res.stdout.split('\0').filter(Boolean);
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (!rec.startsWith('!! ')) continue;
+    const path = rec.slice(3).replace(/\/+$/g, '');
+    if (path) ignored.add(path);
+  }
+  return ignored;
+}
+
+function annotateOmittedWorktreeChildren(entries: GitTreeEntry[], ignoredPaths: Set<string>): GitTreeEntry[] {
+  return entries.map((entry) => {
+    return entry.type === 'tree' && ignoredPaths.has(entry.path)
+      ? { ...entry, children_omitted: true }
+      : entry;
+  });
+}
+
 export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
   return listTree('worktree', path, cwd).entries;
 }
@@ -221,8 +277,11 @@ export function listTree(
   const base = normalizeTreePath(path);
   if (ref === 'worktree') {
     const directEntries = worktreeDirectChildren(cwd, base);
-    if (!options.recursive) return { code: 0, entries: directEntries, stderr: '' };
-    return { code: 0, entries: combineDirectAndRecursiveFiles(directEntries, worktreeRecursiveFiles(cwd, base)), stderr: '' };
+    const ignoredPaths = ignoredWorktreePaths(cwd, base);
+    const annotatedDirectEntries = annotateOmittedWorktreeChildren(directEntries, ignoredPaths);
+    if (!options.recursive) return { code: 0, entries: annotatedDirectEntries, stderr: '' };
+    const recursiveEntries = worktreeRecursiveFiles(cwd, base);
+    return { code: 0, entries: combineDirectAndRecursiveFiles(annotatedDirectEntries, recursiveEntries), stderr: '' };
   }
 
   const direct = gitTreeEntries(ref, base, cwd, false);
@@ -302,17 +361,65 @@ export function truncateToNHunks(diffText: string, n: number): {
   totalHunks: number;
   renderedHunks: number;
   lineCount: number;
+  lineTruncated: boolean;
+};
+export function truncateToNHunks(diffText: string, n: number, maxLines: number): {
+  text: string;
+  totalHunks: number;
+  renderedHunks: number;
+  lineCount: number;
+  lineTruncated: boolean;
+};
+export function truncateToNHunks(diffText: string, n: number, maxLines = Number.POSITIVE_INFINITY): {
+  text: string;
+  totalHunks: number;
+  renderedHunks: number;
+  lineCount: number;
+  lineTruncated: boolean;
 } {
   const { header, hunks } = splitHunks(diffText);
   if (hunks.length === 0) {
-    return { text: diffText, totalHunks: 0, renderedHunks: 0, lineCount: (diffText.match(/\n/g) || []).length };
+    const lines = diffText.split('\n');
+    const lineTruncated = Number.isFinite(maxLines) && lines.length > maxLines;
+    const text = lineTruncated ? lines.slice(0, maxLines).join('\n') : diffText;
+    return {
+      text,
+      totalHunks: 0,
+      renderedHunks: 0,
+      lineCount: (text.match(/\n/g) || []).length,
+      lineTruncated,
+    };
   }
-  const renderedHunks = Math.min(n, hunks.length);
-  const text = header + hunks.slice(0, renderedHunks).join('\n');
+  const maxHunks = Math.min(n, hunks.length);
+  const rendered: string[] = [];
+  let renderedHunks = 0;
+  let usedLines = (header.match(/\n/g) || []).length;
+  let lineTruncated = false;
+  for (let index = 0; index < maxHunks; index++) {
+    const hunk = hunks[index];
+    const lines = hunk.split('\n');
+    const separatorLines = rendered.length > 0 ? 1 : 0;
+    const remaining = maxLines - usedLines - separatorLines;
+    if (remaining <= 0) {
+      lineTruncated = true;
+      break;
+    }
+    if (Number.isFinite(maxLines) && lines.length > remaining) {
+      rendered.push(lines.slice(0, remaining).join('\n'));
+      renderedHunks++;
+      lineTruncated = true;
+      break;
+    }
+    rendered.push(hunk);
+    renderedHunks++;
+    usedLines += separatorLines + lines.length;
+  }
+  const text = header + rendered.join('\n');
   return {
     text,
     totalHunks: hunks.length,
     renderedHunks,
     lineCount: (text.match(/\n/g) || []).length,
+    lineTruncated,
   };
 }

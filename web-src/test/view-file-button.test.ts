@@ -73,13 +73,76 @@ describe('view file UI', () => {
     expect(app.includes('num.textContent = String(index + 1)')).toBe(true);
   });
 
+  test('repository file view does not render unsupported binary files as text', () => {
+    expect(app.includes('function sourceDisplayKind(path: string)')).toBe(true);
+    expect(app.includes("return 'unsupported'")).toBe(true);
+    expect(app.includes('renderSourceUnsupported(card, target)')).toBe(true);
+    expect(app.includes("const displayKind = sourceDisplayKind(target.path)")).toBe(true);
+    expect(app.includes("if (displayKind === 'unsupported')")).toBe(true);
+    expect(app.includes('Preview unavailable')).toBe(true);
+    expect(app.includes('This file type cannot be previewed safely in the browser.')).toBe(true);
+    expect(app.includes("if (displayKind === 'text')")).toBe(true);
+    expect(app.includes('await response.text()')).toBe(true);
+  });
+
+  test('unsupported file preview is styled as a file detail empty state', () => {
+    expect(app.includes("content.className = 'gdp-source-unsupported-content'")).toBe(true);
+    expect(app.includes("title.className = 'gdp-source-unsupported-title'")).toBe(true);
+    expect(app.includes("message.className = 'gdp-source-unsupported-message'")).toBe(true);
+    expect(app.includes("link.className = 'gdp-btn gdp-btn-sm gdp-source-download'")).toBe(true);
+    expect(style.includes('.gdp-source-viewer.unsupported')).toBe(true);
+    expect(style.includes('.gdp-source-unsupported-content')).toBe(true);
+    expect(style.includes('.gdp-source-download')).toBe(true);
+  });
+
+  test('raw file responses use explicit browser-safe headers', () => {
+    expect(server.includes('function rawFileHeaders(path: string, size: number | null = null): HeadersInit')).toBe(true);
+    expect(server.includes('function rawFileSize(path: string, ref: string): number | null')).toBe(true);
+    expect(server.includes("if (req.method === 'HEAD') return new Response(null")).toBe(true);
+    expect(server.includes("headers['Content-Length'] = String(size)")).toBe(true);
+    expect(server.includes("'X-Content-Type-Options': 'nosniff'")).toBe(true);
+    expect(server.includes("'Content-Security-Policy': 'sandbox'")).toBe(true);
+    expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
+  });
+
+  test('raw file HEAD requests validate refs and paths before returning metadata', () => {
+    expect(server.includes("if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not in ref', 404);\n    if (req.method === 'HEAD')")).toBe(true);
+    expect(server.includes("const full = safeWorktreePath(path);\n    if (!full) return text('not found', 404);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not found', 404);\n    if (req.method === 'HEAD')")).toBe(true);
+  });
+
+  test('binary and media file views show file metadata', () => {
+    expect(app.includes('function formatBytes(bytes: number): string')).toBe(true);
+    expect(app.includes('function humanFileKind(path: string, mime: string | undefined, fallback: string): string')).toBe(true);
+    expect(app.includes('async function loadRawFileInfo(target: SourceFileTarget)')).toBe(true);
+    expect(app.includes("method: 'HEAD'")).toBe(true);
+    expect(app.includes("const rawSize = res.headers.get('content-length')")).toBe(true);
+    expect(app.includes('size: rawSize != null && Number.isFinite(size) ? size : undefined')).toBe(true);
+    expect(app.includes('function createSourceFileInfo')).toBe(true);
+    expect(app.includes("type.textContent = humanFileKind(target.path, meta.type, kind)")).toBe(true);
+    expect(app.includes("type.className = 'kind'")).toBe(true);
+    expect(app.includes("'ZIP archive'")).toBe(true);
+    expect(app.includes("'PDF document'")).toBe(true);
+    expect(app.includes("resolution.textContent = img.naturalWidth + ' x ' + img.naturalHeight")).toBe(true);
+    expect(app.includes('This file type cannot be previewed safely in the browser.')).toBe(true);
+  });
+
   test('file detail supports markdown preview and code highlighting', () => {
     expect(app.includes('function isPreviewableSource(path: string): boolean')).toBe(true);
     expect(app.includes("previewButton.textContent = 'Preview'")).toBe(true);
     expect(app.includes("codeButton.textContent = 'Code'")).toBe(true);
+    expect(app.includes("function createSourceTabs(active: 'preview' | 'code')")).toBe(true);
+    expect(app.includes("let previewButton: HTMLButtonElement | null = null")).toBe(true);
+    expect(app.includes('return { tabs, codeButton, previewButton }')).toBe(true);
     expect(app.includes('await loadSyntaxHighlighter()')).toBe(true);
     expect(style.includes('.gdp-markdown-preview')).toBe(true);
     expect(style.includes('.gdp-source-tabs')).toBe(true);
+  });
+
+  test('file detail shows a Code tab even when preview is unavailable', () => {
+    expect(app.includes('const previewable = isPreviewableSource(target.path)')).toBe(true);
+    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code')")).toBe(true);
+    expect(app.includes('if (tabsHost) {')).toBe(true);
+    expect(app.includes('tabsHost.hidden = false')).toBe(true);
   });
 
   test('file detail keeps preview tabs in the sticky header instead of the source viewer', () => {
@@ -107,14 +170,130 @@ describe('view file UI', () => {
   });
 
   test('file detail header renders a breadcrumb path with copy action', () => {
-    expect(app.includes('function createFileBreadcrumb(path: string): HTMLElement')).toBe(true);
+    expect(app.includes('function createFileBreadcrumb(path: string, ref?: string): HTMLElement')).toBe(true);
     expect(app.includes("nav.className = 'gdp-file-breadcrumb'")).toBe(true);
     expect(app.includes("copy.className = 'gdp-file-header-icon gdp-copy-path'")).toBe(true);
     expect(style.includes('.gdp-file-breadcrumb')).toBe(true);
   });
 
+  test('file detail breadcrumb directory parts navigate to repository folders', () => {
+    expect(app.includes('function createFileBreadcrumb(path: string, ref?: string): HTMLElement')).toBe(true);
+    expect(app.includes("document.createElement(isCurrent ? 'span' : 'button')")).toBe(true);
+    expect(app.includes("crumb.className = index === allParts.length - 1 ? 'gdp-file-breadcrumb-current' : 'gdp-file-breadcrumb-part'")).toBe(true);
+    expect(app.includes("setRoute(repoRoute(ref || 'worktree', currentPath))")).toBe(true);
+    expect(app.includes('loadRepo()')).toBe(true);
+  });
+
+  test('repository blob sidebar directory entries navigate to folder detail', () => {
+    expect(app.includes("if (onFileClick) {\n          li.addEventListener('click'")).toBe(true);
+    expect(app.includes("onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted })")).toBe(true);
+    expect(app.includes("chev.addEventListener('click', toggleDir)")).toBe(true);
+    expect(app.includes("if (file.type === 'tree')")).toBe(true);
+    expect(app.includes("setRoute(repoRoute(ref, file.path))")).toBe(true);
+    expect(app.includes('loadRepo()')).toBe(true);
+  });
+
+  test('repository sidebar supports visible-row keyboard navigation', () => {
+    expect(app.includes('function visibleSidebarItems()')).toBe(true);
+    expect(app.includes('function isSidebarRowVisible')).toBe(true);
+    expect(app.includes("return $$<HTMLElement>('#filelist li[data-path], #filelist .tree-dir[data-dirpath]')")).toBe(true);
+    expect(app.includes('function isRepositorySidebarMode()')).toBe(true);
+    expect(app.includes('function moveActiveSidebarItem(direction: 1 | -1)')).toBe(true);
+    expect(app.includes('function setActiveSidebarDirectoryCollapsed(collapsed: boolean)')).toBe(true);
+    expect(app.includes('function openActiveSidebarItem()')).toBe(true);
+    expect(app.includes('const repoSidebar = isRepositorySidebarMode()')).toBe(true);
+    expect(app.includes("if (e.key === 'Enter')")).toBe(true);
+    expect(app.includes('openActiveSidebarItem()')).toBe(true);
+    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+    expect(app.includes("if (e.key === 'h')")).toBe(true);
+    expect(app.includes('setActiveSidebarDirectoryCollapsed(true)')).toBe(true);
+  });
+
+  test('repository sidebar l toggles the active directory', () => {
+    expect(app.includes('function toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+    expect(app.includes("const active = document.querySelector<HTMLElement>('#filelist .tree-dir.active[data-dirpath]')")).toBe(true);
+    expect(app.includes("const control = active.querySelector<HTMLElement>('.chev')")).toBe(true);
+    expect(app.includes('if (control) control.click()')).toBe(true);
+    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+  });
+
+  test('repository sidebar filter enter can focus a visible directory match', () => {
+    expect(app.includes('function jumpToActiveOrFirstFilteredItem()')).toBe(true);
+    expect(app.includes('const items = visibleSidebarItems();')).toBe(true);
+    expect(app.includes('jumpToActiveOrFirstFilteredItem();')).toBe(true);
+    expect(app.includes('visibleSidebarItems().filter(item => !!item.dataset.path)')).toBe(false);
+  });
+
+  test('repository sidebar filter does not hide the right-side detail pane', () => {
+    expect(app.includes('if (!isRepositorySidebarMode()) {')).toBe(true);
+    expect(app.includes("document.querySelectorAll<HTMLElement>('.gdp-file-shell').forEach(card => {")).toBe(true);
+    expect(app.includes("card.classList.toggle('hidden-by-filter', !match)")).toBe(true);
+  });
+
+  test('repository folder pages keep the tree sidebar visible', () => {
+    expect(app.includes("renderRepoBlobSidebar(meta.path || '', meta.ref)")).toBe(true);
+    expect(style.includes('body.gdp-repo-page #sidebar,\nbody.gdp-file-detail-page #sidebar-resizer')).toBe(false);
+    expect(style.includes('body.gdp-repo-page #content {\n  margin-left: var(--sidebar-w);')).toBe(true);
+    expect(style.includes('body.gdp-repo-page #sidebar-resizer {\n  display: none;')).toBe(false);
+  });
+
+  test('repository folder detail uses the available content width', () => {
+    expect(style.includes('.gdp-repo-shell {\n  width: 100%;\n  min-width: 0;')).toBe(true);
+    expect(style.includes('width: min(1120px, calc(100vw - 64px));')).toBe(false);
+  });
+
   test('file detail mode ignores stale source fetches', () => {
     expect(app.includes('let SOURCE_REQ_SEQ = 0')).toBe(true);
     expect(app.includes('if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return')).toBe(true);
+  });
+
+  test('file detail source loading can be cancelled by button or Escape', () => {
+    expect(app.includes('let ACTIVE_SOURCE_LOAD:')).toBe(true);
+    expect(app.includes("function cancelActiveSourceLoad(reason: 'user' | 'navigation' | 'esc'): boolean")).toBe(true);
+    expect(app.includes("fetch(buildRawFileUrl(target), { signal: controller.signal })")).toBe(true);
+    expect(app.includes("renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'))")).toBe(true);
+    expect(app.includes("if (e.key === 'Escape' && !document.querySelector('.mkdp-lightbox'))")).toBe(true);
+    expect(app.includes("if (cancelActiveSourceLoad('esc'))")).toBe(true);
+    expect(app.includes('function renderSourceCancelled(card: DiffCardElement, target: SourceFileTarget)')).toBe(true);
+    expect(app.includes('async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean>')).toBe(true);
+    expect(app.includes('if (signal?.aborted) return false')).toBe(true);
+    expect(app.includes('const rendered = await renderSourceText(card, target, textValue, controller.signal)')).toBe(true);
+    expect(style.includes('.gdp-source-viewer.cancelled')).toBe(true);
+    expect(style.includes('.gdp-source-cancel')).toBe(true);
+  });
+
+  test('large source files use a virtualized source viewer instead of rendering every row', () => {
+    expect(app.includes('const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000')).toBe(true);
+    expect(app.includes('function shouldVirtualizeSource(textValue: string, lines: string[]): boolean')).toBe(true);
+    expect(app.includes('function isVirtualSourceDisabled(): boolean')).toBe(true);
+    expect(app.includes("new URLSearchParams(window.location.search).get('virtual') === 'off'")).toBe(true);
+    expect(app.includes("function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement")).toBe(true);
+    expect(app.includes("view.classList.add('virtual')")).toBe(true);
+    expect(app.includes("badge.textContent = 'Virtual mode'")).toBe(true);
+    expect(app.includes("const { tabs, codeButton, previewButton } = createSourceTabs('preview')")).toBe(true);
+    expect(app.includes('virtualCode.hidden = true')).toBe(true);
+    expect(app.includes("full.textContent = 'Open full view'")).toBe(true);
+    expect(app.includes('navigator.clipboard.writeText(textValue)')).toBe(true);
+    expect(app.includes('VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH')).toBe(true);
+    expect(app.includes("code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value")).toBe(true);
+    expect(app.includes("code.textContent = line")).toBe(true);
+    expect(app.includes('windowEl.replaceChildren()')).toBe(true);
+    expect(app.includes('render();')).toBe(true);
+    expect(app.includes('new ResizeObserver(() =>')).toBe(true);
+    expect(app.includes('resizeObserver?.disconnect()')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-row')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-badge')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-action')).toBe(true);
+    expect(style.includes('line-height: 20px;')).toBe(true);
+  });
+
+  test('huge added diffs can be opened through the virtualized file viewer', () => {
+    expect(app.includes("openFileBtn.textContent = 'Open as file'")).toBe(true);
+    expect(app.includes("openFileBtn.title = 'Open this file in the virtualized source viewer'")).toBe(true);
+    expect(app.includes("if (file.status === 'A') wrap.appendChild(openFileBtn)")).toBe(true);
+    expect(app.includes("fullBtn.textContent = 'Load full diff'")).toBe(true);
   });
 });

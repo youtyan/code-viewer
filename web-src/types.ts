@@ -37,6 +37,7 @@ export type RepoTreeEntry = {
   name: string;
   path: string;
   type: 'tree' | 'blob' | 'commit';
+  children_omitted?: true;
 };
 
 export type RepoTreeResponse = {
@@ -44,6 +45,7 @@ export type RepoTreeResponse = {
   path: string;
   project: string;
   branch?: string;
+  upload_enabled?: boolean;
   entries: RepoTreeEntry[];
   readme?: {
     path: string;
