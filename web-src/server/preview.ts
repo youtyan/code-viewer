@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
+import { cacheFresh, type TimedCacheEntry } from './cache';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
 
@@ -24,8 +25,8 @@ let listenPort = 0;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
-const fileCache = new Map<string, string>();
-const metaCache = new Map<string, { body: string; sig: string }>();
+const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
+const metaCache = new Map<string, TimedCacheEntry<{ body: string; sig: string }>>();
 
 function parseCli() {
   const rest: string[] = [];
@@ -242,14 +243,14 @@ function handleDiffJson(url: URL) {
       fileCache.clear();
     }
     const body = JSON.stringify(payload);
-    metaCache.set(key, { body, sig });
+    metaCache.set(key, { body, sig, storedAt: Date.now() });
     return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   }
   const cached = metaCache.get(key);
-  if (cached) return new Response(cached.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+  if (cacheFresh(cached)) return new Response(cached.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   const payload = computePayload(extras, range);
   const body = JSON.stringify(payload);
-  metaCache.set(key, { body, sig: JSON.stringify({ ...payload, generation: undefined }) });
+  metaCache.set(key, { body, sig: JSON.stringify({ ...payload, generation: undefined }), storedAt: Date.now() });
   return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
@@ -343,9 +344,12 @@ function handleFileDiff(url: URL) {
   const cacheKey = isUntracked
     ? `u\0${path}\0${extras.join('\0')}`
     : `t\0${path}\0${oldPath || ''}\0${[...extras, ...args].join('\0')}`;
-  let diffText = fileCache.get(cacheKey);
+  const cached = fileCache.get(cacheKey);
+  let diffText: string;
   let errText = '';
-  if (!diffText) {
+  if (cacheFresh(cached)) {
+    diffText = cached.diffText;
+  } else {
     if (isUntracked) {
       diffText = git.untrackedFileDiff(extras, path, cwd).stdout || '';
     } else {
@@ -353,7 +357,7 @@ function handleFileDiff(url: URL) {
       diffText = res.stdout || '';
       if (res.code !== 0) errText = res.stderr;
     }
-    fileCache.set(cacheKey, diffText);
+    fileCache.set(cacheKey, { diffText, storedAt: Date.now() });
   }
   const mode = url.searchParams.get('mode') || 'full';
   const truncated = mode === 'preview'
