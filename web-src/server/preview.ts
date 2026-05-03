@@ -1,13 +1,23 @@
 #!/usr/bin/env bun
 
-import { closeSync, constants, existsSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, lstatSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
-import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
+import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, FileSearchListResponse, GrepMatch, GrepResponse, RepoTreeResponse } from '../types';
 import { cacheFresh, fileDiffCacheKey, setTimedCacheEntry, type TimedCacheEntry } from './cache';
 import { startDevAssetReload } from './dev-assets';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
+import {
+  GREP_MAX_FILE_BYTES,
+  buildFileSearchList,
+  buildRgArgs,
+  fixedStringLineMatches,
+  isSkippableSearchPath,
+  normalizeGrepMax,
+  parseGitGrepOutput,
+  parseRgOutput,
+} from './search';
 
 const ROOT = normalize(join(import.meta.dir, '..', '..'));
 const WEB_ROOT = join(ROOT, 'web');
@@ -35,11 +45,13 @@ let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let allowUpload = false;
 let uploadAllowedByCli = false;
+let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
 const metaCache = new Map<string, TimedCacheEntry<{ body: string; sig: string }>>();
+const fileListCache = new Map<string, { generation: number; body: FileSearchListResponse }>();
 
 function parseCli() {
   const rest: string[] = [];
@@ -395,6 +407,98 @@ function handleTree(url: URL) {
   } satisfies RepoTreeResponse);
 }
 
+function handleFiles(url: URL) {
+  const target = url.searchParams.get('ref') || url.searchParams.get('target') || 'worktree';
+  if (target !== 'worktree' && !git.verifyTreeRef(target, cwd)) return text('invalid target', 400);
+  const key = target || 'worktree';
+  const cached = fileListCache.get(key);
+  if (cached && cached.generation === generation) return json(cached.body);
+  const entries = git.listTree(key, '', cwd, { recursive: true }).entries;
+  const body = buildFileSearchList(key, generation, entries);
+  fileListCache.set(key, { generation, body });
+  return json(body);
+}
+
+function parseGrepPaths(url: URL): string[] {
+  return url.searchParams.getAll('path').filter(path => safePath(path) && !isGitInternalPath(path));
+}
+
+function rgAvailable(): boolean {
+  if (rgAvailableCache !== null) return rgAvailableCache;
+  const proc = Bun.spawnSync(['rg', '--version'], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  rgAvailableCache = proc.exitCode === 0;
+  return rgAvailableCache;
+}
+
+function grepWorktreeFallback(query: string, max: number, paths: string[]): GrepMatch[] {
+  const candidates = paths.length ? paths : git.worktreeFiles(cwd).map(entry => entry.path);
+  const matches: GrepMatch[] = [];
+  for (const path of candidates) {
+    if (matches.length >= max) break;
+    if (!safePath(path) || isGitInternalPath(path) || isSkippableSearchPath(path)) continue;
+    const full = safeWorktreePath(path);
+    if (!full) continue;
+    let stat;
+    try {
+      stat = lstatSync(full);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > GREP_MAX_FILE_BYTES) continue;
+    let data: Buffer;
+    try {
+      data = readFileSync(full);
+    } catch {
+      continue;
+    }
+    if (data.subarray(0, 8192).includes(0)) continue;
+    matches.push(...fixedStringLineMatches(path, data.toString('utf8'), query, max - matches.length));
+  }
+  return matches;
+}
+
+function grepWorktree(query: string, max: number, paths: string[], regex: boolean): GrepResponse {
+  if (rgAvailable()) {
+    const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path) && safeWorktreePath(path));
+    const args = buildRgArgs(query, max, safePaths, regex);
+    const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
+    const stdout = new TextDecoder().decode(proc.stdout);
+    const matches = parseRgOutput(stdout, max)
+      .filter(match => safePath(match.path) && !isGitInternalPath(match.path) && !!safeWorktreePath(match.path));
+    return { ref: 'worktree', engine: 'rg', truncated: matches.length >= max, matches };
+  }
+  if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] };
+  const matches = grepWorktreeFallback(query, max, paths);
+  return { ref: 'worktree', engine: 'fallback', truncated: matches.length >= max, matches };
+}
+
+function grepTreeRef(ref: string, query: string, max: number, paths: string[], regex: boolean): GrepResponse {
+  const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path));
+  const args = [
+    'git', '-c', 'core.quotepath=false', 'grep',
+    '-n', '--column', '-i', regex ? '-E' : '-F', '--no-color',
+    '-e', query,
+    ref, '--',
+    ...safePaths,
+  ];
+  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
+  const stdout = new TextDecoder().decode(proc.stdout);
+  const matches = parseGitGrepOutput(stdout, ref, max).slice(0, max);
+  return { ref, engine: 'git', truncated: matches.length >= max, matches };
+}
+
+function handleGrep(url: URL) {
+  const query = url.searchParams.get('q') || '';
+  const ref = url.searchParams.get('ref') || 'worktree';
+  const max = normalizeGrepMax(url.searchParams.get('max'));
+  const paths = parseGrepPaths(url);
+  const regex = url.searchParams.get('regex') === '1';
+  if (!query.trim()) return json({ ref, engine: ref === 'worktree' ? 'fallback' : 'git', truncated: false, matches: [] } satisfies GrepResponse);
+  if (ref === 'worktree' || ref === '') return json(grepWorktree(query, max, paths, regex));
+  if (!git.verifyTreeRef(ref, cwd)) return text('invalid target', 400);
+  return json(grepTreeRef(ref, query, max, paths, regex));
+}
+
 function handleFileDiff(url: URL) {
   const path = url.searchParams.get('path') || '';
   if (!safePath(path)) return text('invalid path', 400);
@@ -739,6 +843,8 @@ const server = Bun.serve({
     if (staticResponse) return staticResponse;
     if (url.pathname === '/diff.json') return handleDiffJson(url);
     if (url.pathname === '/_tree') return handleTree(url);
+    if (url.pathname === '/_files') return handleFiles(url);
+    if (url.pathname === '/_grep') return handleGrep(url);
     if (url.pathname === '/file_diff') return handleFileDiff(url);
     if (url.pathname === '/file_range') return handleFileRange(url);
     if (url.pathname === '/_file') return handleRawFile(req, url);
@@ -750,6 +856,7 @@ const server = Bun.serve({
       generation++;
       fileCache.clear();
       metaCache.clear();
+      fileListCache.clear();
       sendSse('update');
       return json({ ok: true, generation });
     }

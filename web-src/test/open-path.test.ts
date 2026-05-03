@@ -60,3 +60,50 @@ describe('state changing refresh endpoint', () => {
     expect(server.includes("if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);\n      generation++;")).toBe(true);
   });
 });
+
+describe('search palette shortcuts', () => {
+  test('Ctrl+K and Ctrl+G open the palette while slash keeps sidebar filter focus', () => {
+    expect(app.includes("openSearchPalette('file')")).toBe(true);
+    expect(app.includes("openSearchPalette('grep')")).toBe(true);
+    expect(app.includes("if (e.key === '/') { e.preventDefault(); focusFileFilter(); }")).toBe(true);
+    expect(app.includes("focusFileFilter();\n      return;\n    }\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g')")).toBe(false);
+  });
+
+  test('palette keeps keyboard selection scrolled into view', () => {
+    expect(app.includes("row.scrollIntoView({ block: 'nearest' })")).toBe(true);
+  });
+
+  test('palette exposes glob and explicit regex modes', () => {
+    expect(app.includes("'Glob: * ? []'")).toBe(true);
+    expect(app.includes("'Fuzzy path search'")).toBe(true);
+    expect(app.includes('grepRegex: false')).toBe(true);
+    expect(app.includes("params.set('regex', '1')")).toBe(true);
+    expect(app.includes('Invalid regular expression')).toBe(true);
+    expect(app.includes('Alt+R toggles regex')).toBe(true);
+  });
+
+  test('file line route highlights target source lines', () => {
+    expect(app.includes('function lineInSourceTarget')).toBe(true);
+    expect(app.includes("tr.classList.toggle('gdp-source-line-target'")).toBe(true);
+    expect(app.includes("row.classList.toggle('gdp-source-line-target'")).toBe(true);
+    expect(style.includes('.gdp-source-line-target')).toBe(true);
+    expect(style.includes('--line-hit-bg:    #fff8c5;')).toBe(true);
+    expect(style.includes('--line-hit-border:var(--accent);')).toBe(true);
+    expect(style.includes('.gdp-source-line-target .gdp-source-line-code')).toBe(true);
+  });
+
+  test('diff grep selection stores and focuses a diff line route', () => {
+    expect(app.includes("setRoute({ screen: 'diff', range: currentRange(), path: item.path, line: item.line })")).toBe(true);
+    expect(app.includes('function focusDiffLine')).toBe(true);
+    expect(app.includes('if (card && card.dataset.path !== STATE.route.path) return false;')).toBe(true);
+    expect(app.includes('.gdp-diff-line-target')).toBe(true);
+    expect(style.includes('.gdp-diff-line-target')).toBe(true);
+  });
+
+  test('source line numbers update the route line parameter by click and drag', () => {
+    expect(app.includes('function beginSourceLineSelection')).toBe(true);
+    expect(app.includes('function updateSourceLineSelection')).toBe(true);
+    expect(app.includes("num.addEventListener('mousedown'")).toBe(true);
+    expect(app.includes("num.addEventListener('mouseenter'")).toBe(true);
+  });
+});

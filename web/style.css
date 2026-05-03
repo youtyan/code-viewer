@@ -29,6 +29,8 @@
   --danger:         #cf222e;
   --danger-emph:    #cf222e;
   --attn:           #9a6700;
+  --line-hit-bg:    #fff8c5;
+  --line-hit-border:var(--accent);
   --done:           #8250df;
   /* diff colors (GitHub exact) */
   --diff-add-bg:        #dafbe1;
@@ -74,6 +76,8 @@
   --danger:         #f85149;
   --danger-emph:    #da3633;
   --attn:           #d29922;
+  --line-hit-bg:    rgba(187,128,9,0.18);
+  --line-hit-border:var(--accent);
   --done:           #a371f7;
   --diff-add-bg:        rgba(46,160,67,0.15);
   --diff-add-num-bg:    rgba(46,160,67,0.30);
@@ -105,6 +109,140 @@ html, body {
 
 /* Window scrolls; global header + topbar + sidebar are fixed */
 #app { display: block; }
+
+.gdp-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(31, 35, 40, 0.18);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(12vh, 96px);
+}
+
+[data-theme="dark"] .gdp-palette-backdrop {
+  background: rgba(1, 4, 9, 0.45);
+}
+
+.gdp-palette {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
+}
+
+.gdp-palette-label {
+  padding: 12px 16px 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.gdp-palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px 14px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 24px;
+  line-height: 1.25;
+  outline: none;
+}
+
+.gdp-palette-status {
+  min-height: 28px;
+  padding: 6px 16px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.gdp-palette-controls {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 0;
+}
+
+.gdp-palette-mode-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gdp-palette-mode-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.gdp-palette-mode-hint {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.gdp-palette-list {
+  overflow: auto;
+  padding: 6px;
+}
+
+.gdp-palette-row {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gdp-palette-row[aria-selected="true"] {
+  background: var(--accent-subtle);
+}
+
+.gdp-palette-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gdp-palette-row-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.gdp-palette-row-detail mark {
+  background: var(--attn);
+  color: var(--fg-onemphasis);
+  border-radius: 2px;
+  padding: 0 1px;
+}
 
 /* ===== Global header ===== */
 #global-header {
@@ -1286,6 +1424,17 @@ table.d2h-diff-table .d2h-code-line-prefix {
   width: 1.5em;
   padding-left: 4px;
 }
+
+table.d2h-diff-table tr.gdp-diff-line-target > td,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-side-line,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line-ctn {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
+}
 /* Stack height = number of buttons * 20px. With 1 button = 20px row,
  * with 2 (↑+↓) = 40px row, matching GitHub. */
 .gdp-expand-stack {
@@ -1602,6 +1751,33 @@ table.d2h-diff-table .d2h-code-line-prefix {
   font-size: 12px;
   line-height: 20px;
 }
+.gdp-source-table tr.gdp-source-line-target {
+  background: var(--line-hit-bg);
+}
+.gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
+.gdp-source-table tr.gdp-source-line-target .gdp-source-line-code,
+.gdp-source-virtual-row.gdp-source-line-target {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+.gdp-source-table tr.gdp-source-line-target > td.gdp-source-line-number,
+.gdp-source-virtual-row.gdp-source-line-target > .gdp-source-virtual-line-number {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+.gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
+.gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
+}
+.gdp-source-line-target .gdp-source-line-code,
+.gdp-source-line-target .gdp-source-virtual-line-code {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+.gdp-source-line-target .gdp-source-line-code.shiki span,
+.gdp-source-line-target .gdp-source-virtual-line-code.hljs span {
+  background: transparent !important;
+}
 .gdp-standalone-source .gdp-source-table {
   display: block;
   overflow: auto;
@@ -1659,6 +1835,11 @@ table.d2h-diff-table .d2h-code-line-prefix {
 }
 .gdp-source-line-code.hljs {
   background: var(--bg);
+}
+.gdp-source-line-target .gdp-source-line-code.hljs,
+.gdp-source-line-target .gdp-source-line-code.shiki,
+.gdp-source-line-target .gdp-source-virtual-line-code.hljs {
+  background: var(--line-hit-bg);
 }
 .gdp-source-line-code.shiki,
 .gdp-source-line-code.shiki span {
@@ -1733,6 +1914,8 @@ table.d2h-diff-table .d2h-code-line-prefix {
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 20px;
+  cursor: pointer;
+  user-select: none;
 }
 .gdp-source-virtual-spacer {
   position: relative;
@@ -1760,6 +1943,7 @@ table.d2h-diff-table .d2h-code-line-prefix {
   background: var(--bg);
   box-shadow: inset -1px 0 0 var(--border-muted);
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
   user-select: none;
 }
 .gdp-source-virtual-line-code {
