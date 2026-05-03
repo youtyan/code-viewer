@@ -13178,5 +13178,6 @@ var createHighlighter = /* @__PURE__ */ createBundledHighlighter({
   engine: () => (0, engine_oniguruma_exports.createOnigurumaEngine)(Promise.resolve().then(() => (init_wasm2(), exports_wasm2)))
 });
 export {
-  createHighlighter
+  createHighlighter,
+  bundledLanguages
 };

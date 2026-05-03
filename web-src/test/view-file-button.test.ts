@@ -164,6 +164,21 @@ describe('view file UI', () => {
     expect(style.includes('.gdp-source-tabs')).toBe(true);
   });
 
+  test('file detail uses Shiki for non-virtual source highlighting', () => {
+    expect(app.includes('type SourceShikiHighlighter')).toBe(true);
+    expect(app.includes('function loadSourceShikiHighlighter()')).toBe(true);
+    expect(app.includes("import('/' + 'shiki.js')")).toBe(true);
+    expect(app.includes('bundledLanguages?: Record<string, unknown>')).toBe(true);
+    expect(app.includes('SOURCE_SHIKI_LANGS.filter(lang => !!typed.bundledLanguages?.[lang])')).toBe(true);
+    expect(app.includes("'terraform'")).toBe(true);
+    expect(app.includes('const sourceShikiLang = normalizeSourceShikiLang(lang)')).toBe(true);
+    expect(app.includes('const shikiLines = sourceShikiRef && sourceShikiLang ? sourceShikiLines(textValue, sourceShikiLang, sourceShikiRef) : null')).toBe(true);
+    expect(app.includes('renderVirtualSource(target, textValue, lines, hljsRef, lang)')).toBe(true);
+    expect(app.includes("code.classList.add('shiki')")).toBe(true);
+    expect(style.includes('.gdp-source-line-code.shiki')).toBe(true);
+    expect(style.includes('[data-theme="dark"] .gdp-source-line-code.shiki span')).toBe(true);
+  });
+
   test('file detail shows a Code tab even when preview is unavailable', () => {
     expect(app.includes('const previewable = isPreviewableSource(target.path)')).toBe(true);
     expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code')")).toBe(true);

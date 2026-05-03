@@ -6393,6 +6393,7 @@
     const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
     const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
     let highlightLoadPromise = null;
+    let sourceShikiLoadPromise = null;
     let highlightConfigured = false;
     let PROJECT_NAME = "";
     let REPO_SIDEBAR_REF = null;
@@ -6498,6 +6499,100 @@
       });
       return highlightLoadPromise;
     }
+    const SOURCE_SHIKI_LANGS = Array.from(new Set([
+      "bash",
+      "bibtex",
+      "c",
+      "clojure",
+      "cmake",
+      "cpp",
+      "csharp",
+      "css",
+      "dart",
+      "diff",
+      "dockerfile",
+      "elixir",
+      "erlang",
+      "fortran",
+      "go",
+      "gradle",
+      "graphql",
+      "haskell",
+      "html",
+      "java",
+      "javascript",
+      "json",
+      "julia",
+      "kotlin",
+      "lua",
+      "make",
+      "markdown",
+      "nix",
+      "ocaml",
+      "perl",
+      "php",
+      "properties",
+      "protobuf",
+      "python",
+      "r",
+      "rst",
+      "ruby",
+      "rust",
+      "scala",
+      "scss",
+      "sql",
+      "swift",
+      "terraform",
+      "tex",
+      "toml",
+      "typescript",
+      "vim",
+      "vue",
+      "xml",
+      "yaml"
+    ]));
+    const SOURCE_SHIKI_LANG_ALIASES = {
+      makefile: "make",
+      objectivec: "c",
+      "objective-c": "c",
+      "objective-cpp": "cpp",
+      starlark: "python"
+    };
+    function normalizeSourceShikiLang(lang) {
+      if (!lang)
+        return null;
+      return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
+    }
+    function loadSourceShikiHighlighter() {
+      if (!sourceShikiLoadPromise) {
+        sourceShikiLoadPromise = import("/shiki.js").then((mod) => {
+          const typed = mod;
+          const langs = typed.bundledLanguages ? SOURCE_SHIKI_LANGS.filter((lang) => !!typed.bundledLanguages?.[lang]) : SOURCE_SHIKI_LANGS;
+          return typed.createHighlighter({
+            themes: ["github-light", "github-dark"],
+            langs
+          });
+        }).catch(() => null);
+      }
+      return sourceShikiLoadPromise;
+    }
+    function sourceShikiLines(textValue, lang, highlighter) {
+      try {
+        const html = highlighter.codeToHtml(textValue || " ", {
+          lang,
+          themes: { light: "github-light", dark: "github-dark" },
+          defaultColor: false
+        });
+        const template = document.createElement("template");
+        template.innerHTML = html;
+        const renderedLines = Array.from(template.content.querySelectorAll(".line"));
+        if (!renderedLines.length)
+          return null;
+        return renderedLines.map((line) => line.innerHTML || " ");
+      } catch {
+        return null;
+      }
+    }
     function rerenderLoadedDiffs() {
       document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
         const data = card._diffData;
@@ -6565,10 +6660,10 @@
     }
     function setFolderIcon(el, collapsed) {
       const path = collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open;
-      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + path + '"></path></svg>';
+      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + path + '"></path></svg>';
     }
     function setChevronIcon(el) {
-      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
+      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
     }
     function iconSvg(className, paths) {
       const pathList = Array.isArray(paths) ? paths : [paths];
@@ -6840,7 +6935,7 @@
       if (meta.totals) {
         const t2 = document.createElement("span");
         t2.className = "num";
-        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> " + "<span>" + meta.totals.files + " files</span>";
+        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> <span>" + meta.totals.files + " files</span>";
         el.appendChild(t2);
       }
       const u2 = document.createElement("span");
@@ -7510,7 +7605,7 @@
       }
       const head = document.createElement("div");
       head.className = "gdp-shell-header";
-      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + "</span>" + '<span class="path">' + escapeHtml2(f2.display_path || f2.path) + "</span>" + '<span class="stats">' + '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>" + "</span>" + '<span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
+      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + '</span><span class="path">' + escapeHtml2(f2.display_path || f2.path) + '</span><span class="stats"><span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + '</span></span><span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
       card.appendChild(head);
       const body = document.createElement("div");
       body.className = "gdp-shell-body";
@@ -7948,7 +8043,7 @@
         const button = document.createElement("button");
         button.className = "gdp-expand-btn";
         button.title = spec.title;
-        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' + '<path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
+        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
         button.addEventListener("click", (e2) => {
           e2.stopPropagation();
           if (button.disabled)
@@ -8046,9 +8141,9 @@
           const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
           lnHtml = '<td class="d2h-code-side-linenumber d2h-cntx">' + num + "</td>";
         } else {
-          lnHtml = '<td class="d2h-code-linenumber d2h-cntx">' + '<div class="line-num1">' + (oldStart + i2) + "</div>" + '<div class="line-num2">' + (newStart + i2) + "</div>" + "</td>";
+          lnHtml = '<td class="d2h-code-linenumber d2h-cntx"><div class="line-num1">' + (oldStart + i2) + '</div><div class="line-num2">' + (newStart + i2) + "</div></td>";
         }
-        tr.innerHTML = lnHtml + '<td class="d2h-cntx">' + '<div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '">' + '<span class="d2h-code-line-prefix">&nbsp;</span>' + '<span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span>" + "</div>" + "</td>";
+        tr.innerHTML = lnHtml + '<td class="d2h-cntx"><div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '"><span class="d2h-code-line-prefix">&nbsp;</span><span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span></div></td>";
         frag.appendChild(tr);
       }
       tbody.insertBefore(frag, anchor);
@@ -8562,12 +8657,14 @@
         header.textContent = target.path + " @ " + target.ref;
       }
       const lang = inferLang(target.path);
-      const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
+      const usesVirtualSource = shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled();
+      const hljsRef = STATE.syntaxHighlight && usesVirtualSource ? await loadSyntaxHighlighter() : null;
+      const sourceShikiRef = STATE.syntaxHighlight && !usesVirtualSource ? await loadSourceShikiHighlighter() : null;
       if (signal?.aborted)
         return false;
       const previewable = isPreviewableSource(target.path);
       const tabsHost = card.querySelector(".gdp-file-detail-tabs");
-      if (shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled()) {
+      if (usesVirtualSource) {
         const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
         if (previewable) {
           const { tabs: tabs2, codeButton: codeButton2, previewButton: previewButton2 } = createSourceTabs("preview");
@@ -8623,6 +8720,8 @@
       const table2 = document.createElement("table");
       table2.className = "gdp-source-table";
       const tbody = document.createElement("tbody");
+      const sourceShikiLang = normalizeSourceShikiLang(lang);
+      const shikiLines = sourceShikiRef && sourceShikiLang ? sourceShikiLines(textValue, sourceShikiLang, sourceShikiRef) : null;
       for (let index = 0;index < lines.length; index++) {
         if (signal?.aborted)
           return false;
@@ -8633,13 +8732,9 @@
         num.textContent = String(index + 1);
         const code2 = document.createElement("td");
         code2.className = "gdp-source-line-code";
-        if (hljsRef && hljsRef.highlight && lang && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
-          try {
-            code2.innerHTML = hljsRef.highlight(line || " ", { language: lang, ignoreIllegals: true }).value;
-            code2.classList.add("hljs");
-          } catch {
-            code2.textContent = line || " ";
-          }
+        if (shikiLines && shikiLines[index] != null) {
+          code2.innerHTML = shikiLines[index] || " ";
+          code2.classList.add("shiki");
         } else {
           code2.textContent = line || " ";
         }
@@ -9450,7 +9545,7 @@
         leftHTML = mediaTag(path, "HEAD");
         rightHTML = mediaTag(path, "worktree");
       }
-      container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+      container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + '</div><div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
       body.replaceWith(container);
     }
     function setupScrollSpy() {
@@ -9842,7 +9937,7 @@
           const [sha, subject, author, when] = c2.split("\t");
           if (!sha)
             continue;
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(sha) + '">' + '<div class="row1">' + '<span class="sha">' + escapeHtml2(sha) + "</span>" + '<span class="subject" title="' + escapeAttr(subject || "") + '">' + escapeHtml2(subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + escapeHtml2(author || "") + "</span>" + '<span class="when">' + escapeHtml2(when || "") + "</span>" + "</div>" + "</div>");
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(sha) + '</span><span class="subject" title="' + escapeAttr(subject || "") + '">' + escapeHtml2(subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(author || "") + '</span><span class="when">' + escapeHtml2(when || "") + "</span></div></div>");
         }
       } else if (popTab === "branches") {
         const branches = (REFS.branches || []).filter(m);
@@ -9851,7 +9946,7 @@
         }
         for (const b2 of branches) {
           const cur = b2 === REFS.current;
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(b2) + '">' + '<span class="name">' + escapeHtml2(b2) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>");
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(b2) + '"><span class="name">' + escapeHtml2(b2) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>");
         }
       } else if (popTab === "tags") {
         const tags = (REFS.tags || []).filter(m);
@@ -9859,7 +9954,7 @@
           html.push('<div class="rp-empty">no tags</div>');
         }
         for (const t2 of tags) {
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(t2) + '">' + '<span class="name">' + escapeHtml2(t2) + "</span>" + '<span class="badge">tag</span>' + "</div>");
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(t2) + '"><span class="name">' + escapeHtml2(t2) + '</span><span class="badge">tag</span></div>');
         }
       }
       popBody.innerHTML = html.join("");
