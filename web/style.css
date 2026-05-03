@@ -1718,11 +1718,6 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
   box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
 }
-.gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
-.gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
-  color: var(--attn);
-  font-weight: 600;
-}
 .gdp-source-line-target .gdp-source-line-code,
 .gdp-source-line-target .gdp-source-virtual-line-code {
   background: var(--line-hit-bg);
@@ -1784,6 +1779,11 @@ table.d2h-diff-table .d2h-code-line-prefix {
 }
 .gdp-source-line-code.hljs {
   background: var(--bg);
+}
+.gdp-source-line-target .gdp-source-line-code.hljs,
+.gdp-source-line-target .gdp-source-line-code.shiki,
+.gdp-source-line-target .gdp-source-virtual-line-code.hljs {
+  background: var(--line-hit-bg);
 }
 .gdp-source-line-code.shiki,
 .gdp-source-line-code.shiki span {
