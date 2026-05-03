@@ -73,6 +73,15 @@ describe('search palette shortcuts', () => {
     expect(app.includes("row.scrollIntoView({ block: 'nearest' })")).toBe(true);
   });
 
+  test('palette exposes glob and explicit regex modes', () => {
+    expect(app.includes("'Glob: * ? []'")).toBe(true);
+    expect(app.includes("'Fuzzy path search'")).toBe(true);
+    expect(app.includes('grepRegex: false')).toBe(true);
+    expect(app.includes("params.set('regex', '1')")).toBe(true);
+    expect(app.includes('Invalid regular expression')).toBe(true);
+    expect(app.includes('Alt+R toggles regex')).toBe(true);
+  });
+
   test('file line route highlights target source lines', () => {
     expect(app.includes('function lineInSourceTarget')).toBe(true);
     expect(app.includes("tr.classList.toggle('gdp-source-line-target'")).toBe(true);
@@ -81,6 +90,13 @@ describe('search palette shortcuts', () => {
     expect(style.includes('--line-hit-bg:    #fff8c5;')).toBe(true);
     expect(style.includes('--line-hit-border:var(--accent);')).toBe(true);
     expect(style.includes('.gdp-source-line-target .gdp-source-line-code')).toBe(true);
+  });
+
+  test('diff grep selection stores and focuses a diff line route', () => {
+    expect(app.includes("setRoute({ screen: 'diff', range: currentRange(), path: item.path, line: item.line })")).toBe(true);
+    expect(app.includes('function focusDiffLine')).toBe(true);
+    expect(app.includes('.gdp-diff-line-target')).toBe(true);
+    expect(style.includes('.gdp-diff-line-target')).toBe(true);
   });
 
   test('source line numbers update the route line parameter by click and drag', () => {

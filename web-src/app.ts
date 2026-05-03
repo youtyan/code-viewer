@@ -2,7 +2,7 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
-import { fuzzyMatchPath, rankFuzzyPaths, type FuzzyRange } from './fuzzy-search';
+import { fuzzyMatchPath, globMatchPath, isGlobPathQuery, rankPathMatches, type FuzzyRange } from './fuzzy-search';
 import { limitPaletteResults, movePaletteSelection } from './search-palette';
 import { createCatchUpGate, shouldCatchUpDiff } from './catch-up';
 import {
@@ -737,7 +737,39 @@ window.GdpExpandLogic = GdpExpandLogic;
     enqueueLoad(f, card, 5);
   }
 
-  function scrollToFile(path: string) {
+  function clearDiffLineFocus() {
+    document.querySelectorAll<HTMLElement>('.gdp-diff-line-target').forEach(row => {
+      row.classList.remove('gdp-diff-line-target');
+    });
+  }
+
+  function diffRowLineNumber(row: HTMLTableRowElement): number | null {
+    const newLine = row.querySelector<HTMLElement>('.line-num2, td.d2h-code-side-linenumber');
+    const raw = (newLine?.textContent || '').trim();
+    const line = Number(raw);
+    return Number.isInteger(line) && line > 0 ? line : null;
+  }
+
+  function focusDiffLine(card: HTMLElement, line: SourceLineTarget | undefined) {
+    const start = lineTargetStart(line);
+    if (!start) return false;
+    const rows = Array.from(card.querySelectorAll<HTMLTableRowElement>('table.d2h-diff-table tr'));
+    const row = rows.find(candidate => diffRowLineNumber(candidate) === start);
+    if (!row) return false;
+    clearDiffLineFocus();
+    row.classList.add('gdp-diff-line-target');
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+  }
+
+  function applyDiffRouteFocus(card?: HTMLElement) {
+    if (STATE.route.screen !== 'diff' || !STATE.route.path || !STATE.route.line) return false;
+    const targetCard = card || document.querySelector<DiffCardElement>(diffCardSelector(STATE.route.path));
+    if (!targetCard) return false;
+    return focusDiffLine(targetCard, STATE.route.line);
+  }
+
+  function scrollToFile(path: string, line?: SourceLineTarget) {
     const card = document.querySelector<DiffCardElement>(diffCardSelector(path));
     if (!card) return;
     markActive(path);
@@ -752,7 +784,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       const f = STATE.files.find(x => x.path === path);
       if (f) enqueueLoad(f, card, 10);
     }
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!line || !focusDiffLine(card, line)) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   function markActive(path: string) {
@@ -3069,6 +3103,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     card.style.minHeight = '';
 
     mountDiff(card, file, data);
+    applyDiffRouteFocus(card);
     card.style.containIntrinsicSize = Math.max(card.offsetHeight, file.estimated_height_px || 200) + 'px';
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
@@ -3508,9 +3543,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   type PaletteState = {
     root: HTMLElement;
     input: HTMLInputElement;
+    controls: HTMLElement;
     list: HTMLElement;
     status: HTMLElement;
     mode: PaletteMode;
+    grepRegex: boolean;
     selected: number;
     items: PaletteItem[];
     composing: boolean;
@@ -3564,19 +3601,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.setAttribute('aria-controls', 'gdp-palette-list');
     const status = document.createElement('div');
     status.className = 'gdp-palette-status';
+    const controls = document.createElement('div');
+    controls.className = 'gdp-palette-controls';
     const list = document.createElement('div');
     list.id = 'gdp-palette-list';
     list.className = 'gdp-palette-list';
     list.setAttribute('role', 'listbox');
-    dialog.append(label, input, status, list);
+    dialog.append(label, input, controls, status, list);
     root.appendChild(dialog);
     document.body.appendChild(root);
     const state: PaletteState = {
       root,
       input,
+      controls,
       list,
       status,
       mode,
+      grepRegex: false,
       selected: -1,
       items: [],
       composing: false,
@@ -3593,6 +3634,55 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.focus();
     updatePaletteResults(state);
     return state;
+  }
+
+  function renderPaletteControls(state: PaletteState) {
+    state.controls.innerHTML = '';
+    if (state.mode === 'file') {
+      const hint = document.createElement('span');
+      hint.className = 'gdp-palette-mode-hint';
+      hint.textContent = isGlobPathQuery(state.input.value) ? 'Glob: * ? []' : 'Fuzzy path search';
+      state.controls.appendChild(hint);
+      return;
+    }
+    const plain = document.createElement('button');
+    plain.type = 'button';
+    plain.className = 'gdp-palette-mode-button';
+    plain.setAttribute('aria-pressed', String(!state.grepRegex));
+    plain.textContent = 'Plain';
+    plain.addEventListener('mousedown', e => {
+      e.preventDefault();
+      state.grepRegex = false;
+      renderPaletteControls(state);
+      updatePaletteResults(state);
+      state.input.focus();
+    });
+    const regex = document.createElement('button');
+    regex.type = 'button';
+    regex.className = 'gdp-palette-mode-button';
+    regex.setAttribute('aria-pressed', String(state.grepRegex));
+    regex.textContent = '.* Regex';
+    regex.title = 'Alt+R';
+    regex.addEventListener('mousedown', e => {
+      e.preventDefault();
+      state.grepRegex = true;
+      renderPaletteControls(state);
+      updatePaletteResults(state);
+      state.input.focus();
+    });
+    const hint = document.createElement('span');
+    hint.className = 'gdp-palette-mode-hint';
+    hint.textContent = 'Alt+R toggles regex';
+    state.controls.append(plain, regex, hint);
+  }
+
+  function regexQueryIsValid(query: string): boolean {
+    try {
+      new RegExp(query);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function appendHighlightedPath(parent: HTMLElement, path: string, ranges: FuzzyRange[]) {
@@ -3667,10 +3757,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function diffFilePaletteItems(state: PaletteState, query: string): PaletteFileItem[] {
+    const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
     const candidates = state.diffSnapshot
       .map(file => {
-        const current = fuzzyMatchPath(query, file.path);
-        const old = file.old_path ? fuzzyMatchPath(query, file.old_path) : null;
+        const current = matchPath(query, file.path);
+        const old = file.old_path ? matchPath(query, file.old_path) : null;
         const best = old && (!current || old.score > current.score)
           ? { match: old, displayPath: file.old_path || file.path }
           : current
@@ -3694,6 +3785,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function updateFilePalette(state: PaletteState, query: string) {
+    renderPaletteControls(state);
     const source = paletteSource();
     if (!query.trim()) {
       const base = source === 'diff'
@@ -3715,7 +3807,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const ref = paletteRef(source);
       const response = await repoPaletteFiles(ref);
       if (PALETTE !== state || state.input.value !== query) return;
-      state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map(match => ({
+      state.items = limitPaletteResults(rankPathMatches(query, response.files)).map(match => ({
         kind: 'file',
         path: match.item.path,
         displayPath: match.item.path,
@@ -3730,12 +3822,21 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function updateGrepPalette(state: PaletteState, query: string) {
+    renderPaletteControls(state);
     state.controller?.abort();
     if (state.debounce) window.clearTimeout(state.debounce);
     if (!query.trim()) {
       state.items = [];
       state.selected = -1;
       state.status.textContent = 'Type to grep';
+      renderPalette(state);
+      return;
+    }
+    if (state.grepRegex && !regexQueryIsValid(query)) {
+      state.controller?.abort();
+      state.items = [];
+      state.selected = -1;
+      state.status.textContent = 'Invalid regular expression';
       renderPalette(state);
       return;
     }
@@ -3747,6 +3848,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       params.set('ref', ref);
       params.set('q', query);
       params.set('max', '200');
+      if (state.grepRegex) params.set('regex', '1');
       if (source === 'diff') {
         for (const file of state.diffSnapshot) params.append('path', file.path);
       }
@@ -3767,7 +3869,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           source,
         })));
         state.selected = state.items.length ? 0 : -1;
-        state.status.textContent = response.engine + (response.truncated ? ' truncated' : '') + ' - ' + state.items.length + ' results';
+        state.status.textContent = response.engine + (state.grepRegex ? ' regex' : ' plain') + (response.truncated ? ' truncated' : '') + ' - ' + state.items.length + ' results';
         renderPalette(state);
       }).catch(err => {
         if (isAbortError(err)) return;
@@ -3806,7 +3908,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     if (item.source === 'diff') {
-      scrollToFile(item.path);
+      setRoute({ screen: 'diff', range: currentRange(), path: item.path, line: item.line });
+      scrollToFile(item.path, item.line);
     } else {
       setRoute({ screen: 'file', path: item.path, ref: item.ref, view: 'blob', line: item.line, range: currentRange() });
       renderStandaloneSource({ path: item.path, ref: item.ref });
@@ -3823,6 +3926,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (state.composing) return;
       e.preventDefault();
       selectPaletteItem(state);
+      return;
+    }
+    if (state.mode === 'grep' && e.altKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      state.grepRegex = !state.grepRegex;
+      updatePaletteResults(state);
       return;
     }
     const direction = e.key === 'ArrowDown' || (e.ctrlKey && e.key.toLowerCase() === 'n')

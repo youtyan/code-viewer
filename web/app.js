@@ -197,6 +197,84 @@
       return match ? { item, score: match.score, ranges: match.ranges } : null;
     }).filter((item) => item !== null).sort((a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path));
   }
+  function isGlobPathQuery(query) {
+    return /[*?]/.test(query.trim());
+  }
+  function escapeRegexChar(ch) {
+    return /[\\^$+?.()|{}]/.test(ch) ? "\\" + ch : ch;
+  }
+  function globToRegExp(query) {
+    const pattern = query.trim();
+    if (!pattern)
+      return null;
+    let source = "^";
+    for (let i = 0;i < pattern.length; i++) {
+      const ch = pattern[i];
+      if (ch === "*") {
+        if (pattern[i + 1] === "*") {
+          source += ".*";
+          i++;
+        } else {
+          source += "[^/]*";
+        }
+      } else if (ch === "?") {
+        source += "[^/]";
+      } else if (ch === "[") {
+        const close = pattern.indexOf("]", i + 1);
+        if (close < 0) {
+          source += "\\[";
+        } else {
+          const body = pattern.slice(i + 1, close).replace(/\\/g, "\\\\");
+          source += "[" + body + "]";
+          i = close;
+        }
+      } else {
+        source += escapeRegexChar(ch);
+      }
+    }
+    source += "$";
+    try {
+      return new RegExp(source, "i");
+    } catch {
+      return null;
+    }
+  }
+  function globMatchPath(query, path) {
+    const regex = globToRegExp(query);
+    const baseStart = basenameStart(path);
+    const basename = path.slice(baseStart);
+    if (!regex || !regex.test(path) && (query.includes("/") || !regex.test(basename)))
+      return null;
+    const literal = query.replace(/[*?[\]]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const ranges = [];
+    const lowerPath = path.toLowerCase();
+    for (const part of literal) {
+      const start = lowerPath.indexOf(part.toLowerCase());
+      if (start >= 0)
+        ranges.push({ start, end: start + part.length });
+    }
+    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+    const mergedRanges = [];
+    for (const range of ranges) {
+      const last = mergedRanges[mergedRanges.length - 1];
+      if (last && last.end >= range.start) {
+        last.end = Math.max(last.end, range.end);
+      } else {
+        mergedRanges.push({ ...range });
+      }
+    }
+    const score = 1000 - Math.min(path.length, 200) + (path.slice(baseStart).toLowerCase().endsWith(query.replace(/^\*+/, "").toLowerCase()) ? 50 : 0);
+    return { score, ranges: mergedRanges };
+  }
+  function rankPathMatches(query, items) {
+    if (isGlobPathQuery(query)) {
+      return items.map((item) => {
+        const match = globMatchPath(query, item.path);
+        return match ? { item, score: match.score, ranges: match.ranges, mode: "glob" } : null;
+      }).filter((item) => item !== null).sort((a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path));
+    }
+    return rankFuzzyPaths(query, items).map((item) => ({ ...item, mode: "fuzzy" }));
+  }
 
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
@@ -276,7 +354,12 @@
         };
       case "/todif":
       case "/todiff":
-        return { screen: "diff", range };
+        return {
+          screen: "diff",
+          range,
+          ...params.get("path") ? { path: params.get("path") || "" } : {},
+          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
+        };
       case "/file": {
         const path = params.get("path") || "";
         const target = params.get("target") || "";
@@ -307,7 +390,7 @@
         }
         return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
       case "diff":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? "&path=" + encodeURIComponent(route.path) : "") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
       default:
@@ -7053,7 +7136,39 @@
         return;
       enqueueLoad(f2, card, 5);
     }
-    function scrollToFile(path) {
+    function clearDiffLineFocus() {
+      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
+        row.classList.remove("gdp-diff-line-target");
+      });
+    }
+    function diffRowLineNumber(row) {
+      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
+      const raw = (newLine?.textContent || "").trim();
+      const line = Number(raw);
+      return Number.isInteger(line) && line > 0 ? line : null;
+    }
+    function focusDiffLine(card, line) {
+      const start = lineTargetStart(line);
+      if (!start)
+        return false;
+      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
+      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
+      if (!row)
+        return false;
+      clearDiffLineFocus();
+      row.classList.add("gdp-diff-line-target");
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      return true;
+    }
+    function applyDiffRouteFocus(card) {
+      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
+        return false;
+      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
+      if (!targetCard)
+        return false;
+      return focusDiffLine(targetCard, STATE.route.line);
+    }
+    function scrollToFile(path, line) {
       const card = document.querySelector(diffCardSelector(path));
       if (!card)
         return;
@@ -7069,7 +7184,9 @@
         if (f2)
           enqueueLoad(f2, card, 10);
       }
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!line || !focusDiffLine(card, line)) {
+        card.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
     function markActive(path) {
       STATE.activeFile = path;
@@ -9527,6 +9644,7 @@
       card.classList.add("loaded");
       card.style.minHeight = "";
       mountDiff(card, file, data);
+      applyDiffRouteFocus(card);
       card.style.containIntrinsicSize = Math.max(card.offsetHeight, file.estimated_height_px || 200) + "px";
       applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
       if (data.truncated && data.mode === "preview") {
@@ -10007,19 +10125,23 @@
       input.setAttribute("aria-controls", "gdp-palette-list");
       const status = document.createElement("div");
       status.className = "gdp-palette-status";
+      const controls = document.createElement("div");
+      controls.className = "gdp-palette-controls";
       const list2 = document.createElement("div");
       list2.id = "gdp-palette-list";
       list2.className = "gdp-palette-list";
       list2.setAttribute("role", "listbox");
-      dialog.append(label, input, status, list2);
+      dialog.append(label, input, controls, status, list2);
       root.appendChild(dialog);
       document.body.appendChild(root);
       const state = {
         root,
         input,
+        controls,
         list: list2,
         status,
         mode,
+        grepRegex: false,
         selected: -1,
         items: [],
         composing: false,
@@ -10041,6 +10163,53 @@
       input.focus();
       updatePaletteResults(state);
       return state;
+    }
+    function renderPaletteControls(state) {
+      state.controls.innerHTML = "";
+      if (state.mode === "file") {
+        const hint2 = document.createElement("span");
+        hint2.className = "gdp-palette-mode-hint";
+        hint2.textContent = isGlobPathQuery(state.input.value) ? "Glob: * ? []" : "Fuzzy path search";
+        state.controls.appendChild(hint2);
+        return;
+      }
+      const plain = document.createElement("button");
+      plain.type = "button";
+      plain.className = "gdp-palette-mode-button";
+      plain.setAttribute("aria-pressed", String(!state.grepRegex));
+      plain.textContent = "Plain";
+      plain.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = false;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const regex = document.createElement("button");
+      regex.type = "button";
+      regex.className = "gdp-palette-mode-button";
+      regex.setAttribute("aria-pressed", String(state.grepRegex));
+      regex.textContent = ".* Regex";
+      regex.title = "Alt+R";
+      regex.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = true;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const hint = document.createElement("span");
+      hint.className = "gdp-palette-mode-hint";
+      hint.textContent = "Alt+R toggles regex";
+      state.controls.append(plain, regex, hint);
+    }
+    function regexQueryIsValid(query) {
+      try {
+        new RegExp(query);
+        return true;
+      } catch {
+        return false;
+      }
     }
     function appendHighlightedPath(parent, path, ranges) {
       let cursor = 0;
@@ -10115,9 +10284,10 @@
       return res;
     }
     function diffFilePaletteItems(state, query) {
+      const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
       const candidates = state.diffSnapshot.map((file) => {
-        const current = fuzzyMatchPath(query, file.path);
-        const old = file.old_path ? fuzzyMatchPath(query, file.old_path) : null;
+        const current = matchPath(query, file.path);
+        const old = file.old_path ? matchPath(query, file.old_path) : null;
         const best = old && (!current || old.score > current.score) ? { match: old, displayPath: file.old_path || file.path } : current ? { match: current, displayPath: file.path } : null;
         return best ? { file, ...best } : null;
       }).filter((item) => item !== null).sort((a2, b2) => b2.match.score - a2.match.score || a2.file.path.localeCompare(b2.file.path));
@@ -10134,6 +10304,7 @@
       }));
     }
     async function updateFilePalette(state, query) {
+      renderPaletteControls(state);
       const source = paletteSource();
       if (!query.trim()) {
         const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
@@ -10154,7 +10325,7 @@
         const response = await repoPaletteFiles(ref);
         if (PALETTE !== state || state.input.value !== query)
           return;
-        state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map((match2) => ({
+        state.items = limitPaletteResults(rankPathMatches(query, response.files)).map((match2) => ({
           kind: "file",
           path: match2.item.path,
           displayPath: match2.item.path,
@@ -10168,6 +10339,7 @@
       renderPalette(state);
     }
     function updateGrepPalette(state, query) {
+      renderPaletteControls(state);
       state.controller?.abort();
       if (state.debounce)
         window.clearTimeout(state.debounce);
@@ -10175,6 +10347,14 @@
         state.items = [];
         state.selected = -1;
         state.status.textContent = "Type to grep";
+        renderPalette(state);
+        return;
+      }
+      if (state.grepRegex && !regexQueryIsValid(query)) {
+        state.controller?.abort();
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Invalid regular expression";
         renderPalette(state);
         return;
       }
@@ -10186,6 +10366,8 @@
         params.set("ref", ref);
         params.set("q", query);
         params.set("max", "200");
+        if (state.grepRegex)
+          params.set("regex", "1");
         if (source === "diff") {
           for (const file of state.diffSnapshot)
             params.append("path", file.path);
@@ -10209,7 +10391,7 @@
             source
           })));
           state.selected = state.items.length ? 0 : -1;
-          state.status.textContent = response.engine + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
+          state.status.textContent = response.engine + (state.grepRegex ? " regex" : " plain") + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
           renderPalette(state);
         }).catch((err) => {
           if (isAbortError(err))
@@ -10248,7 +10430,8 @@
         return;
       }
       if (item.source === "diff") {
-        scrollToFile(item.path);
+        setRoute({ screen: "diff", range: currentRange(), path: item.path, line: item.line });
+        scrollToFile(item.path, item.line);
       } else {
         setRoute({ screen: "file", path: item.path, ref: item.ref, view: "blob", line: item.line, range: currentRange() });
         renderStandaloneSource({ path: item.path, ref: item.ref });
@@ -10265,6 +10448,12 @@
           return;
         e2.preventDefault();
         selectPaletteItem(state);
+        return;
+      }
+      if (state.mode === "grep" && e2.altKey && e2.key.toLowerCase() === "r") {
+        e2.preventDefault();
+        state.grepRegex = !state.grepRegex;
+        updatePaletteResults(state);
         return;
       }
       const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
