@@ -68,12 +68,14 @@ describe('buildRgArgs', () => {
   test('passes query via -e before path arguments', () => {
     expect(buildRgArgs('needle', 20, ['src/app.ts'])).toEqual([
       'rg',
+      '--no-config',
       '--line-number',
       '--column',
       '--no-heading',
       '--color',
       'never',
       '--smart-case',
+      '--fixed-strings',
       '--max-count',
       '20',
       '--max-filesize',
@@ -83,6 +85,10 @@ describe('buildRgArgs', () => {
       '--',
       'src/app.ts',
     ]);
+  });
+
+  test('searches the current repository explicitly when no paths are supplied', () => {
+    expect(buildRgArgs('needle', 20, []).slice(-2)).toEqual(['--', '.']);
   });
 });
 
@@ -96,6 +102,12 @@ describe('grep output parsers', () => {
   test('parses git grep tree output without keeping ref in path', () => {
     expect(parseGitGrepOutput('main:src/app.ts:10:3:const app = true\n', 'main', 10)).toEqual([
       { path: 'src/app.ts', line: 10, column: 3, preview: 'const app = true' },
+    ]);
+  });
+
+  test('keeps colons inside paths when parsing grep output', () => {
+    expect(parseRgOutput('src/a:b.ts:10:3:const app = true\n', 10)).toEqual([
+      { path: 'src/a:b.ts', line: 10, column: 3, preview: 'const app = true' },
     ]);
   });
 });

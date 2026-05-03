@@ -2,7 +2,7 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
-import { rankFuzzyPaths, type FuzzyRange } from './fuzzy-search';
+import { fuzzyMatchPath, rankFuzzyPaths, type FuzzyRange } from './fuzzy-search';
 import { limitPaletteResults, movePaletteSelection } from './search-palette';
 import { createCatchUpGate, shouldCatchUpDiff } from './catch-up';
 import {
@@ -3425,7 +3425,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   type PaletteMode = 'file' | 'grep';
-  type PaletteFileItem = { kind: 'file'; path: string; old_path?: string; ref: string; targetPath?: string; targetRef?: string; source: 'diff' | 'repo'; ranges: FuzzyRange[] };
+  type PaletteFileItem = { kind: 'file'; path: string; old_path?: string; displayPath: string; ref: string; targetPath?: string; targetRef?: string; source: 'diff' | 'repo'; ranges: FuzzyRange[] };
   type PaletteGrepItem = { kind: 'grep'; path: string; line: number; column: number; preview: string; ref: string; source: 'diff' | 'repo' };
   type PaletteItem = PaletteFileItem | PaletteGrepItem;
   type PaletteState = {
@@ -3532,7 +3532,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function renderPalette(state: PaletteState) {
     state.list.innerHTML = '';
-    state.input.setAttribute('aria-activedescendant', state.selected >= 0 ? 'gdp-palette-item-' + state.selected : '');
     state.items.forEach((item, index) => {
       const row = document.createElement('button');
       row.type = 'button';
@@ -3546,7 +3545,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       detail.className = 'gdp-palette-row-detail';
       if (item.kind === 'file') {
         title.textContent = item.path.split('/').pop() || item.path;
-        appendHighlightedPath(detail, item.old_path ? item.path + '  ' + item.old_path : item.path, item.ranges);
+        appendHighlightedPath(detail, item.displayPath, item.ranges);
+        if (item.old_path && item.displayPath !== item.old_path) {
+          detail.appendChild(document.createTextNode('  ' + item.old_path));
+        }
       } else {
         title.textContent = item.path + ':' + item.line;
         detail.textContent = item.preview;
@@ -3554,10 +3556,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       row.append(title, detail);
       row.addEventListener('mouseenter', () => {
         state.selected = index;
-        renderPalette(state);
+        syncPaletteSelection(state);
       });
-      row.addEventListener('click', () => selectPaletteItem(state));
+      row.addEventListener('mousedown', e => {
+        e.preventDefault();
+        state.selected = index;
+        selectPaletteItem(state);
+      });
       state.list.appendChild(row);
+    });
+    syncPaletteSelection(state);
+  }
+
+  function syncPaletteSelection(state: PaletteState) {
+    state.input.setAttribute('aria-activedescendant', state.selected >= 0 ? 'gdp-palette-item-' + state.selected : '');
+    state.list.querySelectorAll<HTMLElement>('.gdp-palette-row').forEach((row, index) => {
+      row.setAttribute('aria-selected', index === state.selected ? 'true' : 'false');
     });
   }
 
@@ -3575,19 +3589,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function diffFilePaletteItems(state: PaletteState, query: string): PaletteFileItem[] {
-    const candidates = state.diffSnapshot.map(file => ({
-      path: file.old_path ? file.path + ' ' + file.old_path : file.path,
-      file,
-    }));
-    return limitPaletteResults(rankFuzzyPaths(query, candidates)).map(match => ({
+    const candidates = state.diffSnapshot
+      .map(file => {
+        const current = fuzzyMatchPath(query, file.path);
+        const old = file.old_path ? fuzzyMatchPath(query, file.old_path) : null;
+        const best = old && (!current || old.score > current.score)
+          ? { match: old, displayPath: file.old_path || file.path }
+          : current
+            ? { match: current, displayPath: file.path }
+            : null;
+        return best ? { file, ...best } : null;
+      })
+      .filter((item): item is { file: FileMeta; match: { score: number; ranges: FuzzyRange[] }; displayPath: string } => item !== null)
+      .sort((a, b) => b.match.score - a.match.score || a.file.path.localeCompare(b.file.path));
+    return limitPaletteResults(candidates).map(candidate => ({
       kind: 'file',
-      path: match.item.file.path,
-      old_path: match.item.file.old_path,
+      path: candidate.file.path,
+      old_path: candidate.file.old_path,
+      displayPath: candidate.displayPath,
       ref: paletteRef('diff'),
-      targetPath: fileSourceTarget(match.item.file).path,
-      targetRef: fileSourceTarget(match.item.file).ref,
+      targetPath: fileSourceTarget(candidate.file).path,
+      targetRef: fileSourceTarget(candidate.file).ref,
       source: 'diff',
-      ranges: match.ranges,
+      ranges: candidate.match.ranges,
     }));
   }
 
@@ -3597,7 +3621,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const base = source === 'diff'
         ? state.diffSnapshot.map(file => {
           const target = fileSourceTarget(file);
-          return { kind: 'file' as const, path: file.path, old_path: file.old_path, ref: paletteRef(source), targetPath: target.path, targetRef: target.ref, source, ranges: [] };
+          return { kind: 'file' as const, path: file.path, old_path: file.old_path, displayPath: file.path, ref: paletteRef(source), targetPath: target.path, targetRef: target.ref, source, ranges: [] };
         })
         : [];
       state.items = limitPaletteResults(base);
@@ -3616,6 +3640,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map(match => ({
         kind: 'file',
         path: match.item.path,
+        displayPath: match.item.path,
         ref,
         source,
         ranges: match.ranges,
@@ -3730,7 +3755,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (direction) {
       e.preventDefault();
       state.selected = movePaletteSelection(state.selected, state.items.length, direction);
-      renderPalette(state);
+      syncPaletteSelection(state);
     }
   }
 
@@ -3741,11 +3766,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
+      if (PALETTE?.mode === 'file') return;
       openSearchPalette('file');
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
       e.preventDefault();
+      if (PALETTE?.mode === 'grep') return;
       openSearchPalette('grep');
       return;
     }

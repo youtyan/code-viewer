@@ -52,14 +52,17 @@ export function buildFileSearchList(ref: string, generation: number, entries: Gi
 }
 
 export function buildRgArgs(query: string, max: number, paths: string[]): string[] {
+  const safePaths = paths.length ? paths : ['.'];
   return [
     'rg',
+    '--no-config',
     '--line-number',
     '--column',
     '--no-heading',
     '--color',
     'never',
     '--smart-case',
+    '--fixed-strings',
     '--max-count',
     String(max),
     '--max-filesize',
@@ -67,7 +70,7 @@ export function buildRgArgs(query: string, max: number, paths: string[]): string
     '-e',
     query,
     '--',
-    ...paths,
+    ...safePaths,
   ];
 }
 
@@ -75,12 +78,12 @@ export function parseRgOutput(stdout: string, max: number): GrepMatch[] {
   const matches: GrepMatch[] = [];
   for (const line of stdout.split('\n')) {
     if (!line || matches.length >= max) continue;
-    const parts = line.split(':');
-    if (parts.length < 4) continue;
-    const path = parts.shift() || '';
-    const lineNo = Number(parts.shift() || '0');
-    const column = Number(parts.shift() || '0');
-    const preview = parts.join(':');
+    const parsed = /^(.*):(\d+):(\d+):(.*)$/.exec(line);
+    if (!parsed) continue;
+    const path = parsed[1];
+    const lineNo = Number(parsed[2]);
+    const column = Number(parsed[3]);
+    const preview = parsed[4];
     if (!path || !lineNo || !column || isSkippableSearchPath(path)) continue;
     matches.push({ path, line: lineNo, column, preview: preview.slice(0, 500) });
   }

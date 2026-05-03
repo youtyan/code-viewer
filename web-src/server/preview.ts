@@ -45,6 +45,7 @@ let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let allowUpload = false;
 let uploadAllowedByCli = false;
+let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -423,8 +424,10 @@ function parseGrepPaths(url: URL): string[] {
 }
 
 function rgAvailable(): boolean {
+  if (rgAvailableCache !== null) return rgAvailableCache;
   const proc = Bun.spawnSync(['rg', '--version'], { cwd, stdout: 'pipe', stderr: 'pipe' });
-  return proc.exitCode === 0;
+  rgAvailableCache = proc.exitCode === 0;
+  return rgAvailableCache;
 }
 
 function grepWorktreeFallback(query: string, max: number, paths: string[]): GrepMatch[] {
@@ -458,9 +461,10 @@ function grepWorktree(query: string, max: number, paths: string[]): GrepResponse
   if (rgAvailable()) {
     const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path) && safeWorktreePath(path));
     const args = buildRgArgs(query, max, safePaths);
-    const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+    const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
     const stdout = new TextDecoder().decode(proc.stdout);
-    const matches = parseRgOutput(stdout, max);
+    const matches = parseRgOutput(stdout, max)
+      .filter(match => safePath(match.path) && !isGitInternalPath(match.path) && !!safeWorktreePath(match.path));
     return { ref: 'worktree', engine: 'rg', truncated: matches.length >= max, matches };
   }
   const matches = grepWorktreeFallback(query, max, paths);
@@ -471,12 +475,12 @@ function grepTreeRef(ref: string, query: string, max: number, paths: string[]): 
   const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path));
   const args = [
     'git', '-c', 'core.quotepath=false', 'grep',
-    '-n', '--column', '-i', '--no-color',
+    '-n', '--column', '-i', '-F', '--no-color',
     '-e', query,
     ref, '--',
     ...safePaths,
   ];
-  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
   const stdout = new TextDecoder().decode(proc.stdout);
   const matches = parseGitGrepOutput(stdout, ref, max).slice(0, max);
   return { ref, engine: 'git', truncated: matches.length >= max, matches };
@@ -850,6 +854,7 @@ const server = Bun.serve({
       generation++;
       fileCache.clear();
       metaCache.clear();
+      fileListCache.clear();
       sendSse('update');
       return json({ ok: true, generation });
     }
