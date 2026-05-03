@@ -68,4 +68,8 @@ describe('search palette shortcuts', () => {
     expect(app.includes("if (e.key === '/') { e.preventDefault(); focusFileFilter(); }")).toBe(true);
     expect(app.includes("focusFileFilter();\n      return;\n    }\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g')")).toBe(false);
   });
+
+  test('palette keeps keyboard selection scrolled into view', () => {
+    expect(app.includes("row.scrollIntoView({ block: 'nearest' })")).toBe(true);
+  });
 });

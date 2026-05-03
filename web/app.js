@@ -10009,6 +10009,8 @@
       state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? "gdp-palette-item-" + state.selected : "");
       state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
         row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        if (index === state.selected)
+          row.scrollIntoView({ block: "nearest" });
       });
     }
     async function repoPaletteFiles(ref) {
