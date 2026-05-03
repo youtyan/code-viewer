@@ -30,7 +30,7 @@
   --danger-emph:    #cf222e;
   --attn:           #9a6700;
   --line-hit-bg:    #fff8c5;
-  --line-hit-border:#d4a72c;
+  --line-hit-border:var(--accent);
   --done:           #8250df;
   /* diff colors (GitHub exact) */
   --diff-add-bg:        #dafbe1;
@@ -77,7 +77,7 @@
   --danger-emph:    #da3633;
   --attn:           #d29922;
   --line-hit-bg:    rgba(187,128,9,0.18);
-  --line-hit-border:#d29922;
+  --line-hit-border:var(--accent);
   --done:           #a371f7;
   --diff-add-bg:        rgba(46,160,67,0.15);
   --diff-add-num-bg:    rgba(46,160,67,0.30);
@@ -1713,12 +1713,19 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .gdp-source-table tr.gdp-source-line-target .gdp-source-line-code,
 .gdp-source-virtual-row.gdp-source-line-target {
   background: var(--line-hit-bg);
-  box-shadow: inset 3px 0 0 var(--line-hit-border);
+}
+.gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
+.gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
 }
 .gdp-source-table tr.gdp-source-line-target .gdp-source-line-number,
 .gdp-source-virtual-row.gdp-source-line-target .gdp-source-virtual-line-number {
   color: var(--attn);
   font-weight: 600;
+}
+.gdp-source-line-target .gdp-source-line-code,
+.gdp-source-line-target .gdp-source-virtual-line-code {
+  background: var(--line-hit-bg);
 }
 .gdp-standalone-source .gdp-source-table {
   display: block;

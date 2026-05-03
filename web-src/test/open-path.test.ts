@@ -78,6 +78,9 @@ describe('search palette shortcuts', () => {
     expect(app.includes("tr.classList.toggle('gdp-source-line-target'")).toBe(true);
     expect(app.includes("row.classList.toggle('gdp-source-line-target'")).toBe(true);
     expect(style.includes('.gdp-source-line-target')).toBe(true);
+    expect(style.includes('--line-hit-bg:    #fff8c5;')).toBe(true);
+    expect(style.includes('--line-hit-border:var(--accent);')).toBe(true);
+    expect(style.includes('.gdp-source-line-target .gdp-source-line-code')).toBe(true);
   });
 
   test('source line numbers update the route line parameter by click and drag', () => {
