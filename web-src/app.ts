@@ -35,6 +35,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     getLanguage?: (language: string) => unknown;
     highlight?: (code: string, options: { language: string; ignoreIllegals: boolean }) => { value: string };
   };
+  type SourceShikiHighlighter = {
+    codeToHtml: (code: string, options: {
+      lang: string;
+      themes: { light: string; dark: string };
+      defaultColor: false;
+    }) => string;
+  };
+  type SourceShikiModule = {
+    bundledLanguages?: Record<string, unknown>;
+    createHighlighter: (options: { themes: string[]; langs: string[] }) => Promise<SourceShikiHighlighter>;
+  };
   type TreeNode = {
     name: string;
     dirs: Record<string, TreeNode>;
@@ -123,6 +134,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
   const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
   let highlightLoadPromise: Promise<HljsApi | null> | null = null;
+  let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null = null;
   let highlightConfigured = false;
   let PROJECT_NAME = '';
   let REPO_SIDEBAR_REF: string | null = null;
@@ -242,6 +254,105 @@ window.GdpExpandLogic = GdpExpandLogic;
       return null;
     });
     return highlightLoadPromise;
+  }
+
+  const SOURCE_SHIKI_LANGS = Array.from(new Set([
+    'bash',
+    'bibtex',
+    'c',
+    'clojure',
+    'cmake',
+    'cpp',
+    'csharp',
+    'css',
+    'dart',
+    'diff',
+    'dockerfile',
+    'elixir',
+    'erlang',
+    'fortran',
+    'go',
+    'gradle',
+    'graphql',
+    'haskell',
+    'html',
+    'java',
+    'javascript',
+    'json',
+    'julia',
+    'kotlin',
+    'lua',
+    'make',
+    'markdown',
+    'nix',
+    'ocaml',
+    'perl',
+    'php',
+    'properties',
+    'protobuf',
+    'python',
+    'r',
+    'rst',
+    'ruby',
+    'rust',
+    'scala',
+    'scss',
+    'sql',
+    'swift',
+    'terraform',
+    'tex',
+    'toml',
+    'typescript',
+    'vim',
+    'vue',
+    'xml',
+    'yaml',
+  ]));
+
+  const SOURCE_SHIKI_LANG_ALIASES: Record<string, string> = {
+    makefile: 'make',
+    objectivec: 'c',
+    'objective-c': 'c',
+    'objective-cpp': 'cpp',
+    starlark: 'python',
+  };
+
+  function normalizeSourceShikiLang(lang: string | null): string | null {
+    if (!lang) return null;
+    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
+  }
+
+  function loadSourceShikiHighlighter(): Promise<SourceShikiHighlighter | null> {
+    if (!sourceShikiLoadPromise) {
+      sourceShikiLoadPromise = import('/' + 'shiki.js').then((mod: unknown) => {
+        const typed = mod as SourceShikiModule;
+        const langs = typed.bundledLanguages
+          ? SOURCE_SHIKI_LANGS.filter(lang => !!typed.bundledLanguages?.[lang])
+          : SOURCE_SHIKI_LANGS;
+        return typed.createHighlighter({
+          themes: ['github-light', 'github-dark'],
+          langs,
+        });
+      }).catch(() => null);
+    }
+    return sourceShikiLoadPromise;
+  }
+
+  function sourceShikiLines(textValue: string, lang: string, highlighter: SourceShikiHighlighter): string[] | null {
+    try {
+      const html = highlighter.codeToHtml(textValue || ' ', {
+        lang,
+        themes: { light: 'github-light', dark: 'github-dark' },
+        defaultColor: false,
+      });
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      const renderedLines = Array.from(template.content.querySelectorAll<HTMLElement>('.line'));
+      if (!renderedLines.length) return null;
+      return renderedLines.map(line => line.innerHTML || ' ');
+    } catch {
+      return null;
+    }
   }
 
   function rerenderLoadedDiffs() {
@@ -2226,11 +2337,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       header.textContent = target.path + ' @ ' + target.ref;
     }
     const lang = inferLang(target.path);
-    const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
+    const usesVirtualSource = shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled();
+    const hljsRef = STATE.syntaxHighlight && usesVirtualSource ? await loadSyntaxHighlighter() : null;
+    const sourceShikiRef = STATE.syntaxHighlight && !usesVirtualSource ? await loadSourceShikiHighlighter() : null;
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
     const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
-    if (shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled()) {
+    if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
       if (previewable) {
         const { tabs, codeButton, previewButton } = createSourceTabs('preview');
@@ -2278,6 +2391,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     const table = document.createElement('table');
     table.className = 'gdp-source-table';
     const tbody = document.createElement('tbody');
+    const sourceShikiLang = normalizeSourceShikiLang(lang);
+    const shikiLines = sourceShikiRef && sourceShikiLang ? sourceShikiLines(textValue, sourceShikiLang, sourceShikiRef) : null;
     for (let index = 0; index < lines.length; index++) {
       if (signal?.aborted) return false;
       const line = lines[index];
@@ -2287,13 +2402,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       num.textContent = String(index + 1);
       const code = document.createElement('td');
       code.className = 'gdp-source-line-code';
-      if (hljsRef && hljsRef.highlight && lang && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
-        try {
-          code.innerHTML = hljsRef.highlight(line || ' ', { language: lang, ignoreIllegals: true }).value;
-          code.classList.add('hljs');
-        } catch {
-          code.textContent = line || ' ';
-        }
+      if (shikiLines && shikiLines[index] != null) {
+        code.innerHTML = shikiLines[index] || ' ';
+        code.classList.add('shiki');
       } else {
         code.textContent = line || ' ';
       }
