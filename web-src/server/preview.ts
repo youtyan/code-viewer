@@ -4,7 +4,7 @@ import { closeSync, constants, existsSync, openSync, readFileSync, realpathSync,
 import { basename, dirname, extname, join, normalize, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, RepoTreeResponse } from '../types';
-import { cacheFresh, type TimedCacheEntry } from './cache';
+import { cacheFresh, fileDiffCacheKey, setTimedCacheEntry, type TimedCacheEntry } from './cache';
 import { startDevAssetReload } from './dev-assets';
 import * as git from './git';
 import { isSameWorktreeRange } from './range';
@@ -273,14 +273,14 @@ function handleDiffJson(url: URL) {
       fileCache.clear();
     }
     const body = JSON.stringify(payload);
-    metaCache.set(key, { body, sig, storedAt: Date.now() });
+    setTimedCacheEntry(metaCache, key, { body, sig });
     return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   }
   const cached = metaCache.get(key);
   if (cacheFresh(cached)) return new Response(cached.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   const payload = computePayload(extras, range);
   const body = JSON.stringify(payload);
-  metaCache.set(key, { body, sig: JSON.stringify({ ...payload, generation: undefined }), storedAt: Date.now() });
+  setTimedCacheEntry(metaCache, key, { body, sig: JSON.stringify({ ...payload, generation: undefined }) });
   return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
@@ -420,9 +420,12 @@ function handleFileDiff(url: URL) {
   }
   const { args } = buildRangeArgs(range);
   const oldPath = url.searchParams.get('old_path');
-  const cacheKey = isUntracked
-    ? `u\0${path}\0${extras.join('\0')}`
-    : `t\0${path}\0${oldPath || ''}\0${[...extras, ...args].join('\0')}`;
+  let cacheKey: string;
+  try {
+    cacheKey = fileDiffCacheKey({ path, oldPath, isUntracked, range, extras, args, cwd });
+  } catch {
+    return text('invalid diff range', 400);
+  }
   const cached = fileCache.get(cacheKey);
   let diffText: string;
   let errText = '';
@@ -436,7 +439,7 @@ function handleFileDiff(url: URL) {
       diffText = res.stdout || '';
       if (res.code !== 0) errText = res.stderr;
     }
-    fileCache.set(cacheKey, { diffText, storedAt: Date.now() });
+    setTimedCacheEntry(fileCache, cacheKey, { diffText });
   }
   const mode = url.searchParams.get('mode') || 'full';
   const truncated = mode === 'preview'
