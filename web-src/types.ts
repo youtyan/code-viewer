@@ -53,6 +53,30 @@ export type RepoTreeResponse = {
   } | null;
 };
 
+export type FileSearchListResponse = {
+  ref: string;
+  generation: number;
+  files: {
+    path: string;
+    type: 'blob' | 'commit';
+  }[];
+  truncated: boolean;
+};
+
+export type GrepMatch = {
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+};
+
+export type GrepResponse = {
+  ref: string;
+  engine: 'rg' | 'git' | 'fallback';
+  truncated: boolean;
+  matches: GrepMatch[];
+};
+
 export type FileDiffResponse = {
   path: string;
   old_path?: string;
