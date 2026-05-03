@@ -72,4 +72,18 @@ describe('search palette shortcuts', () => {
   test('palette keeps keyboard selection scrolled into view', () => {
     expect(app.includes("row.scrollIntoView({ block: 'nearest' })")).toBe(true);
   });
+
+  test('file line route highlights target source lines', () => {
+    expect(app.includes('function lineInSourceTarget')).toBe(true);
+    expect(app.includes("tr.classList.toggle('gdp-source-line-target'")).toBe(true);
+    expect(app.includes("row.classList.toggle('gdp-source-line-target'")).toBe(true);
+    expect(style.includes('.gdp-source-line-target')).toBe(true);
+  });
+
+  test('source line numbers update the route line parameter by click and drag', () => {
+    expect(app.includes('function beginSourceLineSelection')).toBe(true);
+    expect(app.includes('function updateSourceLineSelection')).toBe(true);
+    expect(app.includes("num.addEventListener('mousedown'")).toBe(true);
+    expect(app.includes("num.addEventListener('mouseenter'")).toBe(true);
+  });
 });
