@@ -106,6 +106,109 @@ html, body {
 /* Window scrolls; global header + topbar + sidebar are fixed */
 #app { display: block; }
 
+.gdp-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(31, 35, 40, 0.18);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(12vh, 96px);
+}
+
+[data-theme="dark"] .gdp-palette-backdrop {
+  background: rgba(1, 4, 9, 0.45);
+}
+
+.gdp-palette {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
+}
+
+.gdp-palette-label {
+  padding: 12px 16px 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.gdp-palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px 14px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 24px;
+  line-height: 1.25;
+  outline: none;
+}
+
+.gdp-palette-status {
+  min-height: 28px;
+  padding: 6px 16px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.gdp-palette-list {
+  overflow: auto;
+  padding: 6px;
+}
+
+.gdp-palette-row {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gdp-palette-row[aria-selected="true"] {
+  background: var(--accent-subtle);
+}
+
+.gdp-palette-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gdp-palette-row-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.gdp-palette-row-detail mark {
+  background: var(--attn);
+  color: var(--fg-onemphasis);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 /* ===== Global header ===== */
 #global-header {
   position: fixed;
