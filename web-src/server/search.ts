@@ -70,3 +70,28 @@ export function buildRgArgs(query: string, max: number, paths: string[]): string
     ...paths,
   ];
 }
+
+export function parseRgOutput(stdout: string, max: number): GrepMatch[] {
+  const matches: GrepMatch[] = [];
+  for (const line of stdout.split('\n')) {
+    if (!line || matches.length >= max) continue;
+    const parts = line.split(':');
+    if (parts.length < 4) continue;
+    const path = parts.shift() || '';
+    const lineNo = Number(parts.shift() || '0');
+    const column = Number(parts.shift() || '0');
+    const preview = parts.join(':');
+    if (!path || !lineNo || !column || isSkippableSearchPath(path)) continue;
+    matches.push({ path, line: lineNo, column, preview: preview.slice(0, 500) });
+  }
+  return matches;
+}
+
+export function parseGitGrepOutput(stdout: string, ref: string, max: number): GrepMatch[] {
+  const prefix = ref + ':';
+  const normalized = stdout
+    .split('\n')
+    .map(line => line.startsWith(prefix) ? line.slice(prefix.length) : line)
+    .join('\n');
+  return parseRgOutput(normalized, max);
+}

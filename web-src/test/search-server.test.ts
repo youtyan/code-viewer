@@ -3,6 +3,8 @@ import {
   GREP_ABSOLUTE_MAX,
   GREP_DEFAULT_MAX,
   buildFileSearchList,
+  parseGitGrepOutput,
+  parseRgOutput,
   buildRgArgs,
   fixedStringLineMatches,
   isSkippableSearchPath,
@@ -80,6 +82,20 @@ describe('buildRgArgs', () => {
       'needle',
       '--',
       'src/app.ts',
+    ]);
+  });
+});
+
+describe('grep output parsers', () => {
+  test('parses ripgrep output path line column preview', () => {
+    expect(parseRgOutput('src/app.ts:10:3:const app = true\n', 10)).toEqual([
+      { path: 'src/app.ts', line: 10, column: 3, preview: 'const app = true' },
+    ]);
+  });
+
+  test('parses git grep tree output without keeping ref in path', () => {
+    expect(parseGitGrepOutput('main:src/app.ts:10:3:const app = true\n', 'main', 10)).toEqual([
+      { path: 'src/app.ts', line: 10, column: 3, preview: 'const app = true' },
     ]);
   });
 });
