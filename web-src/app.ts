@@ -63,6 +63,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     minOrder: number;
     explicit?: boolean;
     children_omitted?: true;
+    children_omitted_reason?: RepoTreeEntry['children_omitted_reason'];
   };
   type SidebarItem = {
     order?: number;
@@ -70,6 +71,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     display_path?: string;
     type?: RepoTreeEntry['type'];
     children_omitted?: true;
+    children_omitted_reason?: RepoTreeEntry['children_omitted_reason'];
     status?: string;
     additions?: number;
     deletions?: number;
@@ -160,6 +162,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_SIDEBAR_REF: string | null = null;
   let REPO_SIDEBAR_LOAD_REF: string | null = null;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
+  let SIDEBAR_FILES: SidebarItem[] = [];
+  let SIDEBAR_ON_FILE_CLICK: ((file: SidebarItem) => void) | undefined;
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
@@ -672,7 +676,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
       if (f.type === 'tree') {
         node.explicit = true;
-        if (f.children_omitted === true) node.children_omitted = true;
+        if (f.children_omitted === true) {
+          node.children_omitted = true;
+          node.children_omitted_reason = f.children_omitted_reason;
+        }
         continue;
       }
       node.files.push(f);
@@ -718,12 +725,20 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (dir.explicit) li.dataset.explicit = 'true';
         if (dir.children_omitted) {
           li.classList.add('children-omitted');
-          li.title = 'Directory contents are intentionally not listed';
+          li.classList.add(dir.children_omitted_reason === 'ignored' ? 'children-omitted-ignored' : 'children-omitted-internal');
+          li.title = dir.children_omitted_reason === 'ignored'
+            ? 'Ignored directory: open the detail pane to browse its contents'
+            : 'Internal Git metadata is not browsed';
         }
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
         const chev = document.createElement('span');
-        chev.className = 'chev';
-        setChevronIcon(chev);
+        if (dir.children_omitted) {
+          chev.className = 'chev-spacer';
+          chev.setAttribute('aria-hidden', 'true');
+        } else {
+          chev.className = 'chev';
+          setChevronIcon(chev);
+        }
         li.appendChild(chev);
         const dirIcon = document.createElement('span');
         dirIcon.className = 'dir-icon';
@@ -737,9 +752,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         label.appendChild(dn);
         if (dir.children_omitted) {
           const omitted = document.createElement('span');
-          omitted.className = 'dir-omitted';
-          omitted.textContent = 'skipped';
-          omitted.title = 'Directory contents are intentionally not listed';
+          omitted.className = 'dir-omitted ' + (dir.children_omitted_reason === 'ignored' ? 'dir-omitted-ignored' : 'dir-omitted-internal');
+          omitted.textContent = dir.children_omitted_reason === 'ignored' ? 'ignored' : 'private';
+          omitted.title = dir.children_omitted_reason === 'ignored'
+            ? 'Tree expansion is skipped, but the directory detail can be opened'
+            : 'This directory cannot be opened from the browser';
           label.appendChild(omitted);
         }
         li.appendChild(label);
@@ -761,12 +778,23 @@ window.GdpExpandLogic = GdpExpandLogic;
           else STATE.collapsedDirs.delete(dir.path);
           localStorage.setItem('gdp:collapsed-dirs', JSON.stringify([...STATE.collapsedDirs]));
         };
-        chev.addEventListener('click', toggleDir);
-        dirIcon.addEventListener('click', toggleDir);
+        if (!dir.children_omitted) {
+          chev.addEventListener('click', toggleDir);
+          dirIcon.addEventListener('click', toggleDir);
+        }
         if (onFileClick) {
           li.addEventListener('click', (e) => {
             e.stopPropagation();
-            onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted });
+            if (dir.children_omitted_reason === 'internal') return;
+            if (dir.children_omitted_reason !== 'internal') {
+              onFileClick({
+                path: dir.path,
+                display_path: dir.path,
+                type: 'tree',
+                children_omitted: dir.children_omitted,
+                children_omitted_reason: dir.children_omitted_reason,
+              });
+            }
             focusSidebarPanel();
           });
         } else {
@@ -844,6 +872,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     ul.innerHTML = '';
     ul.classList.toggle('tree', STATE.sbView === 'tree');
     STATE.files = files as FileMeta[];
+    SIDEBAR_FILES = files;
+    SIDEBAR_ON_FILE_CLICK = onFileClick;
     if (!onFileClick) REPO_SIDEBAR_REF = null;
     if (STATE.sbView === 'tree') {
       const root = buildTree(files);
@@ -982,12 +1012,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  function markActive(path: string) {
+  function sidebarAncestorDirs(path: string): string[] {
+    const parts = path.split('/').filter(Boolean);
+    const dirs: string[] = [];
+    for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'));
+    return dirs;
+  }
+
+  function expandSidebarAncestors(path: string) {
+    if (STATE.sbView !== 'tree') return;
+    let changed = false;
+    for (const dir of sidebarAncestorDirs(path)) {
+      if (STATE.collapsedDirs.delete(dir)) changed = true;
+      const row = document.querySelector<HTMLElement>('#filelist .tree-dir[data-dirpath="' + CSS.escape(dir) + '"]');
+      row?.classList.remove('collapsed');
+      const icon = row?.querySelector<HTMLElement>('.dir-icon');
+      if (icon) setFolderIcon(icon, false);
+    }
+    if (changed) localStorage.setItem('gdp:collapsed-dirs', JSON.stringify([...STATE.collapsedDirs]));
+  }
+
+  function markActive(path: string, options: { reveal?: boolean } = {}) {
     STATE.activeFile = path;
+    if (options.reveal && STATE.sbView === 'tree') expandSidebarAncestors(path);
     $$('#filelist li').forEach(li => {
       const itemPath = li.dataset.path || li.dataset.dirpath;
       if (itemPath) li.classList.toggle('active', itemPath === path);
     });
+    if (options.reveal) {
+      const active = document.querySelector<HTMLElement>('#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]');
+      if (active) requestAnimationFrame(() => scrollSidebarItemIntoView(active));
+    }
   }
 
   function applyViewedState() {
@@ -1724,6 +1779,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         display_path: entry.path,
         type: entry.type,
         children_omitted: entry.children_omitted,
+        children_omitted_reason: entry.children_omitted_reason,
       } satisfies SidebarItem));
       renderSidebar(files, file => {
         if (file.type === 'tree') {
@@ -1751,7 +1807,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function activateRepoSidebarPath(currentPath: string) {
-    markActive(currentPath);
+    markActive(currentPath, { reveal: true });
     applyFilter();
   }
 
@@ -2573,8 +2629,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     return /^makefile(?:[.-].+)?$/i.test(name);
   }
 
-  function sourceDisplayKind(path: string): 'image' | 'video' | 'pdf' | 'text' | 'unsupported' {
+  function sourceDisplayKind(path: string): 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'unsupported' {
     if (isVideo(path)) return 'video';
+    if (isAudio(path)) return 'audio';
     if (isImage(path)) return 'image';
     if (/\.pdf$/i.test(path)) return 'pdf';
     const name = sourceFileName(path);
@@ -2608,8 +2665,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (ext === 'zip') return 'ZIP archive';
     if (ext === 'mp4') return 'MP4 video';
     if (ext === 'webm') return 'WebM video';
+    if (ext === 'mp3') return 'MP3 audio';
+    if (ext === 'wav') return 'WAV audio';
+    if (ext === 'ogg') return 'Ogg audio';
+    if (ext === 'flac') return 'FLAC audio';
+    if (ext === 'm4a') return 'M4A audio';
+    if (ext === 'aac') return 'AAC audio';
+    if (ext === 'opus') return 'Opus audio';
+    if (ext === 'mid' || ext === 'midi') return 'MIDI file';
     if (mime?.startsWith('image/')) return 'Image';
     if (mime?.startsWith('video/')) return 'Video';
+    if (mime?.startsWith('audio/')) return 'Audio';
     if (mime === 'application/pdf') return 'PDF document';
     if (fallback === 'unsupported file') return 'Binary file';
     return fallback.charAt(0).toUpperCase() + fallback.slice(1);
@@ -3060,6 +3126,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       video.controls = true;
       video.preload = 'metadata';
       view.appendChild(video);
+    } else if (mediaKind === 'audio') {
+      const audio = document.createElement('audio');
+      audio.src = url;
+      audio.controls = true;
+      audio.preload = 'metadata';
+      view.appendChild(audio);
     } else if (mediaKind === 'pdf') {
       const frame = document.createElement('iframe');
       frame.src = url;
@@ -3220,7 +3292,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         renderSourceUnsupported(card, target);
         return;
       }
-      if (displayKind === 'image' || displayKind === 'video' || displayKind === 'pdf') {
+      if (displayKind === 'image' || displayKind === 'video' || displayKind === 'audio' || displayKind === 'pdf') {
         if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
         finishSourceLoad(req);
         renderSourceMedia(card, target, displayKind);
@@ -3593,13 +3665,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   }
 
-  // ---- media (image / video) embedding for binary file diffs ----
-  const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov)(\?.*)?$/i;
+  // ---- media (image / video / audio) embedding for binary file diffs ----
+  const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
   const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
   const VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  const AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
   function isMedia(p: string): boolean { return MEDIA_RE.test(p); }
   function isImage(p: string): boolean { return IMAGE_RE.test(p); }
   function isVideo(p: string): boolean { return VIDEO_RE.test(p); }
+  function isAudio(p: string): boolean { return AUDIO_RE.test(p); }
   function fileURL(path: string, ref: string): string {
     return '/_file?path=' + encodeURIComponent(path) + '&ref=' + ref;
   }
@@ -3607,6 +3681,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     const url = fileURL(path, ref);
     if (isVideo(path)) {
       return '<video src="' + url + '" controls preload="metadata"></video>';
+    }
+    if (isAudio(path)) {
+      return '<audio src="' + url + '" controls preload="metadata"></audio>';
     }
     return '<img src="' + url + '" alt="" loading="lazy">';
   }
@@ -3712,7 +3789,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     b.addEventListener('click', () => {
       STATE.sbView = (b.dataset.view as SidebarView) || 'tree';
       localStorage.setItem('gdp:sbview', STATE.sbView);
-      if (STATE.files && STATE.files.length) renderSidebar(STATE.files);
+      if (SIDEBAR_FILES.length) renderSidebar(SIDEBAR_FILES, SIDEBAR_ON_FILE_CLICK);
     });
   });
   $('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false));

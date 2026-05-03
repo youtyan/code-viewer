@@ -18,7 +18,10 @@ export type GitTreeEntry = {
   path: string;
   type: 'tree' | 'blob' | 'commit';
   children_omitted?: true;
+  children_omitted_reason?: 'ignored' | 'internal';
 };
+
+const WORKTREE_RECURSIVE_DEPTH_LIMIT = 32;
 
 function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
@@ -156,24 +159,85 @@ function sortTreeEntries(entries: GitTreeEntry[]): GitTreeEntry[] {
   });
 }
 
-function worktreeDirectChildren(cwd: string, path: string): GitTreeEntry[] {
+function ignoredWorktreeDirectories(cwd: string, path: string): Set<string> {
   const base = normalizeTreePath(path);
-  const dir = join(cwd, base);
-  try {
-    return sortTreeEntries(readdirSync(dir, { withFileTypes: true }).map((entry) => {
-      const entryPath = base ? `${base}/${entry.name}` : entry.name;
-      const type = entry.isDirectory()
-        ? hasDotGitEntry(join(dir, entry.name)) ? 'commit' as const : 'tree' as const
-        : 'blob' as const;
-      return {
-        name: entry.name,
+  const args = ['git', '-c', 'core.quotepath=false', 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'];
+  if (base) args.push('--', `${base}/`);
+  const proc = Bun.spawnSync(args, {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  if (proc.exitCode !== 0) return new Set();
+  return new Set(new TextDecoder().decode(proc.stdout)
+    .split('\0')
+    .filter(entry => entry.endsWith('/'))
+    .map(entry => entry.replace(/\/+$/g, ''))
+    .filter(entry => entry && entry !== base));
+}
+
+function worktreeEntryFromDirent(base: string, dir: string, name: string, isDirectory: boolean, ignoredDirectories: Set<string>): GitTreeEntry {
+  const entryPath = base ? `${base}/${name}` : name;
+  const type = isDirectory
+    ? hasDotGitEntry(join(dir, name)) ? 'commit' as const : 'tree' as const
+    : 'blob' as const;
+  return type === 'tree' && (name === '.git' || ignoredDirectories.has(entryPath))
+    ? {
+        name,
         path: entryPath,
         type,
-      };
-    }));
+        children_omitted: true,
+        children_omitted_reason: name === '.git' ? 'internal' : 'ignored',
+      }
+    : { name, path: entryPath, type };
+}
+
+function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean): GitTreeEntry[] {
+  const base = normalizeTreePath(path);
+  const root = join(cwd, base);
+  const ignoredDirectories = ignoredWorktreeDirectories(cwd, base);
+  let directEntries: GitTreeEntry[];
+  try {
+    const dirents = readdirSync(root, { withFileTypes: true });
+    directEntries = sortTreeEntries(dirents
+      .map(entry => worktreeEntryFromDirent(base, root, entry.name, entry.isDirectory(), ignoredDirectories)));
   } catch {
     return [];
   }
+  if (!recursive) return directEntries;
+
+  const fileEntries: GitTreeEntry[] = [];
+  const walk = (dir: string, prefix: string, depth: number) => {
+    if (depth >= WORKTREE_RECURSIVE_DEPTH_LIMIT) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '.git' || ignoredDirectories.has(entryPath)) {
+          fileEntries.push({
+            name: entry.name,
+            path: entryPath,
+            type: 'tree',
+            children_omitted: true,
+            children_omitted_reason: entry.name === '.git' ? 'internal' : 'ignored',
+          });
+          continue;
+        }
+        if (hasDotGitEntry(full)) continue;
+        walk(full, entryPath, depth + 1);
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
+        fileEntries.push({ name: entry.name, path: entryPath, type: 'blob' });
+      }
+    }
+  };
+  walk(root, base, 0);
+  return combineDirectAndRecursiveFiles(directEntries, fileEntries.sort((a, b) => a.path.localeCompare(b.path)));
 }
 
 function hasDotGitEntry(dir: string): boolean {
@@ -183,20 +247,6 @@ function hasDotGitEntry(dir: string): boolean {
   } catch (err) {
     return !!err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT';
   }
-}
-
-function worktreeRecursiveFiles(cwd: string, path: string): GitTreeEntry[] {
-  const base = normalizeTreePath(path);
-  const trackedArgs = ['git', '-c', 'core.quotepath=false', 'ls-files', '-z'];
-  if (base) trackedArgs.push('--', `${base}/`);
-  const tracked = run(trackedArgs, cwd);
-  const paths = tracked.code === 0 ? tracked.stdout.split('\0').filter(Boolean) : [];
-  paths.push(...untracked(cwd, base));
-  return [...new Set(paths)].filter(Boolean).sort().map((entryPath) => ({
-    name: entryPath.split('/').pop() || entryPath,
-    path: entryPath,
-    type: 'blob' as const,
-  }));
 }
 
 function gitTreeEntries(ref: string, path: string, cwd: string, recursive: boolean): { code: number; entries: GitTreeEntry[]; stderr: string } {
@@ -227,31 +277,6 @@ function combineDirectAndRecursiveFiles(directEntries: GitTreeEntry[], fileEntri
   ];
 }
 
-function ignoredWorktreePaths(cwd: string, path: string): Set<string> {
-  const base = normalizeTreePath(path);
-  const args = ['git', '-c', 'core.quotepath=false', 'status', '--ignored', '--porcelain=v1', '-z', '--'];
-  if (base) args.push(`${base}/`);
-  const res = run(args, cwd);
-  const ignored = new Set<string>();
-  if (res.code !== 0) return ignored;
-  const records = res.stdout.split('\0').filter(Boolean);
-  for (let i = 0; i < records.length; i++) {
-    const rec = records[i];
-    if (!rec.startsWith('!! ')) continue;
-    const path = rec.slice(3).replace(/\/+$/g, '');
-    if (path) ignored.add(path);
-  }
-  return ignored;
-}
-
-function annotateOmittedWorktreeChildren(entries: GitTreeEntry[], ignoredPaths: Set<string>): GitTreeEntry[] {
-  return entries.map((entry) => {
-    return entry.type === 'tree' && ignoredPaths.has(entry.path)
-      ? { ...entry, children_omitted: true }
-      : entry;
-  });
-}
-
 export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
   return listTree('worktree', path, cwd).entries;
 }
@@ -276,12 +301,7 @@ export function listTree(
 ): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
   if (ref === 'worktree') {
-    const directEntries = worktreeDirectChildren(cwd, base);
-    const ignoredPaths = ignoredWorktreePaths(cwd, base);
-    const annotatedDirectEntries = annotateOmittedWorktreeChildren(directEntries, ignoredPaths);
-    if (!options.recursive) return { code: 0, entries: annotatedDirectEntries, stderr: '' };
-    const recursiveEntries = worktreeRecursiveFiles(cwd, base);
-    return { code: 0, entries: combineDirectAndRecursiveFiles(annotatedDirectEntries, recursiveEntries), stderr: '' };
+    return { code: 0, entries: worktreeFilesystemEntries(cwd, base, !!options.recursive), stderr: '' };
   }
 
   const direct = gitTreeEntries(ref, base, cwd, false);
