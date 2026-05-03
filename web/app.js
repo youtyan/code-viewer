@@ -7163,6 +7163,8 @@
     function applyDiffRouteFocus(card) {
       if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
         return false;
+      if (card && card.dataset.path !== STATE.route.path)
+        return false;
       const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
       if (!targetCard)
         return false;
