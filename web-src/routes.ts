@@ -11,7 +11,7 @@ export type SourceFileTarget = {
 export type AppRoute =
   | { screen: 'repo'; ref: string; path: string; range: DiffRange }
   | { screen: 'diff'; range: DiffRange }
-  | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail' }
+  | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail'; line?: number }
   | { screen: 'unknown'; reason: 'unknown-pathname' | 'missing-path'; rawPathname: string; rawSearch: string; range: DiffRange };
 
 export const SPA_PATHS = ['/todif', '/todiff', '/file'] as const;
@@ -54,8 +54,10 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
       const path = params.get('path') || '';
       const target = params.get('target') || '';
       const ref = target || params.get('ref') || 'worktree';
+      const lineParam = Number(params.get('line') || '');
+      const line = Number.isInteger(lineParam) && lineParam > 0 ? lineParam : undefined;
       if (!path) return { screen: 'unknown', reason: 'missing-path', rawPathname: pathname, rawSearch: search, range };
-      return { screen: 'file', path, ref, range, view: target ? 'blob' : 'detail' };
+      return { screen: 'file', path, ref, range, view: target ? 'blob' : 'detail', ...(line ? { line } : {}) };
     }
     default:
       return { screen: 'unknown', reason: 'unknown-pathname', rawPathname: pathname, rawSearch: search, range };
@@ -74,12 +76,14 @@ export function buildRoute(route: AppRoute): string {
     case 'file':
       if (route.view === 'blob') {
         return '/file?path=' + encodeURIComponent(route.path) +
-          '&target=' + encodeURIComponent(route.ref || 'worktree');
+          '&target=' + encodeURIComponent(route.ref || 'worktree') +
+          (route.line ? '&line=' + encodeURIComponent(String(route.line)) : '');
       }
       return '/file?path=' + encodeURIComponent(route.path) +
         '&ref=' + encodeURIComponent(route.ref || 'worktree') +
         '&from=' + encodeURIComponent(route.range.from || '') +
-        '&to=' + encodeURIComponent(route.range.to || 'worktree');
+        '&to=' + encodeURIComponent(route.range.to || 'worktree') +
+        (route.line ? '&line=' + encodeURIComponent(String(route.line)) : '');
     case 'diff':
       return '/todif?from=' + encodeURIComponent(route.range.from || '') +
         '&to=' + encodeURIComponent(route.range.to || 'worktree');

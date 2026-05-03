@@ -18,6 +18,8 @@ describe('routes', () => {
       .toBe('/file?path=src%2Fa%20b.ts&ref=feat%2Ffoo&from=HEAD&to=worktree');
     expect(buildRoute({ screen: 'file', path: 'README.md', ref: 'main', view: 'blob', range }))
       .toBe('/file?path=README.md&target=main');
+    expect(buildRoute({ screen: 'file', path: 'README.md', ref: 'main', view: 'blob', line: 12, range }))
+      .toBe('/file?path=README.md&target=main&line=12');
   });
 
   test('parses repository routes with worktree default ref', () => {
@@ -34,6 +36,8 @@ describe('routes', () => {
       .toEqual({ screen: 'file', path: 'src/a.ts', ref: 'feat/foo', range: { from: 'main', to: 'feat/foo' }, view: 'detail' });
     expect(parseRoute('/file', '?path=README.md&target=worktree', defaultRange))
       .toEqual({ screen: 'file', path: 'README.md', ref: 'worktree', view: 'blob', range: defaultRange });
+    expect(parseRoute('/file', '?path=README.md&target=main&line=12', defaultRange))
+      .toEqual({ screen: 'file', path: 'README.md', ref: 'main', view: 'blob', line: 12, range: defaultRange });
   });
 
   test('reads legacy compact range URLs but writes canonical from and to params', () => {
