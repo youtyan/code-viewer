@@ -6764,6 +6764,8 @@
     let REPO_SIDEBAR_REF = null;
     let REPO_SIDEBAR_LOAD_REF = null;
     let REPO_SIDEBAR_LOAD = null;
+    let SIDEBAR_FILES = [];
+    let SIDEBAR_ON_FILE_CLICK;
     let PENDING_G_SCOPE = null;
     let PENDING_G_UNTIL = 0;
     let SOURCE_CURSOR = null;
@@ -7239,8 +7241,10 @@
         }
         if (f2.type === "tree") {
           node.explicit = true;
-          if (f2.children_omitted === true)
+          if (f2.children_omitted === true) {
             node.children_omitted = true;
+            node.children_omitted_reason = f2.children_omitted_reason;
+          }
           continue;
         }
         node.files.push(f2);
@@ -7283,12 +7287,18 @@
             li.dataset.explicit = "true";
           if (dir.children_omitted) {
             li.classList.add("children-omitted");
-            li.title = "Directory contents are intentionally not listed";
+            li.classList.add(dir.children_omitted_reason === "ignored" ? "children-omitted-ignored" : "children-omitted-internal");
+            li.title = dir.children_omitted_reason === "ignored" ? "Ignored directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
           }
           li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
           const chev = document.createElement("span");
-          chev.className = "chev";
-          setChevronIcon(chev);
+          if (dir.children_omitted) {
+            chev.className = "chev-spacer";
+            chev.setAttribute("aria-hidden", "true");
+          } else {
+            chev.className = "chev";
+            setChevronIcon(chev);
+          }
           li.appendChild(chev);
           const dirIcon = document.createElement("span");
           dirIcon.className = "dir-icon";
@@ -7302,9 +7312,9 @@
           label.appendChild(dn);
           if (dir.children_omitted) {
             const omitted = document.createElement("span");
-            omitted.className = "dir-omitted";
-            omitted.textContent = "skipped";
-            omitted.title = "Directory contents are intentionally not listed";
+            omitted.className = "dir-omitted " + (dir.children_omitted_reason === "ignored" ? "dir-omitted-ignored" : "dir-omitted-internal");
+            omitted.textContent = dir.children_omitted_reason === "ignored" ? "ignored" : "private";
+            omitted.title = dir.children_omitted_reason === "ignored" ? "Tree expansion is skipped, but the directory detail can be opened" : "This directory cannot be opened from the browser";
             label.appendChild(omitted);
           }
           li.appendChild(label);
@@ -7329,12 +7339,24 @@
               STATE.collapsedDirs.delete(dir.path);
             localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
           };
-          chev.addEventListener("click", toggleDir);
-          dirIcon.addEventListener("click", toggleDir);
+          if (!dir.children_omitted) {
+            chev.addEventListener("click", toggleDir);
+            dirIcon.addEventListener("click", toggleDir);
+          }
           if (onFileClick) {
             li.addEventListener("click", (e2) => {
               e2.stopPropagation();
-              onFileClick({ path: dir.path, display_path: dir.path, type: "tree", children_omitted: dir.children_omitted });
+              if (dir.children_omitted_reason === "internal")
+                return;
+              if (dir.children_omitted_reason !== "internal") {
+                onFileClick({
+                  path: dir.path,
+                  display_path: dir.path,
+                  type: "tree",
+                  children_omitted: dir.children_omitted,
+                  children_omitted_reason: dir.children_omitted_reason
+                });
+              }
               focusSidebarPanel();
             });
           } else {
@@ -7416,6 +7438,8 @@
       ul.innerHTML = "";
       ul.classList.toggle("tree", STATE.sbView === "tree");
       STATE.files = files;
+      SIDEBAR_FILES = files;
+      SIDEBAR_ON_FILE_CLICK = onFileClick;
       if (!onFileClick)
         REPO_SIDEBAR_REF = null;
       if (STATE.sbView === "tree") {
@@ -7550,13 +7574,43 @@
         card.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
-    function markActive(path) {
+    function sidebarAncestorDirs(path) {
+      const parts = path.split("/").filter(Boolean);
+      const dirs = [];
+      for (let i2 = 1;i2 < parts.length; i2++)
+        dirs.push(parts.slice(0, i2).join("/"));
+      return dirs;
+    }
+    function expandSidebarAncestors(path) {
+      if (STATE.sbView !== "tree")
+        return;
+      let changed = false;
+      for (const dir of sidebarAncestorDirs(path)) {
+        if (STATE.collapsedDirs.delete(dir))
+          changed = true;
+        const row = document.querySelector('#filelist .tree-dir[data-dirpath="' + CSS.escape(dir) + '"]');
+        row?.classList.remove("collapsed");
+        const icon = row?.querySelector(".dir-icon");
+        if (icon)
+          setFolderIcon(icon, false);
+      }
+      if (changed)
+        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+    }
+    function markActive(path, options = {}) {
       STATE.activeFile = path;
+      if (options.reveal && STATE.sbView === "tree")
+        expandSidebarAncestors(path);
       $$("#filelist li").forEach((li) => {
         const itemPath = li.dataset.path || li.dataset.dirpath;
         if (itemPath)
           li.classList.toggle("active", itemPath === path);
       });
+      if (options.reveal) {
+        const active = document.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+        if (active)
+          requestAnimationFrame(() => scrollSidebarItemIntoView(active));
+      }
     }
     function applyViewedState() {
       $$("#filelist li[data-path]").forEach((li) => {
@@ -8239,7 +8293,8 @@
           path: entry.path,
           display_path: entry.path,
           type: entry.type,
-          children_omitted: entry.children_omitted
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason
         }));
         renderSidebar(files, (file) => {
           if (file.type === "tree") {
@@ -8266,7 +8321,7 @@
       return load2;
     }
     function activateRepoSidebarPath(currentPath) {
-      markActive(currentPath);
+      markActive(currentPath, { reveal: true });
       applyFilter();
     }
     function createPlaceholder(f2) {
@@ -9213,6 +9268,8 @@
     function sourceDisplayKind(path) {
       if (isVideo(path))
         return "video";
+      if (isAudio(path))
+        return "audio";
       if (isImage(path))
         return "image";
       if (/\.pdf$/i.test(path))
@@ -9259,10 +9316,28 @@
         return "MP4 video";
       if (ext === "webm")
         return "WebM video";
+      if (ext === "mp3")
+        return "MP3 audio";
+      if (ext === "wav")
+        return "WAV audio";
+      if (ext === "ogg")
+        return "Ogg audio";
+      if (ext === "flac")
+        return "FLAC audio";
+      if (ext === "m4a")
+        return "M4A audio";
+      if (ext === "aac")
+        return "AAC audio";
+      if (ext === "opus")
+        return "Opus audio";
+      if (ext === "mid" || ext === "midi")
+        return "MIDI file";
       if (mime?.startsWith("image/"))
         return "Image";
       if (mime?.startsWith("video/"))
         return "Video";
+      if (mime?.startsWith("audio/"))
+        return "Audio";
       if (mime === "application/pdf")
         return "PDF document";
       if (fallback === "unsupported file")
@@ -9734,6 +9809,12 @@
         video.controls = true;
         video.preload = "metadata";
         view.appendChild(video);
+      } else if (mediaKind === "audio") {
+        const audio = document.createElement("audio");
+        audio.src = url;
+        audio.controls = true;
+        audio.preload = "metadata";
+        view.appendChild(audio);
       } else if (mediaKind === "pdf") {
         const frame = document.createElement("iframe");
         frame.src = url;
@@ -9900,7 +9981,7 @@
           renderSourceUnsupported(card, target);
           return;
         }
-        if (displayKind === "image" || displayKind === "video" || displayKind === "pdf") {
+        if (displayKind === "image" || displayKind === "video" || displayKind === "audio" || displayKind === "pdf") {
           if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target))
             return;
           finishSourceLoad(req);
@@ -10296,9 +10377,10 @@
         b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
       });
     }
-    const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov)(\?.*)?$/i;
+    const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
     const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
     const VIDEO_RE = /\.(mp4|webm|mov)$/i;
+    const AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
     function isMedia(p2) {
       return MEDIA_RE.test(p2);
     }
@@ -10308,6 +10390,9 @@
     function isVideo(p2) {
       return VIDEO_RE.test(p2);
     }
+    function isAudio(p2) {
+      return AUDIO_RE.test(p2);
+    }
     function fileURL(path, ref) {
       return "/_file?path=" + encodeURIComponent(path) + "&ref=" + ref;
     }
@@ -10315,6 +10400,9 @@
       const url = fileURL(path, ref);
       if (isVideo(path)) {
         return '<video src="' + url + '" controls preload="metadata"></video>';
+      }
+      if (isAudio(path)) {
+        return '<audio src="' + url + '" controls preload="metadata"></audio>';
       }
       return '<img src="' + url + '" alt="" loading="lazy">';
     }
@@ -10409,8 +10497,8 @@
       b2.addEventListener("click", () => {
         STATE.sbView = b2.dataset.view || "tree";
         localStorage.setItem("gdp:sbview", STATE.sbView);
-        if (STATE.files && STATE.files.length)
-          renderSidebar(STATE.files);
+        if (SIDEBAR_FILES.length)
+          renderSidebar(SIDEBAR_FILES, SIDEBAR_ON_FILE_CLICK);
       });
     });
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
