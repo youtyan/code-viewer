@@ -2,7 +2,7 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
-import { findMainScrollTarget, focusMainPanel, focusSidebarPanel, getPanelFocusScope, isEditableKeyTarget, keymapScope, prepareKeyboardPanels, setPanelFocusScope, type PanelFocusScope } from './focus-scope';
+import { findMainScrollTarget, focusMainPanel, focusSidebarPanel, getPanelFocusScope, isEditableKeyTarget, keymapScope, prepareKeyboardPanels, restorePanelFocusScope, setPanelFocusScope, type PanelFocusScope } from './focus-scope';
 import { fuzzyMatchPath, globMatchPath, isGlobPathQuery, rankPathMatches, type FuzzyRange } from './fuzzy-search';
 import { resolveKeymapAction, type KeymapAction, type KeymapScope } from './keymap';
 import { limitPaletteResults, movePaletteSelection } from './search-palette';
@@ -298,9 +298,10 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function scrollMainPanel(direction: 1 | -1, repeated = false, unit: 'line' | 'page' = 'line') {
     if (moveSourceCursor(direction, unit)) return;
-    const top = direction * (unit === 'line' ? Math.round(sourceLineScrollAmount() || 32) : Math.round(window.innerHeight * 0.55));
-    const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth';
     const target = findMainScrollTarget();
+    const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
+    const top = direction * (unit === 'line' ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
+    const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth';
     if (target) target.scrollBy({ top, behavior });
     else window.scrollBy({ top, behavior });
   }
@@ -319,12 +320,16 @@ window.GdpExpandLogic = GdpExpandLogic;
   function switchSourceTab(tab: 'preview' | 'code'): boolean {
     const tabs = document.querySelector<HTMLElement>('#content .gdp-source-tabs');
     if (!tabs) return false;
-    const button = Array.from(tabs.querySelectorAll<HTMLButtonElement>('button'))
-      .find(item => item.textContent?.trim().toLowerCase() === tab);
+    const button = tabs.querySelector<HTMLButtonElement>('button[data-source-tab="' + tab + '"]');
     if (!button || button.hidden || button.disabled) return false;
     button.click();
     focusMainPanel();
     return true;
+  }
+
+  function isFocusableClickTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
   }
 
   function invalidateRepoSidebar() {
@@ -2668,6 +2673,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     tabs.className = 'gdp-source-tabs';
     const codeButton = document.createElement('button');
     codeButton.type = 'button';
+    codeButton.dataset.sourceTab = 'code';
     codeButton.textContent = 'Code';
     codeButton.classList.toggle('active', active === 'code');
     tabs.appendChild(codeButton);
@@ -2675,6 +2681,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (active === 'preview') {
       previewButton = document.createElement('button');
       previewButton.type = 'button';
+      previewButton.dataset.sourceTab = 'preview';
       previewButton.className = 'active';
       previewButton.textContent = 'Preview';
       tabs.prepend(previewButton);
@@ -3711,8 +3718,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   $('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false));
   $('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true));
   prepareKeyboardPanels();
-  document.querySelector<HTMLElement>('#content')?.addEventListener('mousedown', () => {
-    focusMainPanel();
+  const contentPanel = document.querySelector<HTMLElement>('#content');
+  contentPanel?.addEventListener('focusin', () => setPanelFocusScope('main'));
+  contentPanel?.addEventListener('mousedown', (event) => {
+    if (isFocusableClickTarget(event.target)) setPanelFocusScope('main');
+    else focusMainPanel();
   });
 
   // Sidebar resizer (drag right edge)
@@ -3734,6 +3744,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     sb.addEventListener('mousedown', mark);
     sb.addEventListener('touchstart', mark, { passive: true });
     sb.addEventListener('scroll', mark, { passive: true });
+    sb.addEventListener('focusin', () => setPanelFocusScope('sidebar'));
+    sb.addEventListener('mousedown', (event) => {
+      if (isFocusableClickTarget(event.target)) setPanelFocusScope('sidebar');
+      else focusSidebarPanel();
+    });
   })();
   (function setupResizer() {
     const handle = $('#sidebar-resizer');
@@ -3806,7 +3821,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     const sidebarRect = sidebar.getBoundingClientRect();
     const itemRect = item.getBoundingClientRect();
-    const stickyBottom = (document.querySelector<HTMLElement>('.sb-filter-wrap')?.getBoundingClientRect().bottom || sidebarRect.top);
+    const stickyBottom = Math.max(
+      sidebarRect.top,
+      document.querySelector<HTMLElement>('.sb-head')?.getBoundingClientRect().bottom || sidebarRect.top,
+      document.querySelector<HTMLElement>('.sb-filter-wrap')?.getBoundingClientRect().bottom || sidebarRect.top,
+    );
     const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
     const bottomPadding = 14;
     const visibleTop = sidebarRect.top + topPadding;
@@ -3962,7 +3981,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (PALETTE.debounce) window.clearTimeout(PALETTE.debounce);
     PALETTE.root.remove();
     PALETTE = null;
-    setPanelFocusScope(previousFocusScope);
+    restorePanelFocusScope(previousFocusScope);
   }
 
   function createPalette(mode: PaletteMode): PaletteState {
@@ -4340,6 +4359,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function dispatchKeymapAction(action: KeymapAction, scope: KeymapScope, repeated = false): boolean {
+    if (action !== 'start-g-sequence') {
+      PENDING_G_SCOPE = null;
+      PENDING_G_UNTIL = 0;
+    }
     if (action === 'open-file-palette') {
       if (PALETTE?.mode !== 'file') openSearchPalette('file');
       return true;
@@ -4361,7 +4384,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === 'cancel-source-load') {
-      return !document.querySelector('.mkdp-lightbox') && cancelActiveSourceLoad('esc');
+      cancelActiveSourceLoad('esc');
+      return true;
     }
     if (action === 'open-sidebar-item') {
       if (!isRepositorySidebarMode()) return false;
@@ -4421,11 +4445,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === 'goto-top' || action === 'goto-bottom') {
-      PENDING_G_SCOPE = null;
-      PENDING_G_UNTIL = 0;
       const edge = action === 'goto-top' ? 'top' : 'bottom';
       if (scope === 'main') scrollMainToEdge(edge);
-      else moveActiveSidebarToEdge(edge);
+      else if (scope === 'sidebar') moveActiveSidebarToEdge(edge);
+      else window.scrollTo({ top: edge === 'top' ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight), behavior: 'auto' });
       return true;
     }
     if (action === 'layout-unified') {
@@ -4452,12 +4475,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       composing: e.isComposing,
       paletteOpen: !!PALETTE,
       pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
+      lightboxOpen: !!document.querySelector('.mkdp-lightbox'),
     });
     if (!action) return;
-    if (action !== 'start-g-sequence' && action !== 'goto-top') {
-      PENDING_G_SCOPE = null;
-      PENDING_G_UNTIL = 0;
-    }
     if (dispatchKeymapAction(action, scope, e.repeat)) e.preventDefault();
   });
 

@@ -42,6 +42,7 @@ export type KeymapContext = {
   composing?: boolean;
   paletteOpen?: boolean;
   pendingG?: boolean;
+  lightboxOpen?: boolean;
 };
 
 export type KeyBinding = {
@@ -55,6 +56,9 @@ export type KeyBinding = {
   allowPaletteOpen?: boolean;
   shift?: boolean;
   pendingG?: boolean;
+  requires?: {
+    lightboxClosed?: boolean;
+  };
 };
 
 export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
@@ -65,7 +69,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: 'focus-file-filter', key: '/' },
   { action: 'focus-sidebar', key: 'h', ctrl: true },
   { action: 'focus-main', key: 'l', ctrl: true },
-  { action: 'cancel-source-load', key: 'escape' },
+  { action: 'cancel-source-load', key: 'escape', requires: { lightboxClosed: true } },
   { action: 'open-sidebar-item', key: 'enter', scope: 'sidebar' },
   { action: 'open-sidebar-item', key: 'enter', scope: 'global' },
   { action: 'sidebar-next', key: 'j', scope: 'sidebar' },
@@ -87,8 +91,10 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: 'tab-preview', key: 'p', scope: 'main', pendingG: true },
   { action: 'tab-code', key: 'c', scope: 'main', pendingG: true },
   { action: 'goto-top', key: 'g', pendingG: true },
+  { action: 'goto-bottom', key: 'g', shift: true, pendingG: true },
   { action: 'goto-bottom', key: 'g', shift: true },
-  { action: 'start-g-sequence', key: 'g' },
+  { action: 'start-g-sequence', key: 'g', scope: 'sidebar' },
+  { action: 'start-g-sequence', key: 'g', scope: 'main' },
   { action: 'layout-unified', key: 'u' },
   { action: 'layout-split', key: 's' },
   { action: 'toggle-theme', key: 't' },
@@ -99,6 +105,7 @@ export function resolveKeymapAction(event: KeyEventLike, context: KeymapContext)
   if (context.composing) return null;
   for (const binding of DEFAULT_KEY_BINDINGS) {
     if (binding.key !== key) continue;
+    if (binding.requires?.lightboxClosed && context.lightboxOpen) continue;
     if (binding.scope && binding.scope !== context.scope) continue;
     if (!!binding.pendingG !== !!context.pendingG) continue;
     if (context.paletteOpen && !binding.allowPaletteOpen) continue;

@@ -2,6 +2,7 @@ import type { KeymapScope } from './keymap';
 
 export type PanelFocusScope = Extract<KeymapScope, 'sidebar' | 'main'>;
 
+// Panel focus scope mirrors the DOM focus owner used by Vim-style key handling.
 export function isEditableKeyTarget(target: Element | null): boolean {
   if (!target) return false;
   const tag = target.tagName;
@@ -32,6 +33,12 @@ export function setPanelFocusScope(scope: PanelFocusScope | null, doc: Document 
   else delete doc.body.dataset.focusScope;
 }
 
+export function restorePanelFocusScope(scope: PanelFocusScope | null, doc: Document = document) {
+  if (scope === 'sidebar') focusSidebarPanel(doc);
+  else if (scope === 'main') focusMainPanel(doc);
+  else setPanelFocusScope(null, doc);
+}
+
 export function focusSidebarPanel(doc: Document = document) {
   const active = doc.querySelector<HTMLElement>('#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]');
   const sidebar = doc.querySelector<HTMLElement>('#sidebar');
@@ -49,5 +56,15 @@ export function findMainScrollTarget(doc: Document = document): HTMLElement | nu
   const activeScroller = active?.closest<HTMLElement>('#content .gdp-source-virtual-scroller');
   if (activeScroller && activeScroller.offsetParent !== null) return activeScroller;
   const sourceScroller = doc.querySelector<HTMLElement>('#content .gdp-source-virtual-scroller');
-  return sourceScroller && sourceScroller.offsetParent !== null ? sourceScroller : null;
+  if (sourceScroller && sourceScroller.offsetParent !== null) return sourceScroller;
+  const content = doc.querySelector<HTMLElement>('#content');
+  if (!content || content.offsetParent === null) return null;
+  const isScrollable = (item: HTMLElement) => {
+    if (item.offsetParent === null) return false;
+    const style = doc.defaultView?.getComputedStyle(item);
+    return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+  };
+  const preferred = Array.from(content.querySelectorAll<HTMLElement>('.gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff'));
+  const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll<HTMLElement>('*')).find(isScrollable);
+  return scrollable || (doc.scrollingElement as HTMLElement | null);
 }
