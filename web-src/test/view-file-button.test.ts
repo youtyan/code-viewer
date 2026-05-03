@@ -85,6 +85,32 @@ describe('view file UI', () => {
     expect(app.includes('await response.text()')).toBe(true);
   });
 
+  test('repository file view treats common source and config formats as text', () => {
+    expect(app.includes('TEXT_SOURCE_EXTENSIONS')).toBe(true);
+    expect(app.includes('...Object.keys(EXT_TO_LANG)')).toBe(true);
+    [
+      "'tf'", "'tfvars'", "'hcl'", "'tfstate'",
+      "'lua'", "'proto'", "'gradle'", "'properties'", "'patch'", "'diff'",
+      "'nix'", "'cue'", "'rego'", "'bicep'", "'bazel'", "'graphqls'",
+      "'bzl'", "'cmake'", "'ipynb'", "'thrift'", "'prisma'",
+      "'ejs'", "'hbs'", "'mustache'", "'liquid'", "'pug'",
+    ].forEach(ext => expect(app.includes(ext)).toBe(true));
+    expect(app.includes('TEXT_SOURCE_FILENAMES')).toBe(true);
+    [
+      "'codeowners'", "'go.mod'", "'build.bazel'", "'workspace.bazel'", "'module.bazel'",
+      "'copying'", "'authors'", "'contributors'",
+      "'gemfile'", "'rakefile'", "'procfile'", "'brewfile'",
+      "'.gitattributes'", "'.gitmodules'", "'.npmrc'", "'.nvmrc'",
+      "'.yarnrc'", "'.prettierrc'", "'.eslintrc'",
+    ].forEach(name => expect(app.includes(name)).toBe(true));
+    expect(app.includes('isDockerfileName(name)')).toBe(true);
+    expect(app.includes('isMakefileName(name)')).toBe(true);
+    expect(app.includes('FILENAME_TO_LANG')).toBe(true);
+    expect(app.includes("makefile: 'makefile'")).toBe(true);
+    expect(app.includes("dockerfile: 'dockerfile'")).toBe(true);
+    expect(app.includes("tf: 'terraform', tfvars: 'terraform', hcl: 'terraform'")).toBe(true);
+  });
+
   test('unsupported file preview is styled as a file detail empty state', () => {
     expect(app.includes("content.className = 'gdp-source-unsupported-content'")).toBe(true);
     expect(app.includes("title.className = 'gdp-source-unsupported-title'")).toBe(true);
@@ -189,7 +215,7 @@ describe('view file UI', () => {
     expect(app.includes("onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted })")).toBe(true);
     expect(app.includes("chev.addEventListener('click', toggleDir)")).toBe(true);
     expect(app.includes("if (file.type === 'tree')")).toBe(true);
-    expect(app.includes("setRoute(repoRoute(ref, file.path))")).toBe(true);
+    expect(app.includes("setRoute(repoRoute(normalizedRef, file.path))")).toBe(true);
     expect(app.includes('loadRepo()')).toBe(true);
   });
 
@@ -237,6 +263,21 @@ describe('view file UI', () => {
     expect(style.includes('body.gdp-repo-page #sidebar,\nbody.gdp-file-detail-page #sidebar-resizer')).toBe(false);
     expect(style.includes('body.gdp-repo-page #content {\n  margin-left: var(--sidebar-w);')).toBe(true);
     expect(style.includes('body.gdp-repo-page #sidebar-resizer {\n  display: none;')).toBe(false);
+  });
+
+  test('repository sidebar reuses the existing tree when navigating within the same ref', () => {
+    expect(app.includes('let REPO_SIDEBAR_REF: string | null = null')).toBe(true);
+    expect(app.includes('function activateRepoSidebarPath(currentPath: string)')).toBe(true);
+    expect(app.includes('function invalidateRepoSidebar()')).toBe(true);
+    expect(app.includes('function isRepoSidebarReusable(ref: string): boolean')).toBe(true);
+    expect(app.includes('if (isRepoSidebarReusable(normalizedRef))')).toBe(true);
+    expect(app.includes("if (!isRepoSidebarReusable(meta.ref)) $('#totals').textContent = ''")).toBe(true);
+    expect(app.includes('return Promise.resolve()')).toBe(true);
+    expect(app.includes("const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === 'repo' ? STATE.route.ref : '')")).toBe(true);
+    expect(app.includes('invalidateRepoSidebar();\n      const savedScroll = window.scrollY;')).toBe(true);
+    expect(app.includes('if (REPO_SIDEBAR_LOAD === load)')).toBe(true);
+    expect(app.includes("$('#filelist').replaceChildren()")).toBe(false);
+    expect(app.includes('REPO_SIDEBAR_REF = null')).toBe(true);
   });
 
   test('repository folder detail uses the available content width', () => {

@@ -6395,6 +6395,17 @@
     let highlightLoadPromise = null;
     let highlightConfigured = false;
     let PROJECT_NAME = "";
+    let REPO_SIDEBAR_REF = null;
+    let REPO_SIDEBAR_LOAD_REF = null;
+    let REPO_SIDEBAR_LOAD = null;
+    function invalidateRepoSidebar() {
+      REPO_SIDEBAR_REF = null;
+      REPO_SIDEBAR_LOAD_REF = null;
+      REPO_SIDEBAR_LOAD = null;
+    }
+    function isRepoSidebarReusable(ref) {
+      return REPO_SIDEBAR_REF === (ref || "worktree") && isRepositorySidebarMode();
+    }
     const STATE = (() => {
       const igRaw = localStorage.getItem("gdp:ignore-ws");
       const fallbackRange = {
@@ -6768,6 +6779,8 @@
       ul.innerHTML = "";
       ul.classList.toggle("tree", STATE.sbView === "tree");
       STATE.files = files;
+      if (!onFileClick)
+        REPO_SIDEBAR_REF = null;
       if (STATE.sbView === "tree") {
         const root = buildTree(files);
         renderTreeNode(root, 0, ul, onFileClick);
@@ -7168,6 +7181,7 @@
       });
       if (!res.ok)
         throw new Error(await res.text());
+      invalidateRepoSidebar();
       await loadRepo();
     }
     function createRepoUploadPanel(path) {
@@ -7282,8 +7296,8 @@
       removeStandaloneSource();
       $("#empty").classList.add("hidden");
       $("#diff").replaceChildren();
-      $("#filelist").replaceChildren();
-      $("#totals").textContent = "";
+      if (!isRepoSidebarReusable(meta.ref))
+        $("#totals").textContent = "";
       STATE.files = [];
       LOAD_QUEUE.length = 0;
       renderRepoBlobSidebar(meta.path || "", meta.ref);
@@ -7426,14 +7440,28 @@
     }
     function renderRepoBlobSidebar(currentPath, ref) {
       syncRepoTargetInput(ref);
+      const normalizedRef = ref || "worktree";
+      if (isRepoSidebarReusable(normalizedRef)) {
+        activateRepoSidebarPath(currentPath);
+        return Promise.resolve();
+      }
+      if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
+        return REPO_SIDEBAR_LOAD.then(() => {
+          activateRepoSidebarPath(currentPath);
+        });
+      }
       const params = new URLSearchParams;
-      params.set("ref", ref || "worktree");
+      params.set("ref", normalizedRef);
       params.set("recursive", "1");
-      return trackLoad(fetch("/_tree?" + params.toString()).then((r2) => {
+      REPO_SIDEBAR_LOAD_REF = normalizedRef;
+      const load2 = trackLoad(fetch("/_tree?" + params.toString()).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");
         return r2.json();
       })).then((meta) => {
+        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
+        if ((activeRepoRef || "worktree") !== normalizedRef)
+          return;
         const files = meta.entries.map((entry, index) => ({
           order: index + 1,
           path: entry.path,
@@ -7443,19 +7471,31 @@
         }));
         renderSidebar(files, (file) => {
           if (file.type === "tree") {
-            setRoute(repoRoute(ref, file.path));
+            setRoute(repoRoute(normalizedRef, file.path));
             loadRepo();
             return;
           }
-          setRoute({ screen: "file", path: file.path, ref, view: "blob", range: currentRange() });
-          renderStandaloneSource({ path: file.path, ref });
+          setRoute({ screen: "file", path: file.path, ref: normalizedRef, view: "blob", range: currentRange() });
+          renderStandaloneSource({ path: file.path, ref: normalizedRef });
         });
-        markActive(currentPath);
-        applyFilter();
+        REPO_SIDEBAR_REF = normalizedRef;
+        activateRepoSidebarPath(currentPath);
       }).catch(() => {
+        REPO_SIDEBAR_REF = null;
         renderSidebar([], undefined);
         $("#totals").textContent = "Cannot load tree";
+      }).finally(() => {
+        if (REPO_SIDEBAR_LOAD === load2) {
+          REPO_SIDEBAR_LOAD_REF = null;
+          REPO_SIDEBAR_LOAD = null;
+        }
       });
+      REPO_SIDEBAR_LOAD = load2;
+      return load2;
+    }
+    function activateRepoSidebarPath(currentPath) {
+      markActive(currentPath);
+      applyFilter();
     }
     function createPlaceholder(f2) {
       const card = document.createElement("div");
@@ -8135,6 +8175,269 @@
     function isPreviewableSource(path) {
       return /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path);
     }
+    const EXT_TO_LANG = {
+      js: "javascript",
+      mjs: "javascript",
+      cjs: "javascript",
+      ts: "typescript",
+      tsx: "typescript",
+      jsx: "javascript",
+      py: "python",
+      rb: "ruby",
+      go: "go",
+      rs: "rust",
+      java: "java",
+      kt: "kotlin",
+      swift: "swift",
+      c: "c",
+      h: "c",
+      cc: "cpp",
+      cpp: "cpp",
+      hpp: "cpp",
+      cs: "csharp",
+      php: "php",
+      lua: "lua",
+      sh: "bash",
+      bash: "bash",
+      zsh: "bash",
+      fish: "bash",
+      sql: "sql",
+      json: "json",
+      yaml: "yaml",
+      yml: "yaml",
+      toml: "toml",
+      tf: "terraform",
+      tfvars: "terraform",
+      hcl: "terraform",
+      xml: "xml",
+      html: "xml",
+      vue: "xml",
+      css: "css",
+      scss: "scss",
+      md: "markdown",
+      dockerfile: "dockerfile",
+      proto: "protobuf",
+      gradle: "gradle",
+      properties: "properties",
+      patch: "diff",
+      diff: "diff",
+      nix: "nix",
+      cue: "cue",
+      rego: "rego",
+      bicep: "bicep",
+      bazel: "starlark",
+      bzl: "starlark",
+      cmake: "cmake",
+      groovy: "groovy",
+      dart: "dart",
+      scala: "scala",
+      clj: "clojure",
+      cljs: "clojure",
+      cljc: "clojure",
+      edn: "clojure",
+      ex: "elixir",
+      exs: "elixir",
+      erl: "erlang",
+      hrl: "erlang",
+      hs: "haskell",
+      lhs: "haskell",
+      ml: "ocaml",
+      mli: "ocaml",
+      jl: "julia",
+      r: "r",
+      rmd: "r",
+      pl: "perl",
+      pm: "perl",
+      tcl: "tcl",
+      vim: "vim",
+      f: "fortran",
+      f90: "fortran",
+      m: "objective-c",
+      mm: "objective-cpp",
+      tex: "tex",
+      bib: "bibtex",
+      rst: "rst"
+    };
+    const TEXT_SOURCE_EXTENSIONS = new Set([
+      ...Object.keys(EXT_TO_LANG),
+      "txt",
+      "md",
+      "markdown",
+      "mdown",
+      "mkdn",
+      "mdx",
+      "json",
+      "jsonc",
+      "csv",
+      "tsv",
+      "yaml",
+      "yml",
+      "toml",
+      "hcl",
+      "tf",
+      "tfvars",
+      "tfstate",
+      "xml",
+      "html",
+      "htm",
+      "css",
+      "scss",
+      "sass",
+      "less",
+      "js",
+      "jsx",
+      "mjs",
+      "cjs",
+      "ts",
+      "tsx",
+      "mts",
+      "cts",
+      "vue",
+      "svelte",
+      "astro",
+      "rs",
+      "go",
+      "py",
+      "rb",
+      "php",
+      "java",
+      "kt",
+      "kts",
+      "c",
+      "cc",
+      "cpp",
+      "cxx",
+      "h",
+      "hpp",
+      "cs",
+      "swift",
+      "sh",
+      "bash",
+      "zsh",
+      "fish",
+      "ps1",
+      "sql",
+      "graphql",
+      "graphqls",
+      "gql",
+      "ini",
+      "conf",
+      "env",
+      "properties",
+      "gitignore",
+      "dockerignore",
+      "editorconfig",
+      "lock",
+      "log",
+      "patch",
+      "diff",
+      "sum",
+      "mk",
+      "proto",
+      "thrift",
+      "prisma",
+      "gradle",
+      "cmake",
+      "nix",
+      "cue",
+      "rego",
+      "bicep",
+      "bazel",
+      "bzl",
+      "dart",
+      "scala",
+      "clj",
+      "cljs",
+      "cljc",
+      "edn",
+      "ex",
+      "exs",
+      "erl",
+      "hrl",
+      "hs",
+      "lhs",
+      "ml",
+      "mli",
+      "jl",
+      "r",
+      "rmd",
+      "pl",
+      "pm",
+      "tcl",
+      "vim",
+      "groovy",
+      "f",
+      "f90",
+      "m",
+      "mm",
+      "pas",
+      "tex",
+      "bib",
+      "rst",
+      "adoc",
+      "org",
+      "ipynb",
+      "ejs",
+      "hbs",
+      "mustache",
+      "liquid",
+      "pug"
+    ]);
+    const TEXT_SOURCE_FILENAMES = new Set([
+      "readme",
+      "license",
+      "copying",
+      "authors",
+      "contributors",
+      "notice",
+      "changelog",
+      "todo",
+      "manifest",
+      "version",
+      "codeowners",
+      "go.mod",
+      "build.bazel",
+      "workspace.bazel",
+      "module.bazel",
+      "gemfile",
+      "rakefile",
+      "procfile",
+      "brewfile",
+      "gnumakefile",
+      "bsdmakefile",
+      ".gitattributes",
+      ".gitmodules",
+      ".npmrc",
+      ".nvmrc",
+      ".yarnrc",
+      ".prettierrc",
+      ".eslintrc",
+      ".babelrc",
+      ".stylelintrc"
+    ]);
+    const FILENAME_TO_LANG = {
+      dockerfile: "dockerfile",
+      makefile: "makefile",
+      gnumakefile: "makefile",
+      bsdmakefile: "makefile",
+      "go.mod": "go",
+      "build.bazel": "starlark",
+      "workspace.bazel": "starlark",
+      "module.bazel": "starlark"
+    };
+    function sourceFileName(path) {
+      return (path.split("/").pop() || path).toLowerCase();
+    }
+    function sourceFileExtension(name) {
+      const index = name.lastIndexOf(".");
+      return index >= 0 ? name.slice(index + 1) : "";
+    }
+    function isDockerfileName(name) {
+      return /^dockerfile(?:[.-].+)?$/i.test(name);
+    }
+    function isMakefileName(name) {
+      return /^makefile(?:[.-].+)?$/i.test(name);
+    }
     function sourceDisplayKind(path) {
       if (isVideo(path))
         return "video";
@@ -8142,9 +8445,13 @@
         return "image";
       if (/\.pdf$/i.test(path))
         return "pdf";
-      if (/\.(txt|md|markdown|mdown|mkdn|mdx|json|jsonc|csv|tsv|ya?ml|toml|xml|html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|mts|cts|vue|svelte|astro|rs|go|py|rb|php|java|kt|kts|c|cc|cpp|cxx|h|hpp|cs|swift|sh|bash|zsh|fish|ps1|sql|graphql|gql|ini|conf|env|gitignore|dockerignore|editorconfig|lock|log)$/i.test(path))
+      const name = sourceFileName(path);
+      const ext = sourceFileExtension(name);
+      if (TEXT_SOURCE_EXTENSIONS.has(ext))
         return "text";
-      if (/\/?(readme|license|notice|changelog|dockerfile|makefile)$/i.test(path))
+      if (TEXT_SOURCE_FILENAMES.has(name))
+        return "text";
+      if (isDockerfileName(name) || isMakefileName(name))
         return "text";
       return "unsupported";
     }
@@ -9005,46 +9312,15 @@
         });
       }
     }
-    const EXT_TO_LANG = {
-      js: "javascript",
-      mjs: "javascript",
-      cjs: "javascript",
-      ts: "typescript",
-      tsx: "typescript",
-      jsx: "javascript",
-      py: "python",
-      rb: "ruby",
-      go: "go",
-      rs: "rust",
-      java: "java",
-      kt: "kotlin",
-      swift: "swift",
-      c: "c",
-      h: "c",
-      cc: "cpp",
-      cpp: "cpp",
-      hpp: "cpp",
-      cs: "csharp",
-      php: "php",
-      lua: "lua",
-      sh: "bash",
-      bash: "bash",
-      zsh: "bash",
-      fish: "bash",
-      sql: "sql",
-      json: "json",
-      yaml: "yaml",
-      yml: "yaml",
-      toml: "toml",
-      xml: "xml",
-      html: "xml",
-      vue: "xml",
-      css: "css",
-      scss: "scss",
-      md: "markdown",
-      dockerfile: "dockerfile"
-    };
     function inferLang(path) {
+      const name = sourceFileName(path);
+      const fileLang = FILENAME_TO_LANG[name];
+      if (fileLang)
+        return fileLang;
+      if (isDockerfileName(name))
+        return "dockerfile";
+      if (isMakefileName(name))
+        return "makefile";
       const m = path.match(/\.([^.]+)$/);
       if (!m)
         return null;
@@ -9826,6 +10102,7 @@
         clearTimeout(sseTimer);
       sseTimer = setTimeout(() => {
         sseTimer = null;
+        invalidateRepoSidebar();
         const savedScroll = window.scrollY;
         const savedActive = STATE.activeFile;
         load().then(() => {
