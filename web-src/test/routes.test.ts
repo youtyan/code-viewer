@@ -14,6 +14,8 @@ describe('routes', () => {
     expect(buildRoute({ screen: 'repo', ref: 'main', path: 'web-src/server', range }))
       .toBe('/?ref=main&path=web-src%2Fserver');
     expect(buildRoute({ screen: 'diff', range })).toBe('/todif?from=HEAD&to=worktree');
+    expect(buildRoute({ screen: 'diff', range, path: 'web-src/app.ts', line: 3655 }))
+      .toBe('/todif?from=HEAD&to=worktree&path=web-src%2Fapp.ts&line=3655');
     expect(buildRoute({ screen: 'file', path: 'src/a b.ts', ref: 'feat/foo', range }))
       .toBe('/file?path=src%2Fa%20b.ts&ref=feat%2Ffoo&from=HEAD&to=worktree');
     expect(buildRoute({ screen: 'file', path: 'README.md', ref: 'main', view: 'blob', range }))
@@ -63,6 +65,8 @@ describe('routes', () => {
   test('builds deterministic URLs for round trips and todiff aliases', () => {
     expect(buildRoute(parseRoute('/todiff', '?from=main&to=feat%2Ffoo', defaultRange)))
       .toBe('/todif?from=main&to=feat%2Ffoo');
+    expect(parseRoute('/todif', '?from=HEAD&to=worktree&path=web-src%2Fapp.ts&line=3655', defaultRange))
+      .toEqual({ screen: 'diff', range: { from: 'HEAD', to: 'worktree' }, path: 'web-src/app.ts', line: 3655 });
     const route = { screen: 'file' as const, path: 'src/a?b&c=1.ts', ref: 'feat/foo', range: { from: 'HEAD^', to: 'worktree' } };
     expect(buildRoute(parseRoute('/file', buildRoute(route).slice('/file'.length), defaultRange)))
       .toBe(buildRoute(route));

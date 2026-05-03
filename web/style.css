@@ -129,7 +129,7 @@ html, body {
   width: min(760px, calc(100vw - 32px));
   max-height: min(620px, calc(100vh - 48px));
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto 1fr;
   overflow: hidden;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -163,6 +163,37 @@ html, body {
   color: var(--fg-muted);
   font-size: 12px;
   border-bottom: 1px solid var(--border-muted);
+}
+
+.gdp-palette-controls {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 0;
+}
+
+.gdp-palette-mode-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gdp-palette-mode-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.gdp-palette-mode-hint {
+  color: var(--fg-muted);
+  font-size: 12px;
 }
 
 .gdp-palette-list {
@@ -1392,6 +1423,17 @@ table.d2h-diff-table .d2h-code-line-prefix {
   display: inline-block;
   width: 1.5em;
   padding-left: 4px;
+}
+
+table.d2h-diff-table tr.gdp-diff-line-target > td,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-side-line,
+table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line-ctn {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
 }
 /* Stack height = number of buttons * 20px. With 1 button = 20px row,
  * with 2 (↑+↓) = 40px row, matching GitHub. */

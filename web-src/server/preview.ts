@@ -457,25 +457,26 @@ function grepWorktreeFallback(query: string, max: number, paths: string[]): Grep
   return matches;
 }
 
-function grepWorktree(query: string, max: number, paths: string[]): GrepResponse {
+function grepWorktree(query: string, max: number, paths: string[], regex: boolean): GrepResponse {
   if (rgAvailable()) {
     const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path) && safeWorktreePath(path));
-    const args = buildRgArgs(query, max, safePaths);
+    const args = buildRgArgs(query, max, safePaths, regex);
     const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
     const stdout = new TextDecoder().decode(proc.stdout);
     const matches = parseRgOutput(stdout, max)
       .filter(match => safePath(match.path) && !isGitInternalPath(match.path) && !!safeWorktreePath(match.path));
     return { ref: 'worktree', engine: 'rg', truncated: matches.length >= max, matches };
   }
+  if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] };
   const matches = grepWorktreeFallback(query, max, paths);
   return { ref: 'worktree', engine: 'fallback', truncated: matches.length >= max, matches };
 }
 
-function grepTreeRef(ref: string, query: string, max: number, paths: string[]): GrepResponse {
+function grepTreeRef(ref: string, query: string, max: number, paths: string[], regex: boolean): GrepResponse {
   const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path));
   const args = [
     'git', '-c', 'core.quotepath=false', 'grep',
-    '-n', '--column', '-i', '-F', '--no-color',
+    '-n', '--column', '-i', regex ? '-E' : '-F', '--no-color',
     '-e', query,
     ref, '--',
     ...safePaths,
@@ -491,10 +492,11 @@ function handleGrep(url: URL) {
   const ref = url.searchParams.get('ref') || 'worktree';
   const max = normalizeGrepMax(url.searchParams.get('max'));
   const paths = parseGrepPaths(url);
+  const regex = url.searchParams.get('regex') === '1';
   if (!query.trim()) return json({ ref, engine: ref === 'worktree' ? 'fallback' : 'git', truncated: false, matches: [] } satisfies GrepResponse);
-  if (ref === 'worktree' || ref === '') return json(grepWorktree(query, max, paths));
+  if (ref === 'worktree' || ref === '') return json(grepWorktree(query, max, paths, regex));
   if (!git.verifyTreeRef(ref, cwd)) return text('invalid target', 400);
-  return json(grepTreeRef(ref, query, max, paths));
+  return json(grepTreeRef(ref, query, max, paths, regex));
 }
 
 function handleFileDiff(url: URL) {

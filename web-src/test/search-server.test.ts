@@ -90,6 +90,12 @@ describe('buildRgArgs', () => {
   test('searches the current repository explicitly when no paths are supplied', () => {
     expect(buildRgArgs('needle', 20, []).slice(-2)).toEqual(['--', '.']);
   });
+
+  test('omits fixed-string mode for explicit regex grep', () => {
+    const args = buildRgArgs('use[A-Z]', 20, ['src/app.ts'], true);
+    expect(args.includes('--fixed-strings')).toBe(false);
+    expect(args.includes('-e')).toBe(true);
+  });
 });
 
 describe('grep output parsers', () => {
@@ -123,6 +129,8 @@ describe('preview search endpoints', () => {
   test('grep endpoint uses safe caps and argument-array ripgrep', () => {
     expect(server.includes('normalizeGrepMax(url.searchParams.get')).toBe(true);
     expect(server.includes('buildRgArgs(query, max')).toBe(true);
+    expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
+    expect(server.includes("if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }")).toBe(true);
     expect(server.includes('Bun.spawnSync(args')).toBe(true);
     expect(server.includes('safeWorktreePath(path)')).toBe(true);
   });

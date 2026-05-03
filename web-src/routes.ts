@@ -17,7 +17,7 @@ export type SourceFileTarget = {
 
 export type AppRoute =
   | { screen: 'repo'; ref: string; path: string; range: DiffRange }
-  | { screen: 'diff'; range: DiffRange }
+  | { screen: 'diff'; range: DiffRange; path?: string; line?: SourceLineTarget }
   | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail'; line?: SourceLineTarget }
   | { screen: 'unknown'; reason: 'unknown-pathname' | 'missing-path'; rawPathname: string; rawSearch: string; range: DiffRange };
 
@@ -75,7 +75,12 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
       };
     case '/todif':
     case '/todiff':
-      return { screen: 'diff', range };
+      return {
+        screen: 'diff',
+        range,
+        ...(params.get('path') ? { path: params.get('path') || '' } : {}),
+        ...(parseLineTarget(params.get('line')) ? { line: parseLineTarget(params.get('line')) } : {}),
+      };
     case '/file': {
       const path = params.get('path') || '';
       const target = params.get('target') || '';
@@ -111,7 +116,9 @@ export function buildRoute(route: AppRoute): string {
         (route.line ? '&line=' + encodeURIComponent(formatLineTarget(route.line)) : '');
     case 'diff':
       return '/todif?from=' + encodeURIComponent(route.range.from || '') +
-        '&to=' + encodeURIComponent(route.range.to || 'worktree');
+        '&to=' + encodeURIComponent(route.range.to || 'worktree') +
+        (route.path ? '&path=' + encodeURIComponent(route.path) : '') +
+        (route.line ? '&line=' + encodeURIComponent(formatLineTarget(route.line)) : '');
     case 'unknown':
       return '/todif?from=' + encodeURIComponent(route.range.from || '') +
         '&to=' + encodeURIComponent(route.range.to || 'worktree');

@@ -51,9 +51,9 @@ export function buildFileSearchList(ref: string, generation: number, entries: Gi
   };
 }
 
-export function buildRgArgs(query: string, max: number, paths: string[]): string[] {
+export function buildRgArgs(query: string, max: number, paths: string[], regex = false): string[] {
   const safePaths = paths.length ? paths : ['.'];
-  return [
+  const args = [
     'rg',
     '--no-config',
     '--line-number',
@@ -62,7 +62,6 @@ export function buildRgArgs(query: string, max: number, paths: string[]): string
     '--color',
     'never',
     '--smart-case',
-    '--fixed-strings',
     '--max-count',
     String(max),
     '--max-filesize',
@@ -72,6 +71,8 @@ export function buildRgArgs(query: string, max: number, paths: string[]): string
     '--',
     ...safePaths,
   ];
+  if (!regex) args.splice(8, 0, '--fixed-strings');
+  return args;
 }
 
 export function parseRgOutput(stdout: string, max: number): GrepMatch[] {
