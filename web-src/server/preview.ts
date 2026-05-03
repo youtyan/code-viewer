@@ -408,9 +408,6 @@ function handleTree(url: URL) {
 
 function handleFiles(url: URL) {
   const target = url.searchParams.get('ref') || url.searchParams.get('target') || 'worktree';
-  if ((target === 'worktree' || target === '') && isGitInternalPath('')) {
-    return text('forbidden', 403);
-  }
   if (target !== 'worktree' && !git.verifyTreeRef(target, cwd)) return text('invalid target', 400);
   const key = target || 'worktree';
   const cached = fileListCache.get(key);

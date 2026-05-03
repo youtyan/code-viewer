@@ -9225,6 +9225,7 @@
             return;
           if (!rendered)
             return;
+          scrollStandaloneSourceLine(card, STATE.route.screen === "file" ? STATE.route.line : undefined);
           finishSourceLoad(req);
         }
       } catch (err) {
@@ -9237,6 +9238,19 @@
         }
         renderSourceError(card, target, "Cannot load " + target.path + " at " + target.ref);
       }
+    }
+    function scrollStandaloneSourceLine(card, line) {
+      if (!line || line < 1)
+        return;
+      const virtualScroller = card.querySelector(".gdp-source-virtual-scroller");
+      if (virtualScroller) {
+        virtualScroller.scrollTop = Math.max(0, (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT);
+        return;
+      }
+      const rows = card.querySelectorAll(".gdp-source-table tr");
+      const row = rows[line - 1];
+      if (row)
+        row.scrollIntoView({ block: "center" });
     }
     function applySourceRouteToShell() {
       const target = sourceTargetFromRoute();
@@ -10008,6 +10022,8 @@
         path: match2.item.file.path,
         old_path: match2.item.file.old_path,
         ref: paletteRef("diff"),
+        targetPath: fileSourceTarget(match2.item.file).path,
+        targetRef: fileSourceTarget(match2.item.file).ref,
         source: "diff",
         ranges: match2.ranges
       }));
@@ -10015,7 +10031,10 @@
     async function updateFilePalette(state, query) {
       const source = paletteSource();
       if (!query.trim()) {
-        const base2 = source === "diff" ? state.diffSnapshot.map((file) => ({ kind: "file", path: file.path, old_path: file.old_path, ref: paletteRef(source), source, ranges: [] })) : [];
+        const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
+          const target = fileSourceTarget(file);
+          return { kind: "file", path: file.path, old_path: file.old_path, ref: paletteRef(source), targetPath: target.path, targetRef: target.ref, source, ranges: [] };
+        }) : [];
         state.items = limitPaletteResults(base2);
         state.selected = state.items.length ? 0 : -1;
         state.status.textContent = source === "diff" ? state.diffSnapshot.length + " diff files" : "Type to search repository files";
@@ -10028,6 +10047,8 @@
         state.status.textContent = "Loading files...";
         const ref = paletteRef(source);
         const response = await repoPaletteFiles(ref);
+        if (PALETTE !== state || state.input.value !== query)
+          return;
         state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map((match2) => ({
           kind: "file",
           path: match2.item.path,
@@ -10109,7 +10130,7 @@
       if (item.kind === "file") {
         if (item.source === "diff") {
           if (STATE.route.screen === "file") {
-            setRoute({ screen: "file", path: item.path, ref: item.ref, range: currentRange() });
+            setRoute({ screen: "file", path: item.targetPath || item.path, ref: item.targetRef || item.ref, range: currentRange() });
             applySourceRouteToShell();
           } else {
             scrollToFile(item.path);
