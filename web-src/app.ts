@@ -764,6 +764,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function applyDiffRouteFocus(card?: HTMLElement) {
     if (STATE.route.screen !== 'diff' || !STATE.route.path || !STATE.route.line) return false;
+    if (card && card.dataset.path !== STATE.route.path) return false;
     const targetCard = card || document.querySelector<DiffCardElement>(diffCardSelector(STATE.route.path));
     if (!targetCard) return false;
     return focusDiffLine(targetCard, STATE.route.line);

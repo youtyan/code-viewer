@@ -95,6 +95,7 @@ describe('search palette shortcuts', () => {
   test('diff grep selection stores and focuses a diff line route', () => {
     expect(app.includes("setRoute({ screen: 'diff', range: currentRange(), path: item.path, line: item.line })")).toBe(true);
     expect(app.includes('function focusDiffLine')).toBe(true);
+    expect(app.includes('if (card && card.dataset.path !== STATE.route.path) return false;')).toBe(true);
     expect(app.includes('.gdp-diff-line-target')).toBe(true);
     expect(style.includes('.gdp-diff-line-target')).toBe(true);
   });
