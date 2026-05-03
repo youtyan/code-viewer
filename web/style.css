@@ -1660,6 +1660,14 @@ table.d2h-diff-table .d2h-code-line-prefix {
 .gdp-source-line-code.hljs {
   background: var(--bg);
 }
+.gdp-source-line-code.shiki,
+.gdp-source-line-code.shiki span {
+  color: var(--shiki-light) !important;
+}
+[data-theme="dark"] .gdp-source-line-code.shiki,
+[data-theme="dark"] .gdp-source-line-code.shiki span {
+  color: var(--shiki-dark) !important;
+}
 .gdp-source-virtual {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
