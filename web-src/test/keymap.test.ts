@@ -53,12 +53,20 @@ describe('keymap action resolution', () => {
   test('keeps default bindings as data for future customization', () => {
     expect(DEFAULT_KEY_BINDINGS.some(binding => binding.action === 'focus-main' && binding.key === 'l' && binding.ctrl)).toBe(true);
     expect(DEFAULT_KEY_BINDINGS.some(binding => binding.action === 'scroll-main-page-up' && binding.key === 'u' && binding.scope === 'main' && binding.ctrl)).toBe(true);
+    expect(DEFAULT_KEY_BINDINGS.some(binding => binding.action === 'cancel-source-load' && binding.requires?.lightboxClosed)).toBe(true);
   });
 
   test('supports Vim top and bottom navigation with gg and Shift+G', () => {
     expect(resolveKeymapAction(key('g'), { scope: 'main', editable: false })).toBe('start-g-sequence');
+    expect(resolveKeymapAction(key('g'), { scope: 'global', editable: false })).toBe(null);
     expect(resolveKeymapAction(key('g'), { scope: 'main', editable: false, pendingG: true })).toBe('goto-top');
     expect(resolveKeymapAction(key('G', { shift: true }), { scope: 'main', editable: false })).toBe('goto-bottom');
+    expect(resolveKeymapAction(key('G', { shift: true }), { scope: 'main', editable: false, pendingG: true })).toBe('goto-bottom');
+  });
+
+  test('does not capture Escape for source load cancellation while a lightbox is open', () => {
+    expect(resolveKeymapAction(key('Escape'), { scope: 'main', editable: false })).toBe('cancel-source-load');
+    expect(resolveKeymapAction(key('Escape'), { scope: 'main', editable: false, lightboxOpen: true })).toBe(null);
   });
 
   test('switches source tabs with gp and gc in the main scope', () => {

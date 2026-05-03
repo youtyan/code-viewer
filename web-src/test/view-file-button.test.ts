@@ -313,11 +313,6 @@ describe('view file UI', () => {
     expect(app.includes("if (action === 'scroll-main-page-down' || action === 'scroll-main-page-up')")).toBe(true);
     expect(app.includes("function switchSourceTab(tab: 'preview' | 'code'): boolean")).toBe(true);
     expect(app.includes("if (action === 'tab-preview' || action === 'tab-code')")).toBe(true);
-    expect(app.includes("const target = findMainScrollTarget();")).toBe(true);
-    expect(app.includes("target.scrollTo({ top: edge === 'top' ? 0 : target.scrollHeight, behavior: 'auto' })")).toBe(true);
-    expect(app.includes("if (target) target.scrollBy({ top, behavior })")).toBe(true);
-    expect(app.includes("const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth'")).toBe(true);
-    expect(app.includes("document.querySelector<HTMLElement>('#content')?.addEventListener('mousedown'")).toBe(true);
     expect(app.includes('focusMainPanel();')).toBe(true);
     expect(app.includes('focusSidebarPanel();')).toBe(true);
     expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
@@ -326,10 +321,8 @@ describe('view file UI', () => {
     expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
     expect(app.includes("if (action === 'start-g-sequence')")).toBe(true);
     expect(app.includes("if (action === 'goto-top' || action === 'goto-bottom')")).toBe(true);
-    expect(app.includes("if (scope === 'main') scrollMainToEdge(edge)")).toBe(true);
-    expect(app.includes("else moveActiveSidebarToEdge(edge)")).toBe(true);
-    expect(style.includes('#sidebar:focus-visible')).toBe(true);
-    expect(style.includes('#content:focus-visible')).toBe(true);
+    expect(style.includes('body[data-focus-scope="sidebar"] #sidebar')).toBe(true);
+    expect(style.includes('body[data-focus-scope="main"] #content')).toBe(true);
   });
 
   test('repository sidebar filter enter can focus a visible directory match', () => {
@@ -383,7 +376,6 @@ describe('view file UI', () => {
     expect(app.includes("fetch(buildRawFileUrl(target), { signal: controller.signal })")).toBe(true);
     expect(app.includes("renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'))")).toBe(true);
     expect(app.includes("if (action === 'cancel-source-load')")).toBe(true);
-    expect(app.includes("return !document.querySelector('.mkdp-lightbox') && cancelActiveSourceLoad('esc')")).toBe(true);
     expect(app.includes('function renderSourceCancelled(card: DiffCardElement, target: SourceFileTarget)')).toBe(true);
     expect(app.includes('async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean>')).toBe(true);
     expect(app.includes('if (signal?.aborted) return false')).toBe(true);

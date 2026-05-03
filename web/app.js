@@ -165,6 +165,14 @@
     else
       delete doc.body.dataset.focusScope;
   }
+  function restorePanelFocusScope(scope, doc = document) {
+    if (scope === "sidebar")
+      focusSidebarPanel(doc);
+    else if (scope === "main")
+      focusMainPanel(doc);
+    else
+      setPanelFocusScope(null, doc);
+  }
   function focusSidebarPanel(doc = document) {
     const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
     const sidebar = doc.querySelector("#sidebar");
@@ -181,7 +189,20 @@
     if (activeScroller && activeScroller.offsetParent !== null)
       return activeScroller;
     const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
-    return sourceScroller && sourceScroller.offsetParent !== null ? sourceScroller : null;
+    if (sourceScroller && sourceScroller.offsetParent !== null)
+      return sourceScroller;
+    const content = doc.querySelector("#content");
+    if (!content || content.offsetParent === null)
+      return null;
+    const isScrollable = (item) => {
+      if (item.offsetParent === null)
+        return false;
+      const style = doc.defaultView?.getComputedStyle(item);
+      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+    };
+    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
+    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
+    return scrollable || doc.scrollingElement;
   }
 
   // web-src/fuzzy-search.ts
@@ -338,7 +359,7 @@
     { action: "focus-file-filter", key: "/" },
     { action: "focus-sidebar", key: "h", ctrl: true },
     { action: "focus-main", key: "l", ctrl: true },
-    { action: "cancel-source-load", key: "escape" },
+    { action: "cancel-source-load", key: "escape", requires: { lightboxClosed: true } },
     { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
     { action: "open-sidebar-item", key: "enter", scope: "global" },
     { action: "sidebar-next", key: "j", scope: "sidebar" },
@@ -360,8 +381,10 @@
     { action: "tab-preview", key: "p", scope: "main", pendingG: true },
     { action: "tab-code", key: "c", scope: "main", pendingG: true },
     { action: "goto-top", key: "g", pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
     { action: "goto-bottom", key: "g", shift: true },
-    { action: "start-g-sequence", key: "g" },
+    { action: "start-g-sequence", key: "g", scope: "sidebar" },
+    { action: "start-g-sequence", key: "g", scope: "main" },
     { action: "layout-unified", key: "u" },
     { action: "layout-split", key: "s" },
     { action: "toggle-theme", key: "t" }
@@ -372,6 +395,8 @@
       return null;
     for (const binding of DEFAULT_KEY_BINDINGS) {
       if (binding.key !== key)
+        continue;
+      if (binding.requires?.lightboxClosed && context.lightboxOpen)
         continue;
       if (binding.scope && binding.scope !== context.scope)
         continue;
@@ -6874,9 +6899,10 @@
     function scrollMainPanel(direction, repeated = false, unit = "line") {
       if (moveSourceCursor(direction, unit))
         return;
-      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(window.innerHeight * 0.55));
-      const behavior = repeated ? "auto" : "smooth";
       const target = findMainScrollTarget();
+      const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
+      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
+      const behavior = repeated ? "auto" : "smooth";
       if (target)
         target.scrollBy({ top, behavior });
       else
@@ -6897,12 +6923,17 @@
       const tabs = document.querySelector("#content .gdp-source-tabs");
       if (!tabs)
         return false;
-      const button = Array.from(tabs.querySelectorAll("button")).find((item) => item.textContent?.trim().toLowerCase() === tab);
+      const button = tabs.querySelector('button[data-source-tab="' + tab + '"]');
       if (!button || button.hidden || button.disabled)
         return false;
       button.click();
       focusMainPanel();
       return true;
+    }
+    function isFocusableClickTarget(target) {
+      if (!(target instanceof Element))
+        return false;
+      return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
     }
     function invalidateRepoSidebar() {
       REPO_SIDEBAR_REF = null;
@@ -9298,6 +9329,7 @@
       tabs.className = "gdp-source-tabs";
       const codeButton = document.createElement("button");
       codeButton.type = "button";
+      codeButton.dataset.sourceTab = "code";
       codeButton.textContent = "Code";
       codeButton.classList.toggle("active", active === "code");
       tabs.appendChild(codeButton);
@@ -9305,6 +9337,7 @@
       if (active === "preview") {
         previewButton = document.createElement("button");
         previewButton.type = "button";
+        previewButton.dataset.sourceTab = "preview";
         previewButton.className = "active";
         previewButton.textContent = "Preview";
         tabs.prepend(previewButton);
@@ -10383,8 +10416,13 @@
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
     prepareKeyboardPanels();
-    document.querySelector("#content")?.addEventListener("mousedown", () => {
-      focusMainPanel();
+    const contentPanel = document.querySelector("#content");
+    contentPanel?.addEventListener("focusin", () => setPanelFocusScope("main"));
+    contentPanel?.addEventListener("mousedown", (event) => {
+      if (isFocusableClickTarget(event.target))
+        setPanelFocusScope("main");
+      else
+        focusMainPanel();
     });
     function applySidebarWidth(w) {
       const cw = Math.max(180, Math.min(900, w));
@@ -10404,6 +10442,13 @@
       sb.addEventListener("mousedown", mark);
       sb.addEventListener("touchstart", mark, { passive: true });
       sb.addEventListener("scroll", mark, { passive: true });
+      sb.addEventListener("focusin", () => setPanelFocusScope("sidebar"));
+      sb.addEventListener("mousedown", (event) => {
+        if (isFocusableClickTarget(event.target))
+          setPanelFocusScope("sidebar");
+        else
+          focusSidebarPanel();
+      });
     })();
     (function setupResizer() {
       const handle = $("#sidebar-resizer");
@@ -10474,7 +10519,7 @@
       }
       const sidebarRect = sidebar.getBoundingClientRect();
       const itemRect = item.getBoundingClientRect();
-      const stickyBottom = document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top;
+      const stickyBottom = Math.max(sidebarRect.top, document.querySelector(".sb-head")?.getBoundingClientRect().bottom || sidebarRect.top, document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top);
       const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
       const bottomPadding = 14;
       const visibleTop = sidebarRect.top + topPadding;
@@ -10632,7 +10677,7 @@
         window.clearTimeout(PALETTE.debounce);
       PALETTE.root.remove();
       PALETTE = null;
-      setPanelFocusScope(previousFocusScope);
+      restorePanelFocusScope(previousFocusScope);
     }
     function createPalette(mode) {
       const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
@@ -11001,6 +11046,10 @@
       createPalette(mode);
     }
     function dispatchKeymapAction(action, scope, repeated = false) {
+      if (action !== "start-g-sequence") {
+        PENDING_G_SCOPE = null;
+        PENDING_G_UNTIL = 0;
+      }
       if (action === "open-file-palette") {
         if (PALETTE?.mode !== "file")
           openSearchPalette("file");
@@ -11024,7 +11073,8 @@
         return true;
       }
       if (action === "cancel-source-load") {
-        return !document.querySelector(".mkdp-lightbox") && cancelActiveSourceLoad("esc");
+        cancelActiveSourceLoad("esc");
+        return true;
       }
       if (action === "open-sidebar-item") {
         if (!isRepositorySidebarMode())
@@ -11091,13 +11141,13 @@
         return true;
       }
       if (action === "goto-top" || action === "goto-bottom") {
-        PENDING_G_SCOPE = null;
-        PENDING_G_UNTIL = 0;
         const edge = action === "goto-top" ? "top" : "bottom";
         if (scope === "main")
           scrollMainToEdge(edge);
-        else
+        else if (scope === "sidebar")
           moveActiveSidebarToEdge(edge);
+        else
+          window.scrollTo({ top: edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight), behavior: "auto" });
         return true;
       }
       if (action === "layout-unified") {
@@ -11122,14 +11172,11 @@
         editable: isEditableKeyTarget(targetEl),
         composing: e2.isComposing,
         paletteOpen: !!PALETTE,
-        pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL
+        pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
+        lightboxOpen: !!document.querySelector(".mkdp-lightbox")
       });
       if (!action)
         return;
-      if (action !== "start-g-sequence" && action !== "goto-top") {
-        PENDING_G_SCOPE = null;
-        PENDING_G_UNTIL = 0;
-      }
       if (dispatchKeymapAction(action, scope, e2.repeat))
         e2.preventDefault();
     });

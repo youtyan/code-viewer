@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   focusMainPanel,
   focusSidebarPanel,
+  findMainScrollTarget,
   getPanelFocusScope,
   isEditableKeyTarget,
   keymapScope,
+  restorePanelFocusScope,
   setPanelFocusScope,
 } from '../focus-scope';
 
@@ -63,5 +65,55 @@ describe('focus scope helpers', () => {
     focusMainPanel(doc);
     expect(calls).toEqual(['sidebar', 'content']);
     expect(getPanelFocusScope(doc)).toBe('main');
+  });
+
+  test('restores saved panel focus through the focus helpers', () => {
+    const calls: string[] = [];
+    const sidebar = { focus: () => calls.push('sidebar') };
+    const content = { focus: () => calls.push('content') };
+    const doc = {
+      body: { dataset: {} },
+      querySelector: (selector: string) => {
+        if (selector === '#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]') return null;
+        if (selector === '#sidebar') return sidebar;
+        if (selector === '#content') return content;
+        return null;
+      },
+    } as unknown as Document;
+
+    restorePanelFocusScope('main', doc);
+    restorePanelFocusScope('sidebar', doc);
+    restorePanelFocusScope(null, doc);
+
+    expect(calls).toEqual(['content', 'sidebar']);
+    expect(getPanelFocusScope(doc)).toBeNull();
+  });
+
+  test('finds a scrollable main-panel target beyond virtual source views', () => {
+    const scrollable = {
+      offsetParent: {},
+      scrollHeight: 500,
+      clientHeight: 200,
+    } as HTMLElement;
+    const content = {
+      offsetParent: {},
+      querySelectorAll: (selector: string) => selector === '.gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff'
+        ? [scrollable]
+        : [],
+    } as unknown as HTMLElement;
+    const doc = {
+      activeElement: null,
+      scrollingElement: { offsetParent: {}, scrollHeight: 1000, clientHeight: 400 },
+      defaultView: {
+        getComputedStyle: (item: HTMLElement) => ({ overflowY: item === scrollable ? 'auto' : 'visible' }),
+      },
+      querySelector: (selector: string) => {
+        if (selector === '#content .gdp-source-virtual-scroller') return null;
+        if (selector === '#content') return content;
+        return null;
+      },
+    } as unknown as Document;
+
+    expect(findMainScrollTarget(doc)).toBe(scrollable);
   });
 });
