@@ -60,3 +60,12 @@ describe('state changing refresh endpoint', () => {
     expect(server.includes("if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);\n      generation++;")).toBe(true);
   });
 });
+
+describe('search palette shortcuts', () => {
+  test('Ctrl+K and Ctrl+G open the palette while slash keeps sidebar filter focus', () => {
+    expect(app.includes("openSearchPalette('file')")).toBe(true);
+    expect(app.includes("openSearchPalette('grep')")).toBe(true);
+    expect(app.includes("if (e.key === '/') { e.preventDefault(); focusFileFilter(); }")).toBe(true);
+    expect(app.includes("focusFileFilter();\n      return;\n    }\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g')")).toBe(false);
+  });
+});

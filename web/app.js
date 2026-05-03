@@ -131,6 +131,86 @@
     };
   }
 
+  // web-src/fuzzy-search.ts
+  function basenameStart(path) {
+    const slash = path.lastIndexOf("/");
+    return slash < 0 ? 0 : slash + 1;
+  }
+  function isBoundary(path, index) {
+    if (index <= 0)
+      return true;
+    const prev = path[index - 1];
+    return prev === "/" || prev === "-" || prev === "_" || prev === "." || prev === " ";
+  }
+  function toRanges(indices) {
+    const ranges = [];
+    for (const index of indices) {
+      const last = ranges[ranges.length - 1];
+      if (last && last.end === index) {
+        last.end = index + 1;
+      } else {
+        ranges.push({ start: index, end: index + 1 });
+      }
+    }
+    return ranges;
+  }
+  function fuzzyMatchPath(query, path) {
+    const q = query.trim().toLowerCase();
+    if (!q)
+      return { score: 0, ranges: [] };
+    const lowerPath = path.toLowerCase();
+    const baseStart = basenameStart(path);
+    const indices = [];
+    let from = 0;
+    let score = 0;
+    for (const ch of q) {
+      const index = lowerPath.indexOf(ch, from);
+      if (index < 0)
+        return null;
+      indices.push(index);
+      score += 10;
+      if (index >= baseStart)
+        score += 8;
+      if (isBoundary(path, index))
+        score += 6;
+      const prev = indices[indices.length - 2];
+      if (prev != null && prev + 1 === index)
+        score += 12;
+      from = index + 1;
+    }
+    const first = indices[0] || 0;
+    score -= Math.min(first, 40);
+    if (indices[0] >= baseStart)
+      score += 20;
+    const basename = lowerPath.slice(baseStart);
+    if (basename.startsWith(q))
+      score += 30;
+    if (basename === q || basename.startsWith(q + "."))
+      score += 25;
+    if (lowerPath.endsWith(q))
+      score += 15;
+    return { score, ranges: toRanges(indices) };
+  }
+  function rankFuzzyPaths(query, items) {
+    return items.map((item) => {
+      const match = fuzzyMatchPath(query, item.path);
+      return match ? { item, score: match.score, ranges: match.ranges } : null;
+    }).filter((item) => item !== null).sort((a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path));
+  }
+
+  // web-src/search-palette.ts
+  var PALETTE_RESULT_LIMIT = 50;
+  function limitPaletteResults(items) {
+    return items.slice(0, PALETTE_RESULT_LIMIT);
+  }
+  function movePaletteSelection(index, count, direction) {
+    if (count <= 0)
+      return -1;
+    if (index < 0)
+      return direction > 0 ? 0 : count - 1;
+    return (index + direction + count) % count;
+  }
+
   // web-src/catch-up.ts
   function shouldCatchUpDiff(route) {
     return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
@@ -183,9 +263,11 @@
         const path = params.get("path") || "";
         const target = params.get("target") || "";
         const ref = target || params.get("ref") || "worktree";
+        const lineParam = Number(params.get("line") || "");
+        const line = Number.isInteger(lineParam) && lineParam > 0 ? lineParam : undefined;
         if (!path)
           return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
-        return { screen: "file", path, ref, range, view: target ? "blob" : "detail" };
+        return { screen: "file", path, ref, range, view: target ? "blob" : "detail", ...line ? { line } : {} };
       }
       default:
         return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
@@ -204,9 +286,9 @@
       }
       case "file":
         if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree");
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? "&line=" + encodeURIComponent(String(route.line)) : "");
         }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(String(route.line)) : "");
       case "diff":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
       case "unknown":
@@ -9775,10 +9857,308 @@
       input.focus();
       input.select();
     }
+    let PALETTE = null;
+    const REPO_FILE_CACHE = new Map;
+    function paletteSource() {
+      if (STATE.route.screen === "diff")
+        return "diff";
+      if (STATE.route.screen === "file" && STATE.route.view !== "blob")
+        return "diff";
+      return "repo";
+    }
+    function paletteRef(source) {
+      if (source === "diff")
+        return STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
+      if (STATE.route.screen === "repo")
+        return STATE.route.ref || "worktree";
+      if (STATE.route.screen === "file")
+        return STATE.route.ref || "worktree";
+      return STATE.repoRef || "worktree";
+    }
+    function closeSearchPalette() {
+      if (!PALETTE)
+        return;
+      PALETTE.controller?.abort();
+      if (PALETTE.debounce)
+        window.clearTimeout(PALETTE.debounce);
+      PALETTE.root.remove();
+      PALETTE = null;
+    }
+    function createPalette(mode) {
+      closeSearchPalette();
+      const root = document.createElement("div");
+      root.className = "gdp-palette-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-palette";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      const label = document.createElement("div");
+      label.className = "gdp-palette-label";
+      label.textContent = mode === "file" ? "Files" : "Grep";
+      const input = document.createElement("input");
+      input.className = "gdp-palette-input";
+      input.type = "search";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = mode === "file" ? "Search files" : "Search text";
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-expanded", "true");
+      input.setAttribute("aria-controls", "gdp-palette-list");
+      const status = document.createElement("div");
+      status.className = "gdp-palette-status";
+      const list2 = document.createElement("div");
+      list2.id = "gdp-palette-list";
+      list2.className = "gdp-palette-list";
+      list2.setAttribute("role", "listbox");
+      dialog.append(label, input, status, list2);
+      root.appendChild(dialog);
+      document.body.appendChild(root);
+      const state = {
+        root,
+        input,
+        list: list2,
+        status,
+        mode,
+        selected: -1,
+        items: [],
+        composing: false,
+        diffSnapshot: [...STATE.files]
+      };
+      PALETTE = state;
+      root.addEventListener("mousedown", (e2) => {
+        if (e2.target === root)
+          closeSearchPalette();
+      });
+      input.addEventListener("compositionstart", () => {
+        state.composing = true;
+      });
+      input.addEventListener("compositionend", () => {
+        state.composing = false;
+      });
+      input.addEventListener("input", () => updatePaletteResults(state));
+      input.addEventListener("keydown", (e2) => handlePaletteKeydown(e2, state));
+      input.focus();
+      updatePaletteResults(state);
+      return state;
+    }
+    function appendHighlightedPath(parent, path, ranges) {
+      let cursor = 0;
+      for (const range of ranges) {
+        if (range.start > cursor)
+          parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
+        const mark = document.createElement("mark");
+        mark.textContent = path.slice(range.start, range.end);
+        parent.appendChild(mark);
+        cursor = range.end;
+      }
+      if (cursor < path.length)
+        parent.appendChild(document.createTextNode(path.slice(cursor)));
+    }
+    function renderPalette(state) {
+      state.list.innerHTML = "";
+      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? "gdp-palette-item-" + state.selected : "");
+      state.items.forEach((item, index) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.id = "gdp-palette-item-" + index;
+        row.className = "gdp-palette-row";
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        const title = document.createElement("span");
+        title.className = "gdp-palette-row-title";
+        const detail = document.createElement("span");
+        detail.className = "gdp-palette-row-detail";
+        if (item.kind === "file") {
+          title.textContent = item.path.split("/").pop() || item.path;
+          appendHighlightedPath(detail, item.old_path ? item.path + "  " + item.old_path : item.path, item.ranges);
+        } else {
+          title.textContent = item.path + ":" + item.line;
+          detail.textContent = item.preview;
+        }
+        row.append(title, detail);
+        row.addEventListener("mouseenter", () => {
+          state.selected = index;
+          renderPalette(state);
+        });
+        row.addEventListener("click", () => selectPaletteItem(state));
+        state.list.appendChild(row);
+      });
+    }
+    async function repoPaletteFiles(ref) {
+      const cached = REPO_FILE_CACHE.get(ref);
+      if (cached && cached.generation === SERVER_GENERATION)
+        return cached;
+      const params = new URLSearchParams;
+      params.set("ref", ref);
+      const res = await trackLoad(fetch("/_files?" + params.toString()).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load files");
+        return r2.json();
+      }));
+      REPO_FILE_CACHE.set(ref, res);
+      return res;
+    }
+    function diffFilePaletteItems(state, query) {
+      const candidates = state.diffSnapshot.map((file) => ({
+        path: file.old_path ? file.path + " " + file.old_path : file.path,
+        file
+      }));
+      return limitPaletteResults(rankFuzzyPaths(query, candidates)).map((match2) => ({
+        kind: "file",
+        path: match2.item.file.path,
+        old_path: match2.item.file.old_path,
+        ref: paletteRef("diff"),
+        source: "diff",
+        ranges: match2.ranges
+      }));
+    }
+    async function updateFilePalette(state, query) {
+      const source = paletteSource();
+      if (!query.trim()) {
+        const base2 = source === "diff" ? state.diffSnapshot.map((file) => ({ kind: "file", path: file.path, old_path: file.old_path, ref: paletteRef(source), source, ranges: [] })) : [];
+        state.items = limitPaletteResults(base2);
+        state.selected = state.items.length ? 0 : -1;
+        state.status.textContent = source === "diff" ? state.diffSnapshot.length + " diff files" : "Type to search repository files";
+        renderPalette(state);
+        return;
+      }
+      if (source === "diff") {
+        state.items = diffFilePaletteItems(state, query);
+      } else {
+        state.status.textContent = "Loading files...";
+        const ref = paletteRef(source);
+        const response = await repoPaletteFiles(ref);
+        state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map((match2) => ({
+          kind: "file",
+          path: match2.item.path,
+          ref,
+          source,
+          ranges: match2.ranges
+        }));
+      }
+      state.selected = state.items.length ? 0 : -1;
+      state.status.textContent = state.items.length ? state.items.length + " results" : "No results";
+      renderPalette(state);
+    }
+    function updateGrepPalette(state, query) {
+      state.controller?.abort();
+      if (state.debounce)
+        window.clearTimeout(state.debounce);
+      if (!query.trim()) {
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Type to grep";
+        renderPalette(state);
+        return;
+      }
+      state.status.textContent = "Searching...";
+      state.debounce = window.setTimeout(() => {
+        const source = paletteSource();
+        const ref = paletteRef(source);
+        const params = new URLSearchParams;
+        params.set("ref", ref);
+        params.set("q", query);
+        params.set("max", "200");
+        if (source === "diff") {
+          for (const file of state.diffSnapshot)
+            params.append("path", file.path);
+        }
+        const controller = new AbortController;
+        state.controller = controller;
+        trackLoad(fetch("/_grep?" + params.toString(), { signal: controller.signal }).then((r2) => {
+          if (!r2.ok)
+            throw new Error("grep failed");
+          return r2.json();
+        })).then((response) => {
+          if (PALETTE !== state || controller.signal.aborted)
+            return;
+          state.items = limitPaletteResults(response.matches.map((match2) => ({
+            kind: "grep",
+            path: match2.path,
+            line: match2.line,
+            column: match2.column,
+            preview: match2.preview,
+            ref,
+            source
+          })));
+          state.selected = state.items.length ? 0 : -1;
+          state.status.textContent = response.engine + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
+          renderPalette(state);
+        }).catch((err) => {
+          if (isAbortError(err))
+            return;
+          state.status.textContent = "Search failed";
+        });
+      }, 80);
+    }
+    function updatePaletteResults(state) {
+      const query = state.input.value;
+      if (state.mode === "file") {
+        updateFilePalette(state, query).catch(() => {
+          state.status.textContent = "Search failed";
+        });
+      } else {
+        updateGrepPalette(state, query);
+      }
+    }
+    function selectPaletteItem(state) {
+      const item = state.items[state.selected];
+      if (!item)
+        return;
+      closeSearchPalette();
+      if (item.kind === "file") {
+        if (item.source === "diff") {
+          if (STATE.route.screen === "file") {
+            setRoute({ screen: "file", path: item.path, ref: item.ref, range: currentRange() });
+            applySourceRouteToShell();
+          } else {
+            scrollToFile(item.path);
+          }
+        } else {
+          setRoute({ screen: "file", path: item.path, ref: item.ref, view: "blob", range: currentRange() });
+          renderStandaloneSource({ path: item.path, ref: item.ref });
+        }
+        return;
+      }
+      if (item.source === "diff") {
+        scrollToFile(item.path);
+      } else {
+        setRoute({ screen: "file", path: item.path, ref: item.ref, view: "blob", line: item.line, range: currentRange() });
+        renderStandaloneSource({ path: item.path, ref: item.ref });
+      }
+    }
+    function handlePaletteKeydown(e2, state) {
+      if (e2.key === "Escape") {
+        e2.preventDefault();
+        closeSearchPalette();
+        return;
+      }
+      if (e2.key === "Enter") {
+        if (state.composing)
+          return;
+        e2.preventDefault();
+        selectPaletteItem(state);
+        return;
+      }
+      const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
+      if (direction) {
+        e2.preventDefault();
+        state.selected = movePaletteSelection(state.selected, state.items.length, direction);
+        renderPalette(state);
+      }
+    }
+    function openSearchPalette(mode) {
+      createPalette(mode);
+    }
     document.addEventListener("keydown", (e2) => {
       if ((e2.metaKey || e2.ctrlKey) && e2.key.toLowerCase() === "k") {
         e2.preventDefault();
-        focusFileFilter();
+        openSearchPalette("file");
+        return;
+      }
+      if ((e2.metaKey || e2.ctrlKey) && e2.key.toLowerCase() === "g") {
+        e2.preventDefault();
+        openSearchPalette("grep");
         return;
       }
       const targetEl = e2.target;

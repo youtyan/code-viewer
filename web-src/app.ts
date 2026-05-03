@@ -2,6 +2,8 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
+import { rankFuzzyPaths, type FuzzyRange } from './fuzzy-search';
+import { limitPaletteResults, movePaletteSelection } from './search-palette';
 import { createCatchUpGate, shouldCatchUpDiff } from './catch-up';
 import {
   buildRawFileUrl,
@@ -17,9 +19,11 @@ import type {
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
+  FileSearchListResponse,
   FileMeta,
   RepoTreeResponse,
   RepoTreeEntry,
+  GrepResponse,
   RefResponse,
 } from './types';
 
@@ -3406,10 +3410,324 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.focus();
     input.select();
   }
+
+  type PaletteMode = 'file' | 'grep';
+  type PaletteFileItem = { kind: 'file'; path: string; old_path?: string; ref: string; source: 'diff' | 'repo'; ranges: FuzzyRange[] };
+  type PaletteGrepItem = { kind: 'grep'; path: string; line: number; column: number; preview: string; ref: string; source: 'diff' | 'repo' };
+  type PaletteItem = PaletteFileItem | PaletteGrepItem;
+  type PaletteState = {
+    root: HTMLElement;
+    input: HTMLInputElement;
+    list: HTMLElement;
+    status: HTMLElement;
+    mode: PaletteMode;
+    selected: number;
+    items: PaletteItem[];
+    composing: boolean;
+    controller?: AbortController;
+    debounce?: number;
+    diffSnapshot: FileMeta[];
+  };
+  let PALETTE: PaletteState | null = null;
+  const REPO_FILE_CACHE = new Map<string, FileSearchListResponse>();
+
+  function paletteSource(): 'diff' | 'repo' {
+    if (STATE.route.screen === 'diff') return 'diff';
+    if (STATE.route.screen === 'file' && STATE.route.view !== 'blob') return 'diff';
+    return 'repo';
+  }
+
+  function paletteRef(source: 'diff' | 'repo'): string {
+    if (source === 'diff') return (STATE.to && STATE.to !== 'worktree') ? STATE.to : 'worktree';
+    if (STATE.route.screen === 'repo') return STATE.route.ref || 'worktree';
+    if (STATE.route.screen === 'file') return STATE.route.ref || 'worktree';
+    return STATE.repoRef || 'worktree';
+  }
+
+  function closeSearchPalette() {
+    if (!PALETTE) return;
+    PALETTE.controller?.abort();
+    if (PALETTE.debounce) window.clearTimeout(PALETTE.debounce);
+    PALETTE.root.remove();
+    PALETTE = null;
+  }
+
+  function createPalette(mode: PaletteMode): PaletteState {
+    closeSearchPalette();
+    const root = document.createElement('div');
+    root.className = 'gdp-palette-backdrop';
+    const dialog = document.createElement('div');
+    dialog.className = 'gdp-palette';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const label = document.createElement('div');
+    label.className = 'gdp-palette-label';
+    label.textContent = mode === 'file' ? 'Files' : 'Grep';
+    const input = document.createElement('input');
+    input.className = 'gdp-palette-input';
+    input.type = 'search';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.placeholder = mode === 'file' ? 'Search files' : 'Search text';
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', 'gdp-palette-list');
+    const status = document.createElement('div');
+    status.className = 'gdp-palette-status';
+    const list = document.createElement('div');
+    list.id = 'gdp-palette-list';
+    list.className = 'gdp-palette-list';
+    list.setAttribute('role', 'listbox');
+    dialog.append(label, input, status, list);
+    root.appendChild(dialog);
+    document.body.appendChild(root);
+    const state: PaletteState = {
+      root,
+      input,
+      list,
+      status,
+      mode,
+      selected: -1,
+      items: [],
+      composing: false,
+      diffSnapshot: [...STATE.files],
+    };
+    PALETTE = state;
+    root.addEventListener('mousedown', e => {
+      if (e.target === root) closeSearchPalette();
+    });
+    input.addEventListener('compositionstart', () => { state.composing = true; });
+    input.addEventListener('compositionend', () => { state.composing = false; });
+    input.addEventListener('input', () => updatePaletteResults(state));
+    input.addEventListener('keydown', e => handlePaletteKeydown(e, state));
+    input.focus();
+    updatePaletteResults(state);
+    return state;
+  }
+
+  function appendHighlightedPath(parent: HTMLElement, path: string, ranges: FuzzyRange[]) {
+    let cursor = 0;
+    for (const range of ranges) {
+      if (range.start > cursor) parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
+      const mark = document.createElement('mark');
+      mark.textContent = path.slice(range.start, range.end);
+      parent.appendChild(mark);
+      cursor = range.end;
+    }
+    if (cursor < path.length) parent.appendChild(document.createTextNode(path.slice(cursor)));
+  }
+
+  function renderPalette(state: PaletteState) {
+    state.list.innerHTML = '';
+    state.input.setAttribute('aria-activedescendant', state.selected >= 0 ? 'gdp-palette-item-' + state.selected : '');
+    state.items.forEach((item, index) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.id = 'gdp-palette-item-' + index;
+      row.className = 'gdp-palette-row';
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', index === state.selected ? 'true' : 'false');
+      const title = document.createElement('span');
+      title.className = 'gdp-palette-row-title';
+      const detail = document.createElement('span');
+      detail.className = 'gdp-palette-row-detail';
+      if (item.kind === 'file') {
+        title.textContent = item.path.split('/').pop() || item.path;
+        appendHighlightedPath(detail, item.old_path ? item.path + '  ' + item.old_path : item.path, item.ranges);
+      } else {
+        title.textContent = item.path + ':' + item.line;
+        detail.textContent = item.preview;
+      }
+      row.append(title, detail);
+      row.addEventListener('mouseenter', () => {
+        state.selected = index;
+        renderPalette(state);
+      });
+      row.addEventListener('click', () => selectPaletteItem(state));
+      state.list.appendChild(row);
+    });
+  }
+
+  async function repoPaletteFiles(ref: string): Promise<FileSearchListResponse> {
+    const cached = REPO_FILE_CACHE.get(ref);
+    if (cached && cached.generation === SERVER_GENERATION) return cached;
+    const params = new URLSearchParams();
+    params.set('ref', ref);
+    const res = await trackLoad<FileSearchListResponse>(fetch('/_files?' + params.toString()).then(r => {
+      if (!r.ok) throw new Error('failed to load files');
+      return r.json();
+    }));
+    REPO_FILE_CACHE.set(ref, res);
+    return res;
+  }
+
+  function diffFilePaletteItems(state: PaletteState, query: string): PaletteFileItem[] {
+    const candidates = state.diffSnapshot.map(file => ({
+      path: file.old_path ? file.path + ' ' + file.old_path : file.path,
+      file,
+    }));
+    return limitPaletteResults(rankFuzzyPaths(query, candidates)).map(match => ({
+      kind: 'file',
+      path: match.item.file.path,
+      old_path: match.item.file.old_path,
+      ref: paletteRef('diff'),
+      source: 'diff',
+      ranges: match.ranges,
+    }));
+  }
+
+  async function updateFilePalette(state: PaletteState, query: string) {
+    const source = paletteSource();
+    if (!query.trim()) {
+      const base = source === 'diff'
+        ? state.diffSnapshot.map(file => ({ kind: 'file' as const, path: file.path, old_path: file.old_path, ref: paletteRef(source), source, ranges: [] }))
+        : [];
+      state.items = limitPaletteResults(base);
+      state.selected = state.items.length ? 0 : -1;
+      state.status.textContent = source === 'diff' ? state.diffSnapshot.length + ' diff files' : 'Type to search repository files';
+      renderPalette(state);
+      return;
+    }
+    if (source === 'diff') {
+      state.items = diffFilePaletteItems(state, query);
+    } else {
+      state.status.textContent = 'Loading files...';
+      const ref = paletteRef(source);
+      const response = await repoPaletteFiles(ref);
+      state.items = limitPaletteResults(rankFuzzyPaths(query, response.files)).map(match => ({
+        kind: 'file',
+        path: match.item.path,
+        ref,
+        source,
+        ranges: match.ranges,
+      }));
+    }
+    state.selected = state.items.length ? 0 : -1;
+    state.status.textContent = state.items.length ? state.items.length + ' results' : 'No results';
+    renderPalette(state);
+  }
+
+  function updateGrepPalette(state: PaletteState, query: string) {
+    state.controller?.abort();
+    if (state.debounce) window.clearTimeout(state.debounce);
+    if (!query.trim()) {
+      state.items = [];
+      state.selected = -1;
+      state.status.textContent = 'Type to grep';
+      renderPalette(state);
+      return;
+    }
+    state.status.textContent = 'Searching...';
+    state.debounce = window.setTimeout(() => {
+      const source = paletteSource();
+      const ref = paletteRef(source);
+      const params = new URLSearchParams();
+      params.set('ref', ref);
+      params.set('q', query);
+      params.set('max', '200');
+      if (source === 'diff') {
+        for (const file of state.diffSnapshot) params.append('path', file.path);
+      }
+      const controller = new AbortController();
+      state.controller = controller;
+      trackLoad<GrepResponse>(fetch('/_grep?' + params.toString(), { signal: controller.signal }).then(r => {
+        if (!r.ok) throw new Error('grep failed');
+        return r.json();
+      })).then(response => {
+        if (PALETTE !== state || controller.signal.aborted) return;
+        state.items = limitPaletteResults(response.matches.map(match => ({
+          kind: 'grep' as const,
+          path: match.path,
+          line: match.line,
+          column: match.column,
+          preview: match.preview,
+          ref,
+          source,
+        })));
+        state.selected = state.items.length ? 0 : -1;
+        state.status.textContent = response.engine + (response.truncated ? ' truncated' : '') + ' - ' + state.items.length + ' results';
+        renderPalette(state);
+      }).catch(err => {
+        if (isAbortError(err)) return;
+        state.status.textContent = 'Search failed';
+      });
+    }, 80);
+  }
+
+  function updatePaletteResults(state: PaletteState) {
+    const query = state.input.value;
+    if (state.mode === 'file') {
+      updateFilePalette(state, query).catch(() => {
+        state.status.textContent = 'Search failed';
+      });
+    } else {
+      updateGrepPalette(state, query);
+    }
+  }
+
+  function selectPaletteItem(state: PaletteState) {
+    const item = state.items[state.selected];
+    if (!item) return;
+    closeSearchPalette();
+    if (item.kind === 'file') {
+      if (item.source === 'diff') {
+        if (STATE.route.screen === 'file') {
+          setRoute({ screen: 'file', path: item.path, ref: item.ref, range: currentRange() });
+          applySourceRouteToShell();
+        } else {
+          scrollToFile(item.path);
+        }
+      } else {
+        setRoute({ screen: 'file', path: item.path, ref: item.ref, view: 'blob', range: currentRange() });
+        renderStandaloneSource({ path: item.path, ref: item.ref });
+      }
+      return;
+    }
+    if (item.source === 'diff') {
+      scrollToFile(item.path);
+    } else {
+      setRoute({ screen: 'file', path: item.path, ref: item.ref, view: 'blob', line: item.line, range: currentRange() });
+      renderStandaloneSource({ path: item.path, ref: item.ref });
+    }
+  }
+
+  function handlePaletteKeydown(e: KeyboardEvent, state: PaletteState) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSearchPalette();
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (state.composing) return;
+      e.preventDefault();
+      selectPaletteItem(state);
+      return;
+    }
+    const direction = e.key === 'ArrowDown' || (e.ctrlKey && e.key.toLowerCase() === 'n')
+      ? 1
+      : e.key === 'ArrowUp' || (e.ctrlKey && e.key.toLowerCase() === 'p')
+        ? -1
+        : 0;
+    if (direction) {
+      e.preventDefault();
+      state.selected = movePaletteSelection(state.selected, state.items.length, direction);
+      renderPalette(state);
+    }
+  }
+
+  function openSearchPalette(mode: PaletteMode) {
+    createPalette(mode);
+  }
+
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      focusFileFilter();
+      openSearchPalette('file');
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+      e.preventDefault();
+      openSearchPalette('grep');
       return;
     }
     const targetEl = e.target as Element | null;
