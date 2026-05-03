@@ -47,6 +47,26 @@ describe('markdown preview', () => {
     expect(html.includes('<li data-gdp-task="unchecked">todo</li>')).toBe(true);
   });
 
+  test('renders skill-style YAML frontmatter as highlighted metadata before the body', () => {
+    const seen: string[] = [];
+    const highlighter = {
+      codeToHtml: (code: string, options: { lang: string }) => {
+        seen.push(options.lang);
+        return '<pre class="shiki"><code><span class="line" data-lang="' + options.lang + '">' + code + '</span></code></pre>';
+      },
+    };
+    const html = renderMarkdownHtml(
+      '---\nname: my-original-psd-avatar-creation\ndescription: Use when creating an original 2D talking avatar character\n---\n# Body\n',
+      { path: '.agents/skills/avatar/SKILL.md', ref: 'worktree' },
+      highlighter,
+    );
+    expect(seen).toEqual(['yaml']);
+    expect(html.includes('data-gdp-frontmatter="yaml"')).toBe(true);
+    expect(html.includes('name: my-original-psd-avatar-creation')).toBe(true);
+    expect(html.includes('<h1 id="body"')).toBe(true);
+    expect(html.includes('<hr>')).toBe(false);
+  });
+
   test('renders highlighted code blocks with Shiki markup', () => {
     const highlighter = {
       codeToHtml: (code: string, options: { lang: string }) =>
@@ -93,7 +113,7 @@ describe('markdown preview', () => {
     expect(app.includes("import { renderMarkdownPreview } from './markdown-preview'")).toBe(true);
     expect(app.includes('onNavigateMarkdown: (path, ref) => {')).toBe(true);
     expect(app.includes("setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() })")).toBe(true);
-    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code')")).toBe(true);
+    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code', textValue)")).toBe(true);
     expect(app.includes('async function renderRepo(meta: RepoTreeResponse)')).toBe(true);
     expect(app.includes('await renderMarkdownPreview')).toBe(true);
     expect(app.includes('syntaxHighlight: STATE.syntaxHighlight')).toBe(true);

@@ -131,6 +131,59 @@
     };
   }
 
+  // web-src/focus-scope.ts
+  function isEditableKeyTarget(target) {
+    if (!target)
+      return false;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
+  }
+  function keymapScope(target) {
+    if (target?.closest("#content"))
+      return "main";
+    if (target?.closest("#sidebar"))
+      return "sidebar";
+    return "global";
+  }
+  function prepareKeyboardPanels(doc = document) {
+    const sidebar = doc.querySelector("#sidebar");
+    const content = doc.querySelector("#content");
+    if (sidebar)
+      sidebar.tabIndex = -1;
+    if (content)
+      content.tabIndex = -1;
+  }
+  function getPanelFocusScope(doc = document) {
+    const scope = doc.body?.dataset.focusScope;
+    return scope === "sidebar" || scope === "main" ? scope : null;
+  }
+  function setPanelFocusScope(scope, doc = document) {
+    if (!doc.body)
+      return;
+    if (scope)
+      doc.body.dataset.focusScope = scope;
+    else
+      delete doc.body.dataset.focusScope;
+  }
+  function focusSidebarPanel(doc = document) {
+    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+    const sidebar = doc.querySelector("#sidebar");
+    (active || sidebar)?.focus({ preventScroll: true });
+    setPanelFocusScope("sidebar", doc);
+  }
+  function focusMainPanel(doc = document) {
+    doc.querySelector("#content")?.focus({ preventScroll: true });
+    setPanelFocusScope("main", doc);
+  }
+  function findMainScrollTarget(doc = document) {
+    const active = doc.activeElement;
+    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
+    if (activeScroller && activeScroller.offsetParent !== null)
+      return activeScroller;
+    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
+    return sourceScroller && sourceScroller.offsetParent !== null ? sourceScroller : null;
+  }
+
   // web-src/fuzzy-search.ts
   function basenameStart(path) {
     const slash = path.lastIndexOf("/");
@@ -276,6 +329,73 @@
     return rankFuzzyPaths(query, items).map((item) => ({ ...item, mode: "fuzzy" }));
   }
 
+  // web-src/keymap.ts
+  var DEFAULT_KEY_BINDINGS = [
+    { action: "open-file-palette", key: "k", ctrl: true, allowEditable: true, allowPaletteOpen: true },
+    { action: "open-file-palette", key: "k", meta: true, allowEditable: true, allowPaletteOpen: true },
+    { action: "open-grep-palette", key: "g", ctrl: true, allowEditable: true, allowPaletteOpen: true },
+    { action: "open-grep-palette", key: "g", meta: true, allowEditable: true, allowPaletteOpen: true },
+    { action: "focus-file-filter", key: "/" },
+    { action: "focus-sidebar", key: "h", ctrl: true },
+    { action: "focus-main", key: "l", ctrl: true },
+    { action: "cancel-source-load", key: "escape" },
+    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
+    { action: "open-sidebar-item", key: "enter", scope: "global" },
+    { action: "sidebar-next", key: "j", scope: "sidebar" },
+    { action: "sidebar-next", key: "j", scope: "global" },
+    { action: "sidebar-previous", key: "k", scope: "sidebar" },
+    { action: "sidebar-previous", key: "k", scope: "global" },
+    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
+    { action: "sidebar-expand", key: "l", scope: "sidebar" },
+    { action: "sidebar-expand", key: "l", scope: "global" },
+    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
+    { action: "sidebar-collapse", key: "h", scope: "global" },
+    { action: "scroll-main-down", key: "j", scope: "main" },
+    { action: "scroll-main-up", key: "k", scope: "main" },
+    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
+    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
+    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
+    { action: "tab-code", key: "c", scope: "main", pendingG: true },
+    { action: "goto-top", key: "g", pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true },
+    { action: "start-g-sequence", key: "g" },
+    { action: "layout-unified", key: "u" },
+    { action: "layout-split", key: "s" },
+    { action: "toggle-theme", key: "t" }
+  ];
+  function resolveKeymapAction(event, context) {
+    const key = event.key.toLowerCase();
+    if (context.composing)
+      return null;
+    for (const binding of DEFAULT_KEY_BINDINGS) {
+      if (binding.key !== key)
+        continue;
+      if (binding.scope && binding.scope !== context.scope)
+        continue;
+      if (!!binding.pendingG !== !!context.pendingG)
+        continue;
+      if (context.paletteOpen && !binding.allowPaletteOpen)
+        continue;
+      if (context.editable && !binding.allowEditable)
+        continue;
+      if (!!binding.ctrl !== !!event.ctrlKey)
+        continue;
+      if (!!binding.meta !== !!event.metaKey)
+        continue;
+      if (!!binding.alt !== !!event.altKey)
+        continue;
+      if (!!binding.shift !== !!event.shiftKey)
+        continue;
+      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
+        continue;
+      return binding.action;
+    }
+    return null;
+  }
+
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
@@ -369,6 +489,13 @@
           return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
         return { screen: "file", path, ref, range, view: target ? "blob" : "detail", ...line ? { line } : {} };
       }
+      case "/help":
+        return {
+          screen: "help",
+          range,
+          lang: params.get("lang") || "en",
+          section: params.get("section") || "keybindings"
+        };
       default:
         return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
     }
@@ -391,6 +518,15 @@
         return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
       case "diff":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? "&path=" + encodeURIComponent(route.path) : "") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+      case "help": {
+        const params = new URLSearchParams;
+        if (route.lang && route.lang !== "en")
+          params.set("lang", route.lang);
+        if (route.section && route.section !== "keybindings")
+          params.set("section", route.section);
+        const qs = params.toString();
+        return "/help" + (qs ? "?" + qs : "");
+      }
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
       default:
@@ -6184,7 +6320,29 @@
     return markdown;
   }
   function renderMarkdownHtml(textValue, target, highlighter, signal) {
-    return createMarkdownIt(target, highlighter, signal).render(textValue);
+    const md = createMarkdownIt(target, highlighter, signal);
+    const frontmatter = splitYamlFrontmatter(textValue);
+    if (!frontmatter)
+      return md.render(textValue);
+    return '<div class="gdp-markdown-frontmatter" data-gdp-frontmatter="yaml">' + md.render("```yaml\n" + frontmatter.yaml + "\n```\n") + "</div>" + md.render(frontmatter.body);
+  }
+  function splitYamlFrontmatter(textValue) {
+    if (!textValue.startsWith(`---
+`) && !textValue.startsWith(`---\r
+`))
+      return null;
+    const newline2 = textValue.startsWith(`---\r
+`) ? `\r
+` : `
+`;
+    const start = 3 + newline2.length;
+    const closing = textValue.indexOf(newline2 + "---" + newline2, start);
+    if (closing < 0)
+      return null;
+    return {
+      yaml: textValue.slice(start, closing),
+      body: textValue.slice(closing + newline2.length + 3 + newline2.length)
+    };
   }
   async function loadMarkdownHighlighter() {
     if (!shikiPromise) {
@@ -6581,6 +6739,171 @@
     let REPO_SIDEBAR_REF = null;
     let REPO_SIDEBAR_LOAD_REF = null;
     let REPO_SIDEBAR_LOAD = null;
+    let PENDING_G_SCOPE = null;
+    let PENDING_G_UNTIL = 0;
+    let SOURCE_CURSOR = null;
+    const SOURCE_CURSOR_TOTALS = new Map;
+    const HELP_LANGUAGES = ["en", "ja"];
+    const HELP_SECTIONS = ["keybindings"];
+    const HELP_CONTENT = {
+      en: {
+        languageLabel: "Language",
+        title: "Help",
+        sections: {
+          keybindings: {
+            nav: "Keybindings",
+            title: "Keyboard Shortcuts",
+            intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
+            groups: [
+              { title: "Global", rows: [["Ctrl+K", "Open file palette"], ["Ctrl+G", "Open grep palette"], ["/", "Focus file filter"], ["t", "Toggle theme"]] },
+              { title: "Panels", rows: [["Ctrl+H", "Focus sidebar"], ["Ctrl+L", "Focus main panel"]] },
+              { title: "Sidebar", rows: [["j / k", "Move selection down / up"], ["Ctrl+D / Ctrl+U", "Move selection by half a page"], ["gg / Shift+G", "Move to top / bottom"], ["Enter", "Open selected item"], ["h / l", "Collapse / expand directory"]] },
+              { title: "Main Panel", rows: [["j / k", "Move code cursor down / up"], ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"], ["gg / Shift+G", "Move code cursor to top / bottom"], ["gp / gc", "Switch to Preview / Code tab"]] }
+            ]
+          }
+        }
+      },
+      ja: {
+        languageLabel: "言語",
+        title: "ヘルプ",
+        sections: {
+          keybindings: {
+            nav: "キーバインド",
+            title: "キーバインド",
+            intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
+            groups: [
+              { title: "グローバル", rows: [["Ctrl+K", "ファイルパレットを開く"], ["Ctrl+G", "grep パレットを開く"], ["/", "ファイルフィルターへフォーカス"], ["t", "テーマ切り替え"]] },
+              { title: "パネル", rows: [["Ctrl+H", "サイドバーへフォーカス"], ["Ctrl+L", "メインパネルへフォーカス"]] },
+              { title: "サイドバー", rows: [["j / k", "選択を下 / 上へ移動"], ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"], ["gg / Shift+G", "先頭 / 末尾へ移動"], ["Enter", "選択項目を開く"], ["h / l", "ディレクトリを閉じる / 開く"]] },
+              { title: "メインパネル", rows: [["j / k", "コードカーソルを下 / 上へ移動"], ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"], ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"], ["gp / gc", "Preview / Code タブへ切り替え"]] }
+            ]
+          }
+        }
+      }
+    };
+    function sourceLineScrollAmount() {
+      const virtualRow = Array.from(document.querySelectorAll("#content .gdp-source-virtual-row")).find((item) => item.offsetParent !== null);
+      if (virtualRow)
+        return virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const sourceRow = Array.from(document.querySelectorAll("#content .gdp-source-table tr")).find((item) => item.offsetParent !== null);
+      if (sourceRow)
+        return sourceRow.getBoundingClientRect().height || 20;
+      const preview = document.querySelector("#content .gdp-markdown-preview:not([hidden])");
+      const lineHeight = Number.parseFloat(getComputedStyle(preview || document.body).lineHeight);
+      return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
+    }
+    function hasVisibleSourceCodeSurface() {
+      return Array.from(document.querySelectorAll("#content .gdp-source-virtual-scroller, #content .gdp-source-table")).some((item) => item.offsetParent !== null);
+    }
+    function sourceCursorKey(target) {
+      return target.ref + "\x00" + target.path;
+    }
+    function sourceCursorMatches(target, line) {
+      return !!SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target) && SOURCE_CURSOR.line === line;
+    }
+    function syncSourceCursorRows(target) {
+      document.querySelectorAll("#content [data-line]").forEach((row) => {
+        const line = Number(row.dataset.line || "0");
+        row.classList.toggle("gdp-source-cursor", sourceCursorMatches(target, line));
+      });
+    }
+    function visibleSourceLineFallback() {
+      const scroller = findMainScrollTarget();
+      if (scroller)
+        return Math.max(1, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1);
+      const rows = $$("#content .gdp-source-table tr[data-line]");
+      const contentTop = document.querySelector("#content")?.getBoundingClientRect().top ?? 0;
+      const row = rows.find((item) => item.getBoundingClientRect().bottom >= Math.max(0, contentTop));
+      return Math.max(1, Number(row?.dataset.line || "1"));
+    }
+    function ensureSourceCursor(target) {
+      if (SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target))
+        return SOURCE_CURSOR;
+      const routeLine = lineTargetStart(currentSourceLineTarget(target));
+      SOURCE_CURSOR = { target, line: routeLine || visibleSourceLineFallback() };
+      syncSourceCursorRows(target);
+      return SOURCE_CURSOR;
+    }
+    function resetSourceCursorForTarget(target, totalLines) {
+      const routeLine = lineTargetStart(currentSourceLineTarget(target));
+      SOURCE_CURSOR = { target, line: Math.max(1, Math.min(totalLines, routeLine || 1)) };
+    }
+    function scrollSourceCursorIntoView(cursor, edge = "nearest") {
+      const scroller = findMainScrollTarget();
+      if (scroller) {
+        const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
+        const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
+        const before = scroller.scrollTop;
+        if (edge === "center")
+          scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+        else if (top < scroller.scrollTop)
+          scroller.scrollTop = top;
+        else if (bottom > scroller.scrollTop + scroller.clientHeight)
+          scroller.scrollTop = bottom - scroller.clientHeight;
+        if (scroller.scrollTop !== before)
+          scroller.dispatchEvent(new Event("scroll"));
+        scroller.__gdpRenderVirtualSource?.();
+        syncSourceCursorRows(cursor.target);
+        return;
+      }
+      document.querySelector('#content [data-line="' + cursor.line + '"]')?.scrollIntoView({ block: edge });
+    }
+    function moveSourceCursor(direction, unit, edge) {
+      if (!hasVisibleSourceCodeSurface())
+        return false;
+      const target = sourceTargetFromRoute();
+      if (!target)
+        return false;
+      const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
+      if (!total)
+        return false;
+      const cursor = ensureSourceCursor(target);
+      if (unit === "edge") {
+        cursor.line = edge === "bottom" ? total : 1;
+        syncSourceCursorRows(target);
+        scrollSourceCursorIntoView(cursor, "center");
+        return true;
+      }
+      const pageRows = Math.max(1, Math.floor((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55 / (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT)));
+      const delta = unit === "page" ? pageRows : 1;
+      cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
+      syncSourceCursorRows(target);
+      scrollSourceCursorIntoView(cursor);
+      return true;
+    }
+    function scrollMainPanel(direction, repeated = false, unit = "line") {
+      if (moveSourceCursor(direction, unit))
+        return;
+      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(window.innerHeight * 0.55));
+      const behavior = repeated ? "auto" : "smooth";
+      const target = findMainScrollTarget();
+      if (target)
+        target.scrollBy({ top, behavior });
+      else
+        window.scrollBy({ top, behavior });
+    }
+    function scrollMainToEdge(edge) {
+      if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
+        return;
+      const target = findMainScrollTarget();
+      if (target) {
+        target.scrollTo({ top: edge === "top" ? 0 : target.scrollHeight, behavior: "auto" });
+        return;
+      }
+      const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      window.scrollTo({ top, behavior: "auto" });
+    }
+    function switchSourceTab(tab) {
+      const tabs = document.querySelector("#content .gdp-source-tabs");
+      if (!tabs)
+        return false;
+      const button = Array.from(tabs.querySelectorAll("button")).find((item) => item.textContent?.trim().toLowerCase() === tab);
+      if (!button || button.hidden || button.disabled)
+        return false;
+      button.click();
+      focusMainPanel();
+      return true;
+    }
     function invalidateRepoSidebar() {
       REPO_SIDEBAR_REF = null;
       REPO_SIDEBAR_LOAD_REF = null;
@@ -6923,6 +7246,7 @@
           const dir = item.dir;
           const li = document.createElement("li");
           li.className = "tree-dir";
+          li.tabIndex = -1;
           li.dataset.dirpath = dir.path;
           if (dir.explicit)
             li.dataset.explicit = "true";
@@ -6980,6 +7304,7 @@
             li.addEventListener("click", (e2) => {
               e2.stopPropagation();
               onFileClick({ path: dir.path, display_path: dir.path, type: "tree", children_omitted: dir.children_omitted });
+              focusSidebarPanel();
             });
           } else {
             li.addEventListener("click", toggleDir);
@@ -6990,6 +7315,7 @@
           const f2 = item.file;
           const li = document.createElement("li");
           li.className = "tree-file";
+          li.tabIndex = -1;
           li.dataset.path = f2.path;
           li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
           li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
@@ -7014,6 +7340,7 @@
               onFileClick(f2);
             else
               scrollToFile(f2.path);
+            focusSidebarPanel();
           });
           if (!onFileClick)
             li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
@@ -7024,6 +7351,7 @@
     function renderFlat(files, ul, onFileClick) {
       files.forEach((f2, i2) => {
         const li = document.createElement("li");
+        li.tabIndex = -1;
         li.dataset.index = String(i2);
         li.dataset.path = f2.path;
         li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
@@ -7045,6 +7373,7 @@
             onFileClick(f2);
           else
             scrollToFile(f2.path);
+          focusSidebarPanel();
         });
         if (!onFileClick)
           li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
@@ -7313,6 +7642,12 @@
     function repoFileTargetFromRoute() {
       return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
     }
+    function helpLanguageFromRoute() {
+      return STATE.route.screen === "help" && HELP_LANGUAGES.includes(STATE.route.lang) ? STATE.route.lang : "en";
+    }
+    function helpSectionFromRoute() {
+      return STATE.route.screen === "help" && HELP_SECTIONS.includes(STATE.route.section) ? STATE.route.section : "keybindings";
+    }
     function setRoute(route, replace2 = false) {
       const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
       STATE.route = nextRoute;
@@ -7333,6 +7668,7 @@
       document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
       document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
+      document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
     }
     function syncHeaderMenu() {
@@ -7347,11 +7683,103 @@
         if (link2.dataset.route === "diff") {
           link2.href = buildRoute({ screen: "diff", range: currentRange() });
         }
+        if (link2.dataset.route === "help") {
+          link2.href = buildRoute({ screen: "help", lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range: currentRange() });
+        }
       });
     }
     function removeStandaloneSource() {
       document.querySelectorAll(".gdp-standalone-source").forEach((el) => el.remove());
       document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => el.remove());
+    }
+    function renderHelpPage() {
+      cancelActiveSourceLoad("navigation");
+      removeStandaloneSource();
+      LOAD_QUEUE.length = 0;
+      const target = $("#diff");
+      const empty = $("#empty");
+      empty.classList.add("hidden");
+      $("#meta").textContent = "";
+      $("#totals").textContent = "";
+      $("#filelist").textContent = "";
+      const lang = helpLanguageFromRoute();
+      const section = helpSectionFromRoute();
+      const content = HELP_CONTENT[lang];
+      const sectionContent = content.sections[section];
+      const shell = document.createElement("section");
+      shell.className = "gdp-help-shell";
+      const header = document.createElement("header");
+      header.className = "gdp-help-header";
+      const title = document.createElement("h1");
+      title.textContent = content.title;
+      const langSelect = document.createElement("select");
+      langSelect.className = "gdp-help-language";
+      langSelect.setAttribute("aria-label", content.languageLabel);
+      HELP_LANGUAGES.forEach((optionLang) => {
+        const option = document.createElement("option");
+        option.value = optionLang;
+        option.textContent = optionLang.toUpperCase();
+        option.selected = optionLang === lang;
+        langSelect.appendChild(option);
+      });
+      langSelect.addEventListener("change", () => {
+        setRoute({ screen: "help", lang: langSelect.value, section, range: currentRange() });
+        setPageMode();
+        renderHelpPage();
+        syncHeaderMenu();
+      });
+      header.append(title, langSelect);
+      const layout = document.createElement("div");
+      layout.className = "gdp-help-layout";
+      const helpNav = document.createElement("nav");
+      helpNav.className = "gdp-help-nav";
+      HELP_SECTIONS.forEach((helpSection) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = helpSection === section ? "active" : "";
+        button.textContent = content.sections[helpSection].nav;
+        button.addEventListener("click", () => {
+          setRoute({ screen: "help", lang, section: helpSection, range: currentRange() });
+          renderHelpPage();
+          syncHeaderMenu();
+        });
+        helpNav.appendChild(button);
+      });
+      const article = document.createElement("article");
+      article.className = "gdp-help-content";
+      const h2 = document.createElement("h2");
+      h2.textContent = sectionContent.title;
+      const intro = document.createElement("p");
+      intro.textContent = sectionContent.intro;
+      article.append(h2, intro);
+      sectionContent.groups.forEach((group) => {
+        const groupSection = document.createElement("section");
+        groupSection.className = "gdp-help-group";
+        const groupTitle = document.createElement("h3");
+        groupTitle.textContent = group.title;
+        const table2 = document.createElement("table");
+        group.rows.forEach(([keys, description]) => {
+          const tr = document.createElement("tr");
+          const keyCell = document.createElement("th");
+          keyCell.scope = "row";
+          keys.split(" / ").forEach((key, index) => {
+            if (index > 0)
+              keyCell.append(" / ");
+            const kbd = document.createElement("kbd");
+            kbd.textContent = key;
+            keyCell.appendChild(kbd);
+          });
+          const desc = document.createElement("td");
+          desc.textContent = description;
+          tr.append(keyCell, desc);
+          table2.appendChild(tr);
+        });
+        groupSection.append(groupTitle, table2);
+        article.appendChild(groupSection);
+      });
+      layout.append(helpNav, article);
+      shell.append(header, layout);
+      target.replaceChildren(shell);
     }
     function renderShell(meta) {
       const newFiles = meta.files || [];
@@ -8842,7 +9270,30 @@
       });
       return info;
     }
-    function createSourceTabs(active) {
+    function createSourceCopyButton(textValue) {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "gdp-file-header-icon gdp-copy-source";
+      copy.title = "Copy source";
+      copy.setAttribute("aria-label", "Copy source");
+      copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(textValue);
+          copy.classList.add("copied");
+          setTimeout(() => {
+            copy.classList.remove("copied");
+          }, 1200);
+        } catch {
+          copy.classList.add("failed");
+          setTimeout(() => {
+            copy.classList.remove("failed");
+          }, 1200);
+        }
+      });
+      return copy;
+    }
+    function createSourceTabs(active, textValue) {
       const tabs = document.createElement("div");
       tabs.className = "gdp-source-tabs";
       const codeButton = document.createElement("button");
@@ -8858,6 +9309,8 @@
         previewButton.textContent = "Preview";
         tabs.prepend(previewButton);
       }
+      if (textValue != null)
+        tabs.appendChild(createSourceCopyButton(textValue));
       return { tabs, codeButton, previewButton };
     }
     async function renderSourceText(card, target, textValue, signal) {
@@ -8865,6 +9318,8 @@
 `).replace(/\r/g, `
 `).split(`
 `) : [""];
+      SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), lines.length);
+      resetSourceCursorForTarget(target, lines.length);
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
       const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
@@ -8885,7 +9340,7 @@
       if (usesVirtualSource) {
         const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
         if (previewable) {
-          const { tabs: tabs2, codeButton: codeButton2, previewButton: previewButton2 } = createSourceTabs("preview");
+          const { tabs: tabs2, codeButton: codeButton2, previewButton: previewButton2 } = createSourceTabs("preview", textValue);
           if (tabsHost) {
             tabsHost.hidden = false;
             tabsHost.replaceChildren(tabs2);
@@ -8947,6 +9402,7 @@
         const tr = document.createElement("tr");
         tr.dataset.line = String(index + 1);
         tr.classList.toggle("gdp-source-line-target", lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
+        tr.classList.toggle("gdp-source-cursor", sourceCursorMatches(target, index + 1));
         const num = document.createElement("td");
         num.className = "gdp-source-line-number";
         num.textContent = String(index + 1);
@@ -8969,7 +9425,7 @@
         }
       }
       table2.appendChild(tbody);
-      const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? "preview" : "code");
+      const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? "preview" : "code", textValue);
       if (tabsHost) {
         tabsHost.hidden = false;
         tabsHost.replaceChildren(tabs);
@@ -9120,19 +9576,21 @@
       actions.className = "gdp-source-virtual-actions";
       const copy = document.createElement("button");
       copy.type = "button";
-      copy.className = "gdp-source-virtual-action";
-      copy.textContent = "Copy all";
+      copy.className = "gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy";
+      copy.title = "Copy source";
+      copy.setAttribute("aria-label", "Copy source");
+      copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
       copy.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(textValue);
-          copy.textContent = "Copied";
+          copy.classList.add("copied");
           setTimeout(() => {
-            copy.textContent = "Copy all";
+            copy.classList.remove("copied");
           }, 1200);
         } catch {
-          copy.textContent = "Copy failed";
+          copy.classList.add("failed");
           setTimeout(() => {
-            copy.textContent = "Copy all";
+            copy.classList.remove("failed");
           }, 1600);
         }
       });
@@ -9180,6 +9638,7 @@
           row.className = "gdp-source-virtual-row";
           row.dataset.line = String(index + 1);
           row.classList.toggle("gdp-source-line-target", lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
+          row.classList.toggle("gdp-source-cursor", sourceCursorMatches(target, index + 1));
           const num = document.createElement("span");
           num.className = "gdp-source-virtual-line-number";
           num.textContent = String(index + 1);
@@ -9206,6 +9665,7 @@
         if (!raf)
           raf = requestAnimationFrame(render);
       };
+      scroller.__gdpRenderVirtualSource = render;
       scroller.addEventListener("scroll", schedule, { passive: true });
       let resizeObserver = null;
       resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
@@ -9922,6 +10382,10 @@
     });
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
+    prepareKeyboardPanels();
+    document.querySelector("#content")?.addEventListener("mousedown", () => {
+      focusMainPanel();
+    });
     function applySidebarWidth(w) {
       const cw = Math.max(180, Math.min(900, w));
       document.documentElement.style.setProperty("--sidebar-w", cw + "px");
@@ -10002,6 +10466,32 @@
     function visibleSidebarItems() {
       return $$("#filelist li[data-path], #filelist .tree-dir[data-dirpath]").filter(isSidebarRowVisible);
     }
+    function scrollSidebarItemIntoView(item, block2 = "nearest") {
+      const sidebar = document.querySelector("#sidebar");
+      if (!sidebar) {
+        item.scrollIntoView({ block: block2 });
+        return;
+      }
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const stickyBottom = document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top;
+      const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
+      const bottomPadding = 14;
+      const visibleTop = sidebarRect.top + topPadding;
+      const visibleBottom = sidebarRect.bottom - bottomPadding;
+      if (block2 === "start") {
+        sidebar.scrollTop += itemRect.top - visibleTop;
+        return;
+      }
+      if (block2 === "end") {
+        sidebar.scrollTop += itemRect.bottom - visibleBottom;
+        return;
+      }
+      if (itemRect.top < visibleTop)
+        sidebar.scrollTop += itemRect.top - visibleTop;
+      else if (itemRect.bottom > visibleBottom)
+        sidebar.scrollTop += itemRect.bottom - visibleBottom;
+    }
     function isRepositorySidebarMode() {
       return document.body.classList.contains("gdp-repo-page") || document.body.classList.contains("gdp-repo-blob-page");
     }
@@ -10017,7 +10507,44 @@
       const path = target.dataset.path || target.dataset.dirpath;
       if (path)
         markActive(path);
-      target.scrollIntoView({ block: "nearest" });
+      scrollSidebarItemIntoView(target);
+      if (target.dataset.path)
+        prefetchByPath(target.dataset.path);
+    }
+    function moveActiveSidebarPage(direction) {
+      const items = visibleSidebarItems();
+      if (!items.length)
+        return;
+      const repoSidebar = isRepositorySidebarMode();
+      const sidebar = document.querySelector("#sidebar");
+      const sample = items.find((item) => item.getBoundingClientRect().height > 0);
+      const rowHeight = sample ? sample.getBoundingClientRect().height : 28;
+      const halfPageRows = Math.max(1, Math.floor((sidebar?.clientHeight || window.innerHeight) / 2 / rowHeight));
+      const current = items.findIndex((li) => li.classList.contains("active"));
+      const start = current < 0 ? 0 : current;
+      const idx = Math.max(0, Math.min(items.length - 1, start + direction * halfPageRows));
+      const target = items[idx];
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (!repoSidebar && target.dataset.path)
+        target.click();
+      else if (path)
+        markActive(path);
+      scrollSidebarItemIntoView(target);
+      if (target.dataset.path)
+        prefetchByPath(target.dataset.path);
+    }
+    function moveActiveSidebarToEdge(edge) {
+      const items = visibleSidebarItems();
+      const repoSidebar = isRepositorySidebarMode();
+      const target = edge === "top" ? items[0] : items[items.length - 1];
+      if (!target)
+        return;
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (!repoSidebar && target.dataset.path)
+        target.click();
+      else if (path)
+        markActive(path);
+      scrollSidebarItemIntoView(target, edge === "top" ? "start" : "end");
       if (target.dataset.path)
         prefetchByPath(target.dataset.path);
     }
@@ -10099,13 +10626,16 @@
     function closeSearchPalette() {
       if (!PALETTE)
         return;
+      const previousFocusScope = PALETTE.previousFocusScope;
       PALETTE.controller?.abort();
       if (PALETTE.debounce)
         window.clearTimeout(PALETTE.debounce);
       PALETTE.root.remove();
       PALETTE = null;
+      setPanelFocusScope(previousFocusScope);
     }
     function createPalette(mode) {
+      const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
       closeSearchPalette();
       const root = document.createElement("div");
       root.className = "gdp-palette-backdrop";
@@ -10147,9 +10677,11 @@
         selected: -1,
         items: [],
         composing: false,
-        diffSnapshot: [...STATE.files]
+        diffSnapshot: [...STATE.files],
+        previousFocusScope
       };
       PALETTE = state;
+      setPanelFocusScope(null);
       root.addEventListener("mousedown", (e2) => {
         if (e2.target === root)
           closeSearchPalette();
@@ -10468,78 +11000,138 @@
     function openSearchPalette(mode) {
       createPalette(mode);
     }
-    document.addEventListener("keydown", (e2) => {
-      if ((e2.metaKey || e2.ctrlKey) && e2.key.toLowerCase() === "k") {
-        e2.preventDefault();
-        if (PALETTE?.mode === "file")
-          return;
-        openSearchPalette("file");
-        return;
+    function dispatchKeymapAction(action, scope, repeated = false) {
+      if (action === "open-file-palette") {
+        if (PALETTE?.mode !== "file")
+          openSearchPalette("file");
+        return true;
       }
-      if ((e2.metaKey || e2.ctrlKey) && e2.key.toLowerCase() === "g") {
-        e2.preventDefault();
-        if (PALETTE?.mode === "grep")
-          return;
-        openSearchPalette("grep");
-        return;
+      if (action === "open-grep-palette") {
+        if (PALETTE?.mode !== "grep")
+          openSearchPalette("grep");
+        return true;
       }
-      const targetEl = e2.target;
-      if (targetEl && (targetEl.tagName === "INPUT" || targetEl.tagName === "TEXTAREA"))
-        return;
-      if (e2.key === "Escape" && !document.querySelector(".mkdp-lightbox")) {
-        if (cancelActiveSourceLoad("esc")) {
-          e2.preventDefault();
-          return;
-        }
-      }
-      if (e2.key === "/") {
-        e2.preventDefault();
+      if (action === "focus-file-filter") {
         focusFileFilter();
-      } else if (e2.key === "Enter") {
-        if (isRepositorySidebarMode()) {
-          e2.preventDefault();
-          openActiveSidebarItem();
-        }
-      } else if (e2.key === "j" || e2.key === "k") {
-        e2.preventDefault();
+        return true;
+      }
+      if (action === "focus-sidebar") {
+        focusSidebarPanel();
+        return true;
+      }
+      if (action === "focus-main") {
+        focusMainPanel();
+        return true;
+      }
+      if (action === "cancel-source-load") {
+        return !document.querySelector(".mkdp-lightbox") && cancelActiveSourceLoad("esc");
+      }
+      if (action === "open-sidebar-item") {
+        if (!isRepositorySidebarMode())
+          return false;
+        openActiveSidebarItem();
+        focusMainPanel();
+        return true;
+      }
+      if (action === "sidebar-next" || action === "sidebar-previous") {
         const repoSidebar = isRepositorySidebarMode();
         const items = repoSidebar ? visibleSidebarItems() : $$("#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)");
         if (!items.length)
-          return;
+          return true;
         let idx = items.findIndex((li) => li.classList.contains("active"));
         if (idx < 0)
           idx = 0;
         else
-          idx = e2.key === "j" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+          idx = action === "sidebar-next" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
         const target = items[idx];
         const path = target?.dataset.path || target?.dataset.dirpath;
         if (!repoSidebar && target) {
           target.click();
-          target.scrollIntoView({ block: "nearest" });
+          scrollSidebarItemIntoView(target);
         } else if (path) {
           markActive(path);
-          target.scrollIntoView({ block: "nearest" });
+          scrollSidebarItemIntoView(target);
         }
-        const nextIdx = e2.key === "j" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+        const nextIdx = action === "sidebar-next" ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
         const nextItem = items[nextIdx];
         if (nextItem && nextItem !== target && nextItem.dataset.path)
           prefetchByPath(nextItem.dataset.path);
-      } else if (e2.key === "l") {
-        if (isRepositorySidebarMode()) {
-          e2.preventDefault();
-          toggleActiveSidebarDirectoryCollapsed();
-        }
-      } else if (e2.key === "h") {
-        if (isRepositorySidebarMode()) {
-          e2.preventDefault();
-          setActiveSidebarDirectoryCollapsed(true);
-        }
-      } else if (e2.key === "u")
+        return true;
+      }
+      if (action === "sidebar-page-down" || action === "sidebar-page-up") {
+        moveActiveSidebarPage(action === "sidebar-page-down" ? 1 : -1);
+        return true;
+      }
+      if (action === "sidebar-expand") {
+        if (!isRepositorySidebarMode())
+          return false;
+        toggleActiveSidebarDirectoryCollapsed();
+        return true;
+      }
+      if (action === "sidebar-collapse") {
+        if (!isRepositorySidebarMode())
+          return false;
+        setActiveSidebarDirectoryCollapsed(true);
+        return true;
+      }
+      if (action === "scroll-main-down" || action === "scroll-main-up") {
+        scrollMainPanel(action === "scroll-main-down" ? 1 : -1, repeated);
+        return true;
+      }
+      if (action === "scroll-main-page-down" || action === "scroll-main-page-up") {
+        scrollMainPanel(action === "scroll-main-page-down" ? 1 : -1, repeated, "page");
+        return true;
+      }
+      if (action === "tab-preview" || action === "tab-code") {
+        return switchSourceTab(action === "tab-preview" ? "preview" : "code");
+      }
+      if (action === "start-g-sequence") {
+        PENDING_G_SCOPE = scope;
+        PENDING_G_UNTIL = performance.now() + 900;
+        return true;
+      }
+      if (action === "goto-top" || action === "goto-bottom") {
+        PENDING_G_SCOPE = null;
+        PENDING_G_UNTIL = 0;
+        const edge = action === "goto-top" ? "top" : "bottom";
+        if (scope === "main")
+          scrollMainToEdge(edge);
+        else
+          moveActiveSidebarToEdge(edge);
+        return true;
+      }
+      if (action === "layout-unified") {
         setLayout("line-by-line");
-      else if (e2.key === "s")
+        return true;
+      }
+      if (action === "layout-split") {
         setLayout("side-by-side");
-      else if (e2.key === "t")
+        return true;
+      }
+      if (action === "toggle-theme") {
         $("#theme").click();
+        return true;
+      }
+      return false;
+    }
+    document.addEventListener("keydown", (e2) => {
+      const targetEl = e2.target;
+      const scope = keymapScope(targetEl);
+      const action = resolveKeymapAction(e2, {
+        scope,
+        editable: isEditableKeyTarget(targetEl),
+        composing: e2.isComposing,
+        paletteOpen: !!PALETTE,
+        pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL
+      });
+      if (!action)
+        return;
+      if (action !== "start-g-sequence" && action !== "goto-top") {
+        PENDING_G_SCOPE = null;
+        PENDING_G_UNTIL = 0;
+      }
+      if (dispatchKeymapAction(action, scope, e2.repeat))
+        e2.preventDefault();
     });
     applyTheme();
     setLayout(STATE.layout);
@@ -10566,6 +11158,12 @@
       }).catch(() => setStatus("error"));
     }
     function load(options = {}) {
+      if (STATE.route.screen === "help") {
+        setStatus("live");
+        renderHelpPage();
+        syncHeaderMenu();
+        return Promise.resolve();
+      }
       if (STATE.route.screen === "repo")
         return loadRepo();
       setStatus("refreshing");
@@ -10584,7 +11182,10 @@
         setStatus("live");
       }).catch(() => setStatus("error"));
     }
-    if (STATE.route.screen === "repo")
+    if (STATE.route.screen === "help") {
+      setStatus("live");
+      renderHelpPage();
+    } else if (STATE.route.screen === "repo")
       loadRepo();
     else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
       setStatus("live");
@@ -10607,10 +11208,13 @@
       const range = currentRange();
       if (STATE.route.screen === "file") {
         setRoute({ screen: "file", path: STATE.route.path, ref: STATE.route.ref, range }, true);
+      } else if (STATE.route.screen === "help") {
+        setRoute({ screen: "help", lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range }, true);
+        renderHelpPage();
       } else {
         setRoute({ screen: "diff", range }, true);
+        load();
       }
-      load();
     }
     syncRefInputs();
     syncHeaderMenu();
@@ -10811,6 +11415,13 @@
         STATE.repoRef = STATE.route.ref || "worktree";
       syncRefInputs();
       syncHeaderMenu();
+      if (STATE.route.screen === "help") {
+        cancelActiveSourceLoad("navigation");
+        setPageMode();
+        renderHelpPage();
+        setStatus("live");
+        return;
+      }
       if (STATE.route.screen === "repo") {
         cancelActiveSourceLoad("navigation");
         setPageMode();
