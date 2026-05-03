@@ -19,9 +19,10 @@ export type AppRoute =
   | { screen: 'repo'; ref: string; path: string; range: DiffRange }
   | { screen: 'diff'; range: DiffRange; path?: string; line?: SourceLineTarget }
   | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail'; line?: SourceLineTarget }
+  | { screen: 'help'; range: DiffRange; lang: string; section: string }
   | { screen: 'unknown'; reason: 'unknown-pathname' | 'missing-path'; rawPathname: string; rawSearch: string; range: DiffRange };
 
-export const SPA_PATHS = ['/todif', '/todiff', '/file'] as const;
+export const SPA_PATHS = ['/todif', '/todiff', '/file', '/help'] as const;
 export const APP_ENTRY_PATHS = ['/', '/index.html'] as const;
 
 export function assertNever(value: never): never {
@@ -89,6 +90,13 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
       if (!path) return { screen: 'unknown', reason: 'missing-path', rawPathname: pathname, rawSearch: search, range };
       return { screen: 'file', path, ref, range, view: target ? 'blob' : 'detail', ...(line ? { line } : {}) };
     }
+    case '/help':
+      return {
+        screen: 'help',
+        range,
+        lang: params.get('lang') || 'en',
+        section: params.get('section') || 'keybindings',
+      };
     default:
       return { screen: 'unknown', reason: 'unknown-pathname', rawPathname: pathname, rawSearch: search, range };
   }
@@ -119,6 +127,13 @@ export function buildRoute(route: AppRoute): string {
         '&to=' + encodeURIComponent(route.range.to || 'worktree') +
         (route.path ? '&path=' + encodeURIComponent(route.path) : '') +
         (route.line ? '&line=' + encodeURIComponent(formatLineTarget(route.line)) : '');
+    case 'help': {
+      const params = new URLSearchParams();
+      if (route.lang && route.lang !== 'en') params.set('lang', route.lang);
+      if (route.section && route.section !== 'keybindings') params.set('section', route.section);
+      const qs = params.toString();
+      return '/help' + (qs ? '?' + qs : '');
+    }
     case 'unknown':
       return '/todif?from=' + encodeURIComponent(route.range.from || '') +
         '&to=' + encodeURIComponent(route.range.to || 'worktree');
