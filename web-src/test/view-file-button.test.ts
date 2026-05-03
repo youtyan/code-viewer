@@ -28,6 +28,8 @@ describe('view file UI', () => {
     const html = readFileSync('web/index.html', 'utf8');
     expect(html.includes('class="app-menu"')).toBe(true);
     expect(html.includes('Diff Viewer')).toBe(true);
+    expect(html.includes('data-route="help"')).toBe(true);
+    expect(html.includes('href="/help"')).toBe(true);
     expect(app.includes('function syncHeaderMenu()')).toBe(true);
     expect(style.includes('.app-menu-item.active')).toBe(true);
   });
@@ -40,6 +42,19 @@ describe('view file UI', () => {
   test('file and todif routes serve the SPA shell', () => {
     expect(server.includes("import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes'")).toBe(true);
     expect(server.includes('for (const spaPath of [...APP_ENTRY_PATHS, ...SPA_PATHS])')).toBe(true);
+  });
+
+  test('help page renders localized subnavigation and keybindings section', () => {
+    expect(app.includes('type HelpLanguage =')).toBe(true);
+    expect(app.includes('const HELP_CONTENT')).toBe(true);
+    expect(app.includes("keybindings: {")).toBe(true);
+    expect(app.includes("function renderHelpPage()")).toBe(true);
+    expect(app.includes("helpNav.className = 'gdp-help-nav'")).toBe(true);
+    expect(app.includes("langSelect.className = 'gdp-help-language'")).toBe(true);
+    expect(app.includes("Keyboard Shortcuts")).toBe(true);
+    expect(app.includes("キーバインド")).toBe(true);
+    expect(style.includes('.gdp-help-layout')).toBe(true);
+    expect(style.includes('.gdp-help-nav')).toBe(true);
   });
 
   test('file URLs can render outside the current diff when no card matches', () => {
@@ -156,12 +171,27 @@ describe('view file UI', () => {
     expect(app.includes('function isPreviewableSource(path: string): boolean')).toBe(true);
     expect(app.includes("previewButton.textContent = 'Preview'")).toBe(true);
     expect(app.includes("codeButton.textContent = 'Code'")).toBe(true);
-    expect(app.includes("function createSourceTabs(active: 'preview' | 'code')")).toBe(true);
+    expect(app.includes("function createSourceTabs(active: 'preview' | 'code', textValue?: string)")).toBe(true);
     expect(app.includes("let previewButton: HTMLButtonElement | null = null")).toBe(true);
     expect(app.includes('return { tabs, codeButton, previewButton }')).toBe(true);
     expect(app.includes('await loadSyntaxHighlighter()')).toBe(true);
     expect(style.includes('.gdp-markdown-preview')).toBe(true);
     expect(style.includes('.gdp-source-tabs')).toBe(true);
+  });
+
+  test('file detail Code tab exposes a GitHub-style copy source button', () => {
+    expect(app.includes('function createSourceCopyButton(textValue: string): HTMLButtonElement')).toBe(true);
+    expect(app.includes("copy.className = 'gdp-file-header-icon gdp-copy-source'")).toBe(true);
+    expect(app.includes("copy.title = 'Copy source'")).toBe(true);
+    expect(app.includes("copy.innerHTML = iconSvg('octicon-copy', COPY_16_PATHS)")).toBe(true);
+    expect(app.includes('await navigator.clipboard.writeText(textValue)')).toBe(true);
+    expect(app.includes('tabs.appendChild(createSourceCopyButton(textValue))')).toBe(true);
+    expect(app.includes("copy.className = 'gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy'")).toBe(true);
+    expect(app.includes("copy.setAttribute('aria-label', 'Copy source')")).toBe(true);
+    expect(style.includes('.gdp-copy-source')).toBe(true);
+    expect(style.includes('.gdp-copy-source.copied')).toBe(true);
+    expect(style.includes('.gdp-copy-source.failed')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-copy')).toBe(true);
   });
 
   test('file detail uses Shiki for non-virtual source highlighting', () => {
@@ -181,7 +211,7 @@ describe('view file UI', () => {
 
   test('file detail shows a Code tab even when preview is unavailable', () => {
     expect(app.includes('const previewable = isPreviewableSource(target.path)')).toBe(true);
-    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code')")).toBe(true);
+    expect(app.includes("createSourceTabs(previewable ? 'preview' : 'code', textValue)")).toBe(true);
     expect(app.includes('if (tabsHost) {')).toBe(true);
     expect(app.includes('tabsHost.hidden = false')).toBe(true);
   });
@@ -235,20 +265,29 @@ describe('view file UI', () => {
   });
 
   test('repository sidebar supports visible-row keyboard navigation', () => {
+    expect(app.includes("import { resolveKeymapAction")).toBe(true);
+    expect(app.includes("function dispatchKeymapAction(action: KeymapAction, scope: KeymapScope, repeated = false): boolean")).toBe(true);
     expect(app.includes('function visibleSidebarItems()')).toBe(true);
     expect(app.includes('function isSidebarRowVisible')).toBe(true);
     expect(app.includes("return $$<HTMLElement>('#filelist li[data-path], #filelist .tree-dir[data-dirpath]')")).toBe(true);
     expect(app.includes('function isRepositorySidebarMode()')).toBe(true);
     expect(app.includes('function moveActiveSidebarItem(direction: 1 | -1)')).toBe(true);
+    expect(app.includes('function moveActiveSidebarPage(direction: 1 | -1)')).toBe(true);
+    expect(app.includes("function scrollSidebarItemIntoView(item: HTMLElement, block: 'nearest' | 'start' | 'end' = 'nearest')")).toBe(true);
+    expect(app.includes("const visibleTop = sidebarRect.top + topPadding")).toBe(true);
     expect(app.includes('function setActiveSidebarDirectoryCollapsed(collapsed: boolean)')).toBe(true);
     expect(app.includes('function openActiveSidebarItem()')).toBe(true);
     expect(app.includes('const repoSidebar = isRepositorySidebarMode()')).toBe(true);
-    expect(app.includes("if (e.key === 'Enter')")).toBe(true);
+    expect(app.includes("if (action === 'open-sidebar-item')")).toBe(true);
     expect(app.includes('openActiveSidebarItem()')).toBe(true);
-    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes("if (action === 'sidebar-expand')")).toBe(true);
     expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
-    expect(app.includes("if (e.key === 'h')")).toBe(true);
+    expect(app.includes("if (action === 'sidebar-collapse')")).toBe(true);
     expect(app.includes('setActiveSidebarDirectoryCollapsed(true)')).toBe(true);
+    expect(app.includes("if (action === 'sidebar-page-down' || action === 'sidebar-page-up')")).toBe(true);
+    expect(app.includes("moveActiveSidebarPage(action === 'sidebar-page-down' ? 1 : -1)")).toBe(true);
+    expect(app.includes("if (!repoSidebar && target.dataset.path) target.click()")).toBe(true);
+    expect(app.includes("function moveActiveSidebarToEdge(edge: 'top' | 'bottom')")).toBe(true);
   });
 
   test('repository sidebar l toggles the active directory', () => {
@@ -256,8 +295,41 @@ describe('view file UI', () => {
     expect(app.includes("const active = document.querySelector<HTMLElement>('#filelist .tree-dir.active[data-dirpath]')")).toBe(true);
     expect(app.includes("const control = active.querySelector<HTMLElement>('.chev')")).toBe(true);
     expect(app.includes('if (control) control.click()')).toBe(true);
-    expect(app.includes("if (e.key === 'l')")).toBe(true);
+    expect(app.includes("if (action === 'sidebar-expand')")).toBe(true);
     expect(app.includes('toggleActiveSidebarDirectoryCollapsed()')).toBe(true);
+  });
+
+  test('vim panel focus and main-panel scrolling are routed through keymap actions', () => {
+    expect(app.includes("from './focus-scope'")).toBe(true);
+    expect(app.includes('getPanelFocusScope')).toBe(true);
+    expect(app.includes('setPanelFocusScope')).toBe(true);
+    expect(app.includes('prepareKeyboardPanels();')).toBe(true);
+    expect(app.includes("function scrollMainPanel(direction: 1 | -1, repeated = false, unit: 'line' | 'page' = 'line')")).toBe(true);
+    expect(app.includes('function sourceLineScrollAmount()')).toBe(true);
+    expect(app.includes("function scrollMainToEdge(edge: 'top' | 'bottom')")).toBe(true);
+    expect(app.includes("if (action === 'focus-sidebar')")).toBe(true);
+    expect(app.includes("if (action === 'focus-main')")).toBe(true);
+    expect(app.includes("if (action === 'scroll-main-down' || action === 'scroll-main-up')")).toBe(true);
+    expect(app.includes("if (action === 'scroll-main-page-down' || action === 'scroll-main-page-up')")).toBe(true);
+    expect(app.includes("function switchSourceTab(tab: 'preview' | 'code'): boolean")).toBe(true);
+    expect(app.includes("if (action === 'tab-preview' || action === 'tab-code')")).toBe(true);
+    expect(app.includes("const target = findMainScrollTarget();")).toBe(true);
+    expect(app.includes("target.scrollTo({ top: edge === 'top' ? 0 : target.scrollHeight, behavior: 'auto' })")).toBe(true);
+    expect(app.includes("if (target) target.scrollBy({ top, behavior })")).toBe(true);
+    expect(app.includes("const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth'")).toBe(true);
+    expect(app.includes("document.querySelector<HTMLElement>('#content')?.addEventListener('mousedown'")).toBe(true);
+    expect(app.includes('focusMainPanel();')).toBe(true);
+    expect(app.includes('focusSidebarPanel();')).toBe(true);
+    expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
+    expect(app.includes('onFileClick({ path: dir.path, display_path: dir.path, type:')).toBe(true);
+    expect(app.includes('composing: e.isComposing')).toBe(true);
+    expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
+    expect(app.includes("if (action === 'start-g-sequence')")).toBe(true);
+    expect(app.includes("if (action === 'goto-top' || action === 'goto-bottom')")).toBe(true);
+    expect(app.includes("if (scope === 'main') scrollMainToEdge(edge)")).toBe(true);
+    expect(app.includes("else moveActiveSidebarToEdge(edge)")).toBe(true);
+    expect(style.includes('#sidebar:focus-visible')).toBe(true);
+    expect(style.includes('#content:focus-visible')).toBe(true);
   });
 
   test('repository sidebar filter enter can focus a visible directory match', () => {
@@ -310,8 +382,8 @@ describe('view file UI', () => {
     expect(app.includes("function cancelActiveSourceLoad(reason: 'user' | 'navigation' | 'esc'): boolean")).toBe(true);
     expect(app.includes("fetch(buildRawFileUrl(target), { signal: controller.signal })")).toBe(true);
     expect(app.includes("renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'))")).toBe(true);
-    expect(app.includes("if (e.key === 'Escape' && !document.querySelector('.mkdp-lightbox'))")).toBe(true);
-    expect(app.includes("if (cancelActiveSourceLoad('esc'))")).toBe(true);
+    expect(app.includes("if (action === 'cancel-source-load')")).toBe(true);
+    expect(app.includes("return !document.querySelector('.mkdp-lightbox') && cancelActiveSourceLoad('esc')")).toBe(true);
     expect(app.includes('function renderSourceCancelled(card: DiffCardElement, target: SourceFileTarget)')).toBe(true);
     expect(app.includes('async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean>')).toBe(true);
     expect(app.includes('if (signal?.aborted) return false')).toBe(true);
@@ -328,7 +400,7 @@ describe('view file UI', () => {
     expect(app.includes("function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement")).toBe(true);
     expect(app.includes("view.classList.add('virtual')")).toBe(true);
     expect(app.includes("badge.textContent = 'Virtual mode'")).toBe(true);
-    expect(app.includes("const { tabs, codeButton, previewButton } = createSourceTabs('preview')")).toBe(true);
+    expect(app.includes("const { tabs, codeButton, previewButton } = createSourceTabs('preview', textValue)")).toBe(true);
     expect(app.includes('virtualCode.hidden = true')).toBe(true);
     expect(app.includes("full.textContent = 'Open full view'")).toBe(true);
     expect(app.includes('navigator.clipboard.writeText(textValue)')).toBe(true);
@@ -343,6 +415,7 @@ describe('view file UI', () => {
     expect(style.includes('.gdp-source-virtual-row')).toBe(true);
     expect(style.includes('.gdp-source-virtual-badge')).toBe(true);
     expect(style.includes('.gdp-source-virtual-action')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-copy')).toBe(true);
     expect(style.includes('line-height: 20px;')).toBe(true);
   });
 
