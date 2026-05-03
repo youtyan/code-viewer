@@ -15,6 +15,8 @@ import {
   fixedStringLineMatches,
   isSkippableSearchPath,
   normalizeGrepMax,
+  parseGitGrepOutput,
+  parseRgOutput,
 } from './search';
 
 const ROOT = normalize(join(import.meta.dir, '..', '..'));
@@ -423,22 +425,6 @@ function parseGrepPaths(url: URL): string[] {
   return url.searchParams.getAll('path').filter(path => safePath(path) && !isGitInternalPath(path));
 }
 
-function parseRgOutput(stdout: string, max: number): GrepMatch[] {
-  const matches: GrepMatch[] = [];
-  for (const line of stdout.split('\n')) {
-    if (!line || matches.length >= max) continue;
-    const parts = line.split(':');
-    if (parts.length < 4) continue;
-    const path = parts.shift() || '';
-    const lineNo = Number(parts.shift() || '0');
-    const column = Number(parts.shift() || '0');
-    const preview = parts.join(':');
-    if (!path || !lineNo || !column || isGitInternalPath(path)) continue;
-    matches.push({ path, line: lineNo, column, preview: preview.slice(0, 500) });
-  }
-  return matches;
-}
-
 function rgAvailable(): boolean {
   const proc = Bun.spawnSync(['rg', '--version'], { cwd, stdout: 'pipe', stderr: 'pipe' });
   return proc.exitCode === 0;
@@ -495,7 +481,7 @@ function grepTreeRef(ref: string, query: string, max: number, paths: string[]): 
   ];
   const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
   const stdout = new TextDecoder().decode(proc.stdout);
-  const matches = parseRgOutput(stdout, max).slice(0, max);
+  const matches = parseGitGrepOutput(stdout, ref, max).slice(0, max);
   return { ref, engine: 'git', truncated: matches.length >= max, matches };
 }
 
