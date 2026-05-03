@@ -2,7 +2,9 @@ import { GdpExpandLogic } from './expand-logic';
 import { nextVisibleFileIndex } from './file-navigation';
 import { filePathClipboardText } from './file-path-copy';
 import { compileFileFilter } from './file-filter';
+import { findMainScrollTarget, focusMainPanel, focusSidebarPanel, getPanelFocusScope, isEditableKeyTarget, keymapScope, prepareKeyboardPanels, restorePanelFocusScope, setPanelFocusScope, type PanelFocusScope } from './focus-scope';
 import { fuzzyMatchPath, globMatchPath, isGlobPathQuery, rankPathMatches, type FuzzyRange } from './fuzzy-search';
+import { resolveKeymapAction, type KeymapAction, type KeymapScope } from './keymap';
 import { limitPaletteResults, movePaletteSelection } from './search-palette';
 import { createCatchUpGate, shouldCatchUpDiff } from './catch-up';
 import {
@@ -34,6 +36,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   type LayoutMode = 'side-by-side' | 'line-by-line';
   type SidebarView = 'tree' | 'flat';
   type ThemeMode = 'light' | 'dark';
+  type HelpLanguage = 'en' | 'ja';
+  type HelpSection = 'keybindings';
   type LoadQueueItem = { file: FileMeta; card: DiffCardElement; priority: number };
   type HljsApi = {
     configure?: (options: Record<string, unknown>) => void;
@@ -112,6 +116,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   };
   type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
+  type HelpContent = {
+    languageLabel: string;
+    title: string;
+    sections: Record<HelpSection, {
+      nav: string;
+      title: string;
+      intro: string;
+      groups: Array<{ title: string; rows: Array<[string, string]> }>;
+    }>;
+  };
+
   const FOLDER_ICON_PATHS = {
     closed: 'M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z',
     open: 'M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z',
@@ -145,6 +160,177 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_SIDEBAR_REF: string | null = null;
   let REPO_SIDEBAR_LOAD_REF: string | null = null;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
+  let PENDING_G_SCOPE: KeymapScope | null = null;
+  let PENDING_G_UNTIL = 0;
+  let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
+  const SOURCE_CURSOR_TOTALS = new Map<string, number>();
+
+  const HELP_LANGUAGES: HelpLanguage[] = ['en', 'ja'];
+  const HELP_SECTIONS: HelpSection[] = ['keybindings'];
+  const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
+    en: {
+      languageLabel: 'Language',
+      title: 'Help',
+      sections: {
+        keybindings: {
+          nav: 'Keybindings',
+          title: 'Keyboard Shortcuts',
+          intro: 'Use these shortcuts to move between panels and navigate files without leaving the keyboard.',
+          groups: [
+            { title: 'Global', rows: [['Ctrl+K', 'Open file palette'], ['Ctrl+G', 'Open grep palette'], ['/', 'Focus file filter'], ['t', 'Toggle theme']] },
+            { title: 'Panels', rows: [['Ctrl+H', 'Focus sidebar'], ['Ctrl+L', 'Focus main panel']] },
+            { title: 'Sidebar', rows: [['j / k', 'Move selection down / up'], ['Ctrl+D / Ctrl+U', 'Move selection by half a page'], ['gg / Shift+G', 'Move to top / bottom'], ['Enter', 'Open selected item'], ['h / l', 'Collapse / expand directory']] },
+            { title: 'Main Panel', rows: [['j / k', 'Move code cursor down / up'], ['Ctrl+D / Ctrl+U', 'Move code cursor by half a page'], ['gg / Shift+G', 'Move code cursor to top / bottom'], ['gp / gc', 'Switch to Preview / Code tab']] },
+          ],
+        },
+      },
+    },
+    ja: {
+      languageLabel: '言語',
+      title: 'ヘルプ',
+      sections: {
+        keybindings: {
+          nav: 'キーバインド',
+          title: 'キーバインド',
+          intro: 'キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。',
+          groups: [
+            { title: 'グローバル', rows: [['Ctrl+K', 'ファイルパレットを開く'], ['Ctrl+G', 'grep パレットを開く'], ['/', 'ファイルフィルターへフォーカス'], ['t', 'テーマ切り替え']] },
+            { title: 'パネル', rows: [['Ctrl+H', 'サイドバーへフォーカス'], ['Ctrl+L', 'メインパネルへフォーカス']] },
+            { title: 'サイドバー', rows: [['j / k', '選択を下 / 上へ移動'], ['Ctrl+D / Ctrl+U', '半ページ分選択を移動'], ['gg / Shift+G', '先頭 / 末尾へ移動'], ['Enter', '選択項目を開く'], ['h / l', 'ディレクトリを閉じる / 開く']] },
+            { title: 'メインパネル', rows: [['j / k', 'コードカーソルを下 / 上へ移動'], ['Ctrl+D / Ctrl+U', 'コードカーソルを半ページ分移動'], ['gg / Shift+G', 'コードカーソルを先頭 / 末尾へ移動'], ['gp / gc', 'Preview / Code タブへ切り替え']] },
+          ],
+        },
+      },
+    },
+  };
+
+  function sourceLineScrollAmount(): number | null {
+    const virtualRow = Array.from(document.querySelectorAll<HTMLElement>('#content .gdp-source-virtual-row'))
+      .find(item => item.offsetParent !== null);
+    if (virtualRow) return virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT;
+    const sourceRow = Array.from(document.querySelectorAll<HTMLElement>('#content .gdp-source-table tr'))
+      .find(item => item.offsetParent !== null);
+    if (sourceRow) return sourceRow.getBoundingClientRect().height || 20;
+    const preview = document.querySelector<HTMLElement>('#content .gdp-markdown-preview:not([hidden])');
+    const lineHeight = Number.parseFloat(getComputedStyle(preview || document.body).lineHeight);
+    return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
+  }
+
+  function hasVisibleSourceCodeSurface(): boolean {
+    return Array.from(document.querySelectorAll<HTMLElement>('#content .gdp-source-virtual-scroller, #content .gdp-source-table'))
+      .some(item => item.offsetParent !== null);
+  }
+
+  function sourceCursorKey(target: SourceFileTarget): string {
+    return target.ref + '\0' + target.path;
+  }
+
+  function sourceCursorMatches(target: SourceFileTarget, line: number): boolean {
+    return !!SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target) && SOURCE_CURSOR.line === line;
+  }
+
+  function syncSourceCursorRows(target: SourceFileTarget) {
+    document.querySelectorAll<HTMLElement>('#content [data-line]').forEach(row => {
+      const line = Number(row.dataset.line || '0');
+      row.classList.toggle('gdp-source-cursor', sourceCursorMatches(target, line));
+    });
+  }
+
+  function visibleSourceLineFallback(): number {
+    const scroller = findMainScrollTarget();
+    if (scroller) return Math.max(1, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1);
+    const rows = $$<HTMLElement>('#content .gdp-source-table tr[data-line]');
+    const contentTop = document.querySelector<HTMLElement>('#content')?.getBoundingClientRect().top ?? 0;
+    const row = rows.find(item => item.getBoundingClientRect().bottom >= Math.max(0, contentTop));
+    return Math.max(1, Number(row?.dataset.line || '1'));
+  }
+
+  function ensureSourceCursor(target: SourceFileTarget): { target: SourceFileTarget; line: number } {
+    if (SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target)) return SOURCE_CURSOR;
+    const routeLine = lineTargetStart(currentSourceLineTarget(target));
+    SOURCE_CURSOR = { target, line: routeLine || visibleSourceLineFallback() };
+    syncSourceCursorRows(target);
+    return SOURCE_CURSOR;
+  }
+
+  function resetSourceCursorForTarget(target: SourceFileTarget, totalLines: number) {
+    const routeLine = lineTargetStart(currentSourceLineTarget(target));
+    SOURCE_CURSOR = { target, line: Math.max(1, Math.min(totalLines, routeLine || 1)) };
+  }
+
+  function scrollSourceCursorIntoView(cursor: { target: SourceFileTarget; line: number }, edge: 'nearest' | 'center' = 'nearest') {
+    const scroller = findMainScrollTarget();
+    if (scroller) {
+      const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
+      const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
+      const before = scroller.scrollTop;
+      if (edge === 'center') scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+      else if (top < scroller.scrollTop) scroller.scrollTop = top;
+      else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
+      if (scroller.scrollTop !== before) scroller.dispatchEvent(new Event('scroll'));
+      (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource?.();
+      syncSourceCursorRows(cursor.target);
+      return;
+    }
+    document.querySelector<HTMLElement>('#content [data-line="' + cursor.line + '"]')?.scrollIntoView({ block: edge });
+  }
+
+  function moveSourceCursor(direction: 1 | -1, unit: 'line' | 'page' | 'edge', edge?: 'top' | 'bottom'): boolean {
+    if (!hasVisibleSourceCodeSurface()) return false;
+    const target = sourceTargetFromRoute();
+    if (!target) return false;
+    const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
+    if (!total) return false;
+    const cursor = ensureSourceCursor(target);
+    if (unit === 'edge') {
+      cursor.line = edge === 'bottom' ? total : 1;
+      syncSourceCursorRows(target);
+      scrollSourceCursorIntoView(cursor, 'center');
+      return true;
+    }
+    const pageRows = Math.max(1, Math.floor(((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55) / (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT)));
+    const delta = unit === 'page' ? pageRows : 1;
+    cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
+    syncSourceCursorRows(target);
+    scrollSourceCursorIntoView(cursor);
+    return true;
+  }
+
+  function scrollMainPanel(direction: 1 | -1, repeated = false, unit: 'line' | 'page' = 'line') {
+    if (moveSourceCursor(direction, unit)) return;
+    const target = findMainScrollTarget();
+    const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
+    const top = direction * (unit === 'line' ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
+    const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth';
+    if (target) target.scrollBy({ top, behavior });
+    else window.scrollBy({ top, behavior });
+  }
+
+  function scrollMainToEdge(edge: 'top' | 'bottom') {
+    if (moveSourceCursor(edge === 'bottom' ? 1 : -1, 'edge', edge)) return;
+    const target = findMainScrollTarget();
+    if (target) {
+      target.scrollTo({ top: edge === 'top' ? 0 : target.scrollHeight, behavior: 'auto' });
+      return;
+    }
+    const top = edge === 'top' ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    window.scrollTo({ top, behavior: 'auto' });
+  }
+
+  function switchSourceTab(tab: 'preview' | 'code'): boolean {
+    const tabs = document.querySelector<HTMLElement>('#content .gdp-source-tabs');
+    if (!tabs) return false;
+    const button = tabs.querySelector<HTMLButtonElement>('button[data-source-tab="' + tab + '"]');
+    if (!button || button.hidden || button.disabled) return false;
+    button.click();
+    focusMainPanel();
+    return true;
+  }
+
+  function isFocusableClickTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
+  }
 
   function invalidateRepoSidebar() {
     REPO_SIDEBAR_REF = null;
@@ -527,6 +713,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const dir = item.dir;
         const li = document.createElement('li');
         li.className = 'tree-dir';
+        li.tabIndex = -1;
         li.dataset.dirpath = dir.path;
         if (dir.explicit) li.dataset.explicit = 'true';
         if (dir.children_omitted) {
@@ -580,6 +767,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           li.addEventListener('click', (e) => {
             e.stopPropagation();
             onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted });
+            focusSidebarPanel();
           });
         } else {
           li.addEventListener('click', toggleDir);
@@ -590,6 +778,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const f = item.file;
         const li = document.createElement('li');
         li.className = 'tree-file';
+        li.tabIndex = -1;
         li.dataset.path = f.path;
         li.classList.toggle('viewed', !onFileClick && STATE.viewedFiles.has(f.path));
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
@@ -612,6 +801,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.addEventListener('click', () => {
           if (onFileClick) onFileClick(f);
           else scrollToFile(f.path);
+          focusSidebarPanel();
         });
         if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
         ul.appendChild(li);
@@ -622,6 +812,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function renderFlat(files: SidebarItem[], ul: HTMLElement, onFileClick?: (file: SidebarItem) => void) {
     files.forEach((f, i) => {
       const li = document.createElement('li');
+      li.tabIndex = -1;
       li.dataset.index = String(i);
       li.dataset.path = f.path;
       li.classList.toggle('viewed', !onFileClick && STATE.viewedFiles.has(f.path));
@@ -641,6 +832,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       li.addEventListener('click', () => {
         if (onFileClick) onFileClick(f);
         else scrollToFile(f.path);
+        focusSidebarPanel();
       });
       if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
       ul.appendChild(li);
@@ -926,6 +1118,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     return STATE.route.screen === 'file' && STATE.route.view === 'blob' ? STATE.route.ref : null;
   }
 
+  function helpLanguageFromRoute(): HelpLanguage {
+    return STATE.route.screen === 'help' && HELP_LANGUAGES.includes(STATE.route.lang as HelpLanguage)
+      ? STATE.route.lang as HelpLanguage
+      : 'en';
+  }
+
+  function helpSectionFromRoute(): HelpSection {
+    return STATE.route.screen === 'help' && HELP_SECTIONS.includes(STATE.route.section as HelpSection)
+      ? STATE.route.section as HelpSection
+      : 'keybindings';
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute = route.screen === 'unknown' ? { screen: 'diff' as const, range: route.range } : route;
     STATE.route = nextRoute;
@@ -947,6 +1151,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.body.classList.toggle('gdp-file-detail-page', STATE.route.screen === 'file');
     document.body.classList.toggle('gdp-repo-blob-page', STATE.route.screen === 'file' && STATE.route.view === 'blob');
     document.body.classList.toggle('gdp-repo-page', STATE.route.screen === 'repo');
+    document.body.classList.toggle('gdp-help-page', STATE.route.screen === 'help');
     syncRepoTargetInput(repoFileTargetFromRoute() || 'worktree');
   }
 
@@ -962,12 +1167,109 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (link.dataset.route === 'diff') {
         link.href = buildRoute({ screen: 'diff', range: currentRange() });
       }
+      if (link.dataset.route === 'help') {
+        link.href = buildRoute({ screen: 'help', lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range: currentRange() });
+      }
     });
   }
 
   function removeStandaloneSource() {
     document.querySelectorAll('.gdp-standalone-source').forEach(el => el.remove());
     document.querySelectorAll('.gdp-repo-blob-layout').forEach(el => el.remove());
+  }
+
+  function renderHelpPage() {
+    cancelActiveSourceLoad('navigation');
+    removeStandaloneSource();
+    LOAD_QUEUE.length = 0;
+    const target = $('#diff');
+    const empty = $('#empty');
+    empty.classList.add('hidden');
+    $('#meta').textContent = '';
+    $('#totals').textContent = '';
+    $('#filelist').textContent = '';
+
+    const lang = helpLanguageFromRoute();
+    const section = helpSectionFromRoute();
+    const content = HELP_CONTENT[lang];
+    const sectionContent = content.sections[section];
+
+    const shell = document.createElement('section');
+    shell.className = 'gdp-help-shell';
+    const header = document.createElement('header');
+    header.className = 'gdp-help-header';
+    const title = document.createElement('h1');
+    title.textContent = content.title;
+    const langSelect = document.createElement('select');
+    langSelect.className = 'gdp-help-language';
+    langSelect.setAttribute('aria-label', content.languageLabel);
+    HELP_LANGUAGES.forEach(optionLang => {
+      const option = document.createElement('option');
+      option.value = optionLang;
+      option.textContent = optionLang.toUpperCase();
+      option.selected = optionLang === lang;
+      langSelect.appendChild(option);
+    });
+    langSelect.addEventListener('change', () => {
+      setRoute({ screen: 'help', lang: langSelect.value, section, range: currentRange() });
+      setPageMode();
+      renderHelpPage();
+      syncHeaderMenu();
+    });
+    header.append(title, langSelect);
+
+    const layout = document.createElement('div');
+    layout.className = 'gdp-help-layout';
+    const helpNav = document.createElement('nav');
+    helpNav.className = 'gdp-help-nav';
+    HELP_SECTIONS.forEach(helpSection => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = helpSection === section ? 'active' : '';
+      button.textContent = content.sections[helpSection].nav;
+      button.addEventListener('click', () => {
+        setRoute({ screen: 'help', lang, section: helpSection, range: currentRange() });
+        renderHelpPage();
+        syncHeaderMenu();
+      });
+      helpNav.appendChild(button);
+    });
+
+    const article = document.createElement('article');
+    article.className = 'gdp-help-content';
+    const h2 = document.createElement('h2');
+    h2.textContent = sectionContent.title;
+    const intro = document.createElement('p');
+    intro.textContent = sectionContent.intro;
+    article.append(h2, intro);
+    sectionContent.groups.forEach(group => {
+      const groupSection = document.createElement('section');
+      groupSection.className = 'gdp-help-group';
+      const groupTitle = document.createElement('h3');
+      groupTitle.textContent = group.title;
+      const table = document.createElement('table');
+      group.rows.forEach(([keys, description]) => {
+        const tr = document.createElement('tr');
+        const keyCell = document.createElement('th');
+        keyCell.scope = 'row';
+        keys.split(' / ').forEach((key, index) => {
+          if (index > 0) keyCell.append(' / ');
+          const kbd = document.createElement('kbd');
+          kbd.textContent = key;
+          keyCell.appendChild(kbd);
+        });
+        const desc = document.createElement('td');
+        desc.textContent = description;
+        tr.append(keyCell, desc);
+        table.appendChild(tr);
+      });
+      groupSection.append(groupTitle, table);
+      article.appendChild(groupSection);
+    });
+
+    layout.append(helpNav, article);
+    shell.append(header, layout);
+    target.replaceChildren(shell);
   }
 
   function renderShell(meta: DiffMeta) {
@@ -2346,11 +2648,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     return info;
   }
 
-  function createSourceTabs(active: 'preview' | 'code') {
+  function createSourceCopyButton(textValue: string): HTMLButtonElement {
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'gdp-file-header-icon gdp-copy-source';
+    copy.title = 'Copy source';
+    copy.setAttribute('aria-label', 'Copy source');
+    copy.innerHTML = iconSvg('octicon-copy', COPY_16_PATHS);
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(textValue);
+        copy.classList.add('copied');
+        setTimeout(() => { copy.classList.remove('copied'); }, 1200);
+      } catch {
+        copy.classList.add('failed');
+        setTimeout(() => { copy.classList.remove('failed'); }, 1200);
+      }
+    });
+    return copy;
+  }
+
+  function createSourceTabs(active: 'preview' | 'code', textValue?: string) {
     const tabs = document.createElement('div');
     tabs.className = 'gdp-source-tabs';
     const codeButton = document.createElement('button');
     codeButton.type = 'button';
+    codeButton.dataset.sourceTab = 'code';
     codeButton.textContent = 'Code';
     codeButton.classList.toggle('active', active === 'code');
     tabs.appendChild(codeButton);
@@ -2358,15 +2681,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (active === 'preview') {
       previewButton = document.createElement('button');
       previewButton.type = 'button';
+      previewButton.dataset.sourceTab = 'preview';
       previewButton.className = 'active';
       previewButton.textContent = 'Preview';
       tabs.prepend(previewButton);
     }
+    if (textValue != null) tabs.appendChild(createSourceCopyButton(textValue));
     return { tabs, codeButton, previewButton };
   }
 
   async function renderSourceText(card: DiffCardElement, target: SourceFileTarget, textValue: string, signal?: AbortSignal): Promise<boolean> {
     const lines = textValue.length ? textValue.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n') : [''];
+    SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), lines.length);
+    resetSourceCursorForTarget(target, lines.length);
     const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
     const isStandalone = card.classList.contains('gdp-standalone-source');
     const view = document.createElement('div');
@@ -2386,7 +2713,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
       if (previewable) {
-        const { tabs, codeButton, previewButton } = createSourceTabs('preview');
+        const { tabs, codeButton, previewButton } = createSourceTabs('preview', textValue);
         if (tabsHost) {
           tabsHost.hidden = false;
           tabsHost.replaceChildren(tabs);
@@ -2439,6 +2766,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const tr = document.createElement('tr');
       tr.dataset.line = String(index + 1);
       tr.classList.toggle('gdp-source-line-target', lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
+      tr.classList.toggle('gdp-source-cursor', sourceCursorMatches(target, index + 1));
       const num = document.createElement('td');
       num.className = 'gdp-source-line-number';
       num.textContent = String(index + 1);
@@ -2460,7 +2788,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
     }
     table.appendChild(tbody);
-    const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? 'preview' : 'code');
+    const { tabs, codeButton, previewButton } = createSourceTabs(previewable ? 'preview' : 'code', textValue);
     if (tabsHost) {
       tabsHost.hidden = false;
       tabsHost.replaceChildren(tabs);
@@ -2611,16 +2939,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     actions.className = 'gdp-source-virtual-actions';
     const copy = document.createElement('button');
     copy.type = 'button';
-    copy.className = 'gdp-source-virtual-action';
-    copy.textContent = 'Copy all';
+    copy.className = 'gdp-file-header-icon gdp-copy-source gdp-source-virtual-copy';
+    copy.title = 'Copy source';
+    copy.setAttribute('aria-label', 'Copy source');
+    copy.innerHTML = iconSvg('octicon-copy', COPY_16_PATHS);
     copy.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(textValue);
-        copy.textContent = 'Copied';
-        setTimeout(() => { copy.textContent = 'Copy all'; }, 1200);
+        copy.classList.add('copied');
+        setTimeout(() => { copy.classList.remove('copied'); }, 1200);
       } catch {
-        copy.textContent = 'Copy failed';
-        setTimeout(() => { copy.textContent = 'Copy all'; }, 1600);
+        copy.classList.add('failed');
+        setTimeout(() => { copy.classList.remove('failed'); }, 1600);
       }
     });
     const full = document.createElement('a');
@@ -2667,6 +2997,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         row.className = 'gdp-source-virtual-row';
         row.dataset.line = String(index + 1);
         row.classList.toggle('gdp-source-line-target', lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
+        row.classList.toggle('gdp-source-cursor', sourceCursorMatches(target, index + 1));
         const num = document.createElement('span');
         num.className = 'gdp-source-virtual-line-number';
         num.textContent = String(index + 1);
@@ -2692,6 +3023,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(render);
     };
+    (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
     scroller.addEventListener('scroll', schedule, { passive: true });
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
@@ -3385,6 +3717,13 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   $('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false));
   $('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true));
+  prepareKeyboardPanels();
+  const contentPanel = document.querySelector<HTMLElement>('#content');
+  contentPanel?.addEventListener('focusin', () => setPanelFocusScope('main'));
+  contentPanel?.addEventListener('mousedown', (event) => {
+    if (isFocusableClickTarget(event.target)) setPanelFocusScope('main');
+    else focusMainPanel();
+  });
 
   // Sidebar resizer (drag right edge)
   function applySidebarWidth(w: number) {
@@ -3405,6 +3744,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     sb.addEventListener('mousedown', mark);
     sb.addEventListener('touchstart', mark, { passive: true });
     sb.addEventListener('scroll', mark, { passive: true });
+    sb.addEventListener('focusin', () => setPanelFocusScope('sidebar'));
+    sb.addEventListener('mousedown', (event) => {
+      if (isFocusableClickTarget(event.target)) setPanelFocusScope('sidebar');
+      else focusSidebarPanel();
+    });
   })();
   (function setupResizer() {
     const handle = $('#sidebar-resizer');
@@ -3469,6 +3813,34 @@ window.GdpExpandLogic = GdpExpandLogic;
     return $$<HTMLElement>('#filelist li[data-path], #filelist .tree-dir[data-dirpath]')
       .filter(isSidebarRowVisible);
   }
+  function scrollSidebarItemIntoView(item: HTMLElement, block: 'nearest' | 'start' | 'end' = 'nearest') {
+    const sidebar = document.querySelector<HTMLElement>('#sidebar');
+    if (!sidebar) {
+      item.scrollIntoView({ block });
+      return;
+    }
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const stickyBottom = Math.max(
+      sidebarRect.top,
+      document.querySelector<HTMLElement>('.sb-head')?.getBoundingClientRect().bottom || sidebarRect.top,
+      document.querySelector<HTMLElement>('.sb-filter-wrap')?.getBoundingClientRect().bottom || sidebarRect.top,
+    );
+    const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
+    const bottomPadding = 14;
+    const visibleTop = sidebarRect.top + topPadding;
+    const visibleBottom = sidebarRect.bottom - bottomPadding;
+    if (block === 'start') {
+      sidebar.scrollTop += itemRect.top - visibleTop;
+      return;
+    }
+    if (block === 'end') {
+      sidebar.scrollTop += itemRect.bottom - visibleBottom;
+      return;
+    }
+    if (itemRect.top < visibleTop) sidebar.scrollTop += itemRect.top - visibleTop;
+    else if (itemRect.bottom > visibleBottom) sidebar.scrollTop += itemRect.bottom - visibleBottom;
+  }
   function isRepositorySidebarMode() {
     return document.body.classList.contains('gdp-repo-page') ||
       document.body.classList.contains('gdp-repo-blob-page');
@@ -3482,7 +3854,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!target) return;
     const path = target.dataset.path || target.dataset.dirpath;
     if (path) markActive(path);
-    target.scrollIntoView({ block: 'nearest' });
+    scrollSidebarItemIntoView(target);
+    if (target.dataset.path) prefetchByPath(target.dataset.path);
+  }
+  function moveActiveSidebarPage(direction: 1 | -1) {
+    const items = visibleSidebarItems();
+    if (!items.length) return;
+    const repoSidebar = isRepositorySidebarMode();
+    const sidebar = document.querySelector<HTMLElement>('#sidebar');
+    const sample = items.find(item => item.getBoundingClientRect().height > 0);
+    const rowHeight = sample ? sample.getBoundingClientRect().height : 28;
+    const halfPageRows = Math.max(1, Math.floor(((sidebar?.clientHeight || window.innerHeight) / 2) / rowHeight));
+    const current = items.findIndex(li => li.classList.contains('active'));
+    const start = current < 0 ? 0 : current;
+    const idx = Math.max(0, Math.min(items.length - 1, start + direction * halfPageRows));
+    const target = items[idx];
+    const path = target.dataset.path || target.dataset.dirpath;
+    if (!repoSidebar && target.dataset.path) target.click();
+    else if (path) markActive(path);
+    scrollSidebarItemIntoView(target);
+    if (target.dataset.path) prefetchByPath(target.dataset.path);
+  }
+  function moveActiveSidebarToEdge(edge: 'top' | 'bottom') {
+    const items = visibleSidebarItems();
+    const repoSidebar = isRepositorySidebarMode();
+    const target = edge === 'top' ? items[0] : items[items.length - 1];
+    if (!target) return;
+    const path = target.dataset.path || target.dataset.dirpath;
+    if (!repoSidebar && target.dataset.path) target.click();
+    else if (path) markActive(path);
+    scrollSidebarItemIntoView(target, edge === 'top' ? 'start' : 'end');
     if (target.dataset.path) prefetchByPath(target.dataset.path);
   }
   function setActiveSidebarDirectoryCollapsed(collapsed: boolean) {
@@ -3555,6 +3956,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     controller?: AbortController;
     debounce?: number;
     diffSnapshot: FileMeta[];
+    previousFocusScope: PanelFocusScope | null;
   };
   let PALETTE: PaletteState | null = null;
   const REPO_FILE_CACHE = new Map<string, FileSearchListResponse>();
@@ -3574,13 +3976,16 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function closeSearchPalette() {
     if (!PALETTE) return;
+    const previousFocusScope = PALETTE.previousFocusScope;
     PALETTE.controller?.abort();
     if (PALETTE.debounce) window.clearTimeout(PALETTE.debounce);
     PALETTE.root.remove();
     PALETTE = null;
+    restorePanelFocusScope(previousFocusScope);
   }
 
   function createPalette(mode: PaletteMode): PaletteState {
+    const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
     closeSearchPalette();
     const root = document.createElement('div');
     root.className = 'gdp-palette-backdrop';
@@ -3623,8 +4028,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       items: [],
       composing: false,
       diffSnapshot: [...STATE.files],
+      previousFocusScope,
     };
     PALETTE = state;
+    setPanelFocusScope(null);
     root.addEventListener('mousedown', e => {
       if (e.target === root) closeSearchPalette();
     });
@@ -3951,68 +4358,127 @@ window.GdpExpandLogic = GdpExpandLogic;
     createPalette(mode);
   }
 
-  document.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      if (PALETTE?.mode === 'file') return;
-      openSearchPalette('file');
-      return;
+  function dispatchKeymapAction(action: KeymapAction, scope: KeymapScope, repeated = false): boolean {
+    if (action !== 'start-g-sequence') {
+      PENDING_G_SCOPE = null;
+      PENDING_G_UNTIL = 0;
     }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
-      e.preventDefault();
-      if (PALETTE?.mode === 'grep') return;
-      openSearchPalette('grep');
-      return;
+    if (action === 'open-file-palette') {
+      if (PALETTE?.mode !== 'file') openSearchPalette('file');
+      return true;
     }
-    const targetEl = e.target as Element | null;
-    if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.tagName === 'TEXTAREA')) return;
-    if (e.key === 'Escape' && !document.querySelector('.mkdp-lightbox')) {
-      if (cancelActiveSourceLoad('esc')) {
-        e.preventDefault();
-        return;
-      }
+    if (action === 'open-grep-palette') {
+      if (PALETTE?.mode !== 'grep') openSearchPalette('grep');
+      return true;
     }
-    if (e.key === '/') { e.preventDefault(); focusFileFilter(); }
-    else if (e.key === 'Enter') {
-      if (isRepositorySidebarMode()) {
-        e.preventDefault();
-        openActiveSidebarItem();
-      }
+    if (action === 'focus-file-filter') {
+      focusFileFilter();
+      return true;
     }
-    else if (e.key === 'j' || e.key === 'k') {
-      e.preventDefault();
+    if (action === 'focus-sidebar') {
+      focusSidebarPanel();
+      return true;
+    }
+    if (action === 'focus-main') {
+      focusMainPanel();
+      return true;
+    }
+    if (action === 'cancel-source-load') {
+      cancelActiveSourceLoad('esc');
+      return true;
+    }
+    if (action === 'open-sidebar-item') {
+      if (!isRepositorySidebarMode()) return false;
+      openActiveSidebarItem();
+      focusMainPanel();
+      return true;
+    }
+    if (action === 'sidebar-next' || action === 'sidebar-previous') {
       const repoSidebar = isRepositorySidebarMode();
       const items = repoSidebar ? visibleSidebarItems() : $$<HTMLElement>('#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)');
-      if (!items.length) return;
+      if (!items.length) return true;
       let idx = items.findIndex(li => li.classList.contains('active'));
       if (idx < 0) idx = 0;
-      else idx = e.key === 'j' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+      else idx = action === 'sidebar-next' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
       const target = items[idx];
       const path = target?.dataset.path || target?.dataset.dirpath;
       if (!repoSidebar && target) {
         target.click();
-        target.scrollIntoView({ block: 'nearest' });
+        scrollSidebarItemIntoView(target);
       } else if (path) {
         markActive(path);
-        target.scrollIntoView({ block: 'nearest' });
+        scrollSidebarItemIntoView(target);
       }
-      // Prefetch the next-next so consecutive j/k feels instant.
-      const nextIdx = e.key === 'j' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+      const nextIdx = action === 'sidebar-next' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
       const nextItem = items[nextIdx];
       if (nextItem && nextItem !== target && nextItem.dataset.path) prefetchByPath(nextItem.dataset.path);
-    } else if (e.key === 'l') {
-      if (isRepositorySidebarMode()) {
-        e.preventDefault();
-        toggleActiveSidebarDirectoryCollapsed();
-      }
-    } else if (e.key === 'h') {
-      if (isRepositorySidebarMode()) {
-        e.preventDefault();
-        setActiveSidebarDirectoryCollapsed(true);
-      }
-    } else if (e.key === 'u') setLayout('line-by-line');
-    else if (e.key === 's') setLayout('side-by-side');
-    else if (e.key === 't') $('#theme').click();
+      return true;
+    }
+    if (action === 'sidebar-page-down' || action === 'sidebar-page-up') {
+      moveActiveSidebarPage(action === 'sidebar-page-down' ? 1 : -1);
+      return true;
+    }
+    if (action === 'sidebar-expand') {
+      if (!isRepositorySidebarMode()) return false;
+      toggleActiveSidebarDirectoryCollapsed();
+      return true;
+    }
+    if (action === 'sidebar-collapse') {
+      if (!isRepositorySidebarMode()) return false;
+      setActiveSidebarDirectoryCollapsed(true);
+      return true;
+    }
+    if (action === 'scroll-main-down' || action === 'scroll-main-up') {
+      scrollMainPanel(action === 'scroll-main-down' ? 1 : -1, repeated);
+      return true;
+    }
+    if (action === 'scroll-main-page-down' || action === 'scroll-main-page-up') {
+      scrollMainPanel(action === 'scroll-main-page-down' ? 1 : -1, repeated, 'page');
+      return true;
+    }
+    if (action === 'tab-preview' || action === 'tab-code') {
+      return switchSourceTab(action === 'tab-preview' ? 'preview' : 'code');
+    }
+    if (action === 'start-g-sequence') {
+      PENDING_G_SCOPE = scope;
+      PENDING_G_UNTIL = performance.now() + 900;
+      return true;
+    }
+    if (action === 'goto-top' || action === 'goto-bottom') {
+      const edge = action === 'goto-top' ? 'top' : 'bottom';
+      if (scope === 'main') scrollMainToEdge(edge);
+      else if (scope === 'sidebar') moveActiveSidebarToEdge(edge);
+      else window.scrollTo({ top: edge === 'top' ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight), behavior: 'auto' });
+      return true;
+    }
+    if (action === 'layout-unified') {
+      setLayout('line-by-line');
+      return true;
+    }
+    if (action === 'layout-split') {
+      setLayout('side-by-side');
+      return true;
+    }
+    if (action === 'toggle-theme') {
+      $('#theme').click();
+      return true;
+    }
+    return false;
+  }
+
+  document.addEventListener('keydown', e => {
+    const targetEl = e.target as Element | null;
+    const scope = keymapScope(targetEl);
+    const action = resolveKeymapAction(e, {
+      scope,
+      editable: isEditableKeyTarget(targetEl),
+      composing: e.isComposing,
+      paletteOpen: !!PALETTE,
+      pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
+      lightboxOpen: !!document.querySelector('.mkdp-lightbox'),
+    });
+    if (!action) return;
+    if (dispatchKeymapAction(action, scope, e.repeat)) e.preventDefault();
   });
 
   // ----- initial state + live updates -----
@@ -4040,6 +4506,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function load(options: { force?: boolean } = {}): Promise<void> {
+    if (STATE.route.screen === 'help') {
+      setStatus('live');
+      renderHelpPage();
+      syncHeaderMenu();
+      return Promise.resolve();
+    }
     if (STATE.route.screen === 'repo') return loadRepo();
     setStatus('refreshing');
     const params = new URLSearchParams();
@@ -4053,7 +4525,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus('live');
     }).catch(() => setStatus('error'));
   }
-  if (STATE.route.screen === 'repo') loadRepo();
+  if (STATE.route.screen === 'help') {
+    setStatus('live');
+    renderHelpPage();
+  } else if (STATE.route.screen === 'repo') loadRepo();
   else if (STATE.route.screen === 'file' && STATE.route.view === 'blob') {
     setStatus('live');
     applySourceRouteToShell();
@@ -4074,10 +4549,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     const range = currentRange();
     if (STATE.route.screen === 'file') {
       setRoute({ screen: 'file', path: STATE.route.path, ref: STATE.route.ref, range }, true);
+    } else if (STATE.route.screen === 'help') {
+      setRoute({ screen: 'help', lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range }, true);
+      renderHelpPage();
     } else {
       setRoute({ screen: 'diff', range }, true);
+      load();
     }
-    load();
   }
   syncRefInputs();
   syncHeaderMenu();
@@ -4299,6 +4777,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === 'repo') STATE.repoRef = STATE.route.ref || 'worktree';
     syncRefInputs();
     syncHeaderMenu();
+    if (STATE.route.screen === 'help') {
+      cancelActiveSourceLoad('navigation');
+      setPageMode();
+      renderHelpPage();
+      setStatus('live');
+      return;
+    }
     if (STATE.route.screen === 'repo') {
       cancelActiveSourceLoad('navigation');
       setPageMode();

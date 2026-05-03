@@ -63,9 +63,11 @@ describe('state changing refresh endpoint', () => {
 
 describe('search palette shortcuts', () => {
   test('Ctrl+K and Ctrl+G open the palette while slash keeps sidebar filter focus', () => {
+    expect(app.includes("import { resolveKeymapAction")).toBe(true);
     expect(app.includes("openSearchPalette('file')")).toBe(true);
     expect(app.includes("openSearchPalette('grep')")).toBe(true);
-    expect(app.includes("if (e.key === '/') { e.preventDefault(); focusFileFilter(); }")).toBe(true);
+    expect(app.includes("if (action === 'focus-file-filter')")).toBe(true);
+    expect(app.includes('focusFileFilter();')).toBe(true);
     expect(app.includes("focusFileFilter();\n      return;\n    }\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g')")).toBe(false);
   });
 

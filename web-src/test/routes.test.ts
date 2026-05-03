@@ -24,6 +24,10 @@ describe('routes', () => {
       .toBe('/file?path=README.md&target=main&line=12');
     expect(buildRoute({ screen: 'file', path: 'README.md', ref: 'main', view: 'blob', line: { start: 12, end: 15 }, range }))
       .toBe('/file?path=README.md&target=main&line=12-15');
+    expect(buildRoute({ screen: 'help', lang: 'en', section: 'keybindings', range }))
+      .toBe('/help');
+    expect(buildRoute({ screen: 'help', lang: 'ja', section: 'keybindings', range }))
+      .toBe('/help?lang=ja');
   });
 
   test('parses repository routes with worktree default ref', () => {
@@ -60,6 +64,13 @@ describe('routes', () => {
       .toEqual({ screen: 'unknown', reason: 'missing-path', rawPathname: '/file', rawSearch: '?ref=worktree', range: defaultRange });
     expect(parseRoute('/blame', '?from=main&to=worktree', defaultRange))
       .toEqual({ screen: 'unknown', reason: 'unknown-pathname', rawPathname: '/blame', rawSearch: '?from=main&to=worktree', range: { from: 'main', to: 'worktree' } });
+  });
+
+  test('parses help routes with language and section defaults', () => {
+    expect(parseRoute('/help', '', defaultRange))
+      .toEqual({ screen: 'help', lang: 'en', section: 'keybindings', range: defaultRange });
+    expect(parseRoute('/help', '?lang=ja&section=keybindings', defaultRange))
+      .toEqual({ screen: 'help', lang: 'ja', section: 'keybindings', range: defaultRange });
   });
 
   test('builds deterministic URLs for round trips and todiff aliases', () => {

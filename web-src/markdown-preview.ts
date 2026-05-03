@@ -247,7 +247,25 @@ export async function renderMarkdownPreview(
 }
 
 export function renderMarkdownHtml(textValue: string, target: SourceFileTarget, highlighter: ShikiHighlighter | null, signal?: AbortSignal): string {
-  return createMarkdownIt(target, highlighter, signal).render(textValue);
+  const md = createMarkdownIt(target, highlighter, signal);
+  const frontmatter = splitYamlFrontmatter(textValue);
+  if (!frontmatter) return md.render(textValue);
+  return '<div class="gdp-markdown-frontmatter" data-gdp-frontmatter="yaml">' +
+    md.render('```yaml\n' + frontmatter.yaml + '\n```\n') +
+    '</div>' +
+    md.render(frontmatter.body);
+}
+
+function splitYamlFrontmatter(textValue: string): { yaml: string; body: string } | null {
+  if (!textValue.startsWith('---\n') && !textValue.startsWith('---\r\n')) return null;
+  const newline = textValue.startsWith('---\r\n') ? '\r\n' : '\n';
+  const start = 3 + newline.length;
+  const closing = textValue.indexOf(newline + '---' + newline, start);
+  if (closing < 0) return null;
+  return {
+    yaml: textValue.slice(start, closing),
+    body: textValue.slice(closing + newline.length + 3 + newline.length),
+  };
 }
 
 async function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
