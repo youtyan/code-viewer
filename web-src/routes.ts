@@ -3,6 +3,13 @@ export type DiffRange = {
   to: string;
 };
 
+export type SourceLineRange = {
+  start: number;
+  end: number;
+};
+
+export type SourceLineTarget = number | SourceLineRange;
+
 export type SourceFileTarget = {
   path: string;
   ref: string;
@@ -11,7 +18,7 @@ export type SourceFileTarget = {
 export type AppRoute =
   | { screen: 'repo'; ref: string; path: string; range: DiffRange }
   | { screen: 'diff'; range: DiffRange }
-  | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail'; line?: number }
+  | { screen: 'file'; path: string; ref: string; range: DiffRange; view?: 'blob' | 'detail'; line?: SourceLineTarget }
   | { screen: 'unknown'; reason: 'unknown-pathname' | 'missing-path'; rawPathname: string; rawSearch: string; range: DiffRange };
 
 export const SPA_PATHS = ['/todif', '/todiff', '/file'] as const;
@@ -29,6 +36,25 @@ function parseLegacyRange(value: string | null | undefined, fallback: DiffRange)
     from: raw.slice(0, sep) || fallback.from,
     to: raw.slice(sep + 2) || fallback.to,
   };
+}
+
+function parseLineTarget(value: string | null | undefined): SourceLineTarget | undefined {
+  const raw = value || '';
+  const range = /^(\d+)-(\d+)$/.exec(raw);
+  if (range) {
+    const a = Number(range[1]);
+    const b = Number(range[2]);
+    const start = Math.min(a, b);
+    const end = Math.max(a, b);
+    if (start > 0) return { start, end };
+    return undefined;
+  }
+  const line = Number(raw);
+  return Number.isInteger(line) && line > 0 ? line : undefined;
+}
+
+function formatLineTarget(line: SourceLineTarget): string {
+  return typeof line === 'number' ? String(line) : line.start + '-' + line.end;
 }
 
 export function parseRoute(pathname: string, search: string, fallbackRange: DiffRange): AppRoute {
@@ -54,8 +80,7 @@ export function parseRoute(pathname: string, search: string, fallbackRange: Diff
       const path = params.get('path') || '';
       const target = params.get('target') || '';
       const ref = target || params.get('ref') || 'worktree';
-      const lineParam = Number(params.get('line') || '');
-      const line = Number.isInteger(lineParam) && lineParam > 0 ? lineParam : undefined;
+      const line = parseLineTarget(params.get('line'));
       if (!path) return { screen: 'unknown', reason: 'missing-path', rawPathname: pathname, rawSearch: search, range };
       return { screen: 'file', path, ref, range, view: target ? 'blob' : 'detail', ...(line ? { line } : {}) };
     }
@@ -77,13 +102,13 @@ export function buildRoute(route: AppRoute): string {
       if (route.view === 'blob') {
         return '/file?path=' + encodeURIComponent(route.path) +
           '&target=' + encodeURIComponent(route.ref || 'worktree') +
-          (route.line ? '&line=' + encodeURIComponent(String(route.line)) : '');
+          (route.line ? '&line=' + encodeURIComponent(formatLineTarget(route.line)) : '');
       }
       return '/file?path=' + encodeURIComponent(route.path) +
         '&ref=' + encodeURIComponent(route.ref || 'worktree') +
         '&from=' + encodeURIComponent(route.range.from || '') +
         '&to=' + encodeURIComponent(route.range.to || 'worktree') +
-        (route.line ? '&line=' + encodeURIComponent(String(route.line)) : '');
+        (route.line ? '&line=' + encodeURIComponent(formatLineTarget(route.line)) : '');
     case 'diff':
       return '/todif?from=' + encodeURIComponent(route.range.from || '') +
         '&to=' + encodeURIComponent(route.range.to || 'worktree');

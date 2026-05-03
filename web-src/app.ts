@@ -12,6 +12,7 @@ import {
   type DiffRange,
   type AppRoute,
   type SourceFileTarget,
+  type SourceLineTarget,
 } from './routes';
 import { renderMarkdownPreview } from './markdown-preview';
 import { suppressWhitespaceOnlyInlineHighlights } from './ws-highlight';
@@ -2401,9 +2402,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (signal?.aborted) return false;
       const line = lines[index];
       const tr = document.createElement('tr');
+      tr.dataset.line = String(index + 1);
+      tr.classList.toggle('gdp-source-line-target', lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
       const num = document.createElement('td');
       num.className = 'gdp-source-line-number';
       num.textContent = String(index + 1);
+      bindSourceLineNumber(num, card, target, index + 1);
       const code = document.createElement('td');
       code.className = 'gdp-source-line-code';
       if (shikiLines && shikiLines[index] != null) {
@@ -2487,6 +2491,75 @@ window.GdpExpandLogic = GdpExpandLogic;
     return url.pathname + url.search;
   }
 
+  function currentSourceLineTarget(target: SourceFileTarget): SourceLineTarget | undefined {
+    const routeTarget = sourceTargetFromRoute();
+    return sourceTargetsEqual(routeTarget, target) && STATE.route.screen === 'file' ? STATE.route.line : undefined;
+  }
+
+  function lineTargetStart(line: SourceLineTarget | undefined): number | undefined {
+    if (!line) return undefined;
+    return typeof line === 'number' ? line : line.start;
+  }
+
+  function lineInSourceTarget(lineNumber: number, target: SourceLineTarget | undefined): boolean {
+    if (!target) return false;
+    if (typeof target === 'number') return lineNumber === target;
+    return lineNumber >= target.start && lineNumber <= target.end;
+  }
+
+  let SOURCE_LINE_DRAG: { target: SourceFileTarget; start: number } | null = null;
+
+  function normalizeSourceLineSelection(start: number, end: number): SourceLineTarget {
+    const a = Math.max(1, Math.floor(start));
+    const b = Math.max(1, Math.floor(end));
+    const from = Math.min(a, b);
+    const to = Math.max(a, b);
+    return from === to ? from : { start: from, end: to };
+  }
+
+  function setSourceLineRoute(target: SourceFileTarget, line: SourceLineTarget) {
+    if (STATE.route.screen !== 'file') return;
+    setRoute({
+      screen: 'file',
+      path: target.path,
+      ref: target.ref,
+      view: STATE.route.view,
+      range: currentRange(),
+      line,
+    }, true);
+  }
+
+  function syncRenderedSourceLineHighlights(card: HTMLElement, target: SourceFileTarget) {
+    const lineTarget = currentSourceLineTarget(target);
+    card.querySelectorAll<HTMLElement>('[data-line]').forEach(row => {
+      const line = Number(row.dataset.line || '0');
+      row.classList.toggle('gdp-source-line-target', lineInSourceTarget(line, lineTarget));
+    });
+  }
+
+  function updateSourceLineSelection(card: HTMLElement, target: SourceFileTarget, start: number, end: number) {
+    setSourceLineRoute(target, normalizeSourceLineSelection(start, end));
+    syncRenderedSourceLineHighlights(card, target);
+  }
+
+  function beginSourceLineSelection(event: MouseEvent, card: HTMLElement, target: SourceFileTarget, line: number) {
+    event.preventDefault();
+    SOURCE_LINE_DRAG = { target, start: line };
+    updateSourceLineSelection(card, target, line, line);
+  }
+
+  function bindSourceLineNumber(num: HTMLElement, card: HTMLElement, target: SourceFileTarget, line: number) {
+    num.addEventListener('mousedown', e => beginSourceLineSelection(e, card, target, line));
+    num.addEventListener('mouseenter', () => {
+      if (!SOURCE_LINE_DRAG || !sourceTargetsEqual(SOURCE_LINE_DRAG.target, target)) return;
+      updateSourceLineSelection(card, target, SOURCE_LINE_DRAG.start, line);
+    });
+  }
+
+  document.addEventListener('mouseup', () => {
+    SOURCE_LINE_DRAG = null;
+  });
+
   function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement {
     const wrap = document.createElement('div');
     wrap.className = 'gdp-source-virtual';
@@ -2522,7 +2595,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     full.title = 'Render every line without virtualization. This can be slow for large files.';
     full.addEventListener('click', (e) => {
       e.preventDefault();
-      history.pushState(null, '', full.href);
+      const url = new URL(full.href, window.location.origin);
+      setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
       renderStandaloneSource(target);
     });
     actions.append(copy, full);
@@ -2556,9 +2630,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       for (let index = start; index < end; index++) {
         const row = document.createElement('div');
         row.className = 'gdp-source-virtual-row';
+        row.dataset.line = String(index + 1);
+        row.classList.toggle('gdp-source-line-target', lineInSourceTarget(index + 1, currentSourceLineTarget(target)));
         const num = document.createElement('span');
         num.className = 'gdp-source-virtual-line-number';
         num.textContent = String(index + 1);
+        bindSourceLineNumber(num, wrap, target, index + 1);
         const code = document.createElement('span');
         code.className = 'gdp-source-virtual-line-code';
         const line = lines[index] ?? '';
@@ -2795,7 +2872,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const rendered = await renderSourceText(card, target, textValue, controller.signal);
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
       if (!rendered) return;
-      scrollStandaloneSourceLine(card, STATE.route.screen === 'file' ? STATE.route.line : undefined);
+      scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
       finishSourceLoad(req);
       }
     } catch (err) {
@@ -2813,11 +2890,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!line || line < 1) return;
     const virtualScroller = card.querySelector<HTMLElement>('.gdp-source-virtual-scroller');
     if (virtualScroller) {
-      virtualScroller.scrollTop = Math.max(0, (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT);
+      const centeredOffset = (virtualScroller.clientHeight / 2) - (VIRTUAL_SOURCE_ROW_HEIGHT / 2);
+      virtualScroller.scrollTop = Math.max(0, (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - Math.max(0, centeredOffset));
       return;
     }
-    const rows = card.querySelectorAll<HTMLElement>('.gdp-source-table tr');
-    const row = rows[line - 1];
+    const row = card.querySelector<HTMLElement>('.gdp-source-table tr[data-line="' + String(line) + '"]');
     if (row) row.scrollIntoView({ block: 'center' });
   }
 
