@@ -247,13 +247,14 @@ describe('repository tree helpers', () => {
     }
   });
 
-  test('includes ignored filesystem directories in recursive worktree tree data', () => {
+  test('includes ignored filesystem files in recursive worktree tree data', () => {
     const dir = mkdtempSync(join(tmpdir(), 'code-viewer-recursive-tree-'));
     try {
       git(dir, ['init']);
-      writeFileSync(join(dir, '.gitignore'), 'ignored-dir/\n');
+      writeFileSync(join(dir, '.gitignore'), '*.mp3\n');
       mkdirSync(join(dir, 'ignored-dir'));
       writeFileSync(join(dir, 'ignored-dir', 'cache.txt'), 'cache');
+      writeFileSync(join(dir, 'ignored-dir', 'sound.mp3'), 'audio');
       writeFileSync(join(dir, 'ignored-root.log'), 'log');
 
       const result = listTree('worktree', '', dir, { recursive: true });
@@ -261,13 +262,62 @@ describe('repository tree helpers', () => {
       expect(result.entries.some(entry =>
         entry.name === 'ignored-dir' && entry.path === 'ignored-dir' && entry.type === 'tree',
       )).toBe(true);
-      expect(result.entries.find(entry => entry.path === 'ignored-dir')?.children_omitted).toBe(true);
+      expect(result.entries.find(entry => entry.path === 'ignored-dir')?.children_omitted).toBe(undefined);
+      expect(result.entries.some(entry =>
+        entry.name === 'cache.txt' && entry.path === 'ignored-dir/cache.txt' && entry.type === 'blob',
+      )).toBe(true);
+      expect(result.entries.some(entry =>
+        entry.name === 'sound.mp3' && entry.path === 'ignored-dir/sound.mp3' && entry.type === 'blob',
+      )).toBe(true);
       expect(result.entries.some(entry =>
         entry.name === 'ignored-root.log' && entry.path === 'ignored-root.log' && entry.type === 'blob',
       )).toBe(true);
 
       const direct = listTree('worktree', '', dir);
-      expect(direct.entries.find(entry => entry.path === 'ignored-dir')?.children_omitted).toBe(true);
+      expect(direct.entries.find(entry => entry.path === 'ignored-dir')?.children_omitted).toBe(undefined);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test('omits known heavy worktree directories from recursive tree data', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'code-viewer-heavy-tree-'));
+    try {
+      git(dir, ['init']);
+      writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
+      mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'pkg', 'index.js'), 'module');
+      mkdirSync(join(dir, 'sandbox'), { recursive: true });
+      writeFileSync(join(dir, 'sandbox', 'sound.mp3'), 'audio');
+
+      const result = listTree('worktree', '', dir, { recursive: true });
+
+      expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted).toBe(true);
+      expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted_reason).toBe('ignored');
+      expect(result.entries.some(entry => entry.path === 'node_modules/pkg/index.js')).toBe(false);
+      expect(result.entries.some(entry =>
+        entry.name === 'sound.mp3' && entry.path === 'sandbox/sound.mp3' && entry.type === 'blob',
+      )).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test('marks the .git directory as internal omitted tree data', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'code-viewer-internal-tree-'));
+    try {
+      git(dir, ['init']);
+      const result = listTree('worktree', '', dir, { recursive: true });
+
+      const gitEntry = result.entries.find(entry => entry.path === '.git');
+      expect(gitEntry).toEqual({
+        name: '.git',
+        path: '.git',
+        type: 'tree',
+        children_omitted: true,
+        children_omitted_reason: 'internal',
+      });
+      expect(result.entries.some(entry => entry.path.startsWith('.git/'))).toBe(false);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

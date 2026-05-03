@@ -807,16 +807,14 @@ html, body {
   z-index: 30;
 }
 body[data-focus-scope="sidebar"] #sidebar {
-  background: color-mix(in oklab, var(--bg-soft) 97%, var(--scope-accent) 3%);
-  outline: 1px solid color-mix(in oklab, var(--scope-accent) 58%, transparent);
-  outline-offset: -1px;
-  box-shadow: inset -3px 0 0 var(--scope-accent);
+  background: var(--bg-soft);
+  outline: none;
+  box-shadow: none;
 }
 body[data-focus-scope="main"] #content {
-  background: color-mix(in oklab, var(--bg) 98%, var(--scope-accent) 2%);
-  outline: 1px solid color-mix(in oklab, var(--scope-accent) 58%, transparent);
-  outline-offset: -1px;
-  box-shadow: inset 3px 0 0 var(--scope-accent);
+  background: var(--bg);
+  outline: none;
+  box-shadow: none;
 }
 .sb-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -1102,6 +1100,12 @@ body.gdp-help-page #content {
 #filelist.tree .tree-dir.children-omitted .dir-label {
   border-bottom: 1px dashed var(--border-strong);
 }
+#filelist.tree .tree-dir.children-omitted-ignored {
+  cursor: pointer;
+}
+#filelist.tree .tree-dir.children-omitted-internal {
+  cursor: default;
+}
 #filelist.tree .tree-dir .chev {
   display: flex;
   width: 16px;
@@ -1119,6 +1123,11 @@ body.gdp-help-page #content {
   display: block;
   width: 12px;
   height: 12px;
+}
+#filelist.tree .tree-dir .chev-spacer {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
 }
 #filelist.tree .tree-dir .dir-label {
   min-width: 0;
@@ -1140,7 +1149,7 @@ body.gdp-help-page #content {
 }
 #filelist.tree .tree-dir .dir-omitted {
   flex: 0 0 auto;
-  max-width: 54px;
+  max-width: 62px;
   overflow: hidden;
   text-overflow: ellipsis;
   border: 1px solid var(--border-muted);
@@ -1150,6 +1159,16 @@ body.gdp-help-page #content {
   font-size: 10px;
   line-height: 15px;
   text-transform: uppercase;
+}
+#filelist.tree .tree-dir .dir-omitted-ignored {
+  color: var(--accent);
+  border-color: var(--accent-muted);
+  background: var(--accent-subtle);
+}
+#filelist.tree .tree-dir .dir-omitted-internal {
+  color: var(--fg-subtle);
+  border-color: var(--border-muted);
+  background: var(--bg-soft);
 }
 #filelist.tree .tree-dir .dir-icon {
   color: #54aeff;
@@ -3244,7 +3263,7 @@ body.gdp-file-detail-page #empty {
   font-style: italic;
 }
 
-/* ===== Media (binary image/video) ===== */
+/* ===== Media (binary image/video/audio) ===== */
 .gdp-media {
   display: flex;
   gap: 16px;
@@ -3280,7 +3299,8 @@ body.gdp-file-detail-page #empty {
   color: var(--danger);
 }
 .gdp-media img,
-.gdp-media video {
+.gdp-media video,
+.gdp-media audio {
   max-width: 100%;
   max-height: 70vh;
   border: 1px solid var(--border);
@@ -3294,6 +3314,12 @@ body.gdp-file-detail-page #empty {
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
   object-fit: contain;
+}
+.gdp-media audio {
+  width: min(100%, 480px);
+  max-height: none;
+  padding: 8px;
+  background-image: none;
 }
 .gdp-media .media-empty {
   width: 100%;

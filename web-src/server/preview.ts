@@ -180,6 +180,7 @@ function guessMediaKind(path: string) {
   const ext = extname(path).slice(1).toLowerCase();
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico'].includes(ext)) return 'image';
   if (['mp4', 'webm', 'mov'].includes(ext)) return 'video';
+  if (['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'].includes(ext)) return 'audio';
   return null;
 }
 
@@ -641,7 +642,9 @@ function rawFileHeaders(path: string, size: number | null = null): HeadersInit {
   const mime: Record<string, string> = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm',
-    '.pdf': 'application/pdf',
+    '.mov': 'video/quicktime', '.pdf': 'application/pdf',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
+    '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.opus': 'audio/ogg',
   };
   const headers: Record<string, string> = {
     'Content-Type': mime[extname(path).toLowerCase()] || 'application/octet-stream',

@@ -25,6 +25,12 @@ describe('open path in OS action', () => {
     expect(server.includes('Bun.spawn(cmd, { stdout:')).toBe(true);
   });
 
+  test('server forbids browsing Git internal tree paths', () => {
+    expect(server.includes('function isGitInternalPath(path: string): boolean')).toBe(true);
+    expect(server.includes("if ((target === 'worktree' || target === '') && isGitInternalPath(path)) return text('forbidden', 403)")).toBe(true);
+    expect(server.includes('if (isGitInternalPath(path)) return null')).toBe(true);
+  });
+
   test('UI adds open actions to directory-oriented surfaces', () => {
     expect(app.includes("createOpenPathButton(dir.path, 'directory', 'open this folder in OS')")).toBe(true);
     expect(app.includes("createOpenPathButton(target.path, 'file-parent', 'open parent folder in OS')")).toBe(true);

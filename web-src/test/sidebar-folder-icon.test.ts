@@ -29,11 +29,25 @@ describe('sidebar folder icons', () => {
 
   test('marks intentionally omitted directory children in the sidebar', () => {
     expect(appSource.includes('children_omitted?: true')).toBe(true);
+    expect(appSource.includes("children_omitted_reason?: RepoTreeEntry['children_omitted_reason']")).toBe(true);
     expect(appSource.includes('f.children_omitted === true')).toBe(true);
     expect(appSource.includes("li.classList.add('children-omitted')")).toBe(true);
-    expect(appSource.includes("omitted.className = 'dir-omitted'")).toBe(true);
+    expect(appSource.includes("li.classList.add(dir.children_omitted_reason === 'ignored' ? 'children-omitted-ignored' : 'children-omitted-internal')")).toBe(true);
+    expect(appSource.includes("omitted.className = 'dir-omitted ' +")).toBe(true);
+    expect(appSource.includes("omitted.textContent = dir.children_omitted_reason === 'ignored' ? 'ignored' : 'private'")).toBe(true);
+    expect(appSource.includes("if (dir.children_omitted) {\n          chev.className = 'chev-spacer';")).toBe(true);
+    expect(appSource.includes('if (!dir.children_omitted) {\n          chev.addEventListener')).toBe(true);
+    expect(appSource.includes("if (dir.children_omitted_reason === 'internal') return;")).toBe(true);
+    expect(appSource.includes("if (dir.children_omitted_reason !== 'internal')")).toBe(true);
     expect(appSource.includes('children_omitted: entry.children_omitted')).toBe(true);
+    expect(appSource.includes('children_omitted_reason: entry.children_omitted_reason')).toBe(true);
     expect(style.includes('#filelist.tree .tree-dir.children-omitted')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir.children-omitted-ignored')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir.children-omitted-internal')).toBe(true);
     expect(style.includes('#filelist.tree .tree-dir .dir-omitted')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir .dir-omitted-ignored')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir .dir-omitted-internal')).toBe(true);
+    expect(style.includes('#filelist.tree .tree-dir .chev-spacer')).toBe(true);
+    expect(style.includes('height: 16px;\n  display: inline-block;')).toBe(true);
   });
 });
