@@ -38,6 +38,7 @@ export type RepoTreeEntry = {
   path: string;
   type: 'tree' | 'blob' | 'commit';
   children_omitted?: true;
+  children_omitted_reason?: 'ignored' | 'internal';
 };
 
 export type RepoTreeResponse = {

@@ -100,6 +100,19 @@ describe('view file UI', () => {
     expect(app.includes('await response.text()')).toBe(true);
   });
 
+  test('repository file view previews browser-playable audio files', () => {
+    expect(app.includes("function sourceDisplayKind(path: string): 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'unsupported'")).toBe(true);
+    expect(app.includes("if (isAudio(path)) return 'audio'")).toBe(true);
+    expect(app.includes("displayKind === 'audio'")).toBe(true);
+    expect(app.includes("mediaKind === 'audio'")).toBe(true);
+    expect(app.includes("document.createElement('audio')")).toBe(true);
+    expect(app.includes("const AUDIO_RE = /\\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i")).toBe(true);
+    expect(app.includes("if (isVideo(path)) return 'video';\n    if (isAudio(path)) return 'audio';")).toBe(true);
+    expect(app.includes("if (ext === 'mid' || ext === 'midi') return 'MIDI file'")).toBe(true);
+    expect(app.includes("return '<audio src=\"' + url + '\" controls preload=\"metadata\"></audio>'")).toBe(true);
+    expect(style.includes('.gdp-media audio')).toBe(true);
+  });
+
   test('repository file view treats common source and config formats as text', () => {
     expect(app.includes('TEXT_SOURCE_EXTENSIONS')).toBe(true);
     expect(app.includes('...Object.keys(EXT_TO_LANG)')).toBe(true);
@@ -144,6 +157,11 @@ describe('view file UI', () => {
     expect(server.includes("'X-Content-Type-Options': 'nosniff'")).toBe(true);
     expect(server.includes("'Content-Security-Policy': 'sandbox'")).toBe(true);
     expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
+    expect(server.includes("'.mp3': 'audio/mpeg'")).toBe(true);
+    expect(server.includes("'.wav': 'audio/wav'")).toBe(true);
+    expect(server.includes("'.m4a': 'audio/mp4'")).toBe(true);
+    expect(server.includes("'.mov': 'video/quicktime'")).toBe(true);
+    expect(server.includes("'.mid': 'audio/midi'")).toBe(false);
   });
 
   test('raw file HEAD requests validate refs and paths before returning metadata', () => {
@@ -257,11 +275,32 @@ describe('view file UI', () => {
 
   test('repository blob sidebar directory entries navigate to folder detail', () => {
     expect(app.includes("if (onFileClick) {\n          li.addEventListener('click'")).toBe(true);
-    expect(app.includes("onFileClick({ path: dir.path, display_path: dir.path, type: 'tree', children_omitted: dir.children_omitted })")).toBe(true);
-    expect(app.includes("chev.addEventListener('click', toggleDir)")).toBe(true);
+    expect(app.includes("if (dir.children_omitted_reason !== 'internal')")).toBe(true);
+    expect(app.includes('children_omitted_reason: dir.children_omitted_reason')).toBe(true);
+    expect(app.includes("if (!dir.children_omitted) {\n          chev.addEventListener('click', toggleDir)")).toBe(true);
     expect(app.includes("if (file.type === 'tree')")).toBe(true);
     expect(app.includes("setRoute(repoRoute(normalizedRef, file.path))")).toBe(true);
     expect(app.includes('loadRepo()')).toBe(true);
+  });
+
+  test('repository sidebar view toggle preserves repository click behavior', () => {
+    expect(app.includes('let SIDEBAR_FILES: SidebarItem[] = []')).toBe(true);
+    expect(app.includes('let SIDEBAR_ON_FILE_CLICK: ((file: SidebarItem) => void) | undefined')).toBe(true);
+    expect(app.includes('SIDEBAR_FILES = files;')).toBe(true);
+    expect(app.includes('SIDEBAR_ON_FILE_CLICK = onFileClick;')).toBe(true);
+    expect(app.includes('renderSidebar(SIDEBAR_FILES, SIDEBAR_ON_FILE_CLICK);')).toBe(true);
+  });
+
+  test('repository file detail reveals its active path in the tree sidebar', () => {
+    expect(app.includes('function sidebarAncestorDirs(path: string): string[]')).toBe(true);
+    expect(app.includes('function expandSidebarAncestors(path: string)')).toBe(true);
+    expect(app.includes('STATE.collapsedDirs.delete(dir)')).toBe(true);
+    expect(app.includes("localStorage.setItem('gdp:collapsed-dirs', JSON.stringify([...STATE.collapsedDirs]))")).toBe(true);
+    expect(app.includes('function markActive(path: string, options: { reveal?: boolean } = {})')).toBe(true);
+    expect(app.includes("if (options.reveal && STATE.sbView === 'tree') expandSidebarAncestors(path);")).toBe(true);
+    expect(app.includes("const active = document.querySelector<HTMLElement>('#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]')")).toBe(true);
+    expect(app.includes('requestAnimationFrame(() => scrollSidebarItemIntoView(active));')).toBe(true);
+    expect(app.includes('markActive(currentPath, { reveal: true });')).toBe(true);
   });
 
   test('repository sidebar supports visible-row keyboard navigation', () => {
@@ -316,7 +355,7 @@ describe('view file UI', () => {
     expect(app.includes('focusMainPanel();')).toBe(true);
     expect(app.includes('focusSidebarPanel();')).toBe(true);
     expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
-    expect(app.includes('onFileClick({ path: dir.path, display_path: dir.path, type:')).toBe(true);
+    expect(app.includes('onFileClick({\n                path: dir.path,')).toBe(true);
     expect(app.includes('composing: e.isComposing')).toBe(true);
     expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
     expect(app.includes("if (action === 'start-g-sequence')")).toBe(true);
