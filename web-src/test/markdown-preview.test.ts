@@ -141,6 +141,8 @@ describe('markdown preview', () => {
   test('markdown preview CSS includes TOC, tables, mermaid, and lightbox styling', () => {
     expect(style.includes('.gdp-markdown-layout')).toBe(true);
     expect(style.includes('.gdp-markdown-toc')).toBe(true);
+    expect(style.includes('.gdp-standalone-source .gdp-markdown-layout')).toBe(true);
+    expect(style.includes('.gdp-standalone-source .gdp-markdown-toc')).toBe(true);
     expect(style.includes('.gdp-markdown-preview table')).toBe(true);
     expect(style.includes('.gdp-markdown-preview .mermaid')).toBe(true);
     expect(style.includes('.mkdp-lightbox')).toBe(true);

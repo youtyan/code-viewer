@@ -38,7 +38,7 @@ export type RepoTreeEntry = {
   path: string;
   type: 'tree' | 'blob' | 'commit';
   children_omitted?: true;
-  children_omitted_reason?: 'ignored' | 'internal';
+  children_omitted_reason?: 'heavy' | 'internal' | 'truncated';
 };
 
 export type RepoTreeResponse = {
@@ -52,6 +52,15 @@ export type RepoTreeResponse = {
     path: string;
     text: string;
   } | null;
+};
+
+export type SettingsResponse = {
+  project: string;
+  scope: {
+    omit_dirs_effective: string[];
+    omit_dirs_built_in: string[];
+    max_entries: number;
+  };
 };
 
 export type FileSearchListResponse = {
