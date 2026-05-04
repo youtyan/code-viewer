@@ -251,7 +251,7 @@ describe('repository tree helpers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'code-viewer-recursive-tree-'));
     try {
       git(dir, ['init']);
-      writeFileSync(join(dir, '.gitignore'), '*.mp3\n');
+      writeFileSync(join(dir, '.gitignore'), 'ignored-dir/\n*.mp3\n');
       mkdirSync(join(dir, 'ignored-dir'));
       writeFileSync(join(dir, 'ignored-dir', 'cache.txt'), 'cache');
       writeFileSync(join(dir, 'ignored-dir', 'sound.mp3'), 'audio');
@@ -293,11 +293,27 @@ describe('repository tree helpers', () => {
       const result = listTree('worktree', '', dir, { recursive: true });
 
       expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted).toBe(true);
-      expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted_reason).toBe('ignored');
+      expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted_reason).toBe('heavy');
       expect(result.entries.some(entry => entry.path === 'node_modules/pkg/index.js')).toBe(false);
       expect(result.entries.some(entry =>
         entry.name === 'sound.mp3' && entry.path === 'sandbox/sound.mp3' && entry.type === 'blob',
       )).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test('allows overriding heavy worktree directory omissions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'code-viewer-heavy-override-tree-'));
+    try {
+      git(dir, ['init']);
+      mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'pkg', 'index.js'), 'module');
+
+      const result = listTree('worktree', '', dir, { recursive: true, omitDirNames: [] });
+
+      expect(result.entries.find(entry => entry.path === 'node_modules')?.children_omitted).toBe(undefined);
+      expect(result.entries.some(entry => entry.path === 'node_modules/pkg/index.js')).toBe(true);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

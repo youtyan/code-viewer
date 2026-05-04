@@ -12,10 +12,11 @@ export function normalizeGrepMax(value: string | null): number {
   return Math.min(parsed, GREP_ABSOLUTE_MAX);
 }
 
-export function isSkippableSearchPath(path: string): boolean {
+export function isSkippableSearchPath(path: string, omitDirNames: string[] = []): boolean {
+  const omitDirs = new Set(omitDirNames.map(name => name.toLowerCase()));
   return path.split(/[\\/]+/).some(part => {
     const lower = part.toLowerCase();
-    return lower === '.git' || lower === 'node_modules';
+    return lower === '.git' || omitDirs.has(lower);
   });
 }
 
@@ -51,8 +52,9 @@ export function buildFileSearchList(ref: string, generation: number, entries: Gi
   };
 }
 
-export function buildRgArgs(query: string, max: number, paths: string[], regex = false): string[] {
+export function buildRgArgs(query: string, max: number, paths: string[], regex = false, omitDirNames: string[] = []): string[] {
   const safePaths = paths.length ? paths : ['.'];
+  const omitGlobs = omitDirNames.flatMap(name => ['--glob', `!${name}/**`, '--glob', `!**/${name}/**`]);
   const args = [
     'rg',
     '--no-config',
@@ -66,6 +68,7 @@ export function buildRgArgs(query: string, max: number, paths: string[], regex =
     String(max),
     '--max-filesize',
     '2M',
+    ...omitGlobs,
     '-e',
     query,
     '--',
@@ -75,7 +78,7 @@ export function buildRgArgs(query: string, max: number, paths: string[], regex =
   return args;
 }
 
-export function parseRgOutput(stdout: string, max: number): GrepMatch[] {
+export function parseRgOutput(stdout: string, max: number, omitDirNames: string[] = []): GrepMatch[] {
   const matches: GrepMatch[] = [];
   for (const line of stdout.split('\n')) {
     if (!line || matches.length >= max) continue;
@@ -85,17 +88,17 @@ export function parseRgOutput(stdout: string, max: number): GrepMatch[] {
     const lineNo = Number(parsed[2]);
     const column = Number(parsed[3]);
     const preview = parsed[4];
-    if (!path || !lineNo || !column || isSkippableSearchPath(path)) continue;
+    if (!path || !lineNo || !column || isSkippableSearchPath(path, omitDirNames)) continue;
     matches.push({ path, line: lineNo, column, preview: preview.slice(0, 500) });
   }
   return matches;
 }
 
-export function parseGitGrepOutput(stdout: string, ref: string, max: number): GrepMatch[] {
+export function parseGitGrepOutput(stdout: string, ref: string, max: number, omitDirNames: string[] = []): GrepMatch[] {
   const prefix = ref + ':';
   const normalized = stdout
     .split('\n')
     .map(line => line.startsWith(prefix) ? line.slice(prefix.length) : line)
     .join('\n');
-  return parseRgOutput(normalized, max);
+  return parseRgOutput(normalized, max, omitDirNames);
 }
