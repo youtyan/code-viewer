@@ -10,7 +10,7 @@ describe('upload files endpoint security', () => {
     expect(server.includes('let allowUpload = false')).toBe(true);
     expect(server.includes('function loadProjectConfigUploadEnabled(): boolean')).toBe(true);
     expect(server.includes("'.code-viewer.json'")).toBe(true);
-    expect(server.includes("config.upload.enabled === true")).toBe(true);
+    expect(server.includes("config?.upload?.enabled === true")).toBe(true);
     expect(server.includes("arg === '--allow-upload'")).toBe(true);
     expect(server.includes("if (url.pathname === '/_upload_files') return handleUploadFiles(req)")).toBe(true);
     expect(server.includes("if (!allowUpload) return text('upload disabled', 403)")).toBe(true);

@@ -28,10 +28,15 @@ describe('view file UI', () => {
     const html = readFileSync('web/index.html', 'utf8');
     expect(html.includes('class="app-menu"')).toBe(true);
     expect(html.includes('Diff Viewer')).toBe(true);
+    expect(html.includes('class="global-help-link"')).toBe(true);
     expect(html.includes('data-route="help"')).toBe(true);
     expect(html.includes('href="/help"')).toBe(true);
     expect(app.includes('function syncHeaderMenu()')).toBe(true);
+    expect(app.includes("document.querySelectorAll<HTMLAnchorElement>('.app-menu-item, .global-help-link')")).toBe(true);
     expect(style.includes('.app-menu-item.active')).toBe(true);
+    expect(style.includes('font-size: 15px')).toBe(true);
+    expect(style.includes('height: 32px')).toBe(true);
+    expect(style.includes('.global-help-link')).toBe(true);
   });
 
   test('deleted files view old_path at the from ref', () => {
@@ -64,7 +69,7 @@ describe('view file UI', () => {
 
   test('repository blob routes render source without waiting for diff metadata', () => {
     expect(app.includes("STATE.route.screen === 'file' && STATE.route.view === 'blob'")).toBe(true);
-    expect(app.includes("setStatus('live');\n    applySourceRouteToShell();")).toBe(true);
+    expect(app.includes("setStatus('live');\n      applySourceRouteToShell();")).toBe(true);
     expect(app.includes("if (STATE.route.screen === 'file') {\n        empty.classList.add('hidden');\n        applySourceRouteToShell();")).toBe(true);
   });
 
@@ -263,6 +268,9 @@ describe('view file UI', () => {
     expect(app.includes("nav.className = 'gdp-file-breadcrumb'")).toBe(true);
     expect(app.includes("copy.className = 'gdp-file-header-icon gdp-copy-path'")).toBe(true);
     expect(style.includes('.gdp-file-breadcrumb')).toBe(true);
+    expect(style.includes('font-weight: 500;\n  line-height: 24px;')).toBe(true);
+    expect(style.includes('.gdp-file-breadcrumb-part {\n  font-weight: 500;\n}')).toBe(true);
+    expect(style.includes('.gdp-file-breadcrumb-current {\n  color: var(--fg);\n  font-weight: 600;')).toBe(true);
   });
 
   test('file detail breadcrumb directory parts navigate to repository folders', () => {
@@ -275,7 +283,7 @@ describe('view file UI', () => {
 
   test('repository blob sidebar directory entries navigate to folder detail', () => {
     expect(app.includes("if (onFileClick) {\n          li.addEventListener('click'")).toBe(true);
-    expect(app.includes("if (dir.children_omitted_reason !== 'internal')")).toBe(true);
+    expect(app.includes("dir.children_omitted_reason === 'internal' || dir.children_omitted_reason === 'truncated'")).toBe(true);
     expect(app.includes('children_omitted_reason: dir.children_omitted_reason')).toBe(true);
     expect(app.includes("if (!dir.children_omitted) {\n          chev.addEventListener('click', toggleDir)")).toBe(true);
     expect(app.includes("if (file.type === 'tree')")).toBe(true);
@@ -289,6 +297,117 @@ describe('view file UI', () => {
     expect(app.includes('SIDEBAR_FILES = files;')).toBe(true);
     expect(app.includes('SIDEBAR_ON_FILE_CLICK = onFileClick;')).toBe(true);
     expect(app.includes('renderSidebar(SIDEBAR_FILES, SIDEBAR_ON_FILE_CLICK);')).toBe(true);
+  });
+
+  test('viewer settings expose repository scope and readable font controls', () => {
+    const html = readFileSync('web/index.html', 'utf8');
+    expect(html.includes('id="viewer-settings"')).toBe(true);
+    expect(html.includes('id="sb-scope-settings"')).toBe(false);
+    expect(html.includes('id="scope-settings-popover"')).toBe(true);
+    expect(html.includes('Viewer Settings')).toBe(true);
+    expect(html.includes('File list font size')).toBe(true);
+    expect(html.includes('Code font size')).toBe(true);
+    expect(html.includes('Extra Large')).toBe(true);
+    expect(html.includes('rows="9"')).toBe(true);
+    expect(html.includes('id="sidebar-font-size"')).toBe(true);
+    expect(html.includes('id="code-font-size"')).toBe(true);
+    expect(html.includes('id="scope-omit-dirs"')).toBe(true);
+    expect(app.includes("const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = 'gdp:scope-omit-dirs:'")).toBe(true);
+    expect(app.includes("const SIDEBAR_FONT_SIZE_STORAGE_KEY = 'gdp:sidebar-font-size'")).toBe(true);
+    expect(app.includes("const CODE_FONT_SIZE_STORAGE_KEY = 'gdp:code-font-size'")).toBe(true);
+    expect(app.includes('function normalizeScopeOmitDirs')).toBe(true);
+    expect(app.includes('function normalizeViewerFontSize')).toBe(true);
+    expect(app.includes("value === 'compact' || value === 'large' || value === 'xlarge'")).toBe(true);
+    expect(app.includes('function applySidebarFontSize')).toBe(true);
+    expect(app.includes('function applyCodeFontSize')).toBe(true);
+    expect(app.includes('function appendScopeOmitDirsParam(params: URLSearchParams)')).toBe(true);
+    expect(app.includes("params.set('omit_dirs', saved.join(','))")).toBe(true);
+    expect(app.includes('function repoFileCacheKey(ref: string): string')).toBe(true);
+    expect(app.includes('loadSettings().finally(() => {')).toBe(true);
+    expect(app.includes("fetch('/_settings')")).toBe(true);
+    expect(app.includes('settings.scope.omit_dirs_effective')).toBe(true);
+    expect(app.includes('localStorage.setItem(scopeOmitDirsStorageKey()')).toBe(true);
+    expect(app.includes('localStorage.removeItem(scopeOmitDirsStorageKey())')).toBe(true);
+    expect(app.includes("$('#viewer-settings')?.addEventListener('click', openScopeSettings)")).toBe(true);
+    expect(style.includes('body[data-sidebar-font-size="large"] #sidebar')).toBe(true);
+    expect(style.includes('body[data-sidebar-font-size="xlarge"] #sidebar')).toBe(true);
+    expect(style.includes('body[data-code-font-size="large"]')).toBe(true);
+    expect(style.includes('body[data-code-font-size="xlarge"]')).toBe(true);
+    expect(style.includes('font-size: var(--code-font-size)')).toBe(true);
+    expect(style.includes('font-size: var(--sidebar-file-font)')).toBe(true);
+    expect(style.includes('min-height: 210px')).toBe(true);
+    expect(style.includes('#scope-settings-popover')).toBe(true);
+  });
+
+  test('global sidebar toggle hides and restores the left sidebar', () => {
+    const html = readFileSync('web/index.html', 'utf8');
+    expect(html.includes('id="sidebar-toggle"')).toBe(true);
+    expect((html.match(/class="app-menu-item active"/g) || []).length).toBe(1);
+    expect(app.includes('sidebarHidden: boolean')).toBe(true);
+    expect(app.includes("sidebarHidden: localStorage.getItem('gdp:sidebar-hidden') === '1'")).toBe(true);
+    expect(app.includes('function applySidebarHidden')).toBe(true);
+    expect(app.includes("document.body.classList.toggle('gdp-sidebar-hidden', hidden)")).toBe(true);
+    expect(app.includes("localStorage.setItem('gdp:sidebar-hidden', hidden ? '1' : '0')")).toBe(true);
+    expect(app.includes("$('#sidebar-toggle')?.addEventListener('click', toggleSidebarHidden)")).toBe(true);
+    expect(app.includes('function attachSidebarToggle(host: HTMLElement)')).toBe(true);
+    expect(app.includes('function placeSidebarToggle()')).toBe(true);
+    expect(app.includes("document.querySelector<HTMLElement>('#topbar')")).toBe(true);
+    expect(app.includes('if (STATE.sidebarHidden && restoreHost) attachSidebarToggle(restoreHost)')).toBe(true);
+    expect(app.includes('target.appendChild(shell);\n    placeSidebarToggle();')).toBe(true);
+    expect(app.includes('root.replaceChildren(layout);\n    } else {\n      root.prepend(card);\n    }\n    placeSidebarToggle();')).toBe(true);
+    expect(app.includes('if (STATE.sidebarHidden) applySidebarHidden(false);\n      focusSidebarPanel();')).toBe(true);
+    expect(style.includes('body.gdp-sidebar-hidden #sidebar')).toBe(true);
+    expect(style.includes('body.gdp-sidebar-hidden #content')).toBe(true);
+    expect(style.includes('body.gdp-repo-page .sb-title')).toBe(true);
+    expect(style.includes('body.gdp-repo-page #totals')).toBe(true);
+    expect(style.includes('body.gdp-repo-page .sb-head')).toBe(true);
+    expect(style.includes('grid-template:\n    "toggle ref actions view" auto\n    / 28px minmax(80px, 240px) auto auto;')).toBe(true);
+    expect(style.includes('grid-area: toggle')).toBe(true);
+    expect(style.includes('grid-area: ref')).toBe(true);
+    expect(style.includes('grid-area: actions')).toBe(true);
+    expect(style.includes('grid-area: view')).toBe(true);
+    expect(style.includes('body.gdp-repo-page #repo-target-wrap')).toBe(true);
+    expect(style.includes('.ref-selector.ref-selector-in-grid { width: 100%; }')).toBe(true);
+    expect(style.includes('body.gdp-repo-page:not(.gdp-sidebar-hidden) .gdp-repo-toolbar > .ref-selector')).toBe(true);
+    expect(style.includes('margin-left: 0;')).toBe(true);
+  });
+
+  test('all ref pickers share the same GitHub-style selector UI', () => {
+    const html = readFileSync('web/index.html', 'utf8');
+    expect(html.includes('data-ref-id="ref-from"')).toBe(true);
+    expect(html.includes('data-ref-id="ref-to"')).toBe(true);
+    expect(html.includes('data-ref-id="repo-target"')).toBe(true);
+    expect((html.match(/data-ref-selector-mount/g)?.length || 0) >= 3).toBe(true);
+    expect(app.includes('function createRefSelectorInput')).toBe(true);
+    expect(app.includes('function hydrateRefSelectorMounts')).toBe(true);
+    expect(app.includes('function wireRefSelectorInput')).toBe(true);
+    expect(app.includes("id: 'repo-ref'")).toBe(true);
+    expect(html.includes('data-extra-class="ref-selector-in-grid"')).toBe(true);
+    expect(app.includes("extraClass: 'ref-selector-compact'")).toBe(false);
+    expect(app.includes("pickedTarget.dispatchEvent(new Event('change'))")).toBe(true);
+    expect(app.includes("wireRefSelectorInput($<HTMLInputElement>('#repo-target')")).toBe(true);
+    expect(app.includes('function syncRefSelectorChrome')).toBe(false);
+    expect(app.includes('wireRepoTargetPicker')).toBe(false);
+    expect(app.includes("targetPickerWrap.className = 'ref-selector")).toBe(false);
+    expect(app.includes("el.id === 'repo-ref' || el.id === 'repo-target'")).toBe(false);
+    expect(app.match(/focusin[^}]*(repo-ref|repo-target)/s)).toBeNull();
+    expect(style.includes('.ref-selector {\n  display: flex;')).toBe(true);
+    expect(style.includes('flex: 0 0 auto;\n  gap: 8px;')).toBe(true);
+    expect(style.includes('width: 220px;\n  height: 32px;')).toBe(true);
+    expect(style.match(/\.ref-selector\s*\{[^}]*?\bwidth:\s*(\d+)px/s)?.[1]).toBe('220');
+    expect(style.includes('.ref-selector .ref-input')).toBe(true);
+    expect(style.match(/^\.ref-input\s*\{/m)).toBeNull();
+    expect(style.includes('.ref-selector-compact')).toBe(false);
+    expect(style.match(/^#repo-target-wrap\s*\{/m)).toBeNull();
+    expect(style.includes('.repo-target-icon')).toBe(false);
+    expect(style.includes('.repo-target-caret')).toBe(false);
+    expect(style.includes('.gdp-repo-target')).toBe(false);
+  });
+
+  test('project name from settings updates the document title before repository rendering', () => {
+    expect(app.includes('function setProjectName(project: string)')).toBe(true);
+    expect(app.includes("document.title = project + ' - code viewer'")).toBe(true);
+    expect(app.includes("setProjectName(settings.project || '')")).toBe(true);
   });
 
   test('repository file detail reveals its active path in the tree sidebar', () => {
@@ -355,7 +474,7 @@ describe('view file UI', () => {
     expect(app.includes('focusMainPanel();')).toBe(true);
     expect(app.includes('focusSidebarPanel();')).toBe(true);
     expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
-    expect(app.includes('onFileClick({\n                path: dir.path,')).toBe(true);
+    expect(app.includes('onFileClick({\n              path: dir.path,')).toBe(true);
     expect(app.includes('composing: e.isComposing')).toBe(true);
     expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
     expect(app.includes("if (action === 'start-g-sequence')")).toBe(true);

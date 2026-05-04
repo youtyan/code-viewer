@@ -25,20 +25,21 @@
     </a>
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
-      <a class="app-menu-item active" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
-      <a class="app-menu-item" data-route="help" href="/help">Help</a>
+      <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
     </nav>
     <div class="global-actions">
+      <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
+      <a class="global-help-link" data-route="help" href="/help">Help</a>
     </div>
   </header>
   <header id="topbar">
     <div id="meta"></div>
     <div class="ref-pickers">
-      <input class="ref-input" id="ref-from" placeholder="from…" autocomplete="off" readonly />
+      <span data-ref-selector-mount data-ref-id="ref-from" data-placeholder="from..."></span>
       <span class="ref-dots">…</span>
-      <input class="ref-input" id="ref-to"   placeholder="to…"   autocomplete="off" readonly />
+      <span data-ref-selector-mount data-ref-id="ref-to" data-placeholder="to..."></span>
       <button id="ref-reset" title="reset to HEAD .. worktree">×</button>
       <button id="reload-prom" title="reload diff (R)">↻</button>
     </div>
@@ -74,13 +75,11 @@
   <div id="load-bar" aria-hidden="true"></div>
 
   <aside id="sidebar">
-    <div id="repo-target-wrap" class="sb-repo-target" hidden>
-      <input id="repo-target" class="ref-input" type="text" placeholder="target…" title="repository target" autocomplete="off" readonly />
-    </div>
     <div class="sb-head">
       <span class="sb-title">Files</span>
       <span id="totals"></span>
-      <div class="sb-actions" role="group" aria-label="folder actions">
+      <span data-ref-selector-mount data-ref-id="repo-target" data-wrapper-id="repo-target-wrap" data-extra-class="ref-selector-in-grid" data-placeholder="target..." data-title="repository target" hidden></span>
+      <div class="sb-actions" role="group" aria-label="sidebar actions">
         <button id="sb-expand-all" class="sb-icon-action sb-tree-action" title="expand all folders" aria-label="expand all folders"></button>
         <button id="sb-collapse-all" class="sb-icon-action sb-tree-action" title="collapse all folders" aria-label="collapse all folders"></button>
       </div>
@@ -95,6 +94,44 @@
     <ul id="filelist"></ul>
     <div id="sidebar-resizer" aria-hidden="true"></div>
   </aside>
+  <button id="sidebar-toggle" title="hide sidebar" aria-label="hide sidebar">
+    <span class="sidebar-toggle-label">Files</span>
+  </button>
+
+  <div id="scope-settings-popover" hidden>
+    <div class="scope-settings-head">
+      <strong>Viewer Settings</strong>
+      <button id="scope-settings-close" type="button" aria-label="close viewer settings">×</button>
+    </div>
+    <div class="scope-settings-section">
+      <strong class="scope-settings-section-title">Display</strong>
+      <label for="sidebar-font-size">File list font size</label>
+      <select id="sidebar-font-size">
+        <option value="compact">Small</option>
+        <option value="regular">Regular</option>
+        <option value="large">Large</option>
+        <option value="xlarge">Extra Large</option>
+      </select>
+      <label for="code-font-size">Code font size</label>
+      <select id="code-font-size">
+        <option value="compact">Small</option>
+        <option value="regular">Regular</option>
+        <option value="large">Large</option>
+        <option value="xlarge">Extra Large</option>
+      </select>
+      <p id="display-settings-source">Applies to all projects in this browser.</p>
+    </div>
+    <div class="scope-settings-section">
+      <strong class="scope-settings-section-title">Excluded directories</strong>
+      <label for="scope-omit-dirs">Skip these directory names while browsing and searching</label>
+      <textarea id="scope-omit-dirs" rows="9" spellcheck="false"></textarea>
+      <p id="scope-omit-source"></p>
+      <div class="scope-settings-actions">
+        <button id="scope-omit-reset" type="button">Reset</button>
+        <button id="scope-omit-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
 
   <main id="content">
     <div id="empty" class="empty hidden">

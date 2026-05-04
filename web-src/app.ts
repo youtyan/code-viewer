@@ -26,6 +26,7 @@ import type {
   FileMeta,
   RepoTreeResponse,
   RepoTreeEntry,
+  SettingsResponse,
   GrepResponse,
   RefResponse,
 } from './types';
@@ -35,6 +36,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 (() => {
   type LayoutMode = 'side-by-side' | 'line-by-line';
   type SidebarView = 'tree' | 'flat';
+  type ViewerFontSize = 'compact' | 'regular' | 'large' | 'xlarge';
   type ThemeMode = 'light' | 'dark';
   type HelpLanguage = 'en' | 'ja';
   type HelpSection = 'keybindings';
@@ -103,6 +105,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     theme: ThemeMode;
     sbView: SidebarView;
     sbWidth: number;
+    sidebarHidden: boolean;
     collapsedDirs: Set<string>;
     ignoreWs: boolean;
     from: string;
@@ -141,8 +144,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   ];
   const FILE_16_PATH = 'M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z';
   const OPEN_EXTERNAL_16_PATH = 'M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z';
-  const UNFOLD_16_PATH = 'm8.177.677 2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25a.75.75 0 0 1-1.5 0V4H5.104a.25.25 0 0 1-.177-.427L7.823.677a.25.25 0 0 1 .354 0ZM7.25 10.75a.75.75 0 0 1 1.5 0V12h2.146a.25.25 0 0 1 .177.427l-2.896 2.896a.25.25 0 0 1-.354 0l-2.896-2.896A.25.25 0 0 1 5.104 12H7.25v-1.25Zm-5-2a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
-  const FOLD_16_PATH = 'M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z';
+  const GIT_BRANCH_16_PATH = 'M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z';
+  const TRIANGLE_DOWN_16_PATH = 'm4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z';
+  const SIDEBAR_SHOW_16_PATHS = [
+    'M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z',
+    'M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z',
+  ];
+  const SIDEBAR_HIDE_16_PATHS = [
+    'm4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z',
+    'M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z',
+  ];
+  const GEAR_16_PATH = 'M8 0a8.2 8.2 0 0 1 1.7.18.75.75 0 0 1 .6.86l-.14.93c.23.1.45.21.67.34l.73-.6a.75.75 0 0 1 1.03.08c.47.37.89.78 1.23 1.23a.75.75 0 0 1 .07 1.03l-.59.73c.13.22.24.44.34.67l.93-.14a.75.75 0 0 1 .86.6c.12.55.18 1.12.18 1.7s-.06 1.15-.18 1.7a.75.75 0 0 1-.86.6l-.93-.14c-.1.23-.21.45-.34.67l.59.73a.75.75 0 0 1-.07 1.03c-.34.45-.76.86-1.23 1.23a.75.75 0 0 1-1.03.08l-.73-.6c-.22.13-.44.24-.67.34l.14.93a.75.75 0 0 1-.6.86A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-1.7-.18.75.75 0 0 1-.6-.86l.14-.93a5.9 5.9 0 0 1-.67-.34l-.73.6a.75.75 0 0 1-1.03-.08 8.1 8.1 0 0 1-1.23-1.23.75.75 0 0 1-.07-1.03l.59-.73a5.9 5.9 0 0 1-.34-.67l-.93.14a.75.75 0 0 1-.86-.6A8.2 8.2 0 0 1 0 8c0-.58.06-1.15.18-1.7a.75.75 0 0 1 .86-.6l.93.14c.1-.23.21-.45.34-.67l-.59-.73a.75.75 0 0 1 .07-1.03 8.1 8.1 0 0 1 1.23-1.23.75.75 0 0 1 1.03-.08l.73.6c.22-.13.44-.24.67-.34l-.14-.93a.75.75 0 0 1 .6-.86A8.2 8.2 0 0 1 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z';
+  const EXPAND_ALL_16_PATHS = [
+    'M3.22 4.47a.75.75 0 0 1 1.06 0L8 8.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 5.53a.75.75 0 0 1 0-1.06Z',
+    'M3.22 8.47a.75.75 0 0 1 1.06 0L8 12.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 9.53a.75.75 0 0 1 0-1.06Z',
+  ];
+  const COLLAPSE_ALL_16_PATHS = [
+    'M7.47 2.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 3.81 4.28 7.53a.75.75 0 0 1-1.06-1.06Z',
+    'M7.47 6.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 7.81l-3.72 3.72a.75.75 0 1 1-1.06-1.06Z',
+  ];
 
   const $ = <T extends Element = HTMLElement>(sel: string): T => document.querySelector(sel) as T;
   const $$ = <T extends Element = HTMLElement>(sel: string): T[] => Array.from(document.querySelectorAll(sel)) as T[];
@@ -164,6 +184,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
   let SIDEBAR_FILES: SidebarItem[] = [];
   let SIDEBAR_ON_FILE_CLICK: ((file: SidebarItem) => void) | undefined;
+  let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
@@ -171,6 +192,15 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const HELP_LANGUAGES: HelpLanguage[] = ['en', 'ja'];
   const HELP_SECTIONS: HelpSection[] = ['keybindings'];
+  const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = 'gdp:scope-omit-dirs:';
+  const SIDEBAR_FONT_SIZE_STORAGE_KEY = 'gdp:sidebar-font-size';
+  const CODE_FONT_SIZE_STORAGE_KEY = 'gdp:code-font-size';
+  const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
+    'node_modules', '.venv', 'venv', '.next', '.nuxt', '.svelte-kit', '.astro', '.vercel',
+    'dist', 'build', 'out', 'target', '.gradle', '__pycache__', '.pytest_cache', '.tox',
+    '.terraform', '.idea', '.vscode', 'vendor', '.cache', 'coverage', 'DerivedData',
+    'Pods', 'bin', 'obj',
+  ];
   const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
     en: {
       languageLabel: 'Language',
@@ -342,6 +372,105 @@ window.GdpExpandLogic = GdpExpandLogic;
     REPO_SIDEBAR_LOAD = null;
   }
 
+  function normalizeScopeOmitDirs(value: string[] | string): string[] {
+    const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+    return [...new Set(raw
+      .map(item => item.trim())
+      .filter(item => item && item.length <= 64 && !item.includes('/') && !item.includes('\\') && item !== '.' && item !== '..' && item !== '.git'))]
+      .slice(0, 100)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function scopeOmitDirsStorageKey(): string {
+    return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || 'default');
+  }
+
+  function setProjectName(project: string) {
+    if (!project) return;
+    PROJECT_NAME = project;
+    document.title = project + ' - code viewer';
+  }
+
+  function savedScopeOmitDirs(): string[] | null {
+    const raw = localStorage.getItem(scopeOmitDirsStorageKey());
+    if (raw == null) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return normalizeScopeOmitDirs(raw);
+    }
+  }
+
+  function serverScopeOmitDirsDefault(): string[] {
+    return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
+  }
+
+  function effectiveScopeOmitDirs(): string[] {
+    return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
+  }
+
+  function appendScopeOmitDirsParam(params: URLSearchParams) {
+    const saved = savedScopeOmitDirs();
+    if (saved != null) params.set('omit_dirs', saved.join(','));
+  }
+
+  function normalizeViewerFontSize(value: unknown): ViewerFontSize {
+    return value === 'compact' || value === 'large' || value === 'xlarge' ? value : 'regular';
+  }
+
+  function savedSidebarFontSize(): ViewerFontSize {
+    return normalizeViewerFontSize(localStorage.getItem(SIDEBAR_FONT_SIZE_STORAGE_KEY));
+  }
+
+  function savedCodeFontSize(): ViewerFontSize {
+    return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
+  }
+
+  function applySidebarFontSize(size: ViewerFontSize = savedSidebarFontSize()) {
+    document.body.dataset.sidebarFontSize = size;
+  }
+
+  function applyCodeFontSize(size: ViewerFontSize = savedCodeFontSize()) {
+    document.body.dataset.codeFontSize = size;
+  }
+
+  function syncSidebarHeaderHeight() {
+    requestAnimationFrame(() => {
+      const head = document.querySelector<HTMLElement>('.sb-head');
+      if (head) document.documentElement.style.setProperty('--sidebar-head-h', Math.ceil(head.getBoundingClientRect().height) + 'px');
+    });
+  }
+
+  function observeSidebarHeaderHeight() {
+    const head = document.querySelector<HTMLElement>('.sb-head');
+    if (!head || typeof ResizeObserver === 'undefined') {
+      syncSidebarHeaderHeight();
+      return;
+    }
+    const observer = new ResizeObserver(syncSidebarHeaderHeight);
+    observer.observe(head);
+    syncSidebarHeaderHeight();
+  }
+
+  function repoFileCacheKey(ref: string): string {
+    const saved = savedScopeOmitDirs();
+    return `${ref}\0${saved ? saved.join('\0') : 'server'}`;
+  }
+
+  async function loadSettings(): Promise<SettingsResponse | null> {
+    try {
+      const res = await fetch('/_settings');
+      if (!res.ok) return null;
+      const settings = await res.json() as SettingsResponse;
+      setProjectName(settings.project || '');
+      SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
+      return settings;
+    } catch {
+      return null;
+    }
+  }
+
   function isRepoSidebarReusable(ref: string): boolean {
     return REPO_SIDEBAR_REF === (ref || 'worktree') && isRepositorySidebarMode();
   }
@@ -359,6 +488,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       theme:  (localStorage.getItem('gdp:theme') as ThemeMode)  || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
       sbView: (localStorage.getItem('gdp:sbview') as SidebarView) || 'tree',
       sbWidth: parseInt(localStorage.getItem('gdp:sbwidth')) || 308,
+      sidebarHidden: localStorage.getItem('gdp:sidebar-hidden') === '1',
       collapsedDirs: new Set<string>(JSON.parse(localStorage.getItem('gdp:collapsed-dirs') || '[]')),
       ignoreWs: igRaw === null ? true : igRaw === '1',
       from: route.range.from,
@@ -643,15 +773,116 @@ window.GdpExpandLogic = GdpExpandLogic;
     button.setAttribute('aria-pressed', expanded ? 'true' : 'false');
     button.title = expanded ? 'Collapse expanded lines' : 'Expand all lines';
     button.innerHTML = expanded
-      ? iconSvg('octicon-fold', FOLD_16_PATH)
-      : iconSvg('octicon-unfold', UNFOLD_16_PATH);
+      ? iconSvg('octicon-fold', COLLAPSE_ALL_16_PATHS)
+      : iconSvg('octicon-unfold', EXPAND_ALL_16_PATHS);
   }
 
   function setSidebarTreeActionIcons() {
+    const settings = document.querySelector<HTMLButtonElement>('#viewer-settings');
+    const sidebarToggle = document.querySelector<HTMLButtonElement>('#sidebar-toggle');
     const expand = document.querySelector<HTMLButtonElement>('#sb-expand-all');
     const collapse = document.querySelector<HTMLButtonElement>('#sb-collapse-all');
-    if (expand) expand.innerHTML = iconSvg('octicon-unfold', UNFOLD_16_PATH);
-    if (collapse) collapse.innerHTML = iconSvg('octicon-fold', FOLD_16_PATH);
+    if (settings) settings.innerHTML = iconSvg('octicon-gear', GEAR_16_PATH);
+    if (sidebarToggle) sidebarToggle.innerHTML = iconSvg('octicon-sidebar', STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+    if (expand) expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS);
+    if (collapse) collapse.innerHTML = iconSvg('octicon-chevron-up', COLLAPSE_ALL_16_PATHS);
+  }
+
+  function attachSidebarToggle(host: HTMLElement) {
+    const button = document.querySelector<HTMLButtonElement>('#sidebar-toggle');
+    if (!button || button.parentElement === host) return;
+    host.prepend(button);
+  }
+
+  function placeSidebarToggle() {
+    const sidebarHead = document.querySelector<HTMLElement>('.sb-head');
+    const toolbar = document.querySelector<HTMLElement>('.gdp-repo-toolbar, .gdp-file-detail-header');
+    const restoreHost = toolbar ||
+      document.querySelector<HTMLElement>('#topbar') ||
+      document.querySelector<HTMLElement>('#global-header');
+    if (STATE.sidebarHidden && restoreHost) attachSidebarToggle(restoreHost);
+    else if (sidebarHead) attachSidebarToggle(sidebarHead);
+  }
+
+  function applySidebarHidden(hidden = STATE.sidebarHidden) {
+    STATE.sidebarHidden = hidden;
+    document.body.classList.toggle('gdp-sidebar-hidden', hidden);
+    localStorage.setItem('gdp:sidebar-hidden', hidden ? '1' : '0');
+    const button = document.querySelector<HTMLButtonElement>('#sidebar-toggle');
+    if (button) {
+      button.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      button.title = hidden ? 'show sidebar' : 'hide sidebar';
+      button.setAttribute('aria-label', hidden ? 'show sidebar' : 'hide sidebar');
+    }
+    setSidebarTreeActionIcons();
+    placeSidebarToggle();
+    syncSidebarHeaderHeight();
+  }
+
+  function toggleSidebarHidden() {
+    applySidebarHidden(!STATE.sidebarHidden);
+  }
+
+  function scopeOmitSourceLabel(): string {
+    return savedScopeOmitDirs() != null
+      ? 'Browser override'
+      : 'Server default';
+  }
+
+  function refreshRepositoryTreeAfterSettings() {
+    REPO_FILE_CACHE.clear();
+    invalidateRepoSidebar();
+    if (STATE.route.screen === 'repo') {
+      loadRepo();
+      return;
+    }
+    const target = sourceTargetFromRoute();
+    if (target) renderRepoBlobSidebar(target.path, target.ref || 'worktree');
+  }
+
+  async function openScopeSettings() {
+    const pop = document.querySelector<HTMLElement>('#scope-settings-popover');
+    const input = document.querySelector<HTMLTextAreaElement>('#scope-omit-dirs');
+    const sidebarFontSize = document.querySelector<HTMLSelectElement>('#sidebar-font-size');
+    const codeFontSize = document.querySelector<HTMLSelectElement>('#code-font-size');
+    const source = document.querySelector<HTMLElement>('#scope-omit-source');
+    if (!pop || !input || !sidebarFontSize || !codeFontSize || !source) return;
+    await loadSettings();
+    sidebarFontSize.value = savedSidebarFontSize();
+    codeFontSize.value = savedCodeFontSize();
+    input.value = effectiveScopeOmitDirs().join('\n');
+    source.textContent = 'Saved for project "' + (PROJECT_NAME || 'default') + '" in this browser. Source: ' + scopeOmitSourceLabel() + '. Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.';
+    pop.hidden = false;
+    sidebarFontSize.focus();
+  }
+
+  function closeScopeSettings() {
+    const pop = document.querySelector<HTMLElement>('#scope-settings-popover');
+    if (pop) pop.hidden = true;
+  }
+
+  function saveScopeSettings() {
+    const input = document.querySelector<HTMLTextAreaElement>('#scope-omit-dirs');
+    const sidebarFontSize = document.querySelector<HTMLSelectElement>('#sidebar-font-size');
+    const codeFontSize = document.querySelector<HTMLSelectElement>('#code-font-size');
+    if (!input || !sidebarFontSize || !codeFontSize) return;
+    localStorage.setItem(SIDEBAR_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
+    localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
+    applySidebarFontSize();
+    applyCodeFontSize();
+    localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
+    closeScopeSettings();
+    refreshRepositoryTreeAfterSettings();
+  }
+
+  function resetScopeSettings() {
+    localStorage.removeItem(SIDEBAR_FONT_SIZE_STORAGE_KEY);
+    localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
+    applySidebarFontSize('regular');
+    applyCodeFontSize('regular');
+    localStorage.removeItem(scopeOmitDirsStorageKey());
+    closeScopeSettings();
+    refreshRepositoryTreeAfterSettings();
   }
 
 
@@ -725,9 +956,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (dir.explicit) li.dataset.explicit = 'true';
         if (dir.children_omitted) {
           li.classList.add('children-omitted');
-          li.classList.add(dir.children_omitted_reason === 'ignored' ? 'children-omitted-ignored' : 'children-omitted-internal');
-          li.title = dir.children_omitted_reason === 'ignored'
-            ? 'Ignored directory: open the detail pane to browse its contents'
+          li.classList.add(dir.children_omitted_reason === 'heavy' ? 'children-omitted-heavy' : 'children-omitted-internal');
+          li.title = dir.children_omitted_reason === 'heavy'
+            ? 'Large generated/vendor directory: open the detail pane to browse its contents'
             : 'Internal Git metadata is not browsed';
         }
         li.style.setProperty('--lvl-pad', (12 + depth * 14) + 'px');
@@ -752,9 +983,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         label.appendChild(dn);
         if (dir.children_omitted) {
           const omitted = document.createElement('span');
-          omitted.className = 'dir-omitted ' + (dir.children_omitted_reason === 'ignored' ? 'dir-omitted-ignored' : 'dir-omitted-internal');
-          omitted.textContent = dir.children_omitted_reason === 'ignored' ? 'ignored' : 'private';
-          omitted.title = dir.children_omitted_reason === 'ignored'
+          omitted.className = 'dir-omitted ' + (dir.children_omitted_reason === 'heavy' ? 'dir-omitted-heavy' : 'dir-omitted-internal');
+          omitted.textContent = dir.children_omitted_reason === 'heavy' ? 'skipped' : 'private';
+          omitted.title = dir.children_omitted_reason === 'heavy'
             ? 'Tree expansion is skipped, but the directory detail can be opened'
             : 'This directory cannot be opened from the browser';
           label.appendChild(omitted);
@@ -785,16 +1016,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (onFileClick) {
           li.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (dir.children_omitted_reason === 'internal') return;
-            if (dir.children_omitted_reason !== 'internal') {
-              onFileClick({
-                path: dir.path,
-                display_path: dir.path,
-                type: 'tree',
-                children_omitted: dir.children_omitted,
-                children_omitted_reason: dir.children_omitted_reason,
-              });
-            }
+            if (dir.children_omitted_reason === 'internal' || dir.children_omitted_reason === 'truncated') return;
+            onFileClick({
+              path: dir.path,
+              display_path: dir.path,
+              type: 'tree',
+              children_omitted: dir.children_omitted,
+              children_omitted_reason: dir.children_omitted_reason,
+            });
             focusSidebarPanel();
           });
         } else {
@@ -915,13 +1144,65 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!input || !wrap) return;
     input.value = ref || 'worktree';
     wrap.hidden = !(STATE.route.screen === 'file' && STATE.route.view === 'blob');
+    syncSidebarHeaderHeight();
+  }
+
+  function createRefSelectorInput(options: {
+    id: string;
+    placeholder: string;
+    title?: string;
+    wrapperId?: string;
+    extraClass?: string;
+    hidden?: boolean;
+    value?: string;
+  }): { wrap: HTMLDivElement; input: HTMLInputElement } {
+    const wrap = document.createElement('div');
+    wrap.className = 'ref-selector' + (options.extraClass ? ' ' + options.extraClass : '');
+    wrap.dataset.refSelector = '';
+    if (options.wrapperId) wrap.id = options.wrapperId;
+    if (options.hidden) wrap.hidden = true;
+
+    const icon = document.createElement('span');
+    icon.className = 'ref-selector-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = iconSvg('octicon-git-branch', GIT_BRANCH_16_PATH);
+
+    const input = document.createElement('input');
+    input.className = 'ref-input';
+    input.id = options.id;
+    input.readOnly = true;
+    input.autocomplete = 'off';
+    input.placeholder = options.placeholder;
+    if (options.title) input.title = options.title;
+    if (options.value != null) input.value = options.value;
+
+    const caret = document.createElement('span');
+    caret.className = 'ref-selector-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    caret.innerHTML = iconSvg('octicon-triangle-down', TRIANGLE_DOWN_16_PATH);
+
+    wrap.append(icon, input, caret);
+    return { wrap, input };
+  }
+
+  function hydrateRefSelectorMounts() {
+    document.querySelectorAll<HTMLElement>('[data-ref-selector-mount]').forEach(mount => {
+      const { wrap } = createRefSelectorInput({
+        id: mount.dataset.refId || '',
+        placeholder: mount.dataset.placeholder || 'ref...',
+        title: mount.dataset.title,
+        wrapperId: mount.dataset.wrapperId,
+        extraClass: mount.dataset.extraClass,
+        hidden: mount.hidden,
+      });
+      mount.replaceWith(wrap);
+    });
   }
 
   function renderMeta(meta: DiffMeta | null) {
     const el = $('#meta');
     if (!meta) { el.textContent = ''; return; }
-    PROJECT_NAME = meta.project || PROJECT_NAME;
-    document.title = (meta.project ? meta.project + ' - ' : '') + 'code viewer';
+    setProjectName(meta.project || '');
     el.innerHTML = '';
     if (meta.branch) {
       const b = document.createElement('span');
@@ -1211,7 +1492,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function syncHeaderMenu() {
-    document.querySelectorAll<HTMLAnchorElement>('.app-menu-item').forEach(link => {
+    document.querySelectorAll<HTMLAnchorElement>('.app-menu-item, .global-help-link').forEach(link => {
       const fileRouteOwner = STATE.route.screen === 'file' && STATE.route.view === 'blob' ? 'repo' : 'diff';
       const active = link.dataset.route === STATE.route.screen || (STATE.route.screen === 'file' && link.dataset.route === fileRouteOwner);
       link.classList.toggle('active', active);
@@ -1543,28 +1824,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     return { screen: 'repo', ref: ref || 'worktree', path, range: currentRange() };
   }
 
-  function wireRepoTargetPicker(input: HTMLInputElement, onPick: (ref: string) => void) {
-    input.addEventListener('focus', () => openPopover(input));
-    input.addEventListener('click', (e) => {
+  function wireRefSelectorInput(input: HTMLInputElement, onPick?: (ref: string) => void) {
+    const wrap = input.closest<HTMLElement>('[data-ref-selector]');
+    wrap?.addEventListener('click', (e) => {
       e.stopPropagation();
       openPopover(input);
     });
-    input.addEventListener('mousedown', (e) => {
-      if (popover.hidden) {
-        e.preventDefault();
-        input.focus();
-      }
-    });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        closePopover();
+        openPopover(input);
       } else if (e.key === 'Escape') {
         closePopover();
         input.blur();
       }
     });
-    input.addEventListener('change', () => onPick(input.value || 'worktree'));
+    if (onPick) input.addEventListener('change', () => onPick(input.value || 'worktree'));
   }
 
   function createRepoBreadcrumb(target: string, path: string): HTMLElement {
@@ -1601,7 +1876,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function renderRepo(meta: RepoTreeResponse) {
-    PROJECT_NAME = meta.project || PROJECT_NAME;
+    setProjectName(meta.project || '');
     setPageMode();
     removeStandaloneSource();
     $('#empty').classList.add('hidden');
@@ -1615,21 +1890,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     const shell = document.createElement('section');
     shell.className = 'gdp-repo-shell';
 
-    const targetPicker = document.createElement('input');
-    targetPicker.className = 'ref-input gdp-repo-target';
-    targetPicker.id = 'repo-ref';
-    targetPicker.readOnly = true;
-    targetPicker.autocomplete = 'off';
-    targetPicker.value = meta.ref || 'worktree';
-    targetPicker.placeholder = 'ref...';
-    targetPicker.title = 'repository ref';
-    wireRepoTargetPicker(targetPicker, (ref) => {
+    const { wrap: targetPickerWrap, input: targetPicker } = createRefSelectorInput({
+      id: 'repo-ref',
+      placeholder: 'ref...',
+      title: 'repository ref',
+      value: meta.ref || 'worktree',
+    });
+    wireRefSelectorInput(targetPicker, (ref) => {
       setRoute(repoRoute(ref, ''));
       loadRepo();
     });
     const toolbar = document.createElement('div');
     toolbar.className = 'gdp-file-detail-header gdp-repo-toolbar';
-    toolbar.append(createRepoBreadcrumb(meta.ref, meta.path || ''), createOpenPathButton(meta.path || '', 'directory', 'open this folder in OS'), targetPicker);
+    toolbar.append(targetPickerWrap, createRepoBreadcrumb(meta.ref, meta.path || ''), createOpenPathButton(meta.path || '', 'directory', 'open this folder in OS'));
     shell.appendChild(toolbar);
 
     const listCard = document.createElement('section');
@@ -1749,6 +2022,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
 
     target.appendChild(shell);
+    placeSidebarToggle();
   }
 
   function renderRepoBlobSidebar(currentPath: string, ref: string) {
@@ -1766,6 +2040,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const params = new URLSearchParams();
     params.set('ref', normalizedRef);
     params.set('recursive', '1');
+    appendScopeOmitDirsParam(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(fetch('/_tree?' + params.toString()).then(r => {
       if (!r.ok) throw new Error('failed to load repository tree');
@@ -1861,7 +2136,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   window.addEventListener('scroll', () => enqueueInitialLoads(), { passive: true });
-  window.addEventListener('resize', () => enqueueInitialLoads(), { passive: true });
+  window.addEventListener('resize', () => {
+    enqueueInitialLoads();
+    syncSidebarHeaderHeight();
+  }, { passive: true });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) enqueueInitialLoads();
   });
@@ -3281,6 +3559,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     } else {
       root.prepend(card);
     }
+    placeSidebarToggle();
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad('user'));
@@ -3783,6 +4062,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   // ----- wiring -----
+  applySidebarFontSize();
+  applyCodeFontSize();
+  applySidebarHidden();
+  observeSidebarHeaderHeight();
+  hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
   // Sidebar view toggle (tree / flat)
   $$('.sb-view-seg button').forEach(b => {
@@ -3794,6 +4078,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   $('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false));
   $('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true));
+  $('#sidebar-toggle')?.addEventListener('click', toggleSidebarHidden);
+  $('#viewer-settings')?.addEventListener('click', openScopeSettings);
+  $('#scope-settings-close')?.addEventListener('click', closeScopeSettings);
+  $('#scope-omit-save')?.addEventListener('click', saveScopeSettings);
+  $('#scope-omit-reset')?.addEventListener('click', resetScopeSettings);
+  $('#scope-settings-popover')?.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeScopeSettings();
+  });
   prepareKeyboardPanels();
   const contentPanel = document.querySelector<HTMLElement>('#content');
   contentPanel?.addEventListener('focusin', () => setPanelFocusScope('main'));
@@ -4229,15 +4521,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   async function repoPaletteFiles(ref: string): Promise<FileSearchListResponse> {
-    const cached = REPO_FILE_CACHE.get(ref);
+    const cacheKey = repoFileCacheKey(ref);
+    const cached = REPO_FILE_CACHE.get(cacheKey);
     if (cached && cached.generation === SERVER_GENERATION) return cached;
     const params = new URLSearchParams();
     params.set('ref', ref);
+    appendScopeOmitDirsParam(params);
     const res = await trackLoad<FileSearchListResponse>(fetch('/_files?' + params.toString()).then(r => {
       if (!r.ok) throw new Error('failed to load files');
       return r.json();
     }));
-    REPO_FILE_CACHE.set(ref, res);
+    REPO_FILE_CACHE.set(cacheKey, res);
     return res;
   }
 
@@ -4334,6 +4628,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       params.set('q', query);
       params.set('max', '200');
       if (state.grepRegex) params.set('regex', '1');
+      appendScopeOmitDirsParam(params);
       if (source === 'diff') {
         for (const file of state.diffSnapshot) params.append('path', file.path);
       }
@@ -4453,6 +4748,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === 'focus-sidebar') {
+      if (STATE.sidebarHidden) applySidebarHidden(false);
       focusSidebarPanel();
       return true;
     }
@@ -4572,6 +4868,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const params = new URLSearchParams();
     params.set('ref', STATE.route.ref || 'worktree');
     if (STATE.route.path) params.set('path', STATE.route.path);
+    appendScopeOmitDirsParam(params);
     return trackLoad<RepoTreeResponse>(fetch('/_tree?' + params.toString()).then(r => {
       if (!r.ok) throw new Error('failed to load repository tree');
       return r.json();
@@ -4602,14 +4899,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus('live');
     }).catch(() => setStatus('error'));
   }
-  if (STATE.route.screen === 'help') {
-    setStatus('live');
-    renderHelpPage();
-  } else if (STATE.route.screen === 'repo') loadRepo();
-  else if (STATE.route.screen === 'file' && STATE.route.view === 'blob') {
-    setStatus('live');
-    applySourceRouteToShell();
-  } else load();
+  loadSettings().finally(() => {
+    if (STATE.route.screen === 'help') {
+      setStatus('live');
+      renderHelpPage();
+    } else if (STATE.route.screen === 'repo') loadRepo();
+    else if (STATE.route.screen === 'file' && STATE.route.view === 'blob') {
+      setStatus('live');
+      applySourceRouteToShell();
+    } else load();
+  });
 
   // Ref picker (from / to)
   function syncRefInputs() {
@@ -4750,38 +5049,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     popTarget = null;
   }
 
-  ['#ref-from', '#ref-to'].forEach(sel => {
-    const el = $<HTMLInputElement>(sel);
-    el.addEventListener('focus', () => openPopover(el));
-    el.addEventListener('mousedown', (e) => {
-      // Re-open if already focused but popover closed
-      if (popover.hidden) {
-        e.preventDefault();
-        el.focus();
-      }
-    });
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openPopover(el);
-    });
-    el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        closePopover();
-      } else if (e.key === 'Escape') {
-        closePopover();
-        el.blur();
-      }
-    });
+  const refFromInput = $<HTMLInputElement>('#ref-from');
+  const refToInput = $<HTMLInputElement>('#ref-to');
+  wireRefSelectorInput(refFromInput, () => {
+    const otherEmpty = !refToInput.value;
+    setRange(refFromInput.value, refToInput.value);
+    if (otherEmpty) setTimeout(() => openPopover(refToInput), 0);
   });
-  wireRepoTargetPicker($<HTMLInputElement>('#repo-target'), (ref) => {
+  wireRefSelectorInput(refToInput, () => setRange(refFromInput.value, refToInput.value));
+  wireRefSelectorInput($<HTMLInputElement>('#repo-target'), (ref) => {
     if (STATE.route.screen !== 'file') return;
     setRoute({ screen: 'file', path: STATE.route.path, ref, view: 'blob', range: currentRange() });
     renderStandaloneSource({ path: STATE.route.path, ref });
-  });
-  document.addEventListener('focusin', (e) => {
-    const el = e.target as Element | null;
-    if (el instanceof HTMLInputElement && (el.id === 'repo-ref' || el.id === 'repo-target')) openPopover(el);
   });
 
   popSearch.addEventListener('input', () => buildPopBody(popSearch.value));
@@ -4797,26 +5076,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!popTarget || !val) return;
     const pickedTarget = popTarget;
     pickedTarget.value = val;
-    if (pickedTarget.id === 'repo-ref') {
-      closePopover();
-      pickedTarget.dispatchEvent(new Event('change'));
-      return;
-    }
-    if (pickedTarget.id === 'repo-target') {
-      closePopover();
-      pickedTarget.dispatchEvent(new Event('change'));
-      return;
-    }
-    const targetWasFrom = (pickedTarget.id === 'ref-from');
-    const otherEmpty = !$<HTMLInputElement>('#ref-to').value;
     closePopover();
-    setRange($<HTMLInputElement>('#ref-from').value, $<HTMLInputElement>('#ref-to').value);
-    // Move focus to the other input on first selection for fast 2-step entry
-    if (targetWasFrom && otherEmpty) {
-      const ti = $<HTMLInputElement>('#ref-to');
-      // re-focus -> reopens popover
-      setTimeout(() => ti.focus(), 0);
-    }
+    pickedTarget.dispatchEvent(new Event('change'));
   }
   popBody.addEventListener('click', (e) => {
     const item = (e.target as Element).closest<HTMLElement>('.rp-item-commit, .rp-item-ref');
