@@ -39,7 +39,11 @@ describe('fixedStringLineMatches', () => {
 describe('search path filtering', () => {
   test('skips paths that should not be searched by fallback grep', () => {
     expect(isSkippableSearchPath('.git/config')).toBe(true);
-    expect(isSkippableSearchPath('node_modules/pkg/index.js')).toBe(true);
+    expect(isSkippableSearchPath('node_modules/pkg/index.js')).toBe(false);
+    expect(isSkippableSearchPath('node_modules/pkg/index.js', ['node_modules'])).toBe(true);
+    expect(isSkippableSearchPath('dist/app.js', ['dist'])).toBe(true);
+    expect(isSkippableSearchPath('node_modules/pkg/index.js', ['dist'])).toBe(false);
+    expect(isSkippableSearchPath('audio/Horizon.wav', ['dist'])).toBe(false);
     expect(isSkippableSearchPath('src/app.ts')).toBe(false);
   });
 });
@@ -91,6 +95,12 @@ describe('buildRgArgs', () => {
     expect(buildRgArgs('needle', 20, []).slice(-2)).toEqual(['--', '.']);
   });
 
+  test('passes repository scope omissions to ripgrep', () => {
+    const args = buildRgArgs('needle', 20, [], false, ['dist']);
+    expect(args.includes('!dist/**')).toBe(true);
+    expect(args.includes('!**/dist/**')).toBe(true);
+  });
+
   test('omits fixed-string mode for explicit regex grep', () => {
     const args = buildRgArgs('use[A-Z]', 20, ['src/app.ts'], true);
     expect(args.includes('--fixed-strings')).toBe(false);
@@ -128,7 +138,9 @@ describe('preview search endpoints', () => {
 
   test('grep endpoint uses safe caps and argument-array ripgrep', () => {
     expect(server.includes('normalizeGrepMax(url.searchParams.get')).toBe(true);
-    expect(server.includes('buildRgArgs(query, max')).toBe(true);
+    expect(server.includes('buildRgArgs(query, max, safePaths, regex, omitDirNames)')).toBe(true);
+    expect(server.includes('scopeOmitDirNamesFromQuery(url)')).toBe(true);
+    expect(server.includes('parseGrepPaths(url, omitDirNames)')).toBe(true);
     expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
     expect(server.includes("if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }")).toBe(true);
     expect(server.includes('Bun.spawnSync(args')).toBe(true);

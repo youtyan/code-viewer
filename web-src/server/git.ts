@@ -18,10 +18,39 @@ export type GitTreeEntry = {
   path: string;
   type: 'tree' | 'blob' | 'commit';
   children_omitted?: true;
-  children_omitted_reason?: 'ignored' | 'internal';
+  children_omitted_reason?: 'heavy' | 'internal' | 'truncated';
 };
 
 const WORKTREE_RECURSIVE_DEPTH_LIMIT = 32;
+export const WORKTREE_RECURSIVE_ENTRY_LIMIT = 50000;
+export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
+  'node_modules',
+  '.venv',
+  'venv',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.astro',
+  '.vercel',
+  'dist',
+  'build',
+  'out',
+  'target',
+  '.gradle',
+  '__pycache__',
+  '.pytest_cache',
+  '.tox',
+  '.terraform',
+  '.idea',
+  '.vscode',
+  'vendor',
+  '.cache',
+  'coverage',
+  'DerivedData',
+  'Pods',
+  'bin',
+  'obj',
+];
 
 function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
@@ -159,55 +188,63 @@ function sortTreeEntries(entries: GitTreeEntry[]): GitTreeEntry[] {
   });
 }
 
-function ignoredWorktreeDirectories(cwd: string, path: string): Set<string> {
-  const base = normalizeTreePath(path);
-  const args = ['git', '-c', 'core.quotepath=false', 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'];
-  if (base) args.push('--', `${base}/`);
-  const proc = Bun.spawnSync(args, {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
-  if (proc.exitCode !== 0) return new Set();
-  return new Set(new TextDecoder().decode(proc.stdout)
-    .split('\0')
-    .filter(entry => entry.endsWith('/'))
-    .map(entry => entry.replace(/\/+$/g, ''))
-    .filter(entry => entry && entry !== base));
+function omittedWorktreeDirectoryReason(name: string, omitDirNames: Set<string>): GitTreeEntry['children_omitted_reason'] | undefined {
+  if (name === '.git') return 'internal';
+  return omitDirNames.has(name) ? 'heavy' : undefined;
 }
 
-function worktreeEntryFromDirent(base: string, dir: string, name: string, isDirectory: boolean, ignoredDirectories: Set<string>): GitTreeEntry {
+function worktreeEntryFromDirent(base: string, dir: string, name: string, isDirectory: boolean, omitDirNames: Set<string>): GitTreeEntry {
   const entryPath = base ? `${base}/${name}` : name;
   const type = isDirectory
     ? hasDotGitEntry(join(dir, name)) ? 'commit' as const : 'tree' as const
     : 'blob' as const;
-  return type === 'tree' && (name === '.git' || ignoredDirectories.has(entryPath))
+  const omittedReason = type === 'tree' ? omittedWorktreeDirectoryReason(name, omitDirNames) : undefined;
+  return omittedReason
     ? {
         name,
         path: entryPath,
         type,
         children_omitted: true,
-        children_omitted_reason: name === '.git' ? 'internal' : 'ignored',
+        children_omitted_reason: omittedReason,
       }
     : { name, path: entryPath, type };
 }
 
-function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean): GitTreeEntry[] {
+function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean, omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES): GitTreeEntry[] {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
-  const ignoredDirectories = ignoredWorktreeDirectories(cwd, base);
+  const omitDirNameSet = new Set(omitDirNames);
   let directEntries: GitTreeEntry[];
   try {
     const dirents = readdirSync(root, { withFileTypes: true });
     directEntries = sortTreeEntries(dirents
-      .map(entry => worktreeEntryFromDirent(base, root, entry.name, entry.isDirectory(), ignoredDirectories)));
+      .map(entry => worktreeEntryFromDirent(base, root, entry.name, entry.isDirectory(), omitDirNameSet)));
   } catch {
     return [];
   }
   if (!recursive) return directEntries;
 
   const fileEntries: GitTreeEntry[] = [];
+  let truncated = false;
+  const pushRecursiveEntry = (entry: GitTreeEntry): boolean => {
+    if (fileEntries.length >= WORKTREE_RECURSIVE_ENTRY_LIMIT) {
+      if (!truncated) {
+        fileEntries.push({
+          name: 'more...',
+          path: '__code_viewer_truncated__',
+          type: 'tree',
+          children_omitted: true,
+          children_omitted_reason: 'truncated',
+        });
+        truncated = true;
+      }
+      return false;
+    }
+    fileEntries.push(entry);
+    return true;
+  };
   const walk = (dir: string, prefix: string, depth: number) => {
+    if (truncated) return;
     if (depth >= WORKTREE_RECURSIVE_DEPTH_LIMIT) return;
     let entries;
     try {
@@ -219,20 +256,21 @@ function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === '.git' || ignoredDirectories.has(entryPath)) {
-          fileEntries.push({
+        const omittedReason = omittedWorktreeDirectoryReason(entry.name, omitDirNameSet);
+        if (omittedReason) {
+          if (!pushRecursiveEntry({
             name: entry.name,
             path: entryPath,
             type: 'tree',
             children_omitted: true,
-            children_omitted_reason: entry.name === '.git' ? 'internal' : 'ignored',
-          });
+            children_omitted_reason: omittedReason,
+          })) return;
           continue;
         }
         if (hasDotGitEntry(full)) continue;
         walk(full, entryPath, depth + 1);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
-        fileEntries.push({ name: entry.name, path: entryPath, type: 'blob' });
+        if (!pushRecursiveEntry({ name: entry.name, path: entryPath, type: 'blob' })) return;
       }
     }
   };
@@ -297,11 +335,11 @@ export function listTree(
   ref: string,
   path: string,
   cwd: string,
-  options: { recursive?: boolean } = {},
+  options: { recursive?: boolean; omitDirNames?: string[] } = {},
 ): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
   if (ref === 'worktree') {
-    return { code: 0, entries: worktreeFilesystemEntries(cwd, base, !!options.recursive), stderr: '' };
+    return { code: 0, entries: worktreeFilesystemEntries(cwd, base, !!options.recursive, options.omitDirNames), stderr: '' };
   }
 
   const direct = gitTreeEntries(ref, base, cwd, false);

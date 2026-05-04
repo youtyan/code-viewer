@@ -18,6 +18,11 @@ describe('open path in OS action', () => {
     expect(server.includes("if (kind === 'file-parent' && !path) return text('invalid path', 400)")).toBe(true);
   });
 
+  test('server keeps an explicit non-git cwd as the project root', () => {
+    expect(server.includes('cwd = git.repoRoot(next) || realpathSync(next)')).toBe(true);
+    expect(server.includes("console.error('--cwd must point to an existing directory')")).toBe(true);
+  });
+
   test('server validates repo-relative paths before spawning the OS opener', () => {
     expect(server.includes('function safeOpenWorktreePath(path: string): string | null')).toBe(true);
     expect(server.includes("path.split(/[\\\\/]+/).some(part => part.toLowerCase() === '.git')")).toBe(true);
@@ -47,12 +52,18 @@ describe('sidebar tree bulk actions', () => {
   test('sidebar exposes expand and collapse all buttons for tree mode', () => {
     expect(html.includes('id="sb-expand-all"')).toBe(true);
     expect(html.includes('id="sb-collapse-all"')).toBe(true);
+    expect(html.includes('id="sidebar-toggle"')).toBe(true);
+    expect(html.includes('id="viewer-settings"')).toBe(true);
     expect(html.includes('class="sb-actions"')).toBe(true);
     expect(html.includes('class="sb-icon-action sb-tree-action"')).toBe(true);
     expect(app.includes('function setAllSidebarDirsCollapsed(collapsed: boolean)')).toBe(true);
     expect(app.includes('function setSidebarTreeActionIcons()')).toBe(true);
-    expect(app.includes("expand.innerHTML = iconSvg('octicon-unfold', UNFOLD_16_PATH)")).toBe(true);
-    expect(app.includes("collapse.innerHTML = iconSvg('octicon-fold', FOLD_16_PATH)")).toBe(true);
+    expect(app.includes("const settings = document.querySelector<HTMLButtonElement>('#viewer-settings')")).toBe(true);
+    expect(app.includes("const sidebarToggle = document.querySelector<HTMLButtonElement>('#sidebar-toggle')")).toBe(true);
+    expect(app.includes("settings.innerHTML = iconSvg('octicon-gear', GEAR_16_PATH)")).toBe(true);
+    expect(app.includes("sidebarToggle.innerHTML = iconSvg('octicon-sidebar', STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS)")).toBe(true);
+    expect(app.includes("expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS)")).toBe(true);
+    expect(app.includes("collapse.innerHTML = iconSvg('octicon-chevron-up', COLLAPSE_ALL_16_PATHS)")).toBe(true);
     expect(app.includes("$('#sb-expand-all').addEventListener('click', () => setAllSidebarDirsCollapsed(false))")).toBe(true);
     expect(app.includes("$('#sb-collapse-all').addEventListener('click', () => setAllSidebarDirsCollapsed(true))")).toBe(true);
     expect(style.includes('.sb-actions')).toBe(true);
@@ -64,6 +75,23 @@ describe('state changing refresh endpoint', () => {
   test('refresh uses the same side-effect request gate as upload and open path', () => {
     expect(server.includes("if (url.pathname === '/refresh' && req.method === 'POST')")).toBe(true);
     expect(server.includes("if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);\n      generation++;")).toBe(true);
+  });
+});
+
+describe('repository scope omit settings', () => {
+  test('server layers built-in, project config, CLI, and browser query omit dirs', () => {
+    expect(server.includes('let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES')).toBe(true);
+    expect(server.includes("arg === '--scope-omit-dir'")).toBe(true);
+    expect(server.includes("arg === '--scope-omit-dirs'")).toBe(false);
+    expect(server.includes("arg === '--no-tree-omit-dirs'")).toBe(false);
+    expect(server.includes('function loadProjectConfigScopeOmitDirs(): string[] | null')).toBe(true);
+    expect(server.includes("(parsed as { version?: unknown }).version !== 1")).toBe(true);
+    expect(server.includes('scope?: { omitDirs?: unknown }')).toBe(true);
+    expect(server.includes('function scopeOmitDirNamesFromQuery(url: URL): string[]')).toBe(true);
+    expect(server.includes("if (url.pathname === '/_settings') return handleSettings()")).toBe(true);
+    expect(server.includes("url.searchParams.has('omit_dirs')")).toBe(true);
+    expect(server.includes('omit_dirs_effective: scopeOmitDirNames')).toBe(true);
+    expect(server.includes('omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES')).toBe(true);
   });
 });
 

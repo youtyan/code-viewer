@@ -65,14 +65,23 @@ Or place `.code-viewer.json` at the repository root:
 
 ```json
 {
+  "version": 1,
   "upload": {
     "enabled": true
+  },
+  "scope": {
+    "omitDirs": ["node_modules", "dist", "build"]
   }
 }
 ```
 
 Uploads are accepted only for the worktree target. Git tree views remain
 read-only.
+
+Repository scope settings control recursive repository browsing and search scope
+for the left tree, Ctrl+K file palette, and Ctrl+G grep palette. The in-app Scope
+Settings popover stores only a browser-local override in localStorage; edit
+`.code-viewer.json` directly for project defaults shared with the repository.
 
 ## Development
 
