@@ -38,6 +38,15 @@ describe('keymap action resolution', () => {
     expect(action('u', 'sidebar', { ctrl: true })).toBe('sidebar-page-up');
   });
 
+  test('scrolls the main panel with paging keys in main scope', () => {
+    expect(action('PageDown', 'main')).toBe('scroll-main-page-down');
+    expect(action('PageUp', 'main')).toBe('scroll-main-page-up');
+    expect(action('ArrowDown', 'main', { ctrl: true })).toBe('scroll-main-page-down');
+    expect(action('ArrowUp', 'main', { ctrl: true })).toBe('scroll-main-page-up');
+    expect(action('PageDown', 'sidebar')).toBe(null);
+    expect(action('ArrowDown', 'sidebar', { ctrl: true })).toBe(null);
+  });
+
   test('does not handle vim navigation inside editable fields', () => {
     expect(resolveKeymapAction(key('j'), { scope: 'main', editable: true })).toBe(null);
     expect(resolveKeymapAction(key('k', { ctrl: true }), { scope: 'main', editable: true })).toBe('open-file-palette');
