@@ -2,176 +2,176 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { sourceFixture } from "./source-fixture";
 import {
-	buildFileSearchList,
-	buildRgArgs,
-	fixedStringLineMatches,
-	GREP_ABSOLUTE_MAX,
-	GREP_DEFAULT_MAX,
-	isSkippableSearchPath,
-	normalizeGrepMax,
-	parseGitGrepOutput,
-	parseRgOutput,
+  buildFileSearchList,
+  buildRgArgs,
+  fixedStringLineMatches,
+  GREP_ABSOLUTE_MAX,
+  GREP_DEFAULT_MAX,
+  isSkippableSearchPath,
+  normalizeGrepMax,
+  parseGitGrepOutput,
+  parseRgOutput,
 } from "../server/search";
 
 describe("normalizeGrepMax", () => {
-	test("defaults and clamps grep result limits", () => {
-		expect(normalizeGrepMax(null)).toBe(GREP_DEFAULT_MAX);
-		expect(normalizeGrepMax("0")).toBe(GREP_DEFAULT_MAX);
-		expect(normalizeGrepMax("20")).toBe(20);
-		expect(normalizeGrepMax("9999")).toBe(GREP_ABSOLUTE_MAX);
-	});
+  test("defaults and clamps grep result limits", () => {
+    expect(normalizeGrepMax(null)).toBe(GREP_DEFAULT_MAX);
+    expect(normalizeGrepMax("0")).toBe(GREP_DEFAULT_MAX);
+    expect(normalizeGrepMax("20")).toBe(20);
+    expect(normalizeGrepMax("9999")).toBe(GREP_ABSOLUTE_MAX);
+  });
 });
 
 describe("fixedStringLineMatches", () => {
-	test("matches text case-insensitively with line and column", () => {
-		const matches = fixedStringLineMatches(
-			"src/app.ts",
-			"Alpha\nbeta alpha\n",
-			"ALPHA",
-			10,
-		);
-		expect(matches).toEqual([
-			{ path: "src/app.ts", line: 1, column: 1, preview: "Alpha" },
-			{ path: "src/app.ts", line: 2, column: 6, preview: "beta alpha" },
-		]);
-	});
+  test("matches text case-insensitively with line and column", () => {
+    const matches = fixedStringLineMatches(
+      "src/app.ts",
+      "Alpha\nbeta alpha\n",
+      "ALPHA",
+      10,
+    );
+    expect(matches).toEqual([
+      { path: "src/app.ts", line: 1, column: 1, preview: "Alpha" },
+      { path: "src/app.ts", line: 2, column: 6, preview: "beta alpha" },
+    ]);
+  });
 
-	test("respects max results", () => {
-		const matches = fixedStringLineMatches("a.txt", "x\nx\nx\n", "x", 2);
-		expect(matches.length).toBe(2);
-	});
+  test("respects max results", () => {
+    const matches = fixedStringLineMatches("a.txt", "x\nx\nx\n", "x", 2);
+    expect(matches.length).toBe(2);
+  });
 });
 
 describe("search path filtering", () => {
-	test("skips paths that should not be searched by fallback grep", () => {
-		expect(isSkippableSearchPath(".git/config")).toBe(true);
-		expect(isSkippableSearchPath("node_modules/pkg/index.js")).toBe(false);
-		expect(
-			isSkippableSearchPath("node_modules/pkg/index.js", ["node_modules"]),
-		).toBe(true);
-		expect(isSkippableSearchPath("dist/app.js", ["dist"])).toBe(true);
-		expect(isSkippableSearchPath("node_modules/pkg/index.js", ["dist"])).toBe(
-			false,
-		);
-		expect(isSkippableSearchPath("audio/Horizon.wav", ["dist"])).toBe(false);
-		expect(isSkippableSearchPath("src/app.ts")).toBe(false);
-	});
+  test("skips paths that should not be searched by fallback grep", () => {
+    expect(isSkippableSearchPath(".git/config")).toBe(true);
+    expect(isSkippableSearchPath("node_modules/pkg/index.js")).toBe(false);
+    expect(
+      isSkippableSearchPath("node_modules/pkg/index.js", ["node_modules"]),
+    ).toBe(true);
+    expect(isSkippableSearchPath("dist/app.js", ["dist"])).toBe(true);
+    expect(isSkippableSearchPath("node_modules/pkg/index.js", ["dist"])).toBe(
+      false,
+    );
+    expect(isSkippableSearchPath("audio/Horizon.wav", ["dist"])).toBe(false);
+    expect(isSkippableSearchPath("src/app.ts")).toBe(false);
+  });
 });
 
 describe("buildFileSearchList", () => {
-	test("keeps only searchable file entries", () => {
-		const response = buildFileSearchList("worktree", 7, [
-			{ name: "src", path: "src", type: "tree" },
-			{ name: "app.ts", path: "src/app.ts", type: "blob" },
-			{ name: "submodule", path: "vendor/submodule", type: "commit" },
-		]);
+  test("keeps only searchable file entries", () => {
+    const response = buildFileSearchList("worktree", 7, [
+      { name: "src", path: "src", type: "tree" },
+      { name: "app.ts", path: "src/app.ts", type: "blob" },
+      { name: "submodule", path: "vendor/submodule", type: "commit" },
+    ]);
 
-		expect(response).toEqual({
-			ref: "worktree",
-			generation: 7,
-			truncated: false,
-			files: [
-				{ path: "src/app.ts", type: "blob" },
-				{ path: "vendor/submodule", type: "commit" },
-			],
-		});
-	});
+    expect(response).toEqual({
+      ref: "worktree",
+      generation: 7,
+      truncated: false,
+      files: [
+        { path: "src/app.ts", type: "blob" },
+        { path: "vendor/submodule", type: "commit" },
+      ],
+    });
+  });
 });
 
 describe("buildRgArgs", () => {
-	test("passes query via -e before path arguments", () => {
-		expect(buildRgArgs("needle", 20, ["src/app.ts"])).toEqual([
-			"rg",
-			"--no-config",
-			"--line-number",
-			"--column",
-			"--no-heading",
-			"--color",
-			"never",
-			"--smart-case",
-			"--fixed-strings",
-			"--max-count",
-			"20",
-			"--max-filesize",
-			"2M",
-			"-e",
-			"needle",
-			"--",
-			"src/app.ts",
-		]);
-	});
+  test("passes query via -e before path arguments", () => {
+    expect(buildRgArgs("needle", 20, ["src/app.ts"])).toEqual([
+      "rg",
+      "--no-config",
+      "--line-number",
+      "--column",
+      "--no-heading",
+      "--color",
+      "never",
+      "--smart-case",
+      "--fixed-strings",
+      "--max-count",
+      "20",
+      "--max-filesize",
+      "2M",
+      "-e",
+      "needle",
+      "--",
+      "src/app.ts",
+    ]);
+  });
 
-	test("searches the current repository explicitly when no paths are supplied", () => {
-		expect(buildRgArgs("needle", 20, []).slice(-2)).toEqual(["--", "."]);
-	});
+  test("searches the current repository explicitly when no paths are supplied", () => {
+    expect(buildRgArgs("needle", 20, []).slice(-2)).toEqual(["--", "."]);
+  });
 
-	test("passes repository scope omissions to ripgrep", () => {
-		const args = buildRgArgs("needle", 20, [], false, ["dist"]);
-		expect(args.includes("!dist/**")).toBe(true);
-		expect(args.includes("!**/dist/**")).toBe(true);
-	});
+  test("passes repository scope omissions to ripgrep", () => {
+    const args = buildRgArgs("needle", 20, [], false, ["dist"]);
+    expect(args.includes("!dist/**")).toBe(true);
+    expect(args.includes("!**/dist/**")).toBe(true);
+  });
 
-	test("omits fixed-string mode for explicit regex grep", () => {
-		const args = buildRgArgs("use[A-Z]", 20, ["src/app.ts"], true);
-		expect(args.includes("--fixed-strings")).toBe(false);
-		expect(args.includes("-e")).toBe(true);
-	});
+  test("omits fixed-string mode for explicit regex grep", () => {
+    const args = buildRgArgs("use[A-Z]", 20, ["src/app.ts"], true);
+    expect(args.includes("--fixed-strings")).toBe(false);
+    expect(args.includes("-e")).toBe(true);
+  });
 });
 
 describe("grep output parsers", () => {
-	test("parses ripgrep output path line column preview", () => {
-		expect(parseRgOutput("src/app.ts:10:3:const app = true\n", 10)).toEqual([
-			{ path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
-		]);
-	});
+  test("parses ripgrep output path line column preview", () => {
+    expect(parseRgOutput("src/app.ts:10:3:const app = true\n", 10)).toEqual([
+      { path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
+    ]);
+  });
 
-	test("parses git grep tree output without keeping ref in path", () => {
-		expect(
-			parseGitGrepOutput("main:src/app.ts:10:3:const app = true\n", "main", 10),
-		).toEqual([
-			{ path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
-		]);
-	});
+  test("parses git grep tree output without keeping ref in path", () => {
+    expect(
+      parseGitGrepOutput("main:src/app.ts:10:3:const app = true\n", "main", 10),
+    ).toEqual([
+      { path: "src/app.ts", line: 10, column: 3, preview: "const app = true" },
+    ]);
+  });
 
-	test("keeps colons inside paths when parsing grep output", () => {
-		expect(parseRgOutput("src/a:b.ts:10:3:const app = true\n", 10)).toEqual([
-			{ path: "src/a:b.ts", line: 10, column: 3, preview: "const app = true" },
-		]);
-	});
+  test("keeps colons inside paths when parsing grep output", () => {
+    expect(parseRgOutput("src/a:b.ts:10:3:const app = true\n", 10)).toEqual([
+      { path: "src/a:b.ts", line: 10, column: 3, preview: "const app = true" },
+    ]);
+  });
 });
 
 describe("preview search endpoints", () => {
-	const server = sourceFixture(
-		readFileSync("web-src/server/preview.ts", "utf8"),
-	);
+  const server = sourceFixture(
+    readFileSync("web-src/server/preview.ts", "utf8"),
+  );
 
-	test("routes read-only file and grep search endpoints", () => {
-		expect(
-			server.includes(
-				"if (url.pathname === '/_files') return handleFiles(url)",
-			),
-		).toBe(true);
-		expect(
-			server.includes("if (url.pathname === '/_grep') return handleGrep(url)"),
-		).toBe(true);
-	});
+  test("routes read-only file and grep search endpoints", () => {
+    expect(
+      server.includes(
+        "if (url.pathname === '/_files') return handleFiles(url)",
+      ),
+    ).toBe(true);
+    expect(
+      server.includes("if (url.pathname === '/_grep') return handleGrep(url)"),
+    ).toBe(true);
+  });
 
-	test("grep endpoint uses safe caps and argument-array ripgrep", () => {
-		expect(server.includes("normalizeGrepMax(url.searchParams.get")).toBe(true);
-		expect(
-			server.includes(
-				"buildRgArgs(query, max, safePaths, regex, omitDirNames)",
-			),
-		).toBe(true);
-		expect(server.includes("scopeOmitDirNamesFromQuery(url)")).toBe(true);
-		expect(server.includes("parseGrepPaths(url, omitDirNames)")).toBe(true);
-		expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
-		expect(
-			server.includes(
-				"if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }",
-			),
-		).toBe(true);
-		expect(server.includes("runSync(args, cwd, { timeout: 5000 })")).toBe(true);
-		expect(server.includes("safeWorktreePath(path)")).toBe(true);
-	});
+  test("grep endpoint uses safe caps and argument-array ripgrep", () => {
+    expect(server.includes("normalizeGrepMax(url.searchParams.get")).toBe(true);
+    expect(
+      server.includes(
+        "buildRgArgs(query, max, safePaths, regex, omitDirNames)",
+      ),
+    ).toBe(true);
+    expect(server.includes("scopeOmitDirNamesFromQuery(url)")).toBe(true);
+    expect(server.includes("parseGrepPaths(url, omitDirNames)")).toBe(true);
+    expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
+    expect(
+      server.includes(
+        "if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }",
+      ),
+    ).toBe(true);
+    expect(server.includes("runSync(args, cwd, { timeout: 5000 })")).toBe(true);
+    expect(server.includes("safeWorktreePath(path)")).toBe(true);
+  });
 });
