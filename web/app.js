@@ -21,6 +21,21 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
+  // web-src/catch-up.ts
+  function shouldCatchUpDiff(route) {
+    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  }
+  function createCatchUpGate(now, minIntervalMs) {
+    let lastForceAt = 0;
+    return function shouldRun() {
+      const current = now();
+      if (current - lastForceAt < minIntervalMs)
+        return false;
+      lastForceAt = current;
+      return true;
+    };
+  }
+
   // web-src/expand-logic.ts
   function initExpandState(prevHunkEndNew, hunkNewStart) {
     return {
@@ -78,20 +93,6 @@
     applyTrailingResult
   };
 
-  // web-src/file-navigation.ts
-  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
-    if (itemCount <= 0)
-      return -1;
-    if (currentIndex < 0)
-      return direction > 0 ? 0 : itemCount - 1;
-    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
-  }
-
-  // web-src/file-path-copy.ts
-  function filePathClipboardText(path) {
-    return path || "";
-  }
-
   // web-src/file-filter.ts
   function normalizeFileFilterQuery(value) {
     return (value || "").toLowerCase().trim();
@@ -129,6 +130,20 @@
       kind: "substring",
       match: (path) => path.toLowerCase().includes(q)
     };
+  }
+
+  // web-src/file-navigation.ts
+  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
+    if (itemCount <= 0)
+      return -1;
+    if (currentIndex < 0)
+      return direction > 0 ? 0 : itemCount - 1;
+    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
+  }
+
+  // web-src/file-path-copy.ts
+  function filePathClipboardText(path) {
+    return path || "";
   }
 
   // web-src/focus-scope.ts
@@ -431,147 +446,6 @@
       return binding.action;
     }
     return null;
-  }
-
-  // web-src/search-palette.ts
-  var PALETTE_RESULT_LIMIT = 50;
-  function limitPaletteResults(items) {
-    return items.slice(0, PALETTE_RESULT_LIMIT);
-  }
-  function movePaletteSelection(index, count, direction) {
-    if (count <= 0)
-      return -1;
-    if (index < 0)
-      return direction > 0 ? 0 : count - 1;
-    return (index + direction + count) % count;
-  }
-
-  // web-src/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
-  }
-  function createCatchUpGate(now, minIntervalMs) {
-    let lastForceAt = 0;
-    return function shouldRun() {
-      const current = now();
-      if (current - lastForceAt < minIntervalMs)
-        return false;
-      lastForceAt = current;
-      return true;
-    };
-  }
-
-  // web-src/routes.ts
-  function assertNever(value) {
-    throw new Error("unhandled route: " + JSON.stringify(value));
-  }
-  function parseLegacyRange(value, fallback) {
-    const raw = value || "";
-    const sep = raw.indexOf("..");
-    if (sep < 0)
-      return fallback;
-    return {
-      from: raw.slice(0, sep) || fallback.from,
-      to: raw.slice(sep + 2) || fallback.to
-    };
-  }
-  function parseLineTarget(value) {
-    const raw = value || "";
-    const range = /^(\d+)-(\d+)$/.exec(raw);
-    if (range) {
-      const a = Number(range[1]);
-      const b = Number(range[2]);
-      const start = Math.min(a, b);
-      const end = Math.max(a, b);
-      if (start > 0)
-        return { start, end };
-      return;
-    }
-    const line = Number(raw);
-    return Number.isInteger(line) && line > 0 ? line : undefined;
-  }
-  function formatLineTarget(line) {
-    return typeof line === "number" ? String(line) : line.start + "-" + line.end;
-  }
-  function parseRoute(pathname, search, fallbackRange) {
-    const params = new URLSearchParams(search);
-    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
-    const range = {
-      from: params.get("from") || legacyRange.from,
-      to: params.get("to") || legacyRange.to
-    };
-    switch (pathname) {
-      case "/":
-      case "/index.html":
-        return {
-          screen: "repo",
-          ref: params.get("ref") || params.get("target") || "worktree",
-          path: params.get("path") || "",
-          range
-        };
-      case "/todif":
-      case "/todiff":
-        return {
-          screen: "diff",
-          range,
-          ...params.get("path") ? { path: params.get("path") || "" } : {},
-          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
-        };
-      case "/file": {
-        const path = params.get("path") || "";
-        const target = params.get("target") || "";
-        const ref = target || params.get("ref") || "worktree";
-        const line = parseLineTarget(params.get("line"));
-        if (!path)
-          return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
-        return { screen: "file", path, ref, range, view: target ? "blob" : "detail", ...line ? { line } : {} };
-      }
-      case "/help":
-        return {
-          screen: "help",
-          range,
-          lang: params.get("lang") || "en",
-          section: params.get("section") || "keybindings"
-        };
-      default:
-        return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
-    }
-  }
-  function buildRoute(route) {
-    switch (route.screen) {
-      case "repo": {
-        const params = new URLSearchParams;
-        if (route.ref && route.ref !== "worktree")
-          params.set("ref", route.ref);
-        if (route.path)
-          params.set("path", route.path);
-        const qs = params.toString();
-        return "/" + (qs ? "?" + qs : "");
-      }
-      case "file":
-        if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
-        }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
-      case "diff":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? "&path=" + encodeURIComponent(route.path) : "") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
-      case "help": {
-        const params = new URLSearchParams;
-        if (route.lang && route.lang !== "en")
-          params.set("lang", route.lang);
-        if (route.section && route.section !== "keybindings")
-          params.set("section", route.section);
-        const qs = params.toString();
-        return "/help" + (qs ? "?" + qs : "");
-      }
-      case "unknown":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
-      default:
-        return assertNever(route);
-    }
-  }
-  function buildRawFileUrl(target) {
-    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
   }
 
   // node_modules/markdown-it/lib/common/utils.mjs
@@ -6155,6 +6029,119 @@
     md.core.ruler.after("inline", "footnote_tail", footnote_tail);
   }
 
+  // web-src/routes.ts
+  function assertNever(value) {
+    throw new Error("unhandled route: " + JSON.stringify(value));
+  }
+  function parseLegacyRange(value, fallback) {
+    const raw = value || "";
+    const sep = raw.indexOf("..");
+    if (sep < 0)
+      return fallback;
+    return {
+      from: raw.slice(0, sep) || fallback.from,
+      to: raw.slice(sep + 2) || fallback.to
+    };
+  }
+  function parseLineTarget(value) {
+    const raw = value || "";
+    const range = /^(\d+)-(\d+)$/.exec(raw);
+    if (range) {
+      const a2 = Number(range[1]);
+      const b2 = Number(range[2]);
+      const start = Math.min(a2, b2);
+      const end = Math.max(a2, b2);
+      if (start > 0)
+        return { start, end };
+      return;
+    }
+    const line = Number(raw);
+    return Number.isInteger(line) && line > 0 ? line : undefined;
+  }
+  function formatLineTarget(line) {
+    return typeof line === "number" ? String(line) : line.start + "-" + line.end;
+  }
+  function parseRoute(pathname, search, fallbackRange) {
+    const params = new URLSearchParams(search);
+    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
+    const range = {
+      from: params.get("from") || legacyRange.from,
+      to: params.get("to") || legacyRange.to
+    };
+    switch (pathname) {
+      case "/":
+      case "/index.html":
+        return {
+          screen: "repo",
+          ref: params.get("ref") || params.get("target") || "worktree",
+          path: params.get("path") || "",
+          range
+        };
+      case "/todif":
+      case "/todiff":
+        return {
+          screen: "diff",
+          range,
+          ...params.get("path") ? { path: params.get("path") || "" } : {},
+          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
+        };
+      case "/file": {
+        const path = params.get("path") || "";
+        const target = params.get("target") || "";
+        const ref = target || params.get("ref") || "worktree";
+        const line = parseLineTarget(params.get("line"));
+        if (!path)
+          return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
+        return { screen: "file", path, ref, range, view: target ? "blob" : "detail", ...line ? { line } : {} };
+      }
+      case "/help":
+        return {
+          screen: "help",
+          range,
+          lang: params.get("lang") || "en",
+          section: params.get("section") || "keybindings"
+        };
+      default:
+        return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
+    }
+  }
+  function buildRoute(route) {
+    switch (route.screen) {
+      case "repo": {
+        const params = new URLSearchParams;
+        if (route.ref && route.ref !== "worktree")
+          params.set("ref", route.ref);
+        if (route.path)
+          params.set("path", route.path);
+        const qs = params.toString();
+        return "/" + (qs ? "?" + qs : "");
+      }
+      case "file":
+        if (route.view === "blob") {
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+        }
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+      case "diff":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? "&path=" + encodeURIComponent(route.path) : "") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+      case "help": {
+        const params = new URLSearchParams;
+        if (route.lang && route.lang !== "en")
+          params.set("lang", route.lang);
+        if (route.section && route.section !== "keybindings")
+          params.set("section", route.section);
+        const qs = params.toString();
+        return "/help" + (qs ? "?" + qs : "");
+      }
+      case "unknown":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
+      default:
+        return assertNever(route);
+    }
+  }
+  function buildRawFileUrl(target) {
+    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
+  }
+
   // web-src/markdown-preview.ts
   var mermaidPromise = null;
   var mermaidInitialized = false;
@@ -6728,6 +6715,19 @@
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
+  // web-src/search-palette.ts
+  var PALETTE_RESULT_LIMIT = 50;
+  function limitPaletteResults(items) {
+    return items.slice(0, PALETTE_RESULT_LIMIT);
+  }
+  function movePaletteSelection(index, count, direction) {
+    if (count <= 0)
+      return -1;
+    if (index < 0)
+      return direction > 0 ? 0 : count - 1;
+    return (index + direction + count) % count;
+  }
+
   // web-src/ws-highlight.ts
   function isWhitespaceOnlyInlineHighlight(text2) {
     return !!text2 && !/\S/.test(text2);
@@ -6844,10 +6844,41 @@
             title: "Keyboard Shortcuts",
             intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
             groups: [
-              { title: "Global", rows: [["Ctrl+K", "Open file palette"], ["Ctrl+G", "Open grep palette"], ["/", "Focus file filter"], ["t", "Toggle theme"]] },
-              { title: "Panels", rows: [["Ctrl+H", "Focus sidebar"], ["Ctrl+L", "Focus main panel"]] },
-              { title: "Sidebar", rows: [["j / k", "Move selection down / up"], ["Ctrl+D / Ctrl+U", "Move selection by half a page"], ["gg / Shift+G", "Move to top / bottom"], ["Enter", "Open selected item"], ["h / l", "Collapse / expand directory"]] },
-              { title: "Main Panel", rows: [["j / k", "Move code cursor down / up"], ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"], ["gg / Shift+G", "Move code cursor to top / bottom"], ["gp / gc", "Switch to Preview / Code tab"]] }
+              {
+                title: "Global",
+                rows: [
+                  ["Ctrl+K", "Open file palette"],
+                  ["Ctrl+G", "Open grep palette"],
+                  ["/", "Focus file filter"],
+                  ["t", "Toggle theme"]
+                ]
+              },
+              {
+                title: "Panels",
+                rows: [
+                  ["Ctrl+H", "Focus sidebar"],
+                  ["Ctrl+L", "Focus main panel"]
+                ]
+              },
+              {
+                title: "Sidebar",
+                rows: [
+                  ["j / k", "Move selection down / up"],
+                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
+                  ["gg / Shift+G", "Move to top / bottom"],
+                  ["Enter", "Open selected item"],
+                  ["h / l", "Collapse / expand directory"]
+                ]
+              },
+              {
+                title: "Main Panel",
+                rows: [
+                  ["j / k", "Move code cursor down / up"],
+                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
+                  ["gg / Shift+G", "Move code cursor to top / bottom"],
+                  ["gp / gc", "Switch to Preview / Code tab"]
+                ]
+              }
             ]
           }
         }
@@ -6861,10 +6892,41 @@
             title: "キーバインド",
             intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
             groups: [
-              { title: "グローバル", rows: [["Ctrl+K", "ファイルパレットを開く"], ["Ctrl+G", "grep パレットを開く"], ["/", "ファイルフィルターへフォーカス"], ["t", "テーマ切り替え"]] },
-              { title: "パネル", rows: [["Ctrl+H", "サイドバーへフォーカス"], ["Ctrl+L", "メインパネルへフォーカス"]] },
-              { title: "サイドバー", rows: [["j / k", "選択を下 / 上へ移動"], ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"], ["gg / Shift+G", "先頭 / 末尾へ移動"], ["Enter", "選択項目を開く"], ["h / l", "ディレクトリを閉じる / 開く"]] },
-              { title: "メインパネル", rows: [["j / k", "コードカーソルを下 / 上へ移動"], ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"], ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"], ["gp / gc", "Preview / Code タブへ切り替え"]] }
+              {
+                title: "グローバル",
+                rows: [
+                  ["Ctrl+K", "ファイルパレットを開く"],
+                  ["Ctrl+G", "grep パレットを開く"],
+                  ["/", "ファイルフィルターへフォーカス"],
+                  ["t", "テーマ切り替え"]
+                ]
+              },
+              {
+                title: "パネル",
+                rows: [
+                  ["Ctrl+H", "サイドバーへフォーカス"],
+                  ["Ctrl+L", "メインパネルへフォーカス"]
+                ]
+              },
+              {
+                title: "サイドバー",
+                rows: [
+                  ["j / k", "選択を下 / 上へ移動"],
+                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
+                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
+                  ["Enter", "選択項目を開く"],
+                  ["h / l", "ディレクトリを閉じる / 開く"]
+                ]
+              },
+              {
+                title: "メインパネル",
+                rows: [
+                  ["j / k", "コードカーソルを下 / 上へ移動"],
+                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
+                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
+                  ["gp / gc", "Preview / Code タブへ切り替え"]
+                ]
+              }
             ]
           }
         }
@@ -6915,7 +6977,10 @@
     }
     function resetSourceCursorForTarget(target, totalLines) {
       const routeLine = lineTargetStart(currentSourceLineTarget(target));
-      SOURCE_CURSOR = { target, line: Math.max(1, Math.min(totalLines, routeLine || 1)) };
+      SOURCE_CURSOR = {
+        target,
+        line: Math.max(1, Math.min(totalLines, routeLine || 1))
+      };
     }
     function scrollSourceCursorIntoView(cursor, edge = "nearest") {
       const scroller = findMainScrollTarget();
@@ -7004,7 +7069,10 @@
         return;
       const target = findMainScrollTarget();
       if (target) {
-        target.scrollTo({ top: edge === "top" ? 0 : target.scrollHeight, behavior: "auto" });
+        target.scrollTo({
+          top: edge === "top" ? 0 : target.scrollHeight,
+          behavior: "auto"
+        });
         return;
       }
       const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
@@ -7033,7 +7101,9 @@
     }
     function normalizeScopeOmitDirs(value) {
       const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
-      return [...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
     }
     function scopeOmitDirsStorageKey() {
       return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
@@ -7494,7 +7564,14 @@
       refreshRepositoryTreeAfterSettings();
     }
     function buildTree(files) {
-      const root = { name: "", dirs: {}, files: [], path: "", minOrder: Infinity, explicit: true };
+      const root = {
+        name: "",
+        dirs: {},
+        files: [],
+        path: "",
+        minOrder: Infinity,
+        explicit: true
+      };
       for (const f2 of files) {
         const parts = f2.path.split("/");
         let node = root;
@@ -7504,7 +7581,13 @@
           const p2 = parts[i2];
           acc = acc ? acc + "/" + p2 : p2;
           if (!node.dirs[p2]) {
-            node.dirs[p2] = { name: p2, dirs: {}, files: [], path: acc, minOrder: Infinity };
+            node.dirs[p2] = {
+              name: p2,
+              dirs: {},
+              files: [],
+              path: acc,
+              minOrder: Infinity
+            };
           }
           node = node.dirs[p2];
           if (typeof f2.order === "number" && f2.order < node.minOrder)
@@ -7544,7 +7627,11 @@
         items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
       }
       for (const f2 of node.files) {
-        items.push({ kind: "file", sortKey: f2.order != null ? f2.order : Infinity, file: f2 });
+        items.push({
+          kind: "file",
+          sortKey: f2.order != null ? f2.order : Infinity,
+          file: f2
+        });
       }
       items.sort((a2, b2) => a2.sortKey - b2.sortKey);
       for (const item of items) {
@@ -7665,7 +7752,9 @@
             scheduleMainSurfaceFocus();
           });
           if (!onFileClick)
-            li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
+            li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
+              passive: true
+            });
           ul.appendChild(li);
         }
       }
@@ -7698,7 +7787,9 @@
           scheduleMainSurfaceFocus();
         });
         if (!onFileClick)
-          li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
+          li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
+            passive: true
+          });
         ul.appendChild(li);
       });
     }
@@ -7998,7 +8089,13 @@
       });
     }
     function escapeHtml2(s2) {
-      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c2]);
+      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c2]);
     }
     function sourceTargetsEqual(a2, b2) {
       return !!a2 && !!b2 && a2.path === b2.path && a2.ref === b2.ref;
@@ -8030,7 +8127,10 @@
       return { path: file.path, ref };
     }
     function currentRange() {
-      return { from: STATE.from || DEFAULT_RANGE.from, to: STATE.to || DEFAULT_RANGE.to };
+      return {
+        from: STATE.from || DEFAULT_RANGE.from,
+        to: STATE.to || DEFAULT_RANGE.to
+      };
     }
     function sourceTargetFromRoute() {
       return STATE.route.screen === "file" ? { path: STATE.route.path, ref: STATE.route.ref } : null;
@@ -8053,7 +8153,12 @@
         STATE.repoRef = nextRoute.ref || "worktree";
       }
       const url = buildRoute(nextRoute);
-      const state = nextRoute.screen === "file" ? { screen: "file", path: nextRoute.path, ref: nextRoute.ref, view: nextRoute.view || "detail" } : { view: nextRoute.screen };
+      const state = nextRoute.screen === "file" ? {
+        screen: "file",
+        path: nextRoute.path,
+        ref: nextRoute.ref,
+        view: nextRoute.view || "detail"
+      } : { view: nextRoute.screen };
       if (replace2)
         history.replaceState(state, "", url);
       else
@@ -8074,13 +8179,23 @@
         link2.classList.toggle("active", active);
         link2.setAttribute("aria-current", active ? "page" : "false");
         if (link2.dataset.route === "repo") {
-          link2.href = buildRoute({ screen: "repo", ref: STATE.repoRef || "worktree", path: "", range: currentRange() });
+          link2.href = buildRoute({
+            screen: "repo",
+            ref: STATE.repoRef || "worktree",
+            path: "",
+            range: currentRange()
+          });
         }
         if (link2.dataset.route === "diff") {
           link2.href = buildRoute({ screen: "diff", range: currentRange() });
         }
         if (link2.dataset.route === "help") {
-          link2.href = buildRoute({ screen: "help", lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range: currentRange() });
+          link2.href = buildRoute({
+            screen: "help",
+            lang: helpLanguageFromRoute(),
+            section: helpSectionFromRoute(),
+            range: currentRange()
+          });
         }
       });
     }
@@ -8119,7 +8234,12 @@
         langSelect.appendChild(option);
       });
       langSelect.addEventListener("change", () => {
-        setRoute({ screen: "help", lang: langSelect.value, section, range: currentRange() });
+        setRoute({
+          screen: "help",
+          lang: langSelect.value,
+          section,
+          range: currentRange()
+        });
         setPageMode();
         renderHelpPage();
         syncHeaderMenu();
@@ -8135,7 +8255,12 @@
         button.className = helpSection === section ? "active" : "";
         button.textContent = content.sections[helpSection].nav;
         button.addEventListener("click", () => {
-          setRoute({ screen: "help", lang, section: helpSection, range: currentRange() });
+          setRoute({
+            screen: "help",
+            lang,
+            section: helpSection,
+            range: currentRange()
+          });
           renderHelpPage();
           syncHeaderMenu();
         });
@@ -8265,7 +8390,10 @@
       try {
         const res = await fetch("/_open_path", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Code-Viewer-Action": "1" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
           body: JSON.stringify({ path, kind })
         });
         if (!res.ok)
@@ -8370,7 +8498,12 @@
       return dropPanel;
     }
     function repoRoute(ref, path) {
-      return { screen: "repo", ref: ref || "worktree", path, range: currentRange() };
+      return {
+        screen: "repo",
+        ref: ref || "worktree",
+        path,
+        range: currentRange()
+      };
     }
     function wireRefSelectorInput(input, onPick) {
       const wrap = input.closest("[data-ref-selector]");
@@ -8516,7 +8649,13 @@
             setRoute(repoRoute(meta.ref, entry.path));
             loadRepo();
           } else if (entry.type === "blob") {
-            setRoute({ screen: "file", path: entry.path, ref: meta.ref, view: "blob", range: currentRange() });
+            setRoute({
+              screen: "file",
+              path: entry.path,
+              ref: meta.ref,
+              view: "blob",
+              range: currentRange()
+            });
             renderStandaloneSource({ path: entry.path, ref: meta.ref });
           }
         });
@@ -8553,7 +8692,13 @@
           wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
             syntaxHighlight: STATE.syntaxHighlight,
             onNavigateMarkdown: (path, ref) => {
-              setRoute({ screen: "file", path, ref, view: "blob", range: currentRange() });
+              setRoute({
+                screen: "file",
+                path,
+                ref,
+                view: "blob",
+                range: currentRange()
+              });
               renderStandaloneSource({ path, ref });
             }
           }));
@@ -8608,7 +8753,13 @@
             loadRepo();
             return;
           }
-          setRoute({ screen: "file", path: file.path, ref: normalizedRef, view: "blob", range: currentRange() });
+          setRoute({
+            screen: "file",
+            path: file.path,
+            ref: normalizedRef,
+            view: "blob",
+            range: currentRange()
+          });
           renderStandaloneSource({ path: file.path, ref: normalizedRef });
         });
         REPO_SIDEBAR_REF = normalizedRef;
@@ -8668,7 +8819,9 @@
       }, { rootMargin: "1200px 0px 1600px 0px" });
       document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => lazyObserver.observe(c2));
     }
-    window.addEventListener("scroll", () => enqueueInitialLoads(), { passive: true });
+    window.addEventListener("scroll", () => enqueueInitialLoads(), {
+      passive: true
+    });
     window.addEventListener("resize", () => {
       enqueueInitialLoads();
       syncSidebarHeaderHeight();
@@ -8757,7 +8910,12 @@
       openFileBtn.title = "Open this file in the virtualized source viewer";
       openFileBtn.addEventListener("click", () => {
         const target = fileSourceTarget(file);
-        setRoute({ screen: "file", path: target.path, ref: target.ref, range: currentRange() });
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: target.ref,
+          range: currentRange()
+        });
         applySourceRouteToShell();
       });
       const fullBtn = document.createElement("button");
@@ -8916,7 +9074,11 @@
           if (!info)
             return;
           const txt = (info.textContent || "").trim();
-          arr.push({ tr, info, hunk: parseHunkHeader(txt) });
+          arr.push({
+            tr,
+            info,
+            hunk: parseHunkHeader(txt)
+          });
         });
         perTable.push(arr);
       });
@@ -9161,7 +9323,13 @@
         });
       };
       rows.forEach((row) => {
-        row.ln.appendChild(createExpandStack([{ direction: "down", title: "Show more lines", onClick: fetchAndInsert }]));
+        row.ln.appendChild(createExpandStack([
+          {
+            direction: "down",
+            title: "Show more lines",
+            onClick: fetchAndInsert
+          }
+        ]));
       });
       syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
     }
@@ -9783,7 +9951,13 @@
             syntaxHighlight: STATE.syntaxHighlight,
             signal,
             onNavigateMarkdown: (path, ref) => {
-              setRoute({ screen: "file", path, ref, view: "blob", range: currentRange() });
+              setRoute({
+                screen: "file",
+                path,
+                ref,
+                view: "blob",
+                range: currentRange()
+              });
               renderStandaloneSource({ path, ref });
             }
           });
@@ -9869,7 +10043,13 @@
           syntaxHighlight: STATE.syntaxHighlight,
           signal,
           onNavigateMarkdown: (path, ref) => {
-            setRoute({ screen: "file", path, ref, view: "blob", range: currentRange() });
+            setRoute({
+              screen: "file",
+              path,
+              ref,
+              view: "blob",
+              range: currentRange()
+            });
             renderStandaloneSource({ path, ref });
           }
         });
@@ -10246,7 +10426,10 @@
           const activeRange = search?.activeRange() || null;
           if (appendVirtualSourceLineCode(code2, line, searchQuery, activeRange, index + 1)) {} else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
             try {
-              code2.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
+              code2.innerHTML = hljsRef.highlight(line, {
+                language: lang,
+                ignoreIllegals: true
+              }).value;
               code2.classList.add("hljs");
             } catch {
               code2.textContent = line;
@@ -10408,7 +10591,10 @@
             code2.textContent = "";
           } else if (appendVirtualSourceLineCode(code2, line, search?.query() || "", search?.activeRange() || null, lineNumber)) {} else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
             try {
-              code2.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
+              code2.innerHTML = hljsRef.highlight(line, {
+                language: lang,
+                ignoreIllegals: true
+              }).value;
               code2.classList.add("hljs");
             } catch {
               code2.textContent = line;
@@ -10437,7 +10623,9 @@
         let done = false;
         while (!done && matches.length < 5000) {
           const endLine = startLine + VIRTUAL_SOURCE_PAGE_SIZE - 1;
-          const data = await trackLoad(fetch(buildFileRangeUrl(target, startLine, endLine), { signal: matchSignal }).then((res) => {
+          const data = await trackLoad(fetch(buildFileRangeUrl(target, startLine, endLine), {
+            signal: matchSignal
+          }).then((res) => {
             if (!res.ok)
               throw new Error("file range failed");
             return res.json();
@@ -10448,7 +10636,11 @@
             const lineNumber = data.start + index;
             lines.set(lineNumber, lineValue);
             for (const range of virtualSourceSearchRanges(lineValue, query)) {
-              matches.push({ line: lineNumber, start: range.start, end: range.end });
+              matches.push({
+                line: lineNumber,
+                start: range.start,
+                end: range.end
+              });
               if (matches.length >= 5000)
                 break;
             }
@@ -10508,7 +10700,9 @@
       const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
       if (signal?.aborted)
         return false;
-      const initial = await trackLoad(fetch(buildFileRangeUrl(target, initialStart, initialEnd), { signal }).then((res) => res.ok ? res.json() : null));
+      const initial = await trackLoad(fetch(buildFileRangeUrl(target, initialStart, initialEnd), {
+        signal
+      }).then((res) => res.ok ? res.json() : null));
       if (!initial)
         return false;
       if (signal?.aborted)
@@ -10959,7 +11153,12 @@
         viewFile.addEventListener("click", (e2) => {
           e2.stopPropagation();
           const target = fileSourceTarget(file);
-          setRoute({ screen: "file", path: target.path, ref: target.ref, range: currentRange() });
+          setRoute({
+            screen: "file",
+            path: target.path,
+            ref: target.ref,
+            range: currentRange()
+          });
           applySourceRouteToShell();
         });
         header.appendChild(viewFile);
@@ -11070,7 +11269,10 @@
         if (text2.length === 0)
           return;
         try {
-          s2.innerHTML = hljsRef.highlight(text2, { language: lang, ignoreIllegals: true }).value;
+          s2.innerHTML = hljsRef.highlight(text2, {
+            language: lang,
+            ignoreIllegals: true
+          }).value;
           if (!s2.classList.contains("hljs"))
             s2.classList.add("hljs");
         } catch (_) {}
@@ -11101,7 +11303,10 @@
           if (text2.length === 0)
             continue;
           try {
-            s2.innerHTML = hljsRef.highlight(text2, { language: lang, ignoreIllegals: true }).value;
+            s2.innerHTML = hljsRef.highlight(text2, {
+              language: lang,
+              ignoreIllegals: true
+            }).value;
             if (!s2.classList.contains("hljs"))
               s2.classList.add("hljs");
           } catch (_) {}
@@ -11746,7 +11951,17 @@
       if (!query.trim()) {
         const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
           const target = fileSourceTarget(file);
-          return { kind: "file", path: file.path, old_path: file.old_path, displayPath: file.path, ref: paletteRef(source), targetPath: target.path, targetRef: target.ref, source, ranges: [] };
+          return {
+            kind: "file",
+            path: file.path,
+            old_path: file.old_path,
+            displayPath: file.path,
+            ref: paletteRef(source),
+            targetPath: target.path,
+            targetRef: target.ref,
+            source,
+            ranges: []
+          };
         }) : [];
         state.items = limitPaletteResults(base2);
         state.selected = state.items.length ? 0 : -1;
@@ -11812,7 +12027,9 @@
         }
         const controller = new AbortController;
         state.controller = controller;
-        trackLoad(fetch("/_grep?" + params.toString(), { signal: controller.signal }).then((r2) => {
+        trackLoad(fetch("/_grep?" + params.toString(), {
+          signal: controller.signal
+        }).then((r2) => {
           if (!r2.ok)
             throw new Error("grep failed");
           return r2.json();
@@ -11856,22 +12073,45 @@
       if (item.kind === "file") {
         if (item.source === "diff") {
           if (STATE.route.screen === "file") {
-            setRoute({ screen: "file", path: item.targetPath || item.path, ref: item.targetRef || item.ref, range: currentRange() });
+            setRoute({
+              screen: "file",
+              path: item.targetPath || item.path,
+              ref: item.targetRef || item.ref,
+              range: currentRange()
+            });
             applySourceRouteToShell();
           } else {
             scrollToFile(item.path);
           }
         } else {
-          setRoute({ screen: "file", path: item.path, ref: item.ref, view: "blob", range: currentRange() });
+          setRoute({
+            screen: "file",
+            path: item.path,
+            ref: item.ref,
+            view: "blob",
+            range: currentRange()
+          });
           renderStandaloneSource({ path: item.path, ref: item.ref });
         }
         return;
       }
       if (item.source === "diff") {
-        setRoute({ screen: "diff", range: currentRange(), path: item.path, line: item.line });
+        setRoute({
+          screen: "diff",
+          range: currentRange(),
+          path: item.path,
+          line: item.line
+        });
         scrollToFile(item.path, item.line);
       } else {
-        setRoute({ screen: "file", path: item.path, ref: item.ref, view: "blob", line: item.line, range: currentRange() });
+        setRoute({
+          screen: "file",
+          path: item.path,
+          ref: item.ref,
+          view: "blob",
+          line: item.line,
+          range: currentRange()
+        });
         renderStandaloneSource({ path: item.path, ref: item.ref });
       }
     }
@@ -12008,7 +12248,10 @@
         else if (scope === "sidebar")
           moveActiveSidebarToEdge(edge);
         else
-          window.scrollTo({ top: edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight), behavior: "auto" });
+          window.scrollTo({
+            top: edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
+            behavior: "auto"
+          });
         return true;
       }
       if (action === "layout-unified") {
@@ -12058,7 +12301,9 @@
     function handleVirtualSourcePagingKeydown(e2) {
       handleVirtualSourcePagingKey(e2, e2.target);
     }
-    document.addEventListener("keydown", handleVirtualSourcePagingKeydown, { capture: true });
+    document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
+      capture: true
+    });
     document.addEventListener("keydown", (e2) => {
       if (e2.__gdpVirtualSourcePagingHandled)
         return;
@@ -12162,7 +12407,12 @@
       if (STATE.route.screen === "file") {
         setRoute({ screen: "file", path: STATE.route.path, ref: STATE.route.ref, range }, true);
       } else if (STATE.route.screen === "help") {
-        setRoute({ screen: "help", lang: helpLanguageFromRoute(), section: helpSectionFromRoute(), range }, true);
+        setRoute({
+          screen: "help",
+          lang: helpLanguageFromRoute(),
+          section: helpSectionFromRoute(),
+          range
+        }, true);
         renderHelpPage();
       } else {
         setRoute({ screen: "diff", range }, true);
@@ -12171,7 +12421,12 @@
     }
     syncRefInputs();
     syncHeaderMenu();
-    const REFS = { branches: [], tags: [], commits: [], current: "" };
+    const REFS = {
+      branches: [],
+      tags: [],
+      commits: [],
+      current: ""
+    };
     const popover = $("#ref-popover");
     const popBody = popover.querySelector(".rp-body");
     const popSearch = popover.querySelector(".rp-search");
@@ -12275,7 +12530,13 @@
     wireRefSelectorInput($("#repo-target"), (ref) => {
       if (STATE.route.screen !== "file")
         return;
-      setRoute({ screen: "file", path: STATE.route.path, ref, view: "blob", range: currentRange() });
+      setRoute({
+        screen: "file",
+        path: STATE.route.path,
+        ref,
+        view: "blob",
+        range: currentRange()
+      });
       renderStandaloneSource({ path: STATE.route.path, ref });
     });
     popSearch.addEventListener("input", () => buildPopBody(popSearch.value));

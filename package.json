@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -32,12 +32,13 @@
     "check": "bun run typecheck",
     "typecheck": "tsc --noEmit",
     "check:bundle": "bun build --target=browser --format=iife --outfile=/tmp/code-viewer-app.js web-src/app.ts && cmp /tmp/code-viewer-app.js web/app.js && bun build --target=browser --format=esm --outfile=/tmp/code-viewer-mermaid.js web-src/mermaid-entry.ts && cmp /tmp/code-viewer-mermaid.js web/mermaid.js && bun build --target=browser --format=esm --outfile=/tmp/code-viewer-shiki.js web-src/shiki-entry.ts && cmp /tmp/code-viewer-shiki.js web/shiki.js",
+    "check:format": "biome format web-src/app.ts web-src/server/preview.ts web-src/test/source-fixture.ts web-src/test/source-fixture.test.ts web-src/test/view-file-button.test.ts web-src/test/open-path.test.ts web-src/test/markdown-preview.test.ts web-src/test/search-server.test.ts web-src/test/upload-files.test.ts web-src/test/git-truncate.test.ts web-src/test/asset-version-removal.test.ts web-src/test/sidebar-folder-icon.test.ts web-src/test/mark-viewed-button.test.ts",
     "dev": "bun run web-src/server/dev.ts",
     "preview": "bun run web-src/server/dev.ts",
     "preview:raw": "bun run web-src/server/preview.ts",
     "test": "bun test",
     "lint": "biome lint web-src/server package.json biome.jsonc",
-    "verify": "bun run check && bun run lint && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
+    "verify": "bun run check && bun run lint && bun run check:format && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
     "pack:dry": "npm pack --dry-run",
     "prepack": "bun run build",
     "prepublishOnly": "bun run verify"
