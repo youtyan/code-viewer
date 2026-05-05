@@ -2849,7 +2849,23 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function isPreviewableSource(path: string): boolean {
-    return /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path);
+    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+  }
+
+  function sourcePreviewKind(path: string): 'markdown' | 'html' | null {
+    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path)) return 'markdown';
+    if (/\.(html|htm)$/i.test(path)) return 'html';
+    return null;
+  }
+
+  function renderHtmlPreview(target: SourceFileTarget, html: string): HTMLElement {
+    const preview = document.createElement('div');
+    preview.className = 'gdp-html-preview';
+    const frame = document.createElement('iframe');
+    frame.title = target.path + ' preview';
+    frame.srcdoc = html;
+    preview.appendChild(frame);
+    return preview;
   }
 
   const EXT_TO_LANG: Record<string, string> = {
@@ -3085,6 +3101,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const sourceShikiRef = STATE.syntaxHighlight && !usesVirtualSource ? await loadSourceShikiHighlighter() : null;
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
+    const previewKind = sourcePreviewKind(target.path);
     const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
     if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
@@ -3094,14 +3111,16 @@ window.GdpExpandLogic = GdpExpandLogic;
           tabsHost.hidden = false;
           tabsHost.replaceChildren(tabs);
         }
-        const preview = await renderMarkdownPreview(textValue, target, {
-          syntaxHighlight: STATE.syntaxHighlight,
-          signal,
-          onNavigateMarkdown: (path, ref) => {
-            setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() });
-            renderStandaloneSource({ path, ref });
-          },
-        });
+        const preview = previewKind === 'html'
+          ? renderHtmlPreview(target, textValue)
+          : await renderMarkdownPreview(textValue, target, {
+            syntaxHighlight: STATE.syntaxHighlight,
+            signal,
+            onNavigateMarkdown: (path, ref) => {
+              setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() });
+              renderStandaloneSource({ path, ref });
+            },
+          });
         if (signal?.aborted) return false;
         virtualCode.hidden = true;
         previewButton?.addEventListener('click', () => {
@@ -3170,7 +3189,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       tabsHost.replaceChildren(tabs);
     }
     if (previewable) {
-      const preview = await renderMarkdownPreview(textValue, target, {
+      const preview = previewKind === 'html'
+        ? renderHtmlPreview(target, textValue)
+        : await renderMarkdownPreview(textValue, target, {
         syntaxHighlight: STATE.syntaxHighlight,
         signal,
         onNavigateMarkdown: (path, ref) => {

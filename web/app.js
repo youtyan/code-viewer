@@ -9309,7 +9309,23 @@
         card.appendChild(view);
     }
     function isPreviewableSource(path) {
-      return /\.(md|markdown|mdown|mkdn|mdx)$/i.test(path);
+      return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+    }
+    function sourcePreviewKind(path) {
+      if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
+        return "markdown";
+      if (/\.(html|htm)$/i.test(path))
+        return "html";
+      return null;
+    }
+    function renderHtmlPreview(target, html) {
+      const preview = document.createElement("div");
+      preview.className = "gdp-html-preview";
+      const frame = document.createElement("iframe");
+      frame.title = target.path + " preview";
+      frame.srcdoc = html;
+      preview.appendChild(frame);
+      return preview;
     }
     const EXT_TO_LANG = {
       js: "javascript",
@@ -9753,6 +9769,7 @@
       if (signal?.aborted)
         return false;
       const previewable = isPreviewableSource(target.path);
+      const previewKind = sourcePreviewKind(target.path);
       const tabsHost = card.querySelector(".gdp-file-detail-tabs");
       if (usesVirtualSource) {
         const virtualCode = renderVirtualSource(target, textValue, lines, hljsRef, lang);
@@ -9762,7 +9779,7 @@
             tabsHost.hidden = false;
             tabsHost.replaceChildren(tabs2);
           }
-          const preview = await renderMarkdownPreview(textValue, target, {
+          const preview = previewKind === "html" ? renderHtmlPreview(target, textValue) : await renderMarkdownPreview(textValue, target, {
             syntaxHighlight: STATE.syntaxHighlight,
             signal,
             onNavigateMarkdown: (path, ref) => {
@@ -9848,7 +9865,7 @@
         tabsHost.replaceChildren(tabs);
       }
       if (previewable) {
-        const preview = await renderMarkdownPreview(textValue, target, {
+        const preview = previewKind === "html" ? renderHtmlPreview(target, textValue) : await renderMarkdownPreview(textValue, target, {
           syntaxHighlight: STATE.syntaxHighlight,
           signal,
           onNavigateMarkdown: (path, ref) => {
