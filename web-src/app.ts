@@ -46,6 +46,7 @@ import type {
   FileRangeResponse,
   FileSearchListResponse,
   GrepResponse,
+  RefCommitResponse,
   RefResponse,
   RepoTreeEntry,
   RepoTreeResponse,
@@ -7465,38 +7466,69 @@ window.GdpExpandLogic = GdpExpandLogic;
   fetchRefs();
 
   let popTab = "commits";
+  let commitSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  let commitSearchSeq = 0;
+  let commitSearchAbort: AbortController | null = null;
+  function fetchCommitRefs(query: string) {
+    const seq = ++commitSearchSeq;
+    if (commitSearchAbort) commitSearchAbort.abort();
+    commitSearchAbort = new AbortController();
+    const url =
+      "/_commits?max=100&q=" + encodeURIComponent((query || "").trim());
+    return fetch(url, { signal: commitSearchAbort.signal })
+      .then((r) => r.json())
+      .then((refs: RefCommitResponse) => {
+        if (seq !== commitSearchSeq) return;
+        REFS.commits = refs.commits || [];
+        if (!popover.hidden && popTab === "commits") {
+          buildPopBody(popSearch.value);
+        }
+      })
+      .catch(() => {});
+  }
+
+  function scheduleCommitSearch(query: string) {
+    if (commitSearchTimer) clearTimeout(commitSearchTimer);
+    commitSearchTimer = setTimeout(() => {
+      commitSearchTimer = null;
+      fetchCommitRefs(query);
+    }, 150);
+  }
+
   function buildPopBody(query: string) {
     const q = (query || "").toLowerCase().trim();
     const m = (s: string) => !q || String(s).toLowerCase().includes(q);
     const html: string[] = [];
     if (popTab === "commits") {
-      const commits = (REFS.commits || []).filter((c) => m(c));
+      const commits = (REFS.commits || []).filter((commit) =>
+        m(`${commit.sha} ${commit.subject} ${commit.author} ${commit.when}`),
+      );
       if (!commits.length) {
         html.push('<div class="rp-empty">no commits</div>');
       }
-      for (const c of commits) {
-        const [sha, subject, author, when] = c.split("\t");
-        if (!sha) continue;
+      for (const commit of commits) {
+        if (!commit.sha) continue;
+        const shortSha = commit.sha.slice(0, 7);
         html.push(
           '<div class="rp-item-commit" data-val="' +
-            escapeAttr(sha) +
+            escapeAttr(commit.sha) +
             '">' +
             '<div class="row1">' +
             '<span class="sha">' +
-            escapeHtml(sha) +
+            escapeHtml(shortSha) +
             "</span>" +
             '<span class="subject" title="' +
-            escapeAttr(subject || "") +
+            escapeAttr(commit.subject || "") +
             '">' +
-            escapeHtml(subject || "") +
+            escapeHtml(commit.subject || "") +
             "</span>" +
             "</div>" +
             '<div class="row2">' +
             '<span class="author">' +
-            escapeHtml(author || "") +
+            escapeHtml(commit.author || "") +
             "</span>" +
             '<span class="when">' +
-            escapeHtml(when || "") +
+            escapeHtml(commit.when || "") +
             "</span>" +
             "</div>" +
             "</div>",
@@ -7573,6 +7605,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function openPopover(input: HTMLInputElement) {
     popTarget = input;
     popSearch.value = "";
+    if (popTab === "commits") scheduleCommitSearch("");
     buildPopBody("");
     // Reflect the input's current value on the quick chips
     const cur = (input.value || "").trim();
@@ -7614,14 +7647,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     renderStandaloneSource({ path: STATE.route.path, ref });
   });
 
-  popSearch.addEventListener("input", () => buildPopBody(popSearch.value));
+  popSearch.addEventListener("input", () => {
+    if (popTab === "commits") scheduleCommitSearch(popSearch.value);
+    buildPopBody(popSearch.value);
+  });
   popSearch.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       closePopover();
     }
     if (e.key === "Enter") {
       // pick first visible item
-      const first = popBody.querySelector<HTMLElement>(".rp-item");
+      const first = popBody.querySelector<HTMLElement>(
+        ".rp-item-commit, .rp-item-ref",
+      );
       if (first) first.click();
     }
   });
@@ -7647,6 +7685,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       popover
         .querySelectorAll(".rp-tab")
         .forEach((b) => b.classList.toggle("active", b === t));
+      if (popTab === "commits") scheduleCommitSearch(popSearch.value);
       buildPopBody(popSearch.value);
     });
   });

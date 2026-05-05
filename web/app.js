@@ -12438,20 +12438,46 @@
     }
     fetchRefs();
     let popTab = "commits";
+    let commitSearchTimer = null;
+    let commitSearchSeq = 0;
+    let commitSearchAbort = null;
+    function fetchCommitRefs(query) {
+      const seq = ++commitSearchSeq;
+      if (commitSearchAbort)
+        commitSearchAbort.abort();
+      commitSearchAbort = new AbortController;
+      const url = "/_commits?max=100&q=" + encodeURIComponent((query || "").trim());
+      return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
+        if (seq !== commitSearchSeq)
+          return;
+        REFS.commits = refs.commits || [];
+        if (!popover.hidden && popTab === "commits") {
+          buildPopBody(popSearch.value);
+        }
+      }).catch(() => {});
+    }
+    function scheduleCommitSearch(query) {
+      if (commitSearchTimer)
+        clearTimeout(commitSearchTimer);
+      commitSearchTimer = setTimeout(() => {
+        commitSearchTimer = null;
+        fetchCommitRefs(query);
+      }, 150);
+    }
     function buildPopBody(query) {
       const q = (query || "").toLowerCase().trim();
       const m = (s2) => !q || String(s2).toLowerCase().includes(q);
       const html = [];
       if (popTab === "commits") {
-        const commits = (REFS.commits || []).filter((c2) => m(c2));
+        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author} ${commit.when}`));
         if (!commits.length) {
           html.push('<div class="rp-empty">no commits</div>');
         }
-        for (const c2 of commits) {
-          const [sha, subject, author, when] = c2.split("\t");
-          if (!sha)
+        for (const commit of commits) {
+          if (!commit.sha)
             continue;
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(sha) + '</span><span class="subject" title="' + escapeAttr(subject || "") + '">' + escapeHtml2(subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(author || "") + '</span><span class="when">' + escapeHtml2(when || "") + "</span></div></div>");
+          const shortSha = commit.sha.slice(0, 7);
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(shortSha) + '</span><span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + escapeHtml2(commit.subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(commit.author || "") + '</span><span class="when">' + escapeHtml2(commit.when || "") + "</span></div></div>");
         }
       } else if (popTab === "branches") {
         const branches = (REFS.branches || []).filter(m);
@@ -12502,6 +12528,8 @@
     function openPopover(input) {
       popTarget = input;
       popSearch.value = "";
+      if (popTab === "commits")
+        scheduleCommitSearch("");
       buildPopBody("");
       const cur = (input.value || "").trim();
       popover.querySelectorAll(".rp-chip").forEach((c2) => {
@@ -12539,13 +12567,17 @@
       });
       renderStandaloneSource({ path: STATE.route.path, ref });
     });
-    popSearch.addEventListener("input", () => buildPopBody(popSearch.value));
+    popSearch.addEventListener("input", () => {
+      if (popTab === "commits")
+        scheduleCommitSearch(popSearch.value);
+      buildPopBody(popSearch.value);
+    });
     popSearch.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape") {
         closePopover();
       }
       if (e2.key === "Enter") {
-        const first = popBody.querySelector(".rp-item");
+        const first = popBody.querySelector(".rp-item-commit, .rp-item-ref");
         if (first)
           first.click();
       }
@@ -12568,6 +12600,8 @@
       t2.addEventListener("click", () => {
         popTab = t2.dataset.tab || "commits";
         popover.querySelectorAll(".rp-tab").forEach((b2) => b2.classList.toggle("active", b2 === t2));
+        if (popTab === "commits")
+          scheduleCommitSearch(popSearch.value);
         buildPopBody(popSearch.value);
       });
     });
