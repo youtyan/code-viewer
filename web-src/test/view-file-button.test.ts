@@ -574,6 +574,42 @@ describe('view file UI', () => {
     expect(style.includes('line-height: 20px;')).toBe(true);
   });
 
+  test('virtual source viewer keeps code text selectable while line numbers remain non-selectable', () => {
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;\n  min-height: 0;\n  font-family:')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;\n  min-height: 0;\n  font-family: "Monaspace Neon"')).toBe(true);
+    expect(style.includes('grid-template-rows: auto minmax(0, 1fr);')).toBe(true);
+    expect(style.includes('cursor: text;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-line-number {\n  position: sticky;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-line-number {\n  position: sticky;\n  left: 0;')).toBe(true);
+    expect(style.includes('  user-select: none;\n}\n.gdp-source-virtual-line-code')).toBe(true);
+    const scrollerBlock = style.match(/\.gdp-source-virtual-scroller\s*\{[^}]*\}/s)?.[0] || '';
+    expect(scrollerBlock.includes('user-select: none')).toBe(false);
+  });
+
+  test('virtual source viewer provides current-file Ctrl+F search without using the repo grep palette', () => {
+    expect(app.includes('type VirtualSourceSearchMatch = { line: number; start: number; end: number }')).toBe(true);
+    expect(app.includes('type VirtualSourceSearchHandle = { open: () => void; query: () => string; activeRange: () => VirtualSourceSearchMatch | null }')).toBe(true);
+    expect(app.includes('function openVirtualSourceSearchFromKeyboard(targetEl: Element | null): boolean')).toBe(true);
+    expect(app.includes("(e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'")).toBe(true);
+    expect(app.includes("search = createVirtualSourceSearch(wrap, scroller, query => Promise.resolve(collectVirtualSourceSearchMatches(lines, query)), render)")).toBe(true);
+    expect(app.includes('const findPagedMatches = async (query: string, matchSignal?: AbortSignal): Promise<VirtualSourceSearchMatch[]>')).toBe(true);
+    expect(app.includes('fetch(buildFileRangeUrl(target, startLine, endLine), { signal: matchSignal })')).toBe(true);
+    expect(app.includes('for (const range of virtualSourceSearchRanges(lineValue, query))')).toBe(true);
+    expect(app.includes("wrap.__gdpVirtualSourceSearch = search")).toBe(true);
+    expect(app.includes('function createVirtualSourceSearch(')).toBe(true);
+    expect(app.includes("bar.className = 'gdp-source-virtual-search'")).toBe(true);
+    expect(app.includes("wrap.querySelector('.gdp-source-virtual-info')?.appendChild(bar)")).toBe(true);
+    expect(app.includes("input.placeholder = 'Find in file'")).toBe(true);
+    expect(app.includes('function virtualSourceSearchRanges(line: string, query: string): Array<{ start: number; end: number }>')).toBe(true);
+    expect(app.includes('function appendVirtualSourceLineCode(')).toBe(true);
+    expect(app.includes("mark.className = active ? 'gdp-source-virtual-search-hit active' : 'gdp-source-virtual-search-hit'")).toBe(true);
+    expect(app.includes("if (openVirtualSourceSearchFromKeyboard(targetEl))")).toBe(true);
+    expect(app.includes("searchController?.abort();")).toBe(true);
+    expect(app.includes("code.classList.add('gdp-source-virtual-search-line')")).toBe(false);
+    expect(app.includes("openSearchPalette('grep')")).toBe(true);
+  });
+
   test('large source files use paged line-range loading instead of raw text loading', () => {
     expect(app.includes('const VIRTUAL_SOURCE_PAGE_SIZE = 2000')).toBe(true);
     expect(app.includes('function buildFileRangeUrl(target: SourceFileTarget, start: number, end: number): string')).toBe(true);
