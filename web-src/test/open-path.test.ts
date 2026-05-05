@@ -27,7 +27,7 @@ describe('open path in OS action', () => {
     expect(server.includes('function safeOpenWorktreePath(path: string): string | null')).toBe(true);
     expect(server.includes("path.split(/[\\\\/]+/).some(part => part.toLowerCase() === '.git')")).toBe(true);
     expect(server.includes('if (isGitInternalPath(rel)) return null')).toBe(true);
-    expect(server.includes('Bun.spawn(cmd, { stdout:')).toBe(true);
+    expect(server.includes('spawnDetached(cmd)')).toBe(true);
   });
 
   test('server forbids browsing Git internal tree paths', () => {

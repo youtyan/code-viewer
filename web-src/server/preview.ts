@@ -1,7 +1,5 @@
-#!/usr/bin/env bun
-
 import { closeSync, constants, existsSync, lstatSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, join, normalize, relative } from 'node:path';
+import { basename, dirname, extname, join, relative } from 'node:path';
 import { APP_ENTRY_PATHS, SPA_PATHS } from '../routes';
 import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, FileSearchListResponse, GrepMatch, GrepResponse, RepoTreeResponse, SettingsResponse } from '../types';
 import { cacheFresh, fileDiffCacheKey, setTimedCacheEntry, type TimedCacheEntry } from './cache';
@@ -19,6 +17,8 @@ import {
   type LineOffsetIndex,
   type LineRangeResult,
 } from './range';
+import { ROOT } from './root';
+import { fileByteRangeResponseBody, fileReadableStream, readFileTextRange, runSync, spawnDetached, startServer } from './runtime';
 import {
   GREP_MAX_FILE_BYTES,
   buildFileSearchList,
@@ -30,7 +30,6 @@ import {
   parseRgOutput,
 } from './search';
 
-const ROOT = normalize(join(import.meta.dir, '..', '..'));
 const WEB_ROOT = join(ROOT, 'web');
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version as string;
 const DEFAULT_ARGS = ['HEAD'];
@@ -518,8 +517,8 @@ function parseGrepPaths(url: URL, omitDirNames: string[]): string[] {
 
 function rgAvailable(): boolean {
   if (rgAvailableCache !== null) return rgAvailableCache;
-  const proc = Bun.spawnSync(['rg', '--version'], { cwd, stdout: 'pipe', stderr: 'pipe' });
-  rgAvailableCache = proc.exitCode === 0;
+  const proc = runSync(['rg', '--version'], cwd);
+  rgAvailableCache = proc.code === 0;
   return rgAvailableCache;
 }
 
@@ -531,7 +530,7 @@ function grepWorktreeFallback(query: string, max: number, paths: string[], omitD
     if (!safePath(path) || isGitInternalPath(path) || isSkippableSearchPath(path, omitDirNames)) continue;
     const full = safeWorktreePath(path);
     if (!full) continue;
-    let stat;
+    let stat: ReturnType<typeof lstatSync>;
     try {
       stat = lstatSync(full);
     } catch {
@@ -554,8 +553,8 @@ function grepWorktree(query: string, max: number, paths: string[], regex: boolea
   if (rgAvailable()) {
     const safePaths = paths.filter(path => safePath(path) && !isGitInternalPath(path) && !isSkippableSearchPath(path, omitDirNames) && safeWorktreePath(path));
     const args = buildRgArgs(query, max, safePaths, regex, omitDirNames);
-    const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
-    const stdout = new TextDecoder().decode(proc.stdout);
+    const proc = runSync(args, cwd, { timeout: 5000 });
+    const stdout = proc.stdout;
     const matches = parseRgOutput(stdout, max, omitDirNames)
       .filter(match => safePath(match.path) && !isGitInternalPath(match.path) && !isSkippableSearchPath(match.path, omitDirNames) && !!safeWorktreePath(match.path));
     return { ref: 'worktree', engine: 'rg', truncated: matches.length >= max, matches };
@@ -574,8 +573,8 @@ function grepTreeRef(ref: string, query: string, max: number, paths: string[], r
     ref, '--',
     ...safePaths,
   ];
-  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', timeout: 5000, killSignal: 'SIGKILL' });
-  const stdout = new TextDecoder().decode(proc.stdout);
+  const proc = runSync(args, cwd, { timeout: 5000 });
+  const stdout = proc.stdout;
   const matches = parseGitGrepOutput(stdout, ref, max, omitDirNames).slice(0, max);
   return { ref, engine: 'git', truncated: matches.length >= max, matches };
 }
@@ -685,7 +684,7 @@ async function getWorktreeLineIndex(full: string): Promise<LineOffsetIndex | nul
   }
   const stat = statSync(full) as unknown as { size: number };
   if (stat.size > LINE_INDEX_MAX_FILE_BYTES) return null;
-  const index = await buildLineOffsetIndexFromStream(Bun.file(full).stream(), stat.size);
+  const index = await buildLineOffsetIndexFromStream(fileReadableStream(full), stat.size);
   lineIndexCache.delete(full);
   lineIndexCache.set(full, { signature, index });
   while (lineIndexCache.size > 32) {
@@ -785,13 +784,13 @@ async function collectIndexedGitBlobLineRange(path: string, oid: string, size: n
 
 async function collectIndexedWorktreeLineRange(full: string, start: number, end: number): Promise<LineRangeResult> {
   if (start < LINE_INDEX_MIN_START && !lineIndexCache.has(full)) {
-    return collectLineRangeFromStream(Bun.file(full).stream(), start, end);
+    return collectLineRangeFromStream(fileReadableStream(full), start, end);
   }
   const index = await getWorktreeLineIndex(full);
-  if (!index) return collectLineRangeFromStream(Bun.file(full).stream(), start, end);
+  if (!index) return collectLineRangeFromStream(fileReadableStream(full), start, end);
   const range = lineByteRangeForIndex(index, start, end);
   const textValue = range
-    ? await Bun.file(full).slice(range.start, range.endExclusive).text()
+    ? await readFileTextRange(full, range.start, range.endExclusive)
     : '';
   return collectLineRangeFromIndexedText(textValue, index, start, end);
 }
@@ -857,14 +856,13 @@ function handleRawFile(req: Request, url: URL) {
           headers: rawFileHeaders(path, size, range),
         });
       }
-      const file = Bun.file(full).slice(range.start, range.end + 1);
-      return new Response(file, {
+      return new Response(fileByteRangeResponseBody(full, range.start, range.end), {
         status: 206,
         headers: rawFileHeaders(path, size, range),
       });
     }
     if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
-    return new Response(Bun.file(full).stream(), { headers: rawFileHeaders(path, size) });
+    return new Response(fileReadableStream(full), { headers: rawFileHeaders(path, size) });
   }
 }
 
@@ -1034,7 +1032,7 @@ function openOsPath(path: string) {
   const cmd = process.platform === 'darwin' ? ['open', '--', path]
     : process.platform === 'win32' ? ['explorer.exe', path]
       : ['xdg-open', path];
-  Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' });
+  spawnDetached(cmd);
 }
 
 async function handleOpenPath(req: Request) {
@@ -1082,12 +1080,12 @@ function openBrowser(url: string) {
   const cmd = process.platform === 'darwin' ? ['open', url]
     : process.platform === 'win32' ? ['cmd.exe', '/c', 'start', '', url]
       : ['xdg-open', url];
-  Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' });
+  spawnDetached(cmd);
 }
 
 parseCli();
 
-const server = Bun.serve({
+const server = await startServer({
   hostname: '127.0.0.1',
   port: listenPort,
   async fetch(req) {
@@ -1140,7 +1138,6 @@ const server = Bun.serve({
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
         },
       });
     }

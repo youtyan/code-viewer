@@ -95,7 +95,7 @@ export function parseRgOutput(stdout: string, max: number, omitDirNames: string[
 }
 
 export function parseGitGrepOutput(stdout: string, ref: string, max: number, omitDirNames: string[] = []): GrepMatch[] {
-  const prefix = ref + ':';
+  const prefix = `${ref}:`;
   const normalized = stdout
     .split('\n')
     .map(line => line.startsWith(prefix) ? line.slice(prefix.length) : line)

@@ -2,7 +2,8 @@
 
 Local browser-based code and git diff viewer.
 
-Requires [Bun](https://bun.sh/) on your `PATH`.
+Requires Node.js 20 or newer when installed from npm. Development uses
+[Bun](https://bun.sh/).
 
 ## Features
 
@@ -16,26 +17,51 @@ Requires [Bun](https://bun.sh/) on your `PATH`.
 
 ## Usage
 
+From inside a git repository, run it without installing:
+
 ```sh
-bunx @youtyan/code-viewer --cwd /path/to/repo
+npx @youtyan/code-viewer
 ```
 
-Or after installing globally:
+The server prints a local URL. Add `--open` if you want the browser opened
+automatically:
+
+```sh
+npx @youtyan/code-viewer --open
+```
+
+To inspect another repository, pass `--cwd`:
+
+```sh
+npx @youtyan/code-viewer --cwd /path/to/repo
+```
+
+Equivalent one-shot commands also work:
+
+```sh
+pnpm dlx @youtyan/code-viewer
+bunx @youtyan/code-viewer
+```
+
+Or install it globally:
 
 ```sh
 npm install -g @youtyan/code-viewer
-code-viewer --cwd /path/to/repo
+code-viewer
 ```
 
-Arguments after options are passed to `git diff`. By default it compares
-`HEAD` with the working tree.
+The published CLI runs on Node.js 20 or newer. Bun is supported as a package
+runner through `bunx`, but the npm package no longer requires Bun at runtime.
+
+Arguments after options are passed to `git diff`. By default, code-viewer
+compares `HEAD` with the working tree.
 
 ```sh
+npx @youtyan/code-viewer HEAD~1 HEAD
+npx @youtyan/code-viewer --staged
 code-viewer HEAD~1 HEAD
 code-viewer --cwd /path/to/repo --staged
 ```
-
-Pass `--open` only when you want the browser opened automatically.
 
 ## Repository View
 

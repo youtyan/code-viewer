@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
+import { runBytesSync, runSync, spawnStream } from './runtime';
 import { join } from 'node:path';
 
 export type GitFileMeta = {
@@ -53,21 +54,11 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
 ];
 
 function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
-  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
-  return {
-    code: proc.exitCode,
-    stdout: new TextDecoder().decode(proc.stdout),
-    stderr: new TextDecoder().decode(proc.stderr),
-  };
+  return runSync(args, cwd);
 }
 
 function runBytes(args: string[], cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
-  const proc = Bun.spawnSync(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
-  return {
-    code: proc.exitCode,
-    stdout: new Uint8Array(proc.stdout),
-    stderr: new TextDecoder().decode(proc.stderr),
-  };
+  return runBytesSync(args, cwd);
 }
 
 export function repoRoot(cwd: string): string | null {
@@ -89,12 +80,7 @@ export function showBytes(ref: string, path: string, cwd: string): { code: numbe
 }
 
 export function catFileBlobStream(oid: string, cwd: string): { stream: ReadableStream<Uint8Array>; exited: Promise<number>; kill(signal?: string): void } {
-  const proc = Bun.spawn(['git', 'cat-file', 'blob', oid], { cwd, stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
-  return {
-    stream: proc.stdout as ReadableStream<Uint8Array>,
-    exited: proc.exited,
-    kill: (signal?: string) => proc.kill(signal),
-  };
+  return spawnStream(['git', 'cat-file', 'blob', oid], cwd);
 }
 
 export function objectSize(ref: string, path: string, cwd: string): { code: number; size: number; stderr: string } {
@@ -269,7 +255,7 @@ function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean
   const walk = (dir: string, prefix: string, depth: number) => {
     if (truncated) return;
     if (depth >= WORKTREE_RECURSIVE_DEPTH_LIMIT) return;
-    let entries;
+    let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
