@@ -189,6 +189,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
+  type VirtualSourceSearchMatch = { line: number; start: number; end: number };
+  type VirtualSourceSearchHandle = { open: () => void; query: () => string; activeRange: () => VirtualSourceSearchMatch | null };
+  type VirtualSourceSearchRoot = HTMLElement & { __gdpVirtualSourceSearch?: VirtualSourceSearchHandle };
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
@@ -3276,8 +3279,154 @@ window.GdpExpandLogic = GdpExpandLogic;
     SOURCE_LINE_DRAG = null;
   });
 
+  function virtualSourceSearchRanges(line: string, query: string): Array<{ start: number; end: number }> {
+    const needle = query.toLowerCase();
+    if (!needle) return [];
+    const haystack = line.toLowerCase();
+    const ranges: Array<{ start: number; end: number }> = [];
+    let cursor = 0;
+    while (cursor <= haystack.length) {
+      const index = haystack.indexOf(needle, cursor);
+      if (index < 0) break;
+      ranges.push({ start: index, end: index + query.length });
+      cursor = Math.max(index + query.length, index + 1);
+    }
+    return ranges;
+  }
+
+  function collectVirtualSourceSearchMatches(lines: string[], query: string, max = 5000): VirtualSourceSearchMatch[] {
+    const matches: VirtualSourceSearchMatch[] = [];
+    for (let index = 0; index < lines.length && matches.length < max; index++) {
+      for (const range of virtualSourceSearchRanges(lines[index] || '', query)) {
+        matches.push({ line: index + 1, start: range.start, end: range.end });
+        if (matches.length >= max) break;
+      }
+    }
+    return matches;
+  }
+
+  function appendVirtualSourceLineCode(code: HTMLElement, line: string, query: string, activeRange: VirtualSourceSearchMatch | null, lineNumber: number): boolean {
+    const ranges = virtualSourceSearchRanges(line, query);
+    if (!ranges.length) return false;
+    let cursor = 0;
+    for (const range of ranges) {
+      if (range.start > cursor) code.appendChild(document.createTextNode(line.slice(cursor, range.start)));
+      const mark = document.createElement('mark');
+      const active = !!activeRange && activeRange.line === lineNumber && activeRange.start === range.start && activeRange.end === range.end;
+      mark.className = active ? 'gdp-source-virtual-search-hit active' : 'gdp-source-virtual-search-hit';
+      mark.textContent = line.slice(range.start, range.end);
+      code.appendChild(mark);
+      cursor = range.end;
+    }
+    if (cursor < line.length) code.appendChild(document.createTextNode(line.slice(cursor)));
+    return true;
+  }
+
+  function createVirtualSourceSearch(wrap: VirtualSourceSearchRoot, scroller: HTMLElement, findMatches: (query: string) => Promise<VirtualSourceSearchMatch[]>, renderFn: () => void): VirtualSourceSearchHandle {
+    const bar = document.createElement('div');
+    bar.className = 'gdp-source-virtual-search';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.placeholder = 'Find in file';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    const count = document.createElement('span');
+    count.className = 'gdp-source-virtual-search-count';
+    const previous = document.createElement('button');
+    previous.type = 'button';
+    previous.textContent = 'Prev';
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = 'Next';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    bar.append(input, count, previous, next, close);
+    wrap.querySelector('.gdp-source-virtual-info')?.appendChild(bar);
+    bar.hidden = true;
+
+    let matches: VirtualSourceSearchMatch[] = [];
+    let active = -1;
+    let debounce = 0;
+    let searchVersion = 0;
+    const hide = () => {
+      bar.hidden = true;
+      renderFn();
+      scroller.focus({ preventScroll: true });
+    };
+    const sync = () => {
+      const query = input.value;
+      const version = ++searchVersion;
+      if (!query) {
+        matches = [];
+        active = -1;
+        count.textContent = '';
+        renderFn();
+        return;
+      }
+      count.textContent = 'Searching...';
+      findMatches(query).then(nextMatches => {
+        if (version !== searchVersion) return;
+        matches = nextMatches;
+        active = matches.length ? Math.max(0, Math.min(active, matches.length - 1)) : -1;
+        count.textContent = matches.length ? (active + 1) + ' / ' + matches.length : '0 / 0';
+        if (active >= 0) scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
+        renderFn();
+      }).catch(() => {
+        if (version !== searchVersion) return;
+        matches = [];
+        active = -1;
+        count.textContent = 'Search failed';
+        renderFn();
+      });
+    };
+    const scheduleSync = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(sync, 120);
+    };
+    const move = (direction: number) => {
+      if (!matches.length) return;
+      active = (active + direction + matches.length) % matches.length;
+      count.textContent = (active + 1) + ' / ' + matches.length;
+      scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
+      renderFn();
+    };
+    input.addEventListener('input', () => { active = 0; scheduleSync(); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hide();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        move(e.shiftKey ? -1 : 1);
+      }
+    });
+    previous.addEventListener('click', () => move(-1));
+    next.addEventListener('click', () => move(1));
+    close.addEventListener('click', hide);
+    return {
+      open: () => {
+        bar.hidden = false;
+        input.focus();
+        input.select();
+        sync();
+      },
+      query: () => bar.hidden ? '' : input.value,
+      activeRange: () => active >= 0 ? matches[active] || null : null,
+    };
+  }
+
+  function openVirtualSourceSearchFromKeyboard(targetEl: Element | null): boolean {
+    const active = targetEl?.closest<VirtualSourceSearchRoot>('#content .gdp-source-virtual');
+    const fallback = document.querySelector<VirtualSourceSearchRoot>('#content .gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])');
+    const search = active?.__gdpVirtualSourceSearch || fallback?.__gdpVirtualSourceSearch;
+    if (!search) return false;
+    search.open();
+    return true;
+  }
+
   function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement {
-    const wrap = document.createElement('div');
+    const wrap = document.createElement('div') as VirtualSourceSearchRoot;
     wrap.className = 'gdp-source-virtual';
     const info = document.createElement('div');
     info.className = 'gdp-source-virtual-info';
@@ -3333,6 +3482,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let search: VirtualSourceSearchHandle | null = null;
     const render = () => {
       raf = 0;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
@@ -3358,7 +3508,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         const code = document.createElement('span');
         code.className = 'gdp-source-virtual-line-code';
         const line = lines[index] ?? '';
-        if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+        const searchQuery = search?.query() || '';
+        const activeRange = search?.activeRange() || null;
+        if (appendVirtualSourceLineCode(code, line, searchQuery, activeRange, index + 1)) {
+        } else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
           try {
             code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
             code.classList.add('hljs');
@@ -3378,6 +3531,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
     (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
     scroller.addEventListener('scroll', schedule, { passive: true });
+    search = createVirtualSourceSearch(wrap, scroller, query => Promise.resolve(collectVirtualSourceSearchMatches(lines, query)), render);
+    wrap.__gdpVirtualSourceSearch = search;
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
       if (!scroller.isConnected) {
@@ -3404,7 +3559,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     lang: string | null,
     signal?: AbortSignal,
   ): HTMLElement {
-    const wrap = document.createElement('div');
+    const wrap = document.createElement('div') as VirtualSourceSearchRoot;
     wrap.className = 'gdp-source-virtual';
     const info = document.createElement('div');
     info.className = 'gdp-source-virtual-info';
@@ -3500,6 +3655,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let search: VirtualSourceSearchHandle | null = null;
+    let searchController: AbortController | null = null;
     const render = () => {
       raf = 0;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
@@ -3529,6 +3686,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         const line = lines.get(lineNumber);
         if (line == null) {
           code.textContent = '';
+        } else if (appendVirtualSourceLineCode(code, line, search?.query() || '', search?.activeRange() || null, lineNumber)) {
+          // Search marks are rendered from text so virtual rows can be rebuilt cheaply.
         } else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
           try {
             code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
@@ -3553,6 +3712,43 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
     (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
     scroller.addEventListener('scroll', schedule, { passive: true });
+    const findPagedMatches = async (query: string, matchSignal?: AbortSignal): Promise<VirtualSourceSearchMatch[]> => {
+      const matches: VirtualSourceSearchMatch[] = [];
+      let startLine = 1;
+      let done = false;
+      while (!done && matches.length < 5000) {
+        const endLine = startLine + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+        const data = await trackLoad(fetch(buildFileRangeUrl(target, startLine, endLine), { signal: matchSignal })
+          .then(res => {
+            if (!res.ok) throw new Error('file range failed');
+            return res.json() as Promise<FileRangeResponse>;
+          }));
+        if (matchSignal?.aborted) return [];
+        data.lines.forEach((lineValue, index) => {
+          const lineNumber = data.start + index;
+          lines.set(lineNumber, lineValue);
+          for (const range of virtualSourceSearchRanges(lineValue, query)) {
+            matches.push({ line: lineNumber, start: range.start, end: range.end });
+            if (matches.length >= 5000) break;
+          }
+        });
+        totalRows = data.complete ? Math.max(1, data.total) : Math.max(totalRows, data.total, endLine + VIRTUAL_SOURCE_PAGE_SIZE);
+        complete = data.complete === true;
+        updateTotals();
+        if (data.complete || !data.lines.length) done = true;
+        else startLine = data.start + data.lines.length;
+      }
+      renderedStart = -1;
+      renderedEnd = -1;
+      schedule();
+      return matches;
+    };
+    search = createVirtualSourceSearch(wrap, scroller, query => {
+      searchController?.abort();
+      searchController = new AbortController();
+      return findPagedMatches(query, searchController.signal);
+    }, render);
+    wrap.__gdpVirtualSourceSearch = search;
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
       if (!scroller.isConnected) {
@@ -5075,6 +5271,12 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   document.addEventListener('keydown', e => {
     const targetEl = e.target as Element | null;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isEditableKeyTarget(targetEl)) {
+      if (openVirtualSourceSearchFromKeyboard(targetEl)) {
+        e.preventDefault();
+        return;
+      }
+    }
     const scope = keymapScope(targetEl);
     const action = resolveKeymapAction(e, {
       scope,
