@@ -161,7 +161,7 @@ describe('view file UI', () => {
     expect(server.includes("headers['Content-Length'] = String(size)")).toBe(true);
     expect(server.includes("'Accept-Ranges': 'bytes'")).toBe(true);
     expect(server.includes("headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`")).toBe(true);
-    expect(server.includes('return new Response(file, {\n        status: 206,')).toBe(true);
+    expect(server.includes('return new Response(fileByteRangeResponseBody(full, range.start, range.end), {\n        status: 206,')).toBe(true);
     expect(server.includes("'X-Content-Type-Options': 'nosniff'")).toBe(true);
     expect(server.includes("'Content-Security-Policy': 'sandbox'")).toBe(true);
     expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
@@ -644,11 +644,11 @@ describe('view file UI', () => {
     expect(server.includes('const LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024')).toBe(true);
     expect(server.includes('const BLOB_LINE_CACHE_MAX_BYTES = 128 * 1024 * 1024')).toBe(true);
     expect(server.includes('async function collectIndexedWorktreeLineRange(full: string, start: number, end: number)')).toBe(true);
-    expect(server.includes('buildLineOffsetIndexFromStream(Bun.file(full).stream(), stat.size)')).toBe(true);
+    expect(server.includes('buildLineOffsetIndexFromStream(fileReadableStream(full), stat.size)')).toBe(true);
     expect(server.includes('if (stat.size > LINE_INDEX_MAX_FILE_BYTES) return null')).toBe(true);
     expect(server.includes('if (start < LINE_INDEX_MIN_START && !lineIndexCache.has(full))')).toBe(true);
     expect(server.includes('lineByteRangeForIndex(index, start, end)')).toBe(true);
-    expect(server.includes('Bun.file(full).slice(range.start, range.endExclusive).text()')).toBe(true);
+    expect(server.includes('readFileTextRange(full, range.start, range.endExclusive)')).toBe(true);
     expect(server.includes('git.objectId(ref, path, cwd)')).toBe(true);
     expect(server.includes('git.objectByteSize(oid.oid, cwd)')).toBe(true);
     expect(server.includes('async function collectIndexedGitBlobLineRange(path: string, oid: string, size: number, start: number, end: number)')).toBe(true);
