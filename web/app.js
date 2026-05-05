@@ -6974,6 +6974,31 @@
       else
         window.scrollBy({ top, behavior });
     }
+    let MAIN_SURFACE_FOCUS_SEQ = 0;
+    function focusMainSurface() {
+      const target = findMainScrollTarget();
+      if (target?.matches("#content .gdp-source-virtual-scroller")) {
+        target.focus({ preventScroll: true });
+        setPanelFocusScope("main");
+        return;
+      }
+      focusMainPanel();
+    }
+    function scheduleMainSurfaceFocus() {
+      const seq = ++MAIN_SURFACE_FOCUS_SEQ;
+      const apply = () => {
+        if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE)
+          return;
+        if (isEditableKeyTarget(document.activeElement))
+          return;
+        focusMainSurface();
+      };
+      focusMainPanel();
+      queueMicrotask(apply);
+      requestAnimationFrame(apply);
+      setTimeout(apply, 100);
+      setTimeout(apply, 300);
+    }
     function scrollMainToEdge(edge) {
       if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
         return;
@@ -7601,7 +7626,7 @@
                 children_omitted: dir.children_omitted,
                 children_omitted_reason: dir.children_omitted_reason
               });
-              focusSidebarPanel();
+              scheduleMainSurfaceFocus();
             });
           } else {
             li.addEventListener("click", toggleDir);
@@ -7637,7 +7662,7 @@
               onFileClick(f2);
             else
               scrollToFile(f2.path);
-            focusSidebarPanel();
+            scheduleMainSurfaceFocus();
           });
           if (!onFileClick)
             li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
@@ -7670,7 +7695,7 @@
             onFileClick(f2);
           else
             scrollToFile(f2.path);
-          focusSidebarPanel();
+          scheduleMainSurfaceFocus();
         });
         if (!onFileClick)
           li.addEventListener("mouseenter", () => prefetchByPath(f2.path), { passive: true });
@@ -12010,6 +12035,7 @@
       e2.preventDefault();
       e2.stopPropagation();
       scrollMainPanel(pageDown ? 1 : -1, e2.repeat, "page");
+      focusMainSurface();
       return true;
     }
     function handleVirtualSourcePagingKeydown(e2) {

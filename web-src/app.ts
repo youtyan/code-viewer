@@ -346,6 +346,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     else window.scrollBy({ top, behavior });
   }
 
+  let MAIN_SURFACE_FOCUS_SEQ = 0;
+
+  function focusMainSurface() {
+    const target = findMainScrollTarget();
+    if (target?.matches('#content .gdp-source-virtual-scroller')) {
+      target.focus({ preventScroll: true });
+      setPanelFocusScope('main');
+      return;
+    }
+    focusMainPanel();
+  }
+
+  function scheduleMainSurfaceFocus() {
+    const seq = ++MAIN_SURFACE_FOCUS_SEQ;
+    const apply = () => {
+      if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE) return;
+      if (isEditableKeyTarget(document.activeElement)) return;
+      focusMainSurface();
+    };
+    focusMainPanel();
+    queueMicrotask(apply);
+    requestAnimationFrame(apply);
+    setTimeout(apply, 100);
+    setTimeout(apply, 300);
+  }
+
   function scrollMainToEdge(edge: 'top' | 'bottom') {
     if (moveSourceCursor(edge === 'bottom' ? 1 : -1, 'edge', edge)) return;
     const target = findMainScrollTarget();
@@ -1030,7 +1056,7 @@ window.GdpExpandLogic = GdpExpandLogic;
               children_omitted: dir.children_omitted,
               children_omitted_reason: dir.children_omitted_reason,
             });
-            focusSidebarPanel();
+            scheduleMainSurfaceFocus();
           });
         } else {
           li.addEventListener('click', toggleDir);
@@ -1064,7 +1090,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.addEventListener('click', () => {
           if (onFileClick) onFileClick(f);
           else scrollToFile(f.path);
-          focusSidebarPanel();
+          scheduleMainSurfaceFocus();
         });
         if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
         ul.appendChild(li);
@@ -1095,7 +1121,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       li.addEventListener('click', () => {
         if (onFileClick) onFileClick(f);
         else scrollToFile(f.path);
-        focusSidebarPanel();
+        scheduleMainSurfaceFocus();
       });
       if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
       ul.appendChild(li);
@@ -5298,6 +5324,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     e.preventDefault();
     e.stopPropagation();
     scrollMainPanel(pageDown ? 1 : -1, e.repeat, 'page');
+    focusMainSurface();
     return true;
   }
 
