@@ -22,6 +22,7 @@ import type {
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
+  FileRangeResponse,
   FileSearchListResponse,
   FileMeta,
   RepoTreeResponse,
@@ -172,6 +173,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const DEFAULT_RANGE: DiffRange = { from: 'HEAD', to: 'worktree' };
   const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
   const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
+  const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
   // Keep in sync with .gdp-source-virtual-row height/line-height in web/style.css.
   const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
   const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
@@ -187,6 +189,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
+  type VirtualSourceSearchMatch = { line: number; start: number; end: number };
+  type VirtualSourceSearchHandle = { open: () => void; query: () => string; activeRange: () => VirtualSourceSearchMatch | null };
+  type VirtualSourceSearchRoot = HTMLElement & { __gdpVirtualSourceSearch?: VirtualSourceSearchHandle };
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
@@ -292,13 +297,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     SOURCE_CURSOR = { target, line: Math.max(1, Math.min(totalLines, routeLine || 1)) };
   }
 
-  function scrollSourceCursorIntoView(cursor: { target: SourceFileTarget; line: number }, edge: 'nearest' | 'center' = 'nearest') {
+  function scrollSourceCursorIntoView(cursor: { target: SourceFileTarget; line: number }, edge: 'nearest' | 'center' | 'start' = 'nearest') {
     const scroller = findMainScrollTarget();
     if (scroller) {
       const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
       const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
       const before = scroller.scrollTop;
       if (edge === 'center') scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+      else if (edge === 'start') scroller.scrollTop = top;
       else if (top < scroller.scrollTop) scroller.scrollTop = top;
       else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
       if (scroller.scrollTop !== before) scroller.dispatchEvent(new Event('scroll'));
@@ -326,7 +332,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const delta = unit === 'page' ? pageRows : 1;
     cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
     syncSourceCursorRows(target);
-    scrollSourceCursorIntoView(cursor);
+    scrollSourceCursorIntoView(cursor, unit === 'page' ? 'start' : 'nearest');
     return true;
   }
 
@@ -338,6 +344,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     const behavior: ScrollBehavior = repeated ? 'auto' : 'smooth';
     if (target) target.scrollBy({ top, behavior });
     else window.scrollBy({ top, behavior });
+  }
+
+  let MAIN_SURFACE_FOCUS_SEQ = 0;
+
+  function focusMainSurface() {
+    const target = findMainScrollTarget();
+    if (target?.matches('#content .gdp-source-virtual-scroller')) {
+      target.focus({ preventScroll: true });
+      setPanelFocusScope('main');
+      return;
+    }
+    focusMainPanel();
+  }
+
+  function scheduleMainSurfaceFocus() {
+    const seq = ++MAIN_SURFACE_FOCUS_SEQ;
+    const apply = () => {
+      if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE) return;
+      if (isEditableKeyTarget(document.activeElement)) return;
+      focusMainSurface();
+    };
+    focusMainPanel();
+    queueMicrotask(apply);
+    requestAnimationFrame(apply);
+    setTimeout(apply, 100);
+    setTimeout(apply, 300);
   }
 
   function scrollMainToEdge(edge: 'top' | 'bottom') {
@@ -1024,7 +1056,7 @@ window.GdpExpandLogic = GdpExpandLogic;
               children_omitted: dir.children_omitted,
               children_omitted_reason: dir.children_omitted_reason,
             });
-            focusSidebarPanel();
+            scheduleMainSurfaceFocus();
           });
         } else {
           li.addEventListener('click', toggleDir);
@@ -1058,7 +1090,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.addEventListener('click', () => {
           if (onFileClick) onFileClick(f);
           else scrollToFile(f.path);
-          focusSidebarPanel();
+          scheduleMainSurfaceFocus();
         });
         if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
         ul.appendChild(li);
@@ -1089,7 +1121,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       li.addEventListener('click', () => {
         if (onFileClick) onFileClick(f);
         else scrollToFile(f.path);
-        focusSidebarPanel();
+        scheduleMainSurfaceFocus();
       });
       if (!onFileClick) li.addEventListener('mouseenter', () => prefetchByPath(f.path), { passive: true });
       ul.appendChild(li);
@@ -3198,6 +3230,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     return url.pathname + url.search;
   }
 
+  function buildFileRangeUrl(target: SourceFileTarget, start: number, end: number): string {
+    return '/file_range?path=' + encodeURIComponent(target.path) +
+      '&ref=' + encodeURIComponent(target.ref || 'worktree') +
+      '&start=' + encodeURIComponent(String(start)) +
+      '&end=' + encodeURIComponent(String(end));
+  }
+
   function currentSourceLineTarget(target: SourceFileTarget): SourceLineTarget | undefined {
     const routeTarget = sourceTargetFromRoute();
     return sourceTargetsEqual(routeTarget, target) && STATE.route.screen === 'file' ? STATE.route.line : undefined;
@@ -3267,8 +3306,154 @@ window.GdpExpandLogic = GdpExpandLogic;
     SOURCE_LINE_DRAG = null;
   });
 
+  function virtualSourceSearchRanges(line: string, query: string): Array<{ start: number; end: number }> {
+    const needle = query.toLowerCase();
+    if (!needle) return [];
+    const haystack = line.toLowerCase();
+    const ranges: Array<{ start: number; end: number }> = [];
+    let cursor = 0;
+    while (cursor <= haystack.length) {
+      const index = haystack.indexOf(needle, cursor);
+      if (index < 0) break;
+      ranges.push({ start: index, end: index + query.length });
+      cursor = Math.max(index + query.length, index + 1);
+    }
+    return ranges;
+  }
+
+  function collectVirtualSourceSearchMatches(lines: string[], query: string, max = 5000): VirtualSourceSearchMatch[] {
+    const matches: VirtualSourceSearchMatch[] = [];
+    for (let index = 0; index < lines.length && matches.length < max; index++) {
+      for (const range of virtualSourceSearchRanges(lines[index] || '', query)) {
+        matches.push({ line: index + 1, start: range.start, end: range.end });
+        if (matches.length >= max) break;
+      }
+    }
+    return matches;
+  }
+
+  function appendVirtualSourceLineCode(code: HTMLElement, line: string, query: string, activeRange: VirtualSourceSearchMatch | null, lineNumber: number): boolean {
+    const ranges = virtualSourceSearchRanges(line, query);
+    if (!ranges.length) return false;
+    let cursor = 0;
+    for (const range of ranges) {
+      if (range.start > cursor) code.appendChild(document.createTextNode(line.slice(cursor, range.start)));
+      const mark = document.createElement('mark');
+      const active = !!activeRange && activeRange.line === lineNumber && activeRange.start === range.start && activeRange.end === range.end;
+      mark.className = active ? 'gdp-source-virtual-search-hit active' : 'gdp-source-virtual-search-hit';
+      mark.textContent = line.slice(range.start, range.end);
+      code.appendChild(mark);
+      cursor = range.end;
+    }
+    if (cursor < line.length) code.appendChild(document.createTextNode(line.slice(cursor)));
+    return true;
+  }
+
+  function createVirtualSourceSearch(wrap: VirtualSourceSearchRoot, scroller: HTMLElement, findMatches: (query: string) => Promise<VirtualSourceSearchMatch[]>, renderFn: () => void): VirtualSourceSearchHandle {
+    const bar = document.createElement('div');
+    bar.className = 'gdp-source-virtual-search';
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.placeholder = 'Find in file';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    const count = document.createElement('span');
+    count.className = 'gdp-source-virtual-search-count';
+    const previous = document.createElement('button');
+    previous.type = 'button';
+    previous.textContent = 'Prev';
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = 'Next';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Close';
+    bar.append(input, count, previous, next, close);
+    wrap.querySelector('.gdp-source-virtual-info')?.appendChild(bar);
+    bar.hidden = true;
+
+    let matches: VirtualSourceSearchMatch[] = [];
+    let active = -1;
+    let debounce = 0;
+    let searchVersion = 0;
+    const hide = () => {
+      bar.hidden = true;
+      renderFn();
+      scroller.focus({ preventScroll: true });
+    };
+    const sync = () => {
+      const query = input.value;
+      const version = ++searchVersion;
+      if (!query) {
+        matches = [];
+        active = -1;
+        count.textContent = '';
+        renderFn();
+        return;
+      }
+      count.textContent = 'Searching...';
+      findMatches(query).then(nextMatches => {
+        if (version !== searchVersion) return;
+        matches = nextMatches;
+        active = matches.length ? Math.max(0, Math.min(active, matches.length - 1)) : -1;
+        count.textContent = matches.length ? (active + 1) + ' / ' + matches.length : '0 / 0';
+        if (active >= 0) scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
+        renderFn();
+      }).catch(() => {
+        if (version !== searchVersion) return;
+        matches = [];
+        active = -1;
+        count.textContent = 'Search failed';
+        renderFn();
+      });
+    };
+    const scheduleSync = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(sync, 120);
+    };
+    const move = (direction: number) => {
+      if (!matches.length) return;
+      active = (active + direction + matches.length) % matches.length;
+      count.textContent = (active + 1) + ' / ' + matches.length;
+      scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
+      renderFn();
+    };
+    input.addEventListener('input', () => { active = 0; scheduleSync(); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hide();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        move(e.shiftKey ? -1 : 1);
+      }
+    });
+    previous.addEventListener('click', () => move(-1));
+    next.addEventListener('click', () => move(1));
+    close.addEventListener('click', hide);
+    return {
+      open: () => {
+        bar.hidden = false;
+        input.focus();
+        input.select();
+        sync();
+      },
+      query: () => bar.hidden ? '' : input.value,
+      activeRange: () => active >= 0 ? matches[active] || null : null,
+    };
+  }
+
+  function openVirtualSourceSearchFromKeyboard(targetEl: Element | null): boolean {
+    const active = targetEl?.closest<VirtualSourceSearchRoot>('#content .gdp-source-virtual');
+    const fallback = document.querySelector<VirtualSourceSearchRoot>('#content .gdp-source-viewer.virtual .gdp-source-virtual:not([hidden])');
+    const search = active?.__gdpVirtualSourceSearch || fallback?.__gdpVirtualSourceSearch;
+    if (!search) return false;
+    search.open();
+    return true;
+  }
+
   function renderVirtualSource(target: SourceFileTarget, textValue: string, lines: string[], hljsRef: HljsApi | null, lang: string | null): HTMLElement {
-    const wrap = document.createElement('div');
+    const wrap = document.createElement('div') as VirtualSourceSearchRoot;
     wrap.className = 'gdp-source-virtual';
     const info = document.createElement('div');
     info.className = 'gdp-source-virtual-info';
@@ -3312,6 +3497,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     info.append(badge, summary, actions);
     const scroller = document.createElement('div');
     scroller.className = 'gdp-source-virtual-scroller';
+    scroller.tabIndex = 0;
+    scroller.setAttribute('role', 'region');
+    scroller.setAttribute('aria-label', target.path + ' source code');
     const spacer = document.createElement('div');
     spacer.className = 'gdp-source-virtual-spacer';
     spacer.style.height = Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px';
@@ -3324,6 +3512,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let raf = 0;
     let renderedStart = -1;
     let renderedEnd = -1;
+    let search: VirtualSourceSearchHandle | null = null;
     const render = () => {
       raf = 0;
       const viewportHeight = scroller.clientHeight || window.innerHeight;
@@ -3349,7 +3538,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         const code = document.createElement('span');
         code.className = 'gdp-source-virtual-line-code';
         const line = lines[index] ?? '';
-        if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+        const searchQuery = search?.query() || '';
+        const activeRange = search?.activeRange() || null;
+        if (appendVirtualSourceLineCode(code, line, searchQuery, activeRange, index + 1)) {
+        } else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
           try {
             code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
             code.classList.add('hljs');
@@ -3369,6 +3561,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
     (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
     scroller.addEventListener('scroll', schedule, { passive: true });
+    search = createVirtualSourceSearch(wrap, scroller, query => Promise.resolve(collectVirtualSourceSearchMatches(lines, query)), render);
+    wrap.__gdpVirtualSourceSearch = search;
     let resizeObserver: ResizeObserver | null = null;
     resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
       if (!scroller.isConnected) {
@@ -3382,6 +3576,264 @@ window.GdpExpandLogic = GdpExpandLogic;
     render();
     schedule();
     return wrap;
+  }
+
+  function renderPagedVirtualSource(
+    target: SourceFileTarget,
+    size: number,
+    initialStart: number,
+    initialLines: string[],
+    initialComplete: boolean,
+    initialTotal: number,
+    hljsRef: HljsApi | null,
+    lang: string | null,
+    signal?: AbortSignal,
+  ): HTMLElement {
+    const wrap = document.createElement('div') as VirtualSourceSearchRoot;
+    wrap.className = 'gdp-source-virtual';
+    const info = document.createElement('div');
+    info.className = 'gdp-source-virtual-info';
+    const badge = document.createElement('span');
+    badge.className = 'gdp-source-virtual-badge';
+    badge.textContent = 'Virtual mode';
+    const summary = document.createElement('span');
+    summary.className = 'gdp-source-virtual-summary';
+    const actions = document.createElement('span');
+    actions.className = 'gdp-source-virtual-actions';
+    const raw = document.createElement('a');
+    raw.className = 'gdp-source-virtual-action';
+    raw.href = buildRawFileUrl(target);
+    raw.target = '_blank';
+    raw.rel = 'noreferrer';
+    raw.textContent = 'Open raw';
+    const full = document.createElement('a');
+    full.className = 'gdp-source-virtual-action';
+    full.href = buildCurrentFileRouteWithVirtualMode(target, 'off');
+    full.textContent = 'Open full view';
+    full.title = 'Render every line without paged loading. This can be slow for large files.';
+    full.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = new URL(full.href, window.location.origin);
+      setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
+      renderStandaloneSource(target);
+    });
+    actions.append(raw, full);
+    info.append(badge, summary, actions);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'gdp-source-virtual-scroller';
+    scroller.tabIndex = 0;
+    scroller.setAttribute('role', 'region');
+    scroller.setAttribute('aria-label', target.path + ' source code');
+    const spacer = document.createElement('div');
+    spacer.className = 'gdp-source-virtual-spacer';
+    const windowEl = document.createElement('div');
+    windowEl.className = 'gdp-source-virtual-window';
+    spacer.appendChild(windowEl);
+    scroller.appendChild(spacer);
+    wrap.append(info, scroller);
+
+    const lines = new Map<number, string>();
+    const requestedPages = new Set<number>();
+    const failedPages = new Set<number>();
+    const targetLine = lineTargetStart(currentSourceLineTarget(target)) || 1;
+    let complete = initialComplete;
+    let totalRows = initialComplete
+      ? Math.max(1, initialTotal)
+      : Math.max(initialTotal || 1, initialStart + initialLines.length - 1, targetLine + VIRTUAL_SOURCE_PAGE_SIZE);
+    initialLines.forEach((line, index) => lines.set(initialStart + index, line));
+    requestedPages.add(Math.max(0, Math.floor((initialStart - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
+    for (let line = initialStart; line < initialStart + initialLines.length; line += VIRTUAL_SOURCE_PAGE_SIZE) {
+      requestedPages.add(Math.max(0, Math.floor((line - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
+    }
+
+    const updateTotals = () => {
+      SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
+      summary.textContent = (complete ? totalRows.toLocaleString() : (lines.size.toLocaleString() + '+')) +
+        ' lines loaded from ' + formatBytes(size) + '. More rows load as you scroll.';
+      spacer.style.height = Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px';
+    };
+
+    const loadPage = (line: number) => {
+      if (signal?.aborted || (complete && line > totalRows)) return;
+      const page = Math.max(0, Math.floor((line - 1) / VIRTUAL_SOURCE_PAGE_SIZE));
+      if (requestedPages.has(page)) return;
+      if (failedPages.has(page)) return;
+      requestedPages.add(page);
+      const start = page * VIRTUAL_SOURCE_PAGE_SIZE + 1;
+      const end = start + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+      trackLoad(fetch(buildFileRangeUrl(target, start, end), { signal })
+        .then(res => res.ok ? res.json() as Promise<FileRangeResponse> : null)
+        .then(data => {
+          if (!data || signal?.aborted) return;
+          data.lines.forEach((lineValue, index) => lines.set(data.start + index, lineValue));
+          totalRows = data.complete
+            ? Math.max(1, data.total)
+            : Math.max(totalRows, data.total, end + VIRTUAL_SOURCE_PAGE_SIZE);
+          complete = data.complete === true;
+          updateTotals();
+          renderedStart = -1;
+          renderedEnd = -1;
+          render();
+        }).catch(err => {
+          if (!isAbortError(err)) {
+            failedPages.add(page);
+            renderedStart = -1;
+            renderedEnd = -1;
+            schedule();
+          }
+        }));
+    };
+
+    let raf = 0;
+    let renderedStart = -1;
+    let renderedEnd = -1;
+    let search: VirtualSourceSearchHandle | null = null;
+    let searchController: AbortController | null = null;
+    const render = () => {
+      raf = 0;
+      const viewportHeight = scroller.clientHeight || window.innerHeight;
+      const overscan = 20;
+      const start = Math.max(0, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan);
+      const end = Math.min(totalRows, Math.ceil((scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT) + overscan);
+      if (start === renderedStart && end === renderedEnd) return;
+      renderedStart = start;
+      renderedEnd = end;
+      windowEl.replaceChildren();
+      windowEl.style.transform = 'translateY(' + (start * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px)';
+      const fragment = document.createDocumentFragment();
+      for (let index = start; index < end; index++) {
+        const lineNumber = index + 1;
+        if (!lines.has(lineNumber)) loadPage(lineNumber);
+        const row = document.createElement('div');
+        row.className = 'gdp-source-virtual-row';
+        row.dataset.line = String(lineNumber);
+        row.classList.toggle('gdp-source-line-target', lineInSourceTarget(lineNumber, currentSourceLineTarget(target)));
+        row.classList.toggle('gdp-source-cursor', sourceCursorMatches(target, lineNumber));
+        const num = document.createElement('span');
+        num.className = 'gdp-source-virtual-line-number';
+        num.textContent = String(lineNumber);
+        bindSourceLineNumber(num, wrap, target, lineNumber);
+        const code = document.createElement('span');
+        code.className = 'gdp-source-virtual-line-code';
+        const line = lines.get(lineNumber);
+        if (line == null) {
+          code.textContent = '';
+        } else if (appendVirtualSourceLineCode(code, line, search?.query() || '', search?.activeRange() || null, lineNumber)) {
+          // Search marks are rendered from text so virtual rows can be rebuilt cheaply.
+        } else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+          try {
+            code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
+            code.classList.add('hljs');
+          } catch {
+            code.textContent = line;
+          }
+        } else {
+          code.textContent = line;
+        }
+        row.append(num, code);
+        fragment.appendChild(row);
+      }
+      windowEl.appendChild(fragment);
+      if (!complete && totalRows - end < VIRTUAL_SOURCE_PAGE_SIZE) {
+        totalRows += VIRTUAL_SOURCE_PAGE_SIZE;
+        updateTotals();
+      }
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(render);
+    };
+    (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
+    scroller.addEventListener('scroll', schedule, { passive: true });
+    const findPagedMatches = async (query: string, matchSignal?: AbortSignal): Promise<VirtualSourceSearchMatch[]> => {
+      const matches: VirtualSourceSearchMatch[] = [];
+      let startLine = 1;
+      let done = false;
+      while (!done && matches.length < 5000) {
+        const endLine = startLine + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+        const data = await trackLoad(fetch(buildFileRangeUrl(target, startLine, endLine), { signal: matchSignal })
+          .then(res => {
+            if (!res.ok) throw new Error('file range failed');
+            return res.json() as Promise<FileRangeResponse>;
+          }));
+        if (matchSignal?.aborted) return [];
+        data.lines.forEach((lineValue, index) => {
+          const lineNumber = data.start + index;
+          lines.set(lineNumber, lineValue);
+          for (const range of virtualSourceSearchRanges(lineValue, query)) {
+            matches.push({ line: lineNumber, start: range.start, end: range.end });
+            if (matches.length >= 5000) break;
+          }
+        });
+        totalRows = data.complete ? Math.max(1, data.total) : Math.max(totalRows, data.total, endLine + VIRTUAL_SOURCE_PAGE_SIZE);
+        complete = data.complete === true;
+        updateTotals();
+        if (data.complete || !data.lines.length) done = true;
+        else startLine = data.start + data.lines.length;
+      }
+      renderedStart = -1;
+      renderedEnd = -1;
+      schedule();
+      return matches;
+    };
+    search = createVirtualSourceSearch(wrap, scroller, query => {
+      searchController?.abort();
+      searchController = new AbortController();
+      return findPagedMatches(query, searchController.signal);
+    }, render);
+    wrap.__gdpVirtualSourceSearch = search;
+    let resizeObserver: ResizeObserver | null = null;
+    resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      if (!scroller.isConnected) {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        return;
+      }
+      schedule();
+    }) : null;
+    resizeObserver?.observe(scroller);
+    updateTotals();
+    if (targetLine <= 1) {
+      render();
+      schedule();
+    }
+    return wrap;
+  }
+
+  async function renderPagedSourceText(card: DiffCardElement, target: SourceFileTarget, size: number, signal?: AbortSignal): Promise<boolean> {
+    const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
+    const isStandalone = card.classList.contains('gdp-standalone-source');
+    const view = document.createElement('div');
+    view.className = 'gdp-source-viewer virtual';
+    const header = isStandalone ? null : document.createElement('div');
+    if (header) {
+      header.className = 'gdp-source-meta';
+      header.textContent = target.path + ' @ ' + target.ref;
+      view.appendChild(header);
+    }
+    const lineTarget = lineTargetStart(currentSourceLineTarget(target)) || 1;
+    const initialPage = Math.max(0, Math.floor((lineTarget - 1) / VIRTUAL_SOURCE_PAGE_SIZE));
+    const initialStart = initialPage * VIRTUAL_SOURCE_PAGE_SIZE + 1;
+    const initialEnd = initialStart + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+    const lang = inferLang(target.path);
+    const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
+    if (signal?.aborted) return false;
+    const initial = await trackLoad(fetch(buildFileRangeUrl(target, initialStart, initialEnd), { signal })
+      .then(res => res.ok ? res.json() as Promise<FileRangeResponse> : null));
+    if (!initial) return false;
+    if (signal?.aborted) return false;
+    const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
+    if (tabsHost) {
+      tabsHost.hidden = false;
+      tabsHost.replaceChildren(createSourceTabs('code').tabs);
+    }
+    SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), Math.max(1, initial.total, lineTarget));
+    resetSourceCursorForTarget(target, Math.max(1, initial.total, lineTarget));
+    const virtualCode = renderPagedVirtualSource(target, size, initialStart, initial.lines, initial.complete === true, initial.total, hljsRef, lang, signal);
+    view.appendChild(virtualCode);
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+    return true;
   }
 
   function renderSourceMedia(card: DiffCardElement, target: SourceFileTarget, mediaKind: string) {
@@ -3578,20 +4030,30 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       }
       if (displayKind === 'text') {
-      const response = await trackLoad(fetch(buildRawFileUrl(target), { signal: controller.signal }));
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      if (!response.ok) {
+        const meta = await loadRawFileInfo(target);
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!isVirtualSourceDisabled() && meta.size != null && meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD) {
+          const rendered = await renderPagedSourceText(card, target, meta.size, controller.signal);
+          if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+          if (!rendered) return;
+          scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
+          finishSourceLoad(req);
+          return;
+        }
+        const response = await trackLoad(fetch(buildRawFileUrl(target), { signal: controller.signal }));
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!response.ok) {
+          finishSourceLoad(req);
+          renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
+          return;
+        }
+        const textValue = await response.text();
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        const rendered = await renderSourceText(card, target, textValue, controller.signal);
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!rendered) return;
+        scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
         finishSourceLoad(req);
-        renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
-        return;
-      }
-      const textValue = await response.text();
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      const rendered = await renderSourceText(card, target, textValue, controller.signal);
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      if (!rendered) return;
-      scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
-      finishSourceLoad(req);
       }
     } catch (err) {
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
@@ -3610,6 +4072,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (virtualScroller) {
       const centeredOffset = (virtualScroller.clientHeight / 2) - (VIRTUAL_SOURCE_ROW_HEIGHT / 2);
       virtualScroller.scrollTop = Math.max(0, (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - Math.max(0, centeredOffset));
+      (virtualScroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource?.();
       return;
     }
     const row = card.querySelector<HTMLElement>('.gdp-source-table tr[data-line="' + String(line) + '"]');
@@ -4839,8 +5302,47 @@ window.GdpExpandLogic = GdpExpandLogic;
     return false;
   }
 
+  type VirtualSourcePagingKeyboardEvent = KeyboardEvent & { __gdpVirtualSourcePagingHandled?: boolean };
+
+  function handleVirtualSourcePagingKey(e: KeyboardEvent, targetEl: Element | null): boolean {
+    if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled) return true;
+    if (e.defaultPrevented || e.isComposing || PALETTE || document.querySelector('.mkdp-lightbox')) return false;
+    const editable = isEditableKeyTarget(targetEl);
+    const inVirtualSearch = !!targetEl?.closest('.gdp-source-virtual-search');
+    if (editable && !inVirtualSearch) return false;
+    const key = e.key.toLowerCase();
+    if (e.altKey || e.metaKey) return false;
+    const isPlainPageKey = (key === 'pagedown' || key === 'pageup') && !e.ctrlKey && !e.shiftKey;
+    const isCtrlArrowKey = (key === 'arrowdown' || key === 'arrowup') && e.ctrlKey && !e.shiftKey;
+    if (!isPlainPageKey && !isCtrlArrowKey) return false;
+    const scroller = findMainScrollTarget();
+    if (!scroller || !scroller.matches('#content .gdp-source-virtual-scroller')) return false;
+    const pageDown = key === 'pagedown' || key === 'arrowdown';
+    const pageUp = key === 'pageup' || key === 'arrowup';
+    if (!pageDown && !pageUp) return false;
+    (e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled = true;
+    e.preventDefault();
+    e.stopPropagation();
+    scrollMainPanel(pageDown ? 1 : -1, e.repeat, 'page');
+    focusMainSurface();
+    return true;
+  }
+
+  function handleVirtualSourcePagingKeydown(e: KeyboardEvent) {
+    handleVirtualSourcePagingKey(e, e.target as Element | null);
+  }
+
+  document.addEventListener('keydown', handleVirtualSourcePagingKeydown, { capture: true });
+
   document.addEventListener('keydown', e => {
+    if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled) return;
     const targetEl = e.target as Element | null;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isEditableKeyTarget(targetEl)) {
+      if (openVirtualSourceSearchFromKeyboard(targetEl)) {
+        e.preventDefault();
+        return;
+      }
+    }
     const scope = keymapScope(targetEl);
     const action = resolveKeymapAction(e, {
       scope,

@@ -155,10 +155,13 @@ describe('view file UI', () => {
   });
 
   test('raw file responses use explicit browser-safe headers', () => {
-    expect(server.includes('function rawFileHeaders(path: string, size: number | null = null): HeadersInit')).toBe(true);
+    expect(server.includes('function rawFileHeaders(path: string, size: number | null = null, range?: { start: number; end: number }): HeadersInit')).toBe(true);
     expect(server.includes('function rawFileSize(path: string, ref: string): number | null')).toBe(true);
     expect(server.includes("if (req.method === 'HEAD') return new Response(null")).toBe(true);
     expect(server.includes("headers['Content-Length'] = String(size)")).toBe(true);
+    expect(server.includes("'Accept-Ranges': 'bytes'")).toBe(true);
+    expect(server.includes("headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`")).toBe(true);
+    expect(server.includes('return new Response(file, {\n        status: 206,')).toBe(true);
     expect(server.includes("'X-Content-Type-Options': 'nosniff'")).toBe(true);
     expect(server.includes("'Content-Security-Policy': 'sandbox'")).toBe(true);
     expect(server.includes("'.pdf': 'application/pdf'")).toBe(true);
@@ -171,7 +174,9 @@ describe('view file UI', () => {
 
   test('raw file HEAD requests validate refs and paths before returning metadata', () => {
     expect(server.includes("if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not in ref', 404);\n    if (req.method === 'HEAD')")).toBe(true);
-    expect(server.includes("const full = safeWorktreePath(path);\n    if (!full) return text('not found', 404);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not found', 404);\n    if (req.method === 'HEAD')")).toBe(true);
+    expect(server.includes("const full = safeWorktreePath(path);\n    if (!full) return text('not found', 404);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not found', 404);")).toBe(true);
+    expect(server.includes("if (rangeResult?.kind === 'range') {\n      const range = rangeResult.range;\n      if (req.method === 'HEAD')")).toBe(true);
+    expect(server.includes("if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });")).toBe(true);
   });
 
   test('binary and media file views show file metadata', () => {
@@ -469,11 +474,22 @@ describe('view file UI', () => {
     expect(app.includes("if (action === 'focus-main')")).toBe(true);
     expect(app.includes("if (action === 'scroll-main-down' || action === 'scroll-main-up')")).toBe(true);
     expect(app.includes("if (action === 'scroll-main-page-down' || action === 'scroll-main-page-up')")).toBe(true);
+    expect(app.includes("function handleVirtualSourcePagingKey(e: KeyboardEvent, targetEl: Element | null): boolean")).toBe(true);
+    expect(app.includes("document.addEventListener('keydown', handleVirtualSourcePagingKeydown, { capture: true })")).toBe(true);
+    expect(app.includes("const inVirtualSearch = !!targetEl?.closest('.gdp-source-virtual-search')")).toBe(true);
+    expect(app.includes("if (e.altKey || e.metaKey) return false")).toBe(true);
+    expect(app.includes("const scroller = findMainScrollTarget()")).toBe(true);
+    expect(app.includes('function focusMainSurface()')).toBe(true);
+    expect(app.includes('function scheduleMainSurfaceFocus()')).toBe(true);
+    expect(app.includes("scrollMainPanel(pageDown ? 1 : -1, e.repeat, 'page');\n    focusMainSurface();")).toBe(true);
+    expect(app.includes('scroller.tabIndex = 0')).toBe(true);
+    expect(app.includes("scroller.setAttribute('role', 'region')")).toBe(true);
     expect(app.includes("function switchSourceTab(tab: 'preview' | 'code'): boolean")).toBe(true);
     expect(app.includes("if (action === 'tab-preview' || action === 'tab-code')")).toBe(true);
     expect(app.includes('focusMainPanel();')).toBe(true);
     expect(app.includes('focusSidebarPanel();')).toBe(true);
-    expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
+    expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          scheduleMainSurfaceFocus();')).toBe(true);
+    expect(app.includes("onFileClick({\n              path: dir.path,\n              display_path: dir.path,\n              type: 'tree',\n              children_omitted: dir.children_omitted,\n              children_omitted_reason: dir.children_omitted_reason,\n            });\n            scheduleMainSurfaceFocus();")).toBe(true);
     expect(app.includes('onFileClick({\n              path: dir.path,')).toBe(true);
     expect(app.includes('composing: e.isComposing')).toBe(true);
     expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
@@ -567,6 +583,84 @@ describe('view file UI', () => {
     expect(style.includes('.gdp-source-virtual-action')).toBe(true);
     expect(style.includes('.gdp-source-virtual-copy')).toBe(true);
     expect(style.includes('line-height: 20px;')).toBe(true);
+  });
+
+  test('virtual source viewer keeps code text selectable while line numbers remain non-selectable', () => {
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;\n  min-height: 0;\n  font-family:')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-scroller {\n  position: relative;\n  overflow: auto;\n  min-height: 0;\n  font-family: "Monaspace Neon"')).toBe(true);
+    expect(style.includes('grid-template-rows: auto minmax(0, 1fr);')).toBe(true);
+    expect(style.includes('cursor: text;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-line-number {\n  position: sticky;')).toBe(true);
+    expect(style.includes('.gdp-source-virtual-line-number {\n  position: sticky;\n  left: 0;')).toBe(true);
+    expect(style.includes('  user-select: none;\n}\n.gdp-source-virtual-line-code')).toBe(true);
+    const scrollerBlock = style.match(/\.gdp-source-virtual-scroller\s*\{[^}]*\}/s)?.[0] || '';
+    expect(scrollerBlock.includes('user-select: none')).toBe(false);
+  });
+
+  test('virtual source viewer provides current-file Ctrl+F search without using the repo grep palette', () => {
+    expect(app.includes('type VirtualSourceSearchMatch = { line: number; start: number; end: number }')).toBe(true);
+    expect(app.includes('type VirtualSourceSearchHandle = { open: () => void; query: () => string; activeRange: () => VirtualSourceSearchMatch | null }')).toBe(true);
+    expect(app.includes('function openVirtualSourceSearchFromKeyboard(targetEl: Element | null): boolean')).toBe(true);
+    expect(app.includes("(e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'")).toBe(true);
+    expect(app.includes("search = createVirtualSourceSearch(wrap, scroller, query => Promise.resolve(collectVirtualSourceSearchMatches(lines, query)), render)")).toBe(true);
+    expect(app.includes('const findPagedMatches = async (query: string, matchSignal?: AbortSignal): Promise<VirtualSourceSearchMatch[]>')).toBe(true);
+    expect(app.includes('fetch(buildFileRangeUrl(target, startLine, endLine), { signal: matchSignal })')).toBe(true);
+    expect(app.includes('for (const range of virtualSourceSearchRanges(lineValue, query))')).toBe(true);
+    expect(app.includes("wrap.__gdpVirtualSourceSearch = search")).toBe(true);
+    expect(app.includes('function createVirtualSourceSearch(')).toBe(true);
+    expect(app.includes("bar.className = 'gdp-source-virtual-search'")).toBe(true);
+    expect(app.includes("wrap.querySelector('.gdp-source-virtual-info')?.appendChild(bar)")).toBe(true);
+    expect(app.includes("input.placeholder = 'Find in file'")).toBe(true);
+    expect(app.includes('function virtualSourceSearchRanges(line: string, query: string): Array<{ start: number; end: number }>')).toBe(true);
+    expect(app.includes('function appendVirtualSourceLineCode(')).toBe(true);
+    expect(app.includes("mark.className = active ? 'gdp-source-virtual-search-hit active' : 'gdp-source-virtual-search-hit'")).toBe(true);
+    expect(app.includes("if (openVirtualSourceSearchFromKeyboard(targetEl))")).toBe(true);
+    expect(app.includes("searchController?.abort();")).toBe(true);
+    expect(app.includes("code.classList.add('gdp-source-virtual-search-line')")).toBe(false);
+    expect(app.includes("openSearchPalette('grep')")).toBe(true);
+  });
+
+  test('large source files use paged line-range loading instead of raw text loading', () => {
+    expect(app.includes('const VIRTUAL_SOURCE_PAGE_SIZE = 2000')).toBe(true);
+    expect(app.includes('function buildFileRangeUrl(target: SourceFileTarget, start: number, end: number): string')).toBe(true);
+    expect(app.includes('async function renderPagedSourceText(card: DiffCardElement, target: SourceFileTarget, size: number, signal?: AbortSignal): Promise<boolean>')).toBe(true);
+    expect(app.includes("if (!isVirtualSourceDisabled() && meta.size != null && meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD)")).toBe(true);
+    expect(app.includes("target.ref === 'worktree' && !isVirtualSourceDisabled()")).toBe(false);
+    expect(app.includes('trackLoad(fetch(buildFileRangeUrl(target, initialStart, initialEnd), { signal })')).toBe(true);
+    expect(app.includes('renderPagedVirtualSource(target, size, initialStart, initial.lines, initial.complete === true, initial.total, hljsRef, lang, signal)')).toBe(true);
+    expect(app.includes("const rendered = await renderPagedSourceText(card, target, meta.size, controller.signal)")).toBe(true);
+    expect(app.includes("(virtualScroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource?.()")).toBe(true);
+    expect(app.includes('const failedPages = new Set<number>()')).toBe(true);
+    expect(app.includes("full.textContent = 'Open full view'")).toBe(true);
+    expect(app.includes("fetch(buildRawFileUrl(target), { signal: controller.signal })")).toBe(true);
+  });
+
+  test('server file_range uses indexed worktree slices and indexed ref blobs', () => {
+    expect(server.includes('const lineIndexCache = new Map<string,')).toBe(true);
+    expect(server.includes('const blobLineIndexCache = new Map<string, LineOffsetIndex>()')).toBe(true);
+    expect(server.includes('const blobBytesCache = new Map<string, Uint8Array>()')).toBe(true);
+    expect(server.includes('const LINE_INDEX_MIN_START = 10000')).toBe(true);
+    expect(server.includes('const LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024')).toBe(true);
+    expect(server.includes('const BLOB_LINE_CACHE_MAX_BYTES = 128 * 1024 * 1024')).toBe(true);
+    expect(server.includes('async function collectIndexedWorktreeLineRange(full: string, start: number, end: number)')).toBe(true);
+    expect(server.includes('buildLineOffsetIndexFromStream(Bun.file(full).stream(), stat.size)')).toBe(true);
+    expect(server.includes('if (stat.size > LINE_INDEX_MAX_FILE_BYTES) return null')).toBe(true);
+    expect(server.includes('if (start < LINE_INDEX_MIN_START && !lineIndexCache.has(full))')).toBe(true);
+    expect(server.includes('lineByteRangeForIndex(index, start, end)')).toBe(true);
+    expect(server.includes('Bun.file(full).slice(range.start, range.endExclusive).text()')).toBe(true);
+    expect(server.includes('git.objectId(ref, path, cwd)')).toBe(true);
+    expect(server.includes('git.objectByteSize(oid.oid, cwd)')).toBe(true);
+    expect(server.includes('async function collectIndexedGitBlobLineRange(path: string, oid: string, size: number, start: number, end: number)')).toBe(true);
+    expect(server.includes('git.catFileBlobStream(oid, cwd)')).toBe(true);
+    expect(server.includes('async function readGitBlobBytesWithIndex(oid: string, sizeHint: number): Promise<{ bytes: Uint8Array; index: LineOffsetIndex } | null>')).toBe(true);
+    expect(server.includes('collectBytesWithLineOffsetIndexFromStream(shown.stream, sizeHint)')).toBe(true);
+    expect(server.includes('if (size > LINE_INDEX_MAX_FILE_BYTES) return collectGitBlobLineRangeFromStream(oid, start, end)')).toBe(true);
+    expect(server.includes('async function collectGitBlobLineRangeWithIndex(cacheKey: string, oid: string, index: LineOffsetIndex, start: number, end: number)')).toBe(true);
+    expect(server.includes('setBlobLineCache(cacheKey, indexedBlob.bytes, indexedBlob.index)')).toBe(true);
+    expect(server.includes('setBlobLineIndexCache(cacheKey, index)')).toBe(true);
+    expect(server.includes('blobLineCacheBytes > BLOB_LINE_CACHE_MAX_BYTES')).toBe(true);
+    expect(server.includes('lineIndexCache.delete(full);\n    lineIndexCache.set(full, cached);')).toBe(true);
   });
 
   test('huge added diffs can be opened through the virtualized file viewer', () => {
