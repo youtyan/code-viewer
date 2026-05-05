@@ -43,12 +43,14 @@ describe('keymap action resolution', () => {
     expect(action('PageUp', 'main')).toBe('scroll-main-page-up');
     expect(action('PageDown', 'global')).toBe('scroll-main-page-down');
     expect(action('PageUp', 'global')).toBe('scroll-main-page-up');
+    expect(action('PageDown', 'sidebar')).toBe('scroll-main-page-down');
+    expect(action('PageUp', 'sidebar')).toBe('scroll-main-page-up');
     expect(action('ArrowDown', 'main', { ctrl: true })).toBe('scroll-main-page-down');
     expect(action('ArrowUp', 'main', { ctrl: true })).toBe('scroll-main-page-up');
     expect(action('ArrowDown', 'global', { ctrl: true })).toBe('scroll-main-page-down');
     expect(action('ArrowUp', 'global', { ctrl: true })).toBe('scroll-main-page-up');
-    expect(action('PageDown', 'sidebar')).toBe(null);
-    expect(action('ArrowDown', 'sidebar', { ctrl: true })).toBe(null);
+    expect(action('ArrowDown', 'sidebar', { ctrl: true })).toBe('scroll-main-page-down');
+    expect(action('ArrowUp', 'sidebar', { ctrl: true })).toBe('scroll-main-page-up');
   });
 
   test('does not handle vim navigation inside editable fields', () => {

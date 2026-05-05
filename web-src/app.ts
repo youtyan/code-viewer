@@ -297,13 +297,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     SOURCE_CURSOR = { target, line: Math.max(1, Math.min(totalLines, routeLine || 1)) };
   }
 
-  function scrollSourceCursorIntoView(cursor: { target: SourceFileTarget; line: number }, edge: 'nearest' | 'center' = 'nearest') {
+  function scrollSourceCursorIntoView(cursor: { target: SourceFileTarget; line: number }, edge: 'nearest' | 'center' | 'start' = 'nearest') {
     const scroller = findMainScrollTarget();
     if (scroller) {
       const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
       const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
       const before = scroller.scrollTop;
       if (edge === 'center') scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+      else if (edge === 'start') scroller.scrollTop = top;
       else if (top < scroller.scrollTop) scroller.scrollTop = top;
       else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight;
       if (scroller.scrollTop !== before) scroller.dispatchEvent(new Event('scroll'));
@@ -331,7 +332,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const delta = unit === 'page' ? pageRows : 1;
     cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
     syncSourceCursorRows(target);
-    scrollSourceCursorIntoView(cursor);
+    scrollSourceCursorIntoView(cursor, unit === 'page' ? 'start' : 'nearest');
     return true;
   }
 
