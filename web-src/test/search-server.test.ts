@@ -143,7 +143,7 @@ describe('preview search endpoints', () => {
     expect(server.includes('parseGrepPaths(url, omitDirNames)')).toBe(true);
     expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
     expect(server.includes("if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }")).toBe(true);
-    expect(server.includes('Bun.spawnSync(args')).toBe(true);
+    expect(server.includes('runSync(args, cwd, { timeout: 5000 })')).toBe(true);
     expect(server.includes('safeWorktreePath(path)')).toBe(true);
   });
 });
