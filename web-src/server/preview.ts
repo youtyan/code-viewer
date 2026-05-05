@@ -7,7 +7,18 @@ import type { DiffMeta, FileDiffResponse, FileMeta, FileRangeResponse, FileSearc
 import { cacheFresh, fileDiffCacheKey, setTimedCacheEntry, type TimedCacheEntry } from './cache';
 import { startDevAssetReload } from './dev-assets';
 import * as git from './git';
-import { isSameWorktreeRange } from './range';
+import {
+  buildLineOffsetIndexFromStream,
+  collectByteRangeFromStream,
+  collectBytesWithLineOffsetIndexFromStream,
+  collectLineRangeFromIndexedText,
+  collectLineRangeFromStream,
+  isSameWorktreeRange,
+  lineByteRangeForIndex,
+  parseHttpByteRange,
+  type LineOffsetIndex,
+  type LineRangeResult,
+} from './range';
 import {
   GREP_MAX_FILE_BYTES,
   buildFileSearchList,
@@ -29,6 +40,9 @@ const WATCHED_ASSET_FILES = ['index.html', 'style.css', 'app.js'];
 const SIZE_SMALL = 2000;
 const SIZE_MEDIUM = 8000;
 const SIZE_LARGE = 20000;
+const LINE_INDEX_MIN_START = 10000;
+const LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024;
+const BLOB_LINE_CACHE_MAX_BYTES = 128 * 1024 * 1024;
 const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
@@ -54,6 +68,10 @@ const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
 const metaCache = new Map<string, TimedCacheEntry<{ body: string; sig: string }>>();
 const fileListCache = new Map<string, { generation: number; body: FileSearchListResponse }>();
+const lineIndexCache = new Map<string, { signature: string; index: LineOffsetIndex }>();
+const blobLineIndexCache = new Map<string, LineOffsetIndex>();
+const blobBytesCache = new Map<string, Uint8Array>();
+let blobLineCacheBytes = 0;
 
 function parseCli() {
   const rest: string[] = [];
@@ -647,7 +665,138 @@ function handleFileDiff(url: URL) {
   return json(body);
 }
 
-function handleFileRange(url: URL) {
+function worktreeLineIndexSignature(full: string): string | null {
+  try {
+    const stat = statSync(full) as unknown as { size: number; mtimeMs: number; ctimeMs: number; ino?: number };
+    return `size:${stat.size}|mtime:${stat.mtimeMs}|ctime:${stat.ctimeMs}|ino:${stat.ino || 0}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getWorktreeLineIndex(full: string): Promise<LineOffsetIndex | null> {
+  const signature = worktreeLineIndexSignature(full);
+  if (!signature) return null;
+  const cached = lineIndexCache.get(full);
+  if (cached?.signature === signature) {
+    lineIndexCache.delete(full);
+    lineIndexCache.set(full, cached);
+    return cached.index;
+  }
+  const stat = statSync(full) as unknown as { size: number };
+  if (stat.size > LINE_INDEX_MAX_FILE_BYTES) return null;
+  const index = await buildLineOffsetIndexFromStream(Bun.file(full).stream(), stat.size);
+  lineIndexCache.delete(full);
+  lineIndexCache.set(full, { signature, index });
+  while (lineIndexCache.size > 32) {
+    const oldest = lineIndexCache.keys().next().value;
+    if (oldest === undefined) break;
+    lineIndexCache.delete(oldest);
+  }
+  return index;
+}
+
+function cachedBlobLineRange(cacheKey: string, start: number, end: number): LineRangeResult | null {
+  const bytes = blobBytesCache.get(cacheKey);
+  const index = blobLineIndexCache.get(cacheKey);
+  if (!bytes || !index) return null;
+  blobBytesCache.delete(cacheKey);
+  blobBytesCache.set(cacheKey, bytes);
+  blobLineIndexCache.delete(cacheKey);
+  blobLineIndexCache.set(cacheKey, index);
+  const range = lineByteRangeForIndex(index, start, end);
+  const textValue = range
+    ? new TextDecoder().decode(bytes.subarray(range.start, range.endExclusive))
+    : '';
+  return collectLineRangeFromIndexedText(textValue, index, start, end);
+}
+
+function setBlobLineCache(cacheKey: string, bytes: Uint8Array, index: LineOffsetIndex): void {
+  setBlobLineIndexCache(cacheKey, index);
+  const existing = blobBytesCache.get(cacheKey);
+  if (existing) blobLineCacheBytes -= existing.byteLength;
+  blobBytesCache.delete(cacheKey);
+  if (bytes.byteLength > BLOB_LINE_CACHE_MAX_BYTES) return;
+  blobBytesCache.set(cacheKey, bytes);
+  blobLineCacheBytes += bytes.byteLength;
+  while (blobBytesCache.size > 16 || blobLineCacheBytes > BLOB_LINE_CACHE_MAX_BYTES) {
+    const oldest = blobBytesCache.keys().next().value;
+    if (oldest === undefined) break;
+    const evicted = blobBytesCache.get(oldest);
+    if (evicted) blobLineCacheBytes -= evicted.byteLength;
+    blobBytesCache.delete(oldest);
+  }
+}
+
+function setBlobLineIndexCache(cacheKey: string, index: LineOffsetIndex): void {
+  blobLineIndexCache.delete(cacheKey);
+  blobLineIndexCache.set(cacheKey, index);
+  while (blobLineIndexCache.size > 128) {
+    const oldest = blobLineIndexCache.keys().next().value;
+    if (oldest === undefined) break;
+    blobLineIndexCache.delete(oldest);
+  }
+}
+
+async function collectGitBlobLineRangeWithIndex(cacheKey: string, oid: string, index: LineOffsetIndex, start: number, end: number): Promise<LineRangeResult | null> {
+  blobLineIndexCache.delete(cacheKey);
+  blobLineIndexCache.set(cacheKey, index);
+  const range = lineByteRangeForIndex(index, start, end);
+  if (!range) return collectLineRangeFromIndexedText('', index, start, end);
+  const shown = git.catFileBlobStream(oid, cwd);
+  const bytes = await collectByteRangeFromStream(shown.stream, range.start, range.endExclusive);
+  await shown.exited;
+  if (bytes.byteLength !== range.endExclusive - range.start) return null;
+  const textValue = new TextDecoder().decode(bytes);
+  return collectLineRangeFromIndexedText(textValue, index, start, end);
+}
+
+async function readGitBlobBytesWithIndex(oid: string, sizeHint: number): Promise<{ bytes: Uint8Array; index: LineOffsetIndex } | null> {
+  const shown = git.catFileBlobStream(oid, cwd);
+  const result = await collectBytesWithLineOffsetIndexFromStream(shown.stream, sizeHint);
+  const code = await shown.exited;
+  if (code !== 0) return null;
+  return result;
+}
+
+async function collectGitBlobLineRangeFromStream(oid: string, start: number, end: number): Promise<LineRangeResult | null> {
+  const shown = git.catFileBlobStream(oid, cwd);
+  const result = await collectLineRangeFromStream(shown.stream, start, end);
+  const code = await shown.exited;
+  if (code !== 0 && result.complete) return null;
+  return result;
+}
+
+async function collectIndexedGitBlobLineRange(path: string, oid: string, size: number, start: number, end: number): Promise<LineRangeResult | null> {
+  const cacheKey = `${oid}\0${path}`;
+  const cached = cachedBlobLineRange(cacheKey, start, end);
+  if (cached) return cached;
+  const cachedIndex = blobLineIndexCache.get(cacheKey);
+  if (cachedIndex) return collectGitBlobLineRangeWithIndex(cacheKey, oid, cachedIndex, start, end);
+  if (start < LINE_INDEX_MIN_START) {
+    return collectGitBlobLineRangeFromStream(oid, start, end);
+  }
+  if (size > LINE_INDEX_MAX_FILE_BYTES) return collectGitBlobLineRangeFromStream(oid, start, end);
+  const indexedBlob = await readGitBlobBytesWithIndex(oid, size);
+  if (!indexedBlob) return null;
+  setBlobLineCache(cacheKey, indexedBlob.bytes, indexedBlob.index);
+  return cachedBlobLineRange(cacheKey, start, end) || collectGitBlobLineRangeWithIndex(cacheKey, oid, indexedBlob.index, start, end);
+}
+
+async function collectIndexedWorktreeLineRange(full: string, start: number, end: number): Promise<LineRangeResult> {
+  if (start < LINE_INDEX_MIN_START && !lineIndexCache.has(full)) {
+    return collectLineRangeFromStream(Bun.file(full).stream(), start, end);
+  }
+  const index = await getWorktreeLineIndex(full);
+  if (!index) return collectLineRangeFromStream(Bun.file(full).stream(), start, end);
+  const range = lineByteRangeForIndex(index, start, end);
+  const textValue = range
+    ? await Bun.file(full).slice(range.start, range.endExclusive).text()
+    : '';
+  return collectLineRangeFromIndexedText(textValue, index, start, end);
+}
+
+async function handleFileRange(url: URL) {
   const path = url.searchParams.get('path') || '';
   if (!safePath(path)) return text('invalid path', 400);
   let start = Number(url.searchParams.get('start') || '1') || 1;
@@ -655,22 +804,23 @@ function handleFileRange(url: URL) {
   if (start < 1) start = 1;
   if (end < start) end = start;
   const ref = url.searchParams.get('ref') || 'worktree';
-  let content = '';
   if (ref === 'worktree' || ref === '') {
     const full = safeWorktreePath(path);
     if (!full) return text('no file', 404);
-    content = readFileSync(full, 'utf8');
+    const result = await collectIndexedWorktreeLineRange(full, start, end);
+    const body: FileRangeResponse = { path, ref, start, end, lines: result.lines, total: result.total, complete: result.complete, generation };
+    return json(body);
   } else {
     if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);
-    const res = git.show(ref, path, cwd);
-    if (res.code !== 0) return text('not in ref', 404);
-    content = res.stdout;
+    const oid = git.objectId(ref, path, cwd);
+    if (oid.code !== 0 || !oid.oid) return text('not in ref', 404);
+    const size = git.objectByteSize(oid.oid, cwd);
+    if (size.code !== 0) return text('cannot read ref', 500);
+    const result = await collectIndexedGitBlobLineRange(path, oid.oid, size.size, start, end);
+    if (!result) return text('cannot read ref', 500);
+    const body: FileRangeResponse = { path, ref, start, end, lines: result.lines, total: result.total, complete: result.complete, generation };
+    return json(body);
   }
-  const lines: string[] = [];
-  const all = `${content}\n`.split('\n');
-  for (let i = start; i <= end && i <= all.length; i++) lines.push(all[i - 1]);
-  const body: FileRangeResponse = { path, ref, start, end, lines, total: Math.min(all.length, end + 1), generation };
-  return json(body);
 }
 
 function handleRawFile(req: Request, url: URL) {
@@ -692,10 +842,29 @@ function handleRawFile(req: Request, url: URL) {
     if (!full) return text('not found', 404);
     const size = rawFileSize(path, ref);
     if (size == null) return text('not found', 404);
+    const rangeResult = req.headers.get('range') ? parseHttpByteRange(req.headers.get('range'), size) : null;
+    if (rangeResult?.kind === 'unsatisfiable') {
+      return new Response(null, {
+        status: 416,
+        headers: { ...rawFileHeaders(path, size), 'Content-Range': `bytes */${size}`, 'Content-Length': '0' },
+      });
+    }
+    if (rangeResult?.kind === 'range') {
+      const range = rangeResult.range;
+      if (req.method === 'HEAD') {
+        return new Response(null, {
+          status: 206,
+          headers: rawFileHeaders(path, size, range),
+        });
+      }
+      const file = Bun.file(full).slice(range.start, range.end + 1);
+      return new Response(file, {
+        status: 206,
+        headers: rawFileHeaders(path, size, range),
+      });
+    }
     if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });
-    const bytes = new Uint8Array(readFileSync(full));
-    body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    return new Response(body, { headers: rawFileHeaders(path, size) });
+    return new Response(Bun.file(full).stream(), { headers: rawFileHeaders(path, size) });
   }
 }
 
@@ -714,7 +883,7 @@ function rawFileSize(path: string, ref: string): number | null {
   }
 }
 
-function rawFileHeaders(path: string, size: number | null = null): HeadersInit {
+function rawFileHeaders(path: string, size: number | null = null, range?: { start: number; end: number }): HeadersInit {
   const mime: Record<string, string> = {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
     '.webp': 'image/webp', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm',
@@ -727,8 +896,14 @@ function rawFileHeaders(path: string, size: number | null = null): HeadersInit {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': 'sandbox',
+    'Accept-Ranges': 'bytes',
   };
-  if (size != null) headers['Content-Length'] = String(size);
+  if (range && size != null) {
+    headers['Content-Length'] = String(range.end - range.start + 1);
+    headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`;
+  } else if (size != null) {
+    headers['Content-Length'] = String(size);
+  }
   return headers;
 }
 

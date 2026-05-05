@@ -22,6 +22,7 @@ import type {
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
+  FileRangeResponse,
   FileSearchListResponse,
   FileMeta,
   RepoTreeResponse,
@@ -172,6 +173,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const DEFAULT_RANGE: DiffRange = { from: 'HEAD', to: 'worktree' };
   const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
   const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
+  const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
   // Keep in sync with .gdp-source-virtual-row height/line-height in web/style.css.
   const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
   const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
@@ -3198,6 +3200,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     return url.pathname + url.search;
   }
 
+  function buildFileRangeUrl(target: SourceFileTarget, start: number, end: number): string {
+    return '/file_range?path=' + encodeURIComponent(target.path) +
+      '&ref=' + encodeURIComponent(target.ref || 'worktree') +
+      '&start=' + encodeURIComponent(String(start)) +
+      '&end=' + encodeURIComponent(String(end));
+  }
+
   function currentSourceLineTarget(target: SourceFileTarget): SourceLineTarget | undefined {
     const routeTarget = sourceTargetFromRoute();
     return sourceTargetsEqual(routeTarget, target) && STATE.route.screen === 'file' ? STATE.route.line : undefined;
@@ -3382,6 +3391,220 @@ window.GdpExpandLogic = GdpExpandLogic;
     render();
     schedule();
     return wrap;
+  }
+
+  function renderPagedVirtualSource(
+    target: SourceFileTarget,
+    size: number,
+    initialStart: number,
+    initialLines: string[],
+    initialComplete: boolean,
+    initialTotal: number,
+    hljsRef: HljsApi | null,
+    lang: string | null,
+    signal?: AbortSignal,
+  ): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'gdp-source-virtual';
+    const info = document.createElement('div');
+    info.className = 'gdp-source-virtual-info';
+    const badge = document.createElement('span');
+    badge.className = 'gdp-source-virtual-badge';
+    badge.textContent = 'Virtual mode';
+    const summary = document.createElement('span');
+    summary.className = 'gdp-source-virtual-summary';
+    const actions = document.createElement('span');
+    actions.className = 'gdp-source-virtual-actions';
+    const raw = document.createElement('a');
+    raw.className = 'gdp-source-virtual-action';
+    raw.href = buildRawFileUrl(target);
+    raw.target = '_blank';
+    raw.rel = 'noreferrer';
+    raw.textContent = 'Open raw';
+    const full = document.createElement('a');
+    full.className = 'gdp-source-virtual-action';
+    full.href = buildCurrentFileRouteWithVirtualMode(target, 'off');
+    full.textContent = 'Open full view';
+    full.title = 'Render every line without paged loading. This can be slow for large files.';
+    full.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = new URL(full.href, window.location.origin);
+      setRoute(parseRoute(url.pathname, url.search, currentRange()), true);
+      renderStandaloneSource(target);
+    });
+    actions.append(raw, full);
+    info.append(badge, summary, actions);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'gdp-source-virtual-scroller';
+    const spacer = document.createElement('div');
+    spacer.className = 'gdp-source-virtual-spacer';
+    const windowEl = document.createElement('div');
+    windowEl.className = 'gdp-source-virtual-window';
+    spacer.appendChild(windowEl);
+    scroller.appendChild(spacer);
+    wrap.append(info, scroller);
+
+    const lines = new Map<number, string>();
+    const requestedPages = new Set<number>();
+    const failedPages = new Set<number>();
+    const targetLine = lineTargetStart(currentSourceLineTarget(target)) || 1;
+    let complete = initialComplete;
+    let totalRows = initialComplete
+      ? Math.max(1, initialTotal)
+      : Math.max(initialTotal || 1, initialStart + initialLines.length - 1, targetLine + VIRTUAL_SOURCE_PAGE_SIZE);
+    initialLines.forEach((line, index) => lines.set(initialStart + index, line));
+    requestedPages.add(Math.max(0, Math.floor((initialStart - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
+    for (let line = initialStart; line < initialStart + initialLines.length; line += VIRTUAL_SOURCE_PAGE_SIZE) {
+      requestedPages.add(Math.max(0, Math.floor((line - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
+    }
+
+    const updateTotals = () => {
+      SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
+      summary.textContent = (complete ? totalRows.toLocaleString() : (lines.size.toLocaleString() + '+')) +
+        ' lines loaded from ' + formatBytes(size) + '. More rows load as you scroll.';
+      spacer.style.height = Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px';
+    };
+
+    const loadPage = (line: number) => {
+      if (signal?.aborted || (complete && line > totalRows)) return;
+      const page = Math.max(0, Math.floor((line - 1) / VIRTUAL_SOURCE_PAGE_SIZE));
+      if (requestedPages.has(page)) return;
+      if (failedPages.has(page)) return;
+      requestedPages.add(page);
+      const start = page * VIRTUAL_SOURCE_PAGE_SIZE + 1;
+      const end = start + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+      trackLoad(fetch(buildFileRangeUrl(target, start, end), { signal })
+        .then(res => res.ok ? res.json() as Promise<FileRangeResponse> : null)
+        .then(data => {
+          if (!data || signal?.aborted) return;
+          data.lines.forEach((lineValue, index) => lines.set(data.start + index, lineValue));
+          totalRows = data.complete
+            ? Math.max(1, data.total)
+            : Math.max(totalRows, data.total, end + VIRTUAL_SOURCE_PAGE_SIZE);
+          complete = data.complete === true;
+          updateTotals();
+          renderedStart = -1;
+          renderedEnd = -1;
+          render();
+        }).catch(err => {
+          if (!isAbortError(err)) {
+            failedPages.add(page);
+            renderedStart = -1;
+            renderedEnd = -1;
+            schedule();
+          }
+        }));
+    };
+
+    let raf = 0;
+    let renderedStart = -1;
+    let renderedEnd = -1;
+    const render = () => {
+      raf = 0;
+      const viewportHeight = scroller.clientHeight || window.innerHeight;
+      const overscan = 20;
+      const start = Math.max(0, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) - overscan);
+      const end = Math.min(totalRows, Math.ceil((scroller.scrollTop + viewportHeight) / VIRTUAL_SOURCE_ROW_HEIGHT) + overscan);
+      if (start === renderedStart && end === renderedEnd) return;
+      renderedStart = start;
+      renderedEnd = end;
+      windowEl.replaceChildren();
+      windowEl.style.transform = 'translateY(' + (start * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px)';
+      const fragment = document.createDocumentFragment();
+      for (let index = start; index < end; index++) {
+        const lineNumber = index + 1;
+        if (!lines.has(lineNumber)) loadPage(lineNumber);
+        const row = document.createElement('div');
+        row.className = 'gdp-source-virtual-row';
+        row.dataset.line = String(lineNumber);
+        row.classList.toggle('gdp-source-line-target', lineInSourceTarget(lineNumber, currentSourceLineTarget(target)));
+        row.classList.toggle('gdp-source-cursor', sourceCursorMatches(target, lineNumber));
+        const num = document.createElement('span');
+        num.className = 'gdp-source-virtual-line-number';
+        num.textContent = String(lineNumber);
+        bindSourceLineNumber(num, wrap, target, lineNumber);
+        const code = document.createElement('span');
+        code.className = 'gdp-source-virtual-line-code';
+        const line = lines.get(lineNumber);
+        if (line == null) {
+          code.textContent = '';
+        } else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+          try {
+            code.innerHTML = hljsRef.highlight(line, { language: lang, ignoreIllegals: true }).value;
+            code.classList.add('hljs');
+          } catch {
+            code.textContent = line;
+          }
+        } else {
+          code.textContent = line;
+        }
+        row.append(num, code);
+        fragment.appendChild(row);
+      }
+      windowEl.appendChild(fragment);
+      if (!complete && totalRows - end < VIRTUAL_SOURCE_PAGE_SIZE) {
+        totalRows += VIRTUAL_SOURCE_PAGE_SIZE;
+        updateTotals();
+      }
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(render);
+    };
+    (scroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource = render;
+    scroller.addEventListener('scroll', schedule, { passive: true });
+    let resizeObserver: ResizeObserver | null = null;
+    resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      if (!scroller.isConnected) {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        return;
+      }
+      schedule();
+    }) : null;
+    resizeObserver?.observe(scroller);
+    updateTotals();
+    if (targetLine <= 1) {
+      render();
+      schedule();
+    }
+    return wrap;
+  }
+
+  async function renderPagedSourceText(card: DiffCardElement, target: SourceFileTarget, size: number, signal?: AbortSignal): Promise<boolean> {
+    const body = card.querySelector<HTMLElement>('.gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer');
+    const isStandalone = card.classList.contains('gdp-standalone-source');
+    const view = document.createElement('div');
+    view.className = 'gdp-source-viewer virtual';
+    const header = isStandalone ? null : document.createElement('div');
+    if (header) {
+      header.className = 'gdp-source-meta';
+      header.textContent = target.path + ' @ ' + target.ref;
+      view.appendChild(header);
+    }
+    const lineTarget = lineTargetStart(currentSourceLineTarget(target)) || 1;
+    const initialPage = Math.max(0, Math.floor((lineTarget - 1) / VIRTUAL_SOURCE_PAGE_SIZE));
+    const initialStart = initialPage * VIRTUAL_SOURCE_PAGE_SIZE + 1;
+    const initialEnd = initialStart + VIRTUAL_SOURCE_PAGE_SIZE - 1;
+    const lang = inferLang(target.path);
+    const hljsRef = STATE.syntaxHighlight ? await loadSyntaxHighlighter() : null;
+    if (signal?.aborted) return false;
+    const initial = await trackLoad(fetch(buildFileRangeUrl(target, initialStart, initialEnd), { signal })
+      .then(res => res.ok ? res.json() as Promise<FileRangeResponse> : null));
+    if (!initial) return false;
+    if (signal?.aborted) return false;
+    const tabsHost = card.querySelector<HTMLElement>('.gdp-file-detail-tabs');
+    if (tabsHost) {
+      tabsHost.hidden = false;
+      tabsHost.replaceChildren(createSourceTabs('code').tabs);
+    }
+    SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), Math.max(1, initial.total, lineTarget));
+    resetSourceCursorForTarget(target, Math.max(1, initial.total, lineTarget));
+    const virtualCode = renderPagedVirtualSource(target, size, initialStart, initial.lines, initial.complete === true, initial.total, hljsRef, lang, signal);
+    view.appendChild(virtualCode);
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+    return true;
   }
 
   function renderSourceMedia(card: DiffCardElement, target: SourceFileTarget, mediaKind: string) {
@@ -3578,20 +3801,30 @@ window.GdpExpandLogic = GdpExpandLogic;
         return;
       }
       if (displayKind === 'text') {
-      const response = await trackLoad(fetch(buildRawFileUrl(target), { signal: controller.signal }));
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      if (!response.ok) {
+        const meta = await loadRawFileInfo(target);
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!isVirtualSourceDisabled() && meta.size != null && meta.size >= VIRTUAL_SOURCE_SIZE_THRESHOLD) {
+          const rendered = await renderPagedSourceText(card, target, meta.size, controller.signal);
+          if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+          if (!rendered) return;
+          scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
+          finishSourceLoad(req);
+          return;
+        }
+        const response = await trackLoad(fetch(buildRawFileUrl(target), { signal: controller.signal }));
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!response.ok) {
+          finishSourceLoad(req);
+          renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
+          return;
+        }
+        const textValue = await response.text();
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        const rendered = await renderSourceText(card, target, textValue, controller.signal);
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
+        if (!rendered) return;
+        scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
         finishSourceLoad(req);
-        renderSourceError(card, target, 'Cannot load ' + target.path + ' at ' + target.ref);
-        return;
-      }
-      const textValue = await response.text();
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      const rendered = await renderSourceText(card, target, textValue, controller.signal);
-      if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
-      if (!rendered) return;
-      scrollStandaloneSourceLine(card, lineTargetStart(STATE.route.screen === 'file' ? STATE.route.line : undefined));
-      finishSourceLoad(req);
       }
     } catch (err) {
       if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target)) return;
@@ -3610,6 +3843,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (virtualScroller) {
       const centeredOffset = (virtualScroller.clientHeight / 2) - (VIRTUAL_SOURCE_ROW_HEIGHT / 2);
       virtualScroller.scrollTop = Math.max(0, (line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - Math.max(0, centeredOffset));
+      (virtualScroller as HTMLElement & { __gdpRenderVirtualSource?: () => void }).__gdpRenderVirtualSource?.();
       return;
     }
     const row = card.querySelector<HTMLElement>('.gdp-source-table tr[data-line="' + String(line) + '"]');

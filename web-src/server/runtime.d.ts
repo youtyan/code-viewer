@@ -1,7 +1,17 @@
+interface BunFile extends globalThis.Blob {
+  arrayBuffer(): Promise<ArrayBuffer>;
+  slice(start?: number, end?: number, contentType?: string): BunFile;
+  stream(): ReadableStream<Uint8Array<ArrayBuffer>>;
+  text(): Promise<string>;
+}
+
 declare const Bun: {
+  file(path: string): BunFile;
   spawn(args: string[], opts?: Record<string, unknown>): {
     kill(signal?: string): void;
     exited: Promise<number>;
+    stdout?: ReadableStream<Uint8Array>;
+    stderr?: ReadableStream<Uint8Array>;
   };
   spawnSync(args: string[], opts?: Record<string, unknown>): {
     exitCode: number;
