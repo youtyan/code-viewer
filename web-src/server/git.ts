@@ -88,9 +88,32 @@ export function showBytes(ref: string, path: string, cwd: string): { code: numbe
   return runBytes(['git', 'show', `${ref}:${path}`], cwd);
 }
 
+export function catFileBlobStream(oid: string, cwd: string): { stream: ReadableStream<Uint8Array>; exited: Promise<number>; kill(signal?: string): void } {
+  const proc = Bun.spawn(['git', 'cat-file', 'blob', oid], { cwd, stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
+  return {
+    stream: proc.stdout as ReadableStream<Uint8Array>,
+    exited: proc.exited,
+    kill: (signal?: string) => proc.kill(signal),
+  };
+}
+
 export function objectSize(ref: string, path: string, cwd: string): { code: number; size: number; stderr: string } {
   const res = run(['git', 'cat-file', '-s', `${ref}:${path}`], cwd);
   return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
+}
+
+export function objectByteSize(oid: string, cwd: string): { code: number; size: number; stderr: string } {
+  const res = run(['git', 'cat-file', '-s', oid], cwd);
+  return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
+}
+
+export function objectId(ref: string, path: string, cwd: string): { code: number; oid: string; stderr: string } {
+  const res = run(['git', 'rev-parse', '--verify', `${ref}:${path}`], cwd);
+  const oid = res.stdout.trim();
+  if (res.code !== 0 || !oid) return { code: res.code || 1, oid: '', stderr: res.stderr };
+  const type = run(['git', 'cat-file', '-t', oid], cwd);
+  if (type.code !== 0 || type.stdout.trim() !== 'blob') return { code: 1, oid: '', stderr: type.stderr };
+  return { code: 0, oid, stderr: '' };
 }
 
 export function verifyTreeRef(ref: string, cwd: string): boolean {

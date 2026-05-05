@@ -106,7 +106,13 @@ export type FileRangeResponse = {
   start: number;
   end: number;
   lines: string[];
+  /**
+   * When complete is true, total is the file's total line count.
+   * When complete is false, total is only the highest line number the server
+   * had to scan to prove more lines exist.
+   */
   total: number;
+  complete?: boolean;
   generation?: number;
 };
 

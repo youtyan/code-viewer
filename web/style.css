@@ -2350,11 +2350,44 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.gdp-source-virtual-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+}
+.gdp-source-virtual-search[hidden] {
+  display: none;
+}
+.gdp-source-virtual-search input {
+  width: min(220px, 28vw);
+  min-width: 120px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.gdp-source-virtual-search button {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  cursor: pointer;
+}
+.gdp-source-virtual-search-count {
+  min-width: 62px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
 .gdp-source-virtual-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
 }
 .gdp-source-virtual-action {
   display: inline-flex;
@@ -2385,8 +2418,7 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: var(--code-font-size);
   line-height: 20px;
-  cursor: pointer;
-  user-select: none;
+  cursor: text;
 }
 .gdp-source-virtual-spacer {
   position: relative;
@@ -2425,6 +2457,15 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
 }
 .gdp-source-virtual-line-code.hljs {
   background: var(--bg);
+}
+.gdp-source-virtual-search-hit {
+  background: #fff8c5;
+  color: inherit;
+  border-radius: 2px;
+}
+.gdp-source-virtual-search-hit.active {
+  background: var(--accent);
+  color: var(--bg);
 }
 .gdp-standalone-source.gdp-file-shell {
   border: 0;
