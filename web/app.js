@@ -382,10 +382,14 @@
     { action: "scroll-main-page-up", key: "pageup", scope: "main" },
     { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
     { action: "scroll-main-page-up", key: "pageup", scope: "global" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
     { action: "scroll-main-page-down", key: "arrowdown", scope: "main", ctrl: true },
     { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
     { action: "scroll-main-page-down", key: "arrowdown", scope: "global", ctrl: true },
     { action: "scroll-main-page-up", key: "arrowup", scope: "global", ctrl: true },
+    { action: "scroll-main-page-down", key: "arrowdown", scope: "sidebar", ctrl: true },
+    { action: "scroll-main-page-up", key: "arrowup", scope: "sidebar", ctrl: true },
     { action: "tab-preview", key: "p", scope: "main", pendingG: true },
     { action: "tab-code", key: "c", scope: "main", pendingG: true },
     { action: "goto-top", key: "g", pendingG: true },
@@ -6921,6 +6925,8 @@
         const before = scroller.scrollTop;
         if (edge === "center")
           scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+        else if (edge === "start")
+          scroller.scrollTop = top;
         else if (top < scroller.scrollTop)
           scroller.scrollTop = top;
         else if (bottom > scroller.scrollTop + scroller.clientHeight)
@@ -6953,7 +6959,7 @@
       const delta = unit === "page" ? pageRows : 1;
       cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
       syncSourceCursorRows(target);
-      scrollSourceCursorIntoView(cursor);
+      scrollSourceCursorIntoView(cursor, unit === "page" ? "start" : "nearest");
       return true;
     }
     function scrollMainPanel(direction, repeated = false, unit = "line") {
