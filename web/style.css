@@ -2575,6 +2575,18 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   font-size: 16px;
   line-height: 1.75;
 }
+.gdp-html-preview {
+  width: 100%;
+  min-height: min(78vh, 920px);
+  background: var(--bg);
+}
+.gdp-html-preview iframe {
+  display: block;
+  width: 100%;
+  min-height: min(78vh, 920px);
+  border: 0;
+  background: #fff;
+}
 .gdp-markdown-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);

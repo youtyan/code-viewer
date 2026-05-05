@@ -58,6 +58,7 @@ let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
 let allowUpload = false;
 let uploadAllowedByCli = false;
+let openAfterStart = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let rgAvailableCache: boolean | null = null;
@@ -113,7 +114,7 @@ Examples:
       }
       listenPort = parsed;
     } else if (arg === '--open') {
-      setTimeout(() => openBrowser(`http://127.0.0.1:${server.port}/`), 0);
+      openAfterStart = true;
     } else if (arg === '--allow-upload') {
       allowUpload = true;
       uploadAllowedByCli = true;
@@ -1144,6 +1145,10 @@ const server = await startServer({
     return text('not found', 404);
   },
 });
+
+if (openAfterStart) {
+  openBrowser(`http://127.0.0.1:${server.port}/`);
+}
 
 startDevAssetReload({
   enabled: process.env.CODE_VIEWER_DEV === '1',
