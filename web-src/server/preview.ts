@@ -916,6 +916,14 @@ function handleGrep(url: URL) {
   return json(grepTreeRef(ref, query, max, paths, regex, omitDirNames));
 }
 
+function handleRefCommits(url: URL) {
+  const query = url.searchParams.get("q") || "";
+  const parsedMax = Number(url.searchParams.get("max") || "");
+  const max =
+    Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
+  return json({ commits: git.refCommits(cwd, query, max) });
+}
+
 function handleFileDiff(url: URL) {
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
@@ -1608,6 +1616,7 @@ const server = await startServer({
     if (url.pathname === "/_tree") return handleTree(url);
     if (url.pathname === "/_files") return handleFiles(url);
     if (url.pathname === "/_grep") return handleGrep(url);
+    if (url.pathname === "/_commits") return handleRefCommits(url);
     if (url.pathname === "/file_diff") return handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);
     if (url.pathname === "/_file") return handleRawFile(req, url);

@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { fileDiffCacheKey, worktreeFileSignature } from "../server/cache";
 import {
   listTree,
+  refCommits,
+  refs,
   treeEntries,
   truncateToNHunks,
   verifyTreeRef,
@@ -285,6 +287,57 @@ describe("repository tree helpers", () => {
     expect(entries.some((entry) => entry.path === "web-src/app.ts")).toBe(
       false,
     );
+  });
+
+  test("caps the initial commit list in the ref picker data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-refs-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      for (let index = 1; index <= 105; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `commit ${index}`]);
+      }
+
+      const result = refs(dir);
+
+      expect(result.commits.length).toBe(100);
+      expect(result.commits[0].subject).toBe("commit 105");
+      expect(
+        result.commits.some((commit) => commit.subject === "commit 1"),
+      ).toBe(false);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("searches commits server-side beyond the initial visible window", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-commit-search-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      writeFileSync(join(dir, "file.txt"), "oldest\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "needle oldest commit"]);
+      for (let index = 1; index <= 105; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `recent commit ${index}`]);
+      }
+
+      const result = refCommits(dir, "needle oldest", 5);
+
+      expect(result.length).toBe(1);
+      expect(result[0].subject).toBe("needle oldest commit");
+      expect(refCommits(dir, result[0].sha.slice(0, 8), 5)[0].sha).toBe(
+        result[0].sha,
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 
   test("lists ignored filesystem directories in worktree view", () => {
