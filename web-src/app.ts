@@ -3471,6 +3471,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     info.append(badge, summary, actions);
     const scroller = document.createElement('div');
     scroller.className = 'gdp-source-virtual-scroller';
+    scroller.tabIndex = 0;
+    scroller.setAttribute('role', 'region');
+    scroller.setAttribute('aria-label', target.path + ' source code');
     const spacer = document.createElement('div');
     spacer.className = 'gdp-source-virtual-spacer';
     spacer.style.height = Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT) + 'px';
@@ -3593,6 +3596,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     const scroller = document.createElement('div');
     scroller.className = 'gdp-source-virtual-scroller';
+    scroller.tabIndex = 0;
+    scroller.setAttribute('role', 'region');
+    scroller.setAttribute('aria-label', target.path + ' source code');
     const spacer = document.createElement('div');
     spacer.className = 'gdp-source-virtual-spacer';
     const windowEl = document.createElement('div');
@@ -5270,7 +5276,39 @@ window.GdpExpandLogic = GdpExpandLogic;
     return false;
   }
 
+  type VirtualSourcePagingKeyboardEvent = KeyboardEvent & { __gdpVirtualSourcePagingHandled?: boolean };
+
+  function handleVirtualSourcePagingKey(e: KeyboardEvent, targetEl: Element | null): boolean {
+    if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled) return true;
+    if (e.defaultPrevented || e.isComposing || PALETTE || document.querySelector('.mkdp-lightbox')) return false;
+    const editable = isEditableKeyTarget(targetEl);
+    const inVirtualSearch = !!targetEl?.closest('.gdp-source-virtual-search');
+    if (editable && !inVirtualSearch) return false;
+    const key = e.key.toLowerCase();
+    if (e.altKey || e.metaKey) return false;
+    const isPlainPageKey = (key === 'pagedown' || key === 'pageup') && !e.ctrlKey && !e.shiftKey;
+    const isCtrlArrowKey = (key === 'arrowdown' || key === 'arrowup') && e.ctrlKey && !e.shiftKey;
+    if (!isPlainPageKey && !isCtrlArrowKey) return false;
+    const scroller = findMainScrollTarget();
+    if (!scroller || !scroller.matches('#content .gdp-source-virtual-scroller')) return false;
+    const pageDown = key === 'pagedown' || key === 'arrowdown';
+    const pageUp = key === 'pageup' || key === 'arrowup';
+    if (!pageDown && !pageUp) return false;
+    (e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled = true;
+    e.preventDefault();
+    e.stopPropagation();
+    scrollMainPanel(pageDown ? 1 : -1, e.repeat, 'page');
+    return true;
+  }
+
+  function handleVirtualSourcePagingKeydown(e: KeyboardEvent) {
+    handleVirtualSourcePagingKey(e, e.target as Element | null);
+  }
+
+  document.addEventListener('keydown', handleVirtualSourcePagingKeydown, { capture: true });
+
   document.addEventListener('keydown', e => {
+    if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled) return;
     const targetEl = e.target as Element | null;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !isEditableKeyTarget(targetEl)) {
       if (openVirtualSourceSearchFromKeyboard(targetEl)) {

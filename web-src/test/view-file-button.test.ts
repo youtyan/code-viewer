@@ -474,6 +474,13 @@ describe('view file UI', () => {
     expect(app.includes("if (action === 'focus-main')")).toBe(true);
     expect(app.includes("if (action === 'scroll-main-down' || action === 'scroll-main-up')")).toBe(true);
     expect(app.includes("if (action === 'scroll-main-page-down' || action === 'scroll-main-page-up')")).toBe(true);
+    expect(app.includes("function handleVirtualSourcePagingKey(e: KeyboardEvent, targetEl: Element | null): boolean")).toBe(true);
+    expect(app.includes("document.addEventListener('keydown', handleVirtualSourcePagingKeydown, { capture: true })")).toBe(true);
+    expect(app.includes("const inVirtualSearch = !!targetEl?.closest('.gdp-source-virtual-search')")).toBe(true);
+    expect(app.includes("if (e.altKey || e.metaKey) return false")).toBe(true);
+    expect(app.includes("const scroller = findMainScrollTarget()")).toBe(true);
+    expect(app.includes('scroller.tabIndex = 0')).toBe(true);
+    expect(app.includes("scroller.setAttribute('role', 'region')")).toBe(true);
     expect(app.includes("function switchSourceTab(tab: 'preview' | 'code'): boolean")).toBe(true);
     expect(app.includes("if (action === 'tab-preview' || action === 'tab-code')")).toBe(true);
     expect(app.includes('focusMainPanel();')).toBe(true);
