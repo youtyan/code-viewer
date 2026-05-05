@@ -479,13 +479,17 @@ describe('view file UI', () => {
     expect(app.includes("const inVirtualSearch = !!targetEl?.closest('.gdp-source-virtual-search')")).toBe(true);
     expect(app.includes("if (e.altKey || e.metaKey) return false")).toBe(true);
     expect(app.includes("const scroller = findMainScrollTarget()")).toBe(true);
+    expect(app.includes('function focusMainSurface()')).toBe(true);
+    expect(app.includes('function scheduleMainSurfaceFocus()')).toBe(true);
+    expect(app.includes("scrollMainPanel(pageDown ? 1 : -1, e.repeat, 'page');\n    focusMainSurface();")).toBe(true);
     expect(app.includes('scroller.tabIndex = 0')).toBe(true);
     expect(app.includes("scroller.setAttribute('role', 'region')")).toBe(true);
     expect(app.includes("function switchSourceTab(tab: 'preview' | 'code'): boolean")).toBe(true);
     expect(app.includes("if (action === 'tab-preview' || action === 'tab-code')")).toBe(true);
     expect(app.includes('focusMainPanel();')).toBe(true);
     expect(app.includes('focusSidebarPanel();')).toBe(true);
-    expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          focusMainPanel();')).toBe(false);
+    expect(app.includes('if (onFileClick) onFileClick(f);\n          else scrollToFile(f.path);\n          scheduleMainSurfaceFocus();')).toBe(true);
+    expect(app.includes("onFileClick({\n              path: dir.path,\n              display_path: dir.path,\n              type: 'tree',\n              children_omitted: dir.children_omitted,\n              children_omitted_reason: dir.children_omitted_reason,\n            });\n            scheduleMainSurfaceFocus();")).toBe(true);
     expect(app.includes('onFileClick({\n              path: dir.path,')).toBe(true);
     expect(app.includes('composing: e.isComposing')).toBe(true);
     expect(app.includes('paletteOpen: !!PALETTE')).toBe(true);
