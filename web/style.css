@@ -2998,7 +2998,7 @@ body.gdp-file-detail-page.gdp-repo-blob-page .sb-head {
   justify-content: stretch;
   align-items: center;
   gap: 8px;
-  top: var(--global-header-h);
+  top: 0;
   z-index: 5;
 }
 body.gdp-repo-page .sb-head > #sidebar-toggle,
