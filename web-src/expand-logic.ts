@@ -8,21 +8,34 @@ export type LineRange = {
   end: number;
 };
 
-export function initExpandState(prevHunkEndNew: number, hunkNewStart: number): ExpandState {
+export function initExpandState(
+  prevHunkEndNew: number,
+  hunkNewStart: number,
+): ExpandState {
   return {
     topExpandedStart: hunkNewStart,
     bottomExpandedEnd: prevHunkEndNew - 1,
   };
 }
 
-export function remainingGap(state: ExpandState, prevHunkEndNew: number): LineRange | null {
-  const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
+export function remainingGap(
+  state: ExpandState,
+  prevHunkEndNew: number,
+): LineRange | null {
+  const remainingStart = Math.max(
+    1,
+    prevHunkEndNew,
+    state.bottomExpandedEnd + 1,
+  );
   const remainingEnd = state.topExpandedStart - 1;
   if (remainingStart > remainingEnd) return null;
   return { start: remainingStart, end: remainingEnd };
 }
 
-export function isFullyExpanded(state: ExpandState, prevHunkEndNew: number): boolean {
+export function isFullyExpanded(
+  state: ExpandState,
+  prevHunkEndNew: number,
+): boolean {
   return remainingGap(state, prevHunkEndNew) == null;
 }
 
@@ -32,7 +45,9 @@ export function upClickRange(
   step: number,
 ): LineRange | null {
   const gap = remainingGap(state, prevHunkEndNew);
-  return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
+  return gap
+    ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) }
+    : null;
 }
 
 export function downClickRange(
@@ -41,7 +56,9 @@ export function downClickRange(
   step: number,
 ): LineRange | null {
   const gap = remainingGap(state, prevHunkEndNew);
-  return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
+  return gap
+    ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end }
+    : null;
 }
 
 export function applyUp(state: ExpandState, range: LineRange): ExpandState {
@@ -52,11 +69,18 @@ export function applyDown(state: ExpandState, range: LineRange): ExpandState {
   return Object.assign({}, state, { topExpandedStart: range.start });
 }
 
-export function mapNewToOld(newLine: number, prevHunkEndNew: number, prevHunkEndOld: number): number {
+export function mapNewToOld(
+  newLine: number,
+  prevHunkEndNew: number,
+  prevHunkEndOld: number,
+): number {
   return prevHunkEndOld + (newLine - prevHunkEndNew);
 }
 
-export function trailingClickRange(hunkEndNew: number, step: number): LineRange {
+export function trailingClickRange(
+  hunkEndNew: number,
+  step: number,
+): LineRange {
   return { start: hunkEndNew, end: hunkEndNew + step - 1 };
 }
 

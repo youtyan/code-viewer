@@ -1,5 +1,5 @@
-import { lstatSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync } from "node:fs";
+import { join } from "node:path";
 
 // Short enough that a browser reload self-heals stale git data, while still
 // coalescing bursts from one render pass.
@@ -34,10 +34,10 @@ export function setTimedCacheEntry<T>(
 export function worktreeFileSignature(path: string, cwd: string): string {
   try {
     const stats = lstatSync(join(cwd, path));
-    const inode = 'ino' in stats ? stats.ino : 0;
+    const inode = "ino" in stats ? stats.ino : 0;
     return `state:file|size:${stats.size}|mtime:${stats.mtimeMs}|ctime:${stats.ctimeMs}|ino:${inode}`;
   } catch {
-    return 'state:missing';
+    return "state:missing";
   }
 }
 
@@ -50,15 +50,18 @@ export function fileDiffCacheKey(options: {
   args: string[];
   cwd: string;
 }): string {
-  const worktreeTarget = options.range.from === 'worktree' || !options.range.to || options.range.to === 'worktree';
+  const worktreeTarget =
+    options.range.from === "worktree" ||
+    !options.range.to ||
+    options.range.to === "worktree";
   if (options.isUntracked && !worktreeTarget) {
-    throw new Error('untracked file diffs require a worktree range');
+    throw new Error("untracked file diffs require a worktree range");
   }
   const signature = worktreeTarget
     ? `\0${worktreeFileSignature(options.path, options.cwd)}`
-    : '';
+    : "";
   if (options.isUntracked) {
-    return `u\0${options.path}${signature}\0${options.extras.join('\0')}`;
+    return `u\0${options.path}${signature}\0${options.extras.join("\0")}`;
   }
-  return `t\0${options.path}\0${options.oldPath || ''}${signature}\0${[...options.extras, ...options.args].join('\0')}`;
+  return `t\0${options.path}\0${options.oldPath || ""}${signature}\0${[...options.extras, ...options.args].join("\0")}`;
 }
