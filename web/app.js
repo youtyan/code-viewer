@@ -359,22 +359,58 @@
     if (isGlobPathQuery(query)) {
       return items.map((item) => {
         const match = globMatchPath(query, item.path);
-        return match ? { item, score: match.score, ranges: match.ranges, mode: "glob" } : null;
+        return match ? {
+          item,
+          score: match.score,
+          ranges: match.ranges,
+          mode: "glob"
+        } : null;
       }).filter((item) => item !== null).sort((a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path));
     }
-    return rankFuzzyPaths(query, items).map((item) => ({ ...item, mode: "fuzzy" }));
+    return rankFuzzyPaths(query, items).map((item) => ({
+      ...item,
+      mode: "fuzzy"
+    }));
   }
 
   // web-src/keymap.ts
   var DEFAULT_KEY_BINDINGS = [
-    { action: "open-file-palette", key: "k", ctrl: true, allowEditable: true, allowPaletteOpen: true },
-    { action: "open-file-palette", key: "k", meta: true, allowEditable: true, allowPaletteOpen: true },
-    { action: "open-grep-palette", key: "g", ctrl: true, allowEditable: true, allowPaletteOpen: true },
-    { action: "open-grep-palette", key: "g", meta: true, allowEditable: true, allowPaletteOpen: true },
+    {
+      action: "open-file-palette",
+      key: "k",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-file-palette",
+      key: "k",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
     { action: "focus-file-filter", key: "/" },
     { action: "focus-sidebar", key: "h", ctrl: true },
     { action: "focus-main", key: "l", ctrl: true },
-    { action: "cancel-source-load", key: "escape", requires: { lightboxClosed: true } },
+    {
+      action: "cancel-source-load",
+      key: "escape",
+      requires: { lightboxClosed: true }
+    },
     { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
     { action: "open-sidebar-item", key: "enter", scope: "global" },
     { action: "sidebar-next", key: "j", scope: "sidebar" },
@@ -399,12 +435,37 @@
     { action: "scroll-main-page-up", key: "pageup", scope: "global" },
     { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
     { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
-    { action: "scroll-main-page-down", key: "arrowdown", scope: "main", ctrl: true },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "main",
+      ctrl: true
+    },
     { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
-    { action: "scroll-main-page-down", key: "arrowdown", scope: "global", ctrl: true },
-    { action: "scroll-main-page-up", key: "arrowup", scope: "global", ctrl: true },
-    { action: "scroll-main-page-down", key: "arrowdown", scope: "sidebar", ctrl: true },
-    { action: "scroll-main-page-up", key: "arrowup", scope: "sidebar", ctrl: true },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "sidebar",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "sidebar",
+      ctrl: true
+    },
     { action: "tab-preview", key: "p", scope: "main", pendingG: true },
     { action: "tab-code", key: "c", scope: "main", pendingG: true },
     { action: "goto-top", key: "g", pendingG: true },
@@ -6091,8 +6152,21 @@
         const ref = target || params.get("ref") || "worktree";
         const line = parseLineTarget(params.get("line"));
         if (!path)
-          return { screen: "unknown", reason: "missing-path", rawPathname: pathname, rawSearch: search, range };
-        return { screen: "file", path, ref, range, view: target ? "blob" : "detail", ...line ? { line } : {} };
+          return {
+            screen: "unknown",
+            reason: "missing-path",
+            rawPathname: pathname,
+            rawSearch: search,
+            range
+          };
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: target ? "blob" : "detail",
+          ...line ? { line } : {}
+        };
       }
       case "/help":
         return {
@@ -6102,7 +6176,13 @@
           section: params.get("section") || "keybindings"
         };
       default:
-        return { screen: "unknown", reason: "unknown-pathname", rawPathname: pathname, rawSearch: search, range };
+        return {
+          screen: "unknown",
+          reason: "unknown-pathname",
+          rawPathname: pathname,
+          rawSearch: search,
+          range
+        };
     }
   }
   function buildRoute(route) {
@@ -6218,7 +6298,10 @@
   }
   function resolveRepoRelative(currentPath, requestedPath) {
     const base2 = currentPath.split("/").slice(0, -1);
-    const parts = [...requestedPath.startsWith("/") ? [] : base2, ...requestedPath.split("/")].filter((part) => part && part !== ".");
+    const parts = [
+      ...requestedPath.startsWith("/") ? [] : base2,
+      ...requestedPath.split("/")
+    ].filter((part) => part && part !== ".");
     const resolved = [];
     for (const part of parts) {
       if (part === "..") {
@@ -6440,7 +6523,10 @@
     const toc = root.querySelector(".gdp-markdown-toc");
     if (!toc)
       return;
-    const entries = Array.from(toc.querySelectorAll("a[data-target]")).map((link2) => ({ link: link2, target: root.querySelector("#" + CSS.escape(link2.dataset.target || "")) })).filter((entry) => !!entry.target);
+    const entries = Array.from(toc.querySelectorAll("a[data-target]")).map((link2) => ({
+      link: link2,
+      target: root.querySelector("#" + CSS.escape(link2.dataset.target || ""))
+    })).filter((entry) => !!entry.target);
     if (!entries.length)
       return;
     toc.addEventListener("click", (e2) => {
@@ -6485,7 +6571,10 @@
       if (!raf)
         raf = requestAnimationFrame(update);
     };
-    window.addEventListener("scroll", schedule, { passive: true, signal: controller.signal });
+    window.addEventListener("scroll", schedule, {
+      passive: true,
+      signal: controller.signal
+    });
     window.addEventListener("resize", schedule, { signal: controller.signal });
     setTimeout(() => {
       if (!root.isConnected)
@@ -6537,7 +6626,11 @@
         const typed = mod;
         const mermaid = typed.default;
         if (!mermaidInitialized) {
-          mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme: "default"
+          });
           mermaidInitialized = true;
         }
         return mermaid;

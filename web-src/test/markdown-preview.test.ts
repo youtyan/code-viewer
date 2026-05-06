@@ -37,8 +37,8 @@ describe("markdown preview", () => {
         "buildRawFileUrl({ path: resolved, ref: target.ref || 'worktree' })",
       ),
     ).toBe(true);
-    expect(markdown.includes("target', '_blank'")).toBe(true);
-    expect(markdown.includes("rel', 'noopener noreferrer'")).toBe(true);
+    expect(markdown.includes('target", "_blank"')).toBe(true);
+    expect(markdown.includes('rel", "noopener noreferrer"')).toBe(true);
   });
 
   test("resolves relative markdown links inside the repository", () => {
