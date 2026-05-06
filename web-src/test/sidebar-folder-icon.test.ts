@@ -107,6 +107,16 @@ describe("sidebar folder icons", () => {
       true,
     );
     expect(
+      style.includes(
+        "#filelist.tree .tree-dir.children-omitted .dir-label {\n  border-bottom: 0;",
+      ),
+    ).toBe(true);
+    expect(
+      style.includes(
+        "#filelist.tree .tree-dir .dir-omitted-heavy {\n  color: var(--fg-subtle);\n  border-color: var(--border-muted);\n  background: var(--bg-soft);",
+      ),
+    ).toBe(true);
+    expect(
       style.includes("#filelist.tree .tree-dir .dir-omitted-internal"),
     ).toBe(true);
     expect(style.includes("#filelist.tree .tree-dir .chev-spacer")).toBe(true);
