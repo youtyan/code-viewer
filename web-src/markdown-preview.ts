@@ -1,8 +1,8 @@
 import MarkdownIt from "markdown-it";
-import markdownItAnchor from "markdown-it-anchor";
-import markdownItFootnote from "markdown-it-footnote";
 import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
+import markdownItAnchor from "markdown-it-anchor";
+import markdownItFootnote from "markdown-it-footnote";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
 
 export type MarkdownPreviewOptions = {
@@ -177,7 +177,7 @@ function createMarkdownIt(
           // Fall through to escaped code.
         }
       }
-      return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
+      return `<pre><code>${md.utils.escapeHtml(code)}</code></pre>`;
     },
   });
   md.use(markdownItAnchor, {
@@ -317,7 +317,7 @@ export function renderMarkdownHtml(
   if (!frontmatter) return md.render(textValue);
   return (
     '<div class="gdp-markdown-frontmatter" data-gdp-frontmatter="yaml">' +
-    md.render("```yaml\n" + frontmatter.yaml + "\n```\n") +
+    md.render(`\`\`\`yaml\n${frontmatter.yaml}\n\`\`\`\n`) +
     "</div>" +
     md.render(frontmatter.body)
   );
@@ -330,7 +330,7 @@ function splitYamlFrontmatter(
     return null;
   const newline = textValue.startsWith("---\r\n") ? "\r\n" : "\n";
   const start = 3 + newline.length;
-  const closing = textValue.indexOf(newline + "---" + newline, start);
+  const closing = textValue.indexOf(`${newline}---${newline}`, start);
   if (closing < 0) return null;
   return {
     yaml: textValue.slice(start, closing),
@@ -390,9 +390,9 @@ function createMarkdownToc(
   const list = document.createElement("ul");
   entries.forEach((entry) => {
     const item = document.createElement("li");
-    item.className = "level-" + entry.level;
+    item.className = `level-${entry.level}`;
     const link = document.createElement("a");
-    link.href = "#" + encodeURIComponent(entry.id);
+    link.href = `#${encodeURIComponent(entry.id)}`;
     link.dataset.target = entry.id;
     link.textContent = entry.text;
     item.appendChild(link);
@@ -432,7 +432,7 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
     .map((link) => ({
       link,
       target: root.querySelector<HTMLElement>(
-        "#" + CSS.escape(link.dataset.target || ""),
+        `#${CSS.escape(link.dataset.target || "")}`,
       ),
     }))
     .filter(
@@ -447,7 +447,7 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
     );
     if (!link) return;
     const section = root.querySelector<HTMLElement>(
-      "#" + CSS.escape(link.dataset.target || ""),
+      `#${CSS.escape(link.dataset.target || "")}`,
     );
     if (!section) return;
     e.preventDefault();
@@ -455,7 +455,7 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
     history.replaceState(
       history.state,
       "",
-      "#" + encodeURIComponent(section.id),
+      `#${encodeURIComponent(section.id)}`,
     );
   });
 
@@ -483,9 +483,9 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
     ) {
       active = entries[entries.length - 1];
     }
-    entries.forEach((entry) =>
-      entry.link.classList.toggle("active", entry === active),
-    );
+    entries.forEach((entry) => {
+      entry.link.classList.toggle("active", entry === active);
+    });
     keepTocLinkVisible(toc, active.link);
   };
   const schedule = () => {
@@ -631,8 +631,7 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
   let tx = 0;
   let ty = 0;
   const apply = () => {
-    svg.style.transform =
-      "translate(" + tx + "px, " + ty + "px) scale(" + scale + ")";
+    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   };
   const fit = () => {
     const vw = Math.max(1, window.innerWidth - 128);
@@ -734,7 +733,7 @@ function safeSvgBox(svg: SVGSVGElement): { width: number; height: number } {
     if (box.width > 0 && box.height > 0) {
       svg.setAttribute(
         "viewBox",
-        box.x + " " + box.y + " " + box.width + " " + box.height,
+        `${box.x} ${box.y} ${box.width} ${box.height}`,
       );
       svg.setAttribute("width", String(box.width));
       svg.setAttribute("height", String(box.height));

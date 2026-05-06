@@ -43,6 +43,17 @@
   },
   "overrides": [
     {
+      "includes": ["web-src/test/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            // Tests inspect source text snippets where literal `${...}` is data, not a missed template.
+            "noTemplateCurlyInString": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["web-src/server/dev.ts"],
       "linter": {
         "rules": {

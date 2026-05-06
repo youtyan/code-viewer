@@ -686,9 +686,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 
 /* Branch / tag / special items */
 .rp-item-ref {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: block;
   padding: 7px 14px;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -699,16 +697,29 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   background: var(--bg-mute);
   border-left-color: var(--accent);
 }
+.rp-item-ref .row1 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 10px;
+}
 .rp-item-ref .name {
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
 }
 .rp-item-ref .badge {
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
   font-size: 10px;
+  line-height: 1;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -716,12 +727,14 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   background: var(--bg-mute);
   padding: 2px 6px;
   border-radius: 4px;
+  white-space: nowrap;
+  justify-self: end;
 }
 .rp-item-ref .badge.cur { background: var(--accent-subtle); color: var(--accent); }
-.rp-item-ref .desc {
+.rp-item-ref .row2 {
   font-size: 11px;
   color: var(--fg-subtle);
-  font-style: italic;
+  margin-top: 2px;
 }
 .rp-empty {
   padding: 36px 14px;

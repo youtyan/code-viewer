@@ -37,7 +37,7 @@
     "preview": "bun run web-src/server/dev.ts",
     "preview:raw": "bun run web-src/server/preview.ts",
     "test": "bun test",
-    "lint": "biome lint web-src/server package.json biome.jsonc",
+    "lint": "biome lint web-src package.json biome.jsonc",
     "verify": "bun run check && bun run lint && bun run check:format && bun run build && bun run check:bundle && bun run test && node --check web/app.js && node --check web/mermaid.js && node --check web/shiki.js && node --check dist/code-viewer.js && node dist/code-viewer.js --help && node scripts/node-smoke.mjs",
     "pack:dry": "npm pack --dry-run",
     "prepack": "bun run build",

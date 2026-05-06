@@ -39,7 +39,7 @@ export const SPA_PATHS = ["/todif", "/todiff", "/file", "/help"] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
 
 export function assertNever(value: never): never {
-  throw new Error("unhandled route: " + JSON.stringify(value));
+  throw new Error(`unhandled route: ${JSON.stringify(value)}`);
 }
 
 function parseLegacyRange(
@@ -73,7 +73,7 @@ function parseLineTarget(
 }
 
 function formatLineTarget(line: SourceLineTarget): string {
-  return typeof line === "number" ? String(line) : line.start + "-" + line.end;
+  return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
 }
 
 export function parseRoute(
@@ -153,7 +153,7 @@ export function buildRoute(route: AppRoute): string {
       if (route.ref && route.ref !== "worktree") params.set("ref", route.ref);
       if (route.path) params.set("path", route.path);
       const qs = params.toString();
-      return "/" + (qs ? "?" + qs : "");
+      return `/${qs ? `?${qs}` : ""}`;
     }
     case "file":
       if (route.view === "blob") {
@@ -163,7 +163,7 @@ export function buildRoute(route: AppRoute): string {
           "&target=" +
           encodeURIComponent(route.ref || "worktree") +
           (route.line
-            ? "&line=" + encodeURIComponent(formatLineTarget(route.line))
+            ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "")
         );
       }
@@ -177,7 +177,7 @@ export function buildRoute(route: AppRoute): string {
         "&to=" +
         encodeURIComponent(route.range.to || "worktree") +
         (route.line
-          ? "&line=" + encodeURIComponent(formatLineTarget(route.line))
+          ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
           : "")
       );
     case "diff":
@@ -186,9 +186,9 @@ export function buildRoute(route: AppRoute): string {
         encodeURIComponent(route.range.from || "") +
         "&to=" +
         encodeURIComponent(route.range.to || "worktree") +
-        (route.path ? "&path=" + encodeURIComponent(route.path) : "") +
+        (route.path ? `&path=${encodeURIComponent(route.path)}` : "") +
         (route.line
-          ? "&line=" + encodeURIComponent(formatLineTarget(route.line))
+          ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
           : "")
       );
     case "help": {
@@ -197,7 +197,7 @@ export function buildRoute(route: AppRoute): string {
       if (route.section && route.section !== "keybindings")
         params.set("section", route.section);
       const qs = params.toString();
-      return "/help" + (qs ? "?" + qs : "");
+      return `/help${qs ? `?${qs}` : ""}`;
     }
     case "unknown":
       return (

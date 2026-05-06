@@ -70,7 +70,7 @@ export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
   if (indices[0] >= baseStart) score += 20;
   const basename = lowerPath.slice(baseStart);
   if (basename.startsWith(q)) score += 30;
-  if (basename === q || basename.startsWith(q + ".")) score += 25;
+  if (basename === q || basename.startsWith(`${q}.`)) score += 25;
   if (lowerPath.endsWith(q)) score += 15;
 
   return { score, ranges: toRanges(indices) };
@@ -96,7 +96,7 @@ export function isGlobPathQuery(query: string): boolean {
 }
 
 function escapeRegexChar(ch: string): string {
-  return /[\\^$+?.()|{}]/.test(ch) ? "\\" + ch : ch;
+  return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
 }
 
 export function globToRegExp(query: string): RegExp | null {
@@ -120,7 +120,7 @@ export function globToRegExp(query: string): RegExp | null {
         source += "\\[";
       } else {
         const body = pattern.slice(i + 1, close).replace(/\\/g, "\\\\");
-        source += "[" + body + "]";
+        source += `[${body}]`;
         i = close;
       }
     } else {

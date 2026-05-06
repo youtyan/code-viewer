@@ -274,7 +274,7 @@
     const basename = lowerPath.slice(baseStart);
     if (basename.startsWith(q))
       score += 30;
-    if (basename === q || basename.startsWith(q + "."))
+    if (basename === q || basename.startsWith(`${q}.`))
       score += 25;
     if (lowerPath.endsWith(q))
       score += 15;
@@ -290,7 +290,7 @@
     return /[*?]/.test(query.trim());
   }
   function escapeRegexChar(ch) {
-    return /[\\^$+?.()|{}]/.test(ch) ? "\\" + ch : ch;
+    return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
   }
   function globToRegExp(query) {
     const pattern = query.trim();
@@ -314,7 +314,7 @@
           source += "\\[";
         } else {
           const body = pattern.slice(i + 1, close).replace(/\\/g, "\\\\");
-          source += "[" + body + "]";
+          source += `[${body}]`;
           i = close;
         }
       } else {
@@ -6092,7 +6092,7 @@
 
   // web-src/routes.ts
   function assertNever(value) {
-    throw new Error("unhandled route: " + JSON.stringify(value));
+    throw new Error(`unhandled route: ${JSON.stringify(value)}`);
   }
   function parseLegacyRange(value, fallback) {
     const raw = value || "";
@@ -6120,7 +6120,7 @@
     return Number.isInteger(line) && line > 0 ? line : undefined;
   }
   function formatLineTarget(line) {
-    return typeof line === "number" ? String(line) : line.start + "-" + line.end;
+    return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
   }
   function parseRoute(pathname, search, fallbackRange) {
     const params = new URLSearchParams(search);
@@ -6194,15 +6194,15 @@
         if (route.path)
           params.set("path", route.path);
         const qs = params.toString();
-        return "/" + (qs ? "?" + qs : "");
+        return `/${qs ? `?${qs}` : ""}`;
       }
       case "file":
         if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
         }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
       case "diff":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? "&path=" + encodeURIComponent(route.path) : "") + (route.line ? "&line=" + encodeURIComponent(formatLineTarget(route.line)) : "");
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
       case "help": {
         const params = new URLSearchParams;
         if (route.lang && route.lang !== "en")
@@ -6210,7 +6210,7 @@
         if (route.section && route.section !== "keybindings")
           params.set("section", route.section);
         const qs = params.toString();
-        return "/help" + (qs ? "?" + qs : "");
+        return `/help${qs ? `?${qs}` : ""}`;
       }
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
@@ -6331,7 +6331,7 @@
             });
           } catch {}
         }
-        return "<pre><code>" + md.utils.escapeHtml(code2) + "</code></pre>";
+        return `<pre><code>${md.utils.escapeHtml(code2)}</code></pre>`;
       }
     });
     md.use(b, {
@@ -6431,7 +6431,10 @@
     const frontmatter = splitYamlFrontmatter(textValue);
     if (!frontmatter)
       return md.render(textValue);
-    return '<div class="gdp-markdown-frontmatter" data-gdp-frontmatter="yaml">' + md.render("```yaml\n" + frontmatter.yaml + "\n```\n") + "</div>" + md.render(frontmatter.body);
+    return '<div class="gdp-markdown-frontmatter" data-gdp-frontmatter="yaml">' + md.render(`\`\`\`yaml
+${frontmatter.yaml}
+\`\`\`
+`) + "</div>" + md.render(frontmatter.body);
   }
   function splitYamlFrontmatter(textValue) {
     if (!textValue.startsWith(`---
@@ -6443,7 +6446,7 @@
 ` : `
 `;
     const start = 3 + newline2.length;
-    const closing = textValue.indexOf(newline2 + "---" + newline2, start);
+    const closing = textValue.indexOf(`${newline2}---${newline2}`, start);
     if (closing < 0)
       return null;
     return {
@@ -6492,9 +6495,9 @@
     const list2 = document.createElement("ul");
     entries.forEach((entry) => {
       const item = document.createElement("li");
-      item.className = "level-" + entry.level;
+      item.className = `level-${entry.level}`;
       const link2 = document.createElement("a");
-      link2.href = "#" + encodeURIComponent(entry.id);
+      link2.href = `#${encodeURIComponent(entry.id)}`;
       link2.dataset.target = entry.id;
       link2.textContent = entry.text;
       item.appendChild(link2);
@@ -6525,7 +6528,7 @@
       return;
     const entries = Array.from(toc.querySelectorAll("a[data-target]")).map((link2) => ({
       link: link2,
-      target: root.querySelector("#" + CSS.escape(link2.dataset.target || ""))
+      target: root.querySelector(`#${CSS.escape(link2.dataset.target || "")}`)
     })).filter((entry) => !!entry.target);
     if (!entries.length)
       return;
@@ -6533,12 +6536,12 @@
       const link2 = e2.target?.closest("a[data-target]");
       if (!link2)
         return;
-      const section = root.querySelector("#" + CSS.escape(link2.dataset.target || ""));
+      const section = root.querySelector(`#${CSS.escape(link2.dataset.target || "")}`);
       if (!section)
         return;
       e2.preventDefault();
       section.scrollIntoView({ block: "start", behavior: "smooth" });
-      history.replaceState(history.state, "", "#" + encodeURIComponent(section.id));
+      history.replaceState(history.state, "", `#${encodeURIComponent(section.id)}`);
     });
     const controller = new AbortController;
     const scrollRoot = document.scrollingElement || document.documentElement;
@@ -6564,7 +6567,9 @@
       if (window.innerHeight + scrollRoot.scrollTop >= scrollRoot.scrollHeight - 4) {
         active = entries[entries.length - 1];
       }
-      entries.forEach((entry) => entry.link.classList.toggle("active", entry === active));
+      entries.forEach((entry) => {
+        entry.link.classList.toggle("active", entry === active);
+      });
       keepTocLinkVisible(toc, active.link);
     };
     const schedule = () => {
@@ -6698,7 +6703,7 @@
     let tx = 0;
     let ty = 0;
     const apply = () => {
-      svg.style.transform = "translate(" + tx + "px, " + ty + "px) scale(" + scale + ")";
+      svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
     };
     const fit = () => {
       const vw = Math.max(1, window.innerWidth - 128);
@@ -6798,7 +6803,7 @@
     try {
       const box = svg.getBBox();
       if (box.width > 0 && box.height > 0) {
-        svg.setAttribute("viewBox", box.x + " " + box.y + " " + box.width + " " + box.height);
+        svg.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
         svg.setAttribute("width", String(box.width));
         svg.setAttribute("height", String(box.height));
         return { width: box.width, height: box.height };
@@ -7040,7 +7045,7 @@
       return Array.from(document.querySelectorAll("#content .gdp-source-virtual-scroller, #content .gdp-source-table")).some((item) => item.offsetParent !== null);
     }
     function sourceCursorKey(target) {
-      return target.ref + "\x00" + target.path;
+      return `${target.ref}\x00${target.path}`;
     }
     function sourceCursorMatches(target, line) {
       return !!SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target) && SOURCE_CURSOR.line === line;
@@ -7095,7 +7100,7 @@
         syncSourceCursorRows(cursor.target);
         return;
       }
-      document.querySelector('#content [data-line="' + cursor.line + '"]')?.scrollIntoView({ block: edge });
+      document.querySelector(`#content [data-line="${cursor.line}"]`)?.scrollIntoView({ block: edge });
     }
     function moveSourceCursor(direction, unit, edge) {
       if (!hasVisibleSourceCodeSurface())
@@ -7175,7 +7180,7 @@
       const tabs = document.querySelector("#content .gdp-source-tabs");
       if (!tabs)
         return false;
-      const button = tabs.querySelector('button[data-source-tab="' + tab + '"]');
+      const button = tabs.querySelector(`button[data-source-tab="${tab}"]`);
       if (!button || button.hidden || button.disabled)
         return false;
       button.click();
@@ -7205,7 +7210,7 @@
       if (!project)
         return;
       PROJECT_NAME = project;
-      document.title = project + " - code viewer";
+      document.title = `${project} - code viewer`;
     }
     function savedScopeOmitDirs() {
       const raw = localStorage.getItem(scopeOmitDirsStorageKey());
@@ -7248,7 +7253,7 @@
       requestAnimationFrame(() => {
         const head = document.querySelector(".sb-head");
         if (head)
-          document.documentElement.style.setProperty("--sidebar-head-h", Math.ceil(head.getBoundingClientRect().height) + "px");
+          document.documentElement.style.setProperty("--sidebar-head-h", `${Math.ceil(head.getBoundingClientRect().height)}px`);
       });
     }
     function observeSidebarHeaderHeight() {
@@ -7293,7 +7298,7 @@
         layout: localStorage.getItem("gdp:layout") || "side-by-side",
         theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
         sbView: localStorage.getItem("gdp:sbview") || "tree",
-        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth")) || 308,
+        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
         collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
         ignoreWs: igRaw === null ? true : igRaw === "1",
@@ -7321,7 +7326,7 @@
       $("#hljs-dark").disabled = STATE.theme !== "dark";
     }
     function getHljs() {
-      const hljsRef = window.hljs || window.Diff2HtmlUI && window.Diff2HtmlUI.hljs;
+      const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
       if (!hljsRef)
         return null;
       if (!highlightConfigured && typeof hljsRef.configure === "function") {
@@ -7502,7 +7507,7 @@
     function fileBadge(status) {
       const ch = (status || "M")[0].toUpperCase();
       const span = document.createElement("span");
-      span.className = "badge " + ch;
+      span.className = `badge ${ch}`;
       span.textContent = ch;
       span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
       return span;
@@ -7542,7 +7547,7 @@
     }
     function iconSvg(className, paths) {
       const pathList = Array.isArray(paths) ? paths : [paths];
-      return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => '<path fill="currentColor" d="' + path + '"></path>').join("") + "</svg>";
+      return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
     }
     function setUnfoldButtonState(button, expanded) {
       if (!button)
@@ -7672,7 +7677,7 @@
         const dirPartCount = f2.type === "tree" ? parts.length : parts.length - 1;
         for (let i2 = 0;i2 < dirPartCount; i2++) {
           const p2 = parts[i2];
-          acc = acc ? acc + "/" + p2 : p2;
+          acc = acc ? `${acc}/${p2}` : p2;
           if (!node.dirs[p2]) {
             node.dirs[p2] = {
               name: p2,
@@ -7700,13 +7705,15 @@
         const ks = Object.keys(node.dirs);
         while (ks.length === 1 && node.files.length === 0 && !node.explicit && node !== root) {
           const only = node.dirs[ks[0]];
-          node.name = node.name ? node.name + "/" + only.name : only.name;
+          node.name = node.name ? `${node.name}/${only.name}` : only.name;
           node.dirs = only.dirs;
           node.files = only.files;
           node.path = only.path;
           node.minOrder = Math.min(node.minOrder, only.minOrder);
           ks.length = 0;
-          Object.keys(node.dirs).forEach((k) => ks.push(k));
+          Object.keys(node.dirs).forEach((k) => {
+            ks.push(k);
+          });
         }
         Object.values(node.dirs).forEach(compress);
       }
@@ -7741,7 +7748,7 @@
             li.classList.add(dir.children_omitted_reason === "heavy" ? "children-omitted-heavy" : "children-omitted-internal");
             li.title = dir.children_omitted_reason === "heavy" ? "Large generated/vendor directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
           }
-          li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
+          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
           const chev = document.createElement("span");
           if (dir.children_omitted) {
             chev.className = "chev-spacer";
@@ -7820,7 +7827,7 @@
           li.tabIndex = -1;
           li.dataset.path = f2.path;
           li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
-          li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
+          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
           const spacer = document.createElement("span");
           spacer.className = "chev-spacer";
           li.appendChild(spacer);
@@ -7901,7 +7908,7 @@
       } else {
         renderFlat(files, ul, onFileClick);
       }
-      $("#totals").textContent = files.length ? files.length + " file" + (files.length === 1 ? "" : "s") : "";
+      $("#totals").textContent = files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "";
       $$(".sb-view-seg button").forEach((b2) => {
         b2.classList.toggle("active", b2.dataset.view === STATE.sbView);
       });
@@ -7939,7 +7946,7 @@
     }
     function createRefSelectorInput(options) {
       const wrap = document.createElement("div");
-      wrap.className = "ref-selector" + (options.extraClass ? " " + options.extraClass : "");
+      wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
       wrap.dataset.refSelector = "";
       if (options.wrapperId)
         wrap.id = options.wrapperId;
@@ -7990,7 +7997,7 @@
       if (meta.branch) {
         const b2 = document.createElement("span");
         b2.className = "ref";
-        b2.textContent = "⎇ " + meta.branch;
+        b2.textContent = `⎇ ${meta.branch}`;
         el.appendChild(b2);
       }
       if (meta.totals) {
@@ -8002,13 +8009,13 @@
       const u2 = document.createElement("span");
       u2.className = "updated-at";
       u2.title = "last updated";
-      u2.textContent = "updated " + new Date().toLocaleTimeString([], { hour12: false });
+      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
       el.appendChild(u2);
     }
     let SUPPRESS_SPY_UNTIL = 0;
     function prefetchByPath(path) {
       const card = document.querySelector(diffCardSelector(path));
-      if (!card || !card.classList.contains("pending"))
+      if (!card?.classList.contains("pending"))
         return;
       const f2 = STATE.files.find((x) => x.path === path);
       if (!f2)
@@ -8083,7 +8090,7 @@
       for (const dir of sidebarAncestorDirs(path)) {
         if (STATE.collapsedDirs.delete(dir))
           changed = true;
-        const row = document.querySelector('#filelist .tree-dir[data-dirpath="' + CSS.escape(dir) + '"]');
+        const row = document.querySelector(`#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`);
         row?.classList.remove("collapsed");
         const icon = row?.querySelector(".dir-icon");
         if (icon)
@@ -8144,7 +8151,7 @@
     function updateTreeDirVisibility(dirMatches, filterActive = false) {
       $$("#filelist .tree-dir").forEach((dir) => {
         const childUl = dir.nextElementSibling;
-        if (!childUl || !childUl.classList.contains("tree-children"))
+        if (!childUl?.classList.contains("tree-children"))
           return;
         const anyVisible = !!childUl.querySelector(".tree-file:not(.hidden):not(.hidden-by-tests)");
         const explicitVisible = dir.dataset.explicit === "true" && !filterActive;
@@ -8293,8 +8300,12 @@
       });
     }
     function removeStandaloneSource() {
-      document.querySelectorAll(".gdp-standalone-source").forEach((el) => el.remove());
-      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => el.remove());
+      document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
+        el.remove();
+      });
+      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
+        el.remove();
+      });
     }
     function renderHelpPage() {
       cancelActiveSourceLoad("navigation");
@@ -8441,7 +8452,7 @@
             delete old.dataset.manualRendered;
             delete old.dataset.manualLoad;
             delete old.dataset.manualMode;
-            old.style.minHeight = (f2.estimated_height_px || 80) + "px";
+            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
             old._diffData = null;
             old._file = null;
           } else {
@@ -8456,7 +8467,9 @@
           ordered.push(createPlaceholder(f2));
         }
       });
-      oldByKey.forEach((c2) => c2.remove());
+      oldByKey.forEach((c2) => {
+        c2.remove();
+      });
       target.replaceChildren(...ordered);
       for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
         if (!LOAD_QUEUE[i2].card.isConnected)
@@ -8531,7 +8544,9 @@
         return;
       const form = new FormData;
       form.set("dir", path);
-      list2.forEach((file) => form.append("files", file, file.name));
+      list2.forEach((file) => {
+        form.append("files", file, file.name);
+      });
       const res = await fetch("/_upload_files", {
         method: "POST",
         headers: { "X-Code-Viewer-Action": "1" },
@@ -8547,7 +8562,7 @@
       dropPanel.className = "gdp-upload-panel";
       const copy = document.createElement("div");
       copy.className = "gdp-upload-copy";
-      copy.textContent = "Drop files into " + (path || PROJECT_NAME || "repository");
+      copy.textContent = `Drop files into ${path || PROJECT_NAME || "repository"}`;
       const input = document.createElement("input");
       input.type = "file";
       input.multiple = true;
@@ -8563,7 +8578,7 @@
       };
       input.addEventListener("change", async () => {
         try {
-          if (input.files && input.files.length)
+          if (input.files?.length)
             await uploadFiles(path, input.files);
         } catch {
           fail();
@@ -8581,7 +8596,7 @@
         dropPanel.classList.remove("dragging");
         try {
           const files = event.dataTransfer?.files;
-          if (files && files.length)
+          if (files?.length)
             await uploadFiles(path, files);
         } catch {
           fail();
@@ -8723,7 +8738,7 @@
       meta.entries.forEach((entry) => {
         const row = document.createElement("button");
         row.type = "button";
-        row.className = "gdp-repo-row " + entry.type;
+        row.className = `gdp-repo-row ${entry.type}`;
         const icon = document.createElement("span");
         icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
         if (entry.type === "tree")
@@ -8763,7 +8778,7 @@
       listWrapper.appendChild(list2);
       listCard.appendChild(listWrapper);
       shell.appendChild(listCard);
-      if (meta.readme && meta.readme.text) {
+      if (meta.readme?.text) {
         const readme = document.createElement("section");
         readme.className = "gdp-file-shell loaded gdp-repo-readme";
         const wrapper = document.createElement("div");
@@ -8824,7 +8839,7 @@
       params.set("recursive", "1");
       appendScopeOmitDirsParam(params);
       REPO_SIDEBAR_LOAD_REF = normalizedRef;
-      const load2 = trackLoad(fetch("/_tree?" + params.toString()).then((r2) => {
+      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");
         return r2.json();
@@ -8883,7 +8898,7 @@
       card.dataset.status = f2.status || "M";
       card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
       if (f2.estimated_height_px) {
-        card.style.minHeight = f2.estimated_height_px + "px";
+        card.style.minHeight = `${f2.estimated_height_px}px`;
       }
       const head = document.createElement("div");
       head.className = "gdp-shell-header";
@@ -8910,7 +8925,9 @@
           enqueueLoad(f2, card, 0);
         });
       }, { rootMargin: "1200px 0px 1600px 0px" });
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => lazyObserver.observe(c2));
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
+        lazyObserver.observe(c2);
+      });
     }
     window.addEventListener("scroll", () => enqueueInitialLoads(), {
       passive: true
@@ -8981,12 +8998,14 @@
       if (indicator)
         indicator.hidden = true;
       const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
       body.innerHTML = "";
       const wrap = document.createElement("div");
       wrap.className = "gdp-manual-load";
       const note = document.createElement("div");
       note.className = "gdp-manual-note";
-      note.textContent = manualLoadReason(file) + " - click to load diff";
+      note.textContent = `${manualLoadReason(file)} - click to load diff`;
       const previewBtn = document.createElement("button");
       previewBtn.className = "gdp-show-full";
       previewBtn.textContent = "Load preview";
@@ -9091,6 +9110,8 @@
         card.classList.remove("loading");
         card.classList.add("error");
         const body = card.querySelector(".gdp-shell-body");
+        if (!body)
+          return;
         body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
         const btn = body.querySelector(".retry");
         if (btn)
@@ -9107,8 +9128,10 @@
       if (head)
         head.style.display = "none";
       const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
       body.innerHTML = "";
-      if (!data.diff || !data.diff.trim()) {
+      if (!data.diff?.trim()) {
         body.innerHTML = '<div class="gdp-info">No content</div>';
         return;
       }
@@ -9200,7 +9223,9 @@
         const parsed = group.find((g) => g.hunk) || group[0];
         if (!parsed.hunk)
           return;
-        group.forEach((g) => g.tr.classList.add("gdp-hunk-row"));
+        group.forEach((g) => {
+          g.tr.classList.add("gdp-hunk-row");
+        });
         infoRows.push({
           tr: parsed.tr,
           info: parsed.info,
@@ -9264,7 +9289,7 @@
         setBusy(true);
         const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
         trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          if (!data || !data.lines) {
+          if (!data?.lines) {
             setBusy(false);
             return;
           }
@@ -9282,7 +9307,7 @@
             item.bottomExpandedEnd = end;
           for (const sib of item.siblings || [{ tr: item.tr }]) {
             const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
-            const old = ln && ln.querySelector(".gdp-expand-stack");
+            const old = ln?.querySelector(".gdp-expand-stack");
             if (old)
               old.remove();
           }
@@ -9299,18 +9324,18 @@
         if (isFirst) {
           buttons.push({
             direction: "up",
-            title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
             onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
           });
         } else {
           buttons.push({
             direction: "up",
-            title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
             onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), "before")
           });
           buttons.push({
             direction: "down",
-            title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
             onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
           });
         }
@@ -9354,12 +9379,14 @@
       const syncHeight = () => {
         const stack = stackRow.querySelector(".gdp-expand-stack");
         const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
-        rows.forEach((row) => row.style.setProperty("height", targetH + "px", "important"));
+        rows.forEach((row) => {
+          row.style.setProperty("height", `${targetH}px`, "important");
+        });
       };
       requestAnimationFrame(syncHeight);
       setTimeout(syncHeight, 100);
     }
-    function attachTrailingExpandControls(item, file, ref, refPath) {
+    function _attachTrailingExpandControls(item, file, ref, refPath) {
       const STEP = 20;
       let nextNewStart = nextNewLine(item.hunk);
       let nextOldStart = nextOldLine(item.hunk);
@@ -9385,29 +9412,37 @@
       if (!rows.length)
         return;
       const setBusy = (busy) => {
-        rows.forEach((row) => row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
-          btn.disabled = busy;
-        }));
+        rows.forEach((row) => {
+          row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
+            btn.disabled = busy;
+          });
+        });
       };
       const fetchAndInsert = () => {
         const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, STEP);
         setBusy(true);
         const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
         trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          const lines = data && data.lines || [];
+          const lines = data?.lines || [];
           if (!lines.length) {
-            rows.forEach((row) => row.tr.remove());
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
             return;
           }
           const card = item.tr.closest(".d2h-file-wrapper");
-          rows.forEach((row) => insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex));
+          rows.forEach((row) => {
+            insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
+          });
           const next = window.GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, STEP);
           nextNewStart = next.newStart;
           nextOldStart = next.oldStart;
           if (card)
             highlightInsertedSpans(card, file);
           if (next.eof) {
-            rows.forEach((row) => row.tr.remove());
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
             return;
           }
           setBusy(false);
@@ -9441,7 +9476,7 @@
         let lnHtml;
         if (isSplit) {
           const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
-          lnHtml = '<td class="d2h-code-side-linenumber d2h-cntx">' + num + "</td>";
+          lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
         } else {
           lnHtml = '<td class="d2h-code-linenumber d2h-cntx"><div class="line-num1">' + (oldStart + i2) + '</div><div class="line-num2">' + (newStart + i2) + "</div></td>";
         }
@@ -9489,7 +9524,7 @@
       title.textContent = "Loading file";
       const message = document.createElement("div");
       message.className = "gdp-source-loading-message";
-      message.textContent = target.path + " at " + target.ref;
+      message.textContent = `${target.path} at ${target.ref}`;
       content.append(title, message);
       if (onCancel) {
         const button = document.createElement("button");
@@ -9513,7 +9548,7 @@
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
       const view = document.createElement("div");
       view.className = "gdp-source-viewer error";
-      view.textContent = message || "Cannot load " + target.path + " at " + target.ref;
+      view.textContent = message || `Cannot load ${target.path} at ${target.ref}`;
       if (body)
         body.replaceWith(view);
       else
@@ -9530,7 +9565,7 @@
       title.textContent = "Loading cancelled";
       const message = document.createElement("div");
       message.className = "gdp-source-loading-message";
-      message.textContent = target.path + " at " + target.ref;
+      message.textContent = `${target.path} at ${target.ref}`;
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "gdp-btn gdp-btn-sm";
@@ -9583,7 +9618,7 @@
       const preview = document.createElement("div");
       preview.className = "gdp-html-preview";
       const frame = document.createElement("iframe");
-      frame.title = target.path + " preview";
+      frame.title = `${target.path} preview`;
       frame.srcdoc = html;
       preview.appendChild(frame);
       return preview;
@@ -10021,7 +10056,7 @@
       const header = isStandalone ? null : document.createElement("div");
       if (header) {
         header.className = "gdp-source-meta";
-        header.textContent = target.path + " @ " + target.ref;
+        header.textContent = `${target.path} @ ${target.ref}`;
       }
       const lang = inferLang(target.path);
       const usesVirtualSource = shouldVirtualizeSource(textValue, lines) && !isVirtualSourceDisabled();
@@ -10364,7 +10399,7 @@
             return;
           matches = nextMatches;
           active = matches.length ? Math.max(0, Math.min(active, matches.length - 1)) : -1;
-          count.textContent = matches.length ? active + 1 + " / " + matches.length : "0 / 0";
+          count.textContent = matches.length ? `${active + 1} / ${matches.length}` : "0 / 0";
           if (active >= 0)
             scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
           renderFn();
@@ -10386,7 +10421,7 @@
         if (!matches.length)
           return;
         active = (active + direction + matches.length) % matches.length;
-        count.textContent = active + 1 + " / " + matches.length;
+        count.textContent = `${active + 1} / ${matches.length}`;
         scroller.scrollTop = Math.max(0, (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT - VIRTUAL_SOURCE_ROW_HEIGHT * 3);
         renderFn();
       };
@@ -10476,10 +10511,10 @@
       scroller.className = "gdp-source-virtual-scroller";
       scroller.tabIndex = 0;
       scroller.setAttribute("role", "region");
-      scroller.setAttribute("aria-label", target.path + " source code");
+      scroller.setAttribute("aria-label", `${target.path} source code`);
       const spacer = document.createElement("div");
       spacer.className = "gdp-source-virtual-spacer";
-      spacer.style.height = Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT) + "px";
+      spacer.style.height = `${Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
       const windowEl = document.createElement("div");
       windowEl.className = "gdp-source-virtual-window";
       spacer.appendChild(windowEl);
@@ -10500,7 +10535,7 @@
         renderedStart = start;
         renderedEnd = end;
         windowEl.replaceChildren();
-        windowEl.style.transform = "translateY(" + start * VIRTUAL_SOURCE_ROW_HEIGHT + "px)";
+        windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
         const fragment = document.createDocumentFragment();
         for (let index = start;index < end; index++) {
           const row = document.createElement("div");
@@ -10517,7 +10552,7 @@
           const line = lines[index] ?? "";
           const searchQuery = search?.query() || "";
           const activeRange = search?.activeRange() || null;
-          if (appendVirtualSourceLineCode(code2, line, searchQuery, activeRange, index + 1)) {} else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+          if (appendVirtualSourceLineCode(code2, line, searchQuery, activeRange, index + 1)) {} else if (hljsRef?.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
             try {
               code2.innerHTML = hljsRef.highlight(line, {
                 language: lang,
@@ -10592,7 +10627,7 @@
       scroller.className = "gdp-source-virtual-scroller";
       scroller.tabIndex = 0;
       scroller.setAttribute("role", "region");
-      scroller.setAttribute("aria-label", target.path + " source code");
+      scroller.setAttribute("aria-label", `${target.path} source code`);
       const spacer = document.createElement("div");
       spacer.className = "gdp-source-virtual-spacer";
       const windowEl = document.createElement("div");
@@ -10606,15 +10641,17 @@
       const targetLine = lineTargetStart(currentSourceLineTarget(target)) || 1;
       let complete = initialComplete;
       let totalRows = initialComplete ? Math.max(1, initialTotal) : Math.max(initialTotal || 1, initialStart + initialLines.length - 1, targetLine + VIRTUAL_SOURCE_PAGE_SIZE);
-      initialLines.forEach((line, index) => lines.set(initialStart + index, line));
+      initialLines.forEach((line, index) => {
+        lines.set(initialStart + index, line);
+      });
       requestedPages.add(Math.max(0, Math.floor((initialStart - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
       for (let line = initialStart;line < initialStart + initialLines.length; line += VIRTUAL_SOURCE_PAGE_SIZE) {
         requestedPages.add(Math.max(0, Math.floor((line - 1) / VIRTUAL_SOURCE_PAGE_SIZE)));
       }
       const updateTotals = () => {
         SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-        summary.textContent = (complete ? totalRows.toLocaleString() : lines.size.toLocaleString() + "+") + " lines loaded from " + formatBytes(size) + ". More rows load as you scroll.";
-        spacer.style.height = Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT) + "px";
+        summary.textContent = (complete ? totalRows.toLocaleString() : `${lines.size.toLocaleString()}+`) + " lines loaded from " + formatBytes(size) + ". More rows load as you scroll.";
+        spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
       };
       const loadPage = (line) => {
         if (signal?.aborted || complete && line > totalRows)
@@ -10630,7 +10667,9 @@
         trackLoad(fetch(buildFileRangeUrl(target, start, end), { signal }).then((res) => res.ok ? res.json() : null).then((data) => {
           if (!data || signal?.aborted)
             return;
-          data.lines.forEach((lineValue, index) => lines.set(data.start + index, lineValue));
+          data.lines.forEach((lineValue, index) => {
+            lines.set(data.start + index, lineValue);
+          });
           totalRows = data.complete ? Math.max(1, data.total) : Math.max(totalRows, data.total, end + VIRTUAL_SOURCE_PAGE_SIZE);
           complete = data.complete === true;
           updateTotals();
@@ -10662,7 +10701,7 @@
         renderedStart = start;
         renderedEnd = end;
         windowEl.replaceChildren();
-        windowEl.style.transform = "translateY(" + start * VIRTUAL_SOURCE_ROW_HEIGHT + "px)";
+        windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
         const fragment = document.createDocumentFragment();
         for (let index = start;index < end; index++) {
           const lineNumber = index + 1;
@@ -10682,7 +10721,7 @@
           const line = lines.get(lineNumber);
           if (line == null) {
             code2.textContent = "";
-          } else if (appendVirtualSourceLineCode(code2, line, search?.query() || "", search?.activeRange() || null, lineNumber)) {} else if (hljsRef && hljsRef.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
+          } else if (appendVirtualSourceLineCode(code2, line, search?.query() || "", search?.activeRange() || null, lineNumber)) {} else if (hljsRef?.highlight && lang && line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH && (!hljsRef.getLanguage || hljsRef.getLanguage(lang))) {
             try {
               code2.innerHTML = hljsRef.highlight(line, {
                 language: lang,
@@ -10782,7 +10821,7 @@
       const header = isStandalone ? null : document.createElement("div");
       if (header) {
         header.className = "gdp-source-meta";
-        header.textContent = target.path + " @ " + target.ref;
+        header.textContent = `${target.path} @ ${target.ref}`;
         view.appendChild(header);
       }
       const lineTarget = lineTargetStart(currentSourceLineTarget(target)) || 1;
@@ -10823,7 +10862,7 @@
       if (!isStandalone) {
         const meta = document.createElement("div");
         meta.className = "gdp-source-meta";
-        meta.textContent = target.path + " @ " + target.ref;
+        meta.textContent = `${target.path} @ ${target.ref}`;
         view.appendChild(meta);
       }
       const url = buildRawFileUrl(target);
@@ -10853,7 +10892,7 @@
         img.alt = "";
         img.addEventListener("load", () => {
           const resolution = document.createElement("span");
-          resolution.textContent = img.naturalWidth + " x " + img.naturalHeight;
+          resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
           info.appendChild(resolution);
         }, { once: true });
         view.appendChild(img);
@@ -10863,7 +10902,7 @@
       else
         card.appendChild(view);
     }
-    function renderSourceBinary(card, target) {
+    function _renderSourceBinary(card, target) {
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
       const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
@@ -10876,7 +10915,7 @@
       if (!isStandalone) {
         const meta = document.createElement("div");
         meta.className = "gdp-source-meta";
-        meta.textContent = target.path + " @ " + target.ref;
+        meta.textContent = `${target.path} @ ${target.ref}`;
         view.appendChild(meta);
       }
       view.appendChild(link2);
@@ -10928,7 +10967,9 @@
       const repoTarget = repoFileTargetFromRoute();
       setPageMode();
       removeStandaloneSource();
-      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => el.remove());
+      document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
+        el.remove();
+      });
       const card = document.createElement("article");
       card.className = "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
       card.dataset.path = target.path;
@@ -11034,7 +11075,7 @@
             return;
           if (!response.ok) {
             finishSourceLoad(req);
-            renderSourceError(card, target, "Cannot load " + target.path + " at " + target.ref);
+            renderSourceError(card, target, `Cannot load ${target.path} at ${target.ref}`);
             return;
           }
           const textValue = await response.text();
@@ -11056,7 +11097,7 @@
           renderSourceCancelled(card, target);
           return;
         }
-        renderSourceError(card, target, "Cannot load " + target.path + " at " + target.ref);
+        renderSourceError(card, target, `Cannot load ${target.path} at ${target.ref}`);
       }
     }
     function scrollStandaloneSourceLine(card, line) {
@@ -11069,7 +11110,7 @@
         virtualScroller.__gdpRenderVirtualSource?.();
         return;
       }
-      const row = card.querySelector('.gdp-source-table tr[data-line="' + String(line) + '"]');
+      const row = card.querySelector(`.gdp-source-table tr[data-line="${String(line)}"]`);
       if (row)
         row.scrollIntoView({ block: "center" });
     }
@@ -11210,7 +11251,8 @@
       }
       const total = (file.additions || 0) + (file.deletions || 0);
       const SEG = 5;
-      let aSeg, dSeg;
+      let aSeg;
+      let dSeg;
       if (total === 0) {
         aSeg = 0;
         dSeg = 0;
@@ -11267,7 +11309,7 @@
       card.style.minHeight = "";
       mountDiff(card, file, data);
       applyDiffRouteFocus(card);
-      card.style.containIntrinsicSize = Math.max(card.offsetHeight, file.estimated_height_px || 200) + "px";
+      card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
       applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
       if (data.truncated && data.mode === "preview") {
         addExpandHunksUI(file, data, card);
@@ -11294,15 +11336,15 @@
       const step = Math.min(10, remaining);
       const moreBtn = document.createElement("button");
       moreBtn.className = "gdp-show-full";
-      moreBtn.textContent = "Show next " + step + " hunk" + (step === 1 ? "" : "s");
+      moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
       moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
       const allBtn = document.createElement("button");
       allBtn.className = "gdp-show-full secondary";
-      allBtn.textContent = "Show all (" + remaining + " remaining)";
+      allBtn.textContent = `Show all (${remaining} remaining)`;
       allBtn.addEventListener("click", () => loadMore(total, true));
       const note = document.createElement("span");
       note.className = "gdp-hunk-note";
-      note.textContent = rendered + " / " + total + " hunks shown";
+      note.textContent = `${rendered} / ${total} hunks shown`;
       wrap.appendChild(note);
       wrap.appendChild(moreBtn);
       wrap.appendChild(allBtn);
@@ -11350,10 +11392,10 @@
       if (!STATE.syntaxHighlight)
         return;
       const hljsRef = getHljs();
-      if (!hljsRef || !hljsRef.highlight)
+      if (!hljsRef?.highlight)
         return;
       const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage || !hljsRef.getLanguage(lang))
+      if (!lang || !hljsRef.getLanguage?.(lang))
         return;
       const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
       spans.forEach((s2) => {
@@ -11381,10 +11423,10 @@
       if (!("requestIdleCallback" in window))
         return;
       const hljsRef = getHljs();
-      if (!hljsRef || !hljsRef.highlight)
+      if (!hljsRef?.highlight)
         return;
       const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage || !hljsRef.getLanguage(lang))
+      if (!lang || !hljsRef.getLanguage?.(lang))
         return;
       const work = (deadline) => {
         const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
@@ -11446,17 +11488,17 @@
       return AUDIO_RE.test(p2);
     }
     function fileURL(path, ref) {
-      return "/_file?path=" + encodeURIComponent(path) + "&ref=" + ref;
+      return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
     }
     function mediaTag(path, ref) {
       const url = fileURL(path, ref);
       if (isVideo(path)) {
-        return '<video src="' + url + '" controls preload="metadata"></video>';
+        return `<video src="${url}" controls preload="metadata"></video>`;
       }
       if (isAudio(path)) {
-        return '<audio src="' + url + '" controls preload="metadata"></audio>';
+        return `<audio src="${url}" controls preload="metadata"></audio>`;
       }
-      return '<img src="' + url + '" alt="" loading="lazy">';
+      return `<img src="${url}" alt="" loading="lazy">`;
     }
     function enhanceMediaCard(file, card) {
       const path = file.path;
@@ -11470,7 +11512,8 @@
         return;
       const container = document.createElement("div");
       container.className = "gdp-media";
-      let leftHTML, rightHTML;
+      let leftHTML;
+      let rightHTML;
       if (file.status === "A") {
         leftHTML = '<div class="media-empty">Not in HEAD</div>';
         rightHTML = mediaTag(path, "worktree");
@@ -11494,7 +11537,7 @@
           handler._raf = null;
           if (performance.now() < SUPPRESS_SPY_UNTIL)
             return;
-          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h")) || 56;
+          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 56;
           const scanY = topbarH + 24;
           const cards = document.querySelectorAll(".gdp-file-shell");
           for (const w of cards) {
@@ -11512,7 +11555,7 @@
                 markActive(best);
                 const recentlyTouched = performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
                 if (!recentlyTouched) {
-                  const li = document.querySelector('#filelist li[data-path="' + CSS.escape(best) + '"]');
+                  const li = document.querySelector(`#filelist li[data-path="${CSS.escape(best)}"]`);
                   if (li) {
                     const sb = document.querySelector("#sidebar");
                     if (!sb)
@@ -11536,7 +11579,7 @@
       window.addEventListener("scroll", handler, { passive: true });
       handler(new Event("scroll"));
     }
-    function collapseAll(force) {
+    function _collapseAll(force) {
       STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
       document.querySelectorAll(".gdp-file-shell.loaded .d2h-file-wrapper").forEach((w) => {
         const body = w.querySelector(".d2h-files-diff, .d2h-file-diff");
@@ -11580,7 +11623,7 @@
     });
     function applySidebarWidth(w) {
       const cw = Math.max(180, Math.min(900, w));
-      document.documentElement.style.setProperty("--sidebar-w", cw + "px");
+      document.documentElement.style.setProperty("--sidebar-w", `${cw}px`);
       STATE.sbWidth = cw;
       localStorage.setItem("gdp:sbwidth", String(cw));
     }
@@ -11621,14 +11664,14 @@
         currentW = startW;
         document.body.classList.add("gdp-resizing");
         preview.style.display = "block";
-        preview.style.left = startW + "px";
+        preview.style.left = `${startW}px`;
         e2.preventDefault();
       });
       window.addEventListener("mousemove", (e2) => {
         if (!dragging)
           return;
         currentW = clamp(startW + (e2.clientX - startX));
-        preview.style.left = currentW + "px";
+        preview.style.left = `${currentW}px`;
       });
       window.addEventListener("mouseup", () => {
         if (!dragging)
@@ -11962,7 +12005,7 @@
       state.items.forEach((item, index) => {
         const row = document.createElement("button");
         row.type = "button";
-        row.id = "gdp-palette-item-" + index;
+        row.id = `gdp-palette-item-${index}`;
         row.className = "gdp-palette-row";
         row.setAttribute("role", "option");
         row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
@@ -11974,10 +12017,10 @@
           title.textContent = item.path.split("/").pop() || item.path;
           appendHighlightedPath(detail, item.displayPath, item.ranges);
           if (item.old_path && item.displayPath !== item.old_path) {
-            detail.appendChild(document.createTextNode("  " + item.old_path));
+            detail.appendChild(document.createTextNode(`  ${item.old_path}`));
           }
         } else {
-          title.textContent = item.path + ":" + item.line;
+          title.textContent = `${item.path}:${item.line}`;
           detail.textContent = item.preview;
         }
         row.append(title, detail);
@@ -11995,7 +12038,7 @@
       syncPaletteSelection(state);
     }
     function syncPaletteSelection(state) {
-      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? "gdp-palette-item-" + state.selected : "");
+      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "");
       state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
         row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
         if (index === state.selected)
@@ -12010,7 +12053,7 @@
       const params = new URLSearchParams;
       params.set("ref", ref);
       appendScopeOmitDirsParam(params);
-      const res = await trackLoad(fetch("/_files?" + params.toString()).then((r2) => {
+      const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load files");
         return r2.json();
@@ -12058,7 +12101,7 @@
         }) : [];
         state.items = limitPaletteResults(base2);
         state.selected = state.items.length ? 0 : -1;
-        state.status.textContent = source === "diff" ? state.diffSnapshot.length + " diff files" : "Type to search repository files";
+        state.status.textContent = source === "diff" ? `${state.diffSnapshot.length} diff files` : "Type to search repository files";
         renderPalette(state);
         return;
       }
@@ -12080,7 +12123,7 @@
         }));
       }
       state.selected = state.items.length ? 0 : -1;
-      state.status.textContent = state.items.length ? state.items.length + " results" : "No results";
+      state.status.textContent = state.items.length ? `${state.items.length} results` : "No results";
       renderPalette(state);
     }
     function updateGrepPalette(state, query) {
@@ -12120,7 +12163,7 @@
         }
         const controller = new AbortController;
         state.controller = controller;
-        trackLoad(fetch("/_grep?" + params.toString(), {
+        trackLoad(fetch(`/_grep?${params.toString()}`, {
           signal: controller.signal
         }).then((r2) => {
           if (!r2.ok)
@@ -12378,7 +12421,7 @@
       if (!isPlainPageKey && !isCtrlArrowKey)
         return false;
       const scroller = findMainScrollTarget();
-      if (!scroller || !scroller.matches("#content .gdp-source-virtual-scroller"))
+      if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
         return false;
       const pageDown = key === "pagedown" || key === "arrowdown";
       const pageUp = key === "pageup" || key === "arrowup";
@@ -12436,7 +12479,7 @@
       if (STATE.route.path)
         params.set("path", STATE.route.path);
       appendScopeOmitDirsParam(params);
-      return trackLoad(fetch("/_tree?" + params.toString()).then((r2) => {
+      return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");
         return r2.json();
@@ -12465,7 +12508,7 @@
         params.set("to", STATE.to);
       if (options.force)
         params.set("nocache", "1");
-      const url = "/diff.json" + (params.toString() ? "?" + params.toString() : "");
+      const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
       return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
         renderShell(data);
         setStatus("live");
@@ -12523,6 +12566,8 @@
     const popover = $("#ref-popover");
     const popBody = popover.querySelector(".rp-body");
     const popSearch = popover.querySelector(".rp-search");
+    if (!popBody || !popSearch)
+      return;
     let popTarget = null;
     function fetchRefs() {
       return fetch("/_refs").then((r2) => r2.json()).then((refs) => {
@@ -12540,7 +12585,7 @@
       if (commitSearchAbort)
         commitSearchAbort.abort();
       commitSearchAbort = new AbortController;
-      const url = "/_commits?max=100&q=" + encodeURIComponent((query || "").trim());
+      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
       return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
         if (seq !== commitSearchSeq)
           return;
@@ -12585,21 +12630,21 @@
           html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(shortSha) + '</span><span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + escapeHtml2(commit.subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(commit.author || "") + '</span><span class="when">' + escapeHtml2(commit.when || "") + "</span></div></div>");
         }
       } else if (popTab === "branches") {
-        const branches = (REFS.branches || []).filter(m);
+        const branches = (REFS.branches || []).filter((b2) => m(b2.name));
         if (!branches.length) {
           html.push('<div class="rp-empty">no branches</div>');
         }
-        for (const b2 of branches) {
-          const cur = b2 === REFS.current;
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(b2) + '"><span class="name">' + escapeHtml2(b2) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>");
+        for (const branch of branches) {
+          const cur = branch.name === REFS.current;
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(branch.name) + '"><div class="row1"><span class="name">' + escapeHtml2(branch.name) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>" + (branch.when ? '<div class="row2"><span class="when">' + escapeHtml2(branch.when) + "</span></div>" : "") + "</div>");
         }
       } else if (popTab === "tags") {
-        const tags = (REFS.tags || []).filter(m);
+        const tags = (REFS.tags || []).filter((t2) => m(t2.name));
         if (!tags.length) {
           html.push('<div class="rp-empty">no tags</div>');
         }
-        for (const t2 of tags) {
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(t2) + '"><span class="name">' + escapeHtml2(t2) + '</span><span class="badge">tag</span></div>');
+        for (const tag of tags) {
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(tag.name) + '"><div class="row1"><span class="name">' + escapeHtml2(tag.name) + '</span><span class="badge">tag</span></div>' + (tag.when ? '<div class="row2"><span class="when">' + escapeHtml2(tag.when) + "</span></div>" : "") + "</div>");
         }
       }
       popBody.innerHTML = html.join("");
@@ -12643,8 +12688,8 @@
       popover.hidden = false;
       const r2 = input.getBoundingClientRect();
       const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
-      popover.style.left = Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8)) + "px";
-      popover.style.top = r2.bottom + 4 + "px";
+      popover.style.left = `${Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8))}px`;
+      popover.style.top = `${r2.bottom + 4}px`;
       setTimeout(() => popSearch.focus(), 0);
     }
     function closePopover() {
@@ -12704,7 +12749,9 @@
     popover.querySelectorAll(".rp-tab").forEach((t2) => {
       t2.addEventListener("click", () => {
         popTab = t2.dataset.tab || "commits";
-        popover.querySelectorAll(".rp-tab").forEach((b2) => b2.classList.toggle("active", b2 === t2));
+        popover.querySelectorAll(".rp-tab").forEach((b2) => {
+          b2.classList.toggle("active", b2 === t2);
+        });
         if (popTab === "commits")
           scheduleCommitSearch(popSearch.value);
         buildPopBody(popSearch.value);

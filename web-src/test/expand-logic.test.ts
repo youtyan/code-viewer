@@ -78,7 +78,7 @@ describe("upClickRange (↑, low end)", () => {
   });
 
   test("shrunk gap < STEP: pulls only what remains", () => {
-    let s = initExpandState(33, 50);
+    const s = initExpandState(33, 50);
     expect(upClickRange(s, 33, STEP)).toEqual({ start: 33, end: 49 });
   });
 
@@ -101,7 +101,7 @@ describe("downClickRange (↓, high end)", () => {
   });
 
   test("shrunk gap < STEP: pulls only what remains", () => {
-    let s = initExpandState(33, 50);
+    const s = initExpandState(33, 50);
     expect(downClickRange(s, 33, STEP)).toEqual({ start: 33, end: 49 });
   });
 });

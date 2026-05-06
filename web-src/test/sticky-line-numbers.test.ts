@@ -6,7 +6,7 @@ const style = readFileSync("web/style.css", "utf8");
 function cssBlock(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = style.match(
-    new RegExp("^\\s*" + escaped + "\\s*\\{([^}]*)\\}", "m"),
+    new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, "m"),
   );
   return match ? match[1] : "";
 }
@@ -49,5 +49,15 @@ describe("sticky line number styles", () => {
     expect(
       style.includes("background: var(--diff-del-num-sticky-bg) !important"),
     ).toBe(true);
+  });
+
+  test("ref picker labels override generic status badge sizing", () => {
+    const rowBlock = cssBlock(".rp-item-ref .row1");
+    const badgeBlock = cssBlock(".rp-item-ref .badge");
+
+    expect(rowBlock.includes("align-items: center")).toBe(true);
+    expect(badgeBlock.includes("width: auto")).toBe(true);
+    expect(badgeBlock.includes("height: auto")).toBe(true);
+    expect(badgeBlock.includes("white-space: nowrap")).toBe(true);
   });
 });
