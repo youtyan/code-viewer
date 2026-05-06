@@ -1374,7 +1374,7 @@ body.gdp-help-page #content {
   opacity: 0.72;
 }
 #filelist.tree .tree-dir.children-omitted .dir-label {
-  border-bottom: 1px dashed var(--border-strong);
+  border-bottom: 0;
 }
 #filelist.tree .tree-dir.children-omitted-heavy {
   cursor: pointer;
@@ -1437,9 +1437,9 @@ body.gdp-help-page #content {
   text-transform: uppercase;
 }
 #filelist.tree .tree-dir .dir-omitted-heavy {
-  color: var(--accent);
-  border-color: var(--accent-muted);
-  background: var(--accent-subtle);
+  color: var(--fg-subtle);
+  border-color: var(--border-muted);
+  background: var(--bg-soft);
 }
 #filelist.tree .tree-dir .dir-omitted-internal {
   color: var(--fg-subtle);
