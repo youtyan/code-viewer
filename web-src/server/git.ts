@@ -236,10 +236,33 @@ function commitLogArgs(limit: number): string[] {
   return [
     "git",
     "log",
+    "--all",
     "-z",
     `--max-count=${limit}`,
     `--format=${COMMIT_FORMAT}`,
   ];
+}
+
+function mergeCommitResults(
+  limit: number,
+  ...groups: GitCommitMeta[][]
+): GitCommitMeta[] {
+  const seen = new Set<string>();
+  const merged: GitCommitMeta[] = [];
+  for (const commits of groups) {
+    for (const commit of commits) {
+      if (!commit.sha || seen.has(commit.sha)) continue;
+      seen.add(commit.sha);
+      merged.push(commit);
+      if (merged.length >= limit) return merged;
+    }
+  }
+  return merged;
+}
+
+function runCommitLog(cwd: string, args: string[]): GitCommitMeta[] {
+  const commits = run(args, cwd);
+  return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
 }
 
 export function refCommits(
@@ -249,6 +272,7 @@ export function refCommits(
 ): GitCommitMeta[] {
   const limit = clampCommitLimit(max);
   const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  const hashMatches: GitCommitMeta[] = [];
   if (/^[0-9a-f]{4,40}$/i.test(trimmed)) {
     const verified = run(
       ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
@@ -268,15 +292,25 @@ export function refCommits(
       cwd,
     );
     if (single.code === 0 && single.stdout.trim()) {
-      return parseCommitLog(single.stdout);
+      hashMatches.push(...parseCommitLog(single.stdout));
     }
   }
-  const args = commitLogArgs(limit);
-  if (trimmed) {
-    args.push("--regexp-ignore-case", "--fixed-strings", `--grep=${trimmed}`);
+  if (!trimmed) {
+    return runCommitLog(cwd, commitLogArgs(limit));
   }
-  const commits = run(args, cwd);
-  return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
+  const subjectMatches = runCommitLog(cwd, [
+    ...commitLogArgs(limit),
+    "--regexp-ignore-case",
+    "--fixed-strings",
+    `--grep=${trimmed}`,
+  ]);
+  const authorMatches = runCommitLog(cwd, [
+    ...commitLogArgs(limit),
+    "--regexp-ignore-case",
+    "--fixed-strings",
+    `--author=${trimmed}`,
+  ]);
+  return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
 }
 
 export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
