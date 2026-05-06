@@ -7469,6 +7469,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let commitSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let commitSearchSeq = 0;
   let commitSearchAbort: AbortController | null = null;
+  let commitSearchLoading = false;
   function fetchCommitRefs(query: string) {
     const seq = ++commitSearchSeq;
     if (commitSearchAbort) commitSearchAbort.abort();
@@ -7479,16 +7480,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       .then((r) => r.json())
       .then((refs: RefCommitResponse) => {
         if (seq !== commitSearchSeq) return;
+        commitSearchLoading = false;
         REFS.commits = refs.commits || [];
         if (!popover.hidden && popTab === "commits") {
           buildPopBody(popSearch.value);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (seq === commitSearchSeq) commitSearchLoading = false;
+      });
   }
 
   function scheduleCommitSearch(query: string) {
     if (commitSearchTimer) clearTimeout(commitSearchTimer);
+    commitSearchLoading = true;
     commitSearchTimer = setTimeout(() => {
       commitSearchTimer = null;
       fetchCommitRefs(query);
@@ -7500,8 +7505,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     const m = (s: string) => !q || String(s).toLowerCase().includes(q);
     const html: string[] = [];
     if (popTab === "commits") {
+      if (commitSearchLoading) {
+        html.push('<div class="rp-empty">loading commits...</div>');
+        popBody.innerHTML = html.join("");
+        highlightCurrentInPopover();
+        return;
+      }
       const commits = (REFS.commits || []).filter((commit) =>
-        m(`${commit.sha} ${commit.subject} ${commit.author} ${commit.when}`),
+        m(`${commit.sha} ${commit.subject} ${commit.author}`),
       );
       if (!commits.length) {
         html.push('<div class="rp-empty">no commits</div>');

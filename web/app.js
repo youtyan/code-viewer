@@ -12441,6 +12441,7 @@
     let commitSearchTimer = null;
     let commitSearchSeq = 0;
     let commitSearchAbort = null;
+    let commitSearchLoading = false;
     function fetchCommitRefs(query) {
       const seq = ++commitSearchSeq;
       if (commitSearchAbort)
@@ -12450,15 +12451,20 @@
       return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
         if (seq !== commitSearchSeq)
           return;
+        commitSearchLoading = false;
         REFS.commits = refs.commits || [];
         if (!popover.hidden && popTab === "commits") {
           buildPopBody(popSearch.value);
         }
-      }).catch(() => {});
+      }).catch(() => {
+        if (seq === commitSearchSeq)
+          commitSearchLoading = false;
+      });
     }
     function scheduleCommitSearch(query) {
       if (commitSearchTimer)
         clearTimeout(commitSearchTimer);
+      commitSearchLoading = true;
       commitSearchTimer = setTimeout(() => {
         commitSearchTimer = null;
         fetchCommitRefs(query);
@@ -12469,7 +12475,13 @@
       const m = (s2) => !q || String(s2).toLowerCase().includes(q);
       const html = [];
       if (popTab === "commits") {
-        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author} ${commit.when}`));
+        if (commitSearchLoading) {
+          html.push('<div class="rp-empty">loading commits...</div>');
+          popBody.innerHTML = html.join("");
+          highlightCurrentInPopover();
+          return;
+        }
+        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author}`));
         if (!commits.length) {
           html.push('<div class="rp-empty">no commits</div>');
         }
