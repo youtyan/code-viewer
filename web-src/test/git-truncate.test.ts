@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -21,12 +22,11 @@ import {
 import { sourceFixture } from "./source-fixture";
 
 function git(cwd: string, args: string[]) {
-  const proc = Bun.spawnSync(["git", ...args], {
+  const proc = spawnSync("git", args, {
     cwd,
-    stdout: "pipe",
-    stderr: "pipe",
+    encoding: "utf8",
   });
-  expect(proc.exitCode).toBe(0);
+  expect(proc.status).toBe(0);
   return proc;
 }
 
@@ -60,7 +60,7 @@ describe("truncateToNHunks", () => {
       "--- /dev/null",
       "+++ b/generated.js",
       "@@ -0,0 +1,5000 @@",
-      ...Array.from({ length: 5000 }, (_, index) => "+line " + index),
+      ...Array.from({ length: 5000 }, (_, index) => `+line ${index}`),
       "",
     ].join("\n");
 
@@ -75,11 +75,11 @@ describe("truncateToNHunks", () => {
   test("counts inserted separators when capping multi-hunk preview lines", () => {
     const hunk = (offset: number) =>
       [
-        "@@ -" + offset + ",4 +" + offset + ",4 @@",
-        " context " + offset,
-        "-old " + offset,
-        "+new " + offset,
-        " tail " + offset,
+        `@@ -${offset},4 +${offset},4 @@`,
+        ` context ${offset}`,
+        `-old ${offset}`,
+        `+new ${offset}`,
+        ` tail ${offset}`,
       ].join("\n");
     const diff = [
       "diff --git a/file.ts b/file.ts",
@@ -309,6 +309,83 @@ describe("repository tree helpers", () => {
       expect(
         result.commits.some((commit) => commit.subject === "commit 1"),
       ).toBe(false);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("returns branch metadata without remote HEAD aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-branches-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      writeFileSync(join(dir, "file.txt"), "main\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "main commit"]);
+      git(dir, ["branch", "feature"]);
+      git(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+      git(dir, [
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+      ]);
+      git(dir, ["update-ref", "refs/remotes/upstream/main", "HEAD"]);
+      git(dir, [
+        "symbolic-ref",
+        "refs/remotes/upstream/HEAD",
+        "refs/remotes/upstream/main",
+      ]);
+
+      const result = refs(dir);
+
+      expect(result.branches.some((branch) => branch.name === "origin")).toBe(
+        false,
+      );
+      expect(result.branches.some((branch) => branch.name === "upstream")).toBe(
+        false,
+      );
+      expect(
+        result.branches.some((branch) => branch.name === "origin/main"),
+      ).toBe(true);
+      expect(
+        result.branches.some((branch) => branch.name === "upstream/main"),
+      ).toBe(true);
+      expect(result.branches.every((branch) => branch.when)).toBe(true);
+      expect(
+        result.branches.every((branch) =>
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(branch.when),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("returns tag metadata for the ref picker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-tags-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      writeFileSync(join(dir, "file.txt"), "tagged\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "tagged commit"]);
+      git(dir, ["tag", "v1.0.0"]);
+      git(dir, ["tag", "-a", "v1.1.0", "-m", "annotated tag"]);
+
+      const result = refs(dir);
+      const lightTag = result.tags.find((item) => item.name === "v1.0.0");
+      const annotatedTag = result.tags.find((item) => item.name === "v1.1.0");
+
+      expect(Boolean(lightTag)).toBe(true);
+      expect(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(lightTag?.when || ""),
+      ).toBe(true);
+      expect(Boolean(annotatedTag)).toBe(true);
+      expect(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(annotatedTag?.when || ""),
+      ).toBe(true);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

@@ -35,6 +35,16 @@ export type GitCommitMeta = {
   when: string;
 };
 
+export type GitBranchMeta = {
+  name: string;
+  when: string;
+};
+
+export type GitTagMeta = {
+  name: string;
+  when: string;
+};
+
 const WORKTREE_RECURSIVE_DEPTH_LIMIT = 32;
 export const WORKTREE_RECURSIVE_ENTRY_LIMIT = 50000;
 export const DEFAULT_REF_COMMIT_LIMIT = 100;
@@ -168,14 +178,14 @@ export function verifyTreeRef(ref: string, cwd: string): boolean {
 }
 
 export function refs(cwd: string): {
-  branches: string[];
-  tags: string[];
+  branches: GitBranchMeta[];
+  tags: GitTagMeta[];
   commits: GitCommitMeta[];
   current: string;
 } {
   const out = {
-    branches: [] as string[],
-    tags: [] as string[],
+    branches: [] as GitBranchMeta[],
+    tags: [] as GitTagMeta[],
     commits: [] as GitCommitMeta[],
     current: "",
   };
@@ -184,28 +194,41 @@ export function refs(cwd: string): {
       "git",
       "for-each-ref",
       "--sort=-committerdate",
-      "--format=%(refname:short)",
+      "--format=%(refname)%09%(refname:short)%09%(committerdate:iso-strict)",
       "refs/heads",
       "refs/remotes",
     ],
     cwd,
   );
   if (branches.code === 0) {
-    out.branches = branches.stdout
-      .split("\n")
-      .filter((line) => line && line !== "origin/HEAD");
+    for (const line of branches.stdout.split("\n")) {
+      const [fullName, name, when] = line.split("\t");
+      if (
+        !fullName ||
+        !name ||
+        (fullName.startsWith("refs/remotes/") && fullName.endsWith("/HEAD"))
+      )
+        continue;
+      out.branches.push({ name, when });
+    }
   }
   const tags = run(
     [
       "git",
       "for-each-ref",
       "--sort=-creatordate",
-      "--format=%(refname:short)",
+      "--format=%(refname:short)%09%(creatordate:iso-strict)",
       "refs/tags",
     ],
     cwd,
   );
-  if (tags.code === 0) out.tags = tags.stdout.split("\n").filter(Boolean);
+  if (tags.code === 0) {
+    for (const line of tags.stdout.split("\n")) {
+      const [name, when] = line.split("\t");
+      if (!name) continue;
+      out.tags.push({ name, when });
+    }
+  }
   out.commits = refCommits(cwd, "", DEFAULT_REF_COMMIT_LIMIT);
   out.current = currentBranch(cwd) || "";
   return out;
