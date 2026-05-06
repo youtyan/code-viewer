@@ -226,7 +226,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
   // Keep in sync with .gdp-source-virtual-row height/line-height in web/style.css.
   const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
+  const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
+  const VIRTUAL_SIDEBAR_ROW_HEIGHT = 29;
+  const VIRTUAL_SIDEBAR_OVERSCAN = 16;
   const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
+  const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
   let highlightLoadPromise: Promise<HljsApi | null> | null = null;
   let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
     null;
@@ -237,6 +241,23 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
   let SIDEBAR_FILES: SidebarItem[] = [];
   let SIDEBAR_ON_FILE_CLICK: ((file: SidebarItem) => void) | undefined;
+  type SidebarTreeRow = {
+    kind: "dir" | "file";
+    path: string;
+    name: string;
+    depth: number;
+    file?: SidebarItem;
+    dir?: TreeNode;
+  };
+  type TreeNodeItem =
+    | { kind: "dir"; sortKey: number; dir: TreeNode }
+    | { kind: "file"; sortKey: number; file: SidebarItem };
+  let SIDEBAR_TREE_ROOT: TreeNode | null = null;
+  let SIDEBAR_TREE_ROWS: SidebarTreeRow[] = [];
+  let SIDEBAR_VISIBLE_ROWS: SidebarTreeRow[] = [];
+  let SIDEBAR_ROW_BY_PATH = new Map<string, SidebarTreeRow>();
+  let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
+  const SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
   let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
@@ -1171,6 +1192,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector<HTMLElement>("#global-header");
     if (STATE.sidebarHidden && restoreHost) attachSidebarToggle(restoreHost);
     else if (sidebarHead) attachSidebarToggle(sidebarHead);
+    placeSidebarFilter();
+  }
+
+  function placeSidebarFilter() {
+    const sidebarHead = document.querySelector<HTMLElement>(".sb-head");
+    const filter = document.querySelector<HTMLElement>(".sb-filter-wrap");
+    const list = document.querySelector<HTMLElement>("#filelist");
+    if (!sidebarHead || !filter || !list) return;
+    const repoSidebar = isRepositorySidebarMode();
+    if (repoSidebar && filter.parentElement !== sidebarHead) {
+      sidebarHead.appendChild(filter);
+      return;
+    }
+    if (!repoSidebar && filter.parentElement === sidebarHead) {
+      sidebarHead.after(filter);
+    }
   }
 
   function applySidebarHidden(hidden = STATE.sidebarHidden) {
@@ -1512,6 +1549,371 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  function treeNodeItems(node: TreeNode) {
+    const cached = SIDEBAR_TREE_ITEMS_CACHE.get(node);
+    if (cached) return cached;
+    const items: TreeNodeItem[] = [];
+    for (const k of Object.keys(node.dirs)) {
+      const d = node.dirs[k];
+      items.push({ kind: "dir", sortKey: d.minOrder, dir: d });
+    }
+    for (const f of node.files) {
+      items.push({
+        kind: "file",
+        sortKey: f.order != null ? f.order : Infinity,
+        file: f,
+      });
+    }
+    items.sort((a, b) => a.sortKey - b.sortKey);
+    SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
+    return items;
+  }
+
+  function createTreeDirRow(
+    dir: TreeNode,
+    depth: number,
+    onFileClick?: (file: SidebarItem) => void,
+  ) {
+    const li = document.createElement("li");
+    li.className = "tree-dir";
+    li.tabIndex = -1;
+    li.dataset.dirpath = dir.path;
+    if (dir.explicit) li.dataset.explicit = "true";
+    if (dir.children_omitted) {
+      li.classList.add("children-omitted");
+      li.classList.add(
+        dir.children_omitted_reason === "heavy"
+          ? "children-omitted-heavy"
+          : "children-omitted-internal",
+      );
+      li.title =
+        dir.children_omitted_reason === "heavy"
+          ? "Large generated/vendor directory: open the detail pane to browse its contents"
+          : "Internal Git metadata is not browsed";
+    }
+    li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    const chev = document.createElement("span");
+    if (dir.children_omitted) {
+      chev.className = "chev-spacer";
+      chev.setAttribute("aria-hidden", "true");
+    } else {
+      chev.className = "chev";
+      setChevronIcon(chev);
+    }
+    li.appendChild(chev);
+    const dirIcon = document.createElement("span");
+    dirIcon.className = "dir-icon";
+    li.appendChild(dirIcon);
+    const label = document.createElement("span");
+    label.className = "dir-label";
+    const dn = document.createElement("span");
+    dn.className = "dir-name";
+    dn.textContent = dir.name;
+    dn.title = dir.path;
+    label.appendChild(dn);
+    if (dir.children_omitted) {
+      const omitted = document.createElement("span");
+      omitted.className =
+        "dir-omitted " +
+        (dir.children_omitted_reason === "heavy"
+          ? "dir-omitted-heavy"
+          : "dir-omitted-internal");
+      omitted.textContent =
+        dir.children_omitted_reason === "heavy" ? "skipped" : "private";
+      omitted.title =
+        dir.children_omitted_reason === "heavy"
+          ? "Tree expansion is skipped, but the directory detail can be opened"
+          : "This directory cannot be opened from the browser";
+      label.appendChild(omitted);
+    }
+    li.appendChild(label);
+    li.appendChild(
+      createOpenPathButton(dir.path, "directory", "open this folder in OS"),
+    );
+    const updateIcon = () => {
+      setFolderIcon(dirIcon, li.classList.contains("collapsed"));
+    };
+    const toggleDir = (e: Event) => {
+      e.stopPropagation();
+      li.classList.toggle("collapsed");
+      updateIcon();
+      if (li.classList.contains("collapsed")) STATE.collapsedDirs.add(dir.path);
+      else STATE.collapsedDirs.delete(dir.path);
+      localStorage.setItem(
+        "gdp:collapsed-dirs",
+        JSON.stringify([...STATE.collapsedDirs]),
+      );
+      rerenderVirtualSidebar();
+    };
+    li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
+    updateIcon();
+    if (!dir.children_omitted) {
+      chev.addEventListener("click", toggleDir);
+      dirIcon.addEventListener("click", toggleDir);
+    }
+    if (onFileClick) {
+      li.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (
+          dir.children_omitted_reason === "internal" ||
+          dir.children_omitted_reason === "truncated"
+        )
+          return;
+        onFileClick({
+          path: dir.path,
+          display_path: dir.path,
+          type: "tree",
+          children_omitted: dir.children_omitted,
+          children_omitted_reason: dir.children_omitted_reason,
+        });
+        scheduleMainSurfaceFocus();
+      });
+    } else {
+      li.addEventListener("click", toggleDir);
+    }
+    return li;
+  }
+
+  function createTreeFileRow(
+    f: SidebarItem,
+    depth: number,
+    onFileClick?: (file: SidebarItem) => void,
+  ) {
+    const li = document.createElement("li");
+    li.className = "tree-file";
+    li.tabIndex = -1;
+    li.dataset.path = f.path;
+    li.classList.toggle(
+      "viewed",
+      !onFileClick && STATE.viewedFiles.has(f.path),
+    );
+    li.classList.toggle(
+      "hidden-by-tests",
+      STATE.hideTests && TEST_RE.test(f.path || ""),
+    );
+    li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+    const spacer = document.createElement("span");
+    spacer.className = "chev-spacer";
+    li.appendChild(spacer);
+    if (f.status) {
+      li.appendChild(fileBadge(f.status));
+    } else {
+      const icon = document.createElement("span");
+      icon.className = "d2h-icon-wrapper";
+      icon.innerHTML = fileEntryIcon();
+      li.appendChild(icon);
+    }
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = f.path.split("/").pop();
+    name.title = f.path;
+    li.appendChild(name);
+    li.addEventListener("click", () => {
+      if (onFileClick) onFileClick(f);
+      else scrollToFile(f.path);
+      scheduleMainSurfaceFocus();
+    });
+    if (!onFileClick)
+      li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
+        passive: true,
+      });
+    return li;
+  }
+
+  function buildSidebarTreeRows(root: TreeNode) {
+    const rows: SidebarTreeRow[] = [];
+    const byPath = new Map<string, SidebarTreeRow>();
+    const walk = (node: TreeNode, depth: number) => {
+      for (const item of treeNodeItems(node)) {
+        if (item.kind === "dir") {
+          const row: SidebarTreeRow = {
+            kind: "dir",
+            path: item.dir.path,
+            name: item.dir.name,
+            depth,
+            dir: item.dir,
+          };
+          rows.push(row);
+          byPath.set(row.path, row);
+          walk(item.dir, depth + 1);
+        } else {
+          const row: SidebarTreeRow = {
+            kind: "file",
+            path: item.file.path,
+            name: item.file.path.split("/").pop() || item.file.path,
+            depth,
+            file: item.file,
+          };
+          rows.push(row);
+          byPath.set(row.path, row);
+        }
+      }
+    };
+    walk(root, 0);
+    SIDEBAR_TREE_ROWS = rows;
+    SIDEBAR_ROW_BY_PATH = byPath;
+  }
+
+  function computeVirtualSidebarVisibleRows() {
+    if (!SIDEBAR_TREE_ROOT) {
+      SIDEBAR_VISIBLE_ROWS = [];
+      return;
+    }
+    const input = $<HTMLInputElement>("#sb-filter");
+    const filter = compileFileFilter(input.value);
+    const invalid = filter.kind === "invalid";
+    input.toggleAttribute("aria-invalid", invalid);
+    input.title = invalid ? filter.error || "invalid regular expression" : "";
+    const filterActive = filter.kind !== "empty" && !invalid;
+    const matches = invalid ? () => true : filter.match;
+    const walk = (
+      node: TreeNode,
+      depth: number,
+    ): { visible: boolean; rows: SidebarTreeRow[] } => {
+      let subtreeVisible = false;
+      const rows: SidebarTreeRow[] = [];
+      for (const item of treeNodeItems(node)) {
+        if (item.kind === "dir") {
+          const dirMatches = filterActive && matches(item.dir.path);
+          const expanded =
+            !item.dir.children_omitted &&
+            (filterActive || !STATE.collapsedDirs.has(item.dir.path));
+          const child = walk(item.dir, depth + 1);
+          const visible =
+            item.dir.explicit && !filterActive
+              ? true
+              : dirMatches || child.visible;
+          if (visible) {
+            rows.push({
+              kind: "dir",
+              path: item.dir.path,
+              name: item.dir.name,
+              depth,
+              dir: item.dir,
+            });
+            if (expanded) rows.push(...child.rows);
+          }
+          subtreeVisible = subtreeVisible || visible;
+        } else {
+          const testHidden =
+            STATE.hideTests && TEST_RE.test(item.file.path || "");
+          const visible = !testHidden && matches(item.file.path || "");
+          if (visible) {
+            rows.push({
+              kind: "file",
+              path: item.file.path,
+              name: item.file.path.split("/").pop() || item.file.path,
+              depth,
+              file: item.file,
+            });
+          }
+          subtreeVisible = subtreeVisible || visible;
+        }
+      }
+      return { visible: subtreeVisible, rows };
+    };
+    SIDEBAR_VISIBLE_ROWS = walk(SIDEBAR_TREE_ROOT, 0).rows;
+  }
+
+  function sidebarVirtualRange() {
+    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const scrollTop = sidebar?.scrollTop || 0;
+    const height = sidebar?.clientHeight || window.innerHeight;
+    const start = Math.max(
+      0,
+      Math.floor(scrollTop / VIRTUAL_SIDEBAR_ROW_HEIGHT) -
+        VIRTUAL_SIDEBAR_OVERSCAN,
+    );
+    const end = Math.min(
+      SIDEBAR_VISIBLE_ROWS.length,
+      Math.ceil((scrollTop + height) / VIRTUAL_SIDEBAR_ROW_HEIGHT) +
+        VIRTUAL_SIDEBAR_OVERSCAN,
+    );
+    return { start, end };
+  }
+
+  function renderVirtualSidebarWindow() {
+    const ul = $("#filelist");
+    if (!ul.classList.contains("tree-virtual")) return;
+    const { start, end } = sidebarVirtualRange();
+    const fragment = document.createDocumentFragment();
+    for (let i = start; i < end; i++) {
+      const row = SIDEBAR_VISIBLE_ROWS[i];
+      const li =
+        row.kind === "dir" && row.dir
+          ? createTreeDirRow(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK)
+          : row.file
+            ? createTreeFileRow(row.file, row.depth, SIDEBAR_ON_FILE_CLICK)
+            : null;
+      if (!li) continue;
+      li.classList.toggle("active", row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH);
+      li.style.position = "absolute";
+      li.style.top = `${i * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+      li.style.left = "0";
+      li.style.right = "0";
+      fragment.appendChild(li);
+    }
+    ul.replaceChildren(fragment);
+    ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+  }
+
+  function scrollVirtualSidebarPathIntoView(path: string) {
+    const index = SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === path);
+    if (index < 0) return;
+    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    if (!sidebar) return;
+    const ul = $("#filelist");
+    const top = index * VIRTUAL_SIDEBAR_ROW_HEIGHT;
+    const bottom = top + VIRTUAL_SIDEBAR_ROW_HEIGHT;
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const stickyBottom = Math.max(
+      sidebarRect.top,
+      document.querySelector<HTMLElement>(".sb-head")?.getBoundingClientRect()
+        .bottom || sidebarRect.top,
+      document
+        .querySelector<HTMLElement>(".sb-filter-wrap")
+        ?.getBoundingClientRect().bottom || sidebarRect.top,
+    );
+    const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
+    const bottomPadding = 14;
+    const listTop = ul.offsetTop;
+    const maxHeight = Number.parseFloat(getComputedStyle(sidebar).maxHeight);
+    const visibleHeight =
+      Number.isFinite(maxHeight) && maxHeight > 0
+        ? Math.min(sidebar.clientHeight, maxHeight)
+        : sidebar.clientHeight;
+    const visibleTop = sidebar.scrollTop + topPadding - listTop;
+    const visibleBottom =
+      sidebar.scrollTop + visibleHeight - bottomPadding - listTop;
+    if (top < visibleTop)
+      sidebar.scrollTop = Math.max(0, top + listTop - topPadding);
+    else if (bottom > visibleBottom)
+      sidebar.scrollTop = bottom + listTop - visibleHeight + bottomPadding;
+    renderVirtualSidebarWindow();
+  }
+
+  function rerenderVirtualSidebar() {
+    const ul = document.querySelector<HTMLElement>("#filelist");
+    if (!ul?.classList.contains("tree-virtual")) return;
+    computeVirtualSidebarVisibleRows();
+    renderVirtualSidebarWindow();
+  }
+
+  function renderVirtualTreeSidebar(root: TreeNode) {
+    const ul = $("#filelist");
+    SIDEBAR_TREE_ROOT = root;
+    buildSidebarTreeRows(root);
+    ul.classList.add("tree-virtual");
+    ul.style.position = "relative";
+    computeVirtualSidebarVisibleRows();
+    renderVirtualSidebarWindow();
+    document
+      .querySelector<HTMLElement>("#sidebar")
+      ?.addEventListener("scroll", renderVirtualSidebarWindow, {
+        passive: true,
+      });
+  }
+
   function renderFlat(
     files: SidebarItem[],
     ul: HTMLElement,
@@ -1559,13 +1961,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     const ul = $("#filelist");
     ul.innerHTML = "";
     ul.classList.toggle("tree", STATE.sbView === "tree");
+    ul.classList.remove("tree-virtual");
+    ul.style.removeProperty("height");
+    ul.style.removeProperty("position");
+    SIDEBAR_TREE_ROOT = null;
+    SIDEBAR_TREE_ROWS = [];
+    SIDEBAR_VISIBLE_ROWS = [];
+    SIDEBAR_ROW_BY_PATH = new Map();
     STATE.files = files as FileMeta[];
     SIDEBAR_FILES = files;
     SIDEBAR_ON_FILE_CLICK = onFileClick;
     if (!onFileClick) REPO_SIDEBAR_REF = null;
     if (STATE.sbView === "tree") {
       const root = buildTree(files);
-      renderTreeNode(root, 0, ul, onFileClick);
+      if (onFileClick && files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
+        renderVirtualTreeSidebar(root);
+      else renderTreeNode(root, 0, ul, onFileClick);
     } else {
       renderFlat(files, ul, onFileClick);
     }
@@ -1587,6 +1998,19 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function setAllSidebarDirsCollapsed(collapsed: boolean) {
     if (!collapsed) STATE.collapsedDirs.clear();
+    if ($("#filelist").classList.contains("tree-virtual")) {
+      if (collapsed) {
+        for (const row of SIDEBAR_TREE_ROWS) {
+          if (row.kind === "dir") STATE.collapsedDirs.add(row.path);
+        }
+      }
+      localStorage.setItem(
+        "gdp:collapsed-dirs",
+        JSON.stringify([...STATE.collapsedDirs]),
+      );
+      rerenderVirtualSidebar();
+      return;
+    }
     $$<HTMLElement>("#filelist .tree-dir[data-dirpath]").forEach((li) => {
       const path = li.dataset.dirpath || "";
       if (!path) return;
@@ -1814,33 +2238,32 @@ window.GdpExpandLogic = GdpExpandLogic;
         "gdp:collapsed-dirs",
         JSON.stringify([...STATE.collapsedDirs]),
       );
+    rerenderVirtualSidebar();
   }
 
   function markActive(path: string, options: { reveal?: boolean } = {}) {
     STATE.activeFile = path;
+    SIDEBAR_VIRTUAL_ACTIVE_PATH = path;
     if (options.reveal && STATE.sbView === "tree") expandSidebarAncestors(path);
-    $$("#filelist li").forEach((li) => {
-      const itemPath = li.dataset.path || li.dataset.dirpath;
-      if (itemPath) li.classList.toggle("active", itemPath === path);
-    });
+    setActiveSidebarItem(sidebarItemByPath(path));
+    if ($("#filelist").classList.contains("tree-virtual")) {
+      renderVirtualSidebarWindow();
+      scrollVirtualSidebarPathIntoView(path);
+      return;
+    }
     if (options.reveal) {
-      const active = document.querySelector<HTMLElement>(
-        "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]",
-      );
+      const active = activeSidebarItem();
       if (active)
         requestAnimationFrame(() => scrollSidebarItemIntoView(active));
     }
   }
 
   function applyViewedState() {
+    if (isRepositorySidebarMode()) return;
     $$<HTMLElement>("#filelist li[data-path]").forEach((li) => {
       const path = li.dataset.path || "";
-      li.classList.toggle(
-        "viewed",
-        !isRepositorySidebarMode() && STATE.viewedFiles.has(path),
-      );
+      li.classList.toggle("viewed", STATE.viewedFiles.has(path));
     });
-    if (isRepositorySidebarMode()) return;
     $$<HTMLElement>(".gdp-file-shell[data-path]").forEach((card) => {
       const path = card.dataset.path || "";
       const viewed = STATE.viewedFiles.has(path);
@@ -1850,11 +2273,16 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function applyFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
+    if ($("#filelist").classList.contains("tree-virtual")) {
+      rerenderVirtualSidebar();
+      return;
+    }
     const filter = compileFileFilter(input.value);
     const invalid = filter.kind === "invalid";
     input.toggleAttribute("aria-invalid", invalid);
     input.title = invalid ? filter.error || "invalid regular expression" : "";
     const matches = invalid ? () => true : filter.match;
+    const filterActive = filter.kind !== "empty" && !invalid;
     $$("#filelist li[data-path]").forEach((li) => {
       const match = matches(li.dataset.path || "");
       li.classList.toggle("hidden", !match);
@@ -1867,20 +2295,40 @@ window.GdpExpandLogic = GdpExpandLogic;
           card.classList.toggle("hidden-by-filter", !match);
         });
     }
-    updateTreeDirVisibility(matches, filter.kind !== "empty" && !invalid);
-    if (typeof applyViewedState === "function") applyViewedState();
+    updateTreeDirVisibility(matches, filterActive);
+    if (!isRepositorySidebarMode() && typeof applyViewedState === "function")
+      applyViewedState();
   }
 
   function updateTreeDirVisibility(
     dirMatches?: (path: string) => boolean,
     filterActive = false,
   ) {
-    $$("#filelist .tree-dir").forEach((dir) => {
+    const dirs = $$<HTMLElement>("#filelist .tree-dir");
+    for (let i = dirs.length - 1; i >= 0; i--) {
+      const dir = dirs[i];
       const childUl = dir.nextElementSibling;
-      if (!childUl?.classList.contains("tree-children")) return;
-      const anyVisible = !!childUl.querySelector(
-        ".tree-file:not(.hidden):not(.hidden-by-tests)",
-      );
+      if (!childUl?.classList.contains("tree-children")) continue;
+      let anyVisible = false;
+      for (const child of childUl.children) {
+        if (!(child instanceof HTMLElement)) continue;
+        if (
+          child.classList.contains("tree-file") &&
+          !child.classList.contains("hidden") &&
+          !child.classList.contains("hidden-by-tests")
+        ) {
+          anyVisible = true;
+          break;
+        }
+        if (
+          child.classList.contains("tree-dir") &&
+          !child.classList.contains("hidden") &&
+          !child.classList.contains("hidden-by-tests")
+        ) {
+          anyVisible = true;
+          break;
+        }
+      }
       const explicitVisible = dir.dataset.explicit === "true" && !filterActive;
       const selfMatches =
         filterActive && !!dirMatches && dirMatches(dir.dataset.dirpath || "");
@@ -1888,7 +2336,23 @@ window.GdpExpandLogic = GdpExpandLogic;
         "hidden",
         !anyVisible && !explicitVisible && !selfMatches,
       );
+    }
+  }
+
+  let SIDEBAR_FILTER_RAF = 0;
+  function scheduleApplyFilter() {
+    if (SIDEBAR_FILTER_RAF) cancelAnimationFrame(SIDEBAR_FILTER_RAF);
+    SIDEBAR_FILTER_RAF = requestAnimationFrame(() => {
+      SIDEBAR_FILTER_RAF = 0;
+      applyFilter();
     });
+  }
+
+  function flushSidebarFilter() {
+    if (!SIDEBAR_FILTER_RAF) return;
+    cancelAnimationFrame(SIDEBAR_FILTER_RAF);
+    SIDEBAR_FILTER_RAF = 0;
+    applyFilter();
   }
 
   // ============================================================
@@ -6428,10 +6892,129 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     return true;
   }
+  const SIDEBAR_ITEM_SELECTOR =
+    "#filelist li[data-path], #filelist .tree-dir[data-dirpath]";
+  const ACTIVE_SIDEBAR_ITEM_SELECTOR =
+    "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]";
+
+  function sidebarItemPath(item: HTMLElement): string {
+    return item.dataset.path || item.dataset.dirpath || "";
+  }
+
+  function activeSidebarItem(): HTMLElement | null {
+    return document.querySelector<HTMLElement>(ACTIVE_SIDEBAR_ITEM_SELECTOR);
+  }
+
+  function sidebarItemByPath(path: string): HTMLElement | null {
+    if (isVirtualSidebarActive() && SIDEBAR_ROW_BY_PATH.has(path)) {
+      return (
+        document.querySelector<HTMLElement>(
+          `#filelist li[data-path="${CSS.escape(path)}"], #filelist .tree-dir[data-dirpath="${CSS.escape(path)}"]`,
+        ) || null
+      );
+    }
+    const escaped = CSS.escape(path);
+    return document.querySelector<HTMLElement>(
+      `#filelist li[data-path="${escaped}"], #filelist .tree-dir[data-dirpath="${escaped}"]`,
+    );
+  }
+
+  function setActiveSidebarItem(target: HTMLElement | null) {
+    document
+      .querySelectorAll<HTMLElement>(ACTIVE_SIDEBAR_ITEM_SELECTOR)
+      .forEach((item) => {
+        if (item !== target) item.classList.remove("active");
+      });
+    target?.classList.add("active");
+  }
+
   function visibleSidebarItems() {
-    return $$<HTMLElement>(
-      "#filelist li[data-path], #filelist .tree-dir[data-dirpath]",
-    ).filter(isSidebarRowVisible);
+    return $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR).filter(isSidebarRowVisible);
+  }
+
+  function isVirtualSidebarActive() {
+    return $("#filelist").classList.contains("tree-virtual");
+  }
+
+  function virtualSidebarActiveIndex() {
+    const activePath = SIDEBAR_VIRTUAL_ACTIVE_PATH || STATE.activeFile || "";
+    return SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === activePath);
+  }
+
+  function selectVirtualSidebarIndex(
+    index: number,
+    options?: { open?: boolean },
+  ) {
+    if (!SIDEBAR_VISIBLE_ROWS.length) return null;
+    const safeIndex = Math.max(
+      0,
+      Math.min(SIDEBAR_VISIBLE_ROWS.length - 1, index),
+    );
+    const row = SIDEBAR_VISIBLE_ROWS[safeIndex];
+    if (!row) return null;
+    markActive(row.path);
+    scrollVirtualSidebarPathIntoView(row.path);
+    if (options?.open) {
+      if (row.kind === "dir" && row.dir && SIDEBAR_ON_FILE_CLICK) {
+        SIDEBAR_ON_FILE_CLICK({
+          path: row.dir.path,
+          display_path: row.dir.path,
+          type: "tree",
+          children_omitted: row.dir.children_omitted,
+          children_omitted_reason: row.dir.children_omitted_reason,
+        });
+      } else if (row.file && SIDEBAR_ON_FILE_CLICK) {
+        SIDEBAR_ON_FILE_CLICK(row.file);
+      }
+    }
+    return row;
+  }
+
+  function visibleSidebarItemFrom(
+    current: HTMLElement,
+    direction: 1 | -1,
+  ): HTMLElement | null {
+    const root = document.querySelector<HTMLElement>("#filelist");
+    if (!current.isConnected) return null;
+    if (!root) return null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(node) {
+        if (!(node instanceof HTMLElement)) return NodeFilter.FILTER_SKIP;
+        if (node.classList.contains("tree-children")) {
+          const dir = node.previousElementSibling;
+          if (
+            dir?.classList.contains("collapsed") ||
+            dir?.classList.contains("hidden") ||
+            dir?.classList.contains("hidden-by-tests")
+          )
+            return NodeFilter.FILTER_REJECT;
+        }
+        if (!node.matches(SIDEBAR_ITEM_SELECTOR)) return NodeFilter.FILTER_SKIP;
+        return isSidebarRowVisible(node)
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_SKIP;
+      },
+    });
+    walker.currentNode = current;
+    const next = direction === 1 ? walker.nextNode() : walker.previousNode();
+    return next instanceof HTMLElement ? next : null;
+  }
+
+  function adjacentVisibleSidebarItem(direction: 1 | -1): HTMLElement | null {
+    const active = activeSidebarItem();
+    if (!active) {
+      const items = visibleSidebarItems();
+      return direction === 1
+        ? items[0] || null
+        : items[items.length - 1] || null;
+    }
+    if (!isSidebarRowVisible(active)) {
+      const items = visibleSidebarItems();
+      return direction === 1
+        ? items[0] || null
+        : items[items.length - 1] || null;
+    }
+    return visibleSidebarItemFrom(active, direction) || active;
   }
   function scrollSidebarItemIntoView(
     item: HTMLElement,
@@ -6476,6 +7059,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   }
   function moveActiveSidebarItem(direction: 1 | -1) {
+    if (isVirtualSidebarActive()) {
+      const current = virtualSidebarActiveIndex();
+      const start =
+        current < 0
+          ? direction === 1
+            ? 0
+            : SIDEBAR_VISIBLE_ROWS.length - 1
+          : current + direction;
+      const row = selectVirtualSidebarIndex(start);
+      if (row?.file) prefetchByPath(row.file.path);
+      return;
+    }
     const items = visibleSidebarItems();
     if (!items.length) return;
     const current = items.findIndex((li) => li.classList.contains("active"));
@@ -6488,6 +7083,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (target.dataset.path) prefetchByPath(target.dataset.path);
   }
   function moveActiveSidebarPage(direction: 1 | -1) {
+    if (isVirtualSidebarActive()) {
+      const sidebar = document.querySelector<HTMLElement>("#sidebar");
+      const halfPageRows = Math.max(
+        1,
+        Math.floor(
+          (sidebar?.clientHeight || window.innerHeight) /
+            2 /
+            VIRTUAL_SIDEBAR_ROW_HEIGHT,
+        ),
+      );
+      const current = virtualSidebarActiveIndex();
+      const start = current < 0 ? 0 : current;
+      const row = selectVirtualSidebarIndex(start + direction * halfPageRows);
+      if (row?.file) prefetchByPath(row.file.path);
+      return;
+    }
     const items = visibleSidebarItems();
     if (!items.length) return;
     const repoSidebar = isRepositorySidebarMode();
@@ -6514,6 +7125,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (target.dataset.path) prefetchByPath(target.dataset.path);
   }
   function moveActiveSidebarToEdge(edge: "top" | "bottom") {
+    if (isVirtualSidebarActive()) {
+      const row = selectVirtualSidebarIndex(
+        edge === "top" ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1,
+      );
+      if (row?.file) prefetchByPath(row.file.path);
+      return;
+    }
     const items = visibleSidebarItems();
     const repoSidebar = isRepositorySidebarMode();
     const target = edge === "top" ? items[0] : items[items.length - 1];
@@ -6525,6 +7143,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (target.dataset.path) prefetchByPath(target.dataset.path);
   }
   function setActiveSidebarDirectoryCollapsed(collapsed: boolean) {
+    if (isVirtualSidebarActive()) {
+      const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
+      if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted) return;
+      if (STATE.collapsedDirs.has(row.path) === collapsed) return;
+      if (collapsed) STATE.collapsedDirs.add(row.path);
+      else STATE.collapsedDirs.delete(row.path);
+      localStorage.setItem(
+        "gdp:collapsed-dirs",
+        JSON.stringify([...STATE.collapsedDirs]),
+      );
+      rerenderVirtualSidebar();
+      scrollVirtualSidebarPathIntoView(row.path);
+      return;
+    }
     const active = document.querySelector<HTMLElement>(
       "#filelist .tree-dir.active[data-dirpath]",
     );
@@ -6534,6 +7166,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (control) control.click();
   }
   function toggleActiveSidebarDirectoryCollapsed() {
+    if (isVirtualSidebarActive()) {
+      const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
+      if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted) return;
+      setActiveSidebarDirectoryCollapsed(!STATE.collapsedDirs.has(row.path));
+      return;
+    }
     const active = document.querySelector<HTMLElement>(
       "#filelist .tree-dir.active[data-dirpath]",
     );
@@ -6542,12 +7180,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (control) control.click();
   }
   function openActiveSidebarItem() {
+    if (isVirtualSidebarActive()) {
+      const index = virtualSidebarActiveIndex();
+      if (index >= 0) selectVirtualSidebarIndex(index, { open: true });
+      return;
+    }
     const active = document.querySelector<HTMLElement>(
       "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]",
     );
     if (active && isSidebarRowVisible(active)) active.click();
   }
   function jumpToActiveOrFirstFilteredItem() {
+    if (isVirtualSidebarActive()) {
+      const current = virtualSidebarActiveIndex();
+      selectVirtualSidebarIndex(current >= 0 ? current : 0, { open: true });
+      $<HTMLInputElement>("#sb-filter").blur();
+      return;
+    }
     const items = visibleSidebarItems();
     const active = items.find((li) => li.classList.contains("active"));
     const target = active || items[0];
@@ -6558,17 +7207,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   const sbFilter = $<HTMLInputElement>("#sb-filter");
   if (sbFilter) {
-    sbFilter.addEventListener("input", () => applyFilter());
+    sbFilter.addEventListener("input", () => scheduleApplyFilter());
     sbFilter.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        flushSidebarFilter();
         jumpToActiveOrFirstFilteredItem();
       } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        flushSidebarFilter();
         moveActiveSidebarItem(e.key === "ArrowDown" ? 1 : -1);
       } else if (e.key === "Escape") {
         if (sbFilter.value) {
           sbFilter.value = "";
+          flushSidebarFilter();
           applyFilter();
         } else {
           sbFilter.blur();
@@ -7174,21 +7826,53 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "sidebar-next" || action === "sidebar-previous") {
       const repoSidebar = isRepositorySidebarMode();
-      const items = repoSidebar
-        ? visibleSidebarItems()
+      const direction = action === "sidebar-next" ? 1 : -1;
+      const diffItems = repoSidebar
+        ? []
         : $$<HTMLElement>(
             "#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)",
           );
-      if (!items.length) return true;
-      let idx = items.findIndex((li) => li.classList.contains("active"));
-      if (idx < 0) idx = 0;
-      else
-        idx =
-          action === "sidebar-next"
-            ? Math.min(items.length - 1, idx + 1)
-            : Math.max(0, idx - 1);
-      const target = items[idx];
-      const path = target?.dataset.path || target?.dataset.dirpath;
+      let diffIndex = diffItems.findIndex((li) =>
+        li.classList.contains("active"),
+      );
+      if (!repoSidebar)
+        diffIndex =
+          diffIndex < 0
+            ? 0
+            : Math.max(
+                0,
+                Math.min(diffItems.length - 1, diffIndex + direction),
+              );
+      const target = repoSidebar
+        ? isVirtualSidebarActive()
+          ? null
+          : adjacentVisibleSidebarItem(direction)
+        : diffItems[diffIndex];
+      if (repoSidebar && isVirtualSidebarActive()) {
+        const current = virtualSidebarActiveIndex();
+        const start =
+          current < 0
+            ? direction === 1
+              ? 0
+              : SIDEBAR_VISIBLE_ROWS.length - 1
+            : current + direction;
+        const row = selectVirtualSidebarIndex(start);
+        const next = row
+          ? SIDEBAR_VISIBLE_ROWS[
+              Math.max(
+                0,
+                Math.min(
+                  SIDEBAR_VISIBLE_ROWS.length - 1,
+                  SIDEBAR_VISIBLE_ROWS.indexOf(row) + direction,
+                ),
+              )
+            ]
+          : null;
+        if (!repeated && next?.file) prefetchByPath(next.file.path);
+        return true;
+      }
+      if (!target) return true;
+      const path = sidebarItemPath(target);
       if (!repoSidebar && target) {
         target.click();
         scrollSidebarItemIntoView(target);
@@ -7196,12 +7880,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         markActive(path);
         scrollSidebarItemIntoView(target);
       }
-      const nextIdx =
-        action === "sidebar-next"
-          ? Math.min(items.length - 1, idx + 1)
-          : Math.max(0, idx - 1);
-      const nextItem = items[nextIdx];
-      if (nextItem && nextItem !== target && nextItem.dataset.path)
+      const nextItem = repoSidebar
+        ? visibleSidebarItemFrom(target, direction)
+        : diffItems[
+            Math.max(0, Math.min(diffItems.length - 1, diffIndex + direction))
+          ];
+      if (!repeated && nextItem && nextItem !== target && nextItem.dataset.path)
         prefetchByPath(nextItem.dataset.path);
       return true;
     }
@@ -7831,7 +8515,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   // Hide-tests toggle: ファイル名に test|spec が含まれるエントリをフィルタ。
-  const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
   function applyHideTests() {
     const btn = $("#hide-tests");
     if (btn) btn.classList.toggle("active", STATE.hideTests);
@@ -7847,7 +8530,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         const isTest = TEST_RE.test(li.dataset.path || "");
         li.classList.toggle("hidden-by-tests", STATE.hideTests && isTest);
       });
-    updateTreeDirVisibility();
+    if (isVirtualSidebarActive()) rerenderVirtualSidebar();
+    else updateTreeDirVisibility();
     if (typeof applyViewedState === "function") applyViewedState();
   }
   applyHideTests();
