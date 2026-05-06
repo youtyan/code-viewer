@@ -733,6 +733,12 @@ describe("view file UI", () => {
         'grid-template:\n    "toggle title totals ." auto\n    "ref ref ref ref" auto\n    "actions actions . view" auto\n    "filter filter filter filter" auto',
       ),
     ).toBe(true);
+    expect(
+      style.includes(
+        "body.gdp-repo-page .sb-head,\nbody.gdp-file-detail-page.gdp-repo-blob-page .sb-head",
+      ),
+    ).toBe(true);
+    expect(style.includes("  top: 0;\n  z-index: 5;")).toBe(true);
     expect(style.includes("grid-area: toggle")).toBe(true);
     expect(style.includes("grid-area: title")).toBe(true);
     expect(style.includes("grid-area: totals")).toBe(true);
