@@ -14,14 +14,16 @@ describe("fuzzyMatchPath", () => {
 
     expect(basename === null).toBe(false);
     expect(directory === null).toBe(false);
-    expect(basename!.score > directory!.score).toBe(true);
+    if (!basename || !directory) throw new Error("expected fuzzy matches");
+    expect(basename.score > directory.score).toBe(true);
   });
 
   test("matches subsequences and returns matched ranges", () => {
     const result = fuzzyMatchPath("fts", "web-src/file-tree-search.ts");
 
     expect(result === null).toBe(false);
-    expect(result!.ranges.length > 0).toBe(true);
+    if (!result) throw new Error("expected fuzzy match");
+    expect(result.ranges.length > 0).toBe(true);
   });
 
   test("returns null when query characters are missing", () => {

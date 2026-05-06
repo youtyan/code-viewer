@@ -31,10 +31,13 @@ describe("sourceFixture", () => {
   });
 
   test("keeps template literals distinct from plain string literals", () => {
-    const fixture = sourceFixture("const label = `${name}`;");
+    const placeholder = "$" + "{name}";
+    const templateLiteral = `const label = \`${placeholder}\`;`;
+    const singleQuoted = `const label = '${placeholder}';`;
+    const fixture = sourceFixture(templateLiteral);
 
-    expect(fixture.includes("const label = '${name}';")).toBe(false);
-    expect(fixture.includes("const label = `${name}`;")).toBe(true);
+    expect(fixture.includes(singleQuoted)).toBe(false);
+    expect(fixture.includes(templateLiteral)).toBe(true);
   });
 
   test("ignores Biome-added trailing commas in arrays, calls, and objects", () => {
