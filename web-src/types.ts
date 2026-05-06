@@ -1,4 +1,4 @@
-import type { GdpExpandLogic } from './expand-logic';
+import type { GdpExpandLogic } from "./expand-logic";
 
 export type FileMeta = {
   order?: number;
@@ -36,9 +36,9 @@ export type DiffMeta = {
 export type RepoTreeEntry = {
   name: string;
   path: string;
-  type: 'tree' | 'blob' | 'commit';
+  type: "tree" | "blob" | "commit";
   children_omitted?: true;
-  children_omitted_reason?: 'heavy' | 'internal' | 'truncated';
+  children_omitted_reason?: "heavy" | "internal" | "truncated";
 };
 
 export type RepoTreeResponse = {
@@ -68,7 +68,7 @@ export type FileSearchListResponse = {
   generation: number;
   files: {
     path: string;
-    type: 'blob' | 'commit';
+    type: "blob" | "commit";
   }[];
   truncated: boolean;
 };
@@ -82,7 +82,7 @@ export type GrepMatch = {
 
 export type GrepResponse = {
   ref: string;
-  engine: 'rg' | 'git' | 'fallback';
+  engine: "rg" | "git" | "fallback";
   truncated: boolean;
   matches: GrepMatch[];
 };
@@ -124,8 +124,19 @@ export type DiffCardElement = HTMLElement & {
 export type RefResponse = {
   branches?: string[];
   tags?: string[];
-  commits?: string[];
+  commits?: CommitMeta[];
   current?: string;
+};
+
+export type CommitMeta = {
+  sha: string;
+  subject: string;
+  author: string;
+  when: string;
+};
+
+export type RefCommitResponse = {
+  commits?: CommitMeta[];
 };
 
 declare global {

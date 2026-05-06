@@ -1,6 +1,12 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
-import { runBytesSync, runSync, spawnStream } from './runtime';
-import { join } from 'node:path';
+import {
+  type Dirent,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { runBytesSync, runSync, spawnStream } from "./runtime";
 
 export type GitFileMeta = {
   order?: number;
@@ -17,133 +23,331 @@ export type GitFileMeta = {
 export type GitTreeEntry = {
   name: string;
   path: string;
-  type: 'tree' | 'blob' | 'commit';
+  type: "tree" | "blob" | "commit";
   children_omitted?: true;
-  children_omitted_reason?: 'heavy' | 'internal' | 'truncated';
+  children_omitted_reason?: "heavy" | "internal" | "truncated";
+};
+
+export type GitCommitMeta = {
+  sha: string;
+  subject: string;
+  author: string;
+  when: string;
 };
 
 const WORKTREE_RECURSIVE_DEPTH_LIMIT = 32;
 export const WORKTREE_RECURSIVE_ENTRY_LIMIT = 50000;
+export const DEFAULT_REF_COMMIT_LIMIT = 100;
+const MAX_REF_COMMIT_LIMIT = 500;
+const COMMIT_FORMAT = "%H%x00%s%x00%an%x00%aI";
 export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
-  'node_modules',
-  '.venv',
-  'venv',
-  '.next',
-  '.nuxt',
-  '.svelte-kit',
-  '.astro',
-  '.vercel',
-  'dist',
-  'build',
-  'out',
-  'target',
-  '.gradle',
-  '__pycache__',
-  '.pytest_cache',
-  '.tox',
-  '.terraform',
-  '.idea',
-  '.vscode',
-  'vendor',
-  '.cache',
-  'coverage',
-  'DerivedData',
-  'Pods',
-  'bin',
-  'obj',
+  "node_modules",
+  ".venv",
+  "venv",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".astro",
+  ".vercel",
+  "dist",
+  "build",
+  "out",
+  "target",
+  ".gradle",
+  "__pycache__",
+  ".pytest_cache",
+  ".tox",
+  ".terraform",
+  ".idea",
+  ".vscode",
+  "vendor",
+  ".cache",
+  "coverage",
+  "DerivedData",
+  "Pods",
+  "bin",
+  "obj",
 ];
 
-function run(args: string[], cwd: string): { code: number; stdout: string; stderr: string } {
+function run(
+  args: string[],
+  cwd: string,
+): { code: number; stdout: string; stderr: string } {
   return runSync(args, cwd);
 }
 
-function runBytes(args: string[], cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
+function runBytes(
+  args: string[],
+  cwd: string,
+): { code: number; stdout: Uint8Array; stderr: string } {
   return runBytesSync(args, cwd);
 }
 
 export function repoRoot(cwd: string): string | null {
-  const res = run(['git', 'rev-parse', '--show-toplevel'], cwd);
+  const res = run(["git", "rev-parse", "--show-toplevel"], cwd);
   return res.code === 0 ? res.stdout.trimEnd() : null;
 }
 
 export function currentBranch(cwd: string): string | null {
-  const res = run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const res = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
   return res.code === 0 ? res.stdout.trimEnd() : null;
 }
 
-export function show(ref: string, path: string, cwd: string): { code: number; stdout: string; stderr: string } {
-  return run(['git', 'show', `${ref}:${path}`], cwd);
+export function show(
+  ref: string,
+  path: string,
+  cwd: string,
+): { code: number; stdout: string; stderr: string } {
+  return run(["git", "show", `${ref}:${path}`], cwd);
 }
 
-export function showBytes(ref: string, path: string, cwd: string): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytes(['git', 'show', `${ref}:${path}`], cwd);
+export function showBytes(
+  ref: string,
+  path: string,
+  cwd: string,
+): { code: number; stdout: Uint8Array; stderr: string } {
+  return runBytes(["git", "show", `${ref}:${path}`], cwd);
 }
 
-export function catFileBlobStream(oid: string, cwd: string): { stream: ReadableStream<Uint8Array>; exited: Promise<number>; kill(signal?: string): void } {
-  return spawnStream(['git', 'cat-file', 'blob', oid], cwd);
+export function catFileBlobStream(
+  oid: string,
+  cwd: string,
+): {
+  stream: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(signal?: string): void;
+} {
+  return spawnStream(["git", "cat-file", "blob", oid], cwd);
 }
 
-export function objectSize(ref: string, path: string, cwd: string): { code: number; size: number; stderr: string } {
-  const res = run(['git', 'cat-file', '-s', `${ref}:${path}`], cwd);
-  return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
+export function objectSize(
+  ref: string,
+  path: string,
+  cwd: string,
+): { code: number; size: number; stderr: string } {
+  const res = run(["git", "cat-file", "-s", `${ref}:${path}`], cwd);
+  return {
+    code: res.code,
+    size: Number(res.stdout.trim()) || 0,
+    stderr: res.stderr,
+  };
 }
 
-export function objectByteSize(oid: string, cwd: string): { code: number; size: number; stderr: string } {
-  const res = run(['git', 'cat-file', '-s', oid], cwd);
-  return { code: res.code, size: Number(res.stdout.trim()) || 0, stderr: res.stderr };
+export function objectByteSize(
+  oid: string,
+  cwd: string,
+): { code: number; size: number; stderr: string } {
+  const res = run(["git", "cat-file", "-s", oid], cwd);
+  return {
+    code: res.code,
+    size: Number(res.stdout.trim()) || 0,
+    stderr: res.stderr,
+  };
 }
 
-export function objectId(ref: string, path: string, cwd: string): { code: number; oid: string; stderr: string } {
-  const res = run(['git', 'rev-parse', '--verify', `${ref}:${path}`], cwd);
+export function objectId(
+  ref: string,
+  path: string,
+  cwd: string,
+): { code: number; oid: string; stderr: string } {
+  const res = run(["git", "rev-parse", "--verify", `${ref}:${path}`], cwd);
   const oid = res.stdout.trim();
-  if (res.code !== 0 || !oid) return { code: res.code || 1, oid: '', stderr: res.stderr };
-  const type = run(['git', 'cat-file', '-t', oid], cwd);
-  if (type.code !== 0 || type.stdout.trim() !== 'blob') return { code: 1, oid: '', stderr: type.stderr };
-  return { code: 0, oid, stderr: '' };
+  if (res.code !== 0 || !oid)
+    return { code: res.code || 1, oid: "", stderr: res.stderr };
+  const type = run(["git", "cat-file", "-t", oid], cwd);
+  if (type.code !== 0 || type.stdout.trim() !== "blob")
+    return { code: 1, oid: "", stderr: type.stderr };
+  return { code: 0, oid, stderr: "" };
 }
 
 export function verifyTreeRef(ref: string, cwd: string): boolean {
-  if (!ref || ref === 'worktree') return false;
-  if (ref.startsWith('-')) return false;
-  const res = run(['git', 'rev-parse', '--verify', `${ref}^{tree}`], cwd);
+  if (!ref || ref === "worktree") return false;
+  if (ref.startsWith("-")) return false;
+  const res = run(["git", "rev-parse", "--verify", `${ref}^{tree}`], cwd);
   return res.code === 0;
 }
 
-export function refs(cwd: string): { branches: string[]; tags: string[]; commits: string[]; current: string } {
-  const out = { branches: [] as string[], tags: [] as string[], commits: [] as string[], current: '' };
-  const branches = run([
-    'git', 'for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads', 'refs/remotes',
-  ], cwd);
+export function refs(cwd: string): {
+  branches: string[];
+  tags: string[];
+  commits: GitCommitMeta[];
+  current: string;
+} {
+  const out = {
+    branches: [] as string[],
+    tags: [] as string[],
+    commits: [] as GitCommitMeta[],
+    current: "",
+  };
+  const branches = run(
+    [
+      "git",
+      "for-each-ref",
+      "--sort=-committerdate",
+      "--format=%(refname:short)",
+      "refs/heads",
+      "refs/remotes",
+    ],
+    cwd,
+  );
   if (branches.code === 0) {
-    out.branches = branches.stdout.split('\n').filter((line) => line && line !== 'origin/HEAD');
+    out.branches = branches.stdout
+      .split("\n")
+      .filter((line) => line && line !== "origin/HEAD");
   }
-  const tags = run(['git', 'for-each-ref', '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags'], cwd);
-  if (tags.code === 0) out.tags = tags.stdout.split('\n').filter(Boolean);
-  const commits = run(['git', 'log', '-50', '--format=%h\t%s\t%an\t%ar'], cwd);
-  if (commits.code === 0) out.commits = commits.stdout.split('\n').filter(Boolean);
-  out.current = currentBranch(cwd) || '';
+  const tags = run(
+    [
+      "git",
+      "for-each-ref",
+      "--sort=-creatordate",
+      "--format=%(refname:short)",
+      "refs/tags",
+    ],
+    cwd,
+  );
+  if (tags.code === 0) out.tags = tags.stdout.split("\n").filter(Boolean);
+  out.commits = refCommits(cwd, "", DEFAULT_REF_COMMIT_LIMIT);
+  out.current = currentBranch(cwd) || "";
   return out;
 }
 
+function clampCommitLimit(max: number): number {
+  return Math.max(1, Math.min(max, MAX_REF_COMMIT_LIMIT));
+}
+
+function parseCommitLog(stdout: string): GitCommitMeta[] {
+  const parts = stdout.split("\0");
+  const commits: GitCommitMeta[] = [];
+  for (let index = 0; index < parts.length; ) {
+    if (!parts[index]) {
+      index++;
+      continue;
+    }
+    const sha = parts[index++] || "";
+    const subject = parts[index++] || "";
+    const author = parts[index++] || "";
+    const when = parts[index++] || "";
+    if (sha) commits.push({ sha, subject, author, when });
+  }
+  return commits;
+}
+
+function commitLogArgs(limit: number): string[] {
+  return [
+    "git",
+    "log",
+    "--all",
+    "-z",
+    `--max-count=${limit}`,
+    `--format=${COMMIT_FORMAT}`,
+  ];
+}
+
+function mergeCommitResults(
+  limit: number,
+  ...groups: GitCommitMeta[][]
+): GitCommitMeta[] {
+  const seen = new Set<string>();
+  const merged: GitCommitMeta[] = [];
+  for (const commits of groups) {
+    for (const commit of commits) {
+      if (!commit.sha || seen.has(commit.sha)) continue;
+      seen.add(commit.sha);
+      merged.push(commit);
+      if (merged.length >= limit) return merged;
+    }
+  }
+  return merged;
+}
+
+function runCommitLog(cwd: string, args: string[]): GitCommitMeta[] {
+  const commits = run(args, cwd);
+  return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
+}
+
+export function refCommits(
+  cwd: string,
+  query = "",
+  max = DEFAULT_REF_COMMIT_LIMIT,
+): GitCommitMeta[] {
+  const limit = clampCommitLimit(max);
+  const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  const hashMatches: GitCommitMeta[] = [];
+  if (/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+    const verified = run(
+      ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
+      cwd,
+    );
+    const single = run(
+      [
+        "git",
+        "log",
+        "-z",
+        "-1",
+        `--format=${COMMIT_FORMAT}`,
+        verified.code === 0 && verified.stdout.trim()
+          ? verified.stdout.trim()
+          : trimmed,
+      ],
+      cwd,
+    );
+    if (single.code === 0 && single.stdout.trim()) {
+      hashMatches.push(...parseCommitLog(single.stdout));
+    }
+  }
+  if (!trimmed) {
+    return runCommitLog(cwd, commitLogArgs(limit));
+  }
+  const subjectMatches = runCommitLog(cwd, [
+    ...commitLogArgs(limit),
+    "--regexp-ignore-case",
+    "--fixed-strings",
+    `--grep=${trimmed}`,
+  ]);
+  const authorMatches = runCommitLog(cwd, [
+    ...commitLogArgs(limit),
+    "--regexp-ignore-case",
+    "--fixed-strings",
+    `--author=${trimmed}`,
+  ]);
+  return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
+}
+
 export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
-  const res = run([
-    'git', '-c', 'core.quotepath=false', 'diff',
-    '--no-color', '--no-ext-diff', '--find-renames', '--name-status', '-z',
-    ...args,
-  ], cwd);
+  const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      "--name-status",
+      "-z",
+      ...args,
+    ],
+    cwd,
+  );
   if (res.code !== 0) return [];
-  const parts = res.stdout.split('\0');
+  const parts = res.stdout.split("\0");
   const files: GitFileMeta[] = [];
-  for (let i = 0; i < parts.length;) {
+  for (let i = 0; i < parts.length; ) {
     const status = parts[i++];
     if (!status) break;
     const kind = status[0];
-    if (kind === 'R' || kind === 'C') {
-      const oldPath = parts[i++] || '';
-      const path = parts[i++] || '';
-      if (path) files.push({ status: kind, old_path: oldPath, path, similarity: Number(status.slice(1)) || undefined });
+    if (kind === "R" || kind === "C") {
+      const oldPath = parts[i++] || "";
+      const path = parts[i++] || "";
+      if (path)
+        files.push({
+          status: kind,
+          old_path: oldPath,
+          path,
+          similarity: Number(status.slice(1)) || undefined,
+        });
     } else {
-      const path = parts[i++] || '';
+      const path = parts[i++] || "";
       if (path) files.push({ status: kind, path });
     }
   }
@@ -151,27 +355,38 @@ export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
 }
 
 export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
-  const res = run([
-    'git', '-c', 'core.quotepath=false', 'diff',
-    '--no-color', '--no-ext-diff', '--find-renames', '--numstat', '-z',
-    ...args,
-  ], cwd);
+  const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      "--numstat",
+      "-z",
+      ...args,
+    ],
+    cwd,
+  );
   if (res.code !== 0) return [];
-  const parts = res.stdout.split('\0');
+  const parts = res.stdout.split("\0");
   const files: GitFileMeta[] = [];
-  for (let i = 0; i < parts.length;) {
+  for (let i = 0; i < parts.length; ) {
     const rec = parts[i++];
     if (!rec) break;
     const match = rec.match(/^(\S+)\t(\S+)\t(.*)$/);
     if (!match) break;
     const [, add, del, rest] = match;
-    const binary = add === '-' && del === '-';
+    const binary = add === "-" && del === "-";
     const additions = binary ? 0 : Number(add) || 0;
     const deletions = binary ? 0 : Number(del) || 0;
-    if (rest === '') {
-      const oldPath = parts[i++] || '';
-      const path = parts[i++] || '';
-      if (path) files.push({ old_path: oldPath, path, additions, deletions, binary });
+    if (rest === "") {
+      const oldPath = parts[i++] || "";
+      const path = parts[i++] || "";
+      if (path)
+        files.push({ old_path: oldPath, path, additions, deletions, binary });
     } else {
       files.push({ path: rest, additions, deletions, binary });
     }
@@ -179,35 +394,49 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
   return files;
 }
 
-export function untracked(cwd: string, path = ''): string[] {
-  const args = ['git', 'ls-files', '--others', '--exclude-standard'];
-  if (path) args.push('--', `${path}/`);
+export function untracked(cwd: string, path = ""): string[] {
+  const args = ["git", "ls-files", "--others", "--exclude-standard"];
+  if (path) args.push("--", `${path}/`);
   const res = run(args, cwd);
-  return res.code === 0 ? res.stdout.split('\n').filter(Boolean) : [];
+  return res.code === 0 ? res.stdout.split("\n").filter(Boolean) : [];
 }
 
 function normalizeTreePath(path: string): string {
-  return path.replace(/^\/+|\/+$/g, '');
+  return path.replace(/^\/+|\/+$/g, "");
 }
 
 function sortTreeEntries(entries: GitTreeEntry[]): GitTreeEntry[] {
   return [...entries].sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
+    if (a.type !== b.type) return a.type === "tree" ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
 }
 
-function omittedWorktreeDirectoryReason(name: string, omitDirNames: Set<string>): GitTreeEntry['children_omitted_reason'] | undefined {
-  if (name === '.git') return 'internal';
-  return omitDirNames.has(name) ? 'heavy' : undefined;
+function omittedWorktreeDirectoryReason(
+  name: string,
+  omitDirNames: Set<string>,
+): GitTreeEntry["children_omitted_reason"] | undefined {
+  if (name === ".git") return "internal";
+  return omitDirNames.has(name) ? "heavy" : undefined;
 }
 
-function worktreeEntryFromDirent(base: string, dir: string, name: string, isDirectory: boolean, omitDirNames: Set<string>): GitTreeEntry {
+function worktreeEntryFromDirent(
+  base: string,
+  dir: string,
+  name: string,
+  isDirectory: boolean,
+  omitDirNames: Set<string>,
+): GitTreeEntry {
   const entryPath = base ? `${base}/${name}` : name;
   const type = isDirectory
-    ? hasDotGitEntry(join(dir, name)) ? 'commit' as const : 'tree' as const
-    : 'blob' as const;
-  const omittedReason = type === 'tree' ? omittedWorktreeDirectoryReason(name, omitDirNames) : undefined;
+    ? hasDotGitEntry(join(dir, name))
+      ? ("commit" as const)
+      : ("tree" as const)
+    : ("blob" as const);
+  const omittedReason =
+    type === "tree"
+      ? omittedWorktreeDirectoryReason(name, omitDirNames)
+      : undefined;
   return omittedReason
     ? {
         name,
@@ -219,15 +448,29 @@ function worktreeEntryFromDirent(base: string, dir: string, name: string, isDire
     : { name, path: entryPath, type };
 }
 
-function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean, omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES): GitTreeEntry[] {
+function worktreeFilesystemEntries(
+  cwd: string,
+  path: string,
+  recursive: boolean,
+  omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+): GitTreeEntry[] {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
   const omitDirNameSet = new Set(omitDirNames);
   let directEntries: GitTreeEntry[];
   try {
     const dirents = readdirSync(root, { withFileTypes: true });
-    directEntries = sortTreeEntries(dirents
-      .map(entry => worktreeEntryFromDirent(base, root, entry.name, entry.isDirectory(), omitDirNameSet)));
+    directEntries = sortTreeEntries(
+      dirents.map((entry) =>
+        worktreeEntryFromDirent(
+          base,
+          root,
+          entry.name,
+          entry.isDirectory(),
+          omitDirNameSet,
+        ),
+      ),
+    );
   } catch {
     return [];
   }
@@ -239,11 +482,11 @@ function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean
     if (fileEntries.length >= WORKTREE_RECURSIVE_ENTRY_LIMIT) {
       if (!truncated) {
         fileEntries.push({
-          name: 'more...',
-          path: '__code_viewer_truncated__',
-          type: 'tree',
+          name: "more...",
+          path: "__code_viewer_truncated__",
+          type: "tree",
           children_omitted: true,
-          children_omitted_reason: 'truncated',
+          children_omitted_reason: "truncated",
         });
         truncated = true;
       }
@@ -265,58 +508,95 @@ function worktreeFilesystemEntries(cwd: string, path: string, recursive: boolean
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        const omittedReason = omittedWorktreeDirectoryReason(entry.name, omitDirNameSet);
+        const omittedReason = omittedWorktreeDirectoryReason(
+          entry.name,
+          omitDirNameSet,
+        );
         if (omittedReason) {
-          if (!pushRecursiveEntry({
-            name: entry.name,
-            path: entryPath,
-            type: 'tree',
-            children_omitted: true,
-            children_omitted_reason: omittedReason,
-          })) return;
+          if (
+            !pushRecursiveEntry({
+              name: entry.name,
+              path: entryPath,
+              type: "tree",
+              children_omitted: true,
+              children_omitted_reason: omittedReason,
+            })
+          )
+            return;
           continue;
         }
         if (hasDotGitEntry(full)) continue;
         walk(full, entryPath, depth + 1);
       } else if (entry.isFile() || entry.isSymbolicLink()) {
-        if (!pushRecursiveEntry({ name: entry.name, path: entryPath, type: 'blob' })) return;
+        if (
+          !pushRecursiveEntry({
+            name: entry.name,
+            path: entryPath,
+            type: "blob",
+          })
+        )
+          return;
       }
     }
   };
   walk(root, base, 0);
-  return combineDirectAndRecursiveFiles(directEntries, fileEntries.sort((a, b) => a.path.localeCompare(b.path)));
+  return combineDirectAndRecursiveFiles(
+    directEntries,
+    fileEntries.sort((a, b) => a.path.localeCompare(b.path)),
+  );
 }
 
 function hasDotGitEntry(dir: string): boolean {
   try {
-    lstatSync(join(dir, '.git'));
+    lstatSync(join(dir, ".git"));
     return true;
   } catch (err) {
-    return !!err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT';
+    return (
+      !!err && typeof err === "object" && "code" in err && err.code !== "ENOENT"
+    );
   }
 }
 
-function gitTreeEntries(ref: string, path: string, cwd: string, recursive: boolean): { code: number; entries: GitTreeEntry[]; stderr: string } {
+function gitTreeEntries(
+  ref: string,
+  path: string,
+  cwd: string,
+  recursive: boolean,
+): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
-  const args = ['git', '-c', 'core.quotepath=false', 'ls-tree'];
-  if (recursive) args.push('-r');
-  args.push('-z', '--full-tree', ref, '--');
+  const args = ["git", "-c", "core.quotepath=false", "ls-tree"];
+  if (recursive) args.push("-r");
+  args.push("-z", "--full-tree", ref, "--");
   if (base) args.push(`${base}/`);
   const res = run(args, cwd);
-  if (res.code !== 0) return { code: res.code, entries: [], stderr: res.stderr };
-  const allowedTypes = recursive ? 'blob|commit' : 'tree|blob|commit';
-  let entries = res.stdout.split('\0').filter(Boolean).map((rec) => {
-    const match = rec.match(new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`));
-    if (!match) return null;
-    const entryPath = match[2];
-    return { name: entryPath.split('/').pop() || entryPath, path: entryPath, type: match[1] as GitTreeEntry['type'] };
-  }).filter((entry): entry is GitTreeEntry => !!entry);
+  if (res.code !== 0)
+    return { code: res.code, entries: [], stderr: res.stderr };
+  const allowedTypes = recursive ? "blob|commit" : "tree|blob|commit";
+  let entries = res.stdout
+    .split("\0")
+    .filter(Boolean)
+    .map((rec) => {
+      const match = rec.match(
+        new RegExp(`^\\d+\\s+(${allowedTypes})\\s+[0-9a-fA-F]+\\t(.+)$`),
+      );
+      if (!match) return null;
+      const entryPath = match[2];
+      return {
+        name: entryPath.split("/").pop() || entryPath,
+        path: entryPath,
+        type: match[1] as GitTreeEntry["type"],
+      };
+    })
+    .filter((entry): entry is GitTreeEntry => !!entry);
   if (recursive) entries.sort((a, b) => a.path.localeCompare(b.path));
   else entries = sortTreeEntries(entries);
-  return { code: 0, entries, stderr: '' };
+  return { code: 0, entries, stderr: "" };
 }
 
-function combineDirectAndRecursiveFiles(directEntries: GitTreeEntry[], fileEntries: GitTreeEntry[]): GitTreeEntry[] {
+function combineDirectAndRecursiveFiles(
+  directEntries: GitTreeEntry[],
+  fileEntries: GitTreeEntry[],
+): GitTreeEntry[] {
   const seen = new Set(directEntries.map((entry) => entry.path));
   return [
     ...directEntries,
@@ -325,19 +605,26 @@ function combineDirectAndRecursiveFiles(directEntries: GitTreeEntry[], fileEntri
 }
 
 export function worktreeEntries(cwd: string, path: string): GitTreeEntry[] {
-  return listTree('worktree', path, cwd).entries;
+  return listTree("worktree", path, cwd).entries;
 }
 
 export function worktreeFiles(cwd: string): GitTreeEntry[] {
-  return listTree('worktree', '', cwd, { recursive: true }).entries;
+  return listTree("worktree", "", cwd, { recursive: true }).entries;
 }
 
-export function treeEntries(ref: string, path: string, cwd: string): { code: number; entries: GitTreeEntry[]; stderr: string } {
+export function treeEntries(
+  ref: string,
+  path: string,
+  cwd: string,
+): { code: number; entries: GitTreeEntry[]; stderr: string } {
   return listTree(ref, path, cwd);
 }
 
-export function treeFiles(ref: string, cwd: string): { code: number; entries: GitTreeEntry[]; stderr: string } {
-  return listTree(ref, '', cwd, { recursive: true });
+export function treeFiles(
+  ref: string,
+  cwd: string,
+): { code: number; entries: GitTreeEntry[]; stderr: string } {
+  return listTree(ref, "", cwd, { recursive: true });
 }
 
 export function listTree(
@@ -347,15 +634,28 @@ export function listTree(
   options: { recursive?: boolean; omitDirNames?: string[] } = {},
 ): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
-  if (ref === 'worktree') {
-    return { code: 0, entries: worktreeFilesystemEntries(cwd, base, !!options.recursive, options.omitDirNames), stderr: '' };
+  if (ref === "worktree") {
+    return {
+      code: 0,
+      entries: worktreeFilesystemEntries(
+        cwd,
+        base,
+        !!options.recursive,
+        options.omitDirNames,
+      ),
+      stderr: "",
+    };
   }
 
   const direct = gitTreeEntries(ref, base, cwd, false);
   if (direct.code !== 0 || !options.recursive) return direct;
   const recursive = gitTreeEntries(ref, base, cwd, true);
   if (recursive.code !== 0) return recursive;
-  return { code: 0, entries: combineDirectAndRecursiveFiles(direct.entries, recursive.entries), stderr: '' };
+  return {
+    code: 0,
+    entries: combineDirectAndRecursiveFiles(direct.entries, recursive.entries),
+    stderr: "",
+  };
 }
 
 export function untrackedMeta(cwd: string): GitFileMeta[] {
@@ -367,13 +667,24 @@ export function untrackedMeta(cwd: string): GitFileMeta[] {
       const data = readFileSync(full);
       const probe = data.subarray(0, 8192);
       binary = probe.includes(0);
-      if (!binary) lines = data.toString('utf8').split('\n').length - 1;
+      if (!binary) lines = data.toString("utf8").split("\n").length - 1;
     }
-    return { path, status: 'A', additions: binary ? 0 : lines, deletions: 0, binary, untracked: true };
+    return {
+      path,
+      status: "A",
+      additions: binary ? 0 : lines,
+      deletions: 0,
+      binary,
+      untracked: true,
+    };
   });
 }
 
-export function fileMeta(args: string[], cwd: string, includeUntracked = false): GitFileMeta[] {
+export function fileMeta(
+  args: string[],
+  cwd: string,
+  includeUntracked = false,
+): GitFileMeta[] {
   const ns = nameStatus(args, cwd);
   const nm = numstatZ(args, cwd);
   const byPath = new Map(nm.map((file) => [file.path, file]));
@@ -389,32 +700,63 @@ export function fileMeta(args: string[], cwd: string, includeUntracked = false):
   return includeUntracked ? files.concat(untrackedMeta(cwd)) : files;
 }
 
-export function fileDiffText(args: string[], path: string | string[], cwd: string): { code: number; stdout: string; stderr: string } {
+export function fileDiffText(
+  args: string[],
+  path: string | string[],
+  cwd: string,
+): { code: number; stdout: string; stderr: string } {
   const paths = Array.isArray(path) ? path : [path];
-  return run([
-    'git', '-c', 'core.quotepath=false', 'diff',
-    '--no-color', '--no-ext-diff', '--find-renames',
-    ...args, '--', ...paths,
-  ], cwd);
+  return run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--find-renames",
+      ...args,
+      "--",
+      ...paths,
+    ],
+    cwd,
+  );
 }
 
-export function untrackedFileDiff(extras: string[], path: string, cwd: string): { code: number; stdout: string; stderr: string } {
-  return run([
-    'git', '-c', 'core.quotepath=false', 'diff',
-    '--no-color', '--no-ext-diff', '--no-index',
-    ...extras, '/dev/null', path,
-  ], cwd);
+export function untrackedFileDiff(
+  extras: string[],
+  path: string,
+  cwd: string,
+): { code: number; stdout: string; stderr: string } {
+  return run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-index",
+      ...extras,
+      "/dev/null",
+      path,
+    ],
+    cwd,
+  );
 }
 
-export function splitHunks(diffText: string): { header: string; hunks: string[] } {
-  if (!diffText) return { header: '', hunks: [] };
-  const first = diffText.startsWith('@@') ? 0 : diffText.indexOf('\n@@') + 1;
+export function splitHunks(diffText: string): {
+  header: string;
+  hunks: string[];
+} {
+  if (!diffText) return { header: "", hunks: [] };
+  const first = diffText.startsWith("@@") ? 0 : diffText.indexOf("\n@@") + 1;
   if (first <= 0) return { header: diffText, hunks: [] };
   const header = diffText.slice(0, first);
   const hunks: string[] = [];
   let cur = first;
   while (cur < diffText.length) {
-    const next = diffText.indexOf('\n@@', cur + 1);
+    const next = diffText.indexOf("\n@@", cur + 1);
     const end = next >= 0 ? next : diffText.length;
     hunks.push(diffText.slice(cur, end));
     if (next < 0) break;
@@ -423,21 +765,32 @@ export function splitHunks(diffText: string): { header: string; hunks: string[] 
   return { header, hunks };
 }
 
-export function truncateToNHunks(diffText: string, n: number): {
+export function truncateToNHunks(
+  diffText: string,
+  n: number,
+): {
   text: string;
   totalHunks: number;
   renderedHunks: number;
   lineCount: number;
   lineTruncated: boolean;
 };
-export function truncateToNHunks(diffText: string, n: number, maxLines: number): {
+export function truncateToNHunks(
+  diffText: string,
+  n: number,
+  maxLines: number,
+): {
   text: string;
   totalHunks: number;
   renderedHunks: number;
   lineCount: number;
   lineTruncated: boolean;
 };
-export function truncateToNHunks(diffText: string, n: number, maxLines = Number.POSITIVE_INFINITY): {
+export function truncateToNHunks(
+  diffText: string,
+  n: number,
+  maxLines = Number.POSITIVE_INFINITY,
+): {
   text: string;
   totalHunks: number;
   renderedHunks: number;
@@ -446,9 +799,9 @@ export function truncateToNHunks(diffText: string, n: number, maxLines = Number.
 } {
   const { header, hunks } = splitHunks(diffText);
   if (hunks.length === 0) {
-    const lines = diffText.split('\n');
+    const lines = diffText.split("\n");
     const lineTruncated = Number.isFinite(maxLines) && lines.length > maxLines;
-    const text = lineTruncated ? lines.slice(0, maxLines).join('\n') : diffText;
+    const text = lineTruncated ? lines.slice(0, maxLines).join("\n") : diffText;
     return {
       text,
       totalHunks: 0,
@@ -464,7 +817,7 @@ export function truncateToNHunks(diffText: string, n: number, maxLines = Number.
   let lineTruncated = false;
   for (let index = 0; index < maxHunks; index++) {
     const hunk = hunks[index];
-    const lines = hunk.split('\n');
+    const lines = hunk.split("\n");
     const separatorLines = rendered.length > 0 ? 1 : 0;
     const remaining = maxLines - usedLines - separatorLines;
     if (remaining <= 0) {
@@ -472,7 +825,7 @@ export function truncateToNHunks(diffText: string, n: number, maxLines = Number.
       break;
     }
     if (Number.isFinite(maxLines) && lines.length > remaining) {
-      rendered.push(lines.slice(0, remaining).join('\n'));
+      rendered.push(lines.slice(0, remaining).join("\n"));
       renderedHunks++;
       lineTruncated = true;
       break;
@@ -481,7 +834,7 @@ export function truncateToNHunks(diffText: string, n: number, maxLines = Number.
     renderedHunks++;
     usedLines += separatorLines + lines.length;
   }
-  const text = header + rendered.join('\n');
+  const text = header + rendered.join("\n");
   return {
     text,
     totalHunks: hunks.length,

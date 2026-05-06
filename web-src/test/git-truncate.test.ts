@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { fileDiffCacheKey, worktreeFileSignature } from "../server/cache";
 import {
   listTree,
+  refCommits,
+  refs,
   treeEntries,
   truncateToNHunks,
   verifyTreeRef,
@@ -25,6 +27,7 @@ function git(cwd: string, args: string[]) {
     stderr: "pipe",
   });
   expect(proc.exitCode).toBe(0);
+  return proc;
 }
 
 describe("truncateToNHunks", () => {
@@ -285,6 +288,133 @@ describe("repository tree helpers", () => {
     expect(entries.some((entry) => entry.path === "web-src/app.ts")).toBe(
       false,
     );
+  });
+
+  test("caps the initial commit list in the ref picker data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-refs-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      for (let index = 1; index <= 105; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `commit ${index}`]);
+      }
+
+      const result = refs(dir);
+
+      expect(result.commits.length).toBe(100);
+      expect(result.commits[0].subject).toBe("commit 105");
+      expect(
+        result.commits.some((commit) => commit.subject === "commit 1"),
+      ).toBe(false);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("searches commits server-side beyond the initial visible window", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-commit-search-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      writeFileSync(join(dir, "file.txt"), "oldest\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "needle oldest commit"]);
+      for (let index = 1; index <= 105; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `recent commit ${index}`]);
+      }
+
+      const result = refCommits(dir, "needle oldest", 5);
+
+      expect(result.length).toBe(1);
+      expect(result[0].subject).toBe("needle oldest commit");
+      expect(refCommits(dir, result[0].sha.slice(0, 8), 5)[0].sha).toBe(
+        result[0].sha,
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("searches commits by author and across non-HEAD refs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-author-search-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "main@example.com"]);
+      git(dir, ["config", "user.name", "Main User"]);
+      writeFileSync(join(dir, "file.txt"), "main\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "main commit"]);
+      const initialBranch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])
+        .stdout.toString()
+        .trim();
+      git(dir, ["switch", "-c", "side"]);
+      git(dir, ["config", "user.email", "alice@example.com"]);
+      git(dir, ["config", "user.name", "Alice Writer"]);
+      writeFileSync(join(dir, "file.txt"), "side\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "side branch work"]);
+      git(dir, ["switch", initialBranch]);
+
+      const result = refCommits(dir, "Alice Writer", 5);
+
+      expect(result.length).toBe(1);
+      expect(result[0].subject).toBe("side branch work");
+      expect(result[0].author).toBe("Alice Writer");
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("combines hash matches with subject grep matches", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-hash-grep-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      writeFileSync(join(dir, "file.txt"), "first\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", "first commit"]);
+      const firstSha = git(dir, ["rev-parse", "HEAD"]).stdout.toString().trim();
+      writeFileSync(join(dir, "file.txt"), "second\n");
+      git(dir, ["add", "file.txt"]);
+      git(dir, ["commit", "-m", firstSha.slice(0, 8)]);
+      const secondSha = git(dir, ["rev-parse", "HEAD"])
+        .stdout.toString()
+        .trim();
+
+      const result = refCommits(dir, firstSha.slice(0, 8), 5);
+
+      expect(result.map((commit) => commit.sha)).toEqual([firstSha, secondSha]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("clamps commit search limits and handles hostile queries safely", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-hostile-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      for (let index = 1; index <= 8; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `commit ${index}`]);
+      }
+
+      expect(refCommits(dir, "", -1).length).toBe(1);
+      expect(refCommits(dir, "", 99999).length).toBe(8);
+      expect(refCommits(dir, "--evil", 5)).toEqual([]);
+      expect(refCommits(dir, "commit\0".repeat(300), 5)).toEqual([]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 
   test("lists ignored filesystem directories in worktree view", () => {
