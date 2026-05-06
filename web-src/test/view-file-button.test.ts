@@ -724,13 +724,16 @@ describe("view file UI", () => {
     expect(style.includes("body.gdp-repo-page .sb-head")).toBe(true);
     expect(
       style.includes(
-        'grid-template:\n    "toggle ref actions view" auto\n    / 28px minmax(80px, 240px) auto auto;',
+        'grid-template:\n    "toggle title totals ." auto\n    "ref ref ref ref" auto\n    "actions actions . view" auto\n    "filter filter filter filter" auto',
       ),
     ).toBe(true);
     expect(style.includes("grid-area: toggle")).toBe(true);
+    expect(style.includes("grid-area: title")).toBe(true);
+    expect(style.includes("grid-area: totals")).toBe(true);
     expect(style.includes("grid-area: ref")).toBe(true);
     expect(style.includes("grid-area: actions")).toBe(true);
     expect(style.includes("grid-area: view")).toBe(true);
+    expect(style.includes("grid-area: filter")).toBe(true);
     expect(style.includes("body.gdp-repo-page #repo-target-wrap")).toBe(true);
     expect(
       style.includes(".ref-selector.ref-selector-in-grid { width: 100%; }"),
@@ -843,11 +846,14 @@ describe("view file UI", () => {
     ).toBe(true);
     expect(app.includes("function visibleSidebarItems()")).toBe(true);
     expect(app.includes("function isSidebarRowVisible")).toBe(true);
-    expect(
-      app.includes(
-        "return $$<HTMLElement>('#filelist li[data-path], #filelist .tree-dir[data-dirpath]')",
-      ),
-    ).toBe(true);
+    expect(app.includes("const SIDEBAR_ITEM_SELECTOR =")).toBe(true);
+    expect(app.includes("return $$<HTMLElement>(SIDEBAR_ITEM_SELECTOR)")).toBe(
+      true,
+    );
+    expect(app.includes("function adjacentVisibleSidebarItem")).toBe(true);
+    expect(app.includes("function visibleSidebarItemFrom")).toBe(true);
+    expect(app.includes("document.createTreeWalker")).toBe(true);
+    expect(app.includes("function setActiveSidebarItem")).toBe(true);
     expect(app.includes("function isRepositorySidebarMode()")).toBe(true);
     expect(
       app.includes("function moveActiveSidebarItem(direction: 1 | -1)"),
@@ -900,6 +906,16 @@ describe("view file UI", () => {
     expect(
       app.includes("function toggleActiveSidebarDirectoryCollapsed()"),
     ).toBe(true);
+    expect(app.includes("if (isVirtualSidebarActive())")).toBe(true);
+    expect(
+      app.includes(
+        "setActiveSidebarDirectoryCollapsed(!STATE.collapsedDirs.has(row.path))",
+      ),
+    ).toBe(true);
+    expect(app.includes("rerenderVirtualSidebar();")).toBe(true);
+    expect(app.includes("scrollVirtualSidebarPathIntoView(row.path);")).toBe(
+      true,
+    );
     expect(
       app.includes(
         "const active = document.querySelector<HTMLElement>('#filelist .tree-dir.active[data-dirpath]')",
@@ -913,6 +929,25 @@ describe("view file UI", () => {
     expect(app.includes("if (control) control.click()")).toBe(true);
     expect(app.includes("if (action === 'sidebar-expand')")).toBe(true);
     expect(app.includes("toggleActiveSidebarDirectoryCollapsed()")).toBe(true);
+  });
+
+  test("repository virtual sidebar keeps tree UX without rendering every row", () => {
+    expect(app.includes("const VIRTUAL_SIDEBAR_THRESHOLD = 3000")).toBe(true);
+    expect(app.includes("function renderVirtualTreeSidebar")).toBe(true);
+    expect(app.includes("ul.classList.add('tree-virtual')")).toBe(true);
+    expect(app.includes("function renderVirtualSidebarWindow()")).toBe(true);
+    expect(app.includes("const { start, end } = sidebarVirtualRange()")).toBe(
+      true,
+    );
+    expect(app.includes("ul.replaceChildren(fragment)")).toBe(true);
+    expect(
+      app.includes("SIDEBAR_VISIBLE_ROWS.length * VIRTUAL_SIDEBAR_ROW_HEIGHT"),
+    ).toBe(true);
+    expect(app.includes("function computeVirtualSidebarVisibleRows()")).toBe(
+      true,
+    );
+    expect(app.includes("filterActive || !STATE.collapsedDirs.has")).toBe(true);
+    expect(app.includes("function selectVirtualSidebarIndex")).toBe(true);
   });
 
   test("vim panel focus and main-panel scrolling are routed through keymap actions", () => {

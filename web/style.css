@@ -1352,6 +1352,16 @@ body.gdp-help-page #content {
 #filelist.tree {
   padding: 4px 0 0;
 }
+#filelist.tree.tree-virtual {
+  padding: 0;
+}
+#filelist.tree.tree-virtual .tree-dir,
+#filelist.tree.tree-virtual .tree-file {
+  height: 29px;
+  min-height: 29px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
 #filelist.tree .tree-dir {
   display: grid;
   grid-template-columns: 16px 16px minmax(0, 1fr) 22px;
@@ -2958,25 +2968,32 @@ body.gdp-file-detail-page.gdp-repo-blob-page #sidebar-resizer {
 body.gdp-repo-page #sidebar-resizer {
   display: block;
 }
-body.gdp-file-detail-page.gdp-repo-blob-page .sb-title,
-body.gdp-file-detail-page.gdp-repo-blob-page #totals,
-body.gdp-repo-page .sb-title,
-body.gdp-repo-page #totals {
-  display: none;
-}
 body.gdp-repo-page .sb-head,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-head {
   display: grid;
   grid-template:
-    "toggle ref actions view" auto
-    / 28px minmax(80px, 240px) auto auto;
-  justify-content: start;
+    "toggle title totals ." auto
+    "ref ref ref ref" auto
+    "actions actions . view" auto
+    "filter filter filter filter" auto
+    / 28px auto minmax(0, 1fr) auto;
+  justify-content: stretch;
   align-items: center;
   gap: 8px;
+  top: var(--global-header-h);
+  z-index: 5;
 }
 body.gdp-repo-page .sb-head > #sidebar-toggle,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-head > #sidebar-toggle {
   grid-area: toggle;
+}
+body.gdp-repo-page .sb-title,
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-title {
+  grid-area: title;
+}
+body.gdp-repo-page #totals,
+body.gdp-file-detail-page.gdp-repo-blob-page #totals {
+  grid-area: totals;
 }
 body.gdp-repo-page #repo-target-wrap,
 body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap {
@@ -2986,10 +3003,22 @@ body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap {
 body.gdp-repo-page .sb-actions,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-actions {
   grid-area: actions;
+  margin-left: 0;
+  justify-self: start;
 }
 body.gdp-repo-page .sb-view-seg,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-view-seg {
   grid-area: view;
+  margin-left: auto;
+}
+body.gdp-repo-page .sb-filter-wrap,
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap {
+  grid-area: filter;
+  position: static;
+  width: 100%;
+  margin: 0;
+  padding: 6px 0 0;
+  border-bottom: 0;
 }
 body.gdp-file-detail-page {
   --chrome-h: var(--global-header-h);

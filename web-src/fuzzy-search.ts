@@ -8,6 +8,10 @@ export type FuzzyMatch = {
   ranges: FuzzyRange[];
 };
 
+type InternalFuzzyMatch = FuzzyMatch & {
+  tier: number;
+};
+
 export type RankedFuzzyPath<T extends { path: string }> = {
   item: T;
   score: number;
@@ -44,9 +48,62 @@ function toRanges(indices: number[]): FuzzyRange[] {
   return ranges;
 }
 
-export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
+function basenameMatchTier(
+  loweredQuery: string,
+  loweredBasename: string,
+): number {
+  if (loweredBasename === loweredQuery) return 4;
+  if (loweredBasename.startsWith(`${loweredQuery}.`)) return 3;
+  if (loweredBasename.startsWith(loweredQuery)) return 2;
+  if (loweredBasename.includes(loweredQuery)) return 1;
+  return 0;
+}
+
+function pathMatchTier(
+  loweredQuery: string,
+  loweredPath: string,
+  loweredBasename: string,
+): number {
+  if (
+    loweredQuery.includes("/") &&
+    (loweredPath === loweredQuery || loweredPath.endsWith(`/${loweredQuery}`))
+  )
+    return 4;
+  return basenameMatchTier(loweredQuery, loweredBasename);
+}
+
+function contiguousPathRange(
+  loweredQuery: string,
+  loweredPath: string,
+  baseStart: number,
+): FuzzyRange | null {
+  const loweredBasename = loweredPath.slice(baseStart);
+  const basenameMatchStart = loweredBasename.indexOf(loweredQuery);
+  if (basenameMatchStart >= 0) {
+    const start = baseStart + basenameMatchStart;
+    return { start, end: start + loweredQuery.length };
+  }
+  if (loweredQuery.includes("/")) {
+    const pathMatchStart = loweredPath.endsWith(`/${loweredQuery}`)
+      ? loweredPath.length - loweredQuery.length
+      : loweredPath === loweredQuery
+        ? 0
+        : -1;
+    if (pathMatchStart >= 0)
+      return {
+        start: pathMatchStart,
+        end: pathMatchStart + loweredQuery.length,
+      };
+  }
+  return null;
+}
+
+function computeFuzzyMatch(
+  query: string,
+  path: string,
+): InternalFuzzyMatch | null {
   const q = query.trim().toLowerCase();
-  if (!q) return { score: 0, ranges: [] };
+  if (!q) return { score: 0, ranges: [], tier: 0 };
   const lowerPath = path.toLowerCase();
   const baseStart = basenameStart(path);
   const indices: number[] = [];
@@ -65,15 +122,23 @@ export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
     from = index + 1;
   }
 
-  const first = indices[0] || 0;
+  const first = indices[0];
   score -= Math.min(first, 40);
   if (indices[0] >= baseStart) score += 20;
   const basename = lowerPath.slice(baseStart);
-  if (basename.startsWith(q)) score += 30;
-  if (basename === q || basename.startsWith(`${q}.`)) score += 25;
-  if (lowerPath.endsWith(q)) score += 15;
+  const tier = pathMatchTier(q, lowerPath, basename);
+  const contiguousRange = contiguousPathRange(q, lowerPath, baseStart);
 
-  return { score, ranges: toRanges(indices) };
+  return {
+    score,
+    ranges: contiguousRange ? [contiguousRange] : toRanges(indices),
+    tier,
+  };
+}
+
+export function fuzzyMatchPath(query: string, path: string): FuzzyMatch | null {
+  const match = computeFuzzyMatch(query, path);
+  return match ? { score: match.score, ranges: match.ranges } : null;
 }
 
 export function rankFuzzyPaths<T extends { path: string }>(
@@ -82,13 +147,21 @@ export function rankFuzzyPaths<T extends { path: string }>(
 ): RankedFuzzyPath<T>[] {
   return items
     .map((item) => {
-      const match = fuzzyMatchPath(query, item.path);
-      return match ? { item, score: match.score, ranges: match.ranges } : null;
+      const match = computeFuzzyMatch(query, item.path);
+      return match
+        ? { item, score: match.score, ranges: match.ranges, tier: match.tier }
+        : null;
     })
-    .filter((item): item is RankedFuzzyPath<T> => item !== null)
+    .filter(
+      (item): item is RankedFuzzyPath<T> & { tier: number } => item !== null,
+    )
     .sort(
-      (a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path),
-    );
+      (a, b) =>
+        b.tier - a.tier ||
+        b.score - a.score ||
+        a.item.path.localeCompare(b.item.path),
+    )
+    .map(({ item, score, ranges }) => ({ item, score, ranges }));
 }
 
 export function isGlobPathQuery(query: string): boolean {
