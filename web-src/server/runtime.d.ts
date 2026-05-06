@@ -7,19 +7,13 @@ interface BunFile extends globalThis.Blob {
 
 declare const Bun: {
   file(path: string): BunFile;
-  spawn(
-    args: string[],
-    opts?: Record<string, unknown>,
-  ): {
+  spawn(args: string[], opts?: Record<string, unknown>): {
     kill(signal?: string): void;
     exited: Promise<number>;
     stdout?: ReadableStream<Uint8Array>;
     stderr?: ReadableStream<Uint8Array>;
   };
-  spawnSync(
-    args: string[],
-    opts?: Record<string, unknown>,
-  ): {
+  spawnSync(args: string[], opts?: Record<string, unknown>): {
     exitCode: number;
     stdout: Uint8Array;
     stderr: Uint8Array;
@@ -35,8 +29,8 @@ declare const process: {
   argv: string[];
   env: Record<string, string | undefined>;
   cwd(): string;
-  platform: "darwin" | "win32" | string;
-  on(event: "SIGINT" | "SIGTERM", listener: () => void): void;
+  platform: 'darwin' | 'win32' | string;
+  on(event: 'SIGINT' | 'SIGTERM', listener: () => void): void;
   exit(code?: number): never;
 };
 
@@ -44,7 +38,7 @@ interface ImportMeta {
   dir: string;
 }
 
-declare module "node:fs" {
+declare module 'node:fs' {
   export function existsSync(path: string): boolean;
   export function readdirSync(path: string): string[];
   export function readFileSync(path: string): Buffer;
@@ -58,7 +52,7 @@ declare module "node:fs" {
   ): unknown;
 }
 
-declare module "node:path" {
+declare module 'node:path' {
   export function basename(path: string): string;
   export function extname(path: string): string;
   export function join(...parts: string[]): string;

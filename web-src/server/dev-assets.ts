@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename } from 'node:path';
 
 export type WatchFn = (
   path: string,
