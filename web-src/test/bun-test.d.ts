@@ -1,4 +1,4 @@
-declare module "bun:test" {
+declare module 'bun:test' {
   export function describe(name: string, fn: () => void): void;
   export function test(name: string, fn: () => void): void;
   export namespace test {

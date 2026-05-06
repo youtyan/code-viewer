@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from 'bun:test';
 import {
   initExpandState,
   remainingGap,
@@ -10,26 +10,26 @@ import {
   mapNewToOld,
   trailingClickRange,
   applyTrailingResult,
-} from "../expand-logic";
+} from '../expand-logic';
 
 const STEP = 20;
 
 // ---- initial state -------------------------------------------------------
 
-describe("initExpandState", () => {
-  test("mid-file hunk: prev ends at new line 32, this hunk starts at 119", () => {
+describe('initExpandState', () => {
+  test('mid-file hunk: prev ends at new line 32, this hunk starts at 119', () => {
     const s = initExpandState(33, 119);
     expect(s.topExpandedStart).toBe(119);
     expect(s.bottomExpandedEnd).toBe(32); // off-by-one fix: prevHunkEndNew - 1
   });
 
-  test("first hunk: no prev, this hunk at line 25", () => {
+  test('first hunk: no prev, this hunk at line 25', () => {
     const s = initExpandState(0, 25);
     expect(s.topExpandedStart).toBe(25);
     expect(s.bottomExpandedEnd).toBe(-1);
   });
 
-  test("whole-file hunk: starts at line 1", () => {
+  test('whole-file hunk: starts at line 1', () => {
     const s = initExpandState(0, 1);
     // remaining gap should be empty
     expect(remainingGap(s, 0)).toBeNull();
@@ -38,23 +38,23 @@ describe("initExpandState", () => {
 
 // ---- gap math ------------------------------------------------------------
 
-describe("remainingGap", () => {
-  test("mid-file: full gap available", () => {
+describe('remainingGap', () => {
+  test('mid-file: full gap available', () => {
     const s = initExpandState(33, 119);
     expect(remainingGap(s, 33)).toEqual({ start: 33, end: 118 });
   });
 
-  test("first hunk: gap clamped to >=1", () => {
+  test('first hunk: gap clamped to >=1', () => {
     const s = initExpandState(0, 25);
     expect(remainingGap(s, 0)).toEqual({ start: 1, end: 24 });
   });
 
-  test("hunk-at-line-1: empty gap", () => {
+  test('hunk-at-line-1: empty gap', () => {
     const s = initExpandState(0, 1);
     expect(remainingGap(s, 0)).toBeNull();
   });
 
-  test("after ↑ + ↓ meet in middle: returns null", () => {
+  test('after ↑ + ↓ meet in middle: returns null', () => {
     let s = initExpandState(33, 119);
     s = applyUp(s, { start: 33, end: 75 });
     s = applyDown(s, { start: 76, end: 118 });
@@ -65,42 +65,42 @@ describe("remainingGap", () => {
 
 // ---- click ranges --------------------------------------------------------
 
-describe("upClickRange (↑, low end)", () => {
-  test("initial click pulls 20 lines starting at gap start", () => {
+describe('upClickRange (↑, low end)', () => {
+  test('initial click pulls 20 lines starting at gap start', () => {
     const s = initExpandState(33, 119);
     expect(upClickRange(s, 33, STEP)).toEqual({ start: 33, end: 52 });
   });
 
-  test("after one ↑, second ↑ extends contiguously", () => {
+  test('after one ↑, second ↑ extends contiguously', () => {
     let s = initExpandState(33, 119);
     s = applyUp(s, upClickRange(s, 33, STEP));
     expect(upClickRange(s, 33, STEP)).toEqual({ start: 53, end: 72 });
   });
 
-  test("shrunk gap < STEP: pulls only what remains", () => {
+  test('shrunk gap < STEP: pulls only what remains', () => {
     let s = initExpandState(33, 50);
     expect(upClickRange(s, 33, STEP)).toEqual({ start: 33, end: 49 });
   });
 
-  test("first hunk gap [1..24]: ↑ pulls 1..20", () => {
+  test('first hunk gap [1..24]: ↑ pulls 1..20', () => {
     const s = initExpandState(0, 25);
     expect(upClickRange(s, 0, STEP)).toEqual({ start: 1, end: 20 });
   });
 });
 
-describe("downClickRange (↓, high end)", () => {
-  test("initial click pulls last 20 lines of gap", () => {
+describe('downClickRange (↓, high end)', () => {
+  test('initial click pulls last 20 lines of gap', () => {
     const s = initExpandState(33, 119);
     expect(downClickRange(s, 33, STEP)).toEqual({ start: 99, end: 118 });
   });
 
-  test("after one ↓, second ↓ extends contiguously below", () => {
+  test('after one ↓, second ↓ extends contiguously below', () => {
     let s = initExpandState(33, 119);
     s = applyDown(s, downClickRange(s, 33, STEP));
     expect(downClickRange(s, 33, STEP)).toEqual({ start: 79, end: 98 });
   });
 
-  test("shrunk gap < STEP: pulls only what remains", () => {
+  test('shrunk gap < STEP: pulls only what remains', () => {
     let s = initExpandState(33, 50);
     expect(downClickRange(s, 33, STEP)).toEqual({ start: 33, end: 49 });
   });
@@ -108,8 +108,8 @@ describe("downClickRange (↓, high end)", () => {
 
 // ---- meeting / fully expanded -------------------------------------------
 
-describe("full sweep with mixed ↑/↓ clicks", () => {
-  test("↑ until reaches ↓ region: no overlap, no missed lines", () => {
+describe('full sweep with mixed ↑/↓ clicks', () => {
+  test('↑ until reaches ↓ region: no overlap, no missed lines', () => {
     let s = initExpandState(33, 119);
     // 5 ↓ clicks (each 20 lines): fill 19..118 → wait gap is 33..118 (86 lines)
     const steps = [];
@@ -117,7 +117,7 @@ describe("full sweep with mixed ↑/↓ clicks", () => {
       const r = downClickRange(s, 33, STEP);
       steps.push(r);
       s = applyDown(s, r);
-      if (steps.length > 10) throw new Error("runaway");
+      if (steps.length > 10) throw new Error('runaway');
     }
     // After all ↓ clicks, gap should be empty
     expect(remainingGap(s, 33)).toBeNull();
@@ -128,7 +128,7 @@ describe("full sweep with mixed ↑/↓ clicks", () => {
     expect(filled.size).toBe(118 - 33 + 1);
   });
 
-  test("alternating ↑/↓ never duplicates lines", () => {
+  test('alternating ↑/↓ never duplicates lines', () => {
     let s = initExpandState(33, 119);
     const filled = new Set();
     let i = 0;
@@ -153,16 +153,16 @@ describe("full sweep with mixed ↑/↓ clicks", () => {
 
 // ---- first-hunk semantics ----------------------------------------------
 
-describe("first hunk button range (single ↑)", () => {
+describe('first hunk button range (single ↑)', () => {
   // For first hunk the visible button pulls the HIGH end of the gap (lines
   // closest to this hunk's start), but renders with the ↑ icon since the
   // expanded rows physically appear ABOVE @@ in the diff view.
-  test("hunk at line 25: first click pulls 5..24 (last 20 of gap)", () => {
+  test('hunk at line 25: first click pulls 5..24 (last 20 of gap)', () => {
     const s = initExpandState(0, 25);
     expect(downClickRange(s, 0, STEP)).toEqual({ start: 5, end: 24 });
   });
 
-  test("repeated clicks walk upward (toward line 1)", () => {
+  test('repeated clicks walk upward (toward line 1)', () => {
     let s = initExpandState(0, 200);
     // 1st click: gap=[1..199]; last 20 of gap = [180..199]
     s = applyDown(s, downClickRange(s, 0, STEP));
@@ -173,51 +173,45 @@ describe("first hunk button range (single ↑)", () => {
   });
 });
 
-describe("mapNewToOld", () => {
-  test("preserves offset between old and new", () => {
+describe('mapNewToOld', () => {
+  test('preserves offset between old and new', () => {
     // hunk1: @@ -25,6 +25,8 @@ (old 25-30, new 25-32) → prevEndNew=33, prevEndOld=31
     expect(mapNewToOld(33, 33, 31)).toBe(31);
     expect(mapNewToOld(99, 33, 31)).toBe(97);
     expect(mapNewToOld(118, 33, 31)).toBe(116);
   });
 
-  test("first hunk: prevEnds = 0, mapping is identity", () => {
+  test('first hunk: prevEnds = 0, mapping is identity', () => {
     expect(mapNewToOld(1, 0, 0)).toBe(1);
     expect(mapNewToOld(20, 0, 0)).toBe(20);
   });
 });
 
-describe("trailingClickRange", () => {
-  test("last hunk down button fetches lines immediately after the hunk", () => {
+describe('trailingClickRange', () => {
+  test('last hunk down button fetches lines immediately after the hunk', () => {
     expect(trailingClickRange(63, STEP)).toEqual({ start: 63, end: 82 });
   });
 });
 
-describe("applyTrailingResult", () => {
-  test("advances old and new cursors by the received line count", () => {
-    expect(
-      applyTrailingResult({ newStart: 63, oldStart: 62 }, 20, STEP),
-    ).toEqual({
+describe('applyTrailingResult', () => {
+  test('advances old and new cursors by the received line count', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 20, STEP)).toEqual({
       newStart: 83,
       oldStart: 82,
       eof: false,
     });
   });
 
-  test("marks eof when the server returns fewer lines than requested", () => {
-    expect(
-      applyTrailingResult({ newStart: 63, oldStart: 62 }, 7, STEP),
-    ).toEqual({
+  test('marks eof when the server returns fewer lines than requested', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 7, STEP)).toEqual({
       newStart: 70,
       oldStart: 69,
       eof: true,
     });
   });
 
-  test("marks eof when the server returns no lines", () => {
-    expect(
-      applyTrailingResult({ newStart: 63, oldStart: 62 }, 0, STEP),
-    ).toEqual({
+  test('marks eof when the server returns no lines', () => {
+    expect(applyTrailingResult({ newStart: 63, oldStart: 62 }, 0, STEP)).toEqual({
       newStart: 63,
       oldStart: 62,
       eof: true,
