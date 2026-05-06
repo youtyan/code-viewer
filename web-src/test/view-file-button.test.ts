@@ -389,6 +389,12 @@ describe("view file UI", () => {
     );
     expect(app.includes("await loadSyntaxHighlighter()")).toBe(true);
     expect(style.includes(".gdp-markdown-preview")).toBe(true);
+    expect(style.includes(".gdp-html-preview")).toBe(true);
+    expect(
+      style.includes(
+        "min-height: calc(100vh - var(--global-header-h) - 118px);",
+      ),
+    ).toBe(true);
     expect(style.includes(".gdp-source-tabs")).toBe(true);
   });
 

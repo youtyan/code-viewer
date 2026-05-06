@@ -370,7 +370,7 @@ function enhanceTaskLists(root: HTMLElement) {
 
 function buildMarkdownToc(root: HTMLElement) {
   const entries = Array.from(
-    root.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id]"),
+    root.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id]"),
   )
     .map((heading) => ({
       id: heading.id,
@@ -395,6 +395,7 @@ function createMarkdownToc(
     link.href = `#${encodeURIComponent(entry.id)}`;
     link.dataset.target = entry.id;
     link.textContent = entry.text;
+    link.title = entry.text;
     item.appendChild(link);
     list.appendChild(item);
   });
