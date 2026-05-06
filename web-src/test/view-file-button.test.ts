@@ -179,7 +179,7 @@ describe("view file UI", () => {
     ).toBe(true);
     expect(
       app.includes(
-        "return '<audio src=\"' + url + '\" controls preload=\"metadata\"></audio>'",
+        'return `<audio src="${url}" controls preload="metadata"></audio>`',
       ),
     ).toBe(true);
     expect(style.includes(".gdp-media audio")).toBe(true);
@@ -362,7 +362,7 @@ describe("view file UI", () => {
     expect(app.includes("'PDF document'")).toBe(true);
     expect(
       app.includes(
-        "resolution.textContent = img.naturalWidth + ' x ' + img.naturalHeight",
+        "resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`",
       ),
     ).toBe(true);
     expect(
@@ -765,6 +765,9 @@ describe("view file UI", () => {
     ).toBe(true);
     expect(app.includes("function syncRefSelectorChrome")).toBe(false);
     expect(app.includes("wireRepoTargetPicker")).toBe(false);
+    expect(app.includes("escapeHtml(branch.when)")).toBe(true);
+    expect(app.includes("escapeHtml(tag.when)")).toBe(true);
+    expect(app.includes('<div class="row2"><span class="when">')).toBe(true);
     expect(app.includes("targetPickerWrap.className = 'ref-selector")).toBe(
       false,
     );
@@ -789,7 +792,7 @@ describe("view file UI", () => {
 
   test("project name from settings updates the document title before repository rendering", () => {
     expect(app.includes("function setProjectName(project: string)")).toBe(true);
-    expect(app.includes("document.title = project + ' - code viewer'")).toBe(
+    expect(app.includes("document.title = `${project} - code viewer`")).toBe(
       true,
     );
     expect(app.includes("setProjectName(settings.project || '')")).toBe(true);

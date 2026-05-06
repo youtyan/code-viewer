@@ -122,10 +122,20 @@ export type DiffCardElement = HTMLElement & {
 };
 
 export type RefResponse = {
-  branches?: string[];
-  tags?: string[];
+  branches?: BranchMeta[];
+  tags?: TagMeta[];
   commits?: CommitMeta[];
   current?: string;
+};
+
+export type BranchMeta = {
+  name: string;
+  when: string;
+};
+
+export type TagMeta = {
+  name: string;
+  when: string;
 };
 
 export type CommitMeta = {
@@ -139,15 +149,40 @@ export type RefCommitResponse = {
   commits?: CommitMeta[];
 };
 
+type Diff2HtmlGlobal = {
+  new (
+    element: HTMLElement,
+    diffInput: string,
+    configuration?: Record<string, unknown>,
+    hljs?: {
+      highlightElement?: (element: HTMLElement) => void;
+      highlight?: (
+        code: string,
+        options: { language: string; ignoreIllegals: boolean },
+      ) => { value: string };
+    } | null,
+  ): {
+    draw(): void;
+    highlightCode(): void;
+  };
+  hljs?: {
+    highlightElement?: (element: HTMLElement) => void;
+    highlight?: (
+      code: string,
+      options: { language: string; ignoreIllegals: boolean },
+    ) => { value: string };
+  };
+};
+
 declare global {
   interface Window {
-    Diff2HtmlUI: any;
-    hljs: any;
+    Diff2HtmlUI: Diff2HtmlGlobal;
+    hljs: unknown;
     GdpExpandLogic: typeof GdpExpandLogic;
     _lastMeta?: DiffMeta;
     __gdpScrollSpy?: EventListener;
     __gdpSidebarTouchedAt?: number;
   }
 
-  const Diff2HtmlUI: any;
+  const Diff2HtmlUI: Diff2HtmlGlobal;
 }

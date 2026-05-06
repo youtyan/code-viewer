@@ -418,7 +418,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function sourceCursorKey(target: SourceFileTarget): string {
-    return target.ref + "\0" + target.path;
+    return `${target.ref}\0${target.path}`;
   }
 
   function sourceCursorMatches(
@@ -511,7 +511,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     document
-      .querySelector<HTMLElement>('#content [data-line="' + cursor.line + '"]')
+      .querySelector<HTMLElement>(`#content [data-line="${cursor.line}"]`)
       ?.scrollIntoView({ block: edge });
   }
 
@@ -619,7 +619,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     if (!tabs) return false;
     const button = tabs.querySelector<HTMLButtonElement>(
-      'button[data-source-tab="' + tab + '"]',
+      `button[data-source-tab="${tab}"]`,
     );
     if (!button || button.hidden || button.disabled) return false;
     button.click();
@@ -669,7 +669,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setProjectName(project: string) {
     if (!project) return;
     PROJECT_NAME = project;
-    document.title = project + " - code viewer";
+    document.title = `${project} - code viewer`;
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -730,7 +730,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (head)
         document.documentElement.style.setProperty(
           "--sidebar-head-h",
-          Math.ceil(head.getBoundingClientRect().height) + "px",
+          `${Math.ceil(head.getBoundingClientRect().height)}px`,
         );
     });
   }
@@ -794,7 +794,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         (localStorage.getItem("gdp:theme") as ThemeMode) ||
         (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
       sbView: (localStorage.getItem("gdp:sbview") as SidebarView) || "tree",
-      sbWidth: parseInt(localStorage.getItem("gdp:sbwidth")) || 308,
+      sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
       collapsedDirs: new Set<string>(
         JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]"),
@@ -828,8 +828,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function getHljs(): HljsApi | null {
-    const hljsRef = (window.hljs ||
-      (window.Diff2HtmlUI && window.Diff2HtmlUI.hljs)) as HljsApi | undefined;
+    const hljsRef = (window.hljs || window.Diff2HtmlUI?.hljs) as
+      | HljsApi
+      | undefined;
     if (!hljsRef) return null;
     if (!highlightConfigured && typeof hljsRef.configure === "function") {
       hljsRef.configure({ ignoreUnescapedHTML: true });
@@ -1045,7 +1046,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function fileBadge(status?: string) {
     const ch = (status || "M")[0].toUpperCase();
     const span = document.createElement("span");
-    span.className = "badge " + ch;
+    span.className = `badge ${ch}`;
     span.textContent = ch;
     span.title =
       { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
@@ -1115,7 +1116,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       className +
       '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' +
       pathList
-        .map((path) => '<path fill="currentColor" d="' + path + '"></path>')
+        .map((path) => `<path fill="currentColor" d="${path}"></path>`)
         .join("") +
       "</svg>"
     );
@@ -1293,7 +1294,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const dirPartCount = f.type === "tree" ? parts.length : parts.length - 1;
       for (let i = 0; i < dirPartCount; i++) {
         const p = parts[i];
-        acc = acc ? acc + "/" + p : p;
+        acc = acc ? `${acc}/${p}` : p;
         if (!node.dirs[p]) {
           node.dirs[p] = {
             name: p,
@@ -1326,13 +1327,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         node !== root
       ) {
         const only = node.dirs[ks[0]];
-        node.name = node.name ? node.name + "/" + only.name : only.name;
+        node.name = node.name ? `${node.name}/${only.name}` : only.name;
         node.dirs = only.dirs;
         node.files = only.files;
         node.path = only.path;
         node.minOrder = Math.min(node.minOrder, only.minOrder);
         ks.length = 0;
-        Object.keys(node.dirs).forEach((k) => ks.push(k));
+        Object.keys(node.dirs).forEach((k) => {
+          ks.push(k);
+        });
       }
       Object.values(node.dirs).forEach(compress);
     }
@@ -1382,7 +1385,7 @@ window.GdpExpandLogic = GdpExpandLogic;
               ? "Large generated/vendor directory: open the detail pane to browse its contents"
               : "Internal Git metadata is not browsed";
         }
-        li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
+        li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
         const chev = document.createElement("span");
         if (dir.children_omitted) {
           chev.className = "chev-spacer";
@@ -1478,7 +1481,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           "viewed",
           !onFileClick && STATE.viewedFiles.has(f.path),
         );
-        li.style.setProperty("--lvl-pad", 12 + depth * 14 + "px");
+        li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
         const spacer = document.createElement("span");
         spacer.className = "chev-spacer";
         li.appendChild(spacer);
@@ -1567,7 +1570,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderFlat(files, ul, onFileClick);
     }
     $("#totals").textContent = files.length
-      ? files.length + " file" + (files.length === 1 ? "" : "s")
+      ? `${files.length} file${files.length === 1 ? "" : "s"}`
       : "";
     // Update view-toggle visual
     $$(".sb-view-seg button").forEach((b) => {
@@ -1619,8 +1622,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     value?: string;
   }): { wrap: HTMLDivElement; input: HTMLInputElement } {
     const wrap = document.createElement("div");
-    wrap.className =
-      "ref-selector" + (options.extraClass ? " " + options.extraClass : "");
+    wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
     wrap.dataset.refSelector = "";
     if (options.wrapperId) wrap.id = options.wrapperId;
     if (options.hidden) wrap.hidden = true;
@@ -1675,7 +1677,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (meta.branch) {
       const b = document.createElement("span");
       b.className = "ref";
-      b.textContent = "⎇ " + meta.branch;
+      b.textContent = `⎇ ${meta.branch}`;
       el.appendChild(b);
     }
     if (meta.totals) {
@@ -1696,8 +1698,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const u = document.createElement("span");
     u.className = "updated-at";
     u.title = "last updated";
-    u.textContent =
-      "updated " + new Date().toLocaleTimeString([], { hour12: false });
+    u.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
     el.appendChild(u);
   }
 
@@ -1711,7 +1712,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const card = document.querySelector<DiffCardElement>(
       diffCardSelector(path),
     );
-    if (!card || !card.classList.contains("pending")) return;
+    if (!card?.classList.contains("pending")) return;
     const f = STATE.files.find((x) => x.path === path);
     if (!f) return;
     enqueueLoad(f, card, 5);
@@ -1802,7 +1803,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const dir of sidebarAncestorDirs(path)) {
       if (STATE.collapsedDirs.delete(dir)) changed = true;
       const row = document.querySelector<HTMLElement>(
-        '#filelist .tree-dir[data-dirpath="' + CSS.escape(dir) + '"]',
+        `#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`,
       );
       row?.classList.remove("collapsed");
       const icon = row?.querySelector<HTMLElement>(".dir-icon");
@@ -1876,7 +1877,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   ) {
     $$("#filelist .tree-dir").forEach((dir) => {
       const childUl = dir.nextElementSibling;
-      if (!childUl || !childUl.classList.contains("tree-children")) return;
+      if (!childUl?.classList.contains("tree-children")) return;
       const anyVisible = !!childUl.querySelector(
         ".tree-file:not(.hidden):not(.hidden-by-tests)",
       );
@@ -2111,12 +2112,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function removeStandaloneSource() {
-    document
-      .querySelectorAll(".gdp-standalone-source")
-      .forEach((el) => el.remove());
-    document
-      .querySelectorAll(".gdp-repo-blob-layout")
-      .forEach((el) => el.remove());
+    document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
+      el.remove();
+    });
+    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
+      el.remove();
+    });
   }
 
   function renderHelpPage() {
@@ -2280,7 +2281,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           delete old.dataset.manualRendered;
           delete old.dataset.manualLoad;
           delete old.dataset.manualMode;
-          old.style.minHeight = (f.estimated_height_px || 80) + "px";
+          old.style.minHeight = `${f.estimated_height_px || 80}px`;
           old._diffData = null;
           old._file = null;
         } else {
@@ -2304,7 +2305,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
 
     // Cards no longer present
-    oldByKey.forEach((c) => c.remove());
+    oldByKey.forEach((c) => {
+      c.remove();
+    });
 
     target.replaceChildren(...ordered);
 
@@ -2401,7 +2404,9 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     const form = new FormData();
     form.set("dir", path);
-    list.forEach((file) => form.append("files", file, file.name));
+    list.forEach((file) => {
+      form.append("files", file, file.name);
+    });
     const res = await fetch("/_upload_files", {
       method: "POST",
       headers: { "X-Code-Viewer-Action": "1" },
@@ -2418,8 +2423,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     const copy = document.createElement("div");
     copy.className = "gdp-upload-copy";
-    copy.textContent =
-      "Drop files into " + (path || PROJECT_NAME || "repository");
+    copy.textContent = `Drop files into ${path || PROJECT_NAME || "repository"}`;
 
     const input = document.createElement("input");
     input.type = "file";
@@ -2439,8 +2443,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     input.addEventListener("change", async () => {
       try {
-        if (input.files && input.files.length)
-          await uploadFiles(path, input.files);
+        if (input.files?.length) await uploadFiles(path, input.files);
       } catch {
         fail();
       } finally {
@@ -2460,7 +2463,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       dropPanel.classList.remove("dragging");
       try {
         const files = event.dataTransfer?.files;
-        if (files && files.length) await uploadFiles(path, files);
+        if (files?.length) await uploadFiles(path, files);
       } catch {
         fail();
       }
@@ -2631,7 +2634,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     meta.entries.forEach((entry) => {
       const row = document.createElement("button");
       row.type = "button";
-      row.className = "gdp-repo-row " + entry.type;
+      row.className = `gdp-repo-row ${entry.type}`;
       const icon = document.createElement("span");
       icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
       if (entry.type === "tree") setFolderIcon(icon, true);
@@ -2675,7 +2678,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     listCard.appendChild(listWrapper);
     shell.appendChild(listCard);
 
-    if (meta.readme && meta.readme.text) {
+    if (meta.readme?.text) {
       const readme = document.createElement("section");
       readme.className = "gdp-file-shell loaded gdp-repo-readme";
       const wrapper = document.createElement("div");
@@ -2745,7 +2748,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     appendScopeOmitDirsParam(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(
-      fetch("/_tree?" + params.toString()).then((r) => {
+      fetch(`/_tree?${params.toString()}`).then((r) => {
         if (!r.ok) throw new Error("failed to load repository tree");
         return r.json();
       }),
@@ -2813,7 +2816,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     card.dataset.status = f.status || "M";
     card.classList.toggle("viewed", STATE.viewedFiles.has(f.path));
     if (f.estimated_height_px) {
-      card.style.minHeight = f.estimated_height_px + "px";
+      card.style.minHeight = `${f.estimated_height_px}px`;
     }
 
     const head = document.createElement("div");
@@ -2871,7 +2874,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     document
       .querySelectorAll<DiffCardElement>(".gdp-file-shell.pending")
-      .forEach((c) => lazyObserver.observe(c));
+      .forEach((c) => {
+        lazyObserver.observe(c);
+      });
   }
 
   window.addEventListener("scroll", () => enqueueInitialLoads(), {
@@ -2951,7 +2956,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (lazyObserver) lazyObserver.unobserve(card);
     const indicator = card.querySelector<HTMLElement>(".loading-indicator");
     if (indicator) indicator.hidden = true;
-    const body = card.querySelector<HTMLElement>(".gdp-shell-body")!;
+    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+    if (!body) return;
     body.innerHTML = "";
 
     const wrap = document.createElement("div");
@@ -2959,7 +2965,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     const note = document.createElement("div");
     note.className = "gdp-manual-note";
-    note.textContent = manualLoadReason(file) + " - click to load diff";
+    note.textContent = `${manualLoadReason(file)} - click to load diff`;
 
     const previewBtn = document.createElement("button");
     previewBtn.className = "gdp-show-full";
@@ -3073,7 +3079,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (String(myReq) !== card.dataset.reqId) return;
         card.classList.remove("loading");
         card.classList.add("error");
-        const body = card.querySelector<HTMLElement>(".gdp-shell-body")!;
+        const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+        if (!body) return;
         body.innerHTML =
           '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
         const btn = body.querySelector(".retry");
@@ -3094,10 +3101,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   ) {
     const head = card.querySelector<HTMLElement>(".gdp-shell-header");
     if (head) head.style.display = "none";
-    const body = card.querySelector<HTMLElement>(".gdp-shell-body")!;
+    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+    if (!body) return;
     body.innerHTML = "";
 
-    if (!data.diff || !data.diff.trim()) {
+    if (!data.diff?.trim()) {
       body.innerHTML = '<div class="gdp-info">No content</div>';
       return;
     }
@@ -3226,7 +3234,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!group.length) return;
       const parsed = group.find((g) => g.hunk) || group[0];
       if (!parsed.hunk) return;
-      group.forEach((g) => g.tr.classList.add("gdp-hunk-row"));
+      group.forEach((g) => {
+        g.tr.classList.add("gdp-hunk-row");
+      });
       infoRows.push({
         tr: parsed.tr,
         info: parsed.info,
@@ -3332,7 +3342,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         end;
       trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
         .then((data) => {
-          if (!data || !data.lines) {
+          if (!data?.lines) {
             setBusy(false);
             return;
           }
@@ -3359,7 +3369,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             const ln = sib.tr.querySelector(
               ".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info",
             );
-            const old = ln && ln.querySelector(".gdp-expand-stack");
+            const old = ln?.querySelector(".gdp-expand-stack");
             if (old) old.remove();
           }
           attachExpandControls(item, file, ref, refPath);
@@ -3388,7 +3398,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         // hunk in the file. Repeated clicks walk further up the file.
         buttons.push({
           direction: "up",
-          title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -3401,7 +3411,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         //            ↓ pulls high end (toward this hunk, below @@).
         buttons.push({
           direction: "up",
-          title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
           onClick: () =>
             fetchAndInsert(
               remainingStart,
@@ -3411,7 +3421,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         });
         buttons.push({
           direction: "down",
-          title: "Show " + Math.min(STEP, remainingSize) + " more lines",
+          title: `Show ${Math.min(STEP, remainingSize)} more lines`,
           onClick: () =>
             fetchAndInsert(
               Math.max(remainingStart, remainingEnd - STEP + 1),
@@ -3483,15 +3493,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       const targetH = stack
         ? Math.max(20, stack.getBoundingClientRect().height)
         : 20;
-      rows.forEach((row) =>
-        row.style.setProperty("height", targetH + "px", "important"),
-      );
+      rows.forEach((row) => {
+        row.style.setProperty("height", `${targetH}px`, "important");
+      });
     };
     requestAnimationFrame(syncHeight);
     setTimeout(syncHeight, 100);
   }
 
-  function attachTrailingExpandControls(
+  function _attachTrailingExpandControls(
     item: HunkRow,
     file: FileMeta,
     ref: string,
@@ -3525,13 +3535,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!rows.length) return;
 
     const setBusy = (busy: boolean) => {
-      rows.forEach((row) =>
+      rows.forEach((row) => {
         row.ln
           .querySelectorAll<HTMLButtonElement>(".gdp-expand-btn")
           .forEach((btn) => {
             btn.disabled = busy;
-          }),
-      );
+          });
+      });
     };
     const fetchAndInsert = () => {
       const range = window.GdpExpandLogic.trailingClickRange(
@@ -3550,13 +3560,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         range.end;
       trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
         .then((data) => {
-          const lines = (data && data.lines) || [];
+          const lines = data?.lines || [];
           if (!lines.length) {
-            rows.forEach((row) => row.tr.remove());
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
             return;
           }
           const card = item.tr.closest(".d2h-file-wrapper");
-          rows.forEach((row) =>
+          rows.forEach((row) => {
             insertContextRows(
               row.tr,
               lines,
@@ -3564,8 +3576,8 @@ window.GdpExpandLogic = GdpExpandLogic;
               nextOldStart,
               "before",
               row.sideIndex,
-            ),
-          );
+            );
+          });
           const next = window.GdpExpandLogic.applyTrailingResult(
             { newStart: nextNewStart, oldStart: nextOldStart },
             lines.length,
@@ -3575,7 +3587,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           nextOldStart = next.oldStart;
           if (card) highlightInsertedSpans(card, file);
           if (next.eof) {
-            rows.forEach((row) => row.tr.remove());
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
             return;
           }
           setBusy(false);
@@ -3623,11 +3637,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       const tr = document.createElement("tr");
       tr.className = "gdp-inserted-ctx";
       if (dir) tr.dataset.gdpDir = dir;
-      let lnHtml;
+      let lnHtml: string;
       if (isSplit) {
         const num = sideIndex === 0 ? oldStart + i : newStart + i;
-        lnHtml =
-          '<td class="d2h-code-side-linenumber d2h-cntx">' + num + "</td>";
+        lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
       } else {
         lnHtml =
           '<td class="d2h-code-linenumber d2h-cntx">' +
@@ -3711,7 +3724,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     title.textContent = "Loading file";
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = target.path + " at " + target.ref;
+    message.textContent = `${target.path} at ${target.ref}`;
     content.append(title, message);
     if (onCancel) {
       const button = document.createElement("button");
@@ -3740,8 +3753,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     const view = document.createElement("div");
     view.className = "gdp-source-viewer error";
-    view.textContent =
-      message || "Cannot load " + target.path + " at " + target.ref;
+    view.textContent = message || `Cannot load ${target.path} at ${target.ref}`;
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }
@@ -3762,7 +3774,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     title.textContent = "Loading cancelled";
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
-    message.textContent = target.path + " at " + target.ref;
+    message.textContent = `${target.path} at ${target.ref}`;
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "gdp-btn gdp-btn-sm";
@@ -3824,7 +3836,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const preview = document.createElement("div");
     preview.className = "gdp-html-preview";
     const frame = document.createElement("iframe");
-    frame.title = target.path + " preview";
+    frame.title = `${target.path} preview`;
     frame.srcdoc = html;
     preview.appendChild(frame);
     return preview;
@@ -4269,7 +4281,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const header = isStandalone ? null : document.createElement("div");
     if (header) {
       header.className = "gdp-source-meta";
-      header.textContent = target.path + " @ " + target.ref;
+      header.textContent = `${target.path} @ ${target.ref}`;
     }
     const lang = inferLang(target.path);
     const usesVirtualSource =
@@ -4733,7 +4745,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             ? Math.max(0, Math.min(active, matches.length - 1))
             : -1;
           count.textContent = matches.length
-            ? active + 1 + " / " + matches.length
+            ? `${active + 1} / ${matches.length}`
             : "0 / 0";
           if (active >= 0)
             scroller.scrollTop = Math.max(
@@ -4758,7 +4770,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const move = (direction: number) => {
       if (!matches.length) return;
       active = (active + direction + matches.length) % matches.length;
-      count.textContent = active + 1 + " / " + matches.length;
+      count.textContent = `${active + 1} / ${matches.length}`;
       scroller.scrollTop = Math.max(
         0,
         (matches[active].line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT -
@@ -4872,11 +4884,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", target.path + " source code");
+    scroller.setAttribute("aria-label", `${target.path} source code`);
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
-    spacer.style.height =
-      Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT) + "px";
+    spacer.style.height = `${Math.max(1, lines.length * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
     const windowEl = document.createElement("div");
     windowEl.className = "gdp-source-virtual-window";
     spacer.appendChild(windowEl);
@@ -4905,8 +4916,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderedStart = start;
       renderedEnd = end;
       windowEl.replaceChildren();
-      windowEl.style.transform =
-        "translateY(" + start * VIRTUAL_SOURCE_ROW_HEIGHT + "px)";
+      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const row = document.createElement("div");
@@ -4939,8 +4949,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           )
         ) {
         } else if (
-          hljsRef &&
-          hljsRef.highlight &&
+          hljsRef?.highlight &&
           lang &&
           line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH &&
           (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
@@ -5042,7 +5051,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     scroller.className = "gdp-source-virtual-scroller";
     scroller.tabIndex = 0;
     scroller.setAttribute("role", "region");
-    scroller.setAttribute("aria-label", target.path + " source code");
+    scroller.setAttribute("aria-label", `${target.path} source code`);
     const spacer = document.createElement("div");
     spacer.className = "gdp-source-virtual-spacer";
     const windowEl = document.createElement("div");
@@ -5063,9 +5072,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           initialStart + initialLines.length - 1,
           targetLine + VIRTUAL_SOURCE_PAGE_SIZE,
         );
-    initialLines.forEach((line, index) =>
-      lines.set(initialStart + index, line),
-    );
+    initialLines.forEach((line, index) => {
+      lines.set(initialStart + index, line);
+    });
     requestedPages.add(
       Math.max(0, Math.floor((initialStart - 1) / VIRTUAL_SOURCE_PAGE_SIZE)),
     );
@@ -5084,12 +5093,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       summary.textContent =
         (complete
           ? totalRows.toLocaleString()
-          : lines.size.toLocaleString() + "+") +
+          : `${lines.size.toLocaleString()}+`) +
         " lines loaded from " +
         formatBytes(size) +
         ". More rows load as you scroll.";
-      spacer.style.height =
-        Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT) + "px";
+      spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
     };
 
     const loadPage = (line: number) => {
@@ -5110,9 +5118,9 @@ window.GdpExpandLogic = GdpExpandLogic;
           )
           .then((data) => {
             if (!data || signal?.aborted) return;
-            data.lines.forEach((lineValue, index) =>
-              lines.set(data.start + index, lineValue),
-            );
+            data.lines.forEach((lineValue, index) => {
+              lines.set(data.start + index, lineValue);
+            });
             totalRows = data.complete
               ? Math.max(1, data.total)
               : Math.max(totalRows, data.total, end + VIRTUAL_SOURCE_PAGE_SIZE);
@@ -5156,8 +5164,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderedStart = start;
       renderedEnd = end;
       windowEl.replaceChildren();
-      windowEl.style.transform =
-        "translateY(" + start * VIRTUAL_SOURCE_ROW_HEIGHT + "px)";
+      windowEl.style.transform = `translateY(${start * VIRTUAL_SOURCE_ROW_HEIGHT}px)`;
       const fragment = document.createDocumentFragment();
       for (let index = start; index < end; index++) {
         const lineNumber = index + 1;
@@ -5193,8 +5200,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ) {
           // Search marks are rendered from text so virtual rows can be rebuilt cheaply.
         } else if (
-          hljsRef &&
-          hljsRef.highlight &&
+          hljsRef?.highlight &&
           lang &&
           line.length <= VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH &&
           (!hljsRef.getLanguage || hljsRef.getLanguage(lang))
@@ -5317,7 +5323,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const header = isStandalone ? null : document.createElement("div");
     if (header) {
       header.className = "gdp-source-meta";
-      header.textContent = target.path + " @ " + target.ref;
+      header.textContent = `${target.path} @ ${target.ref}`;
       view.appendChild(header);
     }
     const lineTarget = lineTargetStart(currentSourceLineTarget(target)) || 1;
@@ -5382,7 +5388,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!isStandalone) {
       const meta = document.createElement("div");
       meta.className = "gdp-source-meta";
-      meta.textContent = target.path + " @ " + target.ref;
+      meta.textContent = `${target.path} @ ${target.ref}`;
       view.appendChild(meta);
     }
     const url = buildRawFileUrl(target);
@@ -5414,7 +5420,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         "load",
         () => {
           const resolution = document.createElement("span");
-          resolution.textContent = img.naturalWidth + " x " + img.naturalHeight;
+          resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
           info.appendChild(resolution);
         },
         { once: true },
@@ -5425,7 +5431,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     else card.appendChild(view);
   }
 
-  function renderSourceBinary(card: DiffCardElement, target: SourceFileTarget) {
+  function _renderSourceBinary(
+    card: DiffCardElement,
+    target: SourceFileTarget,
+  ) {
     const body = card.querySelector<HTMLElement>(
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
     );
@@ -5440,7 +5449,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!isStandalone) {
       const meta = document.createElement("div");
       meta.className = "gdp-source-meta";
-      meta.textContent = target.path + " @ " + target.ref;
+      meta.textContent = `${target.path} @ ${target.ref}`;
       view.appendChild(meta);
     }
     view.appendChild(link);
@@ -5497,9 +5506,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
-    document
-      .querySelectorAll(".gdp-repo-blob-layout")
-      .forEach((el) => el.remove());
+    document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
+      el.remove();
+    });
     const card = document.createElement("article") as DiffCardElement;
     card.className =
       "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
@@ -5650,7 +5659,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           renderSourceError(
             card,
             target,
-            "Cannot load " + target.path + " at " + target.ref,
+            `Cannot load ${target.path} at ${target.ref}`,
           );
           return;
         }
@@ -5694,7 +5703,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderSourceError(
         card,
         target,
-        "Cannot load " + target.path + " at " + target.ref,
+        `Cannot load ${target.path} at ${target.ref}`,
       );
     }
   }
@@ -5722,7 +5731,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     const row = card.querySelector<HTMLElement>(
-      '.gdp-source-table tr[data-line="' + String(line) + '"]',
+      `.gdp-source-table tr[data-line="${String(line)}"]`,
     );
     if (row) row.scrollIntoView({ block: "center" });
   }
@@ -5889,7 +5898,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     const total = (file.additions || 0) + (file.deletions || 0);
     const SEG = 5;
-    let aSeg, dSeg;
+    let aSeg: number;
+    let dSeg: number;
     if (total === 0) {
       aSeg = 0;
       dSeg = 0;
@@ -5949,8 +5959,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
     mountDiff(card, file, data);
     applyDiffRouteFocus(card);
-    card.style.containIntrinsicSize =
-      Math.max(card.offsetHeight, file.estimated_height_px || 200) + "px";
+    card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
     if (data.truncated && data.mode === "preview") {
@@ -5987,18 +5996,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     const step = Math.min(10, remaining);
     const moreBtn = document.createElement("button");
     moreBtn.className = "gdp-show-full";
-    moreBtn.textContent =
-      "Show next " + step + " hunk" + (step === 1 ? "" : "s");
+    moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
     moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
 
     const allBtn = document.createElement("button");
     allBtn.className = "gdp-show-full secondary";
-    allBtn.textContent = "Show all (" + remaining + " remaining)";
+    allBtn.textContent = `Show all (${remaining} remaining)`;
     allBtn.addEventListener("click", () => loadMore(total, true));
 
     const note = document.createElement("span");
     note.className = "gdp-hunk-note";
-    note.textContent = rendered + " / " + total + " hunks shown";
+    note.textContent = `${rendered} / ${total} hunks shown`;
 
     wrap.appendChild(note);
     wrap.appendChild(moreBtn);
@@ -6055,9 +6063,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (file.size_class === "huge") return;
     if (!STATE.syntaxHighlight) return;
     const hljsRef = getHljs();
-    if (!hljsRef || !hljsRef.highlight) return;
+    if (!hljsRef?.highlight) return;
     const lang = inferLang(file.path);
-    if (!lang || !hljsRef.getLanguage || !hljsRef.getLanguage(lang)) return;
+    if (!lang || !hljsRef.getLanguage?.(lang)) return;
     const spans = card.querySelectorAll<HTMLElement>(
       "tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])",
     );
@@ -6083,9 +6091,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!STATE.syntaxHighlight) return;
     if (!("requestIdleCallback" in window)) return;
     const hljsRef = getHljs();
-    if (!hljsRef || !hljsRef.highlight) return;
+    if (!hljsRef?.highlight) return;
     const lang = inferLang(file.path);
-    if (!lang || !hljsRef.getLanguage || !hljsRef.getLanguage(lang)) return;
+    if (!lang || !hljsRef.getLanguage?.(lang)) return;
 
     const work = (deadline: IdleDeadline) => {
       const spans = card.querySelectorAll<HTMLElement>(
@@ -6151,17 +6159,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     return AUDIO_RE.test(p);
   }
   function fileURL(path: string, ref: string): string {
-    return "/_file?path=" + encodeURIComponent(path) + "&ref=" + ref;
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
   }
   function mediaTag(path: string, ref: string): string {
     const url = fileURL(path, ref);
     if (isVideo(path)) {
-      return '<video src="' + url + '" controls preload="metadata"></video>';
+      return `<video src="${url}" controls preload="metadata"></video>`;
     }
     if (isAudio(path)) {
-      return '<audio src="' + url + '" controls preload="metadata"></audio>';
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
     }
-    return '<img src="' + url + '" alt="" loading="lazy">';
+    return `<img src="${url}" alt="" loading="lazy">`;
   }
 
   // Per-card media enhancer (replaces the global walk; only touches this card)
@@ -6176,7 +6184,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!body) return;
     const container = document.createElement("div");
     container.className = "gdp-media";
-    let leftHTML, rightHTML;
+    let leftHTML: string;
+    let rightHTML: string;
     if (file.status === "A") {
       leftHTML = '<div class="media-empty">Not in HEAD</div>';
       rightHTML = mediaTag(path, "worktree");
@@ -6211,6 +6220,7 @@ window.GdpExpandLogic = GdpExpandLogic;
             getComputedStyle(document.documentElement).getPropertyValue(
               "--topbar-h",
             ),
+            10,
           ) || 56;
         // Note: spy now targets .gdp-file-shell (placeholder + loaded both expose
         // data-path), instead of .d2h-file-wrapper which only exists post-render.
@@ -6242,7 +6252,7 @@ window.GdpExpandLogic = GdpExpandLogic;
                 performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
               if (!recentlyTouched) {
                 const li = document.querySelector<HTMLElement>(
-                  '#filelist li[data-path="' + CSS.escape(best) + '"]',
+                  `#filelist li[data-path="${CSS.escape(best)}"]`,
                 );
                 if (li) {
                   const sb = document.querySelector<HTMLElement>("#sidebar");
@@ -6268,7 +6278,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     handler(new Event("scroll"));
   }
 
-  function collapseAll(force?: boolean) {
+  function _collapseAll(force?: boolean) {
     STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
     document
       .querySelectorAll<HTMLElement>(".gdp-file-shell.loaded .d2h-file-wrapper")
@@ -6321,7 +6331,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // Sidebar resizer (drag right edge)
   function applySidebarWidth(w: number) {
     const cw = Math.max(180, Math.min(900, w));
-    document.documentElement.style.setProperty("--sidebar-w", cw + "px");
+    document.documentElement.style.setProperty("--sidebar-w", `${cw}px`);
     STATE.sbWidth = cw;
     localStorage.setItem("gdp:sbwidth", String(cw));
   }
@@ -6369,13 +6379,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       currentW = startW;
       document.body.classList.add("gdp-resizing");
       preview.style.display = "block";
-      preview.style.left = startW + "px";
+      preview.style.left = `${startW}px`;
       e.preventDefault();
     });
     window.addEventListener("mousemove", (e) => {
       if (!dragging) return;
       currentW = clamp(startW + (e.clientX - startX));
-      preview.style.left = currentW + "px";
+      preview.style.left = `${currentW}px`;
     });
     window.addEventListener("mouseup", () => {
       if (!dragging) return;
@@ -6780,7 +6790,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     state.items.forEach((item, index) => {
       const row = document.createElement("button");
       row.type = "button";
-      row.id = "gdp-palette-item-" + index;
+      row.id = `gdp-palette-item-${index}`;
       row.className = "gdp-palette-row";
       row.setAttribute("role", "option");
       row.setAttribute(
@@ -6795,10 +6805,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         title.textContent = item.path.split("/").pop() || item.path;
         appendHighlightedPath(detail, item.displayPath, item.ranges);
         if (item.old_path && item.displayPath !== item.old_path) {
-          detail.appendChild(document.createTextNode("  " + item.old_path));
+          detail.appendChild(document.createTextNode(`  ${item.old_path}`));
         }
       } else {
-        title.textContent = item.path + ":" + item.line;
+        title.textContent = `${item.path}:${item.line}`;
         detail.textContent = item.preview;
       }
       row.append(title, detail);
@@ -6819,7 +6829,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function syncPaletteSelection(state: PaletteState) {
     state.input.setAttribute(
       "aria-activedescendant",
-      state.selected >= 0 ? "gdp-palette-item-" + state.selected : "",
+      state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "",
     );
     state.list
       .querySelectorAll<HTMLElement>(".gdp-palette-row")
@@ -6842,7 +6852,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     params.set("ref", ref);
     appendScopeOmitDirsParam(params);
     const res = await trackLoad<FileSearchListResponse>(
-      fetch("/_files?" + params.toString()).then((r) => {
+      fetch(`/_files?${params.toString()}`).then((r) => {
         if (!r.ok) throw new Error("failed to load files");
         return r.json();
       }),
@@ -6920,7 +6930,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       state.selected = state.items.length ? 0 : -1;
       state.status.textContent =
         source === "diff"
-          ? state.diffSnapshot.length + " diff files"
+          ? `${state.diffSnapshot.length} diff files`
           : "Type to search repository files";
       renderPalette(state);
       return;
@@ -6945,7 +6955,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     state.selected = state.items.length ? 0 : -1;
     state.status.textContent = state.items.length
-      ? state.items.length + " results"
+      ? `${state.items.length} results`
       : "No results";
     renderPalette(state);
   }
@@ -6985,7 +6995,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const controller = new AbortController();
       state.controller = controller;
       trackLoad<GrepResponse>(
-        fetch("/_grep?" + params.toString(), {
+        fetch(`/_grep?${params.toString()}`, {
           signal: controller.signal,
         }).then((r) => {
           if (!r.ok) throw new Error("grep failed");
@@ -7292,7 +7302,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       (key === "arrowdown" || key === "arrowup") && e.ctrlKey && !e.shiftKey;
     if (!isPlainPageKey && !isCtrlArrowKey) return false;
     const scroller = findMainScrollTarget();
-    if (!scroller || !scroller.matches("#content .gdp-source-virtual-scroller"))
+    if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
       return false;
     const pageDown = key === "pagedown" || key === "arrowdown";
     const pageUp = key === "pageup" || key === "arrowup";
@@ -7358,7 +7368,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.path) params.set("path", STATE.route.path);
     appendScopeOmitDirsParam(params);
     return trackLoad<RepoTreeResponse>(
-      fetch("/_tree?" + params.toString()).then((r) => {
+      fetch(`/_tree?${params.toString()}`).then((r) => {
         if (!r.ok) throw new Error("failed to load repository tree");
         return r.json();
       }),
@@ -7385,8 +7395,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.from) params.set("from", STATE.from);
     if (STATE.to) params.set("to", STATE.to);
     if (options.force) params.set("nocache", "1");
-    const url =
-      "/diff.json" + (params.toString() ? "?" + params.toString() : "");
+    const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
         renderShell(data);
@@ -7451,8 +7460,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     current: "",
   };
   const popover = $<HTMLElement>("#ref-popover");
-  const popBody = popover.querySelector<HTMLElement>(".rp-body")!;
-  const popSearch = popover.querySelector<HTMLInputElement>(".rp-search")!;
+  const popBody = popover.querySelector<HTMLElement>(".rp-body");
+  const popSearch = popover.querySelector<HTMLInputElement>(".rp-search");
+  if (!popBody || !popSearch) return;
   let popTarget: HTMLInputElement | null = null; // which input opened the popover
 
   function fetchRefs() {
@@ -7474,8 +7484,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const seq = ++commitSearchSeq;
     if (commitSearchAbort) commitSearchAbort.abort();
     commitSearchAbort = new AbortController();
-    const url =
-      "/_commits?max=100&q=" + encodeURIComponent((query || "").trim());
+    const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
     return fetch(url, { signal: commitSearchAbort.signal })
       .then((r) => r.json())
       .then((refs: RefCommitResponse) => {
@@ -7546,39 +7555,53 @@ window.GdpExpandLogic = GdpExpandLogic;
         );
       }
     } else if (popTab === "branches") {
-      const branches = (REFS.branches || []).filter(m);
+      const branches = (REFS.branches || []).filter((b) => m(b.name));
       if (!branches.length) {
         html.push('<div class="rp-empty">no branches</div>');
       }
-      for (const b of branches) {
-        const cur = b === REFS.current;
+      for (const branch of branches) {
+        const cur = branch.name === REFS.current;
         html.push(
           '<div class="rp-item-ref" data-val="' +
-            escapeAttr(b) +
+            escapeAttr(branch.name) +
             '">' +
+            '<div class="row1">' +
             '<span class="name">' +
-            escapeHtml(b) +
+            escapeHtml(branch.name) +
             "</span>" +
             (cur
               ? '<span class="badge cur">current</span>'
               : '<span class="badge">branch</span>') +
+            "</div>" +
+            (branch.when
+              ? '<div class="row2"><span class="when">' +
+                escapeHtml(branch.when) +
+                "</span></div>"
+              : "") +
             "</div>",
         );
       }
     } else if (popTab === "tags") {
-      const tags = (REFS.tags || []).filter(m);
+      const tags = (REFS.tags || []).filter((t) => m(t.name));
       if (!tags.length) {
         html.push('<div class="rp-empty">no tags</div>');
       }
-      for (const t of tags) {
+      for (const tag of tags) {
         html.push(
           '<div class="rp-item-ref" data-val="' +
-            escapeAttr(t) +
+            escapeAttr(tag.name) +
             '">' +
+            '<div class="row1">' +
             '<span class="name">' +
-            escapeHtml(t) +
+            escapeHtml(tag.name) +
             "</span>" +
             '<span class="badge">tag</span>' +
+            "</div>" +
+            (tag.when
+              ? '<div class="row2"><span class="when">' +
+                escapeHtml(tag.when) +
+                "</span></div>"
+              : "") +
             "</div>",
         );
       }
@@ -7626,9 +7649,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     popover.hidden = false;
     const r = input.getBoundingClientRect();
     const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
-    popover.style.left =
-      Math.max(8, Math.min(r.left, window.innerWidth - popWidth - 8)) + "px";
-    popover.style.top = r.bottom + 4 + "px";
+    popover.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - popWidth - 8))}px`;
+    popover.style.top = `${r.bottom + 4}px`;
     setTimeout(() => popSearch.focus(), 0);
   }
   function closePopover() {
@@ -7693,9 +7715,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   popover.querySelectorAll<HTMLElement>(".rp-tab").forEach((t) => {
     t.addEventListener("click", () => {
       popTab = t.dataset.tab || "commits";
-      popover
-        .querySelectorAll(".rp-tab")
-        .forEach((b) => b.classList.toggle("active", b === t));
+      popover.querySelectorAll(".rp-tab").forEach((b) => {
+        b.classList.toggle("active", b === t);
+      });
       if (popTab === "commits") scheduleCommitSearch(popSearch.value);
       buildPopBody(popSearch.value);
     });

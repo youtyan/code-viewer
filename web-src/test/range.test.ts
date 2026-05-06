@@ -6,13 +6,15 @@ import {
   collectBytesWithLineOffsetIndexFromStream,
   collectLineRangeFromIndexedText,
   collectLineRangeFromStream,
+  isSameWorktreeRange,
   lineByteRangeForIndex,
   parseHttpByteRange,
-  isSameWorktreeRange,
 } from "../server/range";
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {
-  return new Response(text).body!;
+  const body = new Response(text).body;
+  if (!body) throw new Error("Response body is unavailable");
+  return body;
 }
 
 describe("isSameWorktreeRange", () => {
@@ -178,7 +180,7 @@ describe("line offset index", () => {
     const range = lineByteRangeForIndex(index, 2, 3);
     if (!range) throw new Error("expected indexed byte range");
     const indexed = collectLineRangeFromIndexedText(
-      text.slice(range!.start, range!.endExclusive),
+      text.slice(range.start, range.endExclusive),
       index,
       2,
       3,
