@@ -6518,7 +6518,7 @@ ${frontmatter.yaml}
     });
   }
   function buildMarkdownToc(root) {
-    const entries = Array.from(root.querySelectorAll("h1[id], h2[id], h3[id]")).map((heading2) => ({
+    const entries = Array.from(root.querySelectorAll("h1[id], h2[id], h3[id], h4[id]")).map((heading2) => ({
       id: heading2.id,
       level: Number(heading2.tagName.slice(1)),
       text: (heading2.textContent || "").replace(/#$/, "").trim()
@@ -6537,6 +6537,7 @@ ${frontmatter.yaml}
       link2.href = `#${encodeURIComponent(entry.id)}`;
       link2.dataset.target = entry.id;
       link2.textContent = entry.text;
+      link2.title = entry.text;
       item.appendChild(link2);
       list2.appendChild(item);
     });

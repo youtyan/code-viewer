@@ -187,6 +187,15 @@ describe("markdown preview", () => {
     expect(markdownSlugify("***")).toBe("section");
   });
 
+  test("markdown TOC includes h4 headings and exposes link titles", () => {
+    expect(
+      markdown.includes(
+        'root.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id]")',
+      ),
+    ).toBe(true);
+    expect(markdown.includes("link.title = entry.text")).toBe(true);
+  });
+
   test("app wires markdown preview into README and file detail previews", () => {
     expect(
       app.includes(
@@ -241,12 +250,34 @@ describe("markdown preview", () => {
   test("markdown preview CSS includes TOC, tables, mermaid, and lightbox styling", () => {
     expect(style.includes(".gdp-markdown-layout")).toBe(true);
     expect(style.includes(".gdp-markdown-toc")).toBe(true);
-    expect(style.includes(".gdp-standalone-source .gdp-markdown-layout")).toBe(
-      true,
-    );
     expect(style.includes(".gdp-standalone-source .gdp-markdown-toc")).toBe(
+      false,
+    );
+    expect(style.includes(".gdp-standalone-source .gdp-markdown-layout")).toBe(
+      false,
+    );
+    expect(style.includes(".gdp-markdown-layout {\n  display: grid;")).toBe(
       true,
     );
+    expect(style.includes('content: "On this page";')).toBe(true);
+    expect(style.includes("top: calc(var(--global-header-h) + 16px);")).toBe(
+      true,
+    );
+    expect(
+      style.includes(
+        "max-height: calc(100vh - var(--global-header-h) - 40px);",
+      ),
+    ).toBe(true);
+    expect(style.includes("scrollbar-gutter: stable;")).toBe(true);
+    expect(style.includes("scrollbar-width: thin;")).toBe(true);
+    expect(style.includes("-webkit-line-clamp: 2;")).toBe(true);
+    expect(style.includes(".gdp-markdown-toc a:focus-visible")).toBe(true);
+    expect(style.includes(".gdp-markdown-toc .level-4 > a")).toBe(true);
+    expect(
+      style.includes(
+        ".gdp-markdown-toc a.active {\n  background: var(--accent-subtle);\n  border-left-color: var(--accent);\n  color: var(--fg);",
+      ),
+    ).toBe(true);
     expect(style.includes(".gdp-markdown-preview table")).toBe(true);
     expect(style.includes(".gdp-markdown-preview .mermaid")).toBe(true);
     expect(style.includes(".mkdp-lightbox")).toBe(true);
