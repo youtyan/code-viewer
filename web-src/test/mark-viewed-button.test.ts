@@ -39,14 +39,10 @@ describe("mark viewed toolbar button", () => {
       ),
     ).toBe(true);
     expect(appSource.includes("li.classList.toggle('viewed'")).toBe(true);
-    expect(
-      appSource.includes(
-        "!isRepositorySidebarMode() && STATE.viewedFiles.has(path)",
-      ),
-    ).toBe(true);
     expect(appSource.includes("if (isRepositorySidebarMode()) return")).toBe(
       true,
     );
+    expect(appSource.includes("STATE.viewedFiles.has(path)")).toBe(true);
     expect(
       appSource.includes(
         "function syncViewedCardDisplay(card: HTMLElement, viewed: boolean)",

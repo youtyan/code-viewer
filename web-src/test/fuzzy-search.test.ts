@@ -26,6 +26,14 @@ describe("fuzzyMatchPath", () => {
     expect(result.ranges.length > 0).toBe(true);
   });
 
+  test("highlights the contiguous basename match before path subsequences", () => {
+    const result = fuzzyMatchPath("main.tf", "infra/modules/networks/main.tf");
+
+    expect(result === null).toBe(false);
+    if (!result) throw new Error("expected fuzzy match");
+    expect(result.ranges).toEqual([{ start: 23, end: 30 }]);
+  });
+
   test("returns null when query characters are missing", () => {
     expect(fuzzyMatchPath("zzq", "web-src/app.ts")).toBeNull();
   });
@@ -81,5 +89,32 @@ describe("rankFuzzyPaths", () => {
       "src/application.ts",
     ]);
     expect(ranked[0].ranges.length > 0).toBe(true);
+  });
+
+  test("prioritizes exact basename matches over noisy path subsequences", () => {
+    const ranked = rankFuzzyPaths("main.tf", [
+      { path: "main.tfvars" },
+      { path: "infra/modules/networks/main.tf" },
+      { path: "foo/notmain.tf" },
+      {
+        path: ".tmp/ai-character-venv/lib/python3.11/site-packages/PIL/FontFile.py",
+      },
+      { path: "infra/environments/prod/main.tf" },
+      {
+        path: ".tmp/ai-character-venv/lib/python3.11/site-packages/PIL/FitImagePlugin.py",
+      },
+      { path: "mxainx.txfx" },
+    ]);
+    const paths = ranked.map((item) => item.item.path);
+
+    expect(paths).toEqual([
+      "infra/modules/networks/main.tf",
+      "infra/environments/prod/main.tf",
+      "main.tfvars",
+      "foo/notmain.tf",
+      "mxainx.txfx",
+      ".tmp/ai-character-venv/lib/python3.11/site-packages/PIL/FitImagePlugin.py",
+      ".tmp/ai-character-venv/lib/python3.11/site-packages/PIL/FontFile.py",
+    ]);
   });
 });
