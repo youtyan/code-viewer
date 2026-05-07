@@ -101,6 +101,7 @@ html, body {
   margin: 0; padding: 0;
   background: var(--bg); color: var(--fg);
   --code-font-size: 12px;
+  --markdown-font-size: calc(var(--code-font-size) + 2px);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
                Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   font-size: 14px;
@@ -282,9 +283,11 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 .brand {
   display: flex; align-items: center; gap: 9px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--fg);
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: min(34vw, 420px);
+  flex: 0 1 auto;
   text-decoration: none;
 }
 .brand:hover { color: var(--fg); text-decoration: none; }
@@ -294,7 +297,12 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   display: block;
   border-radius: 5px;
 }
-.brand .title { letter-spacing: -0.005em; }
+.brand .title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .app-menu {
   display: flex;
@@ -365,6 +373,13 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+.product-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 .global-actions #theme,
 .global-icon-action {
@@ -2298,6 +2313,12 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
 .gdp-upload-panel.failed {
   border-color: var(--danger);
 }
+.gdp-upload-error {
+  min-height: 18px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 18px;
+}
 .gdp-upload-copy {
   min-width: 0;
   color: var(--fg-muted);
@@ -2542,6 +2563,7 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   display: flex;
   align-items: center;
   min-width: 0;
+  flex: 0 1 auto;
   gap: 4px;
   padding-top: 2px;
   overflow: hidden;
@@ -2595,6 +2617,9 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   flex-shrink: 0;
   color: var(--danger);
 }
+.gdp-file-detail-header .gdp-create-dir {
+  flex-shrink: 0;
+}
 .gdp-file-detail-meta {
   display: flex;
   align-items: center;
@@ -2634,7 +2659,7 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   padding: 24px 32px 40px;
   color: var(--fg);
   overflow-wrap: break-word;
-  font-size: 16px;
+  font-size: var(--markdown-font-size);
   line-height: 1.75;
 }
 .gdp-html-preview {
@@ -2697,7 +2722,7 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   margin: 0;
 }
 .gdp-markdown-toc a {
-  display: -webkit-box;
+  display: block;
   min-height: 28px;
   padding: 5px 10px 5px 12px;
   border-left: 3px solid transparent;
@@ -2706,8 +2731,6 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   overflow: hidden;
   overflow-wrap: anywhere;
   text-decoration: none;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   transition:
     background-color 0.06s ease,
     border-color 0.06s ease,
@@ -2739,6 +2762,14 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   border-left-color: var(--accent);
   color: var(--fg);
   font-weight: 600;
+}
+.gdp-markdown-preview h1,
+.gdp-markdown-preview h2,
+.gdp-markdown-preview h3,
+.gdp-markdown-preview h4,
+.gdp-markdown-preview h5,
+.gdp-markdown-preview h6 {
+  scroll-margin-top: calc(var(--global-header-h) + 120px);
 }
 .gdp-markdown-preview h1,
 .gdp-markdown-preview h2 {
@@ -3141,9 +3172,6 @@ body.gdp-file-detail-page #empty {
   padding-left: 0;
   padding-right: 0;
 }
-.gdp-repo-breadcrumb {
-  flex: 1;
-}
 .gdp-repo-breadcrumb button {
   max-width: 260px;
   border: 0;
@@ -3323,6 +3351,29 @@ body.gdp-file-detail-page #empty {
   font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.gdp-create-dir-input {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.gdp-create-dir-input:focus {
+  outline: 2px solid var(--accent-subtle);
+  border-color: var(--accent);
+}
+.gdp-create-dir-error {
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 18px;
 }
 .gdp-trash-dialog-actions {
   display: flex;
