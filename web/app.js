@@ -6947,6 +6947,8 @@ ${frontmatter.yaml}
       direction: "asc"
     };
     let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
+    let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = [];
+    const UNDO_STACK = [];
     let PENDING_G_SCOPE = null;
     let PENDING_G_UNTIL = 0;
     let SOURCE_CURSOR = null;
@@ -6954,6 +6956,7 @@ ${frontmatter.yaml}
     const HELP_LANGUAGES = ["en", "ja"];
     const HELP_SECTIONS = ["keybindings"];
     const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
+    const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
     const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
     const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
@@ -6984,6 +6987,7 @@ ${frontmatter.yaml}
       "bin",
       "obj"
     ];
+    const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
     const HELP_CONTENT = {
       en: {
         languageLabel: "Language",
@@ -7255,8 +7259,17 @@ ${frontmatter.yaml}
         ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
       ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
     }
+    function normalizeScopeExcludeNames(value) {
+      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 128 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 200).sort((a2, b2) => a2.localeCompare(b2));
+    }
     function scopeOmitDirsStorageKey() {
       return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
+    }
+    function scopeExcludeNamesStorageKey() {
+      return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
     }
     function setProjectName(project) {
       if (!project)
@@ -7275,16 +7288,36 @@ ${frontmatter.yaml}
         return normalizeScopeOmitDirs(raw);
       }
     }
+    function savedScopeExcludeNames() {
+      const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
+      if (raw == null)
+        return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return normalizeScopeExcludeNames(raw);
+      }
+    }
     function serverScopeOmitDirsDefault() {
       return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
+    }
+    function serverScopeExcludeNamesDefault() {
+      return SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT.length ? SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT : CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT;
     }
     function effectiveScopeOmitDirs() {
       return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
     }
-    function appendScopeOmitDirsParam(params) {
-      const saved = savedScopeOmitDirs();
-      if (saved != null)
-        params.set("omit_dirs", saved.join(","));
+    function effectiveScopeExcludeNames() {
+      return savedScopeExcludeNames() ?? serverScopeExcludeNamesDefault();
+    }
+    function appendScopeParams(params) {
+      const omit = savedScopeOmitDirs();
+      if (omit != null)
+        params.set("omit_dirs", omit.join(","));
+      const exclude = savedScopeExcludeNames();
+      if (exclude != null)
+        params.set("exclude_names", exclude.join(","));
     }
     function normalizeViewerFontSize(value) {
       return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
@@ -7319,8 +7352,9 @@ ${frontmatter.yaml}
       syncSidebarHeaderHeight();
     }
     function repoFileCacheKey(ref) {
-      const saved = savedScopeOmitDirs();
-      return `${ref}\x00${saved ? saved.join("\x00") : "server"}`;
+      const omit = savedScopeOmitDirs();
+      const exclude = savedScopeExcludeNames();
+      return `${ref}\x00${omit ? omit.join("\x00") : "server"}\x00${exclude ? exclude.join("\x00") : "server"}`;
     }
     async function loadSettings() {
       try {
@@ -7330,6 +7364,7 @@ ${frontmatter.yaml}
         const settings = await res.json();
         setProjectName(settings.project || "");
         SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
+        SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
         return settings;
       } catch {
         return null;
@@ -7671,7 +7706,7 @@ ${frontmatter.yaml}
       applySidebarHidden(!STATE.sidebarHidden);
     }
     function scopeOmitSourceLabel() {
-      return savedScopeOmitDirs() != null ? "Browser override" : "Server default";
+      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
     }
     function refreshRepositoryTreeAfterSettings() {
       REPO_FILE_CACHE.clear();
@@ -7687,15 +7722,18 @@ ${frontmatter.yaml}
     async function openScopeSettings() {
       const pop = document.querySelector("#scope-settings-popover");
       const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
       const sidebarFontSize = document.querySelector("#sidebar-font-size");
       const codeFontSize = document.querySelector("#code-font-size");
       const source = document.querySelector("#scope-omit-source");
-      if (!pop || !input || !sidebarFontSize || !codeFontSize || !source)
+      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
         return;
       await loadSettings();
       sidebarFontSize.value = savedSidebarFontSize();
       codeFontSize.value = savedCodeFontSize();
       input.value = effectiveScopeOmitDirs().join(`
+`);
+      excludeInput.value = effectiveScopeExcludeNames().join(`
 `);
       source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
       pop.hidden = false;
@@ -7708,15 +7746,17 @@ ${frontmatter.yaml}
     }
     function saveScopeSettings() {
       const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
       const sidebarFontSize = document.querySelector("#sidebar-font-size");
       const codeFontSize = document.querySelector("#code-font-size");
-      if (!input || !sidebarFontSize || !codeFontSize)
+      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
         return;
       localStorage.setItem(SIDEBAR_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
       localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
       applySidebarFontSize();
       applyCodeFontSize();
       localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
+      localStorage.setItem(scopeExcludeNamesStorageKey(), JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)));
       closeScopeSettings();
       refreshRepositoryTreeAfterSettings();
     }
@@ -7726,6 +7766,7 @@ ${frontmatter.yaml}
       applySidebarFontSize("regular");
       applyCodeFontSize("regular");
       localStorage.removeItem(scopeOmitDirsStorageKey());
+      localStorage.removeItem(scopeExcludeNamesStorageKey());
       closeScopeSettings();
       refreshRepositoryTreeAfterSettings();
     }
@@ -7809,6 +7850,8 @@ ${frontmatter.yaml}
           li.className = "tree-dir";
           li.tabIndex = -1;
           li.dataset.dirpath = dir.path;
+          if (dir.children_omitted_reason)
+            li.dataset.childrenOmittedReason = dir.children_omitted_reason;
           if (dir.explicit)
             li.dataset.explicit = "true";
           if (dir.children_omitted) {
@@ -7952,6 +7995,8 @@ ${frontmatter.yaml}
       li.className = "tree-dir";
       li.tabIndex = -1;
       li.dataset.dirpath = dir.path;
+      if (dir.children_omitted_reason)
+        li.dataset.childrenOmittedReason = dir.children_omitted_reason;
       if (dir.explicit)
         li.dataset.explicit = "true";
       if (dir.children_omitted) {
@@ -8944,6 +8989,224 @@ ${frontmatter.yaml}
           button.disabled = false;
       }
     }
+    function closeRepoContextMenu() {
+      document.querySelector(".gdp-context-menu")?.remove();
+    }
+    function closeTrashDialog() {
+      document.querySelector(".gdp-trash-dialog-backdrop")?.remove();
+    }
+    function createTrashDialog(title, body, actions) {
+      closeTrashDialog();
+      const backdrop = document.createElement("div");
+      backdrop.className = "gdp-trash-dialog-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-trash-dialog";
+      const titleId = "gdp-trash-dialog-title";
+      const bodyId = "gdp-trash-dialog-body";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-labelledby", titleId);
+      dialog.setAttribute("aria-describedby", bodyId);
+      const heading2 = document.createElement("div");
+      heading2.id = titleId;
+      heading2.className = "gdp-trash-dialog-title";
+      heading2.textContent = title;
+      const message = document.createElement("div");
+      message.id = bodyId;
+      message.className = "gdp-trash-dialog-body";
+      message.textContent = body;
+      const actionRow = document.createElement("div");
+      actionRow.className = "gdp-trash-dialog-actions";
+      actionRow.append(...actions);
+      dialog.append(heading2, message, actionRow);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      return backdrop;
+    }
+    function confirmMoveToTrash(path, focusReturnTarget) {
+      return new Promise((resolve) => {
+        const previousFocus = focusReturnTarget || document.activeElement;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "gdp-btn gdp-btn-sm";
+        cancel.textContent = "Cancel";
+        const move = document.createElement("button");
+        move.type = "button";
+        move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
+        move.textContent = "Move to Trash";
+        const done = (ok) => {
+          document.removeEventListener("keydown", onKeydown);
+          closeTrashDialog();
+          previousFocus?.focus?.();
+          resolve(ok);
+        };
+        const onKeydown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            done(false);
+            return;
+          }
+          if (event.key !== "Tab")
+            return;
+          const focusables = [cancel, move];
+          const index = focusables.indexOf(document.activeElement);
+          if (index < 0) {
+            event.preventDefault();
+            focusables[0].focus();
+            return;
+          }
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[focusables.length - 1].focus();
+          } else if (!event.shiftKey && index === focusables.length - 1) {
+            event.preventDefault();
+            focusables[0].focus();
+          }
+        };
+        cancel.addEventListener("click", () => done(false));
+        move.addEventListener("click", () => done(true));
+        const backdrop = createTrashDialog("Move to Trash?", `Move "${path}" to Trash?`, [cancel, move]);
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop)
+            done(false);
+        });
+        document.addEventListener("keydown", onKeydown);
+        cancel.focus();
+      });
+    }
+    function showTrashError(message) {
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "gdp-btn gdp-btn-sm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", closeTrashDialog);
+      createTrashDialog("Trash failed", message, [ok]);
+      ok.focus();
+    }
+    async function moveRepoPathToTrash(path) {
+      const res = await fetch("/_trash_path", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify({ path })
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
+        return false;
+      }
+      const body = await res.json();
+      if (body.undo)
+        UNDO_STACK.unshift(body.undo);
+      return true;
+    }
+    async function runUndoAction(action) {
+      if (action.type !== "trash")
+        return false;
+      const res = await fetch("/_restore_trash", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify(action.payload)
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to undo "${action.label}": ${await res.text()}`);
+        return false;
+      }
+      return true;
+    }
+    async function undoLastAction() {
+      const action = UNDO_STACK.shift();
+      if (!action)
+        return false;
+      if (!await runUndoAction(action)) {
+        UNDO_STACK.unshift(action);
+        return true;
+      }
+      invalidateRepoSidebar();
+      await load();
+      return true;
+    }
+    async function requestMoveToTrash(path, onMoved, options = {}) {
+      if (!await confirmMoveToTrash(path, options.focusReturnTarget))
+        return;
+      if (await moveRepoPathToTrash(path))
+        onMoved();
+    }
+    function canTrashWorktreeRef(ref) {
+      return ref === "worktree" || ref === "";
+    }
+    function showRepoContextMenu(event, entry, ref, onDeleted) {
+      if (document.querySelector(".gdp-trash-dialog-backdrop"))
+        return false;
+      if (!canTrashWorktreeRef(ref))
+        return false;
+      if (entry.children_omitted_reason === "internal")
+        return false;
+      event.preventDefault();
+      closeRepoContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "gdp-context-menu";
+      const anchor = event.target;
+      const focusReturnTarget = anchor?.closest("li, .gdp-repo-row");
+      const anchorRect = anchor?.closest("li, .gdp-repo-row")?.getBoundingClientRect();
+      const anchorX = event.clientX > 0 ? event.clientX : anchorRect?.left || window.innerWidth / 2;
+      const anchorY = event.clientY > 0 ? event.clientY : anchorRect?.bottom || window.innerHeight / 2;
+      menu.style.left = `${anchorX}px`;
+      menu.style.top = `${anchorY}px`;
+      const trash = document.createElement("button");
+      trash.type = "button";
+      trash.className = "danger";
+      trash.textContent = "Move to Trash...";
+      trash.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await requestMoveToTrash(entry.path, onDeleted, { focusReturnTarget });
+      });
+      menu.appendChild(trash);
+      document.body.appendChild(menu);
+      const rect = menu.getBoundingClientRect();
+      const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
+      const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+      return true;
+    }
+    function sidebarTrashEntryFromEvent(event) {
+      if (!isRepositorySidebarMode())
+        return null;
+      const row = event.target?.closest("#filelist li");
+      if (!row)
+        return null;
+      const path = row.dataset.path || row.dataset.dirpath || "";
+      if (!path)
+        return null;
+      return {
+        path,
+        children_omitted_reason: row.dataset.childrenOmittedReason
+      };
+    }
+    function handleSidebarContextMenu(event) {
+      const entry = sidebarTrashEntryFromEvent(event);
+      if (!entry)
+        return;
+      if (showRepoContextMenu(event, entry, REPO_SIDEBAR_REF || "worktree", () => loadRepo()))
+        markActive(entry.path);
+    }
+    function createMoveToTrashButton(path, onDeleted) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-btn gdp-btn-sm gdp-trash-path";
+      button.textContent = "Move to Trash";
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
+      });
+      return button;
+    }
     function createOpenPathButton(path, kind, title = "open folder in OS") {
       const button = document.createElement("button");
       button.type = "button";
@@ -9198,6 +9461,7 @@ ${frontmatter.yaml}
               renderStandaloneSource({ path: entry.path, ref: meta.ref });
             }
           });
+          row.addEventListener("contextmenu", (event) => showRepoContextMenu(event, entry, meta.ref, () => loadRepo()));
           list2.appendChild(row);
         });
         if (!meta.entries.length) {
@@ -9271,7 +9535,7 @@ ${frontmatter.yaml}
       const params = new URLSearchParams;
       params.set("ref", normalizedRef);
       params.set("recursive", "1");
-      appendScopeOmitDirsParam(params);
+      appendScopeParams(params);
       REPO_SIDEBAR_LOAD_REF = normalizedRef;
       const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
@@ -9289,6 +9553,7 @@ ${frontmatter.yaml}
           children_omitted: entry.children_omitted,
           children_omitted_reason: entry.children_omitted_reason
         }));
+        REPO_SIDEBAR_REF = normalizedRef;
         renderSidebar(files, (file) => {
           if (file.type === "tree") {
             setRoute(repoRoute(normalizedRef, file.path));
@@ -9304,7 +9569,6 @@ ${frontmatter.yaml}
           });
           renderStandaloneSource({ path: file.path, ref: normalizedRef });
         });
-        REPO_SIDEBAR_REF = normalizedRef;
         activateRepoSidebarPath(currentPath);
       }).catch(() => {
         REPO_SIDEBAR_REF = null;
@@ -11579,6 +11843,13 @@ ${frontmatter.yaml}
       name.appendChild(copy);
       name.appendChild(createOpenPathButton(target.path, "file-parent", "open parent folder in OS"));
       header.appendChild(name);
+      if (repoTarget && canTrashWorktreeRef(repoTarget)) {
+        header.appendChild(createMoveToTrashButton(target.path, () => {
+          const parent = target.path.split("/").slice(0, -1).join("/");
+          setRoute(repoRoute(repoTarget, parent));
+          loadRepo();
+        }));
+      }
       loadRawFileInfo(target).then((meta) => {
         if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target))
           return;
@@ -12781,7 +13052,7 @@ ${frontmatter.yaml}
         return cached;
       const params = new URLSearchParams;
       params.set("ref", ref);
-      appendScopeOmitDirsParam(params);
+      appendScopeParams(params);
       const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load files");
@@ -12885,7 +13156,7 @@ ${frontmatter.yaml}
         params.set("max", "200");
         if (state.grepRegex)
           params.set("regex", "1");
-        appendScopeOmitDirsParam(params);
+        appendScopeParams(params);
         if (source === "diff") {
           for (const file of state.diffSnapshot)
             params.append("path", file.path);
@@ -13176,10 +13447,19 @@ ${frontmatter.yaml}
     document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
       capture: true
     });
-    document.addEventListener("keydown", (e2) => {
+    document.addEventListener("click", closeRepoContextMenu);
+    $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
+    document.addEventListener("keydown", async (e2) => {
+      if (e2.key === "Escape")
+        closeRepoContextMenu();
       if (e2.__gdpVirtualSourcePagingHandled)
         return;
       const targetEl = e2.target;
+      if ((e2.ctrlKey || e2.metaKey) && !e2.shiftKey && !e2.altKey && e2.key.toLowerCase() === "z" && !isEditableKeyTarget(targetEl)) {
+        if (await undoLastAction())
+          e2.preventDefault();
+        return;
+      }
       if ((e2.ctrlKey || e2.metaKey) && e2.key.toLowerCase() === "f" && !isEditableKeyTarget(targetEl)) {
         if (openVirtualSourceSearchFromKeyboard(targetEl)) {
           e2.preventDefault();
@@ -13214,7 +13494,7 @@ ${frontmatter.yaml}
       params.set("ref", STATE.route.ref || "worktree");
       if (STATE.route.path)
         params.set("path", STATE.route.path);
-      appendScopeOmitDirsParam(params);
+      appendScopeParams(params);
       return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");

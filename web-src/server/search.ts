@@ -5,6 +5,7 @@ export const GREP_DEFAULT_MAX = 200;
 export const GREP_ABSOLUTE_MAX = 500;
 export const GREP_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const FILE_SEARCH_ABSOLUTE_MAX = 50000;
+export const DEFAULT_EXCLUDE_NAMES = [".DS_Store"];
 
 export function normalizeGrepMax(value: string | null): number {
   const parsed = Number(value || "");
@@ -15,11 +16,13 @@ export function normalizeGrepMax(value: string | null): number {
 export function isSkippableSearchPath(
   path: string,
   omitDirNames: string[] = [],
+  excludeNames: string[] = [],
 ): boolean {
   const omitDirs = new Set(omitDirNames.map((name) => name.toLowerCase()));
+  const excluded = new Set(excludeNames.map((name) => name.toLowerCase()));
   return path.split(/[\\/]+/).some((part) => {
     const lower = part.toLowerCase();
-    return lower === ".git" || omitDirs.has(lower);
+    return lower === ".git" || omitDirs.has(lower) || excluded.has(lower);
   });
 }
 
@@ -73,6 +76,7 @@ export function buildRgArgs(
   paths: string[],
   regex = false,
   omitDirNames: string[] = [],
+  excludeNames: string[] = [],
 ): string[] {
   const safePaths = paths.length ? paths : ["."];
   const omitGlobs = omitDirNames.flatMap((name) => [
@@ -80,6 +84,12 @@ export function buildRgArgs(
     `!${name}/**`,
     "--glob",
     `!**/${name}/**`,
+  ]);
+  const excludeGlobs = excludeNames.flatMap((name) => [
+    "--glob",
+    `!${name}`,
+    "--glob",
+    `!**/${name}`,
   ]);
   const args = [
     "rg",
@@ -95,6 +105,7 @@ export function buildRgArgs(
     "--max-filesize",
     "2M",
     ...omitGlobs,
+    ...excludeGlobs,
     "-e",
     query,
     "--",
@@ -108,6 +119,7 @@ export function parseRgOutput(
   stdout: string,
   max: number,
   omitDirNames: string[] = [],
+  excludeNames: string[] = [],
 ): GrepMatch[] {
   const matches: GrepMatch[] = [];
   for (const line of stdout.split("\n")) {
@@ -122,7 +134,7 @@ export function parseRgOutput(
       !path ||
       !lineNo ||
       !column ||
-      isSkippableSearchPath(path, omitDirNames)
+      isSkippableSearchPath(path, omitDirNames, excludeNames)
     )
       continue;
     matches.push({
@@ -140,11 +152,12 @@ export function parseGitGrepOutput(
   ref: string,
   max: number,
   omitDirNames: string[] = [],
+  excludeNames: string[] = [],
 ): GrepMatch[] {
   const prefix = `${ref}:`;
   const normalized = stdout
     .split("\n")
     .map((line) => (line.startsWith(prefix) ? line.slice(prefix.length) : line))
     .join("\n");
-  return parseRgOutput(normalized, max, omitDirNames);
+  return parseRgOutput(normalized, max, omitDirNames, excludeNames);
 }

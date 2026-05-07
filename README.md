@@ -108,6 +108,9 @@ Repository scope settings control recursive repository browsing and search scope
 for the left tree, Ctrl+K file palette, and Ctrl+G grep palette. The in-app Scope
 Settings popover stores only a browser-local override in localStorage; edit
 `.code-viewer.json` directly for project defaults shared with the repository.
+Use `scope.omitDirs` for directories that should stay visible as skipped, and
+`scope.excludeNames` for file or directory names that should be hidden entirely.
+`.DS_Store` is hidden by default.
 
 ## Development
 

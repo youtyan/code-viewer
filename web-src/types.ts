@@ -67,8 +67,17 @@ export type SettingsResponse = {
   scope: {
     omit_dirs_effective: string[];
     omit_dirs_built_in: string[];
+    exclude_names_effective: string[];
+    exclude_names_built_in: string[];
     max_entries: number;
   };
+};
+
+export type UndoActionResponse = {
+  id: string;
+  type: string;
+  label: string;
+  payload: Record<string, unknown>;
 };
 
 export type FileSearchListResponse = {

@@ -1171,10 +1171,11 @@ body.gdp-resizing * { user-select: none !important; }
   font: inherit;
   font-size: 12.5px;
 }
-#scope-omit-dirs {
+#scope-omit-dirs,
+#scope-exclude-names {
   box-sizing: border-box;
   width: 100%;
-  min-height: 210px;
+  min-height: 110px;
   resize: vertical;
   border: 1px solid var(--border-muted);
   border-radius: 6px;
@@ -2590,6 +2591,10 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   flex-shrink: 0;
   color: var(--fg-muted);
 }
+.gdp-file-detail-header .gdp-trash-path {
+  flex-shrink: 0;
+  color: var(--danger);
+}
 .gdp-file-detail-meta {
   display: flex;
   align-items: center;
@@ -3256,6 +3261,82 @@ body.gdp-file-detail-page #empty {
   color: var(--fg-muted);
   font-size: 12px;
   white-space: nowrap;
+}
+.gdp-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, 0.18);
+}
+.gdp-context-menu button {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.gdp-context-menu button:hover {
+  background: var(--bg-soft);
+}
+.gdp-context-menu .danger {
+  color: var(--danger);
+}
+.gdp-trash-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(14vh, 120px);
+  background: rgba(31, 35, 40, 0.18);
+}
+[data-theme="dark"] .gdp-trash-dialog-backdrop {
+  background: rgba(1, 4, 9, 0.45);
+}
+.gdp-trash-dialog {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
+}
+.gdp-trash-dialog-title {
+  padding: 14px 16px 0;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
+}
+.gdp-trash-dialog-body {
+  padding: 8px 16px 14px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.gdp-trash-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-muted);
+}
+.gdp-trash-dialog-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.gdp-trash-dialog-danger:hover {
+  background: var(--diff-del-bg);
 }
 .gdp-repo-empty {
   padding: 32px;
