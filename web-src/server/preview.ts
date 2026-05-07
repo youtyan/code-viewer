@@ -69,6 +69,7 @@ import {
   parseGitGrepOutput,
   parseRgOutput,
 } from "./search";
+import { startWorktreeUpdateWatch } from "./worktree-watcher";
 
 const WEB_ROOT = join(ROOT, "web");
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
@@ -1796,10 +1797,7 @@ async function handleUploadFiles(req: Request) {
     return text("upload failed", 500);
   }
 
-  generation++;
-  fileCache.clear();
-  metaCache.clear();
-  sendSse("update");
+  triggerUpdate();
   return json({
     ok: true,
     files: uploads.map((upload) => upload.name),
@@ -1895,6 +1893,12 @@ function clearMutableCaches() {
   fileCache.clear();
   metaCache.clear();
   fileListCache.clear();
+}
+
+function triggerUpdate() {
+  generation++;
+  clearMutableCaches();
+  sendSse("update");
 }
 
 function moveMacPathIntoTrash(path: string): {
@@ -2076,9 +2080,7 @@ async function handleTrashPath(req: Request) {
       trashPath: moved.trashPath,
     },
   };
-  generation++;
-  clearMutableCaches();
-  sendSse("update");
+  triggerUpdate();
   return json({ ok: true, generation, undo });
 }
 
@@ -2127,9 +2129,7 @@ async function handleCreateDirectory(req: Request) {
       return text("already exists", 409);
     return text("create failed", 500);
   }
-  generation++;
-  clearMutableCaches();
-  sendSse("update");
+  triggerUpdate();
   return json({ ok: true, path: targetPath, generation });
 }
 
@@ -2161,9 +2161,7 @@ async function handleRestoreTrash(req: Request) {
   if (isGitInternalPath(originalPath)) return text("forbidden", 403);
   const restored = restoreTrashPath(originalPath, trashPath || undefined);
   if (!restored.ok) return text(restored.error || "undo failed", 409);
-  generation++;
-  clearMutableCaches();
-  sendSse("update");
+  triggerUpdate();
   return json({ ok: true, generation });
 }
 
@@ -2216,9 +2214,7 @@ const server = await startServer({
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {
       if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
-      generation++;
-      clearMutableCaches();
-      sendSse("update");
+      triggerUpdate();
       return json({ ok: true, generation });
     }
     if (url.pathname === "/events") {
@@ -2266,6 +2262,18 @@ startDevAssetReload({
   watchedFiles: WATCHED_ASSET_FILES,
   watch,
   sendReload: () => sendSse("reload"),
+});
+
+startWorktreeUpdateWatch({
+  root: cwd,
+  omitDirNames: scopeOmitDirNames,
+  excludeNames: scopeExcludeNames,
+  watch,
+  onUpdate: triggerUpdate,
+  onError: (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`code-viewer worktree watch skipped: ${message}`);
+  },
 });
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
