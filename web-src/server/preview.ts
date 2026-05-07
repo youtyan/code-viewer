@@ -660,6 +660,103 @@ function parentRepoPath(path: string): string {
   return parent === "." ? "" : parent;
 }
 
+type FileMetadata = {
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
+  commit_updated_at?: string;
+};
+
+function isoDate(ms: number | undefined): string | undefined {
+  return ms && Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+
+function worktreeFileMetadata(path: string, knownSize?: number): FileMetadata {
+  const full = safeWorktreePath(path);
+  if (!full) return {};
+  try {
+    const stat = statSync(full) as unknown as {
+      size: number;
+      birthtimeMs: number;
+      mtimeMs: number;
+      ctimeMs: number;
+      isFile?: () => boolean;
+    };
+    return {
+      size: knownSize ?? stat.size,
+      created_at: isoDate(stat.birthtimeMs),
+      updated_at: isoDate(stat.mtimeMs),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function gitFileMetadata(
+  ref: string,
+  path: string,
+  knownSize?: number,
+): FileMetadata {
+  const size = knownSize ?? rawFileSize(path, ref);
+  const commitUpdatedAt =
+    git.lastCommitDateForPath(ref, path, cwd) || undefined;
+  return {
+    size: size == null ? undefined : size,
+    updated_at: commitUpdatedAt,
+    commit_updated_at: commitUpdatedAt,
+  };
+}
+
+function directoryMetadata(target: string, path: string): FileMetadata {
+  if (target === "worktree" || target === "") {
+    const full =
+      path === "" ? safeOpenWorktreePath("") : safeWorktreePath(path);
+    if (!full) return {};
+    try {
+      const stat = statSync(full) as unknown as {
+        birthtimeMs: number;
+        mtimeMs: number;
+      };
+      return {
+        created_at: isoDate(stat.birthtimeMs),
+        updated_at: isoDate(stat.mtimeMs),
+      };
+    } catch {
+      return {};
+    }
+  }
+  const commitUpdatedAt =
+    git.lastCommitDateForPath(target, path || ".", cwd) || undefined;
+  return { updated_at: commitUpdatedAt, commit_updated_at: commitUpdatedAt };
+}
+
+function fileMetadataForTarget(target: string, path: string): FileMetadata {
+  return target === "worktree" || target === ""
+    ? worktreeFileMetadata(path)
+    : gitFileMetadata(target, path);
+}
+
+function attachTreeEntryMetadata(
+  target: string,
+  entry: git.GitTreeEntry,
+): git.GitTreeEntry {
+  if (entry.type === "tree")
+    return { ...entry, ...directoryMetadata(target, entry.path) };
+  if (entry.type !== "blob") return entry;
+  return { ...entry, ...fileMetadataForTarget(target, entry.path) };
+}
+
+function fileMetadataHeaders(metadata: FileMetadata): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (metadata.created_at)
+    headers["X-Code-Viewer-Created-At"] = metadata.created_at;
+  if (metadata.updated_at)
+    headers["X-Code-Viewer-Updated-At"] = metadata.updated_at;
+  if (metadata.commit_updated_at)
+    headers["X-Code-Viewer-Commit-Updated-At"] = metadata.commit_updated_at;
+  return headers;
+}
+
 function readReadme(
   target: string,
   dirPath: string,
@@ -702,7 +799,9 @@ function handleTree(url: URL) {
     path,
     project: basename(cwd),
     branch: git.currentBranch(cwd) || undefined,
-    entries,
+    entries: recursive
+      ? entries
+      : entries.map((entry) => attachTreeEntryMetadata(target, entry)),
     readme: readReadme(target, path),
     upload_enabled: allowUpload && (target === "worktree" || target === ""),
   } satisfies RepoTreeResponse);
@@ -1278,20 +1377,26 @@ function handleRawFile(req: Request, url: URL) {
     if (!git.verifyTreeRef(ref, cwd)) return text("invalid ref", 400);
     const size = rawFileSize(path, ref);
     if (size == null) return text("not in ref", 404);
+    const metadata = gitFileMetadata(ref, path, size);
     if (req.method === "HEAD")
-      return new Response(null, { headers: rawFileHeaders(path, size) });
+      return new Response(null, {
+        headers: rawFileHeaders(path, size, undefined, metadata),
+      });
     const res = git.showBytes(ref, path, cwd);
     if (res.code !== 0) return text("not in ref", 404);
     body = res.stdout.buffer.slice(
       res.stdout.byteOffset,
       res.stdout.byteOffset + res.stdout.byteLength,
     ) as ArrayBuffer;
-    return new Response(body, { headers: rawFileHeaders(path, size) });
+    return new Response(body, {
+      headers: rawFileHeaders(path, size, undefined, metadata),
+    });
   } else {
     const full = safeWorktreePath(path);
     if (!full) return text("not found", 404);
     const size = rawFileSize(path, ref);
     if (size == null) return text("not found", 404);
+    const metadata = worktreeFileMetadata(path, size);
     const rangeResult = req.headers.get("range")
       ? parseHttpByteRange(req.headers.get("range"), size)
       : null;
@@ -1299,7 +1404,7 @@ function handleRawFile(req: Request, url: URL) {
       return new Response(null, {
         status: 416,
         headers: {
-          ...rawFileHeaders(path, size),
+          ...rawFileHeaders(path, size, undefined, metadata),
           "Content-Range": `bytes */${size}`,
           "Content-Length": "0",
         },
@@ -1310,21 +1415,23 @@ function handleRawFile(req: Request, url: URL) {
       if (req.method === "HEAD") {
         return new Response(null, {
           status: 206,
-          headers: rawFileHeaders(path, size, range),
+          headers: rawFileHeaders(path, size, range, metadata),
         });
       }
       return new Response(
         fileByteRangeResponseBody(full, range.start, range.end),
         {
           status: 206,
-          headers: rawFileHeaders(path, size, range),
+          headers: rawFileHeaders(path, size, range, metadata),
         },
       );
     }
     if (req.method === "HEAD")
-      return new Response(null, { headers: rawFileHeaders(path, size) });
+      return new Response(null, {
+        headers: rawFileHeaders(path, size, undefined, metadata),
+      });
     return new Response(fileReadableStream(full), {
-      headers: rawFileHeaders(path, size),
+      headers: rawFileHeaders(path, size, undefined, metadata),
     });
   }
 }
@@ -1348,6 +1455,7 @@ function rawFileHeaders(
   path: string,
   size: number | null = null,
   range?: { start: number; end: number },
+  metadata: FileMetadata = {},
 ): HeadersInit {
   const mime: Record<string, string> = {
     ".png": "image/png",
@@ -1381,6 +1489,9 @@ function rawFileHeaders(
     headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
   } else if (size != null) {
     headers["Content-Length"] = String(size);
+  }
+  for (const [key, value] of Object.entries(fileMetadataHeaders(metadata))) {
+    headers[key] = value;
   }
   return headers;
 }

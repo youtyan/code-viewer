@@ -2515,6 +2515,7 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
 .gdp-file-detail-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-height: 34px;
   margin-bottom: 0;
@@ -2588,6 +2589,39 @@ table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
 .gdp-file-detail-header .gdp-copy-path {
   flex-shrink: 0;
   color: var(--fg-muted);
+}
+.gdp-file-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.gdp-file-detail-meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 10px;
+  border-right: 1px solid var(--border-muted);
+  white-space: nowrap;
+}
+.gdp-file-detail-meta-item:first-child {
+  padding-left: 0;
+}
+.gdp-file-detail-meta-item:last-child {
+  border-right: 0;
+  padding-right: 0;
+}
+.gdp-file-detail-meta-item .label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+.gdp-file-detail-meta-item .value {
+  color: var(--fg);
+  font-weight: 500;
 }
 .gdp-markdown-preview {
   width: 100%;
@@ -3124,10 +3158,46 @@ body.gdp-file-detail-page #empty {
   padding: 0;
   overflow: hidden;
 }
+.gdp-repo-sort-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 220px) 80px;
+  column-gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-soft);
+}
+.gdp-repo-sort-spacer {
+  display: block;
+}
+.gdp-repo-sort-header button {
+  appearance: none;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  line-height: 20px;
+  padding: 0;
+}
+.gdp-repo-sort-header button:hover,
+.gdp-repo-sort-header button.active {
+  color: var(--fg);
+}
+.gdp-repo-sort-header button[data-repo-sort="size"] {
+  text-align: right;
+}
 .gdp-repo-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 120px;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 220px) 80px;
   align-items: center;
+  column-gap: 8px;
   width: 100%;
   min-height: 42px;
   border: 0;
@@ -3172,6 +3242,20 @@ body.gdp-file-detail-page #empty {
   justify-self: end;
   color: var(--fg-muted);
   font-size: 12px;
+}
+.gdp-repo-row .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.gdp-repo-row .size {
+  justify-self: end;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .gdp-repo-empty {
   padding: 32px;

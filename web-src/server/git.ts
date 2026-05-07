@@ -26,6 +26,10 @@ export type GitTreeEntry = {
   type: "tree" | "blob" | "commit";
   children_omitted?: true;
   children_omitted_reason?: "heavy" | "internal" | "truncated";
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
+  commit_updated_at?: string;
 };
 
 export type GitCommitMeta = {
@@ -153,6 +157,17 @@ export function objectByteSize(
     size: Number(res.stdout.trim()) || 0,
     stderr: res.stderr,
   };
+}
+
+export function lastCommitDateForPath(
+  ref: string,
+  path: string,
+  cwd: string,
+): string | null {
+  const args = ["git", "log", "-1", "--format=%cI", ref, "--", path];
+  const res = run(args, cwd);
+  if (res.code !== 0) return null;
+  return res.stdout.trim() || null;
 }
 
 export function objectId(

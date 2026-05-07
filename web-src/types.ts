@@ -18,6 +18,10 @@ export type FileMeta = {
   preview_url?: string | null;
   estimated_height_px?: number;
   untracked?: boolean;
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
+  commit_updated_at?: string;
 };
 
 export type DiffMeta = {
@@ -39,6 +43,10 @@ export type RepoTreeEntry = {
   type: "tree" | "blob" | "commit";
   children_omitted?: true;
   children_omitted_reason?: "heavy" | "internal" | "truncated";
+  size?: number;
+  created_at?: string;
+  updated_at?: string;
+  commit_updated_at?: string;
 };
 
 export type RepoTreeResponse = {
