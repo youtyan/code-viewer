@@ -452,12 +452,12 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
     );
     if (!section) return;
     e.preventDefault();
-    section.scrollIntoView({ block: "start", behavior: "smooth" });
     history.replaceState(
       history.state,
       "",
       `#${encodeURIComponent(section.id)}`,
     );
+    scrollMarkdownSectionIntoView(section, "smooth");
   });
 
   const controller = new AbortController();
@@ -474,8 +474,10 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
       return;
     }
     let active = entries[0];
+    const activeThreshold = markdownAnchorOffset() + 40;
     for (const entry of entries) {
-      if (entry.target.getBoundingClientRect().top <= 96) active = entry;
+      if (entry.target.getBoundingClientRect().top <= activeThreshold)
+        active = entry;
       else break;
     }
     if (
@@ -499,8 +501,55 @@ function setupMarkdownScrollSpy(root: HTMLElement) {
   window.addEventListener("resize", schedule, { signal: controller.signal });
   setTimeout(() => {
     if (!root.isConnected) return;
+    scrollInitialMarkdownHash(root);
     update();
   }, 0);
+}
+
+function scrollInitialMarkdownHash(root: HTMLElement) {
+  if (!location.hash) return;
+  const id = decodeHashFragment(location.hash);
+  const section = root.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+  if (!section) return;
+  scrollMarkdownSectionIntoView(section, "auto");
+}
+
+function decodeHashFragment(hash: string): string {
+  const value = hash.startsWith("#") ? hash.slice(1) : hash;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function scrollMarkdownSectionIntoView(
+  section: HTMLElement,
+  behavior: ScrollBehavior,
+) {
+  const top =
+    section.getBoundingClientRect().top +
+    window.scrollY -
+    markdownAnchorOffset() -
+    12;
+  window.scrollTo({ top: Math.max(0, top), behavior });
+}
+
+function markdownAnchorOffset(): number {
+  const bottoms = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      "#global-header, .gdp-file-detail-sticky",
+    ),
+  )
+    .map((element) => {
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden") return 0;
+      const rect = element.getBoundingClientRect();
+      if (rect.height <= 0) return 0;
+      return rect.bottom > 0 ? rect.bottom : 0;
+    })
+    .filter((bottom) => Number.isFinite(bottom));
+  return Math.max(0, ...bottoms);
 }
 
 function keepTocLinkVisible(toc: HTMLElement, link: HTMLElement) {

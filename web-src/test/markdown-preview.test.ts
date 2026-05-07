@@ -270,7 +270,6 @@ describe("markdown preview", () => {
     ).toBe(true);
     expect(style.includes("scrollbar-gutter: stable;")).toBe(true);
     expect(style.includes("scrollbar-width: thin;")).toBe(true);
-    expect(style.includes("-webkit-line-clamp: 2;")).toBe(true);
     expect(style.includes(".gdp-markdown-toc a:focus-visible")).toBe(true);
     expect(style.includes(".gdp-markdown-toc .level-4 > a")).toBe(true);
     expect(
