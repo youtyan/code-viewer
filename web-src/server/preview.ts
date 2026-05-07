@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
+import { normalizeNewDirectoryName } from "../directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../routes";
 import type {
   DiffMeta,
@@ -82,8 +83,8 @@ const SIZE_LARGE = 20000;
 const LINE_INDEX_MIN_START = 10000;
 const LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024;
 const BLOB_LINE_CACHE_MAX_BYTES = 128 * 1024 * 1024;
-const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024;
+const MAX_UPLOAD_FILE_BYTES = 512 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 1024 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
 const MAX_UPLOAD_FILES = 50;
 const SAFE_UPLOAD_EXTENSIONS = new Set([
@@ -101,7 +102,19 @@ const SAFE_UPLOAD_EXTENSIONS = new Set([
   ".jpeg",
   ".gif",
   ".webp",
+  ".svg",
   ".pdf",
+  ".mp4",
+  ".mov",
+  ".m4v",
+  ".webm",
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".aac",
+  ".flac",
+  ".ogg",
+  ".zip",
   ".ts",
   ".tsx",
   ".js",
@@ -115,12 +128,11 @@ let generation = 1;
 let cwd = git.repoRoot(process.cwd()) || process.cwd();
 let cliArgs = DEFAULT_ARGS;
 let listenPort = 0;
-let allowUpload = false;
-let uploadAllowedByCli = false;
 let openAfterStart = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
+let uploadDisabledByConfig = false;
 let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
@@ -185,8 +197,7 @@ Examples:
     } else if (arg === "--open") {
       openAfterStart = true;
     } else if (arg === "--allow-upload") {
-      allowUpload = true;
-      uploadAllowedByCli = true;
+      // Deprecated no-op: uploads are enabled for worktree folders by default.
     } else if (arg === "--scope-omit-dir") {
       const next = process.argv[++i];
       if (!next) {
@@ -202,9 +213,9 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
-  if (!uploadAllowedByCli) allowUpload = loadProjectConfigUploadEnabled();
   const configScopeOmitDirs = loadProjectConfigScopeOmitDirs();
   const configScopeExcludeNames = loadProjectConfigScopeExcludeNames();
+  uploadDisabledByConfig = loadProjectConfigUploadDisabled();
   if (scopeOmitDirCliOverride) {
     scopeOmitDirNames = scopeOmitDirCliOverride;
   } else if (configScopeOmitDirs) {
@@ -633,11 +644,11 @@ function loadProjectConfig(): Record<string, unknown> | null {
   }
 }
 
-function loadProjectConfigUploadEnabled(): boolean {
+function loadProjectConfigUploadDisabled(): boolean {
   const config = loadProjectConfig() as {
     upload?: { enabled?: unknown };
   } | null;
-  return config?.upload?.enabled === true;
+  return config?.upload?.enabled === false;
 }
 
 function loadProjectConfigScopeOmitDirs(): string[] | null {
@@ -894,7 +905,8 @@ function handleTree(url: URL) {
       ? entries
       : entries.map((entry) => attachTreeEntryMetadata(target, entry)),
     readme: readReadme(target, path),
-    upload_enabled: allowUpload && (target === "worktree" || target === ""),
+    upload_enabled:
+      !uploadDisabledByConfig && (target === "worktree" || target === ""),
   } satisfies RepoTreeResponse);
 }
 
@@ -1675,13 +1687,23 @@ function isForbiddenUploadName(name: string): boolean {
 }
 
 function safeUploadFileName(name: string): string | null {
-  if (!name || name.includes("\0") || name.includes("/") || name.includes("\\"))
+  const trimmed = name.trim();
+  if (
+    !trimmed ||
+    trimmed.length > 180 ||
+    trimmed.includes("\0") ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\") ||
+    Array.from(trimmed).some((char) => {
+      const code = char.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
     return null;
-  if (name === "." || name === "..") return null;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,180}$/.test(name)) return null;
-  if (isGitInternalPath(name) || isForbiddenUploadName(name)) return null;
-  if (!SAFE_UPLOAD_EXTENSIONS.has(extname(name).toLowerCase())) return null;
-  return name;
+  if (trimmed === "." || trimmed === "..") return null;
+  if (isGitInternalPath(trimmed) || isForbiddenUploadName(trimmed)) return null;
+  if (!SAFE_UPLOAD_EXTENSIONS.has(extname(trimmed).toLowerCase())) return null;
+  return trimmed;
 }
 
 function uploadOpenFlags() {
@@ -1694,7 +1716,8 @@ function uploadOpenFlags() {
 }
 
 async function handleUploadFiles(req: Request) {
-  if (!allowUpload) return text("upload disabled", 403);
+  if (uploadDisabledByConfig)
+    return text("upload disabled by project config", 403);
   if (req.method !== "POST") return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
   if (req.headers.get("content-encoding"))
@@ -2059,6 +2082,57 @@ async function handleTrashPath(req: Request) {
   return json({ ok: true, generation, undo });
 }
 
+async function handleCreateDirectory(req: Request) {
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const lengthHeader = req.headers.get("content-length");
+  const length = Number(lengthHeader || "0");
+  if (lengthHeader && (!Number.isFinite(length) || length < 0))
+    return text("invalid content length", 400);
+  if (length > 2048) return text("payload too large", 413);
+
+  let body: { dir?: unknown; name?: unknown } = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > 2048) return text("payload too large", 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text("invalid json", 400);
+  }
+
+  const dir =
+    typeof body.dir === "string"
+      ? body.dir.trim().replace(/^\/+|\/+$/g, "")
+      : "";
+  const name = normalizeNewDirectoryName(body.name);
+  if (!safeRepoPath(dir)) return text("invalid dir", 400);
+  if (dir && isGitInternalPath(dir)) return text("forbidden", 403);
+  if (!name) return text("invalid name", 400);
+  const parent = safeOpenWorktreePath(dir);
+  if (!parent) return text("not found", 404);
+  const stats = statSync(parent) as unknown as { isDirectory(): boolean };
+  if (!stats.isDirectory()) return text("not a directory", 400);
+  const targetPath = dir ? `${dir}/${name}` : name;
+  if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
+    return text("invalid target", 400);
+  const target = join(parent, name);
+  if (existsSync(target)) return text("already exists", 409);
+  try {
+    mkdirSync(target, { recursive: false });
+  } catch (error) {
+    if ((error as { code?: string }).code === "EEXIST")
+      return text("already exists", 409);
+    return text("create failed", 500);
+  }
+  generation++;
+  clearMutableCaches();
+  sendSse("update");
+  return json({ ok: true, path: targetPath, generation });
+}
+
 async function handleRestoreTrash(req: Request) {
   if (req.method !== "POST") return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
@@ -2136,6 +2210,8 @@ const server = await startServer({
     if (url.pathname === "/_open_path") return handleOpenPath(req);
     if (url.pathname === "/_trash_path") return handleTrashPath(req);
     if (url.pathname === "/_restore_trash") return handleRestoreTrash(req);
+    if (url.pathname === "/_create_directory")
+      return handleCreateDirectory(req);
     if (url.pathname === "/_upload_files") return handleUploadFiles(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {

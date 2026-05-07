@@ -1,8 +1,9 @@
 import { createCatchUpGate, shouldCatchUpDiff } from "./catch-up";
+import { normalizeNewDirectoryName } from "./directory-name";
 import { GdpExpandLogic } from "./expand-logic";
 import { compileFileFilter } from "./file-filter";
 import { nextVisibleFileIndex } from "./file-navigation";
-import { filePathClipboardText } from "./file-path-copy";
+import { fileNameClipboardText, filePathClipboardText } from "./file-path-copy";
 import {
   findMainScrollTarget,
   focusMainPanel,
@@ -191,6 +192,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
   const OPEN_EXTERNAL_16_PATH =
     "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
+  const PLUS_16_PATH =
+    "M7.75 2a.75.75 0 0 1 .75.75V7.5h4.75a.75.75 0 0 1 0 1.5H8.5v4.75a.75.75 0 0 1-1.5 0V9H2.25a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z";
+  const TRASH_16_PATH =
+    "M6.5 1.75A1.75 1.75 0 0 1 8.25 0h1.5A1.75 1.75 0 0 1 11.5 1.75V2h3.75a.75.75 0 0 1 0 1.5h-.75v10.75A1.75 1.75 0 0 1 12.75 16h-9.5A1.75 1.75 0 0 1 1.5 14.25V3.5H.75a.75.75 0 0 1 0-1.5H4.5v-.25ZM6 2h4v-.25a.25.25 0 0 0-.25-.25h-1.5a.25.25 0 0 0-.25.25V2Zm-3 1.5v10.75c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V3.5Zm3 2.25a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 6 5.75Zm4 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 10 5.75Z";
   const GIT_BRANCH_16_PATH =
     "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z";
   const TRIANGLE_DOWN_16_PATH =
@@ -239,6 +244,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     null;
   let highlightConfigured = false;
   let PROJECT_NAME = "";
+  let creatingDirectory = false;
   let REPO_SIDEBAR_REF: string | null = null;
   let REPO_SIDEBAR_LOAD_REF: string | null = null;
   let REPO_SIDEBAR_LOAD: Promise<void> | null = null;
@@ -728,6 +734,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!project) return;
     PROJECT_NAME = project;
     document.title = `${project} - code viewer`;
+    const projectTitle = document.querySelector<HTMLElement>("#project-title");
+    if (projectTitle) {
+      projectTitle.textContent = project;
+      projectTitle.title = project;
+    }
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -1495,6 +1506,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.className = "tree-dir";
         li.tabIndex = -1;
         li.dataset.dirpath = dir.path;
+        li.dataset.type = "tree";
         if (dir.children_omitted_reason)
           li.dataset.childrenOmittedReason = dir.children_omitted_reason;
         if (dir.explicit) li.dataset.explicit = "true";
@@ -1602,6 +1614,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         li.className = "tree-file";
         li.tabIndex = -1;
         li.dataset.path = f.path;
+        li.dataset.type = "blob";
         li.classList.toggle(
           "viewed",
           !onFileClick && STATE.viewedFiles.has(f.path),
@@ -1666,6 +1679,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     li.className = "tree-dir";
     li.tabIndex = -1;
     li.dataset.dirpath = dir.path;
+    li.dataset.type = "tree";
     if (dir.children_omitted_reason)
       li.dataset.childrenOmittedReason = dir.children_omitted_reason;
     if (dir.explicit) li.dataset.explicit = "true";
@@ -1773,6 +1787,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     li.className = "tree-file";
     li.tabIndex = -1;
     li.dataset.path = f.path;
+    li.dataset.type = "blob";
     li.classList.toggle(
       "viewed",
       !onFileClick && STATE.viewedFiles.has(f.path),
@@ -3033,6 +3048,116 @@ window.GdpExpandLogic = GdpExpandLogic;
     ok.focus();
   }
 
+  function showCreateDirectoryError(message: string) {
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "gdp-btn gdp-btn-sm";
+    ok.textContent = "OK";
+    ok.addEventListener("click", closeTrashDialog);
+    createTrashDialog("New folder failed", message, [ok]);
+    ok.focus();
+  }
+
+  function askNewDirectoryName(
+    path: string,
+    focusReturnTarget?: HTMLElement | null,
+  ): Promise<string | null> {
+    return new Promise((resolve) => {
+      const previousFocus =
+        focusReturnTarget || (document.activeElement as HTMLElement | null);
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "gdp-btn gdp-btn-sm";
+      cancel.textContent = "Cancel";
+      const create = document.createElement("button");
+      create.type = "button";
+      create.className = "gdp-btn gdp-btn-sm";
+      create.textContent = "Create";
+      const input = document.createElement("input");
+      input.className = "gdp-create-dir-input";
+      input.type = "text";
+      input.autocomplete = "off";
+      input.placeholder = "Folder name";
+      input.setAttribute("aria-label", "Folder name");
+      const error = document.createElement("div");
+      error.className = "gdp-create-dir-error";
+      error.setAttribute("role", "alert");
+      const syncValidity = () => {
+        const valid = !!normalizeNewDirectoryName(input.value);
+        create.disabled = !valid;
+        error.textContent =
+          input.value && !valid
+            ? "Use a folder name without slashes, control characters, . or .."
+            : "";
+        return valid;
+      };
+      const done = (name: string | null) => {
+        document.removeEventListener("keydown", onKeydown);
+        closeTrashDialog();
+        previousFocus?.focus?.();
+        resolve(name);
+      };
+      const submit = () => {
+        const name = normalizeNewDirectoryName(input.value);
+        if (!name) {
+          syncValidity();
+          input.focus();
+          return;
+        }
+        done(name);
+      };
+      const onKeydown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          done(null);
+          return;
+        }
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submit();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const focusables = [input, cancel, create];
+        const index = focusables.indexOf(
+          document.activeElement as HTMLInputElement | HTMLButtonElement,
+        );
+        if (index < 0) {
+          event.preventDefault();
+          focusables[0].focus();
+          return;
+        }
+        if (event.shiftKey && index <= 0) {
+          event.preventDefault();
+          focusables[focusables.length - 1].focus();
+        } else if (!event.shiftKey && index === focusables.length - 1) {
+          event.preventDefault();
+          focusables[0].focus();
+        }
+      };
+      cancel.addEventListener("click", () => done(null));
+      create.addEventListener("click", submit);
+      input.addEventListener("input", syncValidity);
+      create.disabled = true;
+      const backdrop = createTrashDialog(
+        "New Folder",
+        `Create a folder in "${path || PROJECT_NAME || "repository"}".`,
+        [cancel, create],
+      );
+      const body = backdrop.querySelector<HTMLElement>(
+        ".gdp-trash-dialog-body",
+      );
+      body?.append(input, error);
+      backdrop.addEventListener("pointerdown", (event) => {
+        if (event.target === backdrop) done(null);
+      });
+      document.addEventListener("keydown", onKeydown);
+      input.focus();
+    });
+  }
+
   async function moveRepoPathToTrash(path: string) {
     const res = await fetch("/_trash_path", {
       method: "POST",
@@ -3049,6 +3174,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     const body = (await res.json()) as { undo?: UndoActionResponse };
     if (body.undo) UNDO_STACK.unshift(body.undo);
     return true;
+  }
+
+  async function requestCreateDirectory(
+    path: string,
+    onCreated: (createdPath: string) => void,
+    options: { focusReturnTarget?: HTMLElement | null } = {},
+  ) {
+    if (creatingDirectory) return;
+    const name = await askNewDirectoryName(path, options.focusReturnTarget);
+    if (!name) return;
+    creatingDirectory = true;
+    try {
+      const res = await fetch("/_create_directory", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify({ dir: path, name }),
+      });
+      if (!res.ok) {
+        showCreateDirectoryError(
+          `Failed to create "${name}": ${await res.text()}`,
+        );
+        return;
+      }
+      const body = (await res.json()) as { path?: string };
+      onCreated(body.path || (path ? `${path}/${name}` : name));
+    } finally {
+      creatingDirectory = false;
+    }
   }
 
   async function runUndoAction(action: UndoActionResponse) {
@@ -3093,15 +3249,54 @@ window.GdpExpandLogic = GdpExpandLogic;
     return ref === "worktree" || ref === "";
   }
 
+  function parentRepoPath(path: string): string {
+    return path.split("/").slice(0, -1).join("/");
+  }
+
+  async function copyRepoContextText(text: string) {
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+  }
+
+  function createCopyPathButton(path: string): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gdp-file-header-icon gdp-copy-path";
+    button.title = "copy folder path";
+    button.setAttribute("aria-label", "copy folder path");
+    button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(filePathClipboardText(path));
+        button.classList.add("copied");
+        setTimeout(() => {
+          button.classList.remove("copied");
+        }, 1200);
+      } catch {
+        button.classList.add("failed");
+        setTimeout(() => {
+          button.classList.remove("failed");
+        }, 1200);
+      }
+    });
+    return button;
+  }
+
   function showRepoContextMenu(
     event: MouseEvent,
-    entry: { path: string; children_omitted_reason?: string },
+    entry: {
+      path: string;
+      type?: string;
+      children_omitted_reason?: string;
+    },
     ref: string,
-    onDeleted: () => void,
+    onChanged: () => void,
   ): boolean {
     if (document.querySelector(".gdp-trash-dialog-backdrop")) return false;
     if (!canTrashWorktreeRef(ref)) return false;
     if (entry.children_omitted_reason === "internal") return false;
+    if (entry.type !== "tree" && entry.type !== "blob") return false;
     event.preventDefault();
     closeRepoContextMenu();
 
@@ -3123,15 +3318,40 @@ window.GdpExpandLogic = GdpExpandLogic;
     menu.style.left = `${anchorX}px`;
     menu.style.top = `${anchorY}px`;
 
+    const copyPath = document.createElement("button");
+    copyPath.type = "button";
+    copyPath.textContent = "Copy Path";
+    copyPath.addEventListener("click", async () => {
+      closeRepoContextMenu();
+      await copyRepoContextText(filePathClipboardText(entry.path));
+    });
+    const copyName = document.createElement("button");
+    copyName.type = "button";
+    copyName.textContent = "Copy Name";
+    copyName.addEventListener("click", async () => {
+      closeRepoContextMenu();
+      await copyRepoContextText(fileNameClipboardText(entry.path));
+    });
+    const createDir = document.createElement("button");
+    createDir.type = "button";
+    createDir.textContent = "New Folder...";
+    createDir.addEventListener("click", async () => {
+      closeRepoContextMenu();
+      const targetPath =
+        entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
+      await requestCreateDirectory(targetPath, onChanged, {
+        focusReturnTarget,
+      });
+    });
     const trash = document.createElement("button");
     trash.type = "button";
     trash.className = "danger";
     trash.textContent = "Move to Trash...";
     trash.addEventListener("click", async () => {
       closeRepoContextMenu();
-      await requestMoveToTrash(entry.path, onDeleted, { focusReturnTarget });
+      await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
     });
-    menu.appendChild(trash);
+    menu.append(copyPath, copyName, createDir, trash);
     document.body.appendChild(menu);
     const rect = menu.getBoundingClientRect();
     const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
@@ -3143,6 +3363,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function sidebarTrashEntryFromEvent(event: MouseEvent): {
     path: string;
+    type?: string;
     children_omitted_reason?: string;
   } | null {
     if (!isRepositorySidebarMode()) return null;
@@ -3154,6 +3375,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!path) return null;
     return {
       path,
+      type: row.dataset.type,
       children_omitted_reason: row.dataset.childrenOmittedReason,
     };
   }
@@ -3172,11 +3394,32 @@ window.GdpExpandLogic = GdpExpandLogic;
   function createMoveToTrashButton(path: string, onDeleted: () => void) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "gdp-btn gdp-btn-sm gdp-trash-path";
-    button.textContent = "Move to Trash";
+    button.className = "gdp-file-header-icon gdp-trash-path";
+    button.title = "move folder to Trash";
+    button.setAttribute("aria-label", "move folder to Trash");
+    button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
       await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
+    });
+    return button;
+  }
+
+  function createNewFolderButton(
+    path: string,
+    onCreated: (createdPath: string) => void,
+  ) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gdp-file-header-icon gdp-create-dir";
+    button.title = "new folder";
+    button.setAttribute("aria-label", "new folder");
+    button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await requestCreateDirectory(path, onCreated, {
+        focusReturnTarget: button,
+      });
     });
     return button;
   }
@@ -3249,8 +3492,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     button.className = "gdp-btn gdp-btn-sm";
     button.textContent = "Upload files";
     button.addEventListener("click", () => input.click());
+    const error = document.createElement("div");
+    error.className = "gdp-upload-error";
 
-    const fail = () => {
+    const fail = (message = "Upload failed") => {
+      error.textContent = message;
       dropPanel.classList.add("failed");
       setTimeout(() => dropPanel.classList.remove("failed"), 1600);
     };
@@ -3258,8 +3504,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.addEventListener("change", async () => {
       try {
         if (input.files?.length) await uploadFiles(path, input.files);
-      } catch {
-        fail();
+        error.textContent = "";
+      } catch (uploadError) {
+        fail(
+          uploadError instanceof Error ? uploadError.message : "Upload failed",
+        );
       } finally {
         input.value = "";
       }
@@ -3278,12 +3527,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       try {
         const files = event.dataTransfer?.files;
         if (files?.length) await uploadFiles(path, files);
-      } catch {
-        fail();
+        error.textContent = "";
+      } catch (uploadError) {
+        fail(
+          uploadError instanceof Error ? uploadError.message : "Upload failed",
+        );
       }
     });
 
-    dropPanel.append(copy, button, input);
+    dropPanel.append(copy, button, input, error);
     return dropPanel;
   }
 
@@ -3371,55 +3623,41 @@ window.GdpExpandLogic = GdpExpandLogic;
     const shell = document.createElement("section");
     shell.className = "gdp-repo-shell";
 
-    const { wrap: targetPickerWrap, input: targetPicker } =
-      createRefSelectorInput({
-        id: "repo-ref",
-        placeholder: "ref...",
-        title: "repository ref",
-        value: meta.ref || "worktree",
-      });
-    wireRefSelectorInput(targetPicker, (ref) => {
-      setRoute(repoRoute(ref, ""));
-      loadRepo();
-    });
     const toolbar = document.createElement("div");
     toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
-    toolbar.append(
-      targetPickerWrap,
-      createRepoBreadcrumb(meta.ref, meta.path || ""),
+    const pathHeader = document.createElement("div");
+    pathHeader.className = "gdp-file-detail-path";
+    pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
+    if (meta.path) pathHeader.appendChild(createCopyPathButton(meta.path));
+    pathHeader.appendChild(
       createOpenPathButton(
         meta.path || "",
         "directory",
         "open this folder in OS",
       ),
     );
+    toolbar.appendChild(pathHeader);
+    if (canTrashWorktreeRef(meta.ref)) {
+      toolbar.appendChild(
+        createNewFolderButton(meta.path || "", () => loadRepo()),
+      );
+      if (meta.path) {
+        toolbar.appendChild(
+          createMoveToTrashButton(meta.path, () => {
+            const parent = meta.path.split("/").slice(0, -1).join("/");
+            setRoute(repoRoute(meta.ref, parent));
+            loadRepo();
+          }),
+        );
+      }
+    }
     shell.appendChild(toolbar);
 
     const listCard = document.createElement("section");
     listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
     const listWrapper = document.createElement("div");
     listWrapper.className = "d2h-file-wrapper";
-    const listHeader = document.createElement("div");
-    listHeader.className = "d2h-file-header";
-    const listName = document.createElement("div");
-    listName.className = "d2h-file-name-wrapper";
-    const listIcon = document.createElement("span");
-    listIcon.className = "dir-icon";
-    setFolderIcon(listIcon, false);
-    const listTitle = document.createElement("span");
-    listTitle.className = "d2h-file-name";
-    listTitle.textContent = meta.path || meta.project || "Files";
-    listName.append(listIcon, listTitle);
-    listHeader.appendChild(listName);
-    listHeader.appendChild(
-      createOpenPathButton(
-        meta.path || "",
-        "directory",
-        "open this folder in OS",
-      ),
-    );
-    listWrapper.appendChild(listHeader);
-    if (meta.upload_enabled && (meta.ref === "worktree" || meta.ref === "")) {
+    if (meta.ref === "worktree" || meta.ref === "") {
       listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
     }
     const sortHost = document.createElement("div");
