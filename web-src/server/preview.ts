@@ -3,14 +3,17 @@ import {
   constants,
   existsSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
+  renameSync,
   statSync,
   unlinkSync,
   watch,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../routes";
 import type {
@@ -23,6 +26,7 @@ import type {
   GrepResponse,
   RepoTreeResponse,
   SettingsResponse,
+  UndoActionResponse,
 } from "../types";
 import {
   cacheFresh,
@@ -56,6 +60,7 @@ import {
 import {
   buildFileSearchList,
   buildRgArgs,
+  DEFAULT_EXCLUDE_NAMES,
   fixedStringLineMatches,
   GREP_MAX_FILE_BYTES,
   isSkippableSearchPath,
@@ -115,6 +120,7 @@ let uploadAllowedByCli = false;
 let openAfterStart = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
+let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
 let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
@@ -198,11 +204,13 @@ Examples:
   if (rest.length) cliArgs = rest;
   if (!uploadAllowedByCli) allowUpload = loadProjectConfigUploadEnabled();
   const configScopeOmitDirs = loadProjectConfigScopeOmitDirs();
+  const configScopeExcludeNames = loadProjectConfigScopeExcludeNames();
   if (scopeOmitDirCliOverride) {
     scopeOmitDirNames = scopeOmitDirCliOverride;
   } else if (configScopeOmitDirs) {
     scopeOmitDirNames = configScopeOmitDirs;
   }
+  if (configScopeExcludeNames) scopeExcludeNames = configScopeExcludeNames;
 }
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -529,6 +537,28 @@ function normalizeScopeOmitDirNames(names: unknown): string[] {
   ].sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeScopeExcludeNames(names: unknown): string[] {
+  if (!Array.isArray(names)) return [];
+  return [
+    ...new Set(
+      names
+        .filter((name): name is string => typeof name === "string")
+        .map((name) => name.trim())
+        .filter(
+          (name) =>
+            name &&
+            name.length <= 128 &&
+            !name.includes("/") &&
+            !name.includes("\\") &&
+            !name.includes("\0") &&
+            name !== "." &&
+            name !== ".." &&
+            name !== ".git",
+        ),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
 function parseScopeOmitDirNamesQuery(value: string): string[] | null {
   const names = value ? value.split(",") : [];
   if (names.length > 100) return null;
@@ -547,6 +577,26 @@ function parseScopeOmitDirNamesQuery(value: string): string[] | null {
       return null;
   }
   return normalizeScopeOmitDirNames(names);
+}
+
+function parseScopeExcludeNamesQuery(value: string): string[] | null {
+  const names = value ? value.split(",") : [];
+  if (names.length > 200) return null;
+  for (const raw of names) {
+    const name = raw.trim();
+    if (
+      !name ||
+      name.length > 128 ||
+      name.includes("/") ||
+      name.includes("\\") ||
+      name.includes("\0") ||
+      name === "." ||
+      name === ".." ||
+      name === ".git"
+    )
+      return null;
+  }
+  return normalizeScopeExcludeNames(names);
 }
 
 function loadProjectConfig(): Record<string, unknown> | null {
@@ -598,6 +648,14 @@ function loadProjectConfigScopeOmitDirs(): string[] | null {
   return normalizeScopeOmitDirNames(config.scope.omitDirs);
 }
 
+function loadProjectConfigScopeExcludeNames(): string[] | null {
+  const config = loadProjectConfig() as {
+    scope?: { excludeNames?: unknown };
+  } | null;
+  if (!config?.scope || !Array.isArray(config.scope.excludeNames)) return null;
+  return normalizeScopeExcludeNames(config.scope.excludeNames);
+}
+
 function scopeOmitDirNamesFromQuery(url: URL): string[] {
   if (!url.searchParams.has("omit_dirs")) return scopeOmitDirNames;
   return (
@@ -606,11 +664,34 @@ function scopeOmitDirNamesFromQuery(url: URL): string[] {
   );
 }
 
+function scopeExcludeNamesFromQuery(url: URL): string[] {
+  if (!url.searchParams.has("exclude_names")) return scopeExcludeNames;
+  return (
+    parseScopeExcludeNamesQuery(url.searchParams.get("exclude_names") || "") ||
+    scopeExcludeNames
+  );
+}
+
 function invalidScopeOmitDirNamesQuery(url: URL): boolean {
   return (
     url.searchParams.has("omit_dirs") &&
     !parseScopeOmitDirNamesQuery(url.searchParams.get("omit_dirs") || "")
   );
+}
+
+function invalidScopeExcludeNamesQuery(url: URL): boolean {
+  return (
+    url.searchParams.has("exclude_names") &&
+    !parseScopeExcludeNamesQuery(url.searchParams.get("exclude_names") || "")
+  );
+}
+
+function isExcludedScopePath(path: string, excludeNames: string[]): boolean {
+  return path
+    .split(/[\\/]+/)
+    .some((part) =>
+      excludeNames.some((name) => part.toLowerCase() === name.toLowerCase()),
+    );
 }
 
 function isGitInternalPath(path: string): boolean {
@@ -640,6 +721,10 @@ function safeWorktreePath(path: string): string | null {
     return null;
   if (isGitInternalPath(rel)) return null;
   return realFull;
+}
+
+function worktreePath(path: string): string {
+  return join(cwd, path);
 }
 
 function safeOpenWorktreePath(path: string): string | null {
@@ -790,10 +875,16 @@ function handleTree(url: URL) {
     return text("invalid target", 400);
   const recursive = url.searchParams.get("recursive") === "1";
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
-  const entries = git.listTree(target, path, cwd, {
-    recursive,
-    omitDirNames: scopeOmitDirNamesFromQuery(url),
-  }).entries;
+  if (invalidScopeExcludeNamesQuery(url))
+    return text("invalid exclude names", 400);
+  const excludeNames = scopeExcludeNamesFromQuery(url);
+  const entries = git
+    .listTree(target, path, cwd, {
+      recursive,
+      omitDirNames: scopeOmitDirNamesFromQuery(url),
+      excludeNames,
+    })
+    .entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
   return json({
     ref: target,
     path,
@@ -813,6 +904,8 @@ function handleSettings() {
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
       omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+      exclude_names_effective: scopeExcludeNames,
+      exclude_names_built_in: DEFAULT_EXCLUDE_NAMES,
       max_entries: git.WORKTREE_RECURSIVE_ENTRY_LIMIT,
     },
   } satisfies SettingsResponse);
@@ -824,28 +917,38 @@ function handleFiles(url: URL) {
   if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
     return text("invalid target", 400);
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
+  if (invalidScopeExcludeNamesQuery(url))
+    return text("invalid exclude names", 400);
   const omitDirNames = scopeOmitDirNamesFromQuery(url);
-  const key = `${target || "worktree"}\0${omitDirNames.join("\0")}`;
+  const excludeNames = scopeExcludeNamesFromQuery(url);
+  const key = `${target || "worktree"}\0${omitDirNames.join("\0")}\0${excludeNames.join("\0")}`;
   const cached = fileListCache.get(key);
   if (cached && cached.generation === generation) return json(cached.body);
   const ref = target || "worktree";
-  const entries = git.listTree(ref, "", cwd, {
-    recursive: true,
-    omitDirNames,
-  }).entries;
+  const entries = git
+    .listTree(ref, "", cwd, {
+      recursive: true,
+      omitDirNames,
+      excludeNames,
+    })
+    .entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
   const body = buildFileSearchList(ref, generation, entries);
   fileListCache.set(key, { generation, body });
   return json(body);
 }
 
-function parseGrepPaths(url: URL, omitDirNames: string[]): string[] {
+function parseGrepPaths(
+  url: URL,
+  omitDirNames: string[],
+  excludeNames: string[],
+): string[] {
   return url.searchParams
     .getAll("path")
     .filter(
       (path) =>
         safePath(path) &&
         !isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames),
+        !isSkippableSearchPath(path, omitDirNames, excludeNames),
     );
 }
 
@@ -861,17 +964,24 @@ function grepWorktreeFallback(
   max: number,
   paths: string[],
   omitDirNames: string[],
+  excludeNames: string[],
 ): GrepMatch[] {
   const candidates = paths.length
     ? paths
-    : git.worktreeFiles(cwd).map((entry) => entry.path);
+    : git
+        .listTree("worktree", "", cwd, {
+          recursive: true,
+          omitDirNames,
+          excludeNames,
+        })
+        .entries.map((entry) => entry.path);
   const matches: GrepMatch[] = [];
   for (const path of candidates) {
     if (matches.length >= max) break;
     if (
       !safePath(path) ||
       isGitInternalPath(path) ||
-      isSkippableSearchPath(path, omitDirNames)
+      isSkippableSearchPath(path, omitDirNames, excludeNames)
     )
       continue;
     const full = safeWorktreePath(path);
@@ -913,23 +1023,36 @@ function grepWorktree(
   paths: string[],
   regex: boolean,
   omitDirNames: string[],
+  excludeNames: string[],
 ): GrepResponse {
   if (rgAvailable()) {
     const safePaths = paths.filter(
       (path) =>
         safePath(path) &&
         !isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames) &&
+        !isSkippableSearchPath(path, omitDirNames, excludeNames) &&
         safeWorktreePath(path),
     );
-    const args = buildRgArgs(query, max, safePaths, regex, omitDirNames);
+    const args = buildRgArgs(
+      query,
+      max,
+      safePaths,
+      regex,
+      omitDirNames,
+      excludeNames,
+    );
     const proc = runSync(args, cwd, { timeout: 5000 });
     const stdout = proc.stdout;
-    const matches = parseRgOutput(stdout, max, omitDirNames).filter(
+    const matches = parseRgOutput(
+      stdout,
+      max,
+      omitDirNames,
+      excludeNames,
+    ).filter(
       (match) =>
         safePath(match.path) &&
         !isGitInternalPath(match.path) &&
-        !isSkippableSearchPath(match.path, omitDirNames) &&
+        !isSkippableSearchPath(match.path, omitDirNames, excludeNames) &&
         !!safeWorktreePath(match.path),
     );
     return {
@@ -946,7 +1069,13 @@ function grepWorktree(
       truncated: false,
       matches: [],
     };
-  const matches = grepWorktreeFallback(query, max, paths, omitDirNames);
+  const matches = grepWorktreeFallback(
+    query,
+    max,
+    paths,
+    omitDirNames,
+    excludeNames,
+  );
   return {
     ref: "worktree",
     engine: "fallback",
@@ -962,12 +1091,13 @@ function grepTreeRef(
   paths: string[],
   regex: boolean,
   omitDirNames: string[],
+  excludeNames: string[],
 ): GrepResponse {
   const safePaths = paths.filter(
     (path) =>
       safePath(path) &&
       !isGitInternalPath(path) &&
-      !isSkippableSearchPath(path, omitDirNames),
+      !isSkippableSearchPath(path, omitDirNames, excludeNames),
   );
   const args = [
     "git",
@@ -987,10 +1117,13 @@ function grepTreeRef(
   ];
   const proc = runSync(args, cwd, { timeout: 5000 });
   const stdout = proc.stdout;
-  const matches = parseGitGrepOutput(stdout, ref, max, omitDirNames).slice(
-    0,
+  const matches = parseGitGrepOutput(
+    stdout,
+    ref,
     max,
-  );
+    omitDirNames,
+    excludeNames,
+  ).slice(0, max);
   return { ref, engine: "git", truncated: matches.length >= max, matches };
 }
 
@@ -999,8 +1132,11 @@ function handleGrep(url: URL) {
   const ref = url.searchParams.get("ref") || "worktree";
   const max = normalizeGrepMax(url.searchParams.get("max"));
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
+  if (invalidScopeExcludeNamesQuery(url))
+    return text("invalid exclude names", 400);
   const omitDirNames = scopeOmitDirNamesFromQuery(url);
-  const paths = parseGrepPaths(url, omitDirNames);
+  const excludeNames = scopeExcludeNamesFromQuery(url);
+  const paths = parseGrepPaths(url, omitDirNames, excludeNames);
   const regex = url.searchParams.get("regex") === "1";
   if (!query.trim())
     return json({
@@ -1010,9 +1146,13 @@ function handleGrep(url: URL) {
       matches: [],
     } satisfies GrepResponse);
   if (ref === "worktree" || ref === "")
-    return json(grepWorktree(query, max, paths, regex, omitDirNames));
+    return json(
+      grepWorktree(query, max, paths, regex, omitDirNames, excludeNames),
+    );
   if (!git.verifyTreeRef(ref, cwd)) return text("invalid target", 400);
-  return json(grepTreeRef(ref, query, max, paths, regex, omitDirNames));
+  return json(
+    grepTreeRef(ref, query, max, paths, regex, omitDirNames, excludeNames),
+  );
 }
 
 function handleRefCommits(url: URL) {
@@ -1654,6 +1794,192 @@ function openOsPath(path: string) {
   spawnDetached(cmd);
 }
 
+function windowsTrashScript(path: string): string {
+  const quotedPath = path.replace(/'/g, "''");
+  return [
+    "$ErrorActionPreference = 'Stop';",
+    `$path = '${quotedPath}';`,
+    "Add-Type -TypeDefinition @'",
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "public static class CodeViewerRecycleBin {",
+    "  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]",
+    "  public struct SHFILEOPSTRUCT {",
+    "    public IntPtr hwnd;",
+    "    public uint wFunc;",
+    "    public string pFrom;",
+    "    public string pTo;",
+    "    public ushort fFlags;",
+    "    [MarshalAs(UnmanagedType.Bool)] public bool fAnyOperationsAborted;",
+    "    public IntPtr hNameMappings;",
+    "    public string lpszProgressTitle;",
+    "  }",
+    '  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]',
+    "  private static extern int SHFileOperationW(ref SHFILEOPSTRUCT lpFileOp);",
+    "  public static void MoveToRecycleBin(string path) {",
+    "    const uint FO_DELETE = 0x0003;",
+    "    const ushort FOF_SILENT = 0x0004;",
+    "    const ushort FOF_NOCONFIRMATION = 0x0010;",
+    "    const ushort FOF_ALLOWUNDO = 0x0040;",
+    "    const ushort FOF_NOERRORUI = 0x0400;",
+    "    var op = new SHFILEOPSTRUCT {",
+    "      hwnd = IntPtr.Zero,",
+    "      wFunc = FO_DELETE,",
+    '      pFrom = path + "\\0\\0",',
+    "      pTo = null,",
+    "      fFlags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT),",
+    "      fAnyOperationsAborted = false,",
+    "      hNameMappings = IntPtr.Zero,",
+    "      lpszProgressTitle = null",
+    "    };",
+    "    int result = SHFileOperationW(ref op);",
+    '    if (result != 0) throw new InvalidOperationException("SHFileOperationW failed: " + result);',
+    '    if (op.fAnyOperationsAborted) throw new OperationCanceledException("SHFileOperationW aborted");',
+    "  }",
+    "}",
+    "'@;",
+    "[CodeViewerRecycleBin]::MoveToRecycleBin($path);",
+  ].join(" ");
+}
+
+function windowsRestoreTrashScript(originalPath: string): string {
+  const quotedPath = originalPath.replace(/'/g, "''");
+  return [
+    "$ErrorActionPreference = 'Stop';",
+    `$original = '${quotedPath}';`,
+    "$parent = [System.IO.Path]::GetDirectoryName($original);",
+    "$name = [System.IO.Path]::GetFileName($original);",
+    "$shell = New-Object -ComObject Shell.Application;",
+    "$bin = $shell.Namespace(10);",
+    "$restored = $false;",
+    "foreach ($item in $bin.Items()) {",
+    "  $deletedFrom = $item.ExtendedProperty('System.Recycle.DeletedFrom');",
+    "  if ($item.Name -eq $name -and $deletedFrom -eq $parent) {",
+    "    $item.InvokeVerb('ESTORE');",
+    "    $restored = $true;",
+    "    break;",
+    "  }",
+    "}",
+    "if (-not $restored) { throw 'recycle bin item not found'; }",
+  ].join(" ");
+}
+
+function makeUndoId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function clearMutableCaches() {
+  fileCache.clear();
+  metaCache.clear();
+  fileListCache.clear();
+}
+
+function moveMacPathIntoTrash(path: string): {
+  ok: boolean;
+  trashPath?: string;
+  error?: string;
+} {
+  const trashDir = join(homedir(), ".Trash");
+  const base = basename(path) || "code-viewer-trash-item";
+  const target = join(
+    trashDir,
+    `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+  try {
+    mkdirSync(trashDir, { recursive: true });
+    renameSync(path, target);
+    return { ok: true, trashPath: target };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
+function movePathToTrash(path: string): {
+  ok: boolean;
+  trashPath?: string;
+  error?: string;
+} {
+  lstatSync(path);
+  if (process.platform === "darwin") {
+    return moveMacPathIntoTrash(path);
+  }
+  if (process.platform === "win32") {
+    const res = runSync(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        windowsTrashScript(path),
+      ],
+      cwd,
+      { timeout: 60000 },
+    );
+    return res.code === 0
+      ? { ok: true }
+      : { ok: false, error: res.stderr || res.stdout };
+  }
+  return { ok: false, error: "trash unsupported" };
+}
+
+function restoreTrashPath(
+  originalPath: string,
+  trashPath?: string,
+): {
+  ok: boolean;
+  error?: string;
+} {
+  const parent = parentRepoPath(originalPath);
+  const parentFullPath = safeOpenWorktreePath(parent);
+  if (!parentFullPath) return { ok: false, error: "invalid restore target" };
+  const original = worktreePath(originalPath);
+  if (existsSync(original))
+    return { ok: false, error: "restore target exists" };
+  if (trashPath) {
+    if (process.platform !== "darwin")
+      return { ok: false, error: "invalid trash handle" };
+    if (!existsSync(trashPath))
+      return { ok: false, error: "trash item not found" };
+    try {
+      const trashRoot = join(homedir(), ".Trash");
+      const trashRelative = relative(trashRoot, trashPath);
+      if (
+        trashRelative === "" ||
+        trashRelative.startsWith("..") ||
+        trashRelative.startsWith("/") ||
+        trashRelative.startsWith("\\")
+      )
+        return { ok: false, error: "invalid trash handle" };
+      mkdirSync(dirname(original), { recursive: true });
+      renameSync(trashPath, original);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  }
+  if (process.platform === "win32") {
+    const res = runSync(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        windowsRestoreTrashScript(original),
+      ],
+      cwd,
+      { timeout: 60000 },
+    );
+    return res.code === 0
+      ? { ok: true }
+      : { ok: false, error: res.stderr || res.stdout };
+  }
+  return { ok: false, error: "undo unavailable for this trash operation" };
+}
+
 async function handleOpenPath(req: Request) {
   if (req.method !== "POST") return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
@@ -1689,6 +2015,82 @@ async function handleOpenPath(req: Request) {
   if (!stats.isDirectory()) return text("not a directory", 400);
   openOsPath(target);
   return json({ ok: true });
+}
+
+async function handleTrashPath(req: Request) {
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const length = Number(req.headers.get("content-length") || "0");
+  if (length > 1024) return text("payload too large", 413);
+
+  let body: { path?: unknown } = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > 1024) return text("payload too large", 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text("invalid json", 400);
+  }
+
+  const path =
+    typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
+  if (!path) return text("invalid path", 400);
+  if (!safeRepoPath(path)) return text("invalid path", 400);
+  if (isGitInternalPath(path)) return text("forbidden", 403);
+  const originalFullPath = safeWorktreePath(path);
+  if (!originalFullPath) return text("not found", 404);
+  const moved = movePathToTrash(worktreePath(path));
+  if (!moved.ok) return text(moved.error || "trash failed", 500);
+  const undo: UndoActionResponse = {
+    id: makeUndoId(),
+    type: "trash",
+    label: `Restore ${path}`,
+    payload: {
+      original_path: path,
+      trashPath: moved.trashPath,
+    },
+  };
+  generation++;
+  clearMutableCaches();
+  sendSse("update");
+  return json({ ok: true, generation, undo });
+}
+
+async function handleRestoreTrash(req: Request) {
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const length = Number(req.headers.get("content-length") || "0");
+  if (length > 1024) return text("payload too large", 413);
+
+  let body: { original_path?: unknown; trashPath?: unknown } = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > 1024) return text("payload too large", 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text("invalid json", 400);
+  }
+
+  const originalPath =
+    typeof body.original_path === "string"
+      ? body.original_path.replace(/^\/+|\/+$/g, "")
+      : "";
+  const trashPath = typeof body.trashPath === "string" ? body.trashPath : "";
+  if (!originalPath || !safeRepoPath(originalPath))
+    return text("invalid restore target", 400);
+  if (isGitInternalPath(originalPath)) return text("forbidden", 403);
+  const restored = restoreTrashPath(originalPath, trashPath || undefined);
+  if (!restored.ok) return text(restored.error || "undo failed", 409);
+  generation++;
+  clearMutableCaches();
+  sendSse("update");
+  return json({ ok: true, generation });
 }
 
 function sendSse(event: string, data = "tick") {
@@ -1732,14 +2134,14 @@ const server = await startServer({
     if (url.pathname === "/file_range") return handleFileRange(url);
     if (url.pathname === "/_file") return handleRawFile(req, url);
     if (url.pathname === "/_open_path") return handleOpenPath(req);
+    if (url.pathname === "/_trash_path") return handleTrashPath(req);
+    if (url.pathname === "/_restore_trash") return handleRestoreTrash(req);
     if (url.pathname === "/_upload_files") return handleUploadFiles(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {
       if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
       generation++;
-      fileCache.clear();
-      metaCache.clear();
-      fileListCache.clear();
+      clearMutableCaches();
       sendSse("update");
       return json({ ok: true, generation });
     }

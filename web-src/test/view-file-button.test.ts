@@ -563,9 +563,8 @@ describe("view file UI", () => {
   });
 
   test("repository blob sidebar directory entries navigate to folder detail", () => {
-    expect(
-      app.includes("if (onFileClick) {\n          li.addEventListener('click'"),
-    ).toBe(true);
+    expect(app.includes("if (onFileClick) {")).toBe(true);
+    expect(app.includes("li.addEventListener('click'")).toBe(true);
     expect(
       app.includes(
         "dir.children_omitted_reason === 'internal' || dir.children_omitted_reason === 'truncated'",
@@ -609,7 +608,8 @@ describe("view file UI", () => {
     expect(html.includes("File list font size")).toBe(true);
     expect(html.includes("Code font size")).toBe(true);
     expect(html.includes("Extra Large")).toBe(true);
-    expect(html.includes('rows="9"')).toBe(true);
+    expect(html.includes('rows="6"')).toBe(true);
+    expect(html.includes('id="scope-exclude-names"')).toBe(true);
     expect(html.includes('id="sidebar-font-size"')).toBe(true);
     expect(html.includes('id="code-font-size"')).toBe(true);
     expect(html.includes('id="scope-omit-dirs"')).toBe(true);
@@ -627,6 +627,7 @@ describe("view file UI", () => {
       app.includes("const CODE_FONT_SIZE_STORAGE_KEY = 'gdp:code-font-size'"),
     ).toBe(true);
     expect(app.includes("function normalizeScopeOmitDirs")).toBe(true);
+    expect(app.includes("function normalizeScopeExcludeNames")).toBe(true);
     expect(app.includes("function normalizeViewerFontSize")).toBe(true);
     expect(
       app.includes(
@@ -636,11 +637,12 @@ describe("view file UI", () => {
     expect(app.includes("function applySidebarFontSize")).toBe(true);
     expect(app.includes("function applyCodeFontSize")).toBe(true);
     expect(
-      app.includes(
-        "function appendScopeOmitDirsParam(params: URLSearchParams)",
-      ),
+      app.includes("function appendScopeParams(params: URLSearchParams)"),
     ).toBe(true);
-    expect(app.includes("params.set('omit_dirs', saved.join(','))")).toBe(true);
+    expect(app.includes("params.set('omit_dirs', omit.join(','))")).toBe(true);
+    expect(app.includes("params.set('exclude_names', exclude.join(','))")).toBe(
+      true,
+    );
     expect(app.includes("function repoFileCacheKey(ref: string): string")).toBe(
       true,
     );
@@ -668,7 +670,7 @@ describe("view file UI", () => {
     expect(style.includes('body[data-code-font-size="xlarge"]')).toBe(true);
     expect(style.includes("font-size: var(--code-font-size)")).toBe(true);
     expect(style.includes("font-size: var(--sidebar-file-font)")).toBe(true);
-    expect(style.includes("min-height: 210px")).toBe(true);
+    expect(style.includes("min-height: 110px")).toBe(true);
     expect(style.includes("#scope-settings-popover")).toBe(true);
   });
 

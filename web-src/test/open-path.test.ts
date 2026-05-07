@@ -11,7 +11,7 @@ describe("open path in OS action", () => {
   test("server exposes a localhost-only POST endpoint with bounded JSON input", () => {
     expect(
       server.includes(
-        "if (url.pathname === '/_open_path') return handleOpenPath(req)",
+        'if (url.pathname === "/_open_path") return handleOpenPath(req)',
       ),
     ).toBe(true);
     expect(
@@ -32,17 +32,16 @@ describe("open path in OS action", () => {
     );
     expect(
       server.includes(
-        "if (length > 1024) return text('payload too large', 413)",
+        'if (length > 1024) return text("payload too large", 413)',
       ),
     ).toBe(true);
     expect(
-      server.includes(
-        "if (kind !== 'directory' && kind !== 'file-parent') return text('invalid kind', 400)",
-      ),
+      server.includes('if (kind !== "directory" && kind !== "file-parent")'),
     ).toBe(true);
+    expect(server.includes('return text("invalid kind", 400)')).toBe(true);
     expect(
       server.includes(
-        "if (kind === 'file-parent' && !path) return text('invalid path', 400)",
+        'if (kind === "file-parent" && !path) return text("invalid path", 400)',
       ),
     ).toBe(true);
   });
@@ -176,12 +175,12 @@ describe("state changing refresh endpoint", () => {
   test("refresh uses the same side-effect request gate as upload and open path", () => {
     expect(
       server.includes(
-        "if (url.pathname === '/refresh' && req.method === 'POST')",
+        'if (url.pathname === "/refresh" && req.method === "POST")',
       ),
     ).toBe(true);
     expect(
       server.includes(
-        "if (!sideEffectRequestAllowed(req)) return text('forbidden', 403);\n      generation++;",
+        'if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);\n      generation++;',
       ),
     ).toBe(true);
   });
@@ -213,7 +212,7 @@ describe("repository scope omit settings", () => {
     ).toBe(true);
     expect(
       server.includes(
-        "if (url.pathname === '/_settings') return handleSettings()",
+        'if (url.pathname === "/_settings") return handleSettings()',
       ),
     ).toBe(true);
     expect(server.includes("url.searchParams.has('omit_dirs')")).toBe(true);
@@ -225,6 +224,13 @@ describe("repository scope omit settings", () => {
         "omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES",
       ),
     ).toBe(true);
+    expect(
+      server.includes("let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES"),
+    ).toBe(true);
+    expect(server.includes("scope?: { excludeNames?: unknown }")).toBe(true);
+    expect(server.includes("exclude_names_effective: scopeExcludeNames")).toBe(
+      true,
+    );
   });
 });
 
