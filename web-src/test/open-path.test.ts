@@ -180,7 +180,7 @@ describe("state changing refresh endpoint", () => {
     ).toBe(true);
     expect(
       server.includes(
-        'if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);\n      generation++;',
+        'if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);\n      triggerUpdate();',
       ),
     ).toBe(true);
   });
