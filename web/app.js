@@ -6942,6 +6942,10 @@ ${frontmatter.yaml}
     let SIDEBAR_ROW_BY_PATH = new Map;
     let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
     const SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+    let REPO_SORT = {
+      key: "name",
+      direction: "asc"
+    };
     let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
     let PENDING_G_SCOPE = null;
     let PENDING_G_UNTIL = 0;
@@ -9130,69 +9134,81 @@ ${frontmatter.yaml}
       if (meta.upload_enabled && (meta.ref === "worktree" || meta.ref === "")) {
         listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
       }
+      const sortHost = document.createElement("div");
+      sortHost.className = "gdp-repo-sort-host";
       const list2 = document.createElement("div");
       list2.className = "gdp-source-viewer gdp-repo-file-list";
-      if (meta.path) {
-        const parent = meta.path.split("/").slice(0, -1).join("/");
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "gdp-repo-row parent";
-        const parentIcon = document.createElement("span");
-        parentIcon.className = "dir-icon";
-        setFolderIcon(parentIcon, false);
-        const parentName = document.createElement("span");
-        parentName.className = "name";
-        parentName.textContent = "..";
-        const parentKind = document.createElement("span");
-        parentKind.className = "kind";
-        parentKind.textContent = "parent";
-        row.append(parentIcon, parentName, parentKind);
-        row.addEventListener("click", () => {
-          setRoute(repoRoute(meta.ref, parent));
-          loadRepo();
-        });
-        list2.appendChild(row);
-      }
-      meta.entries.forEach((entry) => {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = `gdp-repo-row ${entry.type}`;
-        const icon = document.createElement("span");
-        icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
-        if (entry.type === "tree")
-          setFolderIcon(icon, true);
-        else
-          icon.innerHTML = fileEntryIcon();
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = entry.name;
-        const kind = document.createElement("span");
-        kind.className = "kind";
-        kind.textContent = entry.type === "tree" ? "directory" : entry.type === "commit" ? "submodule" : "file";
-        row.append(icon, name, kind);
-        row.addEventListener("click", () => {
-          if (entry.type === "tree") {
-            setRoute(repoRoute(meta.ref, entry.path));
+      const renderRepoRows = (focusSortKey) => {
+        sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
+        if (focusSortKey) {
+          sortHost.querySelector(`[data-repo-sort="${focusSortKey}"]`)?.focus();
+        }
+        list2.replaceChildren();
+        if (meta.path) {
+          const parent = meta.path.split("/").slice(0, -1).join("/");
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "gdp-repo-row parent";
+          const parentIcon = document.createElement("span");
+          parentIcon.className = "dir-icon";
+          setFolderIcon(parentIcon, false);
+          const parentName = document.createElement("span");
+          parentName.className = "name";
+          parentName.textContent = "..";
+          const parentKind = document.createElement("span");
+          parentKind.className = "meta";
+          parentKind.textContent = "";
+          const parentSize = document.createElement("span");
+          parentSize.className = "size";
+          row.append(parentIcon, parentName, parentKind, parentSize);
+          row.addEventListener("click", () => {
+            setRoute(repoRoute(meta.ref, parent));
             loadRepo();
-          } else if (entry.type === "blob") {
-            setRoute({
-              screen: "file",
-              path: entry.path,
-              ref: meta.ref,
-              view: "blob",
-              range: currentRange()
-            });
-            renderStandaloneSource({ path: entry.path, ref: meta.ref });
-          }
+          });
+          list2.appendChild(row);
+        }
+        sortedRepoEntries(meta.entries).forEach((entry) => {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = `gdp-repo-row ${entry.type}`;
+          const icon = document.createElement("span");
+          icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
+          if (entry.type === "tree")
+            setFolderIcon(icon, true);
+          else
+            icon.innerHTML = fileEntryIcon();
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = entry.name;
+          const metaBlock = createRepoEntryMeta(entry);
+          const size = createRepoEntrySize(entry);
+          row.append(icon, name, metaBlock, size);
+          row.addEventListener("click", () => {
+            if (entry.type === "tree") {
+              setRoute(repoRoute(meta.ref, entry.path));
+              loadRepo();
+            } else if (entry.type === "blob") {
+              setRoute({
+                screen: "file",
+                path: entry.path,
+                ref: meta.ref,
+                view: "blob",
+                range: currentRange()
+              });
+              renderStandaloneSource({ path: entry.path, ref: meta.ref });
+            }
+          });
+          list2.appendChild(row);
         });
-        list2.appendChild(row);
-      });
-      if (!meta.entries.length) {
-        const empty = document.createElement("div");
-        empty.className = "gdp-repo-empty";
-        empty.textContent = "No files in this directory.";
-        list2.appendChild(empty);
-      }
+        if (!meta.entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "gdp-repo-empty";
+          empty.textContent = "No files in this directory.";
+          list2.appendChild(empty);
+        }
+      };
+      listWrapper.appendChild(sortHost);
+      renderRepoRows();
       listWrapper.appendChild(list2);
       listCard.appendChild(listWrapper);
       shell.appendChild(listCard);
@@ -10335,6 +10351,117 @@ ${frontmatter.yaml}
       }
       return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
     }
+    function formatFileDate(value) {
+      if (!value)
+        return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime()))
+        return "";
+      return date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+    function createRepoEntryMeta(entry) {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
+      const created = formatFileDate(entry.created_at);
+      if (entry.type === "tree" && updated) {
+        meta.textContent = updated;
+        if (created)
+          meta.title = `Created ${created}`;
+        return meta;
+      }
+      if (entry.type !== "blob") {
+        meta.textContent = "-";
+        return meta;
+      }
+      meta.textContent = updated ? updated : created ? created : "-";
+      if (created)
+        meta.title = `Created ${created}`;
+      return meta;
+    }
+    function createRepoEntrySize(entry) {
+      const size = document.createElement("span");
+      size.className = "size";
+      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
+      return size;
+    }
+    function repoEntryUpdatedTime(entry) {
+      const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
+      if (!raw)
+        return -1;
+      const time = new Date(raw).getTime();
+      return Number.isNaN(time) ? -1 : time;
+    }
+    function sortedRepoEntries(entries) {
+      const direction = REPO_SORT.direction === "asc" ? 1 : -1;
+      return [...entries].sort((a2, b2) => {
+        if (REPO_SORT.key === "name" && a2.type !== b2.type) {
+          if (a2.type === "tree")
+            return -1;
+          if (b2.type === "tree")
+            return 1;
+        }
+        let result = 0;
+        if (REPO_SORT.key === "updated") {
+          const aTime = repoEntryUpdatedTime(a2);
+          const bTime = repoEntryUpdatedTime(b2);
+          if (aTime < 0 && bTime >= 0)
+            return 1;
+          if (bTime < 0 && aTime >= 0)
+            return -1;
+          result = aTime - bTime;
+        } else if (REPO_SORT.key === "size") {
+          if (a2.size == null && b2.size != null)
+            return 1;
+          if (b2.size == null && a2.size != null)
+            return -1;
+          result = (a2.size ?? 0) - (b2.size ?? 0);
+        } else {
+          result = a2.name.localeCompare(b2.name);
+        }
+        if (result === 0)
+          result = a2.name.localeCompare(b2.name);
+        return result * direction;
+      });
+    }
+    function createRepoSortHeader(onSortChange) {
+      const header = document.createElement("div");
+      header.className = "gdp-repo-sort-header";
+      const spacer = document.createElement("span");
+      spacer.className = "gdp-repo-sort-spacer";
+      header.appendChild(spacer);
+      const columns = [
+        { key: "name", label: "Name" },
+        { key: "updated", label: "Updated" },
+        { key: "size", label: "Size" }
+      ];
+      columns.forEach((column) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.repoSort = column.key;
+        button.textContent = column.label + (REPO_SORT.key === column.key ? REPO_SORT.direction === "asc" ? " ↑" : " ↓" : "");
+        button.className = REPO_SORT.key === column.key ? "active" : "";
+        button.addEventListener("click", () => {
+          if (REPO_SORT.key === column.key) {
+            REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
+          } else {
+            REPO_SORT = {
+              key: column.key,
+              direction: column.key === "name" ? "asc" : "desc"
+            };
+          }
+          onSortChange(column.key);
+        });
+        header.appendChild(button);
+      });
+      return header;
+    }
     function humanFileKind(path, mime, fallback) {
       const ext = (path.split(".").pop() || "").toLowerCase();
       if (ext === "png")
@@ -10392,11 +10519,40 @@ ${frontmatter.yaml}
         const size = rawSize == null ? NaN : Number(rawSize);
         return {
           size: rawSize != null && Number.isFinite(size) ? size : undefined,
-          type: res.headers.get("content-type") || undefined
+          type: res.headers.get("content-type") || undefined,
+          created_at: res.headers.get("x-code-viewer-created-at") || undefined,
+          updated_at: res.headers.get("x-code-viewer-updated-at") || undefined,
+          commit_updated_at: res.headers.get("x-code-viewer-commit-updated-at") || undefined
         };
       } catch {
         return {};
       }
+    }
+    function createFileDetailMeta(target, meta) {
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-file-detail-meta";
+      const addItem = (label, value) => {
+        if (!value)
+          return;
+        const item = document.createElement("span");
+        item.className = "gdp-file-detail-meta-item";
+        const labelEl = document.createElement("span");
+        labelEl.className = "label";
+        labelEl.textContent = label;
+        const valueEl = document.createElement("span");
+        valueEl.className = "value";
+        valueEl.textContent = value;
+        item.append(labelEl, valueEl);
+        wrap.appendChild(item);
+      };
+      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+      addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
+      addItem("Created", formatFileDate(meta.created_at));
+      if (!wrap.childElementCount) {
+        wrap.hidden = true;
+        wrap.dataset.path = target.path;
+      }
+      return wrap;
     }
     function createSourceFileInfo(target, kind) {
       const info = document.createElement("div");
@@ -11423,6 +11579,11 @@ ${frontmatter.yaml}
       name.appendChild(copy);
       name.appendChild(createOpenPathButton(target.path, "file-parent", "open parent folder in OS"));
       header.appendChild(name);
+      loadRawFileInfo(target).then((meta) => {
+        if (req !== SOURCE_REQ_SEQ || !sourceTargetsEqual(sourceTargetFromRoute(), target))
+          return;
+        header.appendChild(createFileDetailMeta(target, meta));
+      });
       if (!repoTarget) {
         const back = document.createElement("button");
         back.type = "button";
