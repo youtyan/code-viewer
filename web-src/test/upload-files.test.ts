@@ -17,7 +17,7 @@ describe("upload files endpoint security", () => {
     expect(server.includes("arg === '--allow-upload'")).toBe(true);
     expect(
       server.includes(
-        "if (url.pathname === '/_upload_files') return handleUploadFiles(req)",
+        'if (url.pathname === "/_upload_files") return handleUploadFiles(req)',
       ),
     ).toBe(true);
     expect(

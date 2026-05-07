@@ -464,7 +464,14 @@ function worktreeEntryFromDirent(
   name: string,
   isDirectory: boolean,
   omitDirNames: Set<string>,
+  excludeNames: Set<string>,
 ): GitTreeEntry {
+  if (excludeNames.has(name.toLowerCase()))
+    return {
+      name,
+      path: "",
+      type: isDirectory ? "tree" : "blob",
+    };
   const entryPath = base ? `${base}/${name}` : name;
   const type = isDirectory
     ? hasDotGitEntry(join(dir, name))
@@ -491,23 +498,30 @@ function worktreeFilesystemEntries(
   path: string,
   recursive: boolean,
   omitDirNames: string[] = DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+  excludeNames: string[] = [],
 ): GitTreeEntry[] {
   const base = normalizeTreePath(path);
   const root = join(cwd, base);
   const omitDirNameSet = new Set(omitDirNames);
+  const excludeNameSet = new Set(
+    excludeNames.map((name) => name.toLowerCase()),
+  );
   let directEntries: GitTreeEntry[];
   try {
     const dirents = readdirSync(root, { withFileTypes: true });
     directEntries = sortTreeEntries(
-      dirents.map((entry) =>
-        worktreeEntryFromDirent(
-          base,
-          root,
-          entry.name,
-          entry.isDirectory(),
-          omitDirNameSet,
-        ),
-      ),
+      dirents
+        .map((entry) =>
+          worktreeEntryFromDirent(
+            base,
+            root,
+            entry.name,
+            entry.isDirectory(),
+            omitDirNameSet,
+            excludeNameSet,
+          ),
+        )
+        .filter((entry) => entry.path),
     );
   } catch {
     return [];
@@ -543,6 +557,7 @@ function worktreeFilesystemEntries(
       return;
     }
     for (const entry of entries) {
+      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -669,7 +684,11 @@ export function listTree(
   ref: string,
   path: string,
   cwd: string,
-  options: { recursive?: boolean; omitDirNames?: string[] } = {},
+  options: {
+    recursive?: boolean;
+    omitDirNames?: string[];
+    excludeNames?: string[];
+  } = {},
 ): { code: number; entries: GitTreeEntry[]; stderr: string } {
   const base = normalizeTreePath(path);
   if (ref === "worktree") {
@@ -680,6 +699,7 @@ export function listTree(
         base,
         !!options.recursive,
         options.omitDirNames,
+        options.excludeNames,
       ),
       stderr: "",
     };
