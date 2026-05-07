@@ -273,7 +273,7 @@ describe("view file UI", () => {
   test("raw file responses use explicit browser-safe headers", () => {
     expect(
       server.includes(
-        "function rawFileHeaders(path: string, size: number | null = null, range?: { start: number; end: number }): HeadersInit",
+        "function rawFileHeaders(path: string, size: number | null = null, range?: { start: number; end: number }, metadata: FileMetadata = {}): HeadersInit",
       ),
     ).toBe(true);
     expect(
@@ -310,7 +310,7 @@ describe("view file UI", () => {
   test("raw file HEAD requests validate refs and paths before returning metadata", () => {
     expect(
       server.includes(
-        "if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not in ref', 404);\n    if (req.method === 'HEAD')",
+        "if (!git.verifyTreeRef(ref, cwd)) return text('invalid ref', 400);\n    const size = rawFileSize(path, ref);\n    if (size == null) return text('not in ref', 404);\n    const metadata = gitFileMetadata(ref, path, size);\n    if (req.method === 'HEAD')",
       ),
     ).toBe(true);
     expect(
@@ -325,7 +325,7 @@ describe("view file UI", () => {
     ).toBe(true);
     expect(
       server.includes(
-        "if (req.method === 'HEAD') return new Response(null, { headers: rawFileHeaders(path, size) });",
+        "headers: rawFileHeaders(path, size, undefined, metadata)",
       ),
     ).toBe(true);
   });
