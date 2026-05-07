@@ -40,3 +40,11 @@ gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
 ```
 
+## UI/Test Discipline
+
+- Useless tests waste both time and tokens. Never write tests that only prove an implementation contains a string, selector, function name, class name, or other incidental detail without verifying the user-visible behavior or the real contract.
+- Do not write or update tests before the intended behavior is clearly understood.
+- Do not use string-presence tests such as `source.includes(...)` to bless UI behavior or layout. They are acceptable only for narrow guardrails where DOM/browser verification is unnecessary and the assertion cannot mask a wrong specification.
+- For UI changes, verify the actual rendered screen with Browser Pilot before claiming the behavior is correct. Compare the relevant DOM structure and visual placement against the requested existing screen or component.
+- If the user points to an existing UI as the reference, inspect that reference implementation first and match its DOM/CSS structure instead of inventing a parallel layout.
+- Never adjust tests to match an implementation when the implementation is still disputed. Fix the implementation first, then add behavior-level tests that would fail for the wrong UI.
