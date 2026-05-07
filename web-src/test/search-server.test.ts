@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { sourceFixture } from "./source-fixture";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -12,6 +11,7 @@ import {
   parseGitGrepOutput,
   parseRgOutput,
 } from "../server/search";
+import { sourceFixture } from "./source-fixture";
 
 describe("normalizeGrepMax", () => {
   test("defaults and clamps grep result limits", () => {
@@ -54,6 +54,10 @@ describe("search path filtering", () => {
       false,
     );
     expect(isSkippableSearchPath("audio/Horizon.wav", ["dist"])).toBe(false);
+    expect(isSkippableSearchPath(".DS_Store", [], [".DS_Store"])).toBe(true);
+    expect(isSkippableSearchPath("src/.DS_Store", [], [".DS_Store"])).toBe(
+      true,
+    );
     expect(isSkippableSearchPath("src/app.ts")).toBe(false);
   });
 });
@@ -148,11 +152,11 @@ describe("preview search endpoints", () => {
   test("routes read-only file and grep search endpoints", () => {
     expect(
       server.includes(
-        "if (url.pathname === '/_files') return handleFiles(url)",
+        'if (url.pathname === "/_files") return handleFiles(url)',
       ),
     ).toBe(true);
     expect(
-      server.includes("if (url.pathname === '/_grep') return handleGrep(url)"),
+      server.includes('if (url.pathname === "/_grep") return handleGrep(url)'),
     ).toBe(true);
   });
 
@@ -160,11 +164,14 @@ describe("preview search endpoints", () => {
     expect(server.includes("normalizeGrepMax(url.searchParams.get")).toBe(true);
     expect(
       server.includes(
-        "buildRgArgs(query, max, safePaths, regex, omitDirNames)",
+        "buildRgArgs(query, max, safePaths, regex, omitDirNames, excludeNames)",
       ),
     ).toBe(true);
     expect(server.includes("scopeOmitDirNamesFromQuery(url)")).toBe(true);
-    expect(server.includes("parseGrepPaths(url, omitDirNames)")).toBe(true);
+    expect(server.includes("scopeExcludeNamesFromQuery(url)")).toBe(true);
+    expect(
+      server.includes("parseGrepPaths(url, omitDirNames, excludeNames)"),
+    ).toBe(true);
     expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
     expect(
       server.includes(
