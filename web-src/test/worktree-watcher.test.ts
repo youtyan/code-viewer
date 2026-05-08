@@ -118,6 +118,43 @@ describe("worktree update watcher", () => {
     expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
   });
 
+  test("async initial scan watches existing child directories after startup", async () => {
+    const watched: string[] = [];
+    const scheduled: (() => void)[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: ["node_modules"],
+      excludeNames: [],
+      initialScanMode: "async",
+      watch: ((path) => {
+        watched.push(path);
+      }) as WatchFn,
+      readdirSync: (path) => {
+        if (path === "/repo") {
+          return [
+            { name: "src", isDirectory: () => true },
+            { name: "node_modules", isDirectory: () => true },
+          ];
+        }
+        if (path === "/repo/src") {
+          return [{ name: "nested", isDirectory: () => true }];
+        }
+        return [];
+      },
+      onUpdate: () => {},
+      setTimeoutFn: ((callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      }) as typeof setTimeout,
+    });
+
+    expect(watched).toEqual(["/repo"]);
+    while (!watched.includes("/repo/src/nested") && scheduled.length)
+      scheduled.shift()?.();
+    expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
+  });
+
   test("starts watching a newly created directory after a rename event", () => {
     let listener: Parameters<WatchFn>[2] | null = null;
     const watched: string[] = [];
@@ -280,7 +317,7 @@ describe("worktree update watcher", () => {
 
     try {
       expect(handle.started).toBe(true);
-      await wait(100);
+      await wait(500);
       writeFileSync(join(root, "README.md"), "hello");
       expect(await waitUntil(() => updates.length >= 1)).toBe(true);
 
@@ -311,7 +348,7 @@ describe("worktree update watcher", () => {
 
     try {
       expect(handle.started).toBe(true);
-      await wait(100);
+      await wait(500);
       rmSync(sub, { recursive: true, force: true });
       mkdirSync(sub);
       writeFileSync(join(sub, "after.txt"), "after");
