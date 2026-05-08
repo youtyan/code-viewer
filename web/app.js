@@ -7002,7 +7002,9 @@ ${frontmatter.yaml}
     let SIDEBAR_VISIBLE_ROWS = [];
     let SIDEBAR_ROW_BY_PATH = new Map;
     let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
-    const SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+    let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+    const SIDEBAR_LAZY_LOADED_DIRS = new Set;
+    const SIDEBAR_LAZY_LOADING_DIRS = new Map;
     let REPO_SORT = {
       key: "name",
       direction: "asc"
@@ -8058,6 +8060,86 @@ ${frontmatter.yaml}
       SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
       return items;
     }
+    function sidebarTreeNodeHasChildren(node) {
+      return Object.keys(node.dirs).length > 0 || node.files.length > 0;
+    }
+    function shouldLazyLoadSidebarDir(dir) {
+      return isRepositorySidebarMode() && isVirtualSidebarActive() && !dir.children_omitted && !sidebarTreeNodeHasChildren(dir) && !SIDEBAR_LAZY_LOADED_DIRS.has(dir.path);
+    }
+    function upsertSidebarTreeEntry(entry, order) {
+      if (!SIDEBAR_TREE_ROOT)
+        return;
+      const parts = entry.path.split("/").filter(Boolean);
+      if (!parts.length)
+        return;
+      let node = SIDEBAR_TREE_ROOT;
+      let acc = "";
+      const dirPartCount = entry.type === "tree" ? parts.length : parts.length - 1;
+      for (let i2 = 0;i2 < dirPartCount; i2++) {
+        const part = parts[i2];
+        acc = acc ? `${acc}/${part}` : part;
+        if (!node.dirs[part]) {
+          node.dirs[part] = {
+            name: part,
+            dirs: {},
+            files: [],
+            path: acc,
+            minOrder: order
+          };
+        }
+        node = node.dirs[part];
+        node.minOrder = Math.min(node.minOrder, order);
+      }
+      if (entry.type === "tree") {
+        node.explicit = true;
+        if (entry.children_omitted === true) {
+          node.children_omitted = true;
+          node.children_omitted_reason = entry.children_omitted_reason;
+        }
+        return;
+      }
+      if (!node.files.some((file) => file.path === entry.path))
+        node.files.push({ ...entry, order });
+    }
+    function mergeSidebarTreeEntries(entries) {
+      entries.forEach((entry, index) => {
+        upsertSidebarTreeEntry(entry, entry.order ?? index + 1);
+      });
+      SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+      if (SIDEBAR_TREE_ROOT)
+        buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
+    }
+    function ensureVirtualSidebarDirLoaded(dir) {
+      if (!shouldLazyLoadSidebarDir(dir))
+        return Promise.resolve();
+      const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
+      if (existing)
+        return existing;
+      const params = new URLSearchParams;
+      params.set("ref", REPO_SIDEBAR_REF || "worktree");
+      params.set("path", dir.path);
+      appendScopeParams(params);
+      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((response) => {
+        if (!response.ok)
+          throw new Error("failed to load repository tree");
+        return response.json();
+      })).then((meta) => {
+        const entries = meta.entries.map((entry, index) => ({
+          order: dir.minOrder + (index + 1) / 1e5,
+          path: entry.path,
+          display_path: entry.path,
+          type: entry.type,
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason
+        }));
+        mergeSidebarTreeEntries(entries);
+        SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
+      }).finally(() => {
+        SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
+      });
+      SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load2);
+      return load2;
+    }
     function createTreeDirRow(dir, depth, onFileClick) {
       const li = document.createElement("li");
       li.className = "tree-dir";
@@ -8105,16 +8187,26 @@ ${frontmatter.yaml}
       const updateIcon = () => {
         setFolderIcon(dirIcon, li.classList.contains("collapsed"));
       };
-      const toggleDir = (e2) => {
+      const toggleDir = async (e2) => {
         e2.stopPropagation();
-        li.classList.toggle("collapsed");
-        updateIcon();
-        if (li.classList.contains("collapsed"))
-          STATE.collapsedDirs.add(dir.path);
-        else
-          STATE.collapsedDirs.delete(dir.path);
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-        rerenderVirtualSidebar();
+        if (li.dataset.toggling === "true")
+          return;
+        const expanding = li.classList.contains("collapsed");
+        li.dataset.toggling = "true";
+        try {
+          if (expanding)
+            await ensureVirtualSidebarDirLoaded(dir);
+          li.classList.toggle("collapsed");
+          updateIcon();
+          if (li.classList.contains("collapsed"))
+            STATE.collapsedDirs.add(dir.path);
+          else
+            STATE.collapsedDirs.delete(dir.path);
+          localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+          rerenderVirtualSidebar();
+        } finally {
+          delete li.dataset.toggling;
+        }
       };
       li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
       updateIcon();
@@ -8382,6 +8474,8 @@ ${frontmatter.yaml}
       SIDEBAR_TREE_ROWS = [];
       SIDEBAR_VISIBLE_ROWS = [];
       SIDEBAR_ROW_BY_PATH = new Map;
+      SIDEBAR_LAZY_LOADED_DIRS.clear();
+      SIDEBAR_LAZY_LOADING_DIRS.clear();
       STATE.files = files;
       SIDEBAR_FILES = files;
       SIDEBAR_ON_FILE_CLICK = onFileClick;
@@ -9851,6 +9945,14 @@ ${frontmatter.yaml}
     function activateRepoSidebarPath(currentPath) {
       markActive(currentPath, { reveal: true });
       applyFilter();
+      const row = SIDEBAR_ROW_BY_PATH.get(currentPath);
+      if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
+        ensureVirtualSidebarDirLoaded(row.dir).then(() => {
+          if (SIDEBAR_VIRTUAL_ACTIVE_PATH === currentPath) {
+            rerenderVirtualSidebar();
+            scrollVirtualSidebarPathIntoView(currentPath);
+          }
+        });
     }
     function createPlaceholder(f2) {
       const card = document.createElement("div");

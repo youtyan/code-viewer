@@ -27,6 +27,7 @@ type WorktreeUpdateWatchOptions = {
   omitDirNames: string[];
   excludeNames: string[];
   watch?: WatchFn;
+  initialScanMode?: "sync" | "async";
   readdirSync?: (path: string) => DirectoryEntry[];
   isDirectory?: (path: string) => boolean;
   directorySignature?: (path: string) => string | null;
@@ -84,6 +85,12 @@ export function startWorktreeUpdateWatch(
   const debounceMs = options.debounceMs ?? 250;
   const watchers = new Map<string, WatchHandle>();
   const signatures = new Map<string, string>();
+  const initialScanAsync =
+    options.initialScanMode === "async" ||
+    (((!options.watch || options.watch === nodeWatch) &&
+      !options.readdirSync) as boolean);
+  const initialScanQueue: string[] = [];
+  let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const ignored = (path: string) =>
@@ -115,6 +122,11 @@ export function startWorktreeUpdateWatch(
   };
 
   const closeAll = () => {
+    if (initialScanTimer) {
+      clearTimer(initialScanTimer);
+      initialScanTimer = null;
+    }
+    initialScanQueue.length = 0;
     for (const watcher of [...watchers.values()]) {
       try {
         watcher.close?.();
@@ -126,7 +138,37 @@ export function startWorktreeUpdateWatch(
     signatures.clear();
   };
 
-  const watchDirectory = (dir: string): void => {
+  const readChildDirectories = (dir: string): string[] => {
+    let entries: DirectoryEntry[];
+    try {
+      entries = readDirs(dir);
+    } catch (error) {
+      options.onError?.(error);
+      return [];
+    }
+    const children: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      children.push(join(dir, entry.name));
+    }
+    return children;
+  };
+
+  const processInitialScanQueue = () => {
+    initialScanTimer = null;
+    const next = initialScanQueue.shift();
+    if (next) watchDirectory(next, true);
+    if (initialScanQueue.length)
+      initialScanTimer = setTimer(processInitialScanQueue, 50);
+  };
+
+  const queueInitialChildren = (dir: string) => {
+    initialScanQueue.push(...readChildDirectories(dir));
+    if (!initialScanTimer)
+      initialScanTimer = setTimer(processInitialScanQueue, 5000);
+  };
+
+  const watchDirectory = (dir: string, initialScan = false): void => {
     if (watchers.has(dir)) return;
     const rel = normalizeRelativePath(relative(options.root, dir));
     if (rel && ignored(rel)) return;
@@ -179,19 +221,13 @@ export function startWorktreeUpdateWatch(
       return;
     }
 
-    let entries: DirectoryEntry[];
-    try {
-      entries = readDirs(dir);
-    } catch (error) {
-      options.onError?.(error);
+    if (initialScanAsync && initialScan) {
+      queueInitialChildren(dir);
       return;
     }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      watchDirectory(join(dir, entry.name));
-    }
+    for (const child of readChildDirectories(dir)) watchDirectory(child);
   };
 
-  watchDirectory(options.root);
+  watchDirectory(options.root, true);
   return { started: watchers.size > 0, close: closeAll };
 }
