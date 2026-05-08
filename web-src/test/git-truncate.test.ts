@@ -296,11 +296,19 @@ describe("repository tree helpers", () => {
       git(dir, ["init"]);
       git(dir, ["config", "user.email", "tester@example.com"]);
       git(dir, ["config", "user.name", "Test User"]);
+      git(dir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+      let parent = "";
       for (let index = 1; index <= 105; index++) {
-        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
-        git(dir, ["add", "file.txt"]);
-        git(dir, ["commit", "-m", `commit ${index}`]);
+        const args = [
+          "commit-tree",
+          "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+          "-m",
+          `commit ${index}`,
+        ];
+        if (parent) args.push("-p", parent);
+        parent = git(dir, args).stdout.trim();
       }
+      git(dir, ["update-ref", "refs/heads/main", parent]);
 
       const result = refs(dir);
 
