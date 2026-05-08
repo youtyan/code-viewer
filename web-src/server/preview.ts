@@ -2269,6 +2269,7 @@ startWorktreeUpdateWatch({
   omitDirNames: scopeOmitDirNames,
   excludeNames: scopeExcludeNames,
   watch,
+  initialScanMode: "async",
   onUpdate: triggerUpdate,
   onError: (error) => {
     const message = error instanceof Error ? error.message : String(error);

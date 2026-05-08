@@ -266,7 +266,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SIDEBAR_VISIBLE_ROWS: SidebarTreeRow[] = [];
   let SIDEBAR_ROW_BY_PATH = new Map<string, SidebarTreeRow>();
   let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
-  const SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
+  let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
+  const SIDEBAR_LAZY_LOADED_DIRS = new Set<string>();
+  const SIDEBAR_LAZY_LOADING_DIRS = new Map<string, Promise<void>>();
   let REPO_SORT: { key: RepoSortKey; direction: RepoSortDirection } = {
     key: "name",
     direction: "asc",
@@ -1670,6 +1672,99 @@ window.GdpExpandLogic = GdpExpandLogic;
     return items;
   }
 
+  function sidebarTreeNodeHasChildren(node: TreeNode) {
+    return Object.keys(node.dirs).length > 0 || node.files.length > 0;
+  }
+
+  function shouldLazyLoadSidebarDir(dir: TreeNode) {
+    return (
+      isRepositorySidebarMode() &&
+      isVirtualSidebarActive() &&
+      !dir.children_omitted &&
+      !sidebarTreeNodeHasChildren(dir) &&
+      !SIDEBAR_LAZY_LOADED_DIRS.has(dir.path)
+    );
+  }
+
+  function upsertSidebarTreeEntry(entry: SidebarItem, order: number) {
+    if (!SIDEBAR_TREE_ROOT) return;
+    const parts = entry.path.split("/").filter(Boolean);
+    if (!parts.length) return;
+    let node = SIDEBAR_TREE_ROOT;
+    let acc = "";
+    const dirPartCount =
+      entry.type === "tree" ? parts.length : parts.length - 1;
+    for (let i = 0; i < dirPartCount; i++) {
+      const part = parts[i];
+      acc = acc ? `${acc}/${part}` : part;
+      if (!node.dirs[part]) {
+        node.dirs[part] = {
+          name: part,
+          dirs: {},
+          files: [],
+          path: acc,
+          minOrder: order,
+        };
+      }
+      node = node.dirs[part];
+      node.minOrder = Math.min(node.minOrder, order);
+    }
+    if (entry.type === "tree") {
+      node.explicit = true;
+      if (entry.children_omitted === true) {
+        node.children_omitted = true;
+        node.children_omitted_reason = entry.children_omitted_reason;
+      }
+      return;
+    }
+    if (!node.files.some((file) => file.path === entry.path))
+      node.files.push({ ...entry, order });
+  }
+
+  function mergeSidebarTreeEntries(entries: SidebarItem[]) {
+    entries.forEach((entry, index) => {
+      upsertSidebarTreeEntry(entry, entry.order ?? index + 1);
+    });
+    SIDEBAR_TREE_ITEMS_CACHE = new WeakMap<TreeNode, TreeNodeItem[]>();
+    if (SIDEBAR_TREE_ROOT) buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
+  }
+
+  function ensureVirtualSidebarDirLoaded(dir: TreeNode): Promise<void> {
+    if (!shouldLazyLoadSidebarDir(dir)) return Promise.resolve();
+    const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
+    if (existing) return existing;
+    const params = new URLSearchParams();
+    params.set("ref", REPO_SIDEBAR_REF || "worktree");
+    params.set("path", dir.path);
+    appendScopeParams(params);
+    const load = trackLoad<RepoTreeResponse>(
+      fetch(`/_tree?${params.toString()}`).then((response) => {
+        if (!response.ok) throw new Error("failed to load repository tree");
+        return response.json();
+      }),
+    )
+      .then((meta) => {
+        const entries = meta.entries.map(
+          (entry, index) =>
+            ({
+              order: dir.minOrder + (index + 1) / 100000,
+              path: entry.path,
+              display_path: entry.path,
+              type: entry.type,
+              children_omitted: entry.children_omitted,
+              children_omitted_reason: entry.children_omitted_reason,
+            }) satisfies SidebarItem,
+        );
+        mergeSidebarTreeEntries(entries);
+        SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
+      })
+      .finally(() => {
+        SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
+      });
+    SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load);
+    return load;
+  }
+
   function createTreeDirRow(
     dir: TreeNode,
     depth: number,
@@ -1737,17 +1832,26 @@ window.GdpExpandLogic = GdpExpandLogic;
     const updateIcon = () => {
       setFolderIcon(dirIcon, li.classList.contains("collapsed"));
     };
-    const toggleDir = (e: Event) => {
+    const toggleDir = async (e: Event) => {
       e.stopPropagation();
-      li.classList.toggle("collapsed");
-      updateIcon();
-      if (li.classList.contains("collapsed")) STATE.collapsedDirs.add(dir.path);
-      else STATE.collapsedDirs.delete(dir.path);
-      localStorage.setItem(
-        "gdp:collapsed-dirs",
-        JSON.stringify([...STATE.collapsedDirs]),
-      );
-      rerenderVirtualSidebar();
+      if (li.dataset.toggling === "true") return;
+      const expanding = li.classList.contains("collapsed");
+      li.dataset.toggling = "true";
+      try {
+        if (expanding) await ensureVirtualSidebarDirLoaded(dir);
+        li.classList.toggle("collapsed");
+        updateIcon();
+        if (li.classList.contains("collapsed"))
+          STATE.collapsedDirs.add(dir.path);
+        else STATE.collapsedDirs.delete(dir.path);
+        localStorage.setItem(
+          "gdp:collapsed-dirs",
+          JSON.stringify([...STATE.collapsedDirs]),
+        );
+        rerenderVirtualSidebar();
+      } finally {
+        delete li.dataset.toggling;
+      }
     };
     li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
     updateIcon();
@@ -2073,6 +2177,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     SIDEBAR_TREE_ROWS = [];
     SIDEBAR_VISIBLE_ROWS = [];
     SIDEBAR_ROW_BY_PATH = new Map();
+    SIDEBAR_LAZY_LOADED_DIRS.clear();
+    SIDEBAR_LAZY_LOADING_DIRS.clear();
     STATE.files = files as FileMeta[];
     SIDEBAR_FILES = files;
     SIDEBAR_ON_FILE_CLICK = onFileClick;
@@ -3872,6 +3978,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   function activateRepoSidebarPath(currentPath: string) {
     markActive(currentPath, { reveal: true });
     applyFilter();
+    const row = SIDEBAR_ROW_BY_PATH.get(currentPath);
+    if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
+      ensureVirtualSidebarDirLoaded(row.dir).then(() => {
+        if (SIDEBAR_VIRTUAL_ACTIVE_PATH === currentPath) {
+          rerenderVirtualSidebar();
+          scrollVirtualSidebarPathIntoView(currentPath);
+        }
+      });
   }
 
   function createPlaceholder(f: FileMeta): DiffCardElement {

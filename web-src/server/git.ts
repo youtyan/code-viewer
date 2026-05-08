@@ -68,6 +68,8 @@ export const DEFAULT_WORKTREE_OMIT_DIR_NAMES = [
   "out",
   "target",
   ".gradle",
+  ".pnpm-store",
+  ".turbo",
   "__pycache__",
   ".pytest_cache",
   ".tox",
