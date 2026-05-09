@@ -9,6 +9,8 @@ description: Use when preparing, publishing, or troubleshooting npm releases for
 
 This project publishes `@youtyan/code-viewer` to npm. Keep the first-publish path, Trusted Publisher setup, and release path separate; mixing repositories or package names is the main failure mode.
 
+Normal releases are GitHub Release / Trusted Publisher releases. Do not run local npm registry/auth commands during ordinary release-readiness checks. Local npm commands that require authentication are for first-publish recovery, Trusted Publisher setup verification, or npm-specific troubleshooting only.
+
 ## When to Use
 
 Use this when:
@@ -122,6 +124,17 @@ permissions:
 
 `publishConfig.provenance: true` in `package.json` relies on this OIDC path.
 
+For normal release readiness, verify only local build/test/package shape and GitHub repository state:
+
+```sh
+bun run verify
+npm pack --dry-run
+gh repo view youtyan/code-viewer --json defaultBranchRef,url
+git ls-remote --heads origin main
+```
+
+Do not run `npm whoami`, `npm access list packages`, `npm view`, or `npm publish` for normal release readiness. These commands depend on local npm authentication and are not required for the GitHub Actions/OIDC publish path.
+
 ## Common Failures
 
 | Symptom | Cause | Fix |
@@ -135,17 +148,23 @@ permissions:
 
 ## Verification
 
-Before reporting completion, verify the local package and remote package separately:
+Before reporting normal release readiness, verify local package shape and GitHub repository state:
 
 ```sh
 bun run verify
 npm pack --dry-run
-npm access list packages youtyan --json
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
 ```
 
-For a newly published package, also inspect the npm access page and confirm the Trusted Publisher card is visible.
+For first publish, Trusted Publisher setup, or npm-specific troubleshooting, additionally verify npm authentication/package access:
+
+```sh
+npm whoami
+npm access list packages youtyan --json
+```
+
+For a newly published package, inspect the npm access page and confirm the Trusted Publisher card is visible.
 
 ## Post-Release Local Cleanup
 
@@ -153,10 +172,11 @@ After the GitHub Release workflow completes and npm shows the new version, leave
 
 ```sh
 gh run view <run-id> --json status,conclusion,url,displayTitle,headSha
-npm view @youtyan/code-viewer version --json
 git switch main
 git pull --ff-only
 git status --short --branch
 ```
+
+Only run `npm view @youtyan/code-viewer version --json` when explicitly confirming registry visibility after the workflow. If local npm auth is broken, use the GitHub Actions publish result and npm package page in the browser instead of blocking normal cleanup on local npm auth.
 
 Do not use `git stash`, `git commit --amend`, or force-push while cleaning up. If a follow-up documentation or skill update is needed, use a new topic branch and PR, then return to `main` and fast-forward again.

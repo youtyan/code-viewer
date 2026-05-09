@@ -8,6 +8,8 @@ import {
   applyUp,
   applyDown,
   mapNewToOld,
+  shouldAttachTrailingExpand,
+  trailingExpandTargetIndex,
   trailingClickRange,
   applyTrailingResult,
 } from "../expand-logic";
@@ -188,6 +190,17 @@ describe("mapNewToOld", () => {
 });
 
 describe("trailingClickRange", () => {
+  test("selects only the last hunk as the trailing expand target", () => {
+    expect(trailingExpandTargetIndex(0)).toBeNull();
+    expect(trailingExpandTargetIndex(1)).toBe(0);
+    expect(trailingExpandTargetIndex(3)).toBe(2);
+  });
+
+  test("does not select a trailing expand target when the probe found no trailing lines", () => {
+    expect(shouldAttachTrailingExpand(0)).toBe(false);
+    expect(shouldAttachTrailingExpand(1)).toBe(true);
+  });
+
   test("last hunk down button fetches lines immediately after the hunk", () => {
     expect(trailingClickRange(63, STEP)).toEqual({ start: 63, end: 82 });
   });
