@@ -35,10 +35,15 @@ npm pack --dry-run
 For release-related work, also confirm:
 
 ```sh
-npm access list packages youtyan --json
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
 ```
+
+Do not run local npm authentication/registry commands such as `npm whoami`,
+`npm access list packages`, `npm view`, or `npm publish` for normal release
+readiness. Normal releases publish through GitHub Releases and Trusted
+Publisher/OIDC. Use local npm auth commands only for first-publish recovery,
+Trusted Publisher setup verification, or npm-specific troubleshooting.
 
 ## UI/Test Discipline
 
