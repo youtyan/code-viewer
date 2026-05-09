@@ -90,6 +90,12 @@
   function trailingClickRange(hunkEndNew, step) {
     return { start: hunkEndNew, end: hunkEndNew + step - 1 };
   }
+  function trailingExpandTargetIndex(hunkCount) {
+    return hunkCount > 0 ? hunkCount - 1 : null;
+  }
+  function shouldAttachTrailingExpand(probeLineCount) {
+    return probeLineCount > 0;
+  }
   function applyTrailingResult(state, receivedCount, step) {
     return {
       newStart: state.newStart + receivedCount,
@@ -106,6 +112,8 @@
     applyUp,
     applyDown,
     mapNewToOld,
+    trailingExpandTargetIndex,
+    shouldAttachTrailingExpand,
     trailingClickRange,
     applyTrailingResult
   };
@@ -10310,6 +10318,10 @@ ${frontmatter.yaml}
       for (const item of infoRows) {
         attachExpandControls(item, file, ref, refPath);
       }
+      const trailingIndex = window.GdpExpandLogic.trailingExpandTargetIndex(infoRows.length);
+      if (trailingIndex != null) {
+        probeAndAttachTrailingExpandControls(infoRows[trailingIndex], file, ref, refPath);
+      }
     }
     function attachExpandControls(item, file, ref, refPath) {
       const { hunk, prevHunkEndNew, prevHunkEndOld } = item;
@@ -10451,7 +10463,10 @@ ${frontmatter.yaml}
       requestAnimationFrame(syncHeight);
       setTimeout(syncHeight, 100);
     }
-    function _attachTrailingExpandControls(item, file, ref, refPath) {
+    function attachTrailingExpandControls(item, file, ref, refPath) {
+      const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+      if (hasTrailingRow)
+        return;
       const STEP = 20;
       let nextNewStart = nextNewLine(item.hunk);
       let nextOldStart = nextOldLine(item.hunk);
@@ -10485,9 +10500,16 @@ ${frontmatter.yaml}
       };
       const fetchAndInsert = () => {
         const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, STEP);
+        const myGen = SERVER_GENERATION;
         setBusy(true);
         const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
         trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+          if (myGen !== SERVER_GENERATION || data.generation && data.generation !== SERVER_GENERATION) {
+            setBusy(false);
+            return;
+          }
+          if (!item.tr.isConnected)
+            return;
           const lines = data?.lines || [];
           if (!lines.length) {
             rows.forEach((row) => {
@@ -10525,6 +10547,25 @@ ${frontmatter.yaml}
         ]));
       });
       syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
+    }
+    function probeAndAttachTrailingExpandControls(item, file, ref, refPath) {
+      const start = nextNewLine(item.hunk);
+      const myGen = SERVER_GENERATION;
+      const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + start;
+      trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        if (myGen !== SERVER_GENERATION)
+          return;
+        if (data.generation && data.generation !== SERVER_GENERATION)
+          return;
+        if (!item.tr.isConnected)
+          return;
+        const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+        if (hasTrailingRow)
+          return;
+        if (!window.GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0))
+          return;
+        attachTrailingExpandControls(item, file, ref, refPath);
+      }).catch(() => {});
     }
     function insertContextRows(targetTr, lines, newStart, oldStart, dir, sideIndex) {
       const tbody = targetTr.parentElement;

@@ -84,6 +84,14 @@ export function trailingClickRange(
   return { start: hunkEndNew, end: hunkEndNew + step - 1 };
 }
 
+export function trailingExpandTargetIndex(hunkCount: number): number | null {
+  return hunkCount > 0 ? hunkCount - 1 : null;
+}
+
+export function shouldAttachTrailingExpand(probeLineCount: number): boolean {
+  return probeLineCount > 0;
+}
+
 export function applyTrailingResult(
   state: { newStart: number; oldStart: number },
   receivedCount: number,
@@ -105,6 +113,8 @@ export const GdpExpandLogic = {
   applyUp,
   applyDown,
   mapNewToOld,
+  trailingExpandTargetIndex,
+  shouldAttachTrailingExpand,
   trailingClickRange,
   applyTrailingResult,
 };
