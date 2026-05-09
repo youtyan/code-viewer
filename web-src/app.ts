@@ -4440,6 +4440,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const item of infoRows) {
       attachExpandControls(item, file, ref, refPath);
     }
+    const trailingIndex = window.GdpExpandLogic.trailingExpandTargetIndex(
+      infoRows.length,
+    );
+    if (trailingIndex != null) {
+      probeAndAttachTrailingExpandControls(
+        infoRows[trailingIndex],
+        file,
+        ref,
+        refPath,
+      );
+    }
   }
 
   // Build the GitHub-style ↑ / ↓ stack inside the line-number column of a
@@ -4682,12 +4693,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     setTimeout(syncHeight, 100);
   }
 
-  function _attachTrailingExpandControls(
+  function attachTrailingExpandControls(
     item: HunkRow,
     file: FileMeta,
     ref: string,
     refPath: string,
   ) {
+    const hasTrailingRow = (item.siblings || []).some(
+      (sib) =>
+        !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"),
+    );
+    if (hasTrailingRow) return;
     const STEP = 20;
     let nextNewStart = nextNewLine(item.hunk);
     let nextOldStart = nextOldLine(item.hunk);
@@ -4729,6 +4745,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         nextNewStart,
         STEP,
       );
+      const myGen = SERVER_GENERATION;
       setBusy(true);
       const url =
         "/file_range?path=" +
@@ -4739,8 +4756,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         range.start +
         "&end=" +
         range.end;
-      trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
+      trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
         .then((data) => {
+          if (
+            myGen !== SERVER_GENERATION ||
+            (data.generation && data.generation !== SERVER_GENERATION)
+          ) {
+            setBusy(false);
+            return;
+          }
+          if (!item.tr.isConnected) return;
           const lines = data?.lines || [];
           if (!lines.length) {
             rows.forEach((row) => {
@@ -4794,6 +4819,44 @@ window.GdpExpandLogic = GdpExpandLogic;
       rows.map((row) => row.tr),
       rows[0].tr,
     );
+  }
+
+  function probeAndAttachTrailingExpandControls(
+    item: HunkRow,
+    file: FileMeta,
+    ref: string,
+    refPath: string,
+  ) {
+    const start = nextNewLine(item.hunk);
+    const myGen = SERVER_GENERATION;
+    const url =
+      "/file_range?path=" +
+      refPath +
+      "&ref=" +
+      encodeURIComponent(ref) +
+      "&start=" +
+      start +
+      "&end=" +
+      start;
+    trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+      .then((data) => {
+        if (myGen !== SERVER_GENERATION) return;
+        if (data.generation && data.generation !== SERVER_GENERATION) return;
+        if (!item.tr.isConnected) return;
+        const hasTrailingRow = (item.siblings || []).some(
+          (sib) =>
+            !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"),
+        );
+        if (hasTrailingRow) return;
+        if (
+          !window.GdpExpandLogic.shouldAttachTrailingExpand(
+            data?.lines?.length || 0,
+          )
+        )
+          return;
+        attachTrailingExpandControls(item, file, ref, refPath);
+      })
+      .catch(() => {});
   }
 
   // Insert context rows around the `@@` info row.
