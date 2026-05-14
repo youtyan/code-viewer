@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +18,7 @@ import {
   refs,
   treeEntries,
   truncateToNHunks,
+  untrackedMeta,
   verifyTreeRef,
   worktreeEntries,
 } from "../server/git";
@@ -273,6 +276,37 @@ describe("repository tree helpers", () => {
 
       expect(empty === edited).toBe(false);
       expect(edited.startsWith("state:file|size:")).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("untracked file metadata ignores untracked directories", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-untracked-dir-"));
+    try {
+      git(dir, ["init"]);
+      writeFileSync(join(dir, "normal.txt"), "one\ntwo\n");
+      writeFileSync(join(dir, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+      mkdirSync(join(dir, "nested-repo"));
+      git(join(dir, "nested-repo"), ["init"]);
+      symlinkSync("normal.txt", join(dir, "link.txt"));
+      mkdirSync(join(dir, "target-dir"));
+      symlinkSync("target-dir", join(dir, "link-dir"));
+
+      const result = untrackedMeta(dir);
+      const normal = result.find((file) => file.path === "normal.txt");
+      const binary = result.find((file) => file.path === "binary.bin");
+      const link = result.find((file) => file.path === "link.txt");
+
+      expect(normal?.status).toBe("A");
+      expect(normal?.additions).toBe(2);
+      expect(binary?.binary).toBe(true);
+      expect(binary?.additions).toBe(0);
+      expect(result.some((file) => file.path === "link.txt")).toBe(true);
+      expect(link?.additions).toBe(2);
+      expect(existsSync(join(dir, "nested-repo"))).toBe(true);
+      expect(result.some((file) => file.path === "nested-repo/")).toBe(false);
+      expect(result.some((file) => file.path === "link-dir")).toBe(false);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
