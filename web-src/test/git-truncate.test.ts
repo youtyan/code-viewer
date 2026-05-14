@@ -405,14 +405,24 @@ describe("repository tree helpers", () => {
       git(dir, ["init"]);
       git(dir, ["config", "user.email", "tester@example.com"]);
       git(dir, ["config", "user.name", "Test User"]);
-      writeFileSync(join(dir, "file.txt"), "oldest\n");
-      git(dir, ["add", "file.txt"]);
-      git(dir, ["commit", "-m", "needle oldest commit"]);
+      git(dir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+      let parent = git(dir, [
+        "commit-tree",
+        "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "-m",
+        "needle oldest commit",
+      ]).stdout.trim();
       for (let index = 1; index <= 105; index++) {
-        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
-        git(dir, ["add", "file.txt"]);
-        git(dir, ["commit", "-m", `recent commit ${index}`]);
+        parent = git(dir, [
+          "commit-tree",
+          "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+          "-m",
+          `recent commit ${index}`,
+          "-p",
+          parent,
+        ]).stdout.trim();
       }
+      git(dir, ["update-ref", "refs/heads/main", parent]);
 
       const result = refCommits(dir, "needle oldest", 5);
 
