@@ -21,6 +21,7 @@ export type RunBytesResult = {
 
 export type StartedServer = {
   port: number;
+  close(): Promise<void>;
 };
 
 export function runSync(
@@ -135,9 +136,13 @@ export function startServer(options: {
       const request = nodeRequestToWeb(req, options.hostname, server.address());
       const response = await options.fetch(request);
       await writeWebResponse(res, response);
-    } catch {
-      if (!res.headersSent)
-        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+    } catch (error) {
+      console.error("[code-viewer] request error:", req.method, req.url, error);
+      if (res.headersSent || res.writableEnded) {
+        res.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("internal server error");
     }
   });
@@ -151,7 +156,17 @@ export function startServer(options: {
       const address = server.address();
       const port =
         typeof address === "object" && address ? address.port : options.port;
-      resolve({ port });
+      resolve({
+        port,
+        close: () =>
+          new Promise<void>((resolveClose, rejectClose) => {
+            server.close((error) => {
+              if (error) rejectClose(error);
+              else resolveClose();
+            });
+            server.closeAllConnections?.();
+          }),
+      });
     });
   });
 }
