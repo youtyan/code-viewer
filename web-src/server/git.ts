@@ -4,6 +4,7 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { runBytesSync, runSync, spawnStream } from "./runtime";
@@ -719,24 +720,34 @@ export function listTree(
 }
 
 export function untrackedMeta(cwd: string): GitFileMeta[] {
-  return untracked(cwd).map((path) => {
+  return untracked(cwd).flatMap((path) => {
     const full = join(cwd, path);
     let binary = false;
     let lines = 0;
-    if (existsSync(full)) {
+    let fileExists = false;
+    try {
+      fileExists = existsSync(full) && statSync(full).isFile();
+    } catch {
+      fileExists = false;
+    }
+    if (fileExists) {
       const data = readFileSync(full);
       const probe = data.subarray(0, 8192);
       binary = probe.includes(0);
       if (!binary) lines = data.toString("utf8").split("\n").length - 1;
+    } else {
+      return [];
     }
-    return {
-      path,
-      status: "A",
-      additions: binary ? 0 : lines,
-      deletions: 0,
-      binary,
-      untracked: true,
-    };
+    return [
+      {
+        path,
+        status: "A",
+        additions: binary ? 0 : lines,
+        deletions: 0,
+        binary,
+        untracked: true,
+      },
+    ];
   });
 }
 
