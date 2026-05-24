@@ -8644,8 +8644,11 @@ ${frontmatter.yaml}
         return false;
       clearDiffLineFocus();
       row.classList.add("gdp-diff-line-target");
-      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrollDiffElementIntoView(row, "center");
       return true;
+    }
+    function scrollDiffElementIntoView(element, block2) {
+      element.scrollIntoView({ behavior: "auto", block: block2 });
     }
     function applyDiffRouteFocus(card) {
       if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
@@ -8674,7 +8677,7 @@ ${frontmatter.yaml}
           enqueueLoad(f2, card, 10);
       }
       if (!line || !focusDiffLine(card, line)) {
-        card.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrollDiffElementIntoView(card, "start");
       }
     }
     function sidebarAncestorDirs(path) {
