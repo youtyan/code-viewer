@@ -1640,6 +1640,12 @@ body.gdp-help-page #content {
 
 #diff > *:first-child { margin-top: 0; }
 
+body:not(.gdp-file-detail-page) #diff::after {
+  content: "";
+  display: block;
+  height: calc(100vh - var(--chrome-h) - 40px);
+}
+
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 80px 16px; color: var(--fg-muted); text-align: center;
