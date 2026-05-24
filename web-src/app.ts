@@ -2385,8 +2385,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!row) return false;
     clearDiffLineFocus();
     row.classList.add("gdp-diff-line-target");
-    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    scrollDiffElementIntoView(row, "center");
     return true;
+  }
+
+  function scrollDiffElementIntoView(
+    element: HTMLElement,
+    block: ScrollLogicalPosition,
+  ) {
+    element.scrollIntoView({ behavior: "auto", block });
   }
 
   function applyDiffRouteFocus(card?: HTMLElement) {
@@ -2420,7 +2427,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (f) enqueueLoad(f, card, 10);
     }
     if (!line || !focusDiffLine(card, line)) {
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollDiffElementIntoView(card, "start");
     }
   }
 
