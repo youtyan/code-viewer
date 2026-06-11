@@ -101,8 +101,18 @@ export function createHistoryView(deps: HistoryViewDeps) {
     });
   }
 
-  async function loadNextPage(): Promise<boolean> {
-    if (loading) return false;
+  // Shared in-flight promise so concurrent callers (IntersectionObserver and
+  // resolveDeepLink) await the same real page load instead of busy-spinning.
+  let inFlight: Promise<boolean> | null = null;
+  function loadNextPage(): Promise<boolean> {
+    if (inFlight) return inFlight;
+    inFlight = doLoadNextPage().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  }
+
+  async function doLoadNextPage(): Promise<boolean> {
     loading = true;
     const gen = generation;
     setStatusText("loading...");
@@ -123,8 +133,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
     commit: HistoryCommit,
     options: { updateUrl?: boolean } = {},
   ) {
+    const gen = generation;
     selectedSha = commit.sha;
     updateActiveRow();
+    if (gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
       deps.setRoute(
@@ -132,20 +144,29 @@ export function createHistoryView(deps: HistoryViewDeps) {
         true,
       );
     }
+    if (gen !== generation) return;
     await deps.applyCommitRange(commitDiffRange(commit));
+    if (gen !== generation) return;
   }
+
+  // Set when fetchSingleCommit fails for reasons other than "the server says
+  // the ref does not exist" (HTTP 400) — e.g. network errors or 5xx.
+  let lookupFailed = false;
 
   async function fetchSingleCommit(sha: string): Promise<HistoryCommit | null> {
     const url = `/_log?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
+    lookupFailed = false;
     try {
       const res = await deps.trackLoad(
         fetch(url).then(async (r) => {
+          if (r.status === 400) return null;
           if (!r.ok) throw new Error(await r.text());
           return (await r.json()) as HistoryLogResponse;
         }),
       );
-      return res.commits[0] || null;
+      return res?.commits[0] || null;
     } catch {
+      lookupFailed = true;
       return null;
     }
   }
@@ -154,7 +175,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // single lookup pinned to the top of the list.
   async function resolveDeepLink(sha: string) {
     const gen = generation;
-    let pagesLoaded = commits.length > 0 ? 1 : 0;
+    let pagesLoaded = 0;
+    if (commits.length === 0) {
+      await loadNextPage();
+      if (gen !== generation) return;
+      pagesLoaded = 1;
+    } else {
+      pagesLoaded = 1;
+    }
     for (;;) {
       const found = commits.find((c) => c.sha.startsWith(sha));
       if (found) {
@@ -162,13 +190,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
         scrollToSelected();
         return;
       }
-      if (
-        !shouldContinueAutoLoad({
-          pagesLoaded,
-          found: false,
-          hasMore: pagesLoaded === 0 ? true : hasMore,
-        })
-      )
+      if (!shouldContinueAutoLoad({ pagesLoaded, found: false, hasMore }))
         break;
       const got = await loadNextPage();
       if (gen !== generation) return;
@@ -178,7 +200,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const single = await fetchSingleCommit(sha);
     if (gen !== generation) return;
     if (!single) {
-      setBanner(`commit not found: ${sha}`);
+      setBanner(
+        lookupFailed
+          ? `failed to load commit: ${sha}`
+          : `commit not found: ${sha}`,
+      );
       deps.showEmptyDiffPane();
       return;
     }
@@ -191,16 +217,30 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function scrollToSelected() {
     list
-      .querySelector<HTMLElement>(`.history-item[data-sha="${selectedSha}"]`)
+      .querySelector<HTMLElement>(
+        `.history-item[data-sha="${CSS.escape(selectedSha)}"]`,
+      )
       ?.scrollIntoView({ block: "center" });
   }
 
-  async function enterHistory() {
+  // Serialize enterHistory calls so overlapping invocations (e.g. rapid ref
+  // picks plus route changes) run sequentially instead of interleaving.
+  let entering: Promise<void> = Promise.resolve();
+  function enterHistory(force?: boolean): Promise<void> {
+    entering = entering
+      .then(() => doEnterHistory(force === true))
+      .catch(() => {});
+    return entering;
+  }
+
+  // force=true treats the call like a ref change (full reset + reload) even
+  // when the route's ref equals the current one.
+  async function doEnterHistory(force = false) {
     const route = deps.getRoute();
     if (route.screen !== "history") return;
     const nextRef = route.ref || "HEAD";
     const refChanged = nextRef !== ref;
-    if (refChanged || commits.length === 0) {
+    if (refChanged || force || commits.length === 0) {
       generation++;
       ref = nextRef;
       commits = [];
@@ -233,9 +273,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       false,
     );
     // Force a reload even if the picked ref equals the current one.
-    ref = "";
-    commits = [];
-    enterHistory();
+    void enterHistory(true);
   }
 
   list.addEventListener("click", (e) => {
