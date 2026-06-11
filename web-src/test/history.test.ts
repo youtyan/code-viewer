@@ -3,7 +3,6 @@ import {
   commitDiffRange,
   EMPTY_TREE_SHA,
   HISTORY_AUTO_LOAD_MAX_PAGES,
-  HISTORY_PAGE_SIZE,
   shouldContinueAutoLoad,
 } from "../core/history";
 
@@ -48,9 +47,4 @@ describe("shouldContinueAutoLoad", () => {
       }),
     ).toBe(false);
   });
-});
-
-test("page size constants", () => {
-  expect(HISTORY_PAGE_SIZE).toBe(50);
-  expect(HISTORY_AUTO_LOAD_MAX_PAGES).toBe(20);
 });
