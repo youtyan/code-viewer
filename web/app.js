@@ -16525,6 +16525,8 @@ ${frontmatter.yaml}
     }
     window.addEventListener("popstate", applyRouteFromLocation);
     document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
+      if (link2.target === "_blank")
+        return;
       link2.addEventListener("click", (e2) => {
         if (e2.metaKey || e2.ctrlKey || e2.shiftKey || e2.altKey || e2.button !== 0)
           return;
