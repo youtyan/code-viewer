@@ -76,4 +76,18 @@ describe("commitHistory", () => {
     expect(res.error).toBeUndefined();
     expect(res.commits.length).toBe(5);
   });
+
+  // Mutates the repo (adds commits), so this must stay the last test.
+  test("lists both parents for merge commits", () => {
+    git(repo, ["checkout", "-b", "topic", shas[3]]);
+    writeFileSync(join(repo, "topic.txt"), "topic\n");
+    git(repo, ["add", "topic.txt"]);
+    git(repo, ["commit", "-m", "topic commit"]);
+    const topicSha = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
+    git(repo, ["checkout", "main"]);
+    git(repo, ["merge", "--no-ff", "-m", "merge topic", "topic"]);
+    const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 1 });
+    expect(res.commits[0].subject).toBe("merge topic");
+    expect(res.commits[0].parents).toEqual([shas[4], topicSha]);
+  });
 });
