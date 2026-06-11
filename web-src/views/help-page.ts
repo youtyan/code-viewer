@@ -54,6 +54,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               ["Ctrl+G", "Open grep palette"],
               ["/", "Focus file filter"],
               ["t", "Toggle theme"],
+              ["[ / ]", "Previous / next annotation"],
             ],
           },
           {
@@ -103,6 +104,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               ["Ctrl+G", "grep パレットを開く"],
               ["/", "ファイルフィルターへフォーカス"],
               ["t", "テーマ切り替え"],
+              ["[ / ]", "前 / 次の注釈へ移動"],
             ],
           },
           {

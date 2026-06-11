@@ -25,7 +25,9 @@ export type KeymapAction =
   | "cancel-source-load"
   | "layout-unified"
   | "layout-split"
-  | "toggle-theme";
+  | "toggle-theme"
+  | "annotation-next"
+  | "annotation-previous";
 
 export type KeyEventLike = {
   key: string;
@@ -91,6 +93,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
     allowPaletteOpen: true,
   },
   { action: "focus-file-filter", key: "/" },
+  { action: "annotation-next", key: "]" },
+  { action: "annotation-previous", key: "[" },
   { action: "focus-sidebar", key: "h", ctrl: true },
   { action: "focus-main", key: "l", ctrl: true },
   {
