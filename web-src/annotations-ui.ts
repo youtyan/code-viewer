@@ -214,7 +214,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   // When an annotation targets unchanged code outside the diff hunks, the
-  // target row does not exist yet — expand the file's full context (same as
+  // target row does not exist yet — expand the full file context (same as
   // the header unfold button) so the line and its inline note become visible.
   async function expandAnnotationContext(entry: AnnotationEntry) {
     if (!entry.line || inlineAnnotationTargetRow(entry)) return;
@@ -224,7 +224,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const file = deps.getFiles().find((f) => f.path === entry.path);
     if (!card || !file || card.classList.contains("gdp-standalone-source"))
       return;
-    // The card may still be lazy-loading after scrollToFile's priority load.
+    // The card may still be lazy-loading after the scrollToFile priority load.
     for (let i = 0; i < 50 && !card.classList.contains("loaded"); i++)
       await new Promise<void>((resolve) => setTimeout(resolve, 100));
     if (inlineAnnotationTargetRow(entry)) return;
