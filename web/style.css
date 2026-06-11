@@ -3510,7 +3510,7 @@ body.gdp-file-detail-page.gdp-repo-blob-page .sb-view-seg {
 body.gdp-repo-page .sb-filter-wrap,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap {
   grid-area: filter;
-  position: static;
+  position: relative;
   width: 100%;
   margin: 0;
   padding: 6px 0 0;
