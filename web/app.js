@@ -436,7 +436,7 @@
           screen: "help",
           range,
           lang: params.get("lang") || "en",
-          section: params.get("section") || "keybindings"
+          section: params.get("section") || "overview"
         };
       case "/history": {
         const commit = params.get("commit") || "";
@@ -479,7 +479,7 @@
         const params = new URLSearchParams;
         if (route.lang && route.lang !== "en")
           params.set("lang", route.lang);
-        if (route.section && route.section !== "keybindings")
+        if (route.section && route.section !== "overview")
           params.set("section", route.section);
         const qs = params.toString();
         return `/help${qs ? `?${qs}` : ""}`;
@@ -8936,12 +8936,204 @@ ${frontmatter.yaml}
 
   // web-src/views/help-page.ts
   var HELP_LANGUAGES = ["en", "ja"];
-  var HELP_SECTIONS = ["keybindings"];
+  var HELP_SECTIONS = [
+    "overview",
+    "annotations",
+    "skills",
+    "keybindings"
+  ];
   var HELP_CONTENT = {
     en: {
       languageLabel: "Language",
       title: "Help",
       sections: {
+        overview: {
+          nav: "Getting Started",
+          title: "Getting Started",
+          intro: "code-viewer is a local browser UI for reading a repository, reviewing diffs, and letting AI agents attach explanations to exact code lines.",
+          groups: [
+            {
+              title: "Start the viewer",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Run the command from inside a Git repository. The server prints a localhost URL; open it in your browser."
+                },
+                {
+                  kind: "command",
+                  title: "Run without installing",
+                  command: "npx @youtyan/code-viewer"
+                },
+                {
+                  kind: "command",
+                  title: "Open another repository",
+                  command: "code-viewer --cwd /path/to/repo --open"
+                }
+              ]
+            },
+            {
+              title: "Read a diff",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Arguments after the options are passed to Git diff. With no arguments, code-viewer compares HEAD with the working tree."
+                },
+                {
+                  kind: "command",
+                  title: "Compare two refs",
+                  command: "code-viewer HEAD~1 HEAD"
+                },
+                {
+                  kind: "command",
+                  title: "Inspect staged changes",
+                  command: "code-viewer --staged"
+                }
+              ]
+            },
+            {
+              title: "Browse files",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode."
+                }
+              ]
+            }
+          ]
+        },
+        annotations: {
+          nav: "AI Annotations",
+          title: "AI Code Annotations",
+          intro: "Annotations let an AI coding agent guide you through code in the browser. Each annotation points to a file and line range, and open tabs jump there live.",
+          groups: [
+            {
+              title: "What you ask the AI to do",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: 'Ask the agent to explain code with code-viewer annotations. For example: "Use annotate to walk me through the hardest part of this system."'
+                },
+                {
+                  kind: "steps",
+                  items: [
+                    "Start code-viewer for the repository and keep it running.",
+                    "Ask the AI agent for an annotated walkthrough.",
+                    "Open the annotation panel in the browser and follow the entries in order."
+                  ]
+                }
+              ]
+            },
+            {
+              title: "Commands the agent uses",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "Start a walkthrough session",
+                  command: 'code-viewer annotate start --title "How the cache invalidation works"'
+                },
+                {
+                  kind: "command",
+                  title: "Add an explanation to a line range",
+                  command: 'code-viewer annotate add --file src/cache.ts --line 120-145 --title "Entry point" --body "Writes land here first."'
+                },
+                {
+                  kind: "command",
+                  title: "Inspect posted annotations",
+                  command: "code-viewer annotate list"
+                }
+              ]
+            },
+            {
+              title: "Writing useful annotations",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "One idea per annotation",
+                      "Prefer several focused notes over one long explanation."
+                    ],
+                    [
+                      "Always pass --line",
+                      "Use the smallest range that covers the idea. The body is rendered under the last line."
+                    ],
+                    [
+                      "Use sessions",
+                      "Start a new session for each walkthrough topic so the history stays readable."
+                    ],
+                    [
+                      "Fix in place",
+                      "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable."
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        skills: {
+          nav: "Agent Skill",
+          title: "Agent Skill Setup",
+          intro: "The package includes a code-viewer annotate skill so AI agents know when and how to create browser walkthroughs.",
+          groups: [
+            {
+              title: "Install the skill",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "Install for Claude Code in the current project",
+                  command: "npx -y @youtyan/code-viewer skill install"
+                },
+                {
+                  kind: "command",
+                  title: "Install for Codex and Gemini",
+                  command: "npx -y @youtyan/code-viewer skill install --agent codex,gemini"
+                },
+                {
+                  kind: "command",
+                  title: "Install for all supported agents",
+                  command: "npx -y @youtyan/code-viewer skill install --agent all"
+                }
+              ]
+            },
+            {
+              title: "What the skill teaches",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "When to annotate",
+                      "Code reviews, onboarding walkthroughs, and explanations of changes."
+                    ],
+                    [
+                      "How to target code",
+                      "Use --file and --line, and include --from / --to when explaining a diff range."
+                    ],
+                    [
+                      "How to keep history clean",
+                      "Use one session per topic, edit wrong notes in place, and avoid unrelated cleanup."
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "Agent reference",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Agents can print the full built-in guide from the CLI when they need exact command details."
+                },
+                {
+                  kind: "command",
+                  title: "Show the agent guide",
+                  command: "code-viewer annotate agent-help"
+                }
+              ]
+            }
+          ]
+        },
         keybindings: {
           nav: "Keybindings",
           title: "Keyboard Shortcuts",
@@ -8949,38 +9141,58 @@ ${frontmatter.yaml}
           groups: [
             {
               title: "Global",
-              rows: [
-                ["Ctrl+K", "Open file palette"],
-                ["Ctrl+G", "Open grep palette"],
-                ["/", "Focus file filter"],
-                ["t", "Toggle theme"],
-                ["[ / ]", "Previous / next annotation"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["Ctrl+K", "Open file palette"],
+                    ["Ctrl+G", "Open grep palette"],
+                    ["/", "Focus file filter"],
+                    ["t", "Toggle theme"],
+                    ["[ / ]", "Previous / next annotation"]
+                  ]
+                }
               ]
             },
             {
               title: "Panels",
-              rows: [
-                ["Ctrl+H", "Focus sidebar"],
-                ["Ctrl+L", "Focus main panel"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["Ctrl+H", "Focus sidebar"],
+                    ["Ctrl+L", "Focus main panel"]
+                  ]
+                }
               ]
             },
             {
               title: "Sidebar",
-              rows: [
-                ["j / k", "Move selection down / up"],
-                ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                ["gg / Shift+G", "Move to top / bottom"],
-                ["Enter", "Open selected item"],
-                ["h / l", "Collapse / expand directory"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["j / k", "Move selection down / up"],
+                    ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
+                    ["gg / Shift+G", "Move to top / bottom"],
+                    ["Enter", "Open selected item"],
+                    ["h / l", "Collapse / expand directory"]
+                  ]
+                }
               ]
             },
             {
               title: "Main Panel",
-              rows: [
-                ["j / k", "Move code cursor down / up"],
-                ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                ["gg / Shift+G", "Move code cursor to top / bottom"],
-                ["gp / gc", "Switch to Preview / Code tab"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["j / k", "Move code cursor down / up"],
+                    ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
+                    ["gg / Shift+G", "Move code cursor to top / bottom"],
+                    ["gp / gc", "Switch to Preview / Code tab"]
+                  ]
+                }
               ]
             }
           ]
@@ -8991,6 +9203,193 @@ ${frontmatter.yaml}
       languageLabel: "言語",
       title: "ヘルプ",
       sections: {
+        overview: {
+          nav: "はじめに",
+          title: "はじめに",
+          intro: "code-viewer は、ローカルのリポジトリをブラウザで読み、diff を確認し、AI エージェントにコード行へ説明を付けさせるためのツールです。",
+          groups: [
+            {
+              title: "ビューアを起動する",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "Git リポジトリの中でコマンドを実行します。サーバが localhost の URL を表示するので、それをブラウザで開きます。"
+                },
+                {
+                  kind: "command",
+                  title: "インストールせずに起動",
+                  command: "npx @youtyan/code-viewer"
+                },
+                {
+                  kind: "command",
+                  title: "別のリポジトリを開く",
+                  command: "code-viewer --cwd /path/to/repo --open"
+                }
+              ]
+            },
+            {
+              title: "diff を読む",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "オプションの後ろに置いた引数は Git diff に渡されます。引数なしなら HEAD と作業ツリーを比較します。"
+                },
+                {
+                  kind: "command",
+                  title: "2つの ref を比較",
+                  command: "code-viewer HEAD~1 HEAD"
+                },
+                {
+                  kind: "command",
+                  title: "ステージ済み変更を見る",
+                  command: "code-viewer --staged"
+                }
+              ]
+            },
+            {
+              title: "ファイルを読む",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。"
+                }
+              ]
+            }
+          ]
+        },
+        annotations: {
+          nav: "AI注釈",
+          title: "AI コード注釈",
+          intro: "注釈機能を使うと、AI コーディングエージェントがブラウザ上の特定ファイル・特定行へ説明を付けられます。開いているタブは注釈先へライブで移動します。",
+          groups: [
+            {
+              title: "AI に頼む言い方",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AI エージェントには、code-viewer の annotate 機能を使って説明して、と頼みます。例: 「このシステムで一番むずかしい処理を annotate でウォークスルーして」"
+                },
+                {
+                  kind: "steps",
+                  items: [
+                    "対象リポジトリで code-viewer を起動したままにします。",
+                    "AI エージェントに注釈付きの解説を依頼します。",
+                    "ブラウザの注釈パネルを開き、履歴を上から順に追います。"
+                  ]
+                }
+              ]
+            },
+            {
+              title: "AI が使うコマンド",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "ウォークスルー用セッションを作る",
+                  command: 'code-viewer annotate start --title "キャッシュ無効化の流れ"'
+                },
+                {
+                  kind: "command",
+                  title: "行範囲へ説明を追加する",
+                  command: 'code-viewer annotate add --file src/cache.ts --line 120-145 --title "入口" --body "書き込みはここから入ります。"'
+                },
+                {
+                  kind: "command",
+                  title: "投稿済み注釈を確認する",
+                  command: "code-viewer annotate list"
+                }
+              ]
+            },
+            {
+              title: "読みやすい注釈にするコツ",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "1注釈1テーマ",
+                      "巨大な説明を1つ置くより、短い注釈を順番に並べます。"
+                    ],
+                    [
+                      "必ず --line を付ける",
+                      "説明に必要な最小行範囲を指定します。本文は範囲の最後の行の下に表示されます。"
+                    ],
+                    [
+                      "セッションを分ける",
+                      "1つの解説テーマごとにセッションを作ると履歴が読みやすくなります。"
+                    ],
+                    [
+                      "間違いは edit で直す",
+                      "削除して追加し直すより、注釈IDと順番を保ったまま修正します。"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        skills: {
+          nav: "スキル登録",
+          title: "Agent Skill の登録",
+          intro: "このパッケージには、AI エージェントが code-viewer の annotate 機能を正しく使うためのスキルが同梱されています。",
+          groups: [
+            {
+              title: "スキルをインストールする",
+              blocks: [
+                {
+                  kind: "command",
+                  title: "現在のプロジェクトへ Claude Code 用に登録",
+                  command: "npx -y @youtyan/code-viewer skill install"
+                },
+                {
+                  kind: "command",
+                  title: "Codex と Gemini 用に登録",
+                  command: "npx -y @youtyan/code-viewer skill install --agent codex,gemini"
+                },
+                {
+                  kind: "command",
+                  title: "対応エージェントすべてに登録",
+                  command: "npx -y @youtyan/code-viewer skill install --agent all"
+                }
+              ]
+            },
+            {
+              title: "スキルが教えること",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "いつ注釈するか",
+                      "コードレビュー、オンボーディング、変更内容の解説で使うこと。"
+                    ],
+                    [
+                      "どこへ注釈するか",
+                      "--file と --line を使い、diff 範囲を説明するときは --from / --to も渡すこと。"
+                    ],
+                    [
+                      "履歴をきれいに保つ方法",
+                      "1テーマ1セッション、間違いは edit で修正、無関係な削除をしないこと。"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "AI 向けリファレンス",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AI エージェントは、詳細な手順が必要なときに CLI から組み込みガイドを表示できます。"
+                },
+                {
+                  kind: "command",
+                  title: "AI 向けガイドを表示",
+                  command: "code-viewer annotate agent-help"
+                }
+              ]
+            }
+          ]
+        },
         keybindings: {
           nav: "キーバインド",
           title: "キーバインド",
@@ -8998,38 +9397,58 @@ ${frontmatter.yaml}
           groups: [
             {
               title: "グローバル",
-              rows: [
-                ["Ctrl+K", "ファイルパレットを開く"],
-                ["Ctrl+G", "grep パレットを開く"],
-                ["/", "ファイルフィルターへフォーカス"],
-                ["t", "テーマ切り替え"],
-                ["[ / ]", "前 / 次の注釈へ移動"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["Ctrl+K", "ファイルパレットを開く"],
+                    ["Ctrl+G", "grep パレットを開く"],
+                    ["/", "ファイルフィルターへフォーカス"],
+                    ["t", "テーマ切り替え"],
+                    ["[ / ]", "前 / 次の注釈へ移動"]
+                  ]
+                }
               ]
             },
             {
               title: "パネル",
-              rows: [
-                ["Ctrl+H", "サイドバーへフォーカス"],
-                ["Ctrl+L", "メインパネルへフォーカス"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["Ctrl+H", "サイドバーへフォーカス"],
+                    ["Ctrl+L", "メインパネルへフォーカス"]
+                  ]
+                }
               ]
             },
             {
               title: "サイドバー",
-              rows: [
-                ["j / k", "選択を下 / 上へ移動"],
-                ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                ["Enter", "選択項目を開く"],
-                ["h / l", "ディレクトリを閉じる / 開く"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["j / k", "選択を下 / 上へ移動"],
+                    ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
+                    ["gg / Shift+G", "先頭 / 末尾へ移動"],
+                    ["Enter", "選択項目を開く"],
+                    ["h / l", "ディレクトリを閉じる / 開く"]
+                  ]
+                }
               ]
             },
             {
               title: "メインパネル",
-              rows: [
-                ["j / k", "コードカーソルを下 / 上へ移動"],
-                ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                ["gp / gc", "Preview / Code タブへ切り替え"]
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    ["j / k", "コードカーソルを下 / 上へ移動"],
+                    ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
+                    ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
+                    ["gp / gc", "Preview / Code タブへ切り替え"]
+                  ]
+                }
               ]
             }
           ]
@@ -9041,7 +9460,60 @@ ${frontmatter.yaml}
     return route.screen === "help" && HELP_LANGUAGES.includes(route.lang) ? route.lang : "en";
   }
   function helpSectionFromRoute(route) {
-    return route.screen === "help" && HELP_SECTIONS.includes(route.section) ? route.section : "keybindings";
+    return route.screen === "help" && HELP_SECTIONS.includes(route.section) ? route.section : "overview";
+  }
+  function renderHelpCommand(block2) {
+    const wrap = document.createElement("div");
+    wrap.className = "gdp-help-command";
+    const title = document.createElement("div");
+    title.className = "gdp-help-command-title";
+    title.textContent = block2.title;
+    const pre = document.createElement("pre");
+    const code2 = document.createElement("code");
+    code2.textContent = block2.command;
+    pre.appendChild(code2);
+    wrap.append(title, pre);
+    return wrap;
+  }
+  function renderHelpTable(rows) {
+    const table2 = document.createElement("table");
+    rows.forEach(([keys, description]) => {
+      const tr = document.createElement("tr");
+      const keyCell = document.createElement("th");
+      keyCell.scope = "row";
+      keys.split(" / ").forEach((key, index) => {
+        if (index > 0)
+          keyCell.append(" / ");
+        const kbd = document.createElement("kbd");
+        kbd.textContent = key;
+        keyCell.appendChild(kbd);
+      });
+      const desc = document.createElement("td");
+      desc.textContent = description;
+      tr.append(keyCell, desc);
+      table2.appendChild(tr);
+    });
+    return table2;
+  }
+  function renderHelpBlock(block2) {
+    if (block2.kind === "paragraph") {
+      const p2 = document.createElement("p");
+      p2.textContent = block2.text;
+      return p2;
+    }
+    if (block2.kind === "steps") {
+      const ol = document.createElement("ol");
+      ol.className = "gdp-help-steps";
+      block2.items.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        ol.appendChild(li);
+      });
+      return ol;
+    }
+    if (block2.kind === "command")
+      return renderHelpCommand(block2);
+    return renderHelpTable(block2.rows);
   }
   function createHelpPage(deps) {
     function renderHelpPage() {
@@ -9054,7 +9526,7 @@ ${frontmatter.yaml}
       deps.$("#meta").textContent = "";
       deps.$("#totals").textContent = "";
       deps.$("#filelist").textContent = "";
-      const lang = helpLanguageFromRoute(deps.getRoute());
+      const lang = deps.getRoute().screen === "help" && new URLSearchParams(window.location.search).has("lang") ? helpLanguageFromRoute(deps.getRoute()) : deps.getLanguage();
       const section = helpSectionFromRoute(deps.getRoute());
       const content = HELP_CONTENT[lang];
       const sectionContent = content.sections[section];
@@ -9075,15 +9547,8 @@ ${frontmatter.yaml}
         langSelect.appendChild(option);
       });
       langSelect.addEventListener("change", () => {
-        deps.setRoute({
-          screen: "help",
-          lang: langSelect.value,
-          section,
-          range: deps.currentRange()
-        });
-        deps.setPageMode();
-        renderHelpPage();
-        deps.syncHeaderMenu();
+        const nextLang = langSelect.value;
+        deps.setLanguage(nextLang);
       });
       header.append(title, langSelect);
       const layout = document.createElement("div");
@@ -9119,24 +9584,10 @@ ${frontmatter.yaml}
         groupSection.className = "gdp-help-group";
         const groupTitle = document.createElement("h3");
         groupTitle.textContent = group.title;
-        const table2 = document.createElement("table");
-        group.rows.forEach(([keys, description]) => {
-          const tr = document.createElement("tr");
-          const keyCell = document.createElement("th");
-          keyCell.scope = "row";
-          keys.split(" / ").forEach((key, index) => {
-            if (index > 0)
-              keyCell.append(" / ");
-            const kbd = document.createElement("kbd");
-            kbd.textContent = key;
-            keyCell.appendChild(kbd);
-          });
-          const desc = document.createElement("td");
-          desc.textContent = description;
-          tr.append(keyCell, desc);
-          table2.appendChild(tr);
+        groupSection.append(groupTitle);
+        group.blocks.forEach((block2) => {
+          groupSection.appendChild(renderHelpBlock(block2));
         });
-        groupSection.append(groupTitle, table2);
         article.appendChild(groupSection);
       });
       layout.append(helpNav, article);
@@ -15134,6 +15585,8 @@ ${frontmatter.yaml}
     const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
     const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
+    const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+    const VIEWER_LANGUAGES = ["en", "ja"];
     const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
       "node_modules",
       ".venv",
@@ -15293,6 +15746,16 @@ ${frontmatter.yaml}
     function normalizeViewerFontSize(value) {
       return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
     }
+    function normalizeViewerLanguage(value) {
+      return VIEWER_LANGUAGES.includes(value) ? value : "en";
+    }
+    function savedViewerLanguage() {
+      return normalizeViewerLanguage(localStorage.getItem(VIEWER_LANGUAGE_STORAGE_KEY));
+    }
+    function viewerLanguageFromSearch(search) {
+      const raw = new URLSearchParams(search).get("lang");
+      return raw ? normalizeViewerLanguage(raw) : null;
+    }
     function savedCodeFontSize() {
       return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
     }
@@ -15329,11 +15792,14 @@ ${frontmatter.yaml}
         from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
         to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
       };
+      const savedLanguage = viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
-      const route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      const routeBase = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      const route = routeBase.screen === "help" && !new URLSearchParams(window.location.search).has("lang") ? { ...routeBase, lang: savedLanguage } : routeBase;
       return {
         layout: localStorage.getItem("gdp:layout") || "side-by-side",
         theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+        language: savedLanguage,
         sbView: localStorage.getItem("gdp:sbview") || "tree",
         sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
@@ -15532,6 +15998,324 @@ ${frontmatter.yaml}
       getServerGeneration: () => SERVER_GENERATION
     });
     const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } = SEARCH_PALETTE;
+    const UI_TEXT = {
+      en: {
+        nav: {
+          repo: "Repository",
+          diff: "Diff Viewer",
+          history: "History",
+          help: "Help"
+        },
+        global: {
+          annotations: "code annotations",
+          settings: "viewer settings",
+          theme: "toggle theme",
+          product: "code viewer"
+        },
+        topbar: {
+          resetRange: "reset to HEAD .. worktree",
+          reload: "reload diff (R)",
+          layout: "layout",
+          unified: "unified",
+          split: "split",
+          ignoreWs: "ignore whitespace changes (-w)",
+          syntaxLoading: "loading...",
+          syntaxOn: "syntax on",
+          syntaxOff: "syntax off",
+          syntaxOnTitle: "syntax highlighting on",
+          syntaxLoadingTitle: "loading syntax highlighter",
+          syntaxErrorTitle: "failed to load syntax highlighter",
+          syntaxOffTitle: "syntax highlighting off",
+          hideTests: "hide test files (test|spec)"
+        },
+        sidebar: {
+          files: "Files",
+          actions: "sidebar actions",
+          expandAll: "expand all folders",
+          collapseAll: "collapse all folders",
+          view: "view",
+          tree: "tree",
+          flat: "flat",
+          filter: "Filter files...",
+          filterTitle: "Filter files. Use /pattern/ for regex. Cmd/Ctrl+K focuses this field.",
+          hide: "hide sidebar"
+        },
+        history: {
+          title: "Commits",
+          filter: "Filter commits...",
+          filterTitle: "Filter commits by message, SHA, author:name, or path:file."
+        },
+        settings: {
+          title: "Viewer Settings",
+          close: "close viewer settings",
+          display: "Display",
+          language: "Language",
+          fileListFontSize: "File list font size",
+          codeFontSize: "Code font size",
+          sizeSmall: "Small",
+          sizeRegular: "Regular",
+          sizeLarge: "Large",
+          sizeExtraLarge: "Extra Large",
+          displaySource: "Applies to all projects in this browser.",
+          excludedDirectories: "Excluded directories",
+          omitDirs: "Skip these directory names while browsing and searching",
+          excludeNames: "Hide these file or directory names completely",
+          reset: "Reset",
+          save: "Save",
+          scopeSource: (project, source) => `Saved for project "${project}" in this browser. Source: ${source}. Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.`,
+          browserOverride: "Browser override",
+          serverDefault: "Server default"
+        },
+        annotations: {
+          title: "Code annotations",
+          follow: "follow",
+          followTitle: "jump to new annotations as they arrive",
+          clear: "clear",
+          close: "close",
+          sessions: "Sessions"
+        }
+      },
+      ja: {
+        nav: {
+          repo: "リポジトリ",
+          diff: "Diff ビューア",
+          history: "履歴",
+          help: "ヘルプ"
+        },
+        global: {
+          annotations: "コード注釈",
+          settings: "ビューア設定",
+          theme: "テーマ切り替え",
+          product: "code viewer"
+        },
+        topbar: {
+          resetRange: "HEAD .. worktree に戻す",
+          reload: "diff を再読み込み (R)",
+          layout: "レイアウト",
+          unified: "unified",
+          split: "split",
+          ignoreWs: "空白差分を無視 (-w)",
+          syntaxLoading: "読み込み中...",
+          syntaxOn: "syntax on",
+          syntaxOff: "syntax off",
+          syntaxOnTitle: "シンタックスハイライト有効",
+          syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
+          syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
+          syntaxOffTitle: "シンタックスハイライト無効",
+          hideTests: "test/spec ファイルを隠す"
+        },
+        sidebar: {
+          files: "ファイル",
+          actions: "サイドバー操作",
+          expandAll: "すべてのフォルダを開く",
+          collapseAll: "すべてのフォルダを閉じる",
+          view: "表示",
+          tree: "ツリー",
+          flat: "一覧",
+          filter: "ファイルを絞り込み...",
+          filterTitle: "ファイルを絞り込みます。正規表現は /pattern/。Cmd/Ctrl+K でフォーカス。",
+          hide: "サイドバーを隠す"
+        },
+        history: {
+          title: "コミット",
+          filter: "コミットを絞り込み...",
+          filterTitle: "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。"
+        },
+        settings: {
+          title: "ビューア設定",
+          close: "ビューア設定を閉じる",
+          display: "表示",
+          language: "言語",
+          fileListFontSize: "ファイル一覧の文字サイズ",
+          codeFontSize: "コードの文字サイズ",
+          sizeSmall: "小",
+          sizeRegular: "標準",
+          sizeLarge: "大",
+          sizeExtraLarge: "特大",
+          displaySource: "このブラウザのすべてのプロジェクトに適用されます。",
+          excludedDirectories: "除外ディレクトリ",
+          omitDirs: "閲覧と検索でスキップするディレクトリ名",
+          excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
+          reset: "リセット",
+          save: "保存",
+          scopeSource: (project, source) => `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。ツリー、Ctrl+K、Ctrl+G で使われます。リセットするとブラウザ側の上書きを削除します。`,
+          browserOverride: "ブラウザ側の上書き",
+          serverDefault: "サーバ既定値"
+        },
+        annotations: {
+          title: "コード注釈",
+          follow: "追従",
+          followTitle: "新しい注釈が届いたら移動する",
+          clear: "削除",
+          close: "閉じる",
+          sessions: "セッション"
+        }
+      }
+    };
+    function uiText() {
+      return UI_TEXT[STATE.language];
+    }
+    function setElementText(selector, text2) {
+      const el = document.querySelector(selector);
+      if (el)
+        el.textContent = text2;
+    }
+    function setButtonLabel(button, text2) {
+      if (button)
+        button.textContent = text2;
+    }
+    function setOptionText(select, labels) {
+      select?.querySelectorAll("option").forEach((option) => {
+        const label = labels[option.value];
+        if (label)
+          option.textContent = label;
+      });
+    }
+    function localizeViewerChrome() {
+      const text2 = uiText();
+      document.documentElement.lang = STATE.language;
+      document.querySelectorAll(".app-menu-item").forEach((link2) => {
+        const route = link2.dataset.route;
+        if (route && text2.nav[route])
+          link2.textContent = text2.nav[route];
+      });
+      setElementText(".global-help-link[data-route='help']", text2.nav.help);
+      setElementText(".product-label", text2.global.product);
+      const annotationsToggle = document.querySelector("#annotations-toggle");
+      if (annotationsToggle) {
+        annotationsToggle.title = text2.global.annotations;
+        annotationsToggle.setAttribute("aria-label", text2.global.annotations);
+      }
+      const viewerSettings = document.querySelector("#viewer-settings");
+      if (viewerSettings) {
+        viewerSettings.title = text2.global.settings;
+        viewerSettings.setAttribute("aria-label", text2.global.settings);
+      }
+      const theme = document.querySelector("#theme");
+      if (theme)
+        theme.title = text2.global.theme;
+      const refReset = document.querySelector("#ref-reset");
+      if (refReset)
+        refReset.title = text2.topbar.resetRange;
+      const reload = document.querySelector("#reload-prom");
+      if (reload)
+        reload.title = text2.topbar.reload;
+      const layoutGroup = document.querySelector("#topbar .seg");
+      layoutGroup?.setAttribute("aria-label", text2.topbar.layout);
+      setElementText('#topbar .seg button[data-layout="line-by-line"]', text2.topbar.unified);
+      setElementText('#topbar .seg button[data-layout="side-by-side"]', text2.topbar.split);
+      const ignoreWs = document.querySelector("#ignore-ws");
+      if (ignoreWs)
+        ignoreWs.title = text2.topbar.ignoreWs;
+      const hideTests = document.querySelector("#hide-tests");
+      if (hideTests)
+        hideTests.title = text2.topbar.hideTests;
+      setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
+      setElementText(".sb-title", text2.sidebar.files);
+      const sidebarActions = document.querySelector(".sb-actions");
+      sidebarActions?.setAttribute("aria-label", text2.sidebar.actions);
+      const expandAll = document.querySelector("#sb-expand-all");
+      if (expandAll) {
+        expandAll.title = text2.sidebar.expandAll;
+        expandAll.setAttribute("aria-label", text2.sidebar.expandAll);
+      }
+      const collapseAll = document.querySelector("#sb-collapse-all");
+      if (collapseAll) {
+        collapseAll.title = text2.sidebar.collapseAll;
+        collapseAll.setAttribute("aria-label", text2.sidebar.collapseAll);
+      }
+      const sbView = document.querySelector(".sb-view-seg");
+      sbView?.setAttribute("aria-label", text2.sidebar.view);
+      setElementText('.sb-view-seg button[data-view="tree"]', text2.sidebar.tree);
+      setElementText('.sb-view-seg button[data-view="flat"]', text2.sidebar.flat);
+      const filter = document.querySelector("#sb-filter");
+      if (filter) {
+        filter.placeholder = text2.sidebar.filter;
+        filter.title = text2.sidebar.filterTitle;
+      }
+      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      if (sidebarToggle) {
+        sidebarToggle.title = text2.sidebar.hide;
+        sidebarToggle.setAttribute("aria-label", text2.sidebar.hide);
+      }
+      setElementText(".sidebar-toggle-label", text2.sidebar.files);
+      setElementText(".history-title", text2.history.title);
+      const historyPanel = document.querySelector("#history-panel");
+      historyPanel?.setAttribute("aria-label", text2.history.title);
+      const historyFilter = document.querySelector("#history-filter");
+      if (historyFilter) {
+        historyFilter.placeholder = text2.history.filter;
+        historyFilter.title = text2.history.filterTitle;
+      }
+      setElementText(".scope-settings-head strong", text2.settings.title);
+      const settingsClose = document.querySelector("#scope-settings-close");
+      settingsClose?.setAttribute("aria-label", text2.settings.close);
+      const settingsSections = document.querySelectorAll(".scope-settings-section-title");
+      if (settingsSections[0])
+        settingsSections[0].textContent = text2.settings.display;
+      if (settingsSections[1])
+        settingsSections[1].textContent = text2.settings.excludedDirectories;
+      const labelMap = {
+        "viewer-language": text2.settings.language,
+        "sidebar-font-size": text2.settings.fileListFontSize,
+        "code-font-size": text2.settings.codeFontSize,
+        "scope-omit-dirs": text2.settings.omitDirs,
+        "scope-exclude-names": text2.settings.excludeNames
+      };
+      Object.entries(labelMap).forEach(([id, label]) => {
+        const labelEl = document.querySelector(`label[for="${id}"]`);
+        if (labelEl)
+          labelEl.textContent = label;
+      });
+      setOptionText(document.querySelector("#sidebar-font-size"), {
+        compact: text2.settings.sizeSmall,
+        regular: text2.settings.sizeRegular,
+        large: text2.settings.sizeLarge,
+        xlarge: text2.settings.sizeExtraLarge
+      });
+      setOptionText(document.querySelector("#code-font-size"), {
+        compact: text2.settings.sizeSmall,
+        regular: text2.settings.sizeRegular,
+        large: text2.settings.sizeLarge,
+        xlarge: text2.settings.sizeExtraLarge
+      });
+      setElementText("#display-settings-source", text2.settings.displaySource);
+      setButtonLabel(document.querySelector("#scope-omit-reset"), text2.settings.reset);
+      setButtonLabel(document.querySelector("#scope-omit-save"), text2.settings.save);
+      setElementText(".annotation-panel-head strong", text2.annotations.title);
+      const followLabel = document.querySelector(".annotation-follow-label");
+      if (followLabel) {
+        followLabel.title = text2.annotations.followTitle;
+        const input = followLabel.querySelector("input");
+        followLabel.replaceChildren();
+        if (input)
+          followLabel.append(input, ` ${text2.annotations.follow}`);
+      }
+      setButtonLabel(document.querySelector("#annotation-clear"), text2.annotations.clear);
+      setButtonLabel(document.querySelector("#annotation-panel-close"), text2.annotations.close);
+      setElementText(".annotation-list-head strong", text2.annotations.sessions);
+    }
+    function setViewerLanguage(language, persist = true) {
+      const next = normalizeViewerLanguage(language);
+      STATE.language = next;
+      if (persist)
+        localStorage.setItem(VIEWER_LANGUAGE_STORAGE_KEY, next);
+      const select = document.querySelector("#viewer-language");
+      if (select)
+        select.value = next;
+      localizeViewerChrome();
+      if (STATE.route.screen === "help") {
+        setRoute({
+          screen: "help",
+          lang: next,
+          section: helpSectionFromRoute(STATE.route),
+          range: currentRange()
+        }, true);
+        renderHelpPage();
+      } else {
+        syncHeaderMenu();
+      }
+    }
     function setStatus(s2) {
       const el = $("#status");
       el.classList.remove("live", "refreshing", "error");
@@ -15557,11 +16341,12 @@ ${frontmatter.yaml}
       const btn = $("#syntax-highlight");
       if (!btn)
         return;
+      const text2 = uiText();
       btn.classList.toggle("active", STATE.syntaxHighlight);
       btn.classList.toggle("loading", state === "loading");
-      btn.textContent = state === "loading" ? "loading..." : STATE.syntaxHighlight ? "syntax on" : "syntax off";
+      btn.textContent = state === "loading" ? text2.topbar.syntaxLoading : STATE.syntaxHighlight ? text2.topbar.syntaxOn : text2.topbar.syntaxOff;
       btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
-      btn.title = STATE.syntaxHighlight ? "syntax highlighting on" : state === "loading" ? "loading syntax highlighter" : state === "error" ? "failed to load syntax highlighter" : "syntax highlighting off";
+      btn.title = STATE.syntaxHighlight ? text2.topbar.syntaxOnTitle : state === "loading" ? text2.topbar.syntaxLoadingTitle : state === "error" ? text2.topbar.syntaxErrorTitle : text2.topbar.syntaxOffTitle;
     }
     function loadSyntaxHighlighter() {
       const existing = getHljs();
@@ -15620,7 +16405,7 @@ ${frontmatter.yaml}
       el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
     }
     function scopeOmitSourceLabel() {
-      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
+      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? uiText().settings.browserOverride : uiText().settings.serverDefault;
     }
     function refreshRepositoryTreeAfterSettings() {
       clearRepoFileCache();
@@ -15639,19 +16424,22 @@ ${frontmatter.yaml}
       const excludeInput = document.querySelector("#scope-exclude-names");
       const sidebarFontSize = document.querySelector("#sidebar-font-size");
       const codeFontSize = document.querySelector("#code-font-size");
+      const viewerLanguage = document.querySelector("#viewer-language");
       const source = document.querySelector("#scope-omit-source");
-      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
+      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !viewerLanguage || !source)
         return;
       await loadSettings();
+      localizeViewerChrome();
+      viewerLanguage.value = STATE.language;
       sidebarFontSize.value = savedSidebarFontSize();
       codeFontSize.value = savedCodeFontSize();
       input.value = effectiveScopeOmitDirs().join(`
 `);
       excludeInput.value = effectiveScopeExcludeNames().join(`
 `);
-      source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
+      source.textContent = uiText().settings.scopeSource(PROJECT_NAME || "default", scopeOmitSourceLabel());
       pop.hidden = false;
-      sidebarFontSize.focus();
+      viewerLanguage.focus();
     }
     function closeScopeSettings() {
       const pop = document.querySelector("#scope-settings-popover");
@@ -15671,8 +16459,10 @@ ${frontmatter.yaml}
       const excludeInput = document.querySelector("#scope-exclude-names");
       const sidebarFontSize = document.querySelector("#sidebar-font-size");
       const codeFontSize = document.querySelector("#code-font-size");
-      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
+      const viewerLanguage = document.querySelector("#viewer-language");
+      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize || !viewerLanguage)
         return;
+      setViewerLanguage(normalizeViewerLanguage(viewerLanguage.value));
       localStorage.setItem(SIDEBAR_FONT_SIZE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
       localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
       applySidebarFontSize();
@@ -15683,6 +16473,7 @@ ${frontmatter.yaml}
       refreshRepositoryTreeAfterSettings();
     }
     function resetScopeSettings() {
+      setViewerLanguage("en");
       localStorage.removeItem(SIDEBAR_FONT_SIZE_KEY);
       localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
       applySidebarFontSize("regular");
@@ -15865,7 +16656,7 @@ ${frontmatter.yaml}
         if (link2.dataset.route === "help") {
           link2.href = buildRoute({
             screen: "help",
-            lang: helpLanguageFromRoute(STATE.route),
+            lang: STATE.route.screen === "help" ? helpLanguageFromRoute(STATE.route) : STATE.language,
             section: helpSectionFromRoute(STATE.route),
             range: currentRange()
           });
@@ -15969,7 +16760,9 @@ ${frontmatter.yaml}
       removeStandaloneSource,
       clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
       currentRange,
-      syncHeaderMenu
+      syncHeaderMenu,
+      getLanguage: () => STATE.language,
+      setLanguage: (language) => setViewerLanguage(language)
     });
     const { setupHunkExpand } = createHunkExpand({
       trackLoad,
@@ -16044,10 +16837,18 @@ ${frontmatter.yaml}
     $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
     $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
     $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
+    $("#viewer-language")?.addEventListener("change", (event) => {
+      const select = event.currentTarget;
+      setViewerLanguage(normalizeViewerLanguage(select.value));
+      const source = document.querySelector("#scope-omit-source");
+      if (source)
+        source.textContent = uiText().settings.scopeSource(PROJECT_NAME || "default", scopeOmitSourceLabel());
+    });
     $("#scope-settings-popover")?.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape")
         closeScopeSettings();
     });
+    localizeViewerChrome();
     prepareKeyboardPanels();
     const contentPanel = document.querySelector("#content");
     contentPanel?.addEventListener("focusin", () => setPanelFocusScope("main"));
@@ -16483,7 +17284,11 @@ ${frontmatter.yaml}
         restoreRangeAfterHistory();
       }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
-      STATE.route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      const routeLanguage = viewerLanguageFromSearch(window.location.search);
+      if (routeLanguage && routeLanguage !== STATE.language)
+        setViewerLanguage(routeLanguage);
+      const nextRoute = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      STATE.route = nextRoute.screen === "help" && !new URLSearchParams(window.location.search).has("lang") ? { ...nextRoute, lang: STATE.language } : nextRoute;
       STATE.from = STATE.route.range.from;
       STATE.to = STATE.route.range.to;
       if (STATE.route.screen === "repo")

@@ -12,11 +12,19 @@ export type HelpPageDeps = {
   clearLoadQueue(): void;
   currentRange(): { from: string; to: string };
   syncHeaderMenu(): void;
+  getLanguage(): HelpLanguage;
+  setLanguage(language: HelpLanguage): void;
 };
 
 export type HelpLanguage = "en" | "ja";
 
-export type HelpSection = "keybindings";
+export type HelpSection = "overview" | "annotations" | "skills" | "keybindings";
+
+type HelpBlock =
+  | { kind: "paragraph"; text: string }
+  | { kind: "steps"; items: string[] }
+  | { kind: "command"; title: string; command: string }
+  | { kind: "table"; rows: Array<[string, string]> };
 
 type HelpContent = {
   languageLabel: string;
@@ -27,20 +35,219 @@ type HelpContent = {
       nav: string;
       title: string;
       intro: string;
-      groups: Array<{ title: string; rows: Array<[string, string]> }>;
+      groups: Array<{ title: string; blocks: HelpBlock[] }>;
     }
   >;
 };
 
 const HELP_LANGUAGES: HelpLanguage[] = ["en", "ja"];
 
-const HELP_SECTIONS: HelpSection[] = ["keybindings"];
+const HELP_SECTIONS: HelpSection[] = [
+  "overview",
+  "annotations",
+  "skills",
+  "keybindings",
+];
 
 const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
   en: {
     languageLabel: "Language",
     title: "Help",
     sections: {
+      overview: {
+        nav: "Getting Started",
+        title: "Getting Started",
+        intro:
+          "code-viewer is a local browser UI for reading a repository, reviewing diffs, and letting AI agents attach explanations to exact code lines.",
+        groups: [
+          {
+            title: "Start the viewer",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Run the command from inside a Git repository. The server prints a localhost URL; open it in your browser.",
+              },
+              {
+                kind: "command",
+                title: "Run without installing",
+                command: "npx @youtyan/code-viewer",
+              },
+              {
+                kind: "command",
+                title: "Open another repository",
+                command: "code-viewer --cwd /path/to/repo --open",
+              },
+            ],
+          },
+          {
+            title: "Read a diff",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Arguments after the options are passed to Git diff. With no arguments, code-viewer compares HEAD with the working tree.",
+              },
+              {
+                kind: "command",
+                title: "Compare two refs",
+                command: "code-viewer HEAD~1 HEAD",
+              },
+              {
+                kind: "command",
+                title: "Inspect staged changes",
+                command: "code-viewer --staged",
+              },
+            ],
+          },
+          {
+            title: "Browse files",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode.",
+              },
+            ],
+          },
+        ],
+      },
+      annotations: {
+        nav: "AI Annotations",
+        title: "AI Code Annotations",
+        intro:
+          "Annotations let an AI coding agent guide you through code in the browser. Each annotation points to a file and line range, and open tabs jump there live.",
+        groups: [
+          {
+            title: "What you ask the AI to do",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: 'Ask the agent to explain code with code-viewer annotations. For example: "Use annotate to walk me through the hardest part of this system."',
+              },
+              {
+                kind: "steps",
+                items: [
+                  "Start code-viewer for the repository and keep it running.",
+                  "Ask the AI agent for an annotated walkthrough.",
+                  "Open the annotation panel in the browser and follow the entries in order.",
+                ],
+              },
+            ],
+          },
+          {
+            title: "Commands the agent uses",
+            blocks: [
+              {
+                kind: "command",
+                title: "Start a walkthrough session",
+                command:
+                  'code-viewer annotate start --title "How the cache invalidation works"',
+              },
+              {
+                kind: "command",
+                title: "Add an explanation to a line range",
+                command:
+                  'code-viewer annotate add --file src/cache.ts --line 120-145 --title "Entry point" --body "Writes land here first."',
+              },
+              {
+                kind: "command",
+                title: "Inspect posted annotations",
+                command: "code-viewer annotate list",
+              },
+            ],
+          },
+          {
+            title: "Writing useful annotations",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "One idea per annotation",
+                    "Prefer several focused notes over one long explanation.",
+                  ],
+                  [
+                    "Always pass --line",
+                    "Use the smallest range that covers the idea. The body is rendered under the last line.",
+                  ],
+                  [
+                    "Use sessions",
+                    "Start a new session for each walkthrough topic so the history stays readable.",
+                  ],
+                  [
+                    "Fix in place",
+                    "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable.",
+                  ],
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      skills: {
+        nav: "Agent Skill",
+        title: "Agent Skill Setup",
+        intro:
+          "The package includes a code-viewer annotate skill so AI agents know when and how to create browser walkthroughs.",
+        groups: [
+          {
+            title: "Install the skill",
+            blocks: [
+              {
+                kind: "command",
+                title: "Install for Claude Code in the current project",
+                command: "npx -y @youtyan/code-viewer skill install",
+              },
+              {
+                kind: "command",
+                title: "Install for Codex and Gemini",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini",
+              },
+              {
+                kind: "command",
+                title: "Install for all supported agents",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent all",
+              },
+            ],
+          },
+          {
+            title: "What the skill teaches",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "When to annotate",
+                    "Code reviews, onboarding walkthroughs, and explanations of changes.",
+                  ],
+                  [
+                    "How to target code",
+                    "Use --file and --line, and include --from / --to when explaining a diff range.",
+                  ],
+                  [
+                    "How to keep history clean",
+                    "Use one session per topic, edit wrong notes in place, and avoid unrelated cleanup.",
+                  ],
+                ],
+              },
+            ],
+          },
+          {
+            title: "Agent reference",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Agents can print the full built-in guide from the CLI when they need exact command details.",
+              },
+              {
+                kind: "command",
+                title: "Show the agent guide",
+                command: "code-viewer annotate agent-help",
+              },
+            ],
+          },
+        ],
+      },
       keybindings: {
         nav: "Keybindings",
         title: "Keyboard Shortcuts",
@@ -49,38 +256,58 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         groups: [
           {
             title: "Global",
-            rows: [
-              ["Ctrl+K", "Open file palette"],
-              ["Ctrl+G", "Open grep palette"],
-              ["/", "Focus file filter"],
-              ["t", "Toggle theme"],
-              ["[ / ]", "Previous / next annotation"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["Ctrl+K", "Open file palette"],
+                  ["Ctrl+G", "Open grep palette"],
+                  ["/", "Focus file filter"],
+                  ["t", "Toggle theme"],
+                  ["[ / ]", "Previous / next annotation"],
+                ],
+              },
             ],
           },
           {
             title: "Panels",
-            rows: [
-              ["Ctrl+H", "Focus sidebar"],
-              ["Ctrl+L", "Focus main panel"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["Ctrl+H", "Focus sidebar"],
+                  ["Ctrl+L", "Focus main panel"],
+                ],
+              },
             ],
           },
           {
             title: "Sidebar",
-            rows: [
-              ["j / k", "Move selection down / up"],
-              ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-              ["gg / Shift+G", "Move to top / bottom"],
-              ["Enter", "Open selected item"],
-              ["h / l", "Collapse / expand directory"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["j / k", "Move selection down / up"],
+                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
+                  ["gg / Shift+G", "Move to top / bottom"],
+                  ["Enter", "Open selected item"],
+                  ["h / l", "Collapse / expand directory"],
+                ],
+              },
             ],
           },
           {
             title: "Main Panel",
-            rows: [
-              ["j / k", "Move code cursor down / up"],
-              ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-              ["gg / Shift+G", "Move code cursor to top / bottom"],
-              ["gp / gc", "Switch to Preview / Code tab"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["j / k", "Move code cursor down / up"],
+                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
+                  ["gg / Shift+G", "Move code cursor to top / bottom"],
+                  ["gp / gc", "Switch to Preview / Code tab"],
+                ],
+              },
             ],
           },
         ],
@@ -91,6 +318,200 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
     languageLabel: "言語",
     title: "ヘルプ",
     sections: {
+      overview: {
+        nav: "はじめに",
+        title: "はじめに",
+        intro:
+          "code-viewer は、ローカルのリポジトリをブラウザで読み、diff を確認し、AI エージェントにコード行へ説明を付けさせるためのツールです。",
+        groups: [
+          {
+            title: "ビューアを起動する",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Git リポジトリの中でコマンドを実行します。サーバが localhost の URL を表示するので、それをブラウザで開きます。",
+              },
+              {
+                kind: "command",
+                title: "インストールせずに起動",
+                command: "npx @youtyan/code-viewer",
+              },
+              {
+                kind: "command",
+                title: "別のリポジトリを開く",
+                command: "code-viewer --cwd /path/to/repo --open",
+              },
+            ],
+          },
+          {
+            title: "diff を読む",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "オプションの後ろに置いた引数は Git diff に渡されます。引数なしなら HEAD と作業ツリーを比較します。",
+              },
+              {
+                kind: "command",
+                title: "2つの ref を比較",
+                command: "code-viewer HEAD~1 HEAD",
+              },
+              {
+                kind: "command",
+                title: "ステージ済み変更を見る",
+                command: "code-viewer --staged",
+              },
+            ],
+          },
+          {
+            title: "ファイルを読む",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。",
+              },
+            ],
+          },
+        ],
+      },
+      annotations: {
+        nav: "AI注釈",
+        title: "AI コード注釈",
+        intro:
+          "注釈機能を使うと、AI コーディングエージェントがブラウザ上の特定ファイル・特定行へ説明を付けられます。開いているタブは注釈先へライブで移動します。",
+        groups: [
+          {
+            title: "AI に頼む言い方",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "AI エージェントには、code-viewer の annotate 機能を使って説明して、と頼みます。例: 「このシステムで一番むずかしい処理を annotate でウォークスルーして」",
+              },
+              {
+                kind: "steps",
+                items: [
+                  "対象リポジトリで code-viewer を起動したままにします。",
+                  "AI エージェントに注釈付きの解説を依頼します。",
+                  "ブラウザの注釈パネルを開き、履歴を上から順に追います。",
+                ],
+              },
+            ],
+          },
+          {
+            title: "AI が使うコマンド",
+            blocks: [
+              {
+                kind: "command",
+                title: "ウォークスルー用セッションを作る",
+                command:
+                  'code-viewer annotate start --title "キャッシュ無効化の流れ"',
+              },
+              {
+                kind: "command",
+                title: "行範囲へ説明を追加する",
+                command:
+                  'code-viewer annotate add --file src/cache.ts --line 120-145 --title "入口" --body "書き込みはここから入ります。"',
+              },
+              {
+                kind: "command",
+                title: "投稿済み注釈を確認する",
+                command: "code-viewer annotate list",
+              },
+            ],
+          },
+          {
+            title: "読みやすい注釈にするコツ",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "1注釈1テーマ",
+                    "巨大な説明を1つ置くより、短い注釈を順番に並べます。",
+                  ],
+                  [
+                    "必ず --line を付ける",
+                    "説明に必要な最小行範囲を指定します。本文は範囲の最後の行の下に表示されます。",
+                  ],
+                  [
+                    "セッションを分ける",
+                    "1つの解説テーマごとにセッションを作ると履歴が読みやすくなります。",
+                  ],
+                  [
+                    "間違いは edit で直す",
+                    "削除して追加し直すより、注釈IDと順番を保ったまま修正します。",
+                  ],
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      skills: {
+        nav: "スキル登録",
+        title: "Agent Skill の登録",
+        intro:
+          "このパッケージには、AI エージェントが code-viewer の annotate 機能を正しく使うためのスキルが同梱されています。",
+        groups: [
+          {
+            title: "スキルをインストールする",
+            blocks: [
+              {
+                kind: "command",
+                title: "現在のプロジェクトへ Claude Code 用に登録",
+                command: "npx -y @youtyan/code-viewer skill install",
+              },
+              {
+                kind: "command",
+                title: "Codex と Gemini 用に登録",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini",
+              },
+              {
+                kind: "command",
+                title: "対応エージェントすべてに登録",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent all",
+              },
+            ],
+          },
+          {
+            title: "スキルが教えること",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "いつ注釈するか",
+                    "コードレビュー、オンボーディング、変更内容の解説で使うこと。",
+                  ],
+                  [
+                    "どこへ注釈するか",
+                    "--file と --line を使い、diff 範囲を説明するときは --from / --to も渡すこと。",
+                  ],
+                  [
+                    "履歴をきれいに保つ方法",
+                    "1テーマ1セッション、間違いは edit で修正、無関係な削除をしないこと。",
+                  ],
+                ],
+              },
+            ],
+          },
+          {
+            title: "AI 向けリファレンス",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "AI エージェントは、詳細な手順が必要なときに CLI から組み込みガイドを表示できます。",
+              },
+              {
+                kind: "command",
+                title: "AI 向けガイドを表示",
+                command: "code-viewer annotate agent-help",
+              },
+            ],
+          },
+        ],
+      },
       keybindings: {
         nav: "キーバインド",
         title: "キーバインド",
@@ -99,38 +520,58 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         groups: [
           {
             title: "グローバル",
-            rows: [
-              ["Ctrl+K", "ファイルパレットを開く"],
-              ["Ctrl+G", "grep パレットを開く"],
-              ["/", "ファイルフィルターへフォーカス"],
-              ["t", "テーマ切り替え"],
-              ["[ / ]", "前 / 次の注釈へ移動"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["Ctrl+K", "ファイルパレットを開く"],
+                  ["Ctrl+G", "grep パレットを開く"],
+                  ["/", "ファイルフィルターへフォーカス"],
+                  ["t", "テーマ切り替え"],
+                  ["[ / ]", "前 / 次の注釈へ移動"],
+                ],
+              },
             ],
           },
           {
             title: "パネル",
-            rows: [
-              ["Ctrl+H", "サイドバーへフォーカス"],
-              ["Ctrl+L", "メインパネルへフォーカス"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["Ctrl+H", "サイドバーへフォーカス"],
+                  ["Ctrl+L", "メインパネルへフォーカス"],
+                ],
+              },
             ],
           },
           {
             title: "サイドバー",
-            rows: [
-              ["j / k", "選択を下 / 上へ移動"],
-              ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-              ["gg / Shift+G", "先頭 / 末尾へ移動"],
-              ["Enter", "選択項目を開く"],
-              ["h / l", "ディレクトリを閉じる / 開く"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["j / k", "選択を下 / 上へ移動"],
+                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
+                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
+                  ["Enter", "選択項目を開く"],
+                  ["h / l", "ディレクトリを閉じる / 開く"],
+                ],
+              },
             ],
           },
           {
             title: "メインパネル",
-            rows: [
-              ["j / k", "コードカーソルを下 / 上へ移動"],
-              ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-              ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-              ["gp / gc", "Preview / Code タブへ切り替え"],
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  ["j / k", "コードカーソルを下 / 上へ移動"],
+                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
+                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
+                  ["gp / gc", "Preview / Code タブへ切り替え"],
+                ],
+              },
             ],
           },
         ],
@@ -150,7 +591,61 @@ export function helpSectionFromRoute(route: AppRoute): HelpSection {
   return route.screen === "help" &&
     HELP_SECTIONS.includes(route.section as HelpSection)
     ? (route.section as HelpSection)
-    : "keybindings";
+    : "overview";
+}
+
+function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
+  const wrap = document.createElement("div");
+  wrap.className = "gdp-help-command";
+  const title = document.createElement("div");
+  title.className = "gdp-help-command-title";
+  title.textContent = block.title;
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = block.command;
+  pre.appendChild(code);
+  wrap.append(title, pre);
+  return wrap;
+}
+
+function renderHelpTable(rows: Array<[string, string]>) {
+  const table = document.createElement("table");
+  rows.forEach(([keys, description]) => {
+    const tr = document.createElement("tr");
+    const keyCell = document.createElement("th");
+    keyCell.scope = "row";
+    keys.split(" / ").forEach((key, index) => {
+      if (index > 0) keyCell.append(" / ");
+      const kbd = document.createElement("kbd");
+      kbd.textContent = key;
+      keyCell.appendChild(kbd);
+    });
+    const desc = document.createElement("td");
+    desc.textContent = description;
+    tr.append(keyCell, desc);
+    table.appendChild(tr);
+  });
+  return table;
+}
+
+function renderHelpBlock(block: HelpBlock): HTMLElement {
+  if (block.kind === "paragraph") {
+    const p = document.createElement("p");
+    p.textContent = block.text;
+    return p;
+  }
+  if (block.kind === "steps") {
+    const ol = document.createElement("ol");
+    ol.className = "gdp-help-steps";
+    block.items.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      ol.appendChild(li);
+    });
+    return ol;
+  }
+  if (block.kind === "command") return renderHelpCommand(block);
+  return renderHelpTable(block.rows);
 }
 
 export function createHelpPage(deps: HelpPageDeps) {
@@ -165,7 +660,11 @@ export function createHelpPage(deps: HelpPageDeps) {
     deps.$("#totals").textContent = "";
     deps.$("#filelist").textContent = "";
 
-    const lang = helpLanguageFromRoute(deps.getRoute());
+    const lang =
+      deps.getRoute().screen === "help" &&
+      new URLSearchParams(window.location.search).has("lang")
+        ? helpLanguageFromRoute(deps.getRoute())
+        : deps.getLanguage();
     const section = helpSectionFromRoute(deps.getRoute());
     const content = HELP_CONTENT[lang];
     const sectionContent = content.sections[section];
@@ -187,15 +686,8 @@ export function createHelpPage(deps: HelpPageDeps) {
       langSelect.appendChild(option);
     });
     langSelect.addEventListener("change", () => {
-      deps.setRoute({
-        screen: "help",
-        lang: langSelect.value,
-        section,
-        range: deps.currentRange(),
-      });
-      deps.setPageMode();
-      renderHelpPage();
-      deps.syncHeaderMenu();
+      const nextLang = langSelect.value as HelpLanguage;
+      deps.setLanguage(nextLang);
     });
     header.append(title, langSelect);
 
@@ -233,23 +725,10 @@ export function createHelpPage(deps: HelpPageDeps) {
       groupSection.className = "gdp-help-group";
       const groupTitle = document.createElement("h3");
       groupTitle.textContent = group.title;
-      const table = document.createElement("table");
-      group.rows.forEach(([keys, description]) => {
-        const tr = document.createElement("tr");
-        const keyCell = document.createElement("th");
-        keyCell.scope = "row";
-        keys.split(" / ").forEach((key, index) => {
-          if (index > 0) keyCell.append(" / ");
-          const kbd = document.createElement("kbd");
-          kbd.textContent = key;
-          keyCell.appendChild(kbd);
-        });
-        const desc = document.createElement("td");
-        desc.textContent = description;
-        tr.append(keyCell, desc);
-        table.appendChild(tr);
+      groupSection.append(groupTitle);
+      group.blocks.forEach((block) => {
+        groupSection.appendChild(renderHelpBlock(block));
       });
-      groupSection.append(groupTitle, table);
       article.appendChild(groupSection);
     });
 

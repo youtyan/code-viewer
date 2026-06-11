@@ -70,9 +70,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   type LayoutMode = "side-by-side" | "line-by-line";
   type SidebarView = "tree" | "flat";
   type ThemeMode = "light" | "dark";
+  type ViewerLanguage = "en" | "ja";
   type AppState = {
     layout: LayoutMode;
     theme: ThemeMode;
+    language: ViewerLanguage;
     sbView: SidebarView;
     sbWidth: number;
     sidebarHidden: boolean;
@@ -112,6 +114,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
   const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
   const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
+  const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+  const VIEWER_LANGUAGES: ViewerLanguage[] = ["en", "ja"];
   const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
     "node_modules",
     ".venv",
@@ -334,6 +338,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "regular";
   }
 
+  function normalizeViewerLanguage(value: unknown): ViewerLanguage {
+    return VIEWER_LANGUAGES.includes(value as ViewerLanguage)
+      ? (value as ViewerLanguage)
+      : "en";
+  }
+
+  function savedViewerLanguage(): ViewerLanguage {
+    return normalizeViewerLanguage(
+      localStorage.getItem(VIEWER_LANGUAGE_STORAGE_KEY),
+    );
+  }
+
+  function viewerLanguageFromSearch(search: string): ViewerLanguage | null {
+    const raw = new URLSearchParams(search).get("lang");
+    return raw ? normalizeViewerLanguage(raw) : null;
+  }
+
   function savedCodeFontSize(): ViewerFontSize {
     return normalizeViewerFontSize(
       localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY),
@@ -380,21 +401,29 @@ window.GdpExpandLogic = GdpExpandLogic;
       from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
       to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to,
     };
+    const savedLanguage =
+      viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
     const parsedRoute = parseRoute(
       window.location.pathname,
       window.location.search,
       fallbackRange,
     );
-    const route =
+    const routeBase =
       parsedRoute.screen === "unknown"
         ? { screen: "diff" as const, range: parsedRoute.range }
         : parsedRoute;
+    const route =
+      routeBase.screen === "help" &&
+      !new URLSearchParams(window.location.search).has("lang")
+        ? { ...routeBase, lang: savedLanguage }
+        : routeBase;
     return {
       layout:
         (localStorage.getItem("gdp:layout") as LayoutMode) || "side-by-side",
       theme:
         (localStorage.getItem("gdp:theme") as ThemeMode) ||
         (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+      language: savedLanguage,
       sbView: (localStorage.getItem("gdp:sbview") as SidebarView) || "tree",
       sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
@@ -621,6 +650,445 @@ window.GdpExpandLogic = GdpExpandLogic;
   const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } =
     SEARCH_PALETTE;
 
+  const UI_TEXT: Record<
+    ViewerLanguage,
+    {
+      nav: Record<"repo" | "diff" | "history" | "help", string>;
+      global: {
+        annotations: string;
+        settings: string;
+        theme: string;
+        product: string;
+      };
+      topbar: {
+        resetRange: string;
+        reload: string;
+        layout: string;
+        unified: string;
+        split: string;
+        ignoreWs: string;
+        syntaxLoading: string;
+        syntaxOn: string;
+        syntaxOff: string;
+        syntaxOnTitle: string;
+        syntaxLoadingTitle: string;
+        syntaxErrorTitle: string;
+        syntaxOffTitle: string;
+        hideTests: string;
+      };
+      sidebar: {
+        files: string;
+        actions: string;
+        expandAll: string;
+        collapseAll: string;
+        view: string;
+        tree: string;
+        flat: string;
+        filter: string;
+        filterTitle: string;
+        hide: string;
+      };
+      history: {
+        title: string;
+        filter: string;
+        filterTitle: string;
+      };
+      settings: {
+        title: string;
+        close: string;
+        display: string;
+        language: string;
+        fileListFontSize: string;
+        codeFontSize: string;
+        sizeSmall: string;
+        sizeRegular: string;
+        sizeLarge: string;
+        sizeExtraLarge: string;
+        displaySource: string;
+        excludedDirectories: string;
+        omitDirs: string;
+        excludeNames: string;
+        reset: string;
+        save: string;
+        scopeSource: (project: string, source: string) => string;
+        browserOverride: string;
+        serverDefault: string;
+      };
+      annotations: {
+        title: string;
+        follow: string;
+        followTitle: string;
+        clear: string;
+        close: string;
+        sessions: string;
+      };
+    }
+  > = {
+    en: {
+      nav: {
+        repo: "Repository",
+        diff: "Diff Viewer",
+        history: "History",
+        help: "Help",
+      },
+      global: {
+        annotations: "code annotations",
+        settings: "viewer settings",
+        theme: "toggle theme",
+        product: "code viewer",
+      },
+      topbar: {
+        resetRange: "reset to HEAD .. worktree",
+        reload: "reload diff (R)",
+        layout: "layout",
+        unified: "unified",
+        split: "split",
+        ignoreWs: "ignore whitespace changes (-w)",
+        syntaxLoading: "loading...",
+        syntaxOn: "syntax on",
+        syntaxOff: "syntax off",
+        syntaxOnTitle: "syntax highlighting on",
+        syntaxLoadingTitle: "loading syntax highlighter",
+        syntaxErrorTitle: "failed to load syntax highlighter",
+        syntaxOffTitle: "syntax highlighting off",
+        hideTests: "hide test files (test|spec)",
+      },
+      sidebar: {
+        files: "Files",
+        actions: "sidebar actions",
+        expandAll: "expand all folders",
+        collapseAll: "collapse all folders",
+        view: "view",
+        tree: "tree",
+        flat: "flat",
+        filter: "Filter files...",
+        filterTitle:
+          "Filter files. Use /pattern/ for regex. Cmd/Ctrl+K focuses this field.",
+        hide: "hide sidebar",
+      },
+      history: {
+        title: "Commits",
+        filter: "Filter commits...",
+        filterTitle:
+          "Filter commits by message, SHA, author:name, or path:file.",
+      },
+      settings: {
+        title: "Viewer Settings",
+        close: "close viewer settings",
+        display: "Display",
+        language: "Language",
+        fileListFontSize: "File list font size",
+        codeFontSize: "Code font size",
+        sizeSmall: "Small",
+        sizeRegular: "Regular",
+        sizeLarge: "Large",
+        sizeExtraLarge: "Extra Large",
+        displaySource: "Applies to all projects in this browser.",
+        excludedDirectories: "Excluded directories",
+        omitDirs: "Skip these directory names while browsing and searching",
+        excludeNames: "Hide these file or directory names completely",
+        reset: "Reset",
+        save: "Save",
+        scopeSource: (project, source) =>
+          `Saved for project "${project}" in this browser. Source: ${source}. Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.`,
+        browserOverride: "Browser override",
+        serverDefault: "Server default",
+      },
+      annotations: {
+        title: "Code annotations",
+        follow: "follow",
+        followTitle: "jump to new annotations as they arrive",
+        clear: "clear",
+        close: "close",
+        sessions: "Sessions",
+      },
+    },
+    ja: {
+      nav: {
+        repo: "リポジトリ",
+        diff: "Diff ビューア",
+        history: "履歴",
+        help: "ヘルプ",
+      },
+      global: {
+        annotations: "コード注釈",
+        settings: "ビューア設定",
+        theme: "テーマ切り替え",
+        product: "code viewer",
+      },
+      topbar: {
+        resetRange: "HEAD .. worktree に戻す",
+        reload: "diff を再読み込み (R)",
+        layout: "レイアウト",
+        unified: "unified",
+        split: "split",
+        ignoreWs: "空白差分を無視 (-w)",
+        syntaxLoading: "読み込み中...",
+        syntaxOn: "syntax on",
+        syntaxOff: "syntax off",
+        syntaxOnTitle: "シンタックスハイライト有効",
+        syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
+        syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
+        syntaxOffTitle: "シンタックスハイライト無効",
+        hideTests: "test/spec ファイルを隠す",
+      },
+      sidebar: {
+        files: "ファイル",
+        actions: "サイドバー操作",
+        expandAll: "すべてのフォルダを開く",
+        collapseAll: "すべてのフォルダを閉じる",
+        view: "表示",
+        tree: "ツリー",
+        flat: "一覧",
+        filter: "ファイルを絞り込み...",
+        filterTitle:
+          "ファイルを絞り込みます。正規表現は /pattern/。Cmd/Ctrl+K でフォーカス。",
+        hide: "サイドバーを隠す",
+      },
+      history: {
+        title: "コミット",
+        filter: "コミットを絞り込み...",
+        filterTitle:
+          "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。",
+      },
+      settings: {
+        title: "ビューア設定",
+        close: "ビューア設定を閉じる",
+        display: "表示",
+        language: "言語",
+        fileListFontSize: "ファイル一覧の文字サイズ",
+        codeFontSize: "コードの文字サイズ",
+        sizeSmall: "小",
+        sizeRegular: "標準",
+        sizeLarge: "大",
+        sizeExtraLarge: "特大",
+        displaySource: "このブラウザのすべてのプロジェクトに適用されます。",
+        excludedDirectories: "除外ディレクトリ",
+        omitDirs: "閲覧と検索でスキップするディレクトリ名",
+        excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
+        reset: "リセット",
+        save: "保存",
+        scopeSource: (project, source) =>
+          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。ツリー、Ctrl+K、Ctrl+G で使われます。リセットするとブラウザ側の上書きを削除します。`,
+        browserOverride: "ブラウザ側の上書き",
+        serverDefault: "サーバ既定値",
+      },
+      annotations: {
+        title: "コード注釈",
+        follow: "追従",
+        followTitle: "新しい注釈が届いたら移動する",
+        clear: "削除",
+        close: "閉じる",
+        sessions: "セッション",
+      },
+    },
+  };
+
+  function uiText() {
+    return UI_TEXT[STATE.language];
+  }
+
+  function setElementText(selector: string, text: string) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el) el.textContent = text;
+  }
+
+  function setButtonLabel(button: HTMLButtonElement | null, text: string) {
+    if (button) button.textContent = text;
+  }
+
+  function setOptionText(
+    select: HTMLSelectElement | null,
+    labels: Record<string, string>,
+  ) {
+    select?.querySelectorAll<HTMLOptionElement>("option").forEach((option) => {
+      const label = labels[option.value];
+      if (label) option.textContent = label;
+    });
+  }
+
+  function localizeViewerChrome() {
+    const text = uiText();
+    document.documentElement.lang = STATE.language;
+    document
+      .querySelectorAll<HTMLAnchorElement>(".app-menu-item")
+      .forEach((link) => {
+        const route = link.dataset.route as keyof typeof text.nav;
+        if (route && text.nav[route]) link.textContent = text.nav[route];
+      });
+    setElementText(".global-help-link[data-route='help']", text.nav.help);
+    setElementText(".product-label", text.global.product);
+
+    const annotationsToggle = document.querySelector<HTMLButtonElement>(
+      "#annotations-toggle",
+    );
+    if (annotationsToggle) {
+      annotationsToggle.title = text.global.annotations;
+      annotationsToggle.setAttribute("aria-label", text.global.annotations);
+    }
+    const viewerSettings =
+      document.querySelector<HTMLButtonElement>("#viewer-settings");
+    if (viewerSettings) {
+      viewerSettings.title = text.global.settings;
+      viewerSettings.setAttribute("aria-label", text.global.settings);
+    }
+    const theme = document.querySelector<HTMLButtonElement>("#theme");
+    if (theme) theme.title = text.global.theme;
+
+    const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
+    if (refReset) refReset.title = text.topbar.resetRange;
+    const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
+    if (reload) reload.title = text.topbar.reload;
+    const layoutGroup = document.querySelector<HTMLElement>("#topbar .seg");
+    layoutGroup?.setAttribute("aria-label", text.topbar.layout);
+    setElementText(
+      '#topbar .seg button[data-layout="line-by-line"]',
+      text.topbar.unified,
+    );
+    setElementText(
+      '#topbar .seg button[data-layout="side-by-side"]',
+      text.topbar.split,
+    );
+    const ignoreWs = document.querySelector<HTMLButtonElement>("#ignore-ws");
+    if (ignoreWs) ignoreWs.title = text.topbar.ignoreWs;
+    const hideTests = document.querySelector<HTMLButtonElement>("#hide-tests");
+    if (hideTests) hideTests.title = text.topbar.hideTests;
+    setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
+
+    setElementText(".sb-title", text.sidebar.files);
+    const sidebarActions = document.querySelector<HTMLElement>(".sb-actions");
+    sidebarActions?.setAttribute("aria-label", text.sidebar.actions);
+    const expandAll =
+      document.querySelector<HTMLButtonElement>("#sb-expand-all");
+    if (expandAll) {
+      expandAll.title = text.sidebar.expandAll;
+      expandAll.setAttribute("aria-label", text.sidebar.expandAll);
+    }
+    const collapseAll =
+      document.querySelector<HTMLButtonElement>("#sb-collapse-all");
+    if (collapseAll) {
+      collapseAll.title = text.sidebar.collapseAll;
+      collapseAll.setAttribute("aria-label", text.sidebar.collapseAll);
+    }
+    const sbView = document.querySelector<HTMLElement>(".sb-view-seg");
+    sbView?.setAttribute("aria-label", text.sidebar.view);
+    setElementText('.sb-view-seg button[data-view="tree"]', text.sidebar.tree);
+    setElementText('.sb-view-seg button[data-view="flat"]', text.sidebar.flat);
+    const filter = document.querySelector<HTMLInputElement>("#sb-filter");
+    if (filter) {
+      filter.placeholder = text.sidebar.filter;
+      filter.title = text.sidebar.filterTitle;
+    }
+    const sidebarToggle =
+      document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    if (sidebarToggle) {
+      sidebarToggle.title = text.sidebar.hide;
+      sidebarToggle.setAttribute("aria-label", text.sidebar.hide);
+    }
+    setElementText(".sidebar-toggle-label", text.sidebar.files);
+
+    setElementText(".history-title", text.history.title);
+    const historyPanel = document.querySelector<HTMLElement>("#history-panel");
+    historyPanel?.setAttribute("aria-label", text.history.title);
+    const historyFilter =
+      document.querySelector<HTMLInputElement>("#history-filter");
+    if (historyFilter) {
+      historyFilter.placeholder = text.history.filter;
+      historyFilter.title = text.history.filterTitle;
+    }
+
+    setElementText(".scope-settings-head strong", text.settings.title);
+    const settingsClose = document.querySelector<HTMLButtonElement>(
+      "#scope-settings-close",
+    );
+    settingsClose?.setAttribute("aria-label", text.settings.close);
+    const settingsSections = document.querySelectorAll<HTMLElement>(
+      ".scope-settings-section-title",
+    );
+    if (settingsSections[0])
+      settingsSections[0].textContent = text.settings.display;
+    if (settingsSections[1])
+      settingsSections[1].textContent = text.settings.excludedDirectories;
+    const labelMap: Record<string, string> = {
+      "viewer-language": text.settings.language,
+      "sidebar-font-size": text.settings.fileListFontSize,
+      "code-font-size": text.settings.codeFontSize,
+      "scope-omit-dirs": text.settings.omitDirs,
+      "scope-exclude-names": text.settings.excludeNames,
+    };
+    Object.entries(labelMap).forEach(([id, label]) => {
+      const labelEl = document.querySelector<HTMLLabelElement>(
+        `label[for="${id}"]`,
+      );
+      if (labelEl) labelEl.textContent = label;
+    });
+    setOptionText(document.querySelector("#sidebar-font-size"), {
+      compact: text.settings.sizeSmall,
+      regular: text.settings.sizeRegular,
+      large: text.settings.sizeLarge,
+      xlarge: text.settings.sizeExtraLarge,
+    });
+    setOptionText(document.querySelector("#code-font-size"), {
+      compact: text.settings.sizeSmall,
+      regular: text.settings.sizeRegular,
+      large: text.settings.sizeLarge,
+      xlarge: text.settings.sizeExtraLarge,
+    });
+    setElementText("#display-settings-source", text.settings.displaySource);
+    setButtonLabel(
+      document.querySelector("#scope-omit-reset"),
+      text.settings.reset,
+    );
+    setButtonLabel(
+      document.querySelector("#scope-omit-save"),
+      text.settings.save,
+    );
+
+    setElementText(".annotation-panel-head strong", text.annotations.title);
+    const followLabel = document.querySelector<HTMLElement>(
+      ".annotation-follow-label",
+    );
+    if (followLabel) {
+      followLabel.title = text.annotations.followTitle;
+      const input = followLabel.querySelector("input");
+      followLabel.replaceChildren();
+      if (input) followLabel.append(input, ` ${text.annotations.follow}`);
+    }
+    setButtonLabel(
+      document.querySelector("#annotation-clear"),
+      text.annotations.clear,
+    );
+    setButtonLabel(
+      document.querySelector("#annotation-panel-close"),
+      text.annotations.close,
+    );
+    setElementText(".annotation-list-head strong", text.annotations.sessions);
+  }
+
+  function setViewerLanguage(language: ViewerLanguage, persist = true) {
+    const next = normalizeViewerLanguage(language);
+    STATE.language = next;
+    if (persist) localStorage.setItem(VIEWER_LANGUAGE_STORAGE_KEY, next);
+    const select =
+      document.querySelector<HTMLSelectElement>("#viewer-language");
+    if (select) select.value = next;
+    localizeViewerChrome();
+    if (STATE.route.screen === "help") {
+      setRoute(
+        {
+          screen: "help",
+          lang: next,
+          section: helpSectionFromRoute(STATE.route),
+          range: currentRange(),
+        },
+        true,
+      );
+      renderHelpPage();
+    } else {
+      syncHeaderMenu();
+    }
+  }
+
   function setStatus(s: "live" | "refreshing" | "error" | null) {
     const el = $("#status");
     el.classList.remove("live", "refreshing", "error");
@@ -648,22 +1116,23 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setHighlightButton(state: "idle" | "loading" | "loaded" | "error") {
     const btn = $("#syntax-highlight");
     if (!btn) return;
+    const text = uiText();
     btn.classList.toggle("active", STATE.syntaxHighlight);
     btn.classList.toggle("loading", state === "loading");
     btn.textContent =
       state === "loading"
-        ? "loading..."
+        ? text.topbar.syntaxLoading
         : STATE.syntaxHighlight
-          ? "syntax on"
-          : "syntax off";
+          ? text.topbar.syntaxOn
+          : text.topbar.syntaxOff;
     btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
     btn.title = STATE.syntaxHighlight
-      ? "syntax highlighting on"
+      ? text.topbar.syntaxOnTitle
       : state === "loading"
-        ? "loading syntax highlighter"
+        ? text.topbar.syntaxLoadingTitle
         : state === "error"
-          ? "failed to load syntax highlighter"
-          : "syntax highlighting off";
+          ? text.topbar.syntaxErrorTitle
+          : text.topbar.syntaxOffTitle;
   }
 
   function loadSyntaxHighlighter(): Promise<HljsApi | null> {
@@ -734,8 +1203,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function scopeOmitSourceLabel(): string {
     return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null
-      ? "Browser override"
-      : "Server default";
+      ? uiText().settings.browserOverride
+      : uiText().settings.serverDefault;
   }
 
   function refreshRepositoryTreeAfterSettings() {
@@ -760,6 +1229,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector<HTMLSelectElement>("#sidebar-font-size");
     const codeFontSize =
       document.querySelector<HTMLSelectElement>("#code-font-size");
+    const viewerLanguage =
+      document.querySelector<HTMLSelectElement>("#viewer-language");
     const source = document.querySelector<HTMLElement>("#scope-omit-source");
     if (
       !pop ||
@@ -767,22 +1238,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       !excludeInput ||
       !sidebarFontSize ||
       !codeFontSize ||
+      !viewerLanguage ||
       !source
     )
       return;
     await loadSettings();
+    localizeViewerChrome();
+    viewerLanguage.value = STATE.language;
     sidebarFontSize.value = savedSidebarFontSize();
     codeFontSize.value = savedCodeFontSize();
     input.value = effectiveScopeOmitDirs().join("\n");
     excludeInput.value = effectiveScopeExcludeNames().join("\n");
-    source.textContent =
-      'Saved for project "' +
-      (PROJECT_NAME || "default") +
-      '" in this browser. Source: ' +
-      scopeOmitSourceLabel() +
-      ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
+    source.textContent = uiText().settings.scopeSource(
+      PROJECT_NAME || "default",
+      scopeOmitSourceLabel(),
+    );
     pop.hidden = false;
-    sidebarFontSize.focus();
+    viewerLanguage.focus();
   }
 
   function closeScopeSettings() {
@@ -809,7 +1281,17 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector<HTMLSelectElement>("#sidebar-font-size");
     const codeFontSize =
       document.querySelector<HTMLSelectElement>("#code-font-size");
-    if (!input || !excludeInput || !sidebarFontSize || !codeFontSize) return;
+    const viewerLanguage =
+      document.querySelector<HTMLSelectElement>("#viewer-language");
+    if (
+      !input ||
+      !excludeInput ||
+      !sidebarFontSize ||
+      !codeFontSize ||
+      !viewerLanguage
+    )
+      return;
+    setViewerLanguage(normalizeViewerLanguage(viewerLanguage.value));
     localStorage.setItem(
       SIDEBAR_FONT_SIZE_KEY,
       normalizeViewerFontSize(sidebarFontSize.value),
@@ -833,6 +1315,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function resetScopeSettings() {
+    setViewerLanguage("en");
     localStorage.removeItem(SIDEBAR_FONT_SIZE_KEY);
     localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
     applySidebarFontSize("regular");
@@ -1104,7 +1587,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (link.dataset.route === "help") {
           link.href = buildRoute({
             screen: "help",
-            lang: helpLanguageFromRoute(STATE.route),
+            lang:
+              STATE.route.screen === "help"
+                ? helpLanguageFromRoute(STATE.route)
+                : STATE.language,
             section: helpSectionFromRoute(STATE.route),
             range: currentRange(),
           });
@@ -1223,6 +1709,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
     currentRange,
     syncHeaderMenu,
+    getLanguage: () => STATE.language,
+    setLanguage: (language) => setViewerLanguage(language),
   });
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------
@@ -1326,9 +1814,20 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
+  $("#viewer-language")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    setViewerLanguage(normalizeViewerLanguage(select.value));
+    const source = document.querySelector<HTMLElement>("#scope-omit-source");
+    if (source)
+      source.textContent = uiText().settings.scopeSource(
+        PROJECT_NAME || "default",
+        scopeOmitSourceLabel(),
+      );
+  });
   $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeScopeSettings();
   });
+  localizeViewerChrome();
   prepareKeyboardPanels();
   const contentPanel = document.querySelector<HTMLElement>("#content");
   contentPanel?.addEventListener("focusin", () => setPanelFocusScope("main"));
@@ -1854,10 +2353,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       window.location.search,
       currentRange(),
     );
-    STATE.route =
+    const routeLanguage = viewerLanguageFromSearch(window.location.search);
+    if (routeLanguage && routeLanguage !== STATE.language)
+      setViewerLanguage(routeLanguage);
+    const nextRoute: AppRoute =
       parsedRoute.screen === "unknown"
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
+    STATE.route =
+      nextRoute.screen === "help" &&
+      !new URLSearchParams(window.location.search).has("lang")
+        ? { ...nextRoute, lang: STATE.language }
+        : nextRoute;
     STATE.from = STATE.route.range.from;
     STATE.to = STATE.route.range.to;
     if (STATE.route.screen === "repo")
