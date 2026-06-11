@@ -9533,8 +9533,13 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   const annotationPanel = $("#annotation-panel");
   const annotationSessionsEl = $("#annotation-sessions");
-  const annotationCard = $("#annotation-card");
+  const annotationDetail = $("#annotation-detail");
   const annotationCountEl = $("#annotations-count");
+
+  function setAnnotationPanelOpen(open: boolean) {
+    annotationPanel.hidden = !open;
+    document.body.classList.toggle("annotation-panel-open", open);
+  }
 
   function annotationLineTarget(
     entry: AnnotationEntry,
@@ -9589,7 +9594,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     updateAnnotationBadge();
     renderAnnotationPanel();
     if (activeAnnotationId && !findAnnotation(activeAnnotationId))
-      hideAnnotationCard();
+      hideAnnotationDetail();
   }
 
   async function postAnnotationAction(
@@ -9685,28 +9690,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  function hideAnnotationCard() {
+  function hideAnnotationDetail() {
     activeAnnotationId = null;
-    annotationCard.hidden = true;
+    annotationDetail.hidden = true;
     renderAnnotationPanel();
   }
 
-  function showAnnotationCard(
+  function showAnnotationDetail(
     session: AnnotationSession,
     entry: AnnotationEntry,
     index: number,
   ) {
     activeAnnotationId = entry.id;
-    $("#annotation-card-session").textContent = session.title;
-    $("#annotation-card-step").textContent =
+    $("#annotation-detail-session").textContent = session.title;
+    $("#annotation-detail-step").textContent =
       `${index + 1}/${session.entries.length}`;
-    const location = $<HTMLAnchorElement>("#annotation-card-location");
+    const location = $<HTMLAnchorElement>("#annotation-detail-location");
     location.textContent = annotationLocationLabel(entry);
-    const body = $("#annotation-card-body");
+    const body = $("#annotation-detail-body");
     body.replaceChildren();
     if (entry.title) {
       const heading = document.createElement("strong");
-      heading.className = "annotation-card-title";
+      heading.className = "annotation-detail-title";
       heading.textContent = entry.title;
       body.appendChild(heading);
     }
@@ -9717,10 +9722,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       null,
     );
     body.appendChild(markdown);
-    $<HTMLButtonElement>("#annotation-card-prev").disabled = index <= 0;
-    $<HTMLButtonElement>("#annotation-card-next").disabled =
+    $<HTMLButtonElement>("#annotation-detail-prev").disabled = index <= 0;
+    $<HTMLButtonElement>("#annotation-detail-next").disabled =
       index >= session.entries.length - 1;
-    annotationCard.hidden = false;
+    annotationDetail.hidden = false;
+    setAnnotationPanelOpen(true);
     renderAnnotationPanel();
   }
 
@@ -9760,7 +9766,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setPageMode();
       void renderStandaloneSource({ path: entry.path, ref });
     }
-    showAnnotationCard(session, entry, index);
+    showAnnotationDetail(session, entry, index);
   }
 
   function stepAnnotation(direction: 1 | -1) {
@@ -9791,11 +9797,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   $("#annotations-toggle").addEventListener("click", () => {
-    annotationPanel.hidden = !annotationPanel.hidden;
+    setAnnotationPanelOpen(annotationPanel.hidden);
     if (!annotationPanel.hidden) void refreshAnnotations();
   });
   $("#annotation-panel-close").addEventListener("click", () => {
-    annotationPanel.hidden = true;
+    setAnnotationPanelOpen(false);
   });
   const followCheckbox = $<HTMLInputElement>("#annotation-follow");
   followCheckbox.checked = annotationFollow;
@@ -9805,17 +9811,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   $("#annotation-clear").addEventListener("click", () => {
     if (!window.confirm("Delete all annotations?")) return;
-    hideAnnotationCard();
+    hideAnnotationDetail();
     void postAnnotationAction({ action: "clear" });
   });
-  $("#annotation-card-close").addEventListener("click", hideAnnotationCard);
-  $("#annotation-card-prev").addEventListener("click", () => {
+  $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
+  $("#annotation-detail-prev").addEventListener("click", () => {
     stepAnnotation(-1);
   });
-  $("#annotation-card-next").addEventListener("click", () => {
+  $("#annotation-detail-next").addEventListener("click", () => {
     stepAnnotation(1);
   });
-  $("#annotation-card-location").addEventListener("click", (e) => {
+  $("#annotation-detail-location").addEventListener("click", (e) => {
     e.preventDefault();
     if (activeAnnotationId) void openAnnotationEntry(activeAnnotationId);
   });

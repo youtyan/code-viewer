@@ -106,11 +106,10 @@ Use `scope.omitDirs` for directories that should stay visible as skipped, and
 ## AI Code Annotations
 
 AI coding agents (Claude Code, Codex, and similar CLI agents) can walk you
-through a codebase inside the viewer. While a code-viewer server is running,
-an agent posts explanations for specific code locations with the `annotate`
-subcommand, and every open browser tab jumps to that location live — in the
-diff view when the file has changes in the current range, or in the source
-view otherwise:
+through a codebase inside the viewer. An agent posts explanations for
+specific code locations with the `annotate` subcommand, and every open
+browser tab jumps to that location live — in the diff view when the file has
+changes in the current range, or in the source view otherwise:
 
 ```sh
 code-viewer annotate start --title "How the SSE update flow works"
@@ -131,15 +130,19 @@ survives reloads and server restarts. The `.code-viewer` directory is
 tool-internal: it never shows up in the file tree, searches, or diffs. Add it
 to `.gitignore` if you do not want to share annotations through git.
 
-In the browser, the 💬 button in the header opens the annotation history.
-Clicking an entry jumps back to its location and shows the explanation card;
-entries and sessions can be deleted there too. The "follow" checkbox controls
-whether the tab jumps automatically when an agent adds a new annotation.
+In the browser, the 💬 button in the header opens the annotation side panel.
+The current explanation is rendered at the top of the panel while the code
+stays visible next to it, with the annotated lines highlighted. The history
+below groups annotations by session; clicking an entry jumps back to its
+location, and entries and sessions can be deleted there too. The "follow"
+checkbox controls whether the tab jumps automatically when an agent adds a
+new annotation.
 
-The `annotate` subcommand finds the running server automatically (via
-`~/.cache/code-viewer/servers/`). Pass `--cwd <repo>` when annotating a
-repository other than the current directory, or `--server <url>` to target a
-specific server.
+The `annotate` subcommand reuses the running server for the repository when
+one exists (discovered via `~/.cache/code-viewer/servers/`) and starts one
+automatically otherwise, printing its URL to stderr. Pass `--cwd <repo>` when
+annotating a repository other than the current directory, or `--server <url>`
+to target a specific server.
 
 ## Development
 

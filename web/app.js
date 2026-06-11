@@ -14303,8 +14303,12 @@ ${frontmatter.yaml}
     let activeAnnotationId = null;
     const annotationPanel = $("#annotation-panel");
     const annotationSessionsEl = $("#annotation-sessions");
-    const annotationCard = $("#annotation-card");
+    const annotationDetail = $("#annotation-detail");
     const annotationCountEl = $("#annotations-count");
+    function setAnnotationPanelOpen(open) {
+      annotationPanel.hidden = !open;
+      document.body.classList.toggle("annotation-panel-open", open);
+    }
     function annotationLineTarget(entry) {
       if (!entry.line)
         return;
@@ -14344,7 +14348,7 @@ ${frontmatter.yaml}
       updateAnnotationBadge();
       renderAnnotationPanel();
       if (activeAnnotationId && !findAnnotation(activeAnnotationId))
-        hideAnnotationCard();
+        hideAnnotationDetail();
     }
     async function postAnnotationAction(payload) {
       try {
@@ -14427,31 +14431,32 @@ ${frontmatter.yaml}
         annotationSessionsEl.appendChild(sessionEl);
       }
     }
-    function hideAnnotationCard() {
+    function hideAnnotationDetail() {
       activeAnnotationId = null;
-      annotationCard.hidden = true;
+      annotationDetail.hidden = true;
       renderAnnotationPanel();
     }
-    function showAnnotationCard(session, entry, index) {
+    function showAnnotationDetail(session, entry, index) {
       activeAnnotationId = entry.id;
-      $("#annotation-card-session").textContent = session.title;
-      $("#annotation-card-step").textContent = `${index + 1}/${session.entries.length}`;
-      const location2 = $("#annotation-card-location");
+      $("#annotation-detail-session").textContent = session.title;
+      $("#annotation-detail-step").textContent = `${index + 1}/${session.entries.length}`;
+      const location2 = $("#annotation-detail-location");
       location2.textContent = annotationLocationLabel(entry);
-      const body = $("#annotation-card-body");
+      const body = $("#annotation-detail-body");
       body.replaceChildren();
       if (entry.title) {
         const heading2 = document.createElement("strong");
-        heading2.className = "annotation-card-title";
+        heading2.className = "annotation-detail-title";
         heading2.textContent = entry.title;
         body.appendChild(heading2);
       }
       const markdown = document.createElement("div");
       markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
       body.appendChild(markdown);
-      $("#annotation-card-prev").disabled = index <= 0;
-      $("#annotation-card-next").disabled = index >= session.entries.length - 1;
-      annotationCard.hidden = false;
+      $("#annotation-detail-prev").disabled = index <= 0;
+      $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
+      annotationDetail.hidden = false;
+      setAnnotationPanelOpen(true);
       renderAnnotationPanel();
     }
     async function openAnnotationEntry(entryId) {
@@ -14485,7 +14490,7 @@ ${frontmatter.yaml}
         setPageMode();
         renderStandaloneSource({ path: entry.path, ref });
       }
-      showAnnotationCard(session, entry, index);
+      showAnnotationDetail(session, entry, index);
     }
     function stepAnnotation(direction) {
       if (!activeAnnotationId)
@@ -14511,12 +14516,12 @@ ${frontmatter.yaml}
       });
     }
     $("#annotations-toggle").addEventListener("click", () => {
-      annotationPanel.hidden = !annotationPanel.hidden;
+      setAnnotationPanelOpen(annotationPanel.hidden);
       if (!annotationPanel.hidden)
         refreshAnnotations();
     });
     $("#annotation-panel-close").addEventListener("click", () => {
-      annotationPanel.hidden = true;
+      setAnnotationPanelOpen(false);
     });
     const followCheckbox = $("#annotation-follow");
     followCheckbox.checked = annotationFollow;
@@ -14527,17 +14532,17 @@ ${frontmatter.yaml}
     $("#annotation-clear").addEventListener("click", () => {
       if (!window.confirm("Delete all annotations?"))
         return;
-      hideAnnotationCard();
+      hideAnnotationDetail();
       postAnnotationAction({ action: "clear" });
     });
-    $("#annotation-card-close").addEventListener("click", hideAnnotationCard);
-    $("#annotation-card-prev").addEventListener("click", () => {
+    $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
+    $("#annotation-detail-prev").addEventListener("click", () => {
       stepAnnotation(-1);
     });
-    $("#annotation-card-next").addEventListener("click", () => {
+    $("#annotation-detail-next").addEventListener("click", () => {
       stepAnnotation(1);
     });
-    $("#annotation-card-location").addEventListener("click", (e2) => {
+    $("#annotation-detail-location").addEventListener("click", (e2) => {
       e2.preventDefault();
       if (activeAnnotationId)
         openAnnotationEntry(activeAnnotationId);

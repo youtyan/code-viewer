@@ -146,20 +146,19 @@
       <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
       <button id="annotation-panel-close" type="button" aria-label="close annotations panel">×</button>
     </div>
+    <div id="annotation-detail" hidden>
+      <div class="annotation-detail-head">
+        <span id="annotation-detail-session"></span>
+        <span id="annotation-detail-step"></span>
+        <button id="annotation-detail-prev" type="button" title="previous annotation">‹</button>
+        <button id="annotation-detail-next" type="button" title="next annotation">›</button>
+        <button id="annotation-detail-close" type="button" aria-label="close annotation detail">×</button>
+      </div>
+      <a id="annotation-detail-location" href="#"></a>
+      <div id="annotation-detail-body" class="markdown-body"></div>
+    </div>
     <div id="annotation-sessions"></div>
   </aside>
-
-  <div id="annotation-card" hidden>
-    <div class="annotation-card-head">
-      <span id="annotation-card-session"></span>
-      <span id="annotation-card-step"></span>
-      <button id="annotation-card-prev" type="button" title="previous annotation">‹</button>
-      <button id="annotation-card-next" type="button" title="next annotation">›</button>
-      <button id="annotation-card-close" type="button" aria-label="close annotation">×</button>
-    </div>
-    <a id="annotation-card-location" href="#"></a>
-    <div id="annotation-card-body" class="markdown-body"></div>
-  </div>
 
   <main id="content">
     <div id="empty" class="empty hidden">
