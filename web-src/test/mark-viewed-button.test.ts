@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { sourceFixture } from "./source-fixture";
 
 const html = readFileSync("web/index.html", "utf8");
-const appSource = sourceFixture(readFileSync("web-src/app.ts", "utf8"));
+const appSource = sourceFixture(
+  readFileSync("web-src/app.ts", "utf8") +
+    readFileSync("web-src/sidebar.ts", "utf8"),
+);
 const style = readFileSync("web/style.css", "utf8");
 
 describe("mark viewed toolbar button", () => {
