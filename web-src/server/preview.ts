@@ -928,6 +928,7 @@ function handleTree(url: URL) {
 function handleSettings() {
   return json({
     project: basename(cwd),
+    repo_web_url: git.remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
       omit_dirs_built_in: git.DEFAULT_WORKTREE_OMIT_DIR_NAMES,

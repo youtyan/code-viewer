@@ -3,6 +3,7 @@ import { normalizeNewDirectoryName } from "../core/directory-name";
 import {
   fileNameClipboardText,
   filePathClipboardText,
+  fileReferenceClipboardText,
 } from "../core/file-path-copy";
 
 describe("filePathClipboardText", () => {
@@ -18,6 +19,26 @@ describe("filePathClipboardText", () => {
     expect(fileNameClipboardText("web-src/app.ts")).toBe("app.ts");
     expect(fileNameClipboardText("web-src")).toBe("web-src");
     expect(fileNameClipboardText("")).toBe("");
+  });
+});
+
+describe("fileReferenceClipboardText", () => {
+  test("formats a single line as @path#line", () => {
+    expect(fileReferenceClipboardText("bun.lock", 1, 1)).toBe("@bun.lock#1");
+  });
+
+  test("formats a range as @path#start-end", () => {
+    expect(fileReferenceClipboardText("web-src/app.ts", 120, 135)).toBe(
+      "@web-src/app.ts#120-135",
+    );
+  });
+
+  test("normalizes reversed ranges", () => {
+    expect(fileReferenceClipboardText("a.ts", 9, 3)).toBe("@a.ts#3-9");
+  });
+
+  test("returns empty for missing path", () => {
+    expect(fileReferenceClipboardText("", 1, 2)).toBe("");
   });
 });
 
