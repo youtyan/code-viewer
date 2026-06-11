@@ -60,6 +60,12 @@ describe("search path filtering", () => {
     );
     expect(isSkippableSearchPath("src/app.ts")).toBe(false);
   });
+
+  test("always skips the tool-internal .code-viewer directory", () => {
+    expect(isSkippableSearchPath(".code-viewer/annotations.json")).toBe(true);
+    expect(isSkippableSearchPath("docs/.code-viewer/notes.md")).toBe(true);
+    expect(isSkippableSearchPath("src/code-viewer.ts")).toBe(false);
+  });
 });
 
 describe("buildFileSearchList", () => {

@@ -435,11 +435,21 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
   return files;
 }
 
+export function isToolInternalPath(path: string): boolean {
+  return path
+    .split(/[\\/]+/)
+    .some((part) => part.toLowerCase() === ".code-viewer");
+}
+
 export function untracked(cwd: string, path = ""): string[] {
   const args = ["git", "ls-files", "--others", "--exclude-standard"];
   if (path) args.push("--", `${path}/`);
   const res = run(args, cwd);
-  return res.code === 0 ? res.stdout.split("\n").filter(Boolean) : [];
+  if (res.code !== 0) return [];
+  return res.stdout
+    .split("\n")
+    .filter(Boolean)
+    .filter((entry) => !isToolInternalPath(entry));
 }
 
 function normalizeTreePath(path: string): string {
@@ -469,7 +479,7 @@ function worktreeEntryFromDirent(
   omitDirNames: Set<string>,
   excludeNames: Set<string>,
 ): GitTreeEntry {
-  if (excludeNames.has(name.toLowerCase()))
+  if (excludeNames.has(name.toLowerCase()) || isToolInternalPath(name))
     return {
       name,
       path: "",

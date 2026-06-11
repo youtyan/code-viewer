@@ -28,6 +28,7 @@
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
     </nav>
     <div class="global-actions">
+      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
@@ -134,6 +135,30 @@
         <button id="scope-omit-save" type="button">Save</button>
       </div>
     </div>
+  </div>
+
+  <aside id="annotation-panel" hidden>
+    <div class="annotation-panel-head">
+      <strong>Code annotations</strong>
+      <label class="annotation-follow-label" title="jump to new annotations as they arrive">
+        <input type="checkbox" id="annotation-follow" checked /> follow
+      </label>
+      <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
+      <button id="annotation-panel-close" type="button" aria-label="close annotations panel">×</button>
+    </div>
+    <div id="annotation-sessions"></div>
+  </aside>
+
+  <div id="annotation-card" hidden>
+    <div class="annotation-card-head">
+      <span id="annotation-card-session"></span>
+      <span id="annotation-card-step"></span>
+      <button id="annotation-card-prev" type="button" title="previous annotation">‹</button>
+      <button id="annotation-card-next" type="button" title="next annotation">›</button>
+      <button id="annotation-card-close" type="button" aria-label="close annotation">×</button>
+    </div>
+    <a id="annotation-card-location" href="#"></a>
+    <div id="annotation-card-body" class="markdown-body"></div>
   </div>
 
   <main id="content">

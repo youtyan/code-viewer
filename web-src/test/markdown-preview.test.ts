@@ -199,7 +199,7 @@ describe("markdown preview", () => {
   test("app wires markdown preview into README and file detail previews", () => {
     expect(
       app.includes(
-        "import { renderMarkdownPreview } from './markdown-preview'",
+        "import { renderMarkdownHtml, renderMarkdownPreview } from './markdown-preview'",
       ),
     ).toBe(true);
     expect(app.includes("onNavigateMarkdown: (path, ref) => {")).toBe(true);

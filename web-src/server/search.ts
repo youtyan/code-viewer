@@ -22,7 +22,12 @@ export function isSkippableSearchPath(
   const excluded = new Set(excludeNames.map((name) => name.toLowerCase()));
   return path.split(/[\\/]+/).some((part) => {
     const lower = part.toLowerCase();
-    return lower === ".git" || omitDirs.has(lower) || excluded.has(lower);
+    return (
+      lower === ".git" ||
+      lower === ".code-viewer" ||
+      omitDirs.has(lower) ||
+      excluded.has(lower)
+    );
   });
 }
 
