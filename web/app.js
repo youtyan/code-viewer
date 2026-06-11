@@ -15649,6 +15649,7 @@ ${frontmatter.yaml}
       }
       if (action === "annotation-next" || action === "annotation-previous") {
         ANNOTATIONS_UI?.stepAnnotation(action === "annotation-next" ? 1 : -1);
+        scheduleMainSurfaceFocus();
         return true;
       }
       if (action === "start-g-sequence") {
