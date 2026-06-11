@@ -6687,11 +6687,24 @@ ${frontmatter.yaml}
       updateActiveHighlights();
       syncInlineAnnotationActive();
     }
+    function focusStandaloneSourceLines(card, entry) {
+      if (!entry.line)
+        return;
+      const { start, end } = entry.line;
+      card.querySelectorAll(".gdp-source-table tr[data-line]").forEach((tr) => {
+        const n2 = Number(tr.dataset.line);
+        tr.classList.toggle("gdp-source-line-target", n2 >= start && n2 <= end);
+      });
+    }
+    let openEntrySeq = 0;
     async function openAnnotationEntry(entryId) {
+      const seq = ++openEntrySeq;
+      const stale = () => seq !== openEntrySeq;
       const found = findAnnotation(entryId);
       if (!found)
         return;
       const { session, entry, index } = found;
+      showAnnotationDetail(session, entry, index);
       const sessionChanged = activeSessionId !== session.id;
       activeSessionId = session.id;
       const from = entry.range.from || "HEAD";
@@ -6699,26 +6712,40 @@ ${frontmatter.yaml}
       const range = { from, to };
       const current = deps.currentRange();
       const rangeChanged = current.from !== from || current.to !== to;
-      const wasDiffScreen = deps.getRoute().screen === "diff";
+      const prevRoute = deps.getRoute();
       const line = annotationLineTarget(entry);
       deps.setRange(from, to);
       deps.syncRefInputs();
       deps.cancelActiveSourceLoad("navigation");
       deps.setRoute({ screen: "diff", range, path: entry.path, line });
       deps.setPageMode();
-      deps.removeStandaloneSource();
-      if (rangeChanged || !wasDiffScreen || !deps.getFiles().length)
+      const hasDiffCards = !!document.querySelector(".gdp-file-shell:not(.gdp-standalone-source)");
+      if (rangeChanged || !deps.getFiles().length || !hasDiffCards) {
+        deps.removeStandaloneSource();
         await deps.load();
+        if (stale())
+          return;
+      }
       if (deps.getFiles().some((f2) => f2.path === entry.path)) {
+        deps.removeStandaloneSource();
         deps.scrollToFile(entry.path, line);
         await expandAnnotationContext(entry);
+        if (stale())
+          return;
       } else {
         const ref = annotationRefForEntry(entry);
+        const card = document.querySelector(".gdp-standalone-source");
+        const reusable = prevRoute.screen === "file" && prevRoute.path === entry.path && prevRoute.ref === ref && card?.dataset.path === entry.path && !!card.querySelector(".gdp-source-table");
         deps.setRoute({ screen: "file", path: entry.path, ref, view: "blob", line, range }, true);
         deps.setPageMode();
-        await deps.renderStandaloneSource({ path: entry.path, ref });
+        if (reusable && card) {
+          focusStandaloneSourceLines(card, entry);
+        } else {
+          await deps.renderStandaloneSource({ path: entry.path, ref });
+          if (stale())
+            return;
+        }
       }
-      showAnnotationDetail(session, entry, index);
       const rowSelector = `.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`;
       if (sessionChanged || !document.querySelector(rowSelector))
         applyInlineAnnotations();
@@ -8917,7 +8944,8 @@ ${frontmatter.yaml}
       SIDEBAR_ROW_BY_PATH = new Map;
       SIDEBAR_LAZY_LOADED_DIRS.clear();
       SIDEBAR_LAZY_LOADING_DIRS.clear();
-      STATE.files = files;
+      if (!onFileClick)
+        STATE.files = files;
       SIDEBAR_FILES = files;
       SIDEBAR_ON_FILE_CLICK = onFileClick;
       if (!onFileClick)
@@ -12760,7 +12788,7 @@ ${frontmatter.yaml}
         layout.className = "gdp-repo-blob-layout";
         renderRepoBlobSidebar(target.path, repoTarget);
         layout.appendChild(card);
-        root.replaceChildren(layout);
+        root.prepend(layout);
       } else {
         root.prepend(card);
       }
