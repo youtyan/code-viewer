@@ -30,6 +30,15 @@ import type {
   UndoActionResponse,
 } from "../types";
 import {
+  addAnnotationEntry,
+  ANNOTATION_BODY_MAX_BYTES,
+  deleteAnnotationById,
+  emptyAnnotationsState,
+  loadAnnotationsState,
+  saveAnnotationsState,
+  startAnnotationSession,
+} from "./annotations";
+import {
   cacheFresh,
   fileDiffCacheKey,
   setTimedCacheEntry,
@@ -69,6 +78,7 @@ import {
   parseGitGrepOutput,
   parseRgOutput,
 } from "./search";
+import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { startWorktreeUpdateWatch } from "./worktree-watcher";
 
 const WEB_ROOT = join(ROOT, "web");
@@ -164,12 +174,14 @@ function parseCli() {
 
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
+  code-viewer annotate <start|add|list|delete|clear> [options]
 
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
   code-viewer HEAD~1 HEAD
   code-viewer --staged
+  code-viewer annotate --help
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
@@ -2165,6 +2177,111 @@ async function handleRestoreTrash(req: Request) {
   return json({ ok: true, generation });
 }
 
+function annotationSse(
+  kind: "start" | "add" | "delete" | "clear",
+  sessionId?: string,
+  entryId?: string,
+) {
+  sendSse(
+    "annotation",
+    JSON.stringify({ kind, session_id: sessionId, entry_id: entryId }),
+  );
+}
+
+async function handleAnnotations(req: Request) {
+  if (req.method === "GET") return json(loadAnnotationsState(cwd));
+  if (req.method !== "POST") return text("method not allowed", 405);
+  if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType))
+    return text("unsupported media type", 415);
+  const maxBytes = ANNOTATION_BODY_MAX_BYTES + 4096;
+  const length = Number(req.headers.get("content-length") || "0");
+  if (length > maxBytes) return text("payload too large", 413);
+
+  let body: Record<string, unknown> = {};
+  try {
+    const raw = await req.text();
+    if (raw.length > maxBytes) return text("payload too large", 413);
+    body = JSON.parse(raw);
+  } catch {
+    return text("invalid json", 400);
+  }
+
+  const action = body.action;
+  if (action === "start") {
+    const title = typeof body.title === "string" ? body.title : "";
+    const started = startAnnotationSession(
+      loadAnnotationsState(cwd),
+      title,
+      new Date().toISOString(),
+    );
+    saveAnnotationsState(cwd, started.state);
+    annotationSse("start", started.session.id);
+    return json({ ok: true, session: started.session });
+  }
+  if (action === "add") {
+    const path =
+      typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
+    if (!path || !safeRepoPath(path)) return text("invalid path", 400);
+    if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+      return text("forbidden", 403);
+    const result = addAnnotationEntry(
+      loadAnnotationsState(cwd),
+      {
+        session_id:
+          typeof body.session_id === "string" ? body.session_id : undefined,
+        session_title:
+          typeof body.session_title === "string"
+            ? body.session_title
+            : undefined,
+        path,
+        line:
+          body.line && typeof body.line === "object"
+            ? (body.line as { start: number; end: number })
+            : undefined,
+        range:
+          body.range && typeof body.range === "object"
+            ? (body.range as { from?: string; to?: string })
+            : undefined,
+        title: typeof body.title === "string" ? body.title : undefined,
+        body: typeof body.body === "string" ? body.body : "",
+      },
+      new Date().toISOString(),
+    );
+    if (result.ok === false) return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("add", result.session.id, result.entry.id);
+    return json({
+      ok: true,
+      session_id: result.session.id,
+      entry: result.entry,
+    });
+  }
+  if (action === "delete") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return text("invalid id", 400);
+    const result = deleteAnnotationById(loadAnnotationsState(cwd), id);
+    if (result.removed) {
+      saveAnnotationsState(cwd, result.state);
+      annotationSse("delete");
+    }
+    return json({ ok: true, removed: result.removed });
+  }
+  if (action === "clear") {
+    saveAnnotationsState(cwd, emptyAnnotationsState());
+    annotationSse("clear");
+    return json({ ok: true });
+  }
+  return text("invalid action", 400);
+}
+
+function isCodeViewerInternalPath(path: string): boolean {
+  return path
+    .split(/[\\/]+/)
+    .some((part) => part.toLowerCase() === ".code-viewer");
+}
+
 function sendSse(event: string, data = "tick") {
   const payload = enc.encode(`event: ${event}\ndata: ${data}\n\n`);
   for (const client of [...sseClients]) {
@@ -2211,6 +2328,7 @@ const server = await startServer({
     if (url.pathname === "/_create_directory")
       return handleCreateDirectory(req);
     if (url.pathname === "/_upload_files") return handleUploadFiles(req);
+    if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {
       if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
@@ -2254,6 +2372,20 @@ const server = await startServer({
 
 if (openAfterStart) {
   openBrowser(`http://127.0.0.1:${server.port}/`);
+}
+
+writeServerRegistry({
+  url: `http://127.0.0.1:${server.port}/`,
+  pid: process.pid,
+  root: cwd,
+  started_at: new Date().toISOString(),
+});
+process.on("exit", () => removeServerRegistry(cwd, process.pid));
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    removeServerRegistry(cwd, process.pid);
+    process.exit(0);
+  });
 }
 
 startDevAssetReload({

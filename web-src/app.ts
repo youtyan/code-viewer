@@ -28,7 +28,7 @@ import {
   type KeymapScope,
   resolveKeymapAction,
 } from "./keymap";
-import { renderMarkdownPreview } from "./markdown-preview";
+import { renderMarkdownHtml, renderMarkdownPreview } from "./markdown-preview";
 import {
   type AppRoute,
   buildRawFileUrl,
@@ -40,6 +40,10 @@ import {
 } from "./routes";
 import { limitPaletteResults, movePaletteSelection } from "./search-palette";
 import type {
+  AnnotationEntry,
+  AnnotationSession,
+  AnnotationSseEvent,
+  AnnotationsState,
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
@@ -9518,6 +9522,305 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTests();
   });
 
+  // ---- Code annotations (AI walkthrough) ----
+  // Agents post explanations for code locations through the CLI
+  // (`code-viewer annotate add ...`). The server persists them under
+  // .code-viewer/annotations.json and notifies open tabs over SSE; with
+  // follow mode on, the viewer jumps to each new location as it arrives.
+  let ANNOTATIONS: AnnotationsState = { version: 1, sessions: [] };
+  let annotationFollow = localStorage.getItem("gdp:annotation-follow") !== "0";
+  let activeAnnotationId: string | null = null;
+
+  const annotationPanel = $("#annotation-panel");
+  const annotationSessionsEl = $("#annotation-sessions");
+  const annotationCard = $("#annotation-card");
+  const annotationCountEl = $("#annotations-count");
+
+  function annotationLineTarget(
+    entry: AnnotationEntry,
+  ): SourceLineTarget | undefined {
+    if (!entry.line) return undefined;
+    return entry.line.start === entry.line.end
+      ? entry.line.start
+      : { start: entry.line.start, end: entry.line.end };
+  }
+
+  function annotationLocationLabel(entry: AnnotationEntry): string {
+    if (!entry.line) return entry.path;
+    return entry.line.start === entry.line.end
+      ? `${entry.path}:${entry.line.start}`
+      : `${entry.path}:${entry.line.start}-${entry.line.end}`;
+  }
+
+  function annotationRefForEntry(entry: AnnotationEntry): string {
+    const to = entry.range.to || "worktree";
+    return to === "worktree" || to === "" ? "worktree" : to;
+  }
+
+  function findAnnotation(entryId: string): {
+    session: AnnotationSession;
+    entry: AnnotationEntry;
+    index: number;
+  } | null {
+    for (const session of ANNOTATIONS.sessions) {
+      const index = session.entries.findIndex((e) => e.id === entryId);
+      if (index >= 0) return { session, entry: session.entries[index], index };
+    }
+    return null;
+  }
+
+  function updateAnnotationBadge() {
+    const total = ANNOTATIONS.sessions.reduce(
+      (sum, session) => sum + session.entries.length,
+      0,
+    );
+    annotationCountEl.textContent = String(total);
+    annotationCountEl.hidden = total === 0;
+  }
+
+  async function refreshAnnotations(): Promise<void> {
+    try {
+      const res = await fetch("/_annotations");
+      if (!res.ok) return;
+      ANNOTATIONS = (await res.json()) as AnnotationsState;
+    } catch {
+      return;
+    }
+    updateAnnotationBadge();
+    renderAnnotationPanel();
+    if (activeAnnotationId && !findAnnotation(activeAnnotationId))
+      hideAnnotationCard();
+  }
+
+  async function postAnnotationAction(
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await fetch("/_annotations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      /* refresh below shows the real state either way */
+    }
+    await refreshAnnotations();
+  }
+
+  function annotationEntrySummary(entry: AnnotationEntry): string {
+    const text = entry.title || entry.body;
+    const firstLine = text.split("\n")[0].trim();
+    return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
+  }
+
+  function renderAnnotationPanel() {
+    annotationSessionsEl.replaceChildren();
+    if (!ANNOTATIONS.sessions.length) {
+      const empty = document.createElement("p");
+      empty.className = "annotation-empty";
+      empty.textContent =
+        "No annotations yet. Agents can add them with: code-viewer annotate add";
+      annotationSessionsEl.appendChild(empty);
+      return;
+    }
+    for (const session of [...ANNOTATIONS.sessions].reverse()) {
+      const sessionEl = document.createElement("section");
+      sessionEl.className = "annotation-session";
+
+      const head = document.createElement("div");
+      head.className = "annotation-session-head";
+      const title = document.createElement("strong");
+      title.textContent = session.title;
+      title.title = session.created_at;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "annotation-delete";
+      del.title = "delete session";
+      del.setAttribute("aria-label", `delete session ${session.title}`);
+      del.textContent = "×";
+      del.addEventListener("click", () => {
+        void postAnnotationAction({ action: "delete", id: session.id });
+      });
+      head.append(title, del);
+      sessionEl.appendChild(head);
+
+      const list = document.createElement("ol");
+      list.className = "annotation-entries";
+      session.entries.forEach((entry) => {
+        const item = document.createElement("li");
+        item.classList.toggle("active", entry.id === activeAnnotationId);
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "annotation-entry-open";
+        const location = document.createElement("span");
+        location.className = "annotation-entry-location";
+        location.textContent = annotationLocationLabel(entry);
+        const summary = document.createElement("span");
+        summary.className = "annotation-entry-summary";
+        summary.textContent = annotationEntrySummary(entry);
+        open.append(location, summary);
+        open.addEventListener("click", () => {
+          void openAnnotationEntry(entry.id);
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "annotation-delete";
+        remove.title = "delete annotation";
+        remove.setAttribute(
+          "aria-label",
+          `delete annotation for ${annotationLocationLabel(entry)}`,
+        );
+        remove.textContent = "×";
+        remove.addEventListener("click", () => {
+          void postAnnotationAction({ action: "delete", id: entry.id });
+        });
+        item.append(open, remove);
+        list.appendChild(item);
+      });
+      sessionEl.appendChild(list);
+      annotationSessionsEl.appendChild(sessionEl);
+    }
+  }
+
+  function hideAnnotationCard() {
+    activeAnnotationId = null;
+    annotationCard.hidden = true;
+    renderAnnotationPanel();
+  }
+
+  function showAnnotationCard(
+    session: AnnotationSession,
+    entry: AnnotationEntry,
+    index: number,
+  ) {
+    activeAnnotationId = entry.id;
+    $("#annotation-card-session").textContent = session.title;
+    $("#annotation-card-step").textContent =
+      `${index + 1}/${session.entries.length}`;
+    const location = $<HTMLAnchorElement>("#annotation-card-location");
+    location.textContent = annotationLocationLabel(entry);
+    const body = $("#annotation-card-body");
+    body.replaceChildren();
+    if (entry.title) {
+      const heading = document.createElement("strong");
+      heading.className = "annotation-card-title";
+      heading.textContent = entry.title;
+      body.appendChild(heading);
+    }
+    const markdown = document.createElement("div");
+    markdown.innerHTML = renderMarkdownHtml(
+      entry.body,
+      { path: entry.path, ref: annotationRefForEntry(entry) },
+      null,
+    );
+    body.appendChild(markdown);
+    $<HTMLButtonElement>("#annotation-card-prev").disabled = index <= 0;
+    $<HTMLButtonElement>("#annotation-card-next").disabled =
+      index >= session.entries.length - 1;
+    annotationCard.hidden = false;
+    renderAnnotationPanel();
+  }
+
+  async function openAnnotationEntry(entryId: string): Promise<void> {
+    const found = findAnnotation(entryId);
+    if (!found) return;
+    const { session, entry, index } = found;
+    const from = entry.range.from || "HEAD";
+    const to = entry.range.to || "worktree";
+    const range = { from, to };
+    const current = currentRange();
+    const rangeChanged = current.from !== from || current.to !== to;
+    const wasDiffScreen = STATE.route.screen === "diff";
+    const line = annotationLineTarget(entry);
+
+    STATE.from = from;
+    STATE.to = to;
+    localStorage.setItem("gdp:from", from);
+    localStorage.setItem("gdp:to", to);
+    syncRefInputs();
+    cancelActiveSourceLoad("navigation");
+    setRoute({ screen: "diff", range, path: entry.path, line });
+    setPageMode();
+    removeStandaloneSource();
+    if (rangeChanged || !wasDiffScreen || !STATE.files.length) await load();
+
+    if (STATE.files.some((f) => f.path === entry.path)) {
+      scrollToFile(entry.path, line);
+    } else {
+      // The annotated file has no diff in this range — show its source
+      // directly so unchanged code can be explained too.
+      const ref = annotationRefForEntry(entry);
+      setRoute(
+        { screen: "file", path: entry.path, ref, view: "blob", line, range },
+        true,
+      );
+      setPageMode();
+      void renderStandaloneSource({ path: entry.path, ref });
+    }
+    showAnnotationCard(session, entry, index);
+  }
+
+  function stepAnnotation(direction: 1 | -1) {
+    if (!activeAnnotationId) return;
+    const found = findAnnotation(activeAnnotationId);
+    if (!found) return;
+    const next = found.session.entries[found.index + direction];
+    if (next) void openAnnotationEntry(next.id);
+  }
+
+  function handleAnnotationSse(raw: string) {
+    let event: AnnotationSseEvent | null = null;
+    try {
+      event = JSON.parse(raw) as AnnotationSseEvent;
+    } catch {
+      event = null;
+    }
+    void refreshAnnotations().then(() => {
+      if (
+        event?.kind === "add" &&
+        event.entry_id &&
+        annotationFollow &&
+        findAnnotation(event.entry_id)
+      ) {
+        void openAnnotationEntry(event.entry_id);
+      }
+    });
+  }
+
+  $("#annotations-toggle").addEventListener("click", () => {
+    annotationPanel.hidden = !annotationPanel.hidden;
+    if (!annotationPanel.hidden) void refreshAnnotations();
+  });
+  $("#annotation-panel-close").addEventListener("click", () => {
+    annotationPanel.hidden = true;
+  });
+  const followCheckbox = $<HTMLInputElement>("#annotation-follow");
+  followCheckbox.checked = annotationFollow;
+  followCheckbox.addEventListener("change", () => {
+    annotationFollow = followCheckbox.checked;
+    localStorage.setItem("gdp:annotation-follow", annotationFollow ? "1" : "0");
+  });
+  $("#annotation-clear").addEventListener("click", () => {
+    if (!window.confirm("Delete all annotations?")) return;
+    hideAnnotationCard();
+    void postAnnotationAction({ action: "clear" });
+  });
+  $("#annotation-card-close").addEventListener("click", hideAnnotationCard);
+  $("#annotation-card-prev").addEventListener("click", () => {
+    stepAnnotation(-1);
+  });
+  $("#annotation-card-next").addEventListener("click", () => {
+    stepAnnotation(1);
+  });
+  $("#annotation-card-location").addEventListener("click", (e) => {
+    e.preventDefault();
+    if (activeAnnotationId) void openAnnotationEntry(activeAnnotationId);
+  });
+  void refreshAnnotations();
+
   // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession
   // collapse into one fetch. Scroll + active file are preserved across reload.
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -9548,6 +9851,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let openedOnce = false;
   es.addEventListener("update", () => scheduleSseLoad());
   es.addEventListener("reload", () => location.reload());
+  es.addEventListener("annotation", (event) => {
+    handleAnnotationSse((event as MessageEvent).data);
+  });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {
     setStatus("live");
