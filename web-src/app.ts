@@ -1906,6 +1906,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   document
     .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
     .forEach((link) => {
+      // External links (the GitHub repo link) keep native anchor behavior;
+      // hijacking them would push their pathname onto the local origin.
+      if (link.target === "_blank") return;
       link.addEventListener("click", (e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
           return;
