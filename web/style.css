@@ -1806,7 +1806,10 @@ body.gdp-help-page #content {
 
 #diff > *:first-child { margin-top: 0; }
 
-body:not(.gdp-file-detail-page) #diff::after {
+/* Scroll-past-end spacer so the sidebar can align the last diff file to the
+   top of the viewport. Not wanted on the history screen, where small
+   single-commit diffs would gain a screenful of dead scroll space. */
+body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
   content: "";
   display: block;
   height: calc(100vh - var(--chrome-h) - 40px);
