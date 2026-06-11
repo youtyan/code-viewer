@@ -6699,6 +6699,24 @@ ${frontmatter.yaml}
     let activeAnnotationId = null;
     let annotationPanelDismissed = false;
     let activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
+    let mdHighlighter = null;
+    let mdHighlighterRequested = false;
+    function ensureMarkdownHighlighter() {
+      if (mdHighlighter || mdHighlighterRequested)
+        return;
+      mdHighlighterRequested = true;
+      loadMarkdownHighlighter().then((highlighter) => {
+        mdHighlighter = highlighter;
+        if (!highlighter)
+          return;
+        applyInlineAnnotations();
+        if (activeAnnotationId) {
+          const found = findAnnotation(activeAnnotationId);
+          if (found)
+            showAnnotationDetail(found.session, found.entry, found.index);
+        }
+      });
+    }
     const annotationPanel = $("#annotation-panel");
     const annotationSessionsEl = $("#annotation-sessions");
     const annotationDetail = $("#annotation-detail");
@@ -6749,7 +6767,8 @@ ${frontmatter.yaml}
       }
       const markdown = document.createElement("div");
       markdown.className = "gdp-annotation-inline-body";
-      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
       box.appendChild(markdown);
       td.appendChild(box);
       tr.appendChild(td);
@@ -7007,7 +7026,8 @@ ${frontmatter.yaml}
         body.appendChild(heading2);
       }
       const markdown = document.createElement("div");
-      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
       body.appendChild(markdown);
       $("#annotation-detail-prev").disabled = index <= 0;
       $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
