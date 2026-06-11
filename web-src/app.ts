@@ -24,6 +24,13 @@ import {
   isGlobPathQuery,
   rankPathMatches,
 } from "./fuzzy-search";
+import {
+  createHelpPage,
+  type HelpLanguage,
+  type HelpSection,
+  helpLanguageFromRoute,
+  helpSectionFromRoute,
+} from "./help-page";
 import { createHunkExpand, type ExpandStackElement } from "./hunk-expand";
 import {
   CHEVRON_DOWN_12_PATH,
@@ -84,8 +91,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   type SidebarView = "tree" | "flat";
   type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
   type ThemeMode = "light" | "dark";
-  type HelpLanguage = "en" | "ja";
-  type HelpSection = "keybindings";
   type LoadQueueItem = {
     file: FileMeta;
     card: DiffCardElement;
@@ -158,19 +163,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   };
   type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
-  type HelpContent = {
-    languageLabel: string;
-    title: string;
-    sections: Record<
-      HelpSection,
-      {
-        nav: string;
-        title: string;
-        intro: string;
-        groups: Array<{ title: string; rows: Array<[string, string]> }>;
-      }
-    >;
-  };
   type RepoSortKey = "name" | "updated" | "size";
   type RepoSortDirection = "asc" | "desc";
 
@@ -245,8 +237,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   let SOURCE_CURSOR: { target: SourceFileTarget; line: number } | null = null;
   const SOURCE_CURSOR_TOTALS = new Map<string, number>();
 
-  const HELP_LANGUAGES: HelpLanguage[] = ["en", "ja"];
-  const HELP_SECTIONS: HelpSection[] = ["keybindings"];
   const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
   const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
   const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
@@ -280,106 +270,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     "obj",
   ];
   const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
-  const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
-    en: {
-      languageLabel: "Language",
-      title: "Help",
-      sections: {
-        keybindings: {
-          nav: "Keybindings",
-          title: "Keyboard Shortcuts",
-          intro:
-            "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
-          groups: [
-            {
-              title: "Global",
-              rows: [
-                ["Ctrl+K", "Open file palette"],
-                ["Ctrl+G", "Open grep palette"],
-                ["/", "Focus file filter"],
-                ["t", "Toggle theme"],
-              ],
-            },
-            {
-              title: "Panels",
-              rows: [
-                ["Ctrl+H", "Focus sidebar"],
-                ["Ctrl+L", "Focus main panel"],
-              ],
-            },
-            {
-              title: "Sidebar",
-              rows: [
-                ["j / k", "Move selection down / up"],
-                ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                ["gg / Shift+G", "Move to top / bottom"],
-                ["Enter", "Open selected item"],
-                ["h / l", "Collapse / expand directory"],
-              ],
-            },
-            {
-              title: "Main Panel",
-              rows: [
-                ["j / k", "Move code cursor down / up"],
-                ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                ["gg / Shift+G", "Move code cursor to top / bottom"],
-                ["gp / gc", "Switch to Preview / Code tab"],
-              ],
-            },
-          ],
-        },
-      },
-    },
-    ja: {
-      languageLabel: "言語",
-      title: "ヘルプ",
-      sections: {
-        keybindings: {
-          nav: "キーバインド",
-          title: "キーバインド",
-          intro:
-            "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
-          groups: [
-            {
-              title: "グローバル",
-              rows: [
-                ["Ctrl+K", "ファイルパレットを開く"],
-                ["Ctrl+G", "grep パレットを開く"],
-                ["/", "ファイルフィルターへフォーカス"],
-                ["t", "テーマ切り替え"],
-              ],
-            },
-            {
-              title: "パネル",
-              rows: [
-                ["Ctrl+H", "サイドバーへフォーカス"],
-                ["Ctrl+L", "メインパネルへフォーカス"],
-              ],
-            },
-            {
-              title: "サイドバー",
-              rows: [
-                ["j / k", "選択を下 / 上へ移動"],
-                ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                ["Enter", "選択項目を開く"],
-                ["h / l", "ディレクトリを閉じる / 開く"],
-              ],
-            },
-            {
-              title: "メインパネル",
-              rows: [
-                ["j / k", "コードカーソルを下 / 上へ移動"],
-                ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                ["gp / gc", "Preview / Code タブへ切り替え"],
-              ],
-            },
-          ],
-        },
-      },
-    },
-  };
 
   function sourceLineScrollAmount(): number | null {
     const virtualRow = Array.from(
@@ -2666,20 +2556,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       : null;
   }
 
-  function helpLanguageFromRoute(): HelpLanguage {
-    return STATE.route.screen === "help" &&
-      HELP_LANGUAGES.includes(STATE.route.lang as HelpLanguage)
-      ? (STATE.route.lang as HelpLanguage)
-      : "en";
-  }
-
-  function helpSectionFromRoute(): HelpSection {
-    return STATE.route.screen === "help" &&
-      HELP_SECTIONS.includes(STATE.route.section as HelpSection)
-      ? (STATE.route.section as HelpSection)
-      : "keybindings";
-  }
-
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
   // file once its dependencies exist; the few call sites that can run before
   // that (setRoute, lazy diff renders) go through this late-bound handle.
@@ -2770,8 +2646,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (link.dataset.route === "help") {
           link.href = buildRoute({
             screen: "help",
-            lang: helpLanguageFromRoute(),
-            section: helpSectionFromRoute(),
+            lang: helpLanguageFromRoute(STATE.route),
+            section: helpSectionFromRoute(STATE.route),
             range: currentRange(),
           });
         }
@@ -2785,110 +2661,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
       el.remove();
     });
-  }
-
-  function renderHelpPage() {
-    cancelActiveSourceLoad("navigation");
-    removeStandaloneSource();
-    LOAD_QUEUE.length = 0;
-    const target = $("#diff");
-    const empty = $("#empty");
-    empty.classList.add("hidden");
-    $("#meta").textContent = "";
-    $("#totals").textContent = "";
-    $("#filelist").textContent = "";
-
-    const lang = helpLanguageFromRoute();
-    const section = helpSectionFromRoute();
-    const content = HELP_CONTENT[lang];
-    const sectionContent = content.sections[section];
-
-    const shell = document.createElement("section");
-    shell.className = "gdp-help-shell";
-    const header = document.createElement("header");
-    header.className = "gdp-help-header";
-    const title = document.createElement("h1");
-    title.textContent = content.title;
-    const langSelect = document.createElement("select");
-    langSelect.className = "gdp-help-language";
-    langSelect.setAttribute("aria-label", content.languageLabel);
-    HELP_LANGUAGES.forEach((optionLang) => {
-      const option = document.createElement("option");
-      option.value = optionLang;
-      option.textContent = optionLang.toUpperCase();
-      option.selected = optionLang === lang;
-      langSelect.appendChild(option);
-    });
-    langSelect.addEventListener("change", () => {
-      setRoute({
-        screen: "help",
-        lang: langSelect.value,
-        section,
-        range: currentRange(),
-      });
-      setPageMode();
-      renderHelpPage();
-      syncHeaderMenu();
-    });
-    header.append(title, langSelect);
-
-    const layout = document.createElement("div");
-    layout.className = "gdp-help-layout";
-    const helpNav = document.createElement("nav");
-    helpNav.className = "gdp-help-nav";
-    HELP_SECTIONS.forEach((helpSection) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = helpSection === section ? "active" : "";
-      button.textContent = content.sections[helpSection].nav;
-      button.addEventListener("click", () => {
-        setRoute({
-          screen: "help",
-          lang,
-          section: helpSection,
-          range: currentRange(),
-        });
-        renderHelpPage();
-        syncHeaderMenu();
-      });
-      helpNav.appendChild(button);
-    });
-
-    const article = document.createElement("article");
-    article.className = "gdp-help-content";
-    const h2 = document.createElement("h2");
-    h2.textContent = sectionContent.title;
-    const intro = document.createElement("p");
-    intro.textContent = sectionContent.intro;
-    article.append(h2, intro);
-    sectionContent.groups.forEach((group) => {
-      const groupSection = document.createElement("section");
-      groupSection.className = "gdp-help-group";
-      const groupTitle = document.createElement("h3");
-      groupTitle.textContent = group.title;
-      const table = document.createElement("table");
-      group.rows.forEach(([keys, description]) => {
-        const tr = document.createElement("tr");
-        const keyCell = document.createElement("th");
-        keyCell.scope = "row";
-        keys.split(" / ").forEach((key, index) => {
-          if (index > 0) keyCell.append(" / ");
-          const kbd = document.createElement("kbd");
-          kbd.textContent = key;
-          keyCell.appendChild(kbd);
-        });
-        const desc = document.createElement("td");
-        desc.textContent = description;
-        tr.append(keyCell, desc);
-        table.appendChild(tr);
-      });
-      groupSection.append(groupTitle, table);
-      article.appendChild(groupSection);
-    });
-
-    layout.append(helpNav, article);
-    shell.append(header, layout);
-    target.replaceChildren(shell);
   }
 
   function renderShell(meta: DiffMeta) {
@@ -4314,6 +4086,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     appendStatSquaresToHeader(card, file);
     setupHunkExpand(card, file);
   }
+
+  // ---------- Help page: extracted to help-page.ts ----------
+  const { renderHelpPage } = createHelpPage({
+    $,
+    getRoute: () => STATE.route,
+    setRoute,
+    setPageMode,
+    cancelActiveSourceLoad,
+    removeStandaloneSource,
+    clearLoadQueue: () => {
+      LOAD_QUEUE.length = 0;
+    },
+    currentRange,
+    syncHeaderMenu,
+  });
 
   // ---------- Hunk expand: extracted to hunk-expand.ts ----------
   const { setupHunkExpand } = createHunkExpand({
@@ -8463,8 +8250,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setRoute(
         {
           screen: "help",
-          lang: helpLanguageFromRoute(),
-          section: helpSectionFromRoute(),
+          lang: helpLanguageFromRoute(STATE.route),
+          section: helpSectionFromRoute(STATE.route),
           range,
         },
         true,
