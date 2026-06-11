@@ -426,7 +426,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const LINE_REF_PILL = createLineRefPill();
   const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
 
-  // The pill follows the file screen's line= route param; on the diff screen
+  // The pill follows the line= route param of the file screen; on the diff screen
   // diff-line-select owns it (after-side drag selection).
   function syncLineRefPill() {
     const route = STATE.route;
