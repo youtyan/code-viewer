@@ -926,6 +926,11 @@ body.gdp-history-page.gdp-sidebar-hidden main#content {
 body.gdp-history-page #sidebar-resizer {
   left: calc(var(--history-w) + var(--sidebar-w) - 4px);
 }
+/* The history screen drives its diff range from the commit list; the topbar
+   from/to pickers belong to the Diff Viewer and are hidden here. */
+body.gdp-history-page #topbar .ref-pickers {
+  display: none;
+}
 #history-panel[hidden] {
   display: none !important;
 }
@@ -1801,7 +1806,10 @@ body.gdp-help-page #content {
 
 #diff > *:first-child { margin-top: 0; }
 
-body:not(.gdp-file-detail-page) #diff::after {
+/* Scroll-past-end spacer so the sidebar can align the last diff file to the
+   top of the viewport. Not wanted on the history screen, where small
+   single-commit diffs would gain a screenful of dead scroll space. */
+body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
   content: "";
   display: block;
   height: calc(100vh - var(--chrome-h) - 40px);
