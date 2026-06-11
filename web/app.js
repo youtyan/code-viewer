@@ -6558,6 +6558,13 @@ ${frontmatter.yaml}
       } catch {}
       await refreshAnnotations();
     }
+    function sessionTimeLabel(createdAt) {
+      const date = new Date(createdAt);
+      if (Number.isNaN(date.getTime()))
+        return "";
+      const hm = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+      return `${date.getMonth() + 1}/${date.getDate()} ${hm}`;
+    }
     function annotationEntrySummary(entry) {
       const text2 = entry.title || entry.body;
       const firstLine = text2.split(`
@@ -6584,6 +6591,10 @@ ${frontmatter.yaml}
         title.className = "annotation-session-select";
         title.textContent = session.title;
         title.title = session.created_at;
+        const time = document.createElement("span");
+        time.className = "annotation-session-time";
+        time.textContent = sessionTimeLabel(session.created_at);
+        time.title = session.created_at;
         title.addEventListener("click", () => {
           setActiveSession(session.id === activeSessionId ? null : session.id);
         });
@@ -6598,7 +6609,7 @@ ${frontmatter.yaml}
             return;
           postAnnotationAction({ action: "delete", id: session.id });
         });
-        head.append(title, del);
+        head.append(title, time, del);
         sessionEl.appendChild(head);
         const list2 = document.createElement("ol");
         list2.className = "annotation-entries";

@@ -4103,6 +4103,12 @@ body.annotation-panel-open #content {
 .annotation-session-select:hover {
   background: var(--accent-subtle);
 }
+.annotation-session-time {
+  flex: none;
+  font-size: 10px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
 .annotation-session.active .annotation-session-select {
   background: var(--accent-subtle);
   color: var(--accent);
