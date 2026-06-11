@@ -9090,6 +9090,7 @@ ${frontmatter.yaml}
     let loading = false;
     let generation = 0;
     let selectedSha = "";
+    let query = "";
     function setBanner(message) {
       banner.textContent = message;
       banner.hidden = !message;
@@ -9117,7 +9118,7 @@ ${frontmatter.yaml}
       return iso.slice(0, 10);
     }
     function fetchPage(skip) {
-      const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}`;
+      const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` + (query ? `&q=${encodeURIComponent(query)}` : "");
       return deps.trackLoad(fetch(url).then(async (r2) => {
         if (!r2.ok)
           throw new Error(await r2.text());
@@ -9336,6 +9337,37 @@ ${frontmatter.yaml}
       const commit = commits.find((c2) => c2.sha === row.dataset.sha);
       if (commit)
         selectCommit(commit);
+    });
+    function applyFilter(next) {
+      const value = next.trim();
+      if (value === query)
+        return;
+      query = value;
+      generation++;
+      commits = [];
+      hasMore = false;
+      loading = false;
+      inFlight = null;
+      setBanner("");
+      renderList();
+      loadNextPage();
+    }
+    const filterInput = document.querySelector("#history-filter");
+    let filterTimer = null;
+    filterInput?.addEventListener("input", () => {
+      if (filterTimer)
+        clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        filterTimer = null;
+        applyFilter(filterInput.value);
+      }, 250);
+    });
+    filterInput?.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape" && filterInput.value) {
+        filterInput.value = "";
+        applyFilter("");
+        e2.stopPropagation();
+      }
     });
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting))

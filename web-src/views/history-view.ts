@@ -37,6 +37,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let loading = false;
   let generation = 0; // bumped on ref switch / re-enter to drop stale fetches
   let selectedSha = "";
+  let query = "";
 
   function setBanner(message: string) {
     banner.textContent = message;
@@ -63,7 +64,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function fetchPage(skip: number): Promise<HistoryLogResponse | null> {
-    const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}`;
+    const url =
+      `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` +
+      (query ? `&q=${encodeURIComponent(query)}` : "");
     return deps
       .trackLoad(
         fetch(url).then(async (r) => {
@@ -329,6 +332,41 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (!row?.dataset.sha) return;
     const commit = commits.find((c) => c.sha === row.dataset.sha);
     if (commit) selectCommit(commit);
+  });
+
+  // Server-side filter: message text by default, sha prefix for hex terms,
+  // plus "author:" and "path:" prefixes. Keeps the selected commit and the
+  // diff pane untouched; only the list reloads.
+  function applyFilter(next: string) {
+    const value = next.trim();
+    if (value === query) return;
+    query = value;
+    generation++;
+    commits = [];
+    hasMore = false;
+    loading = false;
+    inFlight = null;
+    setBanner("");
+    renderList();
+    void loadNextPage();
+  }
+
+  const filterInput =
+    document.querySelector<HTMLInputElement>("#history-filter");
+  let filterTimer: ReturnType<typeof setTimeout> | null = null;
+  filterInput?.addEventListener("input", () => {
+    if (filterTimer) clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      filterTimer = null;
+      applyFilter(filterInput.value);
+    }, 250);
+  });
+  filterInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && filterInput.value) {
+      filterInput.value = "";
+      applyFilter("");
+      e.stopPropagation();
+    }
   });
 
   const observer = new IntersectionObserver(
