@@ -8070,6 +8070,243 @@ ${frontmatter.yaml}
     body.replaceWith(container);
   }
 
+  // web-src/ref-picker.ts
+  function createRefPicker(deps) {
+    function wireRefSelectorInput(input, onPick) {
+      const wrap = input.closest("[data-ref-selector]");
+      wrap?.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        openPopover(input);
+      });
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" || e2.key === " ") {
+          e2.preventDefault();
+          openPopover(input);
+        } else if (e2.key === "Escape") {
+          closePopover();
+          input.blur();
+        }
+      });
+      if (onPick)
+        input.addEventListener("change", () => onPick(input.value || "worktree"));
+    }
+    const REFS = {
+      branches: [],
+      tags: [],
+      commits: [],
+      current: ""
+    };
+    const popover = deps.$("#ref-popover");
+    const popBody = popover.querySelector(".rp-body");
+    const popSearch = popover.querySelector(".rp-search");
+    if (!popBody || !popSearch)
+      return;
+    let popTarget = null;
+    function fetchRefs() {
+      return fetch("/_refs").then((r2) => r2.json()).then((refs) => {
+        Object.assign(REFS, refs);
+      }).catch(() => {});
+    }
+    fetchRefs();
+    let popTab = "commits";
+    let commitSearchTimer = null;
+    let commitSearchSeq = 0;
+    let commitSearchAbort = null;
+    let commitSearchLoading = false;
+    function fetchCommitRefs(query) {
+      const seq = ++commitSearchSeq;
+      if (commitSearchAbort)
+        commitSearchAbort.abort();
+      commitSearchAbort = new AbortController;
+      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
+      return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
+        if (seq !== commitSearchSeq)
+          return;
+        commitSearchLoading = false;
+        REFS.commits = refs.commits || [];
+        if (!popover.hidden && popTab === "commits") {
+          buildPopBody(popSearch.value);
+        }
+      }).catch(() => {
+        if (seq === commitSearchSeq)
+          commitSearchLoading = false;
+      });
+    }
+    function scheduleCommitSearch(query) {
+      if (commitSearchTimer)
+        clearTimeout(commitSearchTimer);
+      commitSearchLoading = true;
+      commitSearchTimer = setTimeout(() => {
+        commitSearchTimer = null;
+        fetchCommitRefs(query);
+      }, 150);
+    }
+    function buildPopBody(query) {
+      const q = (query || "").toLowerCase().trim();
+      const m = (s2) => !q || String(s2).toLowerCase().includes(q);
+      const html = [];
+      if (popTab === "commits") {
+        if (commitSearchLoading) {
+          html.push('<div class="rp-empty">loading commits...</div>');
+          popBody.innerHTML = html.join("");
+          highlightCurrentInPopover();
+          return;
+        }
+        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author}`));
+        if (!commits.length) {
+          html.push('<div class="rp-empty">no commits</div>');
+        }
+        for (const commit of commits) {
+          if (!commit.sha)
+            continue;
+          const shortSha = commit.sha.slice(0, 7);
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when || "") + "</span>" + "</div>" + "</div>");
+        }
+      } else if (popTab === "branches") {
+        const branches = (REFS.branches || []).filter((b2) => m(b2.name));
+        if (!branches.length) {
+          html.push('<div class="rp-empty">no branches</div>');
+        }
+        for (const branch of branches) {
+          const cur = branch.name === REFS.current;
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(branch.name) + '">' + '<div class="row1">' + '<span class="name">' + deps.escapeHtml(branch.name) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>" + (branch.when ? '<div class="row2"><span class="when">' + deps.escapeHtml(branch.when) + "</span></div>" : "") + "</div>");
+        }
+      } else if (popTab === "tags") {
+        const tags = (REFS.tags || []).filter((t2) => m(t2.name));
+        if (!tags.length) {
+          html.push('<div class="rp-empty">no tags</div>');
+        }
+        for (const tag of tags) {
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(tag.name) + '">' + '<div class="row1">' + '<span class="name">' + deps.escapeHtml(tag.name) + "</span>" + '<span class="badge">tag</span>' + "</div>" + (tag.when ? '<div class="row2"><span class="when">' + deps.escapeHtml(tag.when) + "</span></div>" : "") + "</div>");
+        }
+      }
+      popBody.innerHTML = html.join("");
+      highlightCurrentInPopover();
+    }
+    function highlightCurrentInPopover() {
+      if (!popTarget)
+        return;
+      const cur = (popTarget.value || "").trim();
+      if (!cur)
+        return;
+      const items = popBody.querySelectorAll("[data-val]");
+      let match2 = null;
+      items.forEach((it) => {
+        if (it.dataset.val === cur)
+          match2 = it;
+      });
+      if (match2) {
+        match2.classList.add("current");
+        const ph = popBody;
+        const r2 = match2.getBoundingClientRect();
+        const pr = ph.getBoundingClientRect();
+        if (r2.top < pr.top || r2.bottom > pr.bottom) {
+          ph.scrollTop = match2.offsetTop - ph.clientHeight / 2;
+        }
+      }
+    }
+    function escapeAttr(s2) {
+      return deps.escapeHtml(s2).replace(/"/g, "&quot;");
+    }
+    function openPopover(input) {
+      popTarget = input;
+      popSearch.value = "";
+      if (popTab === "commits")
+        scheduleCommitSearch("");
+      buildPopBody("");
+      const cur = (input.value || "").trim();
+      popover.querySelectorAll(".rp-chip").forEach((c2) => {
+        c2.classList.toggle("current", c2.dataset.val === cur);
+      });
+      popover.hidden = false;
+      const r2 = input.getBoundingClientRect();
+      const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
+      popover.style.left = `${Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8))}px`;
+      popover.style.top = `${r2.bottom + 4}px`;
+      setTimeout(() => popSearch.focus(), 0);
+    }
+    function closePopover() {
+      popover.hidden = true;
+      popTarget = null;
+    }
+    const refFromInput = deps.$("#ref-from");
+    const refToInput = deps.$("#ref-to");
+    wireRefSelectorInput(refFromInput, () => {
+      const otherEmpty = !refToInput.value;
+      deps.setRange(refFromInput.value, refToInput.value);
+      if (otherEmpty)
+        setTimeout(() => openPopover(refToInput), 0);
+    });
+    wireRefSelectorInput(refToInput, () => deps.setRange(refFromInput.value, refToInput.value));
+    wireRefSelectorInput(deps.$("#repo-target"), (ref) => {
+      const route = deps.getRoute();
+      if (route.screen !== "file")
+        return;
+      deps.setRoute({
+        screen: "file",
+        path: route.path,
+        ref,
+        view: "blob",
+        range: deps.currentRange()
+      });
+      deps.renderStandaloneSource({ path: route.path, ref });
+    });
+    popSearch.addEventListener("input", () => {
+      if (popTab === "commits")
+        scheduleCommitSearch(popSearch.value);
+      buildPopBody(popSearch.value);
+    });
+    popSearch.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape") {
+        closePopover();
+      }
+      if (e2.key === "Enter") {
+        const first = popBody.querySelector(".rp-item-commit, .rp-item-ref");
+        if (first)
+          first.click();
+      }
+    });
+    function handlePicked(val) {
+      if (!popTarget || !val)
+        return;
+      const pickedTarget = popTarget;
+      pickedTarget.value = val;
+      closePopover();
+      pickedTarget.dispatchEvent(new Event("change"));
+    }
+    popBody.addEventListener("click", (e2) => {
+      const item = e2.target.closest(".rp-item-commit, .rp-item-ref");
+      if (!item)
+        return;
+      handlePicked(item.dataset.val);
+    });
+    popover.querySelectorAll(".rp-tab").forEach((t2) => {
+      t2.addEventListener("click", () => {
+        popTab = t2.dataset.tab || "commits";
+        popover.querySelectorAll(".rp-tab").forEach((b2) => {
+          b2.classList.toggle("active", b2 === t2);
+        });
+        if (popTab === "commits")
+          scheduleCommitSearch(popSearch.value);
+        buildPopBody(popSearch.value);
+      });
+    });
+    popover.querySelectorAll(".rp-chip").forEach((c2) => {
+      c2.addEventListener("click", () => handlePicked(c2.dataset.val));
+    });
+    document.addEventListener("mousedown", (e2) => {
+      if (popover.hidden)
+        return;
+      const target = e2.target;
+      if (popover.contains(target))
+        return;
+      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
+        return;
+      closePopover();
+    });
+    return { openPopover, closePopover, wireRefSelectorInput };
+  }
+
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
@@ -10605,24 +10842,6 @@ ${frontmatter.yaml}
         path,
         range: currentRange()
       };
-    }
-    function wireRefSelectorInput(input, onPick) {
-      const wrap = input.closest("[data-ref-selector]");
-      wrap?.addEventListener("click", (e2) => {
-        e2.stopPropagation();
-        openPopover(input);
-      });
-      input.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter" || e2.key === " ") {
-          e2.preventDefault();
-          openPopover(input);
-        } else if (e2.key === "Escape") {
-          closePopover();
-          input.blur();
-        }
-      });
-      if (onPick)
-        input.addEventListener("change", () => onPick(input.value || "worktree"));
     }
     function createRepoBreadcrumb(target, path) {
       const nav = document.createElement("nav");
@@ -14520,218 +14739,17 @@ ${frontmatter.yaml}
     }
     syncRefInputs();
     syncHeaderMenu();
-    const REFS = {
-      branches: [],
-      tags: [],
-      commits: [],
-      current: ""
-    };
-    const popover = $("#ref-popover");
-    const popBody = popover.querySelector(".rp-body");
-    const popSearch = popover.querySelector(".rp-search");
-    if (!popBody || !popSearch)
-      return;
-    let popTarget = null;
-    function fetchRefs() {
-      return fetch("/_refs").then((r2) => r2.json()).then((refs) => {
-        Object.assign(REFS, refs);
-      }).catch(() => {});
-    }
-    fetchRefs();
-    let popTab = "commits";
-    let commitSearchTimer = null;
-    let commitSearchSeq = 0;
-    let commitSearchAbort = null;
-    let commitSearchLoading = false;
-    function fetchCommitRefs(query) {
-      const seq = ++commitSearchSeq;
-      if (commitSearchAbort)
-        commitSearchAbort.abort();
-      commitSearchAbort = new AbortController;
-      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
-      return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
-        if (seq !== commitSearchSeq)
-          return;
-        commitSearchLoading = false;
-        REFS.commits = refs.commits || [];
-        if (!popover.hidden && popTab === "commits") {
-          buildPopBody(popSearch.value);
-        }
-      }).catch(() => {
-        if (seq === commitSearchSeq)
-          commitSearchLoading = false;
-      });
-    }
-    function scheduleCommitSearch(query) {
-      if (commitSearchTimer)
-        clearTimeout(commitSearchTimer);
-      commitSearchLoading = true;
-      commitSearchTimer = setTimeout(() => {
-        commitSearchTimer = null;
-        fetchCommitRefs(query);
-      }, 150);
-    }
-    function buildPopBody(query) {
-      const q = (query || "").toLowerCase().trim();
-      const m = (s2) => !q || String(s2).toLowerCase().includes(q);
-      const html = [];
-      if (popTab === "commits") {
-        if (commitSearchLoading) {
-          html.push('<div class="rp-empty">loading commits...</div>');
-          popBody.innerHTML = html.join("");
-          highlightCurrentInPopover();
-          return;
-        }
-        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author}`));
-        if (!commits.length) {
-          html.push('<div class="rp-empty">no commits</div>');
-        }
-        for (const commit of commits) {
-          if (!commit.sha)
-            continue;
-          const shortSha = commit.sha.slice(0, 7);
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(shortSha) + '</span><span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + escapeHtml2(commit.subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(commit.author || "") + '</span><span class="when">' + escapeHtml2(commit.when || "") + "</span></div></div>");
-        }
-      } else if (popTab === "branches") {
-        const branches = (REFS.branches || []).filter((b2) => m(b2.name));
-        if (!branches.length) {
-          html.push('<div class="rp-empty">no branches</div>');
-        }
-        for (const branch of branches) {
-          const cur = branch.name === REFS.current;
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(branch.name) + '"><div class="row1"><span class="name">' + escapeHtml2(branch.name) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>" + (branch.when ? '<div class="row2"><span class="when">' + escapeHtml2(branch.when) + "</span></div>" : "") + "</div>");
-        }
-      } else if (popTab === "tags") {
-        const tags = (REFS.tags || []).filter((t2) => m(t2.name));
-        if (!tags.length) {
-          html.push('<div class="rp-empty">no tags</div>');
-        }
-        for (const tag of tags) {
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(tag.name) + '"><div class="row1"><span class="name">' + escapeHtml2(tag.name) + '</span><span class="badge">tag</span></div>' + (tag.when ? '<div class="row2"><span class="when">' + escapeHtml2(tag.when) + "</span></div>" : "") + "</div>");
-        }
-      }
-      popBody.innerHTML = html.join("");
-      highlightCurrentInPopover();
-    }
-    function highlightCurrentInPopover() {
-      if (!popTarget)
-        return;
-      const cur = (popTarget.value || "").trim();
-      if (!cur)
-        return;
-      const items = popBody.querySelectorAll("[data-val]");
-      let match2 = null;
-      items.forEach((it) => {
-        if (it.dataset.val === cur)
-          match2 = it;
-      });
-      if (match2) {
-        match2.classList.add("current");
-        const ph = popBody;
-        const r2 = match2.getBoundingClientRect();
-        const pr = ph.getBoundingClientRect();
-        if (r2.top < pr.top || r2.bottom > pr.bottom) {
-          ph.scrollTop = match2.offsetTop - ph.clientHeight / 2;
-        }
-      }
-    }
-    function escapeAttr(s2) {
-      return escapeHtml2(s2).replace(/"/g, "&quot;");
-    }
-    function openPopover(input) {
-      popTarget = input;
-      popSearch.value = "";
-      if (popTab === "commits")
-        scheduleCommitSearch("");
-      buildPopBody("");
-      const cur = (input.value || "").trim();
-      popover.querySelectorAll(".rp-chip").forEach((c2) => {
-        c2.classList.toggle("current", c2.dataset.val === cur);
-      });
-      popover.hidden = false;
-      const r2 = input.getBoundingClientRect();
-      const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
-      popover.style.left = `${Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8))}px`;
-      popover.style.top = `${r2.bottom + 4}px`;
-      setTimeout(() => popSearch.focus(), 0);
-    }
-    function closePopover() {
-      popover.hidden = true;
-      popTarget = null;
-    }
-    const refFromInput = $("#ref-from");
-    const refToInput = $("#ref-to");
-    wireRefSelectorInput(refFromInput, () => {
-      const otherEmpty = !refToInput.value;
-      setRange(refFromInput.value, refToInput.value);
-      if (otherEmpty)
-        setTimeout(() => openPopover(refToInput), 0);
-    });
-    wireRefSelectorInput(refToInput, () => setRange(refFromInput.value, refToInput.value));
-    wireRefSelectorInput($("#repo-target"), (ref) => {
-      if (STATE.route.screen !== "file")
-        return;
-      setRoute({
-        screen: "file",
-        path: STATE.route.path,
-        ref,
-        view: "blob",
-        range: currentRange()
-      });
-      renderStandaloneSource({ path: STATE.route.path, ref });
-    });
-    popSearch.addEventListener("input", () => {
-      if (popTab === "commits")
-        scheduleCommitSearch(popSearch.value);
-      buildPopBody(popSearch.value);
-    });
-    popSearch.addEventListener("keydown", (e2) => {
-      if (e2.key === "Escape") {
-        closePopover();
-      }
-      if (e2.key === "Enter") {
-        const first = popBody.querySelector(".rp-item-commit, .rp-item-ref");
-        if (first)
-          first.click();
-      }
-    });
-    function handlePicked(val) {
-      if (!popTarget || !val)
-        return;
-      const pickedTarget = popTarget;
-      pickedTarget.value = val;
-      closePopover();
-      pickedTarget.dispatchEvent(new Event("change"));
-    }
-    popBody.addEventListener("click", (e2) => {
-      const item = e2.target.closest(".rp-item-commit, .rp-item-ref");
-      if (!item)
-        return;
-      handlePicked(item.dataset.val);
-    });
-    popover.querySelectorAll(".rp-tab").forEach((t2) => {
-      t2.addEventListener("click", () => {
-        popTab = t2.dataset.tab || "commits";
-        popover.querySelectorAll(".rp-tab").forEach((b2) => {
-          b2.classList.toggle("active", b2 === t2);
-        });
-        if (popTab === "commits")
-          scheduleCommitSearch(popSearch.value);
-        buildPopBody(popSearch.value);
-      });
-    });
-    popover.querySelectorAll(".rp-chip").forEach((c2) => {
-      c2.addEventListener("click", () => handlePicked(c2.dataset.val));
-    });
-    document.addEventListener("mousedown", (e2) => {
-      if (popover.hidden)
-        return;
-      const target = e2.target;
-      if (popover.contains(target))
-        return;
-      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
-        return;
-      closePopover();
+    createRefPicker({
+      $,
+      escapeHtml: escapeHtml2,
+      currentRange,
+      setRange,
+      setRoute,
+      renderStandaloneSource,
+      getFrom: () => STATE.from,
+      getTo: () => STATE.to,
+      getRepoRef: () => STATE.repoRef,
+      getRoute: () => STATE.route
     });
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
     window.addEventListener("popstate", () => {
