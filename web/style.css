@@ -3992,7 +3992,7 @@ body.gdp-file-detail-page #empty {
 #annotation-panel {
   position: fixed;
   right: 0;
-  top: var(--global-header-h);
+  top: var(--chrome-h);
   bottom: 0;
   width: min(380px, calc(100vw - 32px));
   z-index: 45;
@@ -4001,6 +4001,12 @@ body.gdp-file-detail-page #empty {
   border-left: 1px solid var(--border);
   background: var(--bg);
   box-shadow: var(--shadow-md);
+}
+/* Pages without the diff topbar start the panel right below the header. */
+body.gdp-repo-page #annotation-panel,
+body.gdp-file-detail-page #annotation-panel,
+body.gdp-help-page #annotation-panel {
+  top: var(--global-header-h);
 }
 /* Keep code readable next to the panel instead of underneath it. */
 body.annotation-panel-open #content {
@@ -4181,8 +4187,13 @@ body.annotation-panel-open #content {
 }
 #annotation-detail-body {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 12px 12px;
   font-size: 13px;
+}
+#annotation-detail-body pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 .annotation-detail-title {
   display: block;
