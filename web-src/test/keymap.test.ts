@@ -40,6 +40,13 @@ describe("keymap action resolution", () => {
     expect(action("l", "sidebar", { ctrl: true })).toBe("focus-main");
   });
 
+  test("steps annotations with bracket keys in every scope", () => {
+    expect(action("]", "main")).toBe("annotation-next");
+    expect(action("[", "main")).toBe("annotation-previous");
+    expect(action("]", "sidebar")).toBe("annotation-next");
+    expect(action("[", "global")).toBe("annotation-previous");
+  });
+
   test("keeps Ctrl+K as file palette in every scope", () => {
     expect(action("k", "sidebar", { ctrl: true })).toBe("open-file-palette");
     expect(action("k", "global", { ctrl: true })).toBe("open-file-palette");
