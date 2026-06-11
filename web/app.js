@@ -6455,7 +6455,23 @@ ${frontmatter.yaml}
           anchor = anchor.nextElementSibling;
         anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
       }
+      syncInlineAnnotationWidths();
     }
+    function syncInlineAnnotationWidths() {
+      document.querySelectorAll(".gdp-annotation-inline").forEach((box) => {
+        let scroller = null;
+        for (let el = box.parentElement;el && el !== document.body; el = el.parentElement) {
+          const overflowX = getComputedStyle(el).overflowX;
+          if (overflowX === "auto" || overflowX === "scroll") {
+            scroller = el;
+            break;
+          }
+        }
+        const width = scroller?.clientWidth || 0;
+        box.style.width = width > 32 ? `${width - 16}px` : "";
+      });
+    }
+    window.addEventListener("resize", syncInlineAnnotationWidths);
     function syncSessionUrl() {
       const current = window.location.pathname + window.location.search;
       const next = withSessionParam(current);

@@ -4242,6 +4242,12 @@ body.annotation-panel-open #content {
   background: var(--bg-soft);
 }
 .gdp-annotation-inline {
+  /* The code table can scroll horizontally; keep the note pinned to the
+     visible area (width is synced to the scroll container in
+     annotations-ui.ts). */
+  position: sticky;
+  left: 8px;
+  box-sizing: border-box;
   margin: 4px 8px;
   padding: 8px 12px;
   border: 1px solid var(--border);
