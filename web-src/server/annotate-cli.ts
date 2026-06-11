@@ -7,7 +7,6 @@ import type {
 } from "../types";
 import { parseAnnotationLine } from "./annotations";
 import * as git from "./git";
-import { spawnDetached } from "./runtime";
 import { readServerRegistry } from "./server-registry";
 
 export type AnnotateCommand =
@@ -43,8 +42,8 @@ export const ANNOTATE_HELP = `code-viewer annotate — attach explanations to co
 
 The annotations show up live in the code-viewer browser UI and are stored
 in <repo>/.code-viewer/annotations.json. A running code-viewer server for
-the repository is reused when one exists; otherwise one is started
-automatically and its URL is printed to stderr.
+the repository is required: start one with "code-viewer" before using
+annotate (or point at one explicitly with --server).
 
 Usage:
   code-viewer annotate start [--title <text>]
@@ -216,12 +215,8 @@ async function serverReachable(serverUrl: string): Promise<boolean> {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // Reuse a running server for this repository when one is registered and
-// reachable; otherwise start a detached one and wait for it to register.
+// reachable. The CLI never starts a server itself — ask the user to run one.
 async function ensureServerUrl(
   root: string,
   override?: string,
@@ -237,21 +232,8 @@ async function ensureServerUrl(
     const url = registered.url.replace(/\/+$/, "");
     if (await serverReachable(url)) return url;
   }
-  const stalePid = registered?.pid || 0;
-  spawnDetached([process.execPath, process.argv[1], "--cwd", root]);
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    await sleep(250);
-    const entry = readServerRegistry(root);
-    if (!entry || entry.pid === stalePid) continue;
-    const url = entry.url.replace(/\/+$/, "");
-    if (await serverReachable(url)) {
-      console.error(`started code-viewer server at ${url}/`);
-      return url;
-    }
-  }
   console.error(
-    "failed to start a code-viewer server for this repository.\n" +
+    "no running code-viewer server for this repository.\n" +
       `Start one manually (from ${root}):\n` +
       "  code-viewer",
   );
@@ -333,6 +315,9 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       title: command.title,
     })) as { session: AnnotationSession };
     console.log(`session ${result.session.id}  ${result.session.title}`);
+    console.error(
+      `view annotations at ${serverUrl}/ with the code annotations panel`,
+    );
     return;
   }
   if (command.kind === "add") {
@@ -361,10 +346,23 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       range: { from: command.from, to: command.to },
       title: command.title,
       body,
-    })) as { session_id: string; entry: AnnotationEntry };
+    })) as {
+      session_id: string;
+      session_title?: string;
+      created_session?: boolean;
+      entry: AnnotationEntry;
+    };
+    if (result.created_session) {
+      console.error(
+        `created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`,
+      );
+    }
     console.log(
       `annotated ${result.entry.path}${formatLine(result.entry.line)} ` +
-        `[${result.entry.id}] in session ${result.session_id}`,
+        `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`,
+    );
+    console.error(
+      `view annotations at ${serverUrl}/ with the code annotations panel`,
     );
     return;
   }
