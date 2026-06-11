@@ -35,13 +35,21 @@ function watchedFiles() {
   return readdirSync(SERVER_ROOT)
     .filter((name) => name.endsWith(".ts") && name !== "runtime.d.ts")
     .map((name) => join(SERVER_ROOT, name))
-    .concat(join(ROOT, "web-src", "types.ts"));
+    .concat(join(ROOT, "web-src", "core", "types.ts"));
+}
+
+function fileSignature(file: string): string {
+  // A watched file may disappear mid-flight (branch switch, rename);
+  // that must never crash the watcher loop and orphan the children.
+  try {
+    return `${file}:${statSync(file).mtimeMs}`;
+  } catch {
+    return `${file}:missing`;
+  }
 }
 
 function watchSignature() {
-  return watchedFiles()
-    .map((file) => `${file}:${statSync(file).mtimeMs}`)
-    .join("|");
+  return watchedFiles().map(fileSignature).join("|");
 }
 
 function startBuild() {
@@ -83,14 +91,22 @@ async function restartServer() {
   restarting = false;
 }
 
-function shutdown() {
+function killChildren() {
   if (server) server.kill();
   if (build) build.kill();
+}
+
+function shutdown() {
+  killChildren();
   process.exit(0);
 }
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("SIGHUP", shutdown);
+// Crash paths (uncaught exceptions and the like) bypass the signal
+// handlers; the exit hook keeps children from being orphaned there too.
+process.on("exit", killChildren);
 
 console.log(`code-viewer dev server watching ${SERVER_ROOT}`);
 startBuild();
@@ -98,9 +114,13 @@ startServer();
 
 let sig = watchSignature();
 setInterval(() => {
-  const next = watchSignature();
-  if (next === sig) return;
-  sig = next;
-  console.log("server source changed; restarting preview server");
-  restartServer();
+  try {
+    const next = watchSignature();
+    if (next === sig) return;
+    sig = next;
+    console.log("server source changed; restarting preview server");
+    restartServer();
+  } catch (error) {
+    console.warn(`watch tick failed: ${String(error)}`);
+  }
 }, 500);
