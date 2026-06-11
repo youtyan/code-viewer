@@ -376,11 +376,23 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       ? ` --line ${entry.line.start === entry.line.end ? entry.line.start : `${entry.line.start}-${entry.line.end}`}`
       : "";
     return [
-      `[code-viewer annotation ${entry.id}] ${location}`,
-      `session: ${session.id} "${session.title}"`,
-      `この注釈を読む:   code-viewer annotate list --json`,
-      `この注釈を修正:   code-viewer annotate edit ${entry.id} --body "<markdown>"  (長文は --body-file / stdin)`,
-      `追加回答を投稿:   code-viewer annotate add --session ${session.id} --file ${entry.path}${lineArg} --body "<markdown>"`,
+      "code-viewer のコード注釈について依頼があります。",
+      "",
+      "## 依頼内容",
+      "(ここに質問や修正してほしい点を書いてください)",
+      "",
+      "## 対象の注釈",
+      `- annotation id: ${entry.id}`,
+      `- 場所: ${location}`,
+      `- session: ${session.id}「${session.title}」`,
+      "",
+      "## あなた(AI)への手順",
+      "1. まず対象を読む: `code-viewer annotate list --json` の出力から上記 id の body を確認する。",
+      "2. 依頼が「注釈の誤りの修正」なら、削除せずその場で書き換える(idと表示位置が保たれる):",
+      `   \`code-viewer annotate edit ${entry.id} --body "<修正後のmarkdown>"\` (長文は --body-file か stdin)`,
+      "3. 依頼が「深掘り質問への回答」なら、元の注釈は残して同じ場所に回答を追加する:",
+      `   \`code-viewer annotate add --session ${session.id} --file ${entry.path}${lineArg} --title "回答: <要約>" --body "<markdown>"\``,
+      "4. 詳しい使い方は `code-viewer annotate agent-help` を参照。サーバーが起動している必要があります。",
     ].join("\n");
   }
 
