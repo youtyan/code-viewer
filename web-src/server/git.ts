@@ -570,7 +570,11 @@ function worktreeFilesystemEntries(
       return;
     }
     for (const entry of entries) {
-      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
+      if (
+        excludeNameSet.has(entry.name.toLowerCase()) ||
+        isToolInternalPath(entry.name)
+      )
+        continue;
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
