@@ -7763,6 +7763,64 @@ ${frontmatter.yaml}
     return null;
   }
 
+  // web-src/media-embed.ts
+  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
+  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
+  function isMedia(p2) {
+    return MEDIA_RE.test(p2);
+  }
+  function isImage(p2) {
+    return IMAGE_RE.test(p2);
+  }
+  function isVideo(p2) {
+    return VIDEO_RE.test(p2);
+  }
+  function isAudio(p2) {
+    return AUDIO_RE.test(p2);
+  }
+  function fileURL(path, ref) {
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  }
+  function mediaTag(path, ref) {
+    const url = fileURL(path, ref);
+    if (isVideo(path)) {
+      return `<video src="${url}" controls preload="metadata"></video>`;
+    }
+    if (isAudio(path)) {
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
+    }
+    return `<img src="${url}" alt="" loading="lazy">`;
+  }
+  function enhanceMediaCard(file, card) {
+    const path = file.path;
+    if (!file.media_kind && !isMedia(path))
+      return;
+    const wrapper = card.querySelector(".d2h-file-wrapper");
+    if (!wrapper)
+      return;
+    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
+    if (!body)
+      return;
+    const container = document.createElement("div");
+    container.className = "gdp-media";
+    let leftHTML;
+    let rightHTML;
+    if (file.status === "A") {
+      leftHTML = '<div class="media-empty">Not in HEAD</div>';
+      rightHTML = mediaTag(path, "worktree");
+    } else if (file.status === "D") {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = '<div class="media-empty">Deleted</div>';
+    } else {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = mediaTag(path, "worktree");
+    }
+    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+    body.replaceWith(container);
+  }
+
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
@@ -13245,62 +13303,6 @@ ${frontmatter.yaml}
         a2.addEventListener("scroll", () => mirror(a2, b2), { passive: true });
         b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
       });
-    }
-    const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
-    const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-    const VIDEO_RE = /\.(mp4|webm|mov)$/i;
-    const AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
-    function isMedia(p2) {
-      return MEDIA_RE.test(p2);
-    }
-    function isImage(p2) {
-      return IMAGE_RE.test(p2);
-    }
-    function isVideo(p2) {
-      return VIDEO_RE.test(p2);
-    }
-    function isAudio(p2) {
-      return AUDIO_RE.test(p2);
-    }
-    function fileURL(path, ref) {
-      return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
-    }
-    function mediaTag(path, ref) {
-      const url = fileURL(path, ref);
-      if (isVideo(path)) {
-        return `<video src="${url}" controls preload="metadata"></video>`;
-      }
-      if (isAudio(path)) {
-        return `<audio src="${url}" controls preload="metadata"></audio>`;
-      }
-      return `<img src="${url}" alt="" loading="lazy">`;
-    }
-    function enhanceMediaCard(file, card) {
-      const path = file.path;
-      if (!file.media_kind && !isMedia(path))
-        return;
-      const wrapper = card.querySelector(".d2h-file-wrapper");
-      if (!wrapper)
-        return;
-      const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
-      if (!body)
-        return;
-      const container = document.createElement("div");
-      container.className = "gdp-media";
-      let leftHTML;
-      let rightHTML;
-      if (file.status === "A") {
-        leftHTML = '<div class="media-empty">Not in HEAD</div>';
-        rightHTML = mediaTag(path, "worktree");
-      } else if (file.status === "D") {
-        leftHTML = mediaTag(path, "HEAD");
-        rightHTML = '<div class="media-empty">Deleted</div>';
-      } else {
-        leftHTML = mediaTag(path, "HEAD");
-        rightHTML = mediaTag(path, "worktree");
-      }
-      container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + '</div><div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
-      body.replaceWith(container);
     }
     function setupScrollSpy() {
       const handler = () => {
