@@ -15505,6 +15505,9 @@ ${frontmatter.yaml}
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
       document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
       document.body.classList.toggle("gdp-history-page", STATE.route.screen === "history");
+      const historyPanel = $("#history-panel");
+      if (historyPanel)
+        historyPanel.hidden = STATE.route.screen !== "history";
       if (STATE.route.screen === "history") {
         const historyRefInput = $("#history-ref");
         if (historyRefInput)

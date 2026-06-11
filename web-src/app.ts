@@ -1011,6 +1011,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-history-page",
       STATE.route.screen === "history",
     );
+    const historyPanel = $("#history-panel");
+    if (historyPanel) historyPanel.hidden = STATE.route.screen !== "history";
     if (STATE.route.screen === "history") {
       const historyRefInput = $<HTMLInputElement>("#history-ref");
       if (historyRefInput) historyRefInput.value = STATE.route.ref || "HEAD";
