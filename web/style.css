@@ -900,6 +900,83 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   100% { transform: translateX(450%); }
 }
 
+/* ===== Commit history panel ===== */
+:root { --history-w: 320px; }
+#history-panel {
+  display: none;
+  position: fixed;
+  left: 0;
+  top: var(--chrome-h);
+  bottom: 0;
+  width: var(--history-w);
+  background: var(--bg-soft);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  z-index: 31;
+  flex-direction: column;
+}
+body.gdp-history-page #history-panel { display: flex; }
+body.gdp-history-page #sidebar { left: var(--history-w); }
+body.gdp-history-page main#content {
+  margin-left: calc(var(--history-w) + var(--sidebar-w));
+}
+body.gdp-history-page.gdp-sidebar-hidden main#content {
+  margin-left: var(--history-w);
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 14px 10px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.history-title { font-weight: 600; font-size: 13px; }
+.history-banner {
+  margin: 8px 10px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-mute);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+#history-list { list-style: none; margin: 0; padding: 4px 0 24px; }
+.history-item {
+  padding: 7px 14px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.history-item:hover { background: var(--bg-mute); }
+.history-item.active {
+  background: var(--bg-mute);
+  border-left-color: var(--accent, #3b82f6);
+}
+.history-item .subject {
+  display: block;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-item .meta2 {
+  display: flex;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.history-item .sha { font-family: var(--mono, monospace); }
+.history-status {
+  padding: 10px 14px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+#history-sentinel { height: 1px; }
+
 /* ===== Sidebar ===== */
 #sidebar {
   position: fixed;
