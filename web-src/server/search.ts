@@ -1,4 +1,4 @@
-import type { FileSearchListResponse, GrepMatch } from "../types";
+import type { FileSearchListResponse, GrepMatch } from "../core/types";
 import type { GitTreeEntry } from "./git";
 
 export const GREP_DEFAULT_MAX = 200;

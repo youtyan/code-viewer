@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeNewDirectoryName } from "../directory-name";
+import { normalizeNewDirectoryName } from "../core/directory-name";
 import {
   fileNameClipboardText,
   filePathClipboardText,
-} from "../file-path-copy";
+} from "../core/file-path-copy";
 
 describe("filePathClipboardText", () => {
   test("copies the current file path exactly", () => {

@@ -21,7 +21,7 @@ type MermaidApi = {
 };
 
 type MermaidModule = { default: MermaidApi };
-type ShikiHighlighter = {
+export type ShikiHighlighter = {
   codeToHtml: (
     code: string,
     options: {
@@ -338,7 +338,7 @@ function splitYamlFrontmatter(
   };
 }
 
-async function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
+export async function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
   if (!shikiPromise) {
     // Keep this non-literal so Bun does not pull Shiki into the main bundle.
     shikiPromise = import("/" + "shiki.js")

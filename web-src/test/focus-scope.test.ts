@@ -8,7 +8,7 @@ import {
   keymapScope,
   restorePanelFocusScope,
   setPanelFocusScope,
-} from "../focus-scope";
+} from "../core/focus-scope";
 
 function target(
   tagName: string,

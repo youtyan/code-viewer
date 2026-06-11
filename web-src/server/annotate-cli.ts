@@ -4,7 +4,7 @@ import type {
   AnnotationLineRange,
   AnnotationSession,
   AnnotationsState,
-} from "../types";
+} from "../core/types";
 import { parseAnnotationLine } from "./annotations";
 import * as git from "./git";
 import { readServerRegistry } from "./server-registry";
@@ -22,6 +22,14 @@ export type AnnotateCommand =
       title?: string;
       session?: string;
       sessionTitle?: string;
+      body?: string;
+      bodyFile?: string;
+    }
+  | { kind: "rename"; id: string; title: string }
+  | {
+      kind: "edit";
+      id: string;
+      title?: string;
       body?: string;
       bodyFile?: string;
     }
@@ -53,6 +61,9 @@ Usage:
   code-viewer annotate start [--title <text>]
   code-viewer annotate add --file <path> [--line <n>|<n>-<m>]
       [--from <ref>] [--to <ref>] [--title <text>] [--session <id>]
+      [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate rename <session-id> --title <text>
+  code-viewer annotate edit <id> [--title <text>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
   code-viewer annotate list [--json]
   code-viewer annotate delete <id>
@@ -122,6 +133,21 @@ location and renders your explanation directly under the annotated lines.
 - add --session <id>  → targets a specific session (ids: annotate list).
 - The human can share a walkthrough as a URL; one session = one shareable
   walkthrough. Do not mix unrelated topics in one session.
+
+## Fixing mistakes and follow-ups
+
+- The human may paste a reference block copied from the viewer that starts
+  with "code-viewer のコード注釈について依頼があります" and lists the
+  annotation id, location, and session, followed by their question.
+  Read the current body first: code-viewer annotate list --json
+- Revise a wrong annotation IN PLACE (do not delete + re-add; the id and
+  its position in the walkthrough are preserved):
+    code-viewer annotate edit <id> --body "<corrected markdown>"
+    (long bodies: --body-file <path> or pipe via stdin; --title also works)
+- Post a follow-up answer next to the original instead of replacing it:
+    code-viewer annotate add --session <session-id> --file <path> --line <n> \
+        --title "回答: ..." --body "<markdown>"
+- Rename a session: code-viewer annotate rename <session-id> --title <text>
 
 ## Cleanup
 
@@ -223,6 +249,38 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           title: options.get("--title"),
           session: options.get("--session"),
           sessionTitle: options.get("--session-title"),
+          body,
+          bodyFile,
+        },
+        cwd,
+        server,
+      },
+    };
+  }
+  if (subcommand === "rename") {
+    const id = rest[1];
+    if (!id) return { ok: false, error: "rename requires a session id" };
+    const title = options.get("--title");
+    if (!title) return { ok: false, error: "rename requires --title <text>" };
+    return {
+      ok: true,
+      args: { command: { kind: "rename", id, title }, cwd, server },
+    };
+  }
+  if (subcommand === "edit") {
+    const id = rest[1];
+    if (!id) return { ok: false, error: "edit requires an annotation id" };
+    const body = options.get("--body");
+    const bodyFile = options.get("--body-file");
+    if (body !== undefined && bodyFile !== undefined)
+      return { ok: false, error: "use either --body or --body-file" };
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "edit",
+          id,
+          title: options.get("--title"),
           body,
           bodyFile,
         },
@@ -441,6 +499,38 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     const state = (await request(serverUrl, "GET")) as AnnotationsState;
     if (command.json) console.log(JSON.stringify(state, null, 2));
     else printList(state);
+    return;
+  }
+  if (command.kind === "rename") {
+    await request(serverUrl, "POST", {
+      action: "rename",
+      id: command.id,
+      title: command.title,
+    });
+    console.log(`renamed session ${command.id} to "${command.title}"`);
+    return;
+  }
+  if (command.kind === "edit") {
+    let bodyText = command.body;
+    if (command.bodyFile !== undefined)
+      bodyText = readFileSync(command.bodyFile, "utf8");
+    if (bodyText === undefined) {
+      const stdin = await readStdin();
+      if (stdin.trim()) bodyText = stdin;
+    }
+    if (bodyText === undefined && command.title === undefined) {
+      console.error("edit requires --title, --body, --body-file, or stdin");
+      process.exit(1);
+    }
+    const result = (await request(serverUrl, "POST", {
+      action: "update",
+      id: command.id,
+      title: command.title,
+      body: bodyText,
+    })) as { entry: AnnotationEntry };
+    console.log(
+      `updated annotation ${result.entry.id} (${result.entry.path}${formatLine(result.entry.line)})`,
+    );
     return;
   }
   if (command.kind === "delete") {

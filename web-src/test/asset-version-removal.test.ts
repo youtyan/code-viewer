@@ -9,7 +9,7 @@ describe("asset version polling removal", () => {
     const preview = sourceFixture(
       readFileSync("web-src/server/preview.ts", "utf8"),
     );
-    const types = readFileSync("web-src/types.ts", "utf8");
+    const types = readFileSync("web-src/core/types.ts", "utf8");
 
     for (const source of [app, builtApp, preview, types]) {
       expect(source.includes("_asset_version")).toBe(false);

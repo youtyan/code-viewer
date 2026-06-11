@@ -4076,13 +4076,29 @@ body.annotation-panel-open #content {
   font-size: 12px;
 }
 .annotation-session {
-  margin-bottom: 14px;
+  /* Each session is a distinct card: a bordered group whose header doubles
+     as the "show this walkthrough inline" toggle. */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.annotation-session.active {
+  border-color: var(--accent);
 }
 .annotation-session-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 6px 0;
+  margin: 0;
+  padding: 4px 6px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+.annotation-session.active .annotation-session-head {
+  background: var(--accent-subtle);
+  border-bottom-color: var(--accent);
 }
 .annotation-session-select {
   flex: 1;
@@ -4093,15 +4109,15 @@ body.annotation-panel-open #content {
   font-size: 12px;
   font-weight: 600;
   text-align: left;
-  padding: 2px 4px;
+  padding: 3px 4px;
   border-radius: 6px;
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.annotation-session-select:hover {
-  background: var(--accent-subtle);
+.annotation-session.active .annotation-session-select {
+  color: var(--accent);
 }
 .annotation-session-time {
   flex: none;
@@ -4109,29 +4125,30 @@ body.annotation-panel-open #content {
   color: var(--fg-subtle);
   white-space: nowrap;
 }
-.annotation-session.active .annotation-session-select {
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
 .annotation-entries {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 4px;
   counter-reset: annotation-step;
 }
 .annotation-entries li {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 4px;
   border-radius: 6px;
   counter-increment: annotation-step;
+}
+.annotation-entries li:hover {
+  background: var(--bg-soft);
 }
 .annotation-entries li.active {
   background: var(--accent-subtle);
 }
 .annotation-entry-open {
   flex: 1;
-  display: block;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 4px;
   text-align: left;
   border: 0;
   background: none;
@@ -4141,23 +4158,49 @@ body.annotation-panel-open #content {
   min-width: 0;
 }
 .annotation-entry-open::before {
-  content: counter(annotation-step) ". ";
+  content: counter(annotation-step);
+  grid-row: 1 / span 2;
   color: var(--fg-subtle);
   font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+.annotation-entries li.active .annotation-entry-open::before {
+  color: var(--accent);
+  font-weight: 600;
 }
 .annotation-entry-location {
+  grid-column: 2;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   font-size: 11px;
   color: var(--accent);
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .annotation-entry-summary {
+  grid-column: 2;
   display: block;
   font-size: 12px;
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Per-row actions stay quiet until the row (or the panel item) is hovered,
+   so the list reads as content, not as a wall of trash cans. */
+.annotation-session-head .annotation-icon-btn,
+.annotation-entries li .annotation-icon-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.annotation-session-head:hover .annotation-icon-btn,
+.annotation-entries li:hover .annotation-icon-btn,
+.annotation-icon-btn:focus-visible {
+  opacity: 1;
+}
+.annotation-entries li .annotation-icon-btn {
+  margin-right: 4px;
 }
 .annotation-delete {
   border: 1px solid transparent;
@@ -4174,11 +4217,15 @@ body.annotation-panel-open #content {
 }
 
 #annotation-detail {
+  /* Docked under the session list with a FIXED height: the list above never
+     moves when the entry body is longer or shorter, so click targets stay
+     put while stepping through a walkthrough. */
   flex: none;
   display: flex;
   flex-direction: column;
-  max-height: 55%;
-  border-bottom: 1px solid var(--border);
+  height: 45%;
+  min-height: 220px;
+  border-top: 1px solid var(--border);
   background: var(--bg-soft);
 }
 .annotation-detail-head {
@@ -4229,6 +4276,7 @@ body.annotation-panel-open #content {
   text-decoration: underline;
 }
 #annotation-detail-body {
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 12px 12px;
@@ -4282,4 +4330,76 @@ body.annotation-panel-open #content {
 }
 .gdp-annotation-inline-body p:last-child {
   margin-bottom: 0;
+}
+
+/* Annotation editing + AI-ready reference copy */
+.gdp-annotation-inline {
+  position: sticky;
+}
+.annotation-icon-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.annotation-icon-btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+.annotation-icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.annotation-icon-btn.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.annotation-icon-btn.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.gdp-annotation-inline-copy {
+  float: right;
+  margin-left: 8px;
+}
+.annotation-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+.annotation-edit-form input,
+.annotation-edit-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.annotation-edit-form textarea {
+  flex: 1;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+.annotation-edit-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.gdp-annotation-spacer td {
+  padding: 0;
+  background: var(--bg-soft);
+}
+.gdp-annotation-spacer td > div {
+  height: 0;
 }

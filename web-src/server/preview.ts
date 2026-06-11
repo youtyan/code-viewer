@@ -15,8 +15,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
-import { normalizeNewDirectoryName } from "../directory-name";
-import { APP_ENTRY_PATHS, SPA_PATHS } from "../routes";
+import { normalizeNewDirectoryName } from "../core/directory-name";
+import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   DiffMeta,
   FileDiffResponse,
@@ -28,15 +28,17 @@ import type {
   RepoTreeResponse,
   SettingsResponse,
   UndoActionResponse,
-} from "../types";
+} from "../core/types";
 import {
   ANNOTATION_BODY_MAX_BYTES,
   addAnnotationEntry,
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
+  renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
+  updateAnnotationEntry,
 } from "./annotations";
 import {
   cacheFresh,
@@ -2178,7 +2180,7 @@ async function handleRestoreTrash(req: Request) {
 }
 
 function annotationSse(
-  kind: "start" | "add" | "delete" | "clear",
+  kind: "start" | "add" | "delete" | "clear" | "update",
   sessionId?: string,
   entryId?: string,
 ) {
@@ -2269,6 +2271,32 @@ async function handleAnnotations(req: Request) {
       annotationSse("delete");
     }
     return json({ ok: true, removed: result.removed });
+  }
+  if (action === "rename") {
+    const id = typeof body.id === "string" ? body.id : "";
+    const title = typeof body.title === "string" ? body.title : "";
+    if (!id) return text("invalid id", 400);
+    const result = renameAnnotationSession(
+      loadAnnotationsState(cwd),
+      id,
+      title,
+    );
+    if (!result.renamed) return text("session not found", 404);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", id);
+    return json({ ok: true });
+  }
+  if (action === "update") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return text("invalid id", 400);
+    const result = updateAnnotationEntry(loadAnnotationsState(cwd), id, {
+      title: typeof body.title === "string" ? body.title : undefined,
+      body: typeof body.body === "string" ? body.body : undefined,
+    });
+    if (result.ok === false) return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", undefined, id);
+    return json({ ok: true, entry: result.entry });
   }
   if (action === "clear") {
     saveAnnotationsState(cwd, emptyAnnotationsState());
@@ -2383,11 +2411,28 @@ writeServerRegistry({
   started_at: new Date().toISOString(),
 });
 process.on("exit", () => removeServerRegistry(cwd, process.pid));
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
     removeServerRegistry(cwd, process.pid);
     process.exit(0);
   });
+}
+
+// Under the dev wrapper, exit when the parent dies so a crashed or
+// force-killed dev.ts never leaves this server holding the port.
+// Note: Bun caches process.ppid at startup, so poll the captured pid
+// with signal 0 instead of re-reading process.ppid.
+if (process.env.CODE_VIEWER_DEV === "1") {
+  const parentPid = process.ppid;
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      console.log("dev wrapper exited; shutting down preview server");
+      removeServerRegistry(cwd, process.pid);
+      process.exit(0);
+    }
+  }, 1000).unref();
 }
 
 startDevAssetReload({
