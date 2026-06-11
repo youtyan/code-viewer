@@ -104,6 +104,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     for (const cb of annotationsChangedCallbacks) cb();
   }
   const annotationOpenedCallbacks: Array<(entryId: string) => void> = [];
+  // Range whose diff was loaded and turned out to be empty. Without this,
+  // an empty file list is indistinguishable from a never-loaded one and a
+  // clean worktree would re-trigger a full diff load on every step.
+  let emptyDiffRangeKey: string | null = null;
   function notifyAnnotationOpened(entryId: string) {
     for (const cb of annotationOpenedCallbacks) cb(entryId);
   }
@@ -815,7 +819,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     // route or page-mode switch: flipping to the diff route first and then
     // correcting to the file route repaints the whole layout and makes the
     // header menu flicker on every annotation step.
-    const needDiffLoad = rangeChanged || !deps.getFiles().length;
+    const rangeKey = `${from}..${to}`;
+    const needDiffLoad =
+      rangeChanged ||
+      (!deps.getFiles().length && emptyDiffRangeKey !== rangeKey);
     if (needDiffLoad) {
       // The file list for this range is unknown — the diff has to load.
       deps.setRoute({ screen: "diff", range, path: entry.path, line });
@@ -823,6 +830,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       deps.removeStandaloneSource();
       await deps.load();
       if (stale()) return;
+      emptyDiffRangeKey = deps.getFiles().length ? null : rangeKey;
     }
 
     if (deps.getFiles().some((f) => f.path === entry.path)) {
