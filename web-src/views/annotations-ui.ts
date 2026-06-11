@@ -371,28 +371,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     session: AnnotationSession,
     entry: AnnotationEntry,
   ): string {
-    const location = annotationLocationLabel(entry);
-    const lineArg = entry.line
-      ? ` --line ${entry.line.start === entry.line.end ? entry.line.start : `${entry.line.start}-${entry.line.end}`}`
-      : "";
     return [
       "code-viewer のコード注釈について依頼があります。",
       "",
-      "## 依頼内容",
-      "(ここに質問や修正してほしい点を書いてください)",
-      "",
       "## 対象の注釈",
       `- annotation id: ${entry.id}`,
-      `- 場所: ${location}`,
+      `- 場所: ${annotationLocationLabel(entry)}`,
       `- session: ${session.id}「${session.title}」`,
       "",
-      "## あなた(AI)への手順",
-      "1. まず対象を読む: `code-viewer annotate list --json` の出力から上記 id の body を確認する。",
-      "2. 依頼が「注釈の誤りの修正」なら、削除せずその場で書き換える(idと表示位置が保たれる):",
-      `   \`code-viewer annotate edit ${entry.id} --body "<修正後のmarkdown>"\` (長文は --body-file か stdin)`,
-      "3. 依頼が「深掘り質問への回答」なら、元の注釈は残して同じ場所に回答を追加する:",
-      `   \`code-viewer annotate add --session ${session.id} --file ${entry.path}${lineArg} --title "回答: <要約>" --body "<markdown>"\``,
-      "4. 詳しい使い方は `code-viewer annotate agent-help` を参照。サーバーが起動している必要があります。",
     ].join("\n");
   }
 
