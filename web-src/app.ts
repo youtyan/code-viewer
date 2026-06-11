@@ -1,3 +1,4 @@
+import { type AnnotationsUi, createAnnotationsUi } from "./annotations-ui";
 import { createCatchUpGate, shouldCatchUpDiff } from "./catch-up";
 import { normalizeNewDirectoryName } from "./directory-name";
 import { GdpExpandLogic } from "./expand-logic";
@@ -28,7 +29,7 @@ import {
   type KeymapScope,
   resolveKeymapAction,
 } from "./keymap";
-import { renderMarkdownHtml, renderMarkdownPreview } from "./markdown-preview";
+import { renderMarkdownPreview } from "./markdown-preview";
 import {
   type AppRoute,
   buildRawFileUrl,
@@ -40,10 +41,6 @@ import {
 } from "./routes";
 import { limitPaletteResults, movePaletteSelection } from "./search-palette";
 import type {
-  AnnotationEntry,
-  AnnotationSession,
-  AnnotationSseEvent,
-  AnnotationsState,
   DiffCardElement,
   DiffMeta,
   FileDiffResponse,
@@ -1116,6 +1113,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const file = card._file;
         if (!data || !file) return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -1138,6 +1136,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const file = card._file;
         if (!data || !file) return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -2413,11 +2412,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     return focusDiffLine(targetCard, STATE.route.line);
   }
 
+  // Lazy diff loads above the focused line change the document height and
+  // push the target away after we already scrolled to it. While this window
+  // is open, every finished card load re-anchors the viewport on the route's
+  // target line; any manual scroll intent (wheel/touch) closes it so the
+  // user is never yanked back.
+  let REANCHOR_UNTIL =
+    STATE.route.screen === "diff" && STATE.route.line
+      ? performance.now() + 6000
+      : 0;
+  window.addEventListener(
+    "wheel",
+    () => {
+      REANCHOR_UNTIL = 0;
+    },
+    { passive: true },
+  );
+  window.addEventListener(
+    "touchmove",
+    () => {
+      REANCHOR_UNTIL = 0;
+    },
+    { passive: true },
+  );
+
   function scrollToFile(path: string, line?: SourceLineTarget) {
     const card = document.querySelector<DiffCardElement>(
       diffCardSelector(path),
     );
     if (!card) return;
+    if (line) REANCHOR_UNTIL = performance.now() + 4000;
     markActive(path);
     SUPPRESS_SPY_UNTIL = performance.now() + 1500;
     const onEnd = () => {
@@ -2712,6 +2736,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "keybindings";
   }
 
+  // Annotations UI (annotations-ui.ts) is constructed near the end of this
+  // file once its dependencies exist; the few call sites that can run before
+  // that (setRoute, lazy diff renders) go through this late-bound handle.
+  let ANNOTATIONS_UI: AnnotationsUi | null = null;
+
+  function applyInlineAnnotations() {
+    ANNOTATIONS_UI?.applyInlineAnnotations();
+  }
+
+  function withAnnotationSessionParam(rawUrl: string): string {
+    return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute =
       route.screen === "unknown"
@@ -2726,7 +2763,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
-    const url = buildRoute(nextRoute);
+    const url = withAnnotationSessionParam(buildRoute(nextRoute));
     const state =
       nextRoute.screen === "file"
         ? {
@@ -4530,9 +4567,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       start: number,
       end: number,
       dir: "before" | "after",
-    ) => {
+    ): Promise<void> => {
       if (start < 1) start = 1;
-      if (end < start) return;
+      if (end < start) return Promise.resolve();
       setBusy(true);
       const url =
         "/file_range?path=" +
@@ -4543,7 +4580,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         start +
         "&end=" +
         end;
-      trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
+      return trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
         .then((data) => {
           if (!data?.lines) {
             setBusy(false);
@@ -4636,13 +4673,25 @@ window.GdpExpandLogic = GdpExpandLogic;
       return createExpandStack(buttons);
     };
 
+    // One-shot full-gap expansion for "expand all context": fetches the
+    // whole remaining gap in a single request instead of 20-line clicks.
+    // Sibling stacks (split view) share the guard so the gap loads once.
+    let expandFullyStarted = false;
+    const expandFully = (): Promise<void> => {
+      if (expandFullyStarted) return Promise.resolve();
+      expandFullyStarted = true;
+      return fetchAndInsert(remainingStart, remainingEnd, "after");
+    };
+
     const siblings = item.siblings || [{ tr: item.tr }];
     siblings.forEach((sib) => {
       const ln = sib.tr.querySelector(
         ".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info",
       );
       if (ln && !ln.querySelector(".gdp-expand-stack")) {
-        ln.appendChild(buildStack());
+        const stack = buildStack() as ExpandStackElement;
+        stack._gdpExpandFully = expandFully;
+        ln.appendChild(stack);
       }
     });
     const firstSib = siblings[0];
@@ -4658,6 +4707,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     direction: "up" | "down";
     title: string;
     onClick: () => void;
+  };
+
+  type ExpandStackElement = HTMLElement & {
+    _gdpExpandFully?: () => Promise<void>;
   };
 
   const EXPAND_ICON_PATHS = {
@@ -4751,10 +4804,10 @@ window.GdpExpandLogic = GdpExpandLogic;
           });
       });
     };
-    const fetchAndInsert = () => {
+    const fetchAndInsert = (step = STEP): Promise<void> => {
       const range = window.GdpExpandLogic.trailingClickRange(
         nextNewStart,
-        STEP,
+        step,
       );
       const myGen = SERVER_GENERATION;
       setBusy(true);
@@ -4767,7 +4820,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         range.start +
         "&end=" +
         range.end;
-      trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+      return trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
         .then((data) => {
           if (
             myGen !== SERVER_GENERATION ||
@@ -4798,7 +4851,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           const next = window.GdpExpandLogic.applyTrailingResult(
             { newStart: nextNewStart, oldStart: nextOldStart },
             lines.length,
-            STEP,
+            step,
           );
           nextNewStart = next.newStart;
           nextOldStart = next.oldStart;
@@ -4815,16 +4868,24 @@ window.GdpExpandLogic = GdpExpandLogic;
           setBusy(false);
         });
     };
+    // One-shot expansion to EOF for "expand all context": a single large
+    // range request instead of repeated 20-line clicks.
+    let expandFullyStarted = false;
+    const expandFully = (): Promise<void> => {
+      if (expandFullyStarted) return Promise.resolve();
+      expandFullyStarted = true;
+      return fetchAndInsert(100000);
+    };
     rows.forEach((row) => {
-      row.ln.appendChild(
-        createExpandStack([
-          {
-            direction: "down",
-            title: "Show more lines",
-            onClick: fetchAndInsert,
-          },
-        ]),
-      );
+      const stack = createExpandStack([
+        {
+          direction: "down",
+          title: "Show more lines",
+          onClick: () => void fetchAndInsert(),
+        },
+      ]) as ExpandStackElement;
+      stack._gdpExpandFully = expandFully;
+      row.ln.appendChild(stack);
     });
     syncExpandRowHeights(
       rows.map((row) => row.tr),
@@ -7202,24 +7263,32 @@ window.GdpExpandLogic = GdpExpandLogic;
       card._diffData &&
       (card._diffData.truncated || card._diffData.mode === "preview")
     ) {
+      // Load the full diff first, then fall through to expand its gaps too.
       await loadFile(file, card, file.load_url);
-      card.classList.add("gdp-context-expanded");
-      setUnfoldButtonState(
-        card.querySelector<HTMLButtonElement>(".gdp-file-unfold"),
-        true,
-      );
-      return;
     }
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (button) button.disabled = true;
     try {
-      for (let i = 0; i < 200; i++) {
-        const next = card.querySelector<HTMLButtonElement>(
-          ".gdp-expand-btn:not(:disabled)",
+      // Expand every gap fully in parallel: each stack exposes a one-shot
+      // whole-gap fetch, so a round costs one request per gap instead of
+      // a 20-line click every 80ms. Extra rounds only pick up stacks the
+      // previous round created (e.g. trailing EOF probing).
+      for (let round = 0; round < 20; round++) {
+        const tasks = Array.from(
+          card.querySelectorAll<ExpandStackElement>(".gdp-expand-stack"),
+        )
+          .map((stack) => stack._gdpExpandFully)
+          .filter((fn): fn is () => Promise<void> => !!fn);
+        if (!tasks.length) break;
+        const results = await Promise.all(
+          tasks.map((fn) =>
+            fn().then(
+              () => true,
+              () => false,
+            ),
+          ),
         );
-        if (!next) break;
-        next.click();
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        if (!results.some(Boolean)) break;
       }
       card.classList.add("gdp-context-expanded");
       setUnfoldButtonState(button || null, true);
@@ -7390,7 +7459,31 @@ window.GdpExpandLogic = GdpExpandLogic;
     card.style.minHeight = "";
 
     mountDiff(card, file, data);
-    applyDiffRouteFocus(card);
+    applyInlineAnnotations();
+    const focused = applyDiffRouteFocus(card);
+    // A shared/annotation URL can point at a line outside the diff hunks
+    // (unchanged code). Expand the file context so the target is visible.
+    if (
+      !focused &&
+      STATE.route.screen === "diff" &&
+      STATE.route.path === file.path &&
+      STATE.route.line &&
+      !card.classList.contains("gdp-context-expanded")
+    ) {
+      void expandAllFileContext(card, file).then(() => {
+        applyInlineAnnotations();
+        applyDiffRouteFocus(card);
+      });
+    }
+    // Another card finishing its lazy load can shift the already-focused
+    // target line; re-anchor on it while the navigation window is open.
+    if (
+      performance.now() < REANCHOR_UNTIL &&
+      STATE.route.screen === "diff" &&
+      STATE.route.path !== file.path
+    ) {
+      applyDiffRouteFocus();
+    }
     card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
@@ -9421,6 +9514,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.to = STATE.route.range.to;
     if (STATE.route.screen === "repo")
       STATE.repoRef = STATE.route.ref || "worktree";
+    ANNOTATIONS_UI?.restoreSessionFromUrl();
     syncRefInputs();
     syncHeaderMenu();
     if (STATE.route.screen === "help") {
@@ -9523,309 +9617,32 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   // ---- Code annotations (AI walkthrough) ----
-  // Agents post explanations for code locations through the CLI
-  // (`code-viewer annotate add ...`). The server persists them under
-  // .code-viewer/annotations.json and notifies open tabs over SSE; with
-  // follow mode on, the viewer jumps to each new location as it arrives.
-  let ANNOTATIONS: AnnotationsState = { version: 1, sessions: [] };
-  let annotationFollow = localStorage.getItem("gdp:annotation-follow") !== "0";
-  let activeAnnotationId: string | null = null;
-
-  const annotationPanel = $("#annotation-panel");
-  const annotationSessionsEl = $("#annotation-sessions");
-  const annotationDetail = $("#annotation-detail");
-  const annotationCountEl = $("#annotations-count");
-
-  function setAnnotationPanelOpen(open: boolean) {
-    annotationPanel.hidden = !open;
-    document.body.classList.toggle("annotation-panel-open", open);
-  }
-
-  function annotationLineTarget(
-    entry: AnnotationEntry,
-  ): SourceLineTarget | undefined {
-    if (!entry.line) return undefined;
-    return entry.line.start === entry.line.end
-      ? entry.line.start
-      : { start: entry.line.start, end: entry.line.end };
-  }
-
-  function annotationLocationLabel(entry: AnnotationEntry): string {
-    if (!entry.line) return entry.path;
-    return entry.line.start === entry.line.end
-      ? `${entry.path}:${entry.line.start}`
-      : `${entry.path}:${entry.line.start}-${entry.line.end}`;
-  }
-
-  function annotationRefForEntry(entry: AnnotationEntry): string {
-    const to = entry.range.to || "worktree";
-    return to === "worktree" || to === "" ? "worktree" : to;
-  }
-
-  function findAnnotation(entryId: string): {
-    session: AnnotationSession;
-    entry: AnnotationEntry;
-    index: number;
-  } | null {
-    for (const session of ANNOTATIONS.sessions) {
-      const index = session.entries.findIndex((e) => e.id === entryId);
-      if (index >= 0) return { session, entry: session.entries[index], index };
-    }
-    return null;
-  }
-
-  function updateAnnotationBadge() {
-    const total = ANNOTATIONS.sessions.reduce(
-      (sum, session) => sum + session.entries.length,
-      0,
-    );
-    annotationCountEl.textContent = String(total);
-    annotationCountEl.hidden = total === 0;
-  }
-
-  async function refreshAnnotations(): Promise<void> {
-    try {
-      const res = await fetch("/_annotations");
-      if (!res.ok) return;
-      ANNOTATIONS = (await res.json()) as AnnotationsState;
-    } catch {
-      return;
-    }
-    updateAnnotationBadge();
-    renderAnnotationPanel();
-    if (activeAnnotationId && !findAnnotation(activeAnnotationId))
-      hideAnnotationDetail();
-  }
-
-  async function postAnnotationAction(
-    payload: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      await fetch("/_annotations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1",
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      /* refresh below shows the real state either way */
-    }
-    await refreshAnnotations();
-  }
-
-  function annotationEntrySummary(entry: AnnotationEntry): string {
-    const text = entry.title || entry.body;
-    const firstLine = text.split("\n")[0].trim();
-    return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
-  }
-
-  function renderAnnotationPanel() {
-    annotationSessionsEl.replaceChildren();
-    if (!ANNOTATIONS.sessions.length) {
-      const empty = document.createElement("p");
-      empty.className = "annotation-empty";
-      empty.textContent =
-        "No annotations yet. Agents can add them with: code-viewer annotate add";
-      annotationSessionsEl.appendChild(empty);
-      return;
-    }
-    for (const session of [...ANNOTATIONS.sessions].reverse()) {
-      const sessionEl = document.createElement("section");
-      sessionEl.className = "annotation-session";
-
-      const head = document.createElement("div");
-      head.className = "annotation-session-head";
-      const title = document.createElement("strong");
-      title.textContent = session.title;
-      title.title = session.created_at;
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "annotation-delete";
-      del.title = "delete session";
-      del.setAttribute("aria-label", `delete session ${session.title}`);
-      del.textContent = "×";
-      del.addEventListener("click", () => {
-        void postAnnotationAction({ action: "delete", id: session.id });
-      });
-      head.append(title, del);
-      sessionEl.appendChild(head);
-
-      const list = document.createElement("ol");
-      list.className = "annotation-entries";
-      session.entries.forEach((entry) => {
-        const item = document.createElement("li");
-        item.classList.toggle("active", entry.id === activeAnnotationId);
-        const open = document.createElement("button");
-        open.type = "button";
-        open.className = "annotation-entry-open";
-        const location = document.createElement("span");
-        location.className = "annotation-entry-location";
-        location.textContent = annotationLocationLabel(entry);
-        const summary = document.createElement("span");
-        summary.className = "annotation-entry-summary";
-        summary.textContent = annotationEntrySummary(entry);
-        open.append(location, summary);
-        open.addEventListener("click", () => {
-          void openAnnotationEntry(entry.id);
-        });
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "annotation-delete";
-        remove.title = "delete annotation";
-        remove.setAttribute(
-          "aria-label",
-          `delete annotation for ${annotationLocationLabel(entry)}`,
-        );
-        remove.textContent = "×";
-        remove.addEventListener("click", () => {
-          void postAnnotationAction({ action: "delete", id: entry.id });
-        });
-        item.append(open, remove);
-        list.appendChild(item);
-      });
-      sessionEl.appendChild(list);
-      annotationSessionsEl.appendChild(sessionEl);
-    }
-  }
-
-  function hideAnnotationDetail() {
-    activeAnnotationId = null;
-    annotationDetail.hidden = true;
-    renderAnnotationPanel();
-  }
-
-  function showAnnotationDetail(
-    session: AnnotationSession,
-    entry: AnnotationEntry,
-    index: number,
-  ) {
-    activeAnnotationId = entry.id;
-    $("#annotation-detail-session").textContent = session.title;
-    $("#annotation-detail-step").textContent =
-      `${index + 1}/${session.entries.length}`;
-    const location = $<HTMLAnchorElement>("#annotation-detail-location");
-    location.textContent = annotationLocationLabel(entry);
-    const body = $("#annotation-detail-body");
-    body.replaceChildren();
-    if (entry.title) {
-      const heading = document.createElement("strong");
-      heading.className = "annotation-detail-title";
-      heading.textContent = entry.title;
-      body.appendChild(heading);
-    }
-    const markdown = document.createElement("div");
-    markdown.innerHTML = renderMarkdownHtml(
-      entry.body,
-      { path: entry.path, ref: annotationRefForEntry(entry) },
-      null,
-    );
-    body.appendChild(markdown);
-    $<HTMLButtonElement>("#annotation-detail-prev").disabled = index <= 0;
-    $<HTMLButtonElement>("#annotation-detail-next").disabled =
-      index >= session.entries.length - 1;
-    annotationDetail.hidden = false;
-    setAnnotationPanelOpen(true);
-    renderAnnotationPanel();
-  }
-
-  async function openAnnotationEntry(entryId: string): Promise<void> {
-    const found = findAnnotation(entryId);
-    if (!found) return;
-    const { session, entry, index } = found;
-    const from = entry.range.from || "HEAD";
-    const to = entry.range.to || "worktree";
-    const range = { from, to };
-    const current = currentRange();
-    const rangeChanged = current.from !== from || current.to !== to;
-    const wasDiffScreen = STATE.route.screen === "diff";
-    const line = annotationLineTarget(entry);
-
-    STATE.from = from;
-    STATE.to = to;
-    localStorage.setItem("gdp:from", from);
-    localStorage.setItem("gdp:to", to);
-    syncRefInputs();
-    cancelActiveSourceLoad("navigation");
-    setRoute({ screen: "diff", range, path: entry.path, line });
-    setPageMode();
-    removeStandaloneSource();
-    if (rangeChanged || !wasDiffScreen || !STATE.files.length) await load();
-
-    if (STATE.files.some((f) => f.path === entry.path)) {
-      scrollToFile(entry.path, line);
-    } else {
-      // The annotated file has no diff in this range — show its source
-      // directly so unchanged code can be explained too.
-      const ref = annotationRefForEntry(entry);
-      setRoute(
-        { screen: "file", path: entry.path, ref, view: "blob", line, range },
-        true,
-      );
-      setPageMode();
-      void renderStandaloneSource({ path: entry.path, ref });
-    }
-    showAnnotationDetail(session, entry, index);
-  }
-
-  function stepAnnotation(direction: 1 | -1) {
-    if (!activeAnnotationId) return;
-    const found = findAnnotation(activeAnnotationId);
-    if (!found) return;
-    const next = found.session.entries[found.index + direction];
-    if (next) void openAnnotationEntry(next.id);
-  }
-
-  function handleAnnotationSse(raw: string) {
-    let event: AnnotationSseEvent | null = null;
-    try {
-      event = JSON.parse(raw) as AnnotationSseEvent;
-    } catch {
-      event = null;
-    }
-    void refreshAnnotations().then(() => {
-      if (
-        event?.kind === "add" &&
-        event.entry_id &&
-        annotationFollow &&
-        findAnnotation(event.entry_id)
-      ) {
-        void openAnnotationEntry(event.entry_id);
-      }
-    });
-  }
-
-  $("#annotations-toggle").addEventListener("click", () => {
-    setAnnotationPanelOpen(annotationPanel.hidden);
-    if (!annotationPanel.hidden) void refreshAnnotations();
+  // Panel + inline rows live in annotations-ui.ts; this wires it to the app.
+  ANNOTATIONS_UI = createAnnotationsUi({
+    $,
+    diffCardSelector,
+    diffRowLineNumber,
+    focusDiffLine,
+    scrollDiffElementIntoView,
+    expandAllFileContext,
+    scrollToFile,
+    renderStandaloneSource,
+    removeStandaloneSource,
+    cancelActiveSourceLoad,
+    setRoute,
+    setPageMode,
+    syncRefInputs,
+    load,
+    currentRange,
+    getFiles: () => STATE.files,
+    getRoute: () => STATE.route,
+    setRange: (from, to) => {
+      STATE.from = from;
+      STATE.to = to;
+      localStorage.setItem("gdp:from", from);
+      localStorage.setItem("gdp:to", to);
+    },
   });
-  $("#annotation-panel-close").addEventListener("click", () => {
-    setAnnotationPanelOpen(false);
-  });
-  const followCheckbox = $<HTMLInputElement>("#annotation-follow");
-  followCheckbox.checked = annotationFollow;
-  followCheckbox.addEventListener("change", () => {
-    annotationFollow = followCheckbox.checked;
-    localStorage.setItem("gdp:annotation-follow", annotationFollow ? "1" : "0");
-  });
-  $("#annotation-clear").addEventListener("click", () => {
-    if (!window.confirm("Delete all annotations?")) return;
-    hideAnnotationDetail();
-    void postAnnotationAction({ action: "clear" });
-  });
-  $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
-  $("#annotation-detail-prev").addEventListener("click", () => {
-    stepAnnotation(-1);
-  });
-  $("#annotation-detail-next").addEventListener("click", () => {
-    stepAnnotation(1);
-  });
-  $("#annotation-detail-location").addEventListener("click", (e) => {
-    e.preventDefault();
-    if (activeAnnotationId) void openAnnotationEntry(activeAnnotationId);
-  });
-  void refreshAnnotations();
 
   // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession
   // collapse into one fetch. Scroll + active file are preserved across reload.
@@ -9858,7 +9675,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   es.addEventListener("update", () => scheduleSseLoad());
   es.addEventListener("reload", () => location.reload());
   es.addEventListener("annotation", (event) => {
-    handleAnnotationSse((event as MessageEvent).data);
+    ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
   });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {

@@ -144,7 +144,7 @@
         <input type="checkbox" id="annotation-follow" checked /> follow
       </label>
       <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
-      <button id="annotation-panel-close" type="button" aria-label="close annotations panel">×</button>
+      <button id="annotation-panel-close" type="button">close</button>
     </div>
     <div id="annotation-detail" hidden>
       <div class="annotation-detail-head">
@@ -152,10 +152,14 @@
         <span id="annotation-detail-step"></span>
         <button id="annotation-detail-prev" type="button" title="previous annotation">‹</button>
         <button id="annotation-detail-next" type="button" title="next annotation">›</button>
-        <button id="annotation-detail-close" type="button" aria-label="close annotation detail">×</button>
+        <button id="annotation-detail-close" type="button">close</button>
       </div>
       <a id="annotation-detail-location" href="#"></a>
       <div id="annotation-detail-body" class="markdown-body"></div>
+    </div>
+    <div class="annotation-list-head">
+      <strong>Sessions</strong>
+      <span id="annotation-list-count"></span>
     </div>
     <div id="annotation-sessions"></div>
   </aside>
