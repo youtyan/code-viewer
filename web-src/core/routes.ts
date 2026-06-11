@@ -27,6 +27,7 @@ export type AppRoute =
       line?: SourceLineTarget;
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
+  | { screen: "history"; ref: string; commit?: string; range: DiffRange }
   | {
       screen: "unknown";
       reason: "unknown-pathname" | "missing-path";
@@ -35,7 +36,13 @@ export type AppRoute =
       range: DiffRange;
     };
 
-export const SPA_PATHS = ["/todif", "/todiff", "/file", "/help"] as const;
+export const SPA_PATHS = [
+  "/todif",
+  "/todiff",
+  "/file",
+  "/help",
+  "/history",
+] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
 
 export function assertNever(value: never): never {
@@ -135,6 +142,15 @@ export function parseRoute(
         lang: params.get("lang") || "en",
         section: params.get("section") || "keybindings",
       };
+    case "/history": {
+      const commit = params.get("commit") || "";
+      return {
+        screen: "history",
+        ref: params.get("ref") || "HEAD",
+        ...(commit ? { commit } : {}),
+        range,
+      };
+    }
     default:
       return {
         screen: "unknown",
@@ -198,6 +214,13 @@ export function buildRoute(route: AppRoute): string {
         params.set("section", route.section);
       const qs = params.toString();
       return `/help${qs ? `?${qs}` : ""}`;
+    }
+    case "history": {
+      const params = new URLSearchParams();
+      if (route.ref && route.ref !== "HEAD") params.set("ref", route.ref);
+      if (route.commit) params.set("commit", route.commit);
+      const qs = params.toString();
+      return `/history${qs ? `?${qs}` : ""}`;
     }
     case "unknown":
       return (
