@@ -1876,6 +1876,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     setAnnotationPanelOpen: (open) =>
       ANNOTATIONS_UI?.setAnnotationPanelOpen(open),
     onAnnotationsChanged: (cb) => ANNOTATIONS_UI?.onAnnotationsChanged(cb),
+    onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
+    getActiveAnnotationId: () =>
+      ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
 
   // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession

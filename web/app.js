@@ -532,16 +532,16 @@
       };
       deps.jump(item.entryId).then(proceed, proceed);
     }
-    function play() {
+    function play(fromIndex) {
       if (status === "playing")
         return;
       if (status === "paused") {
-        startEntry(index);
+        startEntry(fromIndex ?? index);
         return;
       }
       if (deps.items().length === 0)
         return;
-      startEntry(0);
+      startEntry(fromIndex ?? 0);
     }
     function pause() {
       if (status !== "playing")
@@ -574,6 +574,11 @@
           deps.jump(item.entryId).catch(() => {});
       }
     }
+    function jumpTo(at) {
+      if (status === "idle")
+        return;
+      moveTo(at);
+    }
     function next() {
       if (status === "idle")
         return;
@@ -603,7 +608,17 @@
       rate = value;
       restartCurrentIfPlaying();
     }
-    return { play, pause, stop, next, prev, setMuted, setRate, getState };
+    return {
+      play,
+      pause,
+      stop,
+      next,
+      prev,
+      jumpTo,
+      setMuted,
+      setRate,
+      getState
+    };
   }
 
   // web-src/core/annotation-speech.ts
@@ -616,6 +631,7 @@
     text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
     text = text.replace(/`([^`]*)`/g, "$1");
     text = text.replace(/https?:\/\/\S+/g, "URL");
+    text = text.replace(/<([^<>]*)>/g, " $1 ");
     text = text.replace(/^[ \t]*(?:#{1,6}|>|[-*+]|\d+\.)[ \t]+/gm, "");
     text = text.replace(/(\*\*|__|\*|_)/g, "");
     return text.replace(/\s+/g, " ").trim();
@@ -689,9 +705,17 @@
       prevBtn.disabled = state.status === "idle";
       nextBtn.disabled = state.status === "idle";
     }
+    let selfJumping = false;
     const core = createAnnotationPlayerCore({
       items,
-      jump: (entryId) => deps.openAnnotationEntry(entryId),
+      jump: async (entryId) => {
+        selfJumping = true;
+        try {
+          await deps.openAnnotationEntry(entryId);
+        } finally {
+          selfJumping = false;
+        }
+      },
       speak,
       schedule: (ms, cb) => {
         const id = window.setTimeout(cb, ms);
@@ -713,13 +737,23 @@
       rateSel.disabled = true;
       core.setMuted(true);
     }
+    function entryIndexOf(entryId) {
+      if (!entryId)
+        return -1;
+      return deps.getActiveSessionEntries().findIndex((entry) => entry.id === entryId);
+    }
     toggleBtn.addEventListener("click", () => {
       const state = core.getState();
       if (state.status === "playing") {
         core.pause();
       } else {
         deps.setAnnotationPanelOpen(true);
-        core.play();
+        if (state.status === "idle") {
+          const activeIndex = entryIndexOf(deps.getActiveAnnotationId());
+          core.play(activeIndex >= 0 ? activeIndex : 0);
+        } else {
+          core.play();
+        }
       }
     });
     prevBtn.addEventListener("click", () => core.prev());
@@ -742,6 +776,15 @@
     deps.onAnnotationsChanged(() => {
       core.stop();
       syncVisibility();
+    });
+    deps.onAnnotationOpened((entryId) => {
+      if (selfJumping)
+        return;
+      if (core.getState().status === "idle")
+        return;
+      const index = entryIndexOf(entryId);
+      if (index >= 0)
+        core.jumpTo(index);
     });
     syncVisibility();
     render(core.getState());
@@ -6970,6 +7013,11 @@ ${frontmatter.yaml}
       for (const cb of annotationsChangedCallbacks)
         cb();
     }
+    const annotationOpenedCallbacks = [];
+    function notifyAnnotationOpened(entryId) {
+      for (const cb of annotationOpenedCallbacks)
+        cb(entryId);
+    }
     let mdHighlighter = null;
     let mdHighlighterRequested = false;
     function ensureMarkdownHighlighter() {
@@ -7475,6 +7523,7 @@ ${frontmatter.yaml}
       activeSessionId = session.id;
       if (sessionChanged)
         notifyAnnotationsChanged();
+      notifyAnnotationOpened(entry.id);
       showAnnotationDetail(session, entry, index);
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
@@ -7595,6 +7644,12 @@ ${frontmatter.yaml}
       },
       onAnnotationsChanged(cb) {
         annotationsChangedCallbacks.push(cb);
+      },
+      onAnnotationOpened(cb) {
+        annotationOpenedCallbacks.push(cb);
+      },
+      getActiveAnnotationId() {
+        return activeAnnotationId;
       }
     };
   }
@@ -15874,7 +15929,9 @@ ${frontmatter.yaml}
       getActiveSessionEntries: () => ANNOTATIONS_UI?.getActiveSessionEntries() ?? [],
       openAnnotationEntry: (id) => ANNOTATIONS_UI ? ANNOTATIONS_UI.openAnnotationEntry(id) : Promise.resolve(),
       setAnnotationPanelOpen: (open) => ANNOTATIONS_UI?.setAnnotationPanelOpen(open),
-      onAnnotationsChanged: (cb) => ANNOTATIONS_UI?.onAnnotationsChanged(cb)
+      onAnnotationsChanged: (cb) => ANNOTATIONS_UI?.onAnnotationsChanged(cb),
+      onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
+      getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
     let sseTimer = null;
     function scheduleSseLoad() {

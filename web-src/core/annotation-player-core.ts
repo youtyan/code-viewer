@@ -79,14 +79,14 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
     deps.jump(item.entryId).then(proceed, proceed);
   }
 
-  function play() {
+  function play(fromIndex?: number) {
     if (status === "playing") return;
     if (status === "paused") {
-      startEntry(index);
+      startEntry(fromIndex ?? index);
       return;
     }
     if (deps.items().length === 0) return;
-    startEntry(0);
+    startEntry(fromIndex ?? 0);
   }
 
   function pause() {
@@ -121,6 +121,11 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
     }
   }
 
+  function jumpTo(at: number) {
+    if (status === "idle") return;
+    moveTo(at);
+  }
+
   function next() {
     if (status === "idle") return;
     moveTo(index + 1);
@@ -151,5 +156,15 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
     restartCurrentIfPlaying();
   }
 
-  return { play, pause, stop, next, prev, setMuted, setRate, getState };
+  return {
+    play,
+    pause,
+    stop,
+    next,
+    prev,
+    jumpTo,
+    setMuted,
+    setRate,
+    getState,
+  };
 }

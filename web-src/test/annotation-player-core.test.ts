@@ -81,6 +81,41 @@ describe("annotation-player-core", () => {
     expect(h.spoken).toEqual([{ text: "Hello", rate: 1 }]);
   });
 
+  test("play with fromIndex starts at that entry", async () => {
+    const h = makeHarness([
+      { entryId: "a", speechText: "Hello" },
+      { entryId: "b", speechText: "World" },
+      { entryId: "c", speechText: "Third" },
+    ]);
+    h.core.play(1);
+    await flush();
+    expect(h.core.getState().index).toBe(1);
+    expect(h.jumps).toEqual(["b"]);
+  });
+
+  test("jumpTo while playing moves playback to that entry", async () => {
+    const h = makeHarness([
+      { entryId: "a", speechText: "Hello" },
+      { entryId: "b", speechText: "World" },
+      { entryId: "c", speechText: "Third" },
+    ]);
+    h.core.play();
+    await flush();
+    h.core.jumpTo(2);
+    await flush();
+    expect(h.core.getState().status).toBe("playing");
+    expect(h.core.getState().index).toBe(2);
+    expect(h.jumps).toEqual(["a", "c"]);
+  });
+
+  test("jumpTo while idle does nothing", async () => {
+    const h = makeHarness([{ entryId: "a", speechText: "Hello" }]);
+    h.core.jumpTo(0);
+    await flush();
+    expect(h.core.getState().status).toBe("idle");
+    expect(h.jumps).toEqual([]);
+  });
+
   test("speech end advances to next entry; ending the last entry returns to idle", async () => {
     const h = makeHarness([
       { entryId: "a", speechText: "Hello" },
