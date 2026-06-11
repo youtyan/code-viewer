@@ -9,6 +9,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 
 - Browse repository files and folders in a persistent sidebar.
 - View git diffs with unified or split layout, lazy loading, and viewed-file state.
+- Browse commit history per branch and open any commit's changed files and diff, with shareable `/history?commit=<sha>` links.
 - Open files directly from the repository or diff view, including large generated files.
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot be rendered.
