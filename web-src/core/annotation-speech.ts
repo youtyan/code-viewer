@@ -14,6 +14,8 @@ export function annotationSpeechText(body: string): string {
   text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
   // Inline code keeps its content.
   text = text.replace(/`([^`]*)`/g, "$1");
+  // Bare URLs are noise when spoken; collapse them to a short token.
+  text = text.replace(/https?:\/\/\S+/g, "URL");
   // Headings, blockquotes, list markers at line starts.
   text = text.replace(/^[ \t]*(?:#{1,6}|>|[-*+]|\d+\.)[ \t]+/gm, "");
   // Emphasis markers.

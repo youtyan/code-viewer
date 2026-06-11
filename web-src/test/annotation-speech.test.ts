@@ -28,6 +28,12 @@ describe("annotationSpeechText", () => {
     );
   });
 
+  test("collapses bare urls to a short token", () => {
+    expect(
+      annotationSpeechText("see https://example.com/very/long?x=1 now"),
+    ).toBe("see URL now");
+  });
+
   test("drops everything after an unterminated fence", () => {
     expect(annotationSpeechText("intro\n```\nno closing")).toBe("intro");
   });
