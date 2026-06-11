@@ -5602,7 +5602,7 @@
     md.core.ruler.after("inline", "footnote_tail", footnote_tail);
   }
 
-  // web-src/routes.ts
+  // web-src/core/routes.ts
   function assertNever(value) {
     throw new Error(`unhandled route: ${JSON.stringify(value)}`);
   }
@@ -5734,7 +5734,7 @@
     return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
   }
 
-  // web-src/markdown-preview.ts
+  // web-src/core/markdown-preview.ts
   var mermaidPromise = null;
   var mermaidInitialized = false;
   var shikiPromise = null;
@@ -6361,7 +6361,7 @@ ${frontmatter.yaml}
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
-  // web-src/annotations-ui.ts
+  // web-src/views/annotations-ui.ts
   var ANNOTATION_SESSION_PARAM = "annotationSession";
   function createAnnotationsUi(deps) {
     const { $ } = deps;
@@ -6819,7 +6819,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/catch-up.ts
+  // web-src/core/catch-up.ts
   function shouldCatchUpDiff(route) {
     return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
   }
@@ -6834,7 +6834,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/expand-logic.ts
+  // web-src/core/expand-logic.ts
   function initExpandState(prevHunkEndNew, hunkNewStart) {
     return {
       topExpandedStart: hunkNewStart,
@@ -6899,7 +6899,7 @@ ${frontmatter.yaml}
     applyTrailingResult
   };
 
-  // web-src/file-path-copy.ts
+  // web-src/core/file-path-copy.ts
   function filePathClipboardText(path) {
     return path || "";
   }
@@ -6910,7 +6910,7 @@ ${frontmatter.yaml}
     return parts[parts.length - 1] || "";
   }
 
-  // web-src/focus-scope.ts
+  // web-src/core/focus-scope.ts
   function isEditableKeyTarget(target) {
     if (!target)
       return false;
@@ -6984,7 +6984,7 @@ ${frontmatter.yaml}
     return scrollable || doc.scrollingElement;
   }
 
-  // web-src/help-page.ts
+  // web-src/views/help-page.ts
   var HELP_LANGUAGES = ["en", "ja"];
   var HELP_SECTIONS = ["keybindings"];
   var HELP_CONTENT = {
@@ -7194,7 +7194,7 @@ ${frontmatter.yaml}
     return { renderHelpPage };
   }
 
-  // web-src/hunk-expand.ts
+  // web-src/views/hunk-expand.ts
   function createHunkExpand(deps) {
     function parseHunkHeader(text2) {
       const m = (text2 || "").match(/@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
@@ -7582,7 +7582,7 @@ ${frontmatter.yaml}
     return { setupHunkExpand };
   }
 
-  // web-src/icons.ts
+  // web-src/core/icons.ts
   var FOLDER_ICON_PATHS = {
     closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
     open: "M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z"
@@ -7621,7 +7621,7 @@ ${frontmatter.yaml}
     return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
   }
 
-  // web-src/keymap.ts
+  // web-src/core/keymap.ts
   var DEFAULT_KEY_BINDINGS = [
     {
       action: "open-file-palette",
@@ -7757,7 +7757,7 @@ ${frontmatter.yaml}
     return null;
   }
 
-  // web-src/media-embed.ts
+  // web-src/views/media-embed.ts
   var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
   var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
   var VIDEO_RE = /\.(mp4|webm|mov)$/i;
@@ -7815,7 +7815,7 @@ ${frontmatter.yaml}
     body.replaceWith(container);
   }
 
-  // web-src/ref-picker.ts
+  // web-src/views/ref-picker.ts
   function createRefPicker(deps) {
     function wireRefSelectorInput(input, onPick) {
       const wrap = input.closest("[data-ref-selector]");
@@ -8052,7 +8052,7 @@ ${frontmatter.yaml}
     return { openPopover, closePopover, wireRefSelectorInput };
   }
 
-  // web-src/directory-name.ts
+  // web-src/core/directory-name.ts
   function normalizeNewDirectoryName(name) {
     if (typeof name !== "string")
       return null;
@@ -8069,7 +8069,7 @@ ${frontmatter.yaml}
     return trimmed;
   }
 
-  // web-src/source-meta.ts
+  // web-src/core/source-meta.ts
   var SOURCE_SHIKI_LANG_ALIASES = {
     makefile: "make",
     objectivec: "c",
@@ -8449,7 +8449,7 @@ ${frontmatter.yaml}
     return fallback.charAt(0).toUpperCase() + fallback.slice(1);
   }
 
-  // web-src/repo-view.ts
+  // web-src/views/repo-view.ts
   function createRepoView(deps) {
     const {
       $,
@@ -9430,7 +9430,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/fuzzy-search.ts
+  // web-src/core/fuzzy-search.ts
   function basenameStart(path) {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? 0 : slash + 1;
@@ -9620,7 +9620,7 @@ ${frontmatter.yaml}
     }));
   }
 
-  // web-src/search-palette.ts
+  // web-src/core/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
     return items.slice(0, PALETTE_RESULT_LIMIT);
@@ -9633,7 +9633,7 @@ ${frontmatter.yaml}
     return (index + direction + count) % count;
   }
 
-  // web-src/search-palette-ui.ts
+  // web-src/views/search-palette-ui.ts
   function createSearchPalette(deps) {
     const {
       STATE,
@@ -10100,7 +10100,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/file-filter.ts
+  // web-src/core/file-filter.ts
   function normalizeFileFilterQuery(value) {
     return (value || "").toLowerCase().trim();
   }
@@ -10139,7 +10139,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/file-navigation.ts
+  // web-src/core/file-navigation.ts
   function nextVisibleFileIndex(currentIndex, itemCount, direction) {
     if (itemCount <= 0)
       return -1;
@@ -10148,7 +10148,7 @@ ${frontmatter.yaml}
     return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
   }
 
-  // web-src/sidebar.ts
+  // web-src/views/sidebar.ts
   var SIDEBAR_FONT_SIZE_KEY = "gdp:sidebar-font-size";
   function createSidebar(deps) {
     const {
@@ -11409,7 +11409,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/source-view.ts
+  // web-src/views/source-view.ts
   function createSourceView(deps) {
     const {
       $,
@@ -12977,7 +12977,7 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/ws-highlight.ts
+  // web-src/core/ws-highlight.ts
   function isWhitespaceOnlyInlineHighlight(text2) {
     return !!text2 && !/\S/.test(text2);
   }

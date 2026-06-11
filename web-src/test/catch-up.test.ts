@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createCatchUpGate, shouldCatchUpDiff } from "../catch-up";
+import { createCatchUpGate, shouldCatchUpDiff } from "../core/catch-up";
 
 describe("diff catch-up policy", () => {
   const range = { from: "HEAD", to: "worktree" };

@@ -2,8 +2,8 @@
 // createRefPicker() wires the popover, the #ref-from/#ref-to inputs, and the
 // #repo-target input at construction time.
 
-import type { AppRoute, DiffRange } from "./routes";
-import type { RefCommitResponse, RefResponse } from "./types";
+import type { AppRoute, DiffRange } from "../core/routes";
+import type { RefCommitResponse, RefResponse } from "../core/types";
 
 export type RefPickerDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;

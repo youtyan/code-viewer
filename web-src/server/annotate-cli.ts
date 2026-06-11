@@ -4,7 +4,7 @@ import type {
   AnnotationLineRange,
   AnnotationSession,
   AnnotationsState,
-} from "../types";
+} from "../core/types";
 import { parseAnnotationLine } from "./annotations";
 import * as git from "./git";
 import { readServerRegistry } from "./server-registry";

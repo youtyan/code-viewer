@@ -4,10 +4,10 @@ import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
   readFileSync("web-src/app.ts", "utf8") +
-    readFileSync("web-src/source-view.ts", "utf8") +
-    readFileSync("web-src/repo-view.ts", "utf8") +
-    readFileSync("web-src/sidebar.ts", "utf8") +
-    readFileSync("web-src/search-palette-ui.ts", "utf8"),
+    readFileSync("web-src/views/source-view.ts", "utf8") +
+    readFileSync("web-src/views/repo-view.ts", "utf8") +
+    readFileSync("web-src/views/sidebar.ts", "utf8") +
+    readFileSync("web-src/views/search-palette-ui.ts", "utf8"),
 );
 const html = readFileSync("web/index.html", "utf8");
 const server = sourceFixture(readFileSync("web-src/server/preview.ts", "utf8"));

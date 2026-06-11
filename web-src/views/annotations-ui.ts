@@ -12,8 +12,8 @@
 // The active session travels in the URL as `annotationSession` so a shared
 // link or reload restores the same inline walkthrough.
 
-import { renderMarkdownHtml } from "./markdown-preview";
-import type { AppRoute, DiffRange, SourceLineTarget } from "./routes";
+import { renderMarkdownHtml } from "../core/markdown-preview";
+import type { AppRoute, DiffRange, SourceLineTarget } from "../core/routes";
 import type {
   AnnotationEntry,
   AnnotationSession,
@@ -21,7 +21,7 @@ import type {
   AnnotationsState,
   DiffCardElement,
   FileMeta,
-} from "./types";
+} from "../core/types";
 
 export const ANNOTATION_SESSION_PARAM = "annotationSession";
 

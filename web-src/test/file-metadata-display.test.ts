@@ -4,12 +4,12 @@ import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
   readFileSync("web-src/app.ts", "utf8") +
-    readFileSync("web-src/source-view.ts", "utf8") +
-    readFileSync("web-src/repo-view.ts", "utf8"),
+    readFileSync("web-src/views/source-view.ts", "utf8") +
+    readFileSync("web-src/views/repo-view.ts", "utf8"),
 );
 const server = sourceFixture(readFileSync("web-src/server/preview.ts", "utf8"));
 const style = sourceFixture(readFileSync("web/style.css", "utf8"));
-const types = sourceFixture(readFileSync("web-src/types.ts", "utf8"));
+const types = sourceFixture(readFileSync("web-src/core/types.ts", "utf8"));
 
 describe("file metadata display", () => {
   test("API types carry file timestamps and size metadata", () => {

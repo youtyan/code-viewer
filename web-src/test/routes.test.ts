@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildRawFileUrl, buildRoute, parseRoute } from "../routes";
+import { buildRawFileUrl, buildRoute, parseRoute } from "../core/routes";
 
 describe("routes", () => {
   const defaultRange = { from: "HEAD", to: "worktree" };

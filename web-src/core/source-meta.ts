@@ -1,7 +1,7 @@
 // Source file classification: language tables, previewability, display
 // kind, and small formatting helpers. Pure functions extracted from app.ts.
 
-import { isAudio, isImage, isVideo } from "./media-embed";
+import { isAudio, isImage, isVideo } from "../views/media-embed";
 
 const SOURCE_SHIKI_LANG_ALIASES: Record<string, string> = {
   makefile: "make",

@@ -6,17 +6,17 @@ import {
   type PanelFocusScope,
   restorePanelFocusScope,
   setPanelFocusScope,
-} from "./focus-scope";
+} from "../core/focus-scope";
 import {
   type FuzzyRange,
   fuzzyMatchPath,
   globMatchPath,
   isGlobPathQuery,
   rankPathMatches,
-} from "./fuzzy-search";
-import type { AppRoute } from "./routes";
-import { limitPaletteResults, movePaletteSelection } from "./search-palette";
-import type { FileMeta, FileSearchListResponse, GrepResponse } from "./types";
+} from "../core/fuzzy-search";
+import type { AppRoute } from "../core/routes";
+import { limitPaletteResults, movePaletteSelection } from "../core/search-palette";
+import type { FileMeta, FileSearchListResponse, GrepResponse } from "../core/types";
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;

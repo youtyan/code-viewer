@@ -2,29 +2,29 @@
 // new-folder / move-to-trash actions, upload panel, and the repo blob
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
-import { normalizeNewDirectoryName } from "./directory-name";
-import { fileNameClipboardText, filePathClipboardText } from "./file-path-copy";
+import { normalizeNewDirectoryName } from "../core/directory-name";
+import { fileNameClipboardText, filePathClipboardText } from "../core/file-path-copy";
 import {
   COPY_16_PATHS,
   FILE_16_PATH,
   iconSvg,
   PLUS_16_PATH,
   TRASH_16_PATH,
-} from "./icons";
-import { renderMarkdownPreview } from "./markdown-preview";
+} from "../core/icons";
+import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
   buildRawFileUrl,
   type SourceFileTarget,
-} from "./routes";
-import { formatBytes, formatFileDate } from "./source-meta";
+} from "../core/routes";
+import { formatBytes, formatFileDate } from "../core/source-meta";
 import type {
   RawFileInfo,
   RepoTreeEntry,
   RepoTreeResponse,
   SidebarItem,
   UndoActionResponse,
-} from "./types";
+} from "../core/types";
 
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
