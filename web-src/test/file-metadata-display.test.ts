@@ -4,7 +4,8 @@ import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
   readFileSync("web-src/app.ts", "utf8") +
-    readFileSync("web-src/source-view.ts", "utf8"),
+    readFileSync("web-src/source-view.ts", "utf8") +
+    readFileSync("web-src/repo-view.ts", "utf8"),
 );
 const server = sourceFixture(readFileSync("web-src/server/preview.ts", "utf8"));
 const style = sourceFixture(readFileSync("web/style.css", "utf8"));
