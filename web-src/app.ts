@@ -762,6 +762,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (pop) pop.hidden = true;
   }
 
+  function toggleScopeSettings() {
+    const pop = document.querySelector<HTMLElement>("#scope-settings-popover");
+    if (pop && !pop.hidden) {
+      closeScopeSettings();
+      return;
+    }
+    void openScopeSettings();
+  }
+
   function saveScopeSettings() {
     const input =
       document.querySelector<HTMLTextAreaElement>("#scope-omit-dirs");
@@ -1245,7 +1254,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setAllSidebarDirsCollapsed(true),
   );
   $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
-  $("#viewer-settings")?.addEventListener("click", openScopeSettings);
+  $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
@@ -1691,7 +1700,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
-  window.addEventListener("popstate", () => {
+  function applyRouteFromLocation() {
     const parsedRoute = parseRoute(
       window.location.pathname,
       window.location.search,
@@ -1730,7 +1739,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     applySourceRouteToShell();
-  });
+  }
+  window.addEventListener("popstate", applyRouteFromLocation);
+
+  // Header menu links navigate within the SPA. A full page load here
+  // re-lays-out the whole app from scratch (the layout shift the menu was
+  // notorious for); pushState + the shared route handler keeps the chrome
+  // stable. Modified clicks (new tab etc.) keep native anchor behavior.
+  document
+    .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
+    .forEach((link) => {
+      link.addEventListener("click", (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)
+          return;
+        e.preventDefault();
+        const target = new URL(link.href, window.location.origin);
+        history.pushState(null, "", target.pathname + target.search);
+        // Mimic a fresh page load: menu navigation starts at the top.
+        window.scrollTo(0, 0);
+        applyRouteFromLocation();
+      });
+    });
 
   // Ignore-whitespace toggle
   function applyIgnoreWs() {
