@@ -2414,8 +2414,8 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // Lazy diff loads above the focused line change the document height and
   // push the target away after we already scrolled to it. While this window
-  // is open, every finished card load re-anchors the viewport on the route's
-  // target line; any manual scroll intent (wheel/touch) closes it so the
+  // is open, every finished card load re-anchors the viewport on the target
+  // line of the route; any manual scroll intent (wheel/touch) closes it so the
   // user is never yanked back.
   let REANCHOR_UNTIL =
     STATE.route.screen === "diff" && STATE.route.line
