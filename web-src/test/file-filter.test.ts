@@ -3,7 +3,7 @@ import {
   compileFileFilter,
   filePathMatchesFilter,
   normalizeFileFilterQuery,
-} from "../file-filter";
+} from "../core/file-filter";
 
 describe("normalizeFileFilterQuery", () => {
   test("trims and lowercases file search text", () => {

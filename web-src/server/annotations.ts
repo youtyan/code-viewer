@@ -11,7 +11,7 @@ import type {
   AnnotationLineRange,
   AnnotationSession,
   AnnotationsState,
-} from "../types";
+} from "../core/types";
 
 export const CODE_VIEWER_DIR = ".code-viewer";
 export const ANNOTATIONS_FILE_NAME = "annotations.json";
@@ -254,6 +254,67 @@ export function addAnnotationEntry(
     entry,
     created_session: createdSession,
   };
+}
+
+export function renameAnnotationSession(
+  state: AnnotationsState,
+  id: string,
+  title: string,
+): { state: AnnotationsState; renamed: boolean } {
+  const session = state.sessions.find((s) => s.id === id);
+  if (!session) return { state, renamed: false };
+  const next =
+    title.trim().slice(0, ANNOTATION_TITLE_MAX_CHARS) || "Untitled session";
+  return {
+    state: {
+      version: 1,
+      sessions: state.sessions.map((s) =>
+        s.id === id ? { ...s, title: next } : s,
+      ),
+    },
+    renamed: true,
+  };
+}
+
+export type UpdateAnnotationResult =
+  | { ok: true; state: AnnotationsState; entry: AnnotationEntry }
+  | { ok: false; error: string };
+
+export function updateAnnotationEntry(
+  state: AnnotationsState,
+  id: string,
+  patch: { title?: string; body?: string },
+): UpdateAnnotationResult {
+  const session = state.sessions.find((s) =>
+    s.entries.some((e) => e.id === id),
+  );
+  if (!session) return { ok: false, error: "annotation not found" };
+  if (patch.body !== undefined) {
+    if (!patch.body.trim()) return { ok: false, error: "body is required" };
+    if (Buffer.byteLength(patch.body, "utf8") > ANNOTATION_BODY_MAX_BYTES)
+      return { ok: false, error: "body is too large" };
+  }
+  let updated: AnnotationEntry | null = null;
+  const sessions = state.sessions.map((s) =>
+    s.id === session.id
+      ? {
+          ...s,
+          entries: s.entries.map((e) => {
+            if (e.id !== id) return e;
+            updated = {
+              ...e,
+              ...(patch.title !== undefined
+                ? { title: patch.title.trim() || undefined }
+                : {}),
+              ...(patch.body !== undefined ? { body: patch.body } : {}),
+            };
+            return updated;
+          }),
+        }
+      : s,
+  );
+  if (!updated) return { ok: false, error: "annotation not found" };
+  return { ok: true, state: { version: 1, sessions }, entry: updated };
 }
 
 export function deleteAnnotationById(

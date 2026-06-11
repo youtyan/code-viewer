@@ -21,6 +21,468 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
+  // web-src/core/catch-up.ts
+  function shouldCatchUpDiff(route) {
+    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  }
+  function createCatchUpGate(now, minIntervalMs) {
+    let lastForceAt = 0;
+    return function shouldRun() {
+      const current = now();
+      if (current - lastForceAt < minIntervalMs)
+        return false;
+      lastForceAt = current;
+      return true;
+    };
+  }
+
+  // web-src/core/expand-logic.ts
+  function initExpandState(prevHunkEndNew, hunkNewStart) {
+    return {
+      topExpandedStart: hunkNewStart,
+      bottomExpandedEnd: prevHunkEndNew - 1
+    };
+  }
+  function remainingGap(state, prevHunkEndNew) {
+    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
+    const remainingEnd = state.topExpandedStart - 1;
+    if (remainingStart > remainingEnd)
+      return null;
+    return { start: remainingStart, end: remainingEnd };
+  }
+  function isFullyExpanded(state, prevHunkEndNew) {
+    return remainingGap(state, prevHunkEndNew) == null;
+  }
+  function upClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
+  }
+  function downClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
+  }
+  function applyUp(state, range) {
+    return Object.assign({}, state, { bottomExpandedEnd: range.end });
+  }
+  function applyDown(state, range) {
+    return Object.assign({}, state, { topExpandedStart: range.start });
+  }
+  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
+    return prevHunkEndOld + (newLine - prevHunkEndNew);
+  }
+  function trailingClickRange(hunkEndNew, step) {
+    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
+  }
+  function trailingExpandTargetIndex(hunkCount) {
+    return hunkCount > 0 ? hunkCount - 1 : null;
+  }
+  function shouldAttachTrailingExpand(probeLineCount) {
+    return probeLineCount > 0;
+  }
+  function applyTrailingResult(state, receivedCount, step) {
+    return {
+      newStart: state.newStart + receivedCount,
+      oldStart: state.oldStart + receivedCount,
+      eof: receivedCount === 0 || receivedCount < step
+    };
+  }
+  var GdpExpandLogic = {
+    initExpandState,
+    remainingGap,
+    isFullyExpanded,
+    upClickRange,
+    downClickRange,
+    applyUp,
+    applyDown,
+    mapNewToOld,
+    trailingExpandTargetIndex,
+    shouldAttachTrailingExpand,
+    trailingClickRange,
+    applyTrailingResult
+  };
+
+  // web-src/core/focus-scope.ts
+  function isEditableKeyTarget(target) {
+    if (!target)
+      return false;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
+  }
+  function keymapScope(target) {
+    if (target?.closest("#content"))
+      return "main";
+    if (target?.closest("#sidebar"))
+      return "sidebar";
+    return "global";
+  }
+  function prepareKeyboardPanels(doc = document) {
+    const sidebar = doc.querySelector("#sidebar");
+    const content = doc.querySelector("#content");
+    if (sidebar)
+      sidebar.tabIndex = -1;
+    if (content)
+      content.tabIndex = -1;
+  }
+  function getPanelFocusScope(doc = document) {
+    const scope = doc.body?.dataset.focusScope;
+    return scope === "sidebar" || scope === "main" ? scope : null;
+  }
+  function setPanelFocusScope(scope, doc = document) {
+    if (!doc.body)
+      return;
+    if (scope)
+      doc.body.dataset.focusScope = scope;
+    else
+      delete doc.body.dataset.focusScope;
+  }
+  function restorePanelFocusScope(scope, doc = document) {
+    if (scope === "sidebar")
+      focusSidebarPanel(doc);
+    else if (scope === "main")
+      focusMainPanel(doc);
+    else
+      setPanelFocusScope(null, doc);
+  }
+  function focusSidebarPanel(doc = document) {
+    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+    const sidebar = doc.querySelector("#sidebar");
+    (active || sidebar)?.focus({ preventScroll: true });
+    setPanelFocusScope("sidebar", doc);
+  }
+  function focusMainPanel(doc = document) {
+    doc.querySelector("#content")?.focus({ preventScroll: true });
+    setPanelFocusScope("main", doc);
+  }
+  function findMainScrollTarget(doc = document) {
+    const active = doc.activeElement;
+    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
+    if (activeScroller && activeScroller.offsetParent !== null)
+      return activeScroller;
+    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
+    if (sourceScroller && sourceScroller.offsetParent !== null)
+      return sourceScroller;
+    const content = doc.querySelector("#content");
+    if (!content || content.offsetParent === null)
+      return null;
+    const isScrollable = (item) => {
+      if (item.offsetParent === null)
+        return false;
+      const style = doc.defaultView?.getComputedStyle(item);
+      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+    };
+    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
+    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
+    return scrollable || doc.scrollingElement;
+  }
+
+  // web-src/core/icons.ts
+  var FOLDER_ICON_PATHS = {
+    closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
+    open: "M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z"
+  };
+  var CHEVRON_DOWN_12_PATH = "M6 8.825c-.2 0-.4-.1-.5-.2l-3.3-3.3c-.3-.3-.3-.8 0-1.1.3-.3.8-.3 1.1 0l2.7 2.7 2.7-2.7c.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1l-3.2 3.2c-.2.2-.4.3-.6.3Z";
+  var CHEVRON_DOWN_16_PATH = "M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z";
+  var COPY_16_PATHS = [
+    "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z",
+    "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
+  ];
+  var FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
+  var OPEN_EXTERNAL_16_PATH = "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
+  var PLUS_16_PATH = "M7.75 2a.75.75 0 0 1 .75.75V7.5h4.75a.75.75 0 0 1 0 1.5H8.5v4.75a.75.75 0 0 1-1.5 0V9H2.25a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z";
+  var TRASH_16_PATH = "M6.5 1.75A1.75 1.75 0 0 1 8.25 0h1.5A1.75 1.75 0 0 1 11.5 1.75V2h3.75a.75.75 0 0 1 0 1.5h-.75v10.75A1.75 1.75 0 0 1 12.75 16h-9.5A1.75 1.75 0 0 1 1.5 14.25V3.5H.75a.75.75 0 0 1 0-1.5H4.5v-.25ZM6 2h4v-.25a.25.25 0 0 0-.25-.25h-1.5a.25.25 0 0 0-.25.25V2Zm-3 1.5v10.75c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V3.5Zm3 2.25a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 6 5.75Zm4 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 10 5.75Z";
+  var GIT_BRANCH_16_PATH = "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z";
+  var TRIANGLE_DOWN_16_PATH = "m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z";
+  var SIDEBAR_SHOW_16_PATHS = [
+    "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
+    "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z"
+  ];
+  var SIDEBAR_HIDE_16_PATHS = [
+    "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
+    "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z"
+  ];
+  var GEAR_16_PATH = "M8 0a8.2 8.2 0 0 1 1.7.18.75.75 0 0 1 .6.86l-.14.93c.23.1.45.21.67.34l.73-.6a.75.75 0 0 1 1.03.08c.47.37.89.78 1.23 1.23a.75.75 0 0 1 .07 1.03l-.59.73c.13.22.24.44.34.67l.93-.14a.75.75 0 0 1 .86.6c.12.55.18 1.12.18 1.7s-.06 1.15-.18 1.7a.75.75 0 0 1-.86.6l-.93-.14c-.1.23-.21.45-.34.67l.59.73a.75.75 0 0 1-.07 1.03c-.34.45-.76.86-1.23 1.23a.75.75 0 0 1-1.03.08l-.73-.6c-.22.13-.44.24-.67.34l.14.93a.75.75 0 0 1-.6.86A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-1.7-.18.75.75 0 0 1-.6-.86l.14-.93a5.9 5.9 0 0 1-.67-.34l-.73.6a.75.75 0 0 1-1.03-.08 8.1 8.1 0 0 1-1.23-1.23.75.75 0 0 1-.07-1.03l.59-.73a5.9 5.9 0 0 1-.34-.67l-.93.14a.75.75 0 0 1-.86-.6A8.2 8.2 0 0 1 0 8c0-.58.06-1.15.18-1.7a.75.75 0 0 1 .86-.6l.93.14c.1-.23.21-.45.34-.67l-.59-.73a.75.75 0 0 1 .07-1.03 8.1 8.1 0 0 1 1.23-1.23.75.75 0 0 1 1.03-.08l.73.6c.22-.13.44-.24.67-.34l-.14-.93a.75.75 0 0 1 .6-.86A8.2 8.2 0 0 1 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z";
+  var EXPAND_ALL_16_PATHS = [
+    "M3.22 4.47a.75.75 0 0 1 1.06 0L8 8.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 5.53a.75.75 0 0 1 0-1.06Z",
+    "M3.22 8.47a.75.75 0 0 1 1.06 0L8 12.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 9.53a.75.75 0 0 1 0-1.06Z"
+  ];
+  var COLLAPSE_ALL_16_PATHS = [
+    "M7.47 2.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 3.81 4.28 7.53a.75.75 0 0 1-1.06-1.06Z",
+    "M7.47 6.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 7.81l-3.72 3.72a.75.75 0 1 1-1.06-1.06Z"
+  ];
+  function iconSvg(className, paths) {
+    const pathList = Array.isArray(paths) ? paths : [paths];
+    return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
+  }
+  var PENCIL_16_PATH = "M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.609Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z";
+
+  // web-src/core/keymap.ts
+  var DEFAULT_KEY_BINDINGS = [
+    {
+      action: "open-file-palette",
+      key: "k",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-file-palette",
+      key: "k",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    { action: "focus-file-filter", key: "/" },
+    { action: "focus-sidebar", key: "h", ctrl: true },
+    { action: "focus-main", key: "l", ctrl: true },
+    {
+      action: "cancel-source-load",
+      key: "escape",
+      requires: { lightboxClosed: true }
+    },
+    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
+    { action: "open-sidebar-item", key: "enter", scope: "global" },
+    { action: "sidebar-next", key: "j", scope: "sidebar" },
+    { action: "sidebar-next", key: "j", scope: "global" },
+    { action: "sidebar-previous", key: "k", scope: "sidebar" },
+    { action: "sidebar-previous", key: "k", scope: "global" },
+    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
+    { action: "sidebar-expand", key: "l", scope: "sidebar" },
+    { action: "sidebar-expand", key: "l", scope: "global" },
+    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
+    { action: "sidebar-collapse", key: "h", scope: "global" },
+    { action: "scroll-main-down", key: "j", scope: "main" },
+    { action: "scroll-main-up", key: "k", scope: "main" },
+    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
+    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "main",
+      ctrl: true
+    },
+    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "sidebar",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "sidebar",
+      ctrl: true
+    },
+    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
+    { action: "tab-code", key: "c", scope: "main", pendingG: true },
+    { action: "goto-top", key: "g", pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true },
+    { action: "start-g-sequence", key: "g", scope: "sidebar" },
+    { action: "start-g-sequence", key: "g", scope: "main" },
+    { action: "layout-unified", key: "u" },
+    { action: "layout-split", key: "s" },
+    { action: "toggle-theme", key: "t" }
+  ];
+  function resolveKeymapAction(event, context) {
+    const key = event.key.toLowerCase();
+    if (context.composing)
+      return null;
+    for (const binding of DEFAULT_KEY_BINDINGS) {
+      if (binding.key !== key)
+        continue;
+      if (binding.requires?.lightboxClosed && context.lightboxOpen)
+        continue;
+      if (binding.scope && binding.scope !== context.scope)
+        continue;
+      if (!!binding.pendingG !== !!context.pendingG)
+        continue;
+      if (context.paletteOpen && !binding.allowPaletteOpen)
+        continue;
+      if (context.editable && !binding.allowEditable)
+        continue;
+      if (!!binding.ctrl !== !!event.ctrlKey)
+        continue;
+      if (!!binding.meta !== !!event.metaKey)
+        continue;
+      if (!!binding.alt !== !!event.altKey)
+        continue;
+      if (!!binding.shift !== !!event.shiftKey)
+        continue;
+      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
+        continue;
+      return binding.action;
+    }
+    return null;
+  }
+
+  // web-src/core/routes.ts
+  function assertNever(value) {
+    throw new Error(`unhandled route: ${JSON.stringify(value)}`);
+  }
+  function parseLegacyRange(value, fallback) {
+    const raw = value || "";
+    const sep = raw.indexOf("..");
+    if (sep < 0)
+      return fallback;
+    return {
+      from: raw.slice(0, sep) || fallback.from,
+      to: raw.slice(sep + 2) || fallback.to
+    };
+  }
+  function parseLineTarget(value) {
+    const raw = value || "";
+    const range = /^(\d+)-(\d+)$/.exec(raw);
+    if (range) {
+      const a = Number(range[1]);
+      const b = Number(range[2]);
+      const start = Math.min(a, b);
+      const end = Math.max(a, b);
+      if (start > 0)
+        return { start, end };
+      return;
+    }
+    const line = Number(raw);
+    return Number.isInteger(line) && line > 0 ? line : undefined;
+  }
+  function formatLineTarget(line) {
+    return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
+  }
+  function parseRoute(pathname, search, fallbackRange) {
+    const params = new URLSearchParams(search);
+    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
+    const range = {
+      from: params.get("from") || legacyRange.from,
+      to: params.get("to") || legacyRange.to
+    };
+    switch (pathname) {
+      case "/":
+      case "/index.html":
+        return {
+          screen: "repo",
+          ref: params.get("ref") || params.get("target") || "worktree",
+          path: params.get("path") || "",
+          range
+        };
+      case "/todif":
+      case "/todiff":
+        return {
+          screen: "diff",
+          range,
+          ...params.get("path") ? { path: params.get("path") || "" } : {},
+          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
+        };
+      case "/file": {
+        const path = params.get("path") || "";
+        const target = params.get("target") || "";
+        const ref = target || params.get("ref") || "worktree";
+        const line = parseLineTarget(params.get("line"));
+        if (!path)
+          return {
+            screen: "unknown",
+            reason: "missing-path",
+            rawPathname: pathname,
+            rawSearch: search,
+            range
+          };
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: target ? "blob" : "detail",
+          ...line ? { line } : {}
+        };
+      }
+      case "/help":
+        return {
+          screen: "help",
+          range,
+          lang: params.get("lang") || "en",
+          section: params.get("section") || "keybindings"
+        };
+      default:
+        return {
+          screen: "unknown",
+          reason: "unknown-pathname",
+          rawPathname: pathname,
+          rawSearch: search,
+          range
+        };
+    }
+  }
+  function buildRoute(route) {
+    switch (route.screen) {
+      case "repo": {
+        const params = new URLSearchParams;
+        if (route.ref && route.ref !== "worktree")
+          params.set("ref", route.ref);
+        if (route.path)
+          params.set("path", route.path);
+        const qs = params.toString();
+        return `/${qs ? `?${qs}` : ""}`;
+      }
+      case "file":
+        if (route.view === "blob") {
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+        }
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+      case "diff":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+      case "help": {
+        const params = new URLSearchParams;
+        if (route.lang && route.lang !== "en")
+          params.set("lang", route.lang);
+        if (route.section && route.section !== "keybindings")
+          params.set("section", route.section);
+        const qs = params.toString();
+        return `/help${qs ? `?${qs}` : ""}`;
+      }
+      case "unknown":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
+      default:
+        return assertNever(route);
+    }
+  }
+  function buildRawFileUrl(target) {
+    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
+  }
+
   // node_modules/markdown-it/lib/common/utils.mjs
   var exports_utils = {};
   __export(exports_utils, {
@@ -5602,139 +6064,7 @@
     md.core.ruler.after("inline", "footnote_tail", footnote_tail);
   }
 
-  // web-src/routes.ts
-  function assertNever(value) {
-    throw new Error(`unhandled route: ${JSON.stringify(value)}`);
-  }
-  function parseLegacyRange(value, fallback) {
-    const raw = value || "";
-    const sep = raw.indexOf("..");
-    if (sep < 0)
-      return fallback;
-    return {
-      from: raw.slice(0, sep) || fallback.from,
-      to: raw.slice(sep + 2) || fallback.to
-    };
-  }
-  function parseLineTarget(value) {
-    const raw = value || "";
-    const range = /^(\d+)-(\d+)$/.exec(raw);
-    if (range) {
-      const a2 = Number(range[1]);
-      const b2 = Number(range[2]);
-      const start = Math.min(a2, b2);
-      const end = Math.max(a2, b2);
-      if (start > 0)
-        return { start, end };
-      return;
-    }
-    const line = Number(raw);
-    return Number.isInteger(line) && line > 0 ? line : undefined;
-  }
-  function formatLineTarget(line) {
-    return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
-  }
-  function parseRoute(pathname, search, fallbackRange) {
-    const params = new URLSearchParams(search);
-    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
-    const range = {
-      from: params.get("from") || legacyRange.from,
-      to: params.get("to") || legacyRange.to
-    };
-    switch (pathname) {
-      case "/":
-      case "/index.html":
-        return {
-          screen: "repo",
-          ref: params.get("ref") || params.get("target") || "worktree",
-          path: params.get("path") || "",
-          range
-        };
-      case "/todif":
-      case "/todiff":
-        return {
-          screen: "diff",
-          range,
-          ...params.get("path") ? { path: params.get("path") || "" } : {},
-          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
-        };
-      case "/file": {
-        const path = params.get("path") || "";
-        const target = params.get("target") || "";
-        const ref = target || params.get("ref") || "worktree";
-        const line = parseLineTarget(params.get("line"));
-        if (!path)
-          return {
-            screen: "unknown",
-            reason: "missing-path",
-            rawPathname: pathname,
-            rawSearch: search,
-            range
-          };
-        return {
-          screen: "file",
-          path,
-          ref,
-          range,
-          view: target ? "blob" : "detail",
-          ...line ? { line } : {}
-        };
-      }
-      case "/help":
-        return {
-          screen: "help",
-          range,
-          lang: params.get("lang") || "en",
-          section: params.get("section") || "keybindings"
-        };
-      default:
-        return {
-          screen: "unknown",
-          reason: "unknown-pathname",
-          rawPathname: pathname,
-          rawSearch: search,
-          range
-        };
-    }
-  }
-  function buildRoute(route) {
-    switch (route.screen) {
-      case "repo": {
-        const params = new URLSearchParams;
-        if (route.ref && route.ref !== "worktree")
-          params.set("ref", route.ref);
-        if (route.path)
-          params.set("path", route.path);
-        const qs = params.toString();
-        return `/${qs ? `?${qs}` : ""}`;
-      }
-      case "file":
-        if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-        }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-      case "diff":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-      case "help": {
-        const params = new URLSearchParams;
-        if (route.lang && route.lang !== "en")
-          params.set("lang", route.lang);
-        if (route.section && route.section !== "keybindings")
-          params.set("section", route.section);
-        const qs = params.toString();
-        return `/help${qs ? `?${qs}` : ""}`;
-      }
-      case "unknown":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
-      default:
-        return assertNever(route);
-    }
-  }
-  function buildRawFileUrl(target) {
-    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
-  }
-
-  // web-src/markdown-preview.ts
+  // web-src/core/markdown-preview.ts
   var mermaidPromise = null;
   var mermaidInitialized = false;
   var shikiPromise = null;
@@ -6361,7 +6691,7 @@ ${frontmatter.yaml}
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
-  // web-src/annotations-ui.ts
+  // web-src/views/annotations-ui.ts
   var ANNOTATION_SESSION_PARAM = "annotationSession";
   function createAnnotationsUi(deps) {
     const { $ } = deps;
@@ -6370,6 +6700,24 @@ ${frontmatter.yaml}
     let activeAnnotationId = null;
     let annotationPanelDismissed = false;
     let activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
+    let mdHighlighter = null;
+    let mdHighlighterRequested = false;
+    function ensureMarkdownHighlighter() {
+      if (mdHighlighter || mdHighlighterRequested)
+        return;
+      mdHighlighterRequested = true;
+      loadMarkdownHighlighter().then((highlighter) => {
+        mdHighlighter = highlighter;
+        if (!highlighter)
+          return;
+        applyInlineAnnotations();
+        if (activeAnnotationId) {
+          const found = findAnnotation(activeAnnotationId);
+          if (found)
+            showAnnotationDetail(found.session, found.entry, found.index);
+        }
+      });
+    }
     const annotationPanel = $("#annotation-panel");
     const annotationSessionsEl = $("#annotation-sessions");
     const annotationDetail = $("#annotation-detail");
@@ -6380,6 +6728,7 @@ ${frontmatter.yaml}
       document.body.classList.toggle("annotation-panel-open", open);
       if (open)
         annotationPanelDismissed = false;
+      localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
     }
     function annotationLineTarget(entry) {
       if (!entry.line)
@@ -6418,9 +6767,11 @@ ${frontmatter.yaml}
         heading2.textContent = entry.title;
         box.appendChild(heading2);
       }
+      box.appendChild(createCopyRefButton(entry, "gdp-annotation-inline-copy"));
       const markdown = document.createElement("div");
       markdown.className = "gdp-annotation-inline-body";
-      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
       box.appendChild(markdown);
       td.appendChild(box);
       tr.appendChild(td);
@@ -6439,6 +6790,30 @@ ${frontmatter.yaml}
       const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
       return rows.find((row) => deps.diffRowLineNumber(row) === line) || null;
     }
+    function siblingSideRow(row) {
+      const side = row.closest(".d2h-file-side-diff");
+      if (!side)
+        return null;
+      const sides = side.parentElement?.querySelectorAll(".d2h-file-side-diff");
+      const other = sides ? [...sides].find((s2) => s2 !== side) : null;
+      if (!other)
+        return null;
+      const rows = (tbody) => tbody ? [...tbody.children].filter((r2) => !r2.classList.contains("gdp-annotation-row")) : [];
+      const mine = rows(row.parentElement);
+      const theirs = rows(other.querySelector("table.d2h-diff-table tbody"));
+      const index = mine.indexOf(row);
+      return theirs[index] || null;
+    }
+    function buildInlineSpacerRow(entry, colSpan) {
+      const tr = document.createElement("tr");
+      tr.className = "gdp-annotation-row gdp-annotation-spacer";
+      tr.dataset.annotationId = entry.id;
+      const td = document.createElement("td");
+      td.colSpan = colSpan;
+      td.appendChild(document.createElement("div"));
+      tr.appendChild(td);
+      return tr;
+    }
     function applyInlineAnnotations() {
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.remove();
@@ -6454,8 +6829,24 @@ ${frontmatter.yaml}
         while (anchor.nextElementSibling?.classList.contains("gdp-annotation-row"))
           anchor = anchor.nextElementSibling;
         anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
+        const sibling = siblingSideRow(target);
+        if (sibling) {
+          let sibAnchor = sibling;
+          while (sibAnchor.nextElementSibling?.classList.contains("gdp-annotation-row"))
+            sibAnchor = sibAnchor.nextElementSibling;
+          sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
+        }
       }
       syncInlineAnnotationWidths();
+    }
+    function syncInlineAnnotationSpacerHeights() {
+      document.querySelectorAll(".gdp-annotation-spacer").forEach((spacer) => {
+        const id = spacer.dataset.annotationId || "";
+        const note = document.querySelector(`.gdp-annotation-row:not(.gdp-annotation-spacer)[data-annotation-id="${CSS.escape(id)}"]`);
+        const div = spacer.querySelector("td > div");
+        if (note && div)
+          div.style.height = `${note.offsetHeight}px`;
+      });
     }
     function syncInlineAnnotationWidths() {
       document.querySelectorAll(".gdp-annotation-inline").forEach((box) => {
@@ -6470,6 +6861,7 @@ ${frontmatter.yaml}
         const width = scroller?.clientWidth || 0;
         box.style.width = width > 32 ? `${width - 16}px` : "";
       });
+      syncInlineAnnotationSpacerHeights();
     }
     window.addEventListener("resize", syncInlineAnnotationWidths);
     function syncSessionUrl() {
@@ -6511,6 +6903,48 @@ ${frontmatter.yaml}
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.classList.toggle("active", row.dataset.annotationId === activeAnnotationId);
       });
+    }
+    function annotationAiReference(session, entry) {
+      return [
+        "code-viewer のコード注釈について依頼があります。",
+        "",
+        "## 対象の注釈",
+        `- annotation id: ${entry.id}`,
+        `- 場所: ${annotationLocationLabel(entry)}`,
+        `- session: ${session.id}「${session.title}」`,
+        ""
+      ].join(`
+`);
+    }
+    function annotationIconButton(icon, paths, title) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "annotation-icon-btn";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = iconSvg(icon, paths);
+      return button;
+    }
+    function createCopyRefButton(entry, extraClass = "") {
+      const button = annotationIconButton("octicon-copy", COPY_16_PATHS, "copy AI-ready reference (id / location / edit commands)");
+      if (extraClass)
+        button.classList.add(extraClass);
+      button.addEventListener("click", async (e2) => {
+        e2.stopPropagation();
+        const found = findAnnotation(entry.id);
+        if (!found)
+          return;
+        try {
+          await navigator.clipboard.writeText(annotationAiReference(found.session, found.entry));
+          button.classList.add("copied");
+        } catch {
+          button.classList.add("failed");
+        }
+        setTimeout(() => {
+          button.classList.remove("copied", "failed");
+        }, 1200);
+      });
+      return button;
     }
     function findAnnotation(entryId) {
       for (const session of ANNOTATIONS.sessions) {
@@ -6599,18 +7033,24 @@ ${frontmatter.yaml}
         title.addEventListener("click", () => {
           setActiveSession(session.id === activeSessionId ? null : session.id);
         });
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "annotation-delete";
-        del.title = "delete session";
-        del.setAttribute("aria-label", `delete session ${session.title}`);
-        del.textContent = "delete";
+        const rename = annotationIconButton("octicon-pencil", PENCIL_16_PATH, `rename session ${session.title}`);
+        rename.addEventListener("click", () => {
+          const next = window.prompt("Rename session", session.title);
+          if (next === null || !next.trim())
+            return;
+          postAnnotationAction({
+            action: "rename",
+            id: session.id,
+            title: next
+          });
+        });
+        const del = annotationIconButton("octicon-trash", TRASH_16_PATH, `delete session ${session.title}`);
         del.addEventListener("click", () => {
           if (!window.confirm(`Delete annotation session "${session.title}"?`))
             return;
           postAnnotationAction({ action: "delete", id: session.id });
         });
-        head.append(title, time, del);
+        head.append(title, time, rename, del);
         sessionEl.appendChild(head);
         const list2 = document.createElement("ol");
         list2.className = "annotation-entries";
@@ -6631,12 +7071,7 @@ ${frontmatter.yaml}
           open.addEventListener("click", () => {
             openAnnotationEntry(entry.id);
           });
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "annotation-delete";
-          remove.title = "delete annotation";
-          remove.setAttribute("aria-label", `delete annotation for ${annotationLocationLabel(entry)}`);
-          remove.textContent = "delete";
+          const remove = annotationIconButton("octicon-trash", TRASH_16_PATH, `delete annotation for ${annotationLocationLabel(entry)}`);
           remove.addEventListener("click", () => {
             if (!window.confirm(`Delete annotation for ${annotationLocationLabel(entry)}?`))
               return;
@@ -6678,8 +7113,22 @@ ${frontmatter.yaml}
         body.appendChild(heading2);
       }
       const markdown = document.createElement("div");
-      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
       body.appendChild(markdown);
+      const head = annotationDetail.querySelector(".annotation-detail-head");
+      head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+        el.remove();
+      });
+      const copyRef = createCopyRefButton(entry, "annotation-detail-head-action");
+      const edit = annotationIconButton("octicon-pencil", PENCIL_16_PATH, "edit this annotation");
+      edit.classList.add("annotation-detail-head-action");
+      edit.addEventListener("click", () => {
+        openAnnotationEditForm(entry);
+      });
+      const prev = $("#annotation-detail-prev");
+      head?.insertBefore(copyRef, prev);
+      head?.insertBefore(edit, prev);
       $("#annotation-detail-prev").disabled = index <= 0;
       $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
       annotationDetail.hidden = false;
@@ -6697,6 +7146,52 @@ ${frontmatter.yaml}
       });
     }
     let openEntrySeq = 0;
+    function openAnnotationEditForm(entry) {
+      const body = $("#annotation-detail-body");
+      body.replaceChildren();
+      const form = document.createElement("div");
+      form.className = "annotation-edit-form";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "title (optional)";
+      titleInput.value = entry.title || "";
+      const bodyInput = document.createElement("textarea");
+      bodyInput.value = entry.body;
+      bodyInput.rows = 10;
+      const buttons = document.createElement("div");
+      buttons.className = "annotation-edit-buttons";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "gdp-btn gdp-btn-sm";
+      save.textContent = "Save";
+      save.addEventListener("click", async () => {
+        if (!bodyInput.value.trim())
+          return;
+        save.disabled = true;
+        await postAnnotationAction({
+          action: "update",
+          id: entry.id,
+          title: titleInput.value,
+          body: bodyInput.value
+        });
+        const found = findAnnotation(entry.id);
+        if (found)
+          showAnnotationDetail(found.session, found.entry, found.index);
+      });
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "gdp-btn gdp-btn-sm";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        const found = findAnnotation(entry.id);
+        if (found)
+          showAnnotationDetail(found.session, found.entry, found.index);
+      });
+      buttons.append(save, cancel);
+      form.append(titleInput, bodyInput, buttons);
+      body.appendChild(form);
+      bodyInput.focus();
+    }
     async function openAnnotationEntry(entryId) {
       const seq = ++openEntrySeq;
       const stale = () => seq !== openEntrySeq;
@@ -6704,9 +7199,9 @@ ${frontmatter.yaml}
       if (!found)
         return;
       const { session, entry, index } = found;
-      showAnnotationDetail(session, entry, index);
       const sessionChanged = activeSessionId !== session.id;
       activeSessionId = session.id;
+      showAnnotationDetail(session, entry, index);
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
       const range = { from, to };
@@ -6776,6 +7271,8 @@ ${frontmatter.yaml}
         }
       });
     }
+    if (localStorage.getItem("gdp:annotation-panel") === "1")
+      setAnnotationPanelOpen(true);
     $("#annotations-toggle").addEventListener("click", () => {
       setAnnotationPanelOpen(annotationPanel.hidden);
       if (!annotationPanel.hidden)
@@ -6819,22 +7316,1963 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  // web-src/core/file-path-copy.ts
+  function filePathClipboardText(path) {
+    return path || "";
   }
-  function createCatchUpGate(now, minIntervalMs) {
-    let lastForceAt = 0;
-    return function shouldRun() {
-      const current = now();
-      if (current - lastForceAt < minIntervalMs)
+  function fileNameClipboardText(path) {
+    if (!path)
+      return "";
+    const parts = path.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "";
+  }
+
+  // web-src/core/ws-highlight.ts
+  function isWhitespaceOnlyInlineHighlight(text2) {
+    return !!text2 && !/\S/.test(text2);
+  }
+  function suppressWhitespaceOnlyInlineHighlights(root) {
+    root.querySelectorAll("ins, del").forEach((el) => {
+      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
+        return;
+      const parent = el.parentNode;
+      if (!parent)
+        return;
+      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
+    });
+  }
+
+  // web-src/views/media-embed.ts
+  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
+  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
+  function isMedia(p2) {
+    return MEDIA_RE.test(p2);
+  }
+  function isImage(p2) {
+    return IMAGE_RE.test(p2);
+  }
+  function isVideo(p2) {
+    return VIDEO_RE.test(p2);
+  }
+  function isAudio(p2) {
+    return AUDIO_RE.test(p2);
+  }
+  function fileURL(path, ref) {
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  }
+  function mediaTag(path, ref) {
+    const url = fileURL(path, ref);
+    if (isVideo(path)) {
+      return `<video src="${url}" controls preload="metadata"></video>`;
+    }
+    if (isAudio(path)) {
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
+    }
+    return `<img src="${url}" alt="" loading="lazy">`;
+  }
+  function enhanceMediaCard(file, card) {
+    const path = file.path;
+    if (!file.media_kind && !isMedia(path))
+      return;
+    const wrapper = card.querySelector(".d2h-file-wrapper");
+    if (!wrapper)
+      return;
+    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
+    if (!body)
+      return;
+    const container = document.createElement("div");
+    container.className = "gdp-media";
+    let leftHTML;
+    let rightHTML;
+    if (file.status === "A") {
+      leftHTML = '<div class="media-empty">Not in HEAD</div>';
+      rightHTML = mediaTag(path, "worktree");
+    } else if (file.status === "D") {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = '<div class="media-empty">Deleted</div>';
+    } else {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = mediaTag(path, "worktree");
+    }
+    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+    body.replaceWith(container);
+  }
+
+  // web-src/views/diff-view.ts
+  function createDiffView(deps) {
+    const {
+      $,
+      $$,
+      STATE,
+      setRoute,
+      currentRange,
+      escapeHtml: escapeHtml2,
+      trackLoad,
+      diffCardSelector,
+      getHljs,
+      inferLang,
+      lineTargetStart,
+      fileSourceTarget,
+      applySourceRouteToShell,
+      setupHunkExpand,
+      applyInlineAnnotations,
+      applyFilter,
+      markActive,
+      renderSidebar,
+      isRepositorySidebarMode,
+      loadRepo,
+      repoRoute,
+      setProjectName,
+      getProjectName,
+      createOpenPathButton,
+      applyHideTests,
+      getServerGeneration,
+      setServerGeneration
+    } = deps;
+    function rerenderLoadedDiffs() {
+      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
+        const data = card._diffData;
+        const file = card._file;
+        if (!data || !file)
+          return;
+        mountDiff(card, file, data);
+        applyInlineAnnotations();
+        if (data.truncated && data.mode === "preview") {
+          addExpandHunksUI(file, data, card);
+        }
+        scheduleIdleHighlight(card, file);
+      });
+    }
+    function fileBadge(status) {
+      const ch = (status || "M")[0].toUpperCase();
+      const span = document.createElement("span");
+      span.className = `badge ${ch}`;
+      span.textContent = ch;
+      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
+      return span;
+    }
+    function persistViewedFiles() {
+      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
+    }
+    function setFileViewed(path, viewed) {
+      if (viewed)
+        STATE.viewedFiles.add(path);
+      else
+        STATE.viewedFiles.delete(path);
+      persistViewedFiles();
+      applyViewedState();
+      $$(diffCardSelector(path)).forEach((card) => {
+        applyViewedToCard(card, viewed, true);
+      });
+    }
+    function syncViewedCardDisplay(card, viewed) {
+      card.classList.toggle("viewed", viewed);
+      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
+        checkbox.checked = viewed;
+      });
+    }
+    function applyViewedToCard(card, viewed, collapseLoaded = false) {
+      syncViewedCardDisplay(card, viewed);
+      if (collapseLoaded && card.classList.contains("loaded")) {
+        setFileCollapsed(card, viewed);
+      }
+    }
+    function setUnfoldButtonState(button, expanded) {
+      if (!button)
+        return;
+      button.setAttribute("aria-pressed", expanded ? "true" : "false");
+      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
+      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
+    }
+    function renderMeta(meta) {
+      const el = $("#meta");
+      if (!meta) {
+        el.textContent = "";
+        return;
+      }
+      setProjectName(meta.project || "");
+      el.innerHTML = "";
+      if (meta.branch) {
+        const b2 = document.createElement("span");
+        b2.className = "ref";
+        b2.textContent = `⎇ ${meta.branch}`;
+        el.appendChild(b2);
+      }
+      if (meta.totals) {
+        const t2 = document.createElement("span");
+        t2.className = "num";
+        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> " + "<span>" + meta.totals.files + " files</span>";
+        el.appendChild(t2);
+      }
+      const u2 = document.createElement("span");
+      u2.className = "updated-at";
+      u2.title = "last updated";
+      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+      el.appendChild(u2);
+    }
+    let SUPPRESS_SPY_UNTIL = 0;
+    function prefetchByPath(path) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card?.classList.contains("pending"))
+        return;
+      const f2 = STATE.files.find((x) => x.path === path);
+      if (!f2)
+        return;
+      enqueueLoad(f2, card, 5);
+    }
+    function clearDiffLineFocus() {
+      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
+        row.classList.remove("gdp-diff-line-target");
+      });
+    }
+    function diffRowLineNumber(row) {
+      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
+      const raw = (newLine?.textContent || "").trim();
+      const line = Number(raw);
+      return Number.isInteger(line) && line > 0 ? line : null;
+    }
+    function focusDiffLine(card, line) {
+      const start = lineTargetStart(line);
+      if (!start)
         return false;
-      lastForceAt = current;
+      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
+      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
+      if (!row)
+        return false;
+      clearDiffLineFocus();
+      row.classList.add("gdp-diff-line-target");
+      scrollDiffElementIntoView(row, "center");
       return true;
+    }
+    function scrollDiffElementIntoView(element, block2) {
+      element.scrollIntoView({ behavior: "auto", block: block2 });
+    }
+    function applyDiffRouteFocus(card) {
+      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
+        return false;
+      if (card && card.dataset.path !== STATE.route.path)
+        return false;
+      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
+      if (!targetCard)
+        return false;
+      return focusDiffLine(targetCard, STATE.route.line);
+    }
+    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
+    window.addEventListener("wheel", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    window.addEventListener("touchmove", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    function scrollToFile(path, line) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card)
+        return;
+      if (line)
+        REANCHOR_UNTIL = performance.now() + 4000;
+      markActive(path);
+      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
+      const onEnd = () => {
+        SUPPRESS_SPY_UNTIL = 0;
+        window.removeEventListener("scrollend", onEnd);
+      };
+      window.addEventListener("scrollend", onEnd, { once: true });
+      if (card.classList.contains("pending")) {
+        const f2 = STATE.files.find((x) => x.path === path);
+        if (f2)
+          enqueueLoad(f2, card, 10);
+      }
+      if (!line || !focusDiffLine(card, line)) {
+        scrollDiffElementIntoView(card, "start");
+      }
+    }
+    function applyViewedState() {
+      if (isRepositorySidebarMode())
+        return;
+      $$("#filelist li[data-path]").forEach((li) => {
+        const path = li.dataset.path || "";
+        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
+      });
+      $$(".gdp-file-shell[data-path]").forEach((card) => {
+        const path = card.dataset.path || "";
+        const viewed = STATE.viewedFiles.has(path);
+        syncViewedCardDisplay(card, viewed);
+      });
+    }
+    let CLIENT_REQ_SEQ = 0;
+    const LOAD_QUEUE = [];
+    let ACTIVE_LOADS = 0;
+    const MAX_PARALLEL = 2;
+    let lazyObserver = null;
+    function renderShell(meta) {
+      const newFiles = meta.files || [];
+      STATE.files = newFiles;
+      setServerGeneration(meta.generation || 0);
+      window._lastMeta = meta;
+      renderMeta(meta);
+      renderSidebar(newFiles);
+      const target = $("#diff");
+      const empty = $("#empty");
+      if (!newFiles.length) {
+        if (STATE.route.screen === "file") {
+          empty.classList.add("hidden");
+          applySourceRouteToShell();
+        } else {
+          empty.classList.remove("hidden");
+          target.replaceChildren();
+        }
+        LOAD_QUEUE.length = 0;
+        return;
+      }
+      empty.classList.add("hidden");
+      const oldByKey = new Map;
+      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
+        if (c2.dataset.key)
+          oldByKey.set(c2.dataset.key, c2);
+      });
+      const ordered = [];
+      newFiles.forEach((f2) => {
+        const key = f2.key || f2.path;
+        const old = oldByKey.get(key);
+        if (old) {
+          oldByKey.delete(key);
+          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
+          const statusChanged = old.dataset.status !== (f2.status || "M");
+          if (sizeChanged || statusChanged) {
+            old.classList.remove("loaded", "error");
+            old.classList.add("pending");
+            old.replaceChildren();
+            const tmp = createPlaceholder(f2);
+            while (tmp.firstChild)
+              old.appendChild(tmp.firstChild);
+            old.dataset.sizeClass = f2.size_class || "small";
+            old.dataset.status = f2.status || "M";
+            delete old.dataset.manualRendered;
+            delete old.dataset.manualLoad;
+            delete old.dataset.manualMode;
+            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
+            old._diffData = null;
+            old._file = null;
+          } else {
+            const stats = old.querySelector(".gdp-shell-header .stats");
+            if (stats) {
+              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
+            }
+            old._file = f2;
+          }
+          ordered.push(old);
+        } else {
+          ordered.push(createPlaceholder(f2));
+        }
+      });
+      oldByKey.forEach((c2) => {
+        c2.remove();
+      });
+      target.replaceChildren(...ordered);
+      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
+        if (!LOAD_QUEUE[i2].card.isConnected)
+          LOAD_QUEUE.splice(i2, 1);
+      }
+      setupLazyObserver();
+      enqueueInitialLoads();
+      applySourceRouteToShell();
+      setupScrollSpy();
+      if (typeof applyHideTests === "function")
+        applyHideTests();
+      applyFilter();
+      applyViewedState();
+    }
+    function createPlaceholder(f2) {
+      const card = document.createElement("div");
+      card.className = "gdp-file-shell pending";
+      card.dataset.path = f2.path;
+      card.dataset.key = f2.key || f2.path;
+      card.dataset.sizeClass = f2.size_class || "small";
+      card.dataset.status = f2.status || "M";
+      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
+      if (f2.estimated_height_px) {
+        card.style.minHeight = `${f2.estimated_height_px}px`;
+      }
+      const head = document.createElement("div");
+      head.className = "gdp-shell-header";
+      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + "</span>" + '<span class="path">' + escapeHtml2(f2.display_path || f2.path) + "</span>" + '<span class="stats">' + '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>" + "</span>" + '<span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
+      card.appendChild(head);
+      const body = document.createElement("div");
+      body.className = "gdp-shell-body";
+      card.appendChild(body);
+      return card;
+    }
+    function setupLazyObserver() {
+      if (lazyObserver)
+        lazyObserver.disconnect();
+      lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting)
+            return;
+          const card = entry.target;
+          if (card.classList.contains("loaded") || card.classList.contains("loading"))
+            return;
+          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+          if (!f2)
+            return;
+          enqueueLoad(f2, card, 0);
+        });
+      }, { rootMargin: "1200px 0px 1600px 0px" });
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
+        lazyObserver.observe(c2);
+      });
+    }
+    function enqueueInitialLoads() {
+      const viewportBottom = window.innerHeight + 1600;
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
+        const rect = card.getBoundingClientRect();
+        if (rect.top > viewportBottom)
+          return;
+        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+        if (f2)
+          enqueueLoad(f2, card, 0);
+      });
+    }
+    function enqueueLoad(file, card, priority) {
+      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
+        renderManualLoadPlaceholder(card, file);
+        return;
+      }
+      if (LOAD_QUEUE.find((item) => item.card === card))
+        return;
+      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
+      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
+      pumpQueue();
+    }
+    function pumpQueue() {
+      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
+        const item = LOAD_QUEUE.shift();
+        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
+          continue;
+        ACTIVE_LOADS++;
+        loadFile(item.file, item.card).finally(() => {
+          ACTIVE_LOADS--;
+          pumpQueue();
+        });
+      }
+    }
+    function manualLoadReason(file) {
+      const path = file.path || "";
+      if (file.size_class === "huge")
+        return "huge diff";
+      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
+        return "minified or bundled file";
+      if (/\.map$/i.test(path))
+        return "source map";
+      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
+        return "generated or vendored path";
+      return null;
+    }
+    function renderManualLoadPlaceholder(card, file) {
+      if (card.dataset.manualRendered === "1")
+        return;
+      card.dataset.manualRendered = "1";
+      card.classList.remove("loading");
+      card.classList.add("pending", "manual-load");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = true;
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-manual-load";
+      const note = document.createElement("div");
+      note.className = "gdp-manual-note";
+      note.textContent = `${manualLoadReason(file)} - click to load diff`;
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "gdp-show-full";
+      previewBtn.textContent = "Load preview";
+      previewBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "preview";
+        card.classList.remove("manual-load");
+        loadFile(file, card, buildPreviewUrl(file, 3));
+      });
+      const openFileBtn = document.createElement("button");
+      openFileBtn.className = "gdp-show-full";
+      openFileBtn.textContent = "Open as file";
+      openFileBtn.title = "Open this file in the virtualized source viewer";
+      openFileBtn.addEventListener("click", () => {
+        const target = fileSourceTarget(file);
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: target.ref,
+          range: currentRange()
+        });
+        applySourceRouteToShell();
+      });
+      const fullBtn = document.createElement("button");
+      fullBtn.className = "gdp-show-full secondary";
+      fullBtn.textContent = "Load full diff";
+      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
+      fullBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "full";
+        card.classList.remove("manual-load");
+        loadFile(file, card, file.load_url);
+      });
+      wrap.appendChild(note);
+      if (file.status === "A")
+        wrap.appendChild(openFileBtn);
+      wrap.appendChild(previewBtn);
+      wrap.appendChild(fullBtn);
+      body.appendChild(wrap);
+    }
+    function nextIdle(timeout = 500) {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done)
+            return;
+          done = true;
+          resolve();
+        };
+        const ric = window.requestIdleCallback;
+        if (typeof ric === "function") {
+          ric(finish, { timeout });
+        } else {
+          requestAnimationFrame(finish);
+          setTimeout(finish, 50);
+        }
+      });
+    }
+    function loadFile(file, card, urlOverride) {
+      card.classList.remove("pending");
+      card.classList.add("loading");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = false;
+      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
+      const myGen = getServerGeneration();
+      const myReq = ++CLIENT_REQ_SEQ;
+      card.dataset.reqId = String(myReq);
+      const retryStale = () => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("pending");
+        if (indicator)
+          indicator.hidden = true;
+        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
+        if (fresh && card.isConnected)
+          enqueueLoad(fresh, card, 0);
+      };
+      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        if (myGen !== getServerGeneration()) {
+          retryStale();
+          return;
+        }
+        if (data.generation && data.generation !== getServerGeneration()) {
+          retryStale();
+          return;
+        }
+        await nextIdle();
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        renderFile(file, data, card);
+      }).catch(() => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("error");
+        const body = card.querySelector(".gdp-shell-body");
+        if (!body)
+          return;
+        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
+        const btn = body.querySelector(".retry");
+        if (btn)
+          btn.addEventListener("click", () => {
+            card.classList.remove("error");
+            card.classList.add("pending");
+            body.innerHTML = "";
+            enqueueLoad(file, card, 1);
+          });
+      });
+    }
+    function mountDiff(card, file, data) {
+      const head = card.querySelector(".gdp-shell-header");
+      if (head)
+        head.style.display = "none";
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      if (!data.diff?.trim()) {
+        body.innerHTML = '<div class="gdp-info">No content</div>';
+        return;
+      }
+      const layout = file.force_layout || STATE.layout;
+      const hljsRef = getHljs();
+      const ui = new Diff2HtmlUI(body, data.diff, {
+        drawFileList: false,
+        matching: "lines",
+        outputFormat: layout,
+        synchronisedScroll: true,
+        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
+        fileListToggle: false,
+        fileContentToggle: false
+      }, hljsRef);
+      ui.draw();
+      if (STATE.ignoreWs)
+        suppressWhitespaceOnlyInlineHighlights(body);
+      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
+        ui.highlightCode();
+      enhanceMediaCard(file, card);
+      syncSideScrollCard(card);
+      appendStatSquaresToHeader(card, file);
+      setupHunkExpand(card, file);
+    }
+    function setFileCollapsed(card, collapsed) {
+      card.classList.toggle("gdp-file-collapsed", collapsed);
+      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
+        body.classList.toggle("d2h-d-none", collapsed);
+      });
+      const button = card.querySelector(".gdp-file-toggle");
+      if (button) {
+        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        button.title = collapsed ? "Expand file" : "Collapse file";
+      }
+      const unfold = card.querySelector(".gdp-file-unfold");
+      if (unfold)
+        unfold.disabled = collapsed;
+      const viewFile = card.querySelector(".gdp-view-file");
+      if (viewFile)
+        viewFile.disabled = collapsed;
+    }
+    function setViewFileButtonState(button, sourceMode) {
+      if (!button)
+        return;
+      button.classList.add("gdp-btn", "gdp-btn-sm");
+      button.textContent = sourceMode ? "View Diff" : "View File";
+      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
+      button.title = sourceMode ? "View diff" : "View file";
+    }
+    function createFileBreadcrumb(path, ref) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb";
+      nav.setAttribute("aria-label", "File path");
+      const parts = path.split("/").filter(Boolean);
+      const allParts = getProjectName() ? [getProjectName(), ...parts] : parts;
+      allParts.forEach((part, index) => {
+        if (index > 0) {
+          const sep = document.createElement("span");
+          sep.className = "gdp-file-breadcrumb-sep";
+          sep.textContent = "/";
+          nav.appendChild(sep);
+        }
+        const isCurrent = index === allParts.length - 1;
+        const crumb = document.createElement(isCurrent ? "span" : "button");
+        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        crumb.textContent = part;
+        if (!isCurrent && crumb instanceof HTMLButtonElement) {
+          crumb.type = "button";
+          crumb.addEventListener("click", () => {
+            const projectOffset = getProjectName() ? 1 : 0;
+            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
+            setRoute(repoRoute(ref || "worktree", currentPath));
+            loadRepo();
+          });
+        }
+        nav.appendChild(crumb);
+      });
+      if (!allParts.length) {
+        const crumb = document.createElement("span");
+        crumb.className = "gdp-file-breadcrumb-current";
+        crumb.textContent = path;
+        nav.appendChild(crumb);
+      }
+      return nav;
+    }
+    async function expandAllFileContext(card, file) {
+      if (card.classList.contains("gdp-context-expanded")) {
+        const data = card._diffData;
+        if (!data)
+          return;
+        card.classList.remove("gdp-context-expanded");
+        mountDiff(card, file, data);
+        if (data.truncated && data.mode === "preview")
+          addExpandHunksUI(file, data, card);
+        scheduleIdleHighlight(card, file);
+        setUnfoldButtonState(card.querySelector(".gdp-file-unfold"), false);
+        return;
+      }
+      if (card._diffData && (card._diffData.truncated || card._diffData.mode === "preview")) {
+        await loadFile(file, card, file.load_url);
+      }
+      const button = card.querySelector(".gdp-file-unfold");
+      if (button)
+        button.disabled = true;
+      try {
+        for (let round = 0;round < 20; round++) {
+          const tasks = Array.from(card.querySelectorAll(".gdp-expand-stack")).map((stack) => stack._gdpExpandFully).filter((fn) => !!fn);
+          if (!tasks.length)
+            break;
+          const results = await Promise.all(tasks.map((fn) => fn().then(() => true, () => false)));
+          if (!results.some(Boolean))
+            break;
+        }
+        card.classList.add("gdp-context-expanded");
+        setUnfoldButtonState(button || null, true);
+      } finally {
+        if (button)
+          button.disabled = false;
+      }
+    }
+    function appendStatSquaresToHeader(card, file) {
+      const header = card.querySelector(".d2h-file-header");
+      if (!header)
+        return;
+      if (!header.querySelector(".gdp-file-toggle")) {
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "gdp-file-header-icon gdp-file-toggle";
+        toggle.title = "Collapse file";
+        toggle.setAttribute("aria-expanded", "true");
+        toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+        toggle.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          setFileCollapsed(card, !card.classList.contains("gdp-file-collapsed"));
+        });
+        header.insertBefore(toggle, header.firstChild);
+      }
+      header.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
+        checkbox.checked = STATE.viewedFiles.has(file.path);
+        if (checkbox.dataset.gdpBound !== "1") {
+          checkbox.dataset.gdpBound = "1";
+          checkbox.addEventListener("change", () => setFileViewed(file.path, checkbox.checked));
+        }
+      });
+      if (!header.querySelector(".gdp-copy-path")) {
+        const nameWrapper = header.querySelector(".d2h-file-name-wrapper");
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "gdp-file-header-icon gdp-copy-path";
+        copy.title = "copy file path";
+        copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+        copy.addEventListener("click", async (e2) => {
+          e2.stopPropagation();
+          const path = filePathClipboardText(file.path);
+          if (!path)
+            return;
+          try {
+            await navigator.clipboard.writeText(path);
+            copy.classList.add("copied");
+            setTimeout(() => {
+              copy.classList.remove("copied");
+            }, 1200);
+          } catch {
+            copy.classList.add("failed");
+            setTimeout(() => {
+              copy.classList.remove("failed");
+            }, 1200);
+          }
+        });
+        const statusTag = nameWrapper ? nameWrapper.querySelector(".d2h-tag") : null;
+        if (statusTag)
+          statusTag.insertAdjacentElement("afterend", copy);
+        else if (nameWrapper)
+          nameWrapper.insertAdjacentElement("beforeend", copy);
+        else
+          header.insertBefore(copy, header.firstChild);
+      }
+      if (!header.querySelector(".gdp-file-unfold")) {
+        const unfold = document.createElement("button");
+        unfold.type = "button";
+        unfold.className = "gdp-file-header-icon gdp-file-unfold";
+        setUnfoldButtonState(unfold, card.classList.contains("gdp-context-expanded"));
+        unfold.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          expandAllFileContext(card, file);
+        });
+        const copy = header.querySelector(".gdp-copy-path");
+        if (copy)
+          copy.insertAdjacentElement("afterend", unfold);
+        else
+          header.appendChild(unfold);
+      }
+      if (!header.querySelector(".gdp-open-path")) {
+        const unfold = header.querySelector(".gdp-file-unfold");
+        const openPath = createOpenPathButton(file.path, "file-parent", "open parent folder in OS");
+        if (unfold)
+          unfold.insertAdjacentElement("afterend", openPath);
+        else
+          header.appendChild(openPath);
+      }
+      if (!header.querySelector(".gdp-stat-text")) {
+        const stats = document.createElement("span");
+        stats.className = "gdp-stat-text";
+        stats.innerHTML = '<span class="a">+' + (file.additions || 0) + "</span>" + '<span class="d">−' + (file.deletions || 0) + "</span>";
+        header.appendChild(stats);
+      }
+      const total = (file.additions || 0) + (file.deletions || 0);
+      const SEG = 5;
+      let aSeg;
+      let dSeg;
+      if (total === 0) {
+        aSeg = 0;
+        dSeg = 0;
+      } else {
+        aSeg = Math.round(file.additions / total * SEG);
+        dSeg = Math.max(0, SEG - aSeg);
+        if (file.additions > 0 && aSeg === 0)
+          aSeg = 1;
+        if (file.deletions > 0 && dSeg === 0)
+          dSeg = 1;
+        const over = aSeg + dSeg - SEG;
+        if (over > 0)
+          dSeg -= over;
+      }
+      const wrap = document.createElement("span");
+      wrap.className = "gdp-stat-squares";
+      for (let i2 = 0;i2 < SEG; i2++) {
+        const box = document.createElement("span");
+        if (i2 < aSeg)
+          box.className = "sq add";
+        else if (i2 < aSeg + dSeg)
+          box.className = "sq del";
+        else
+          box.className = "sq nu";
+        wrap.appendChild(box);
+      }
+      header.appendChild(wrap);
+      if (!header.querySelector(".gdp-view-file")) {
+        const viewFile = document.createElement("button");
+        viewFile.type = "button";
+        viewFile.className = "gdp-view-file gdp-btn gdp-btn-sm";
+        setViewFileButtonState(viewFile, false);
+        viewFile.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          const target = fileSourceTarget(file);
+          setRoute({
+            screen: "file",
+            path: target.path,
+            ref: target.ref,
+            range: currentRange()
+          });
+          applySourceRouteToShell();
+        });
+        header.appendChild(viewFile);
+      } else {
+        setViewFileButtonState(header.querySelector(".gdp-view-file"), false);
+      }
+    }
+    function renderFile(file, data, card) {
+      card._diffData = data;
+      card._file = file;
+      card.classList.remove("loading", "pending");
+      card.classList.add("loaded");
+      card.style.minHeight = "";
+      mountDiff(card, file, data);
+      applyInlineAnnotations();
+      const focused = applyDiffRouteFocus(card);
+      if (!focused && STATE.route.screen === "diff" && STATE.route.path === file.path && STATE.route.line && !card.classList.contains("gdp-context-expanded")) {
+        expandAllFileContext(card, file).then(() => {
+          applyInlineAnnotations();
+          applyDiffRouteFocus(card);
+        });
+      }
+      if (performance.now() < REANCHOR_UNTIL && STATE.route.screen === "diff" && STATE.route.path !== file.path) {
+        applyDiffRouteFocus();
+      }
+      card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
+      applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
+      if (data.truncated && data.mode === "preview") {
+        addExpandHunksUI(file, data, card);
+      }
+      scheduleIdleHighlight(card, file);
+    }
+    function buildPreviewUrl(file, hunks) {
+      const u2 = new URL(file.load_url, window.location.origin);
+      u2.searchParams.set("mode", "preview");
+      u2.searchParams.set("max_hunks", String(hunks));
+      return u2.pathname + u2.search;
+    }
+    function addExpandHunksUI(file, data, card) {
+      const total = data.hunk_count || 0;
+      const rendered = data.rendered_hunk_count || 0;
+      const remaining = total - rendered;
+      if (remaining <= 0)
+        return;
+      const old = card.querySelector(".gdp-show-full-wrap");
+      if (old)
+        old.remove();
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-show-full-wrap";
+      const step = Math.min(10, remaining);
+      const moreBtn = document.createElement("button");
+      moreBtn.className = "gdp-show-full";
+      moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
+      moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
+      const allBtn = document.createElement("button");
+      allBtn.className = "gdp-show-full secondary";
+      allBtn.textContent = `Show all (${remaining} remaining)`;
+      allBtn.addEventListener("click", () => loadMore(total, true));
+      const note = document.createElement("span");
+      note.className = "gdp-hunk-note";
+      note.textContent = `${rendered} / ${total} hunks shown`;
+      wrap.appendChild(note);
+      wrap.appendChild(moreBtn);
+      wrap.appendChild(allBtn);
+      card.appendChild(wrap);
+      function loadMore(count, full) {
+        moreBtn.disabled = allBtn.disabled = true;
+        moreBtn.textContent = "Loading…";
+        const myGen = getServerGeneration();
+        const url = full ? file.load_url : buildPreviewUrl(file, count);
+        trackLoad(fetch(url).then((r2) => r2.json())).then((next) => {
+          if (myGen !== getServerGeneration()) {
+            moreBtn.textContent = "Data changed — reload";
+            moreBtn.disabled = allBtn.disabled = false;
+            return;
+          }
+          wrap.remove();
+          card._diffData = next;
+          mountDiff(card, file, next);
+          if (next.truncated || next.mode === "preview" && next.hunk_count > next.rendered_hunk_count) {
+            addExpandHunksUI(file, next, card);
+          }
+        }).catch(() => {
+          moreBtn.disabled = allBtn.disabled = false;
+          moreBtn.textContent = "Failed — retry";
+        });
+      }
+    }
+    function highlightInsertedSpans(card, file) {
+      if (file.size_class === "huge")
+        return;
+      if (!STATE.syntaxHighlight)
+        return;
+      const hljsRef = getHljs();
+      if (!hljsRef?.highlight)
+        return;
+      const lang = inferLang(file.path);
+      if (!lang || !hljsRef.getLanguage?.(lang))
+        return;
+      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
+      spans.forEach((s2) => {
+        s2.dataset.gdpHl = "1";
+        const text2 = s2.textContent || "";
+        if (text2.length === 0)
+          return;
+        try {
+          s2.innerHTML = hljsRef.highlight(text2, {
+            language: lang,
+            ignoreIllegals: true
+          }).value;
+          if (!s2.classList.contains("hljs"))
+            s2.classList.add("hljs");
+        } catch (_) {}
+      });
+    }
+    function scheduleIdleHighlight(card, file) {
+      if (file.highlight)
+        return;
+      if (file.size_class === "huge")
+        return;
+      if (!STATE.syntaxHighlight)
+        return;
+      if (!("requestIdleCallback" in window))
+        return;
+      const hljsRef = getHljs();
+      if (!hljsRef?.highlight)
+        return;
+      const lang = inferLang(file.path);
+      if (!lang || !hljsRef.getLanguage?.(lang))
+        return;
+      const work = (deadline) => {
+        const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
+        let i2 = 0;
+        while (i2 < spans.length && deadline.timeRemaining() > 4) {
+          const s2 = spans[i2++];
+          s2.dataset.gdpHl = "1";
+          const text2 = s2.textContent || "";
+          if (text2.length === 0)
+            continue;
+          try {
+            s2.innerHTML = hljsRef.highlight(text2, {
+              language: lang,
+              ignoreIllegals: true
+            }).value;
+            if (!s2.classList.contains("hljs"))
+              s2.classList.add("hljs");
+          } catch (_) {}
+        }
+        if (i2 < spans.length)
+          requestIdleCallback(work, { timeout: 1500 });
+      };
+      requestIdleCallback(work, { timeout: 2000 });
+    }
+    function syncSideScrollCard(card) {
+      card.querySelectorAll(".d2h-files-diff").forEach((group) => {
+        const sides = group.querySelectorAll(".d2h-code-wrapper");
+        if (sides.length !== 2)
+          return;
+        const [a2, b2] = sides;
+        let syncing = false;
+        const mirror = (src, dst) => {
+          if (syncing)
+            return;
+          syncing = true;
+          dst.scrollLeft = src.scrollLeft;
+          requestAnimationFrame(() => {
+            syncing = false;
+          });
+        };
+        a2.addEventListener("scroll", () => mirror(a2, b2), { passive: true });
+        b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
+      });
+    }
+    function setupScrollSpy() {
+      const handler = () => {
+        if (handler._raf)
+          return;
+        if (performance.now() < SUPPRESS_SPY_UNTIL)
+          return;
+        handler._raf = requestAnimationFrame(() => {
+          handler._raf = null;
+          if (performance.now() < SUPPRESS_SPY_UNTIL)
+            return;
+          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 56;
+          const scanY = topbarH + 24;
+          const cards = document.querySelectorAll(".gdp-file-shell");
+          for (const w of cards) {
+            const r2 = w.getBoundingClientRect();
+            if (r2.top <= scanY && r2.bottom > scanY) {
+              const text2 = w.dataset.path || "";
+              let best = null, bestLen = 0;
+              STATE.files.forEach((f2) => {
+                if ((text2 === f2.path || text2.endsWith(f2.path)) && f2.path.length > bestLen) {
+                  best = f2.path;
+                  bestLen = f2.path.length;
+                }
+              });
+              if (best) {
+                markActive(best);
+                const recentlyTouched = performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
+                if (!recentlyTouched) {
+                  const li = document.querySelector(`#filelist li[data-path="${CSS.escape(best)}"]`);
+                  if (li) {
+                    const sb = document.querySelector("#sidebar");
+                    if (!sb)
+                      return;
+                    const lr = li.getBoundingClientRect();
+                    const sr = sb.getBoundingClientRect();
+                    if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
+                      li.scrollIntoView({ block: "nearest" });
+                    }
+                  }
+                }
+              }
+              return;
+            }
+          }
+        });
+      };
+      if (window.__gdpScrollSpy)
+        window.removeEventListener("scroll", window.__gdpScrollSpy);
+      window.__gdpScrollSpy = handler;
+      window.addEventListener("scroll", handler, { passive: true });
+      handler(new Event("scroll"));
+    }
+    function _collapseAll(force) {
+      STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
+      document.querySelectorAll(".gdp-file-shell.loaded .d2h-file-wrapper").forEach((w) => {
+        const body = w.querySelector(".d2h-files-diff, .d2h-file-diff");
+        if (body)
+          body.style.display = STATE.collapsed ? "none" : "";
+      });
+    }
+    function clearLoadQueue() {
+      LOAD_QUEUE.length = 0;
+    }
+    return {
+      renderMeta,
+      renderShell,
+      renderFile,
+      rerenderLoadedDiffs,
+      mountDiff,
+      addExpandHunksUI,
+      scheduleIdleHighlight,
+      scrollToFile,
+      prefetchByPath,
+      applyDiffRouteFocus,
+      clearDiffLineFocus,
+      diffRowLineNumber,
+      focusDiffLine,
+      scrollDiffElementIntoView,
+      expandAllFileContext,
+      applyViewedState,
+      applyViewedToCard,
+      setFileViewed,
+      fileBadge,
+      setViewFileButtonState,
+      setupScrollSpy,
+      setupLazyObserver,
+      enqueueInitialLoads,
+      enqueueLoad,
+      loadFile,
+      createFileBreadcrumb,
+      highlightInsertedSpans,
+      setFileCollapsed,
+      clearLoadQueue,
+      persistViewedFiles
     };
   }
 
-  // web-src/directory-name.ts
+  // web-src/views/help-page.ts
+  var HELP_LANGUAGES = ["en", "ja"];
+  var HELP_SECTIONS = ["keybindings"];
+  var HELP_CONTENT = {
+    en: {
+      languageLabel: "Language",
+      title: "Help",
+      sections: {
+        keybindings: {
+          nav: "Keybindings",
+          title: "Keyboard Shortcuts",
+          intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
+          groups: [
+            {
+              title: "Global",
+              rows: [
+                ["Ctrl+K", "Open file palette"],
+                ["Ctrl+G", "Open grep palette"],
+                ["/", "Focus file filter"],
+                ["t", "Toggle theme"]
+              ]
+            },
+            {
+              title: "Panels",
+              rows: [
+                ["Ctrl+H", "Focus sidebar"],
+                ["Ctrl+L", "Focus main panel"]
+              ]
+            },
+            {
+              title: "Sidebar",
+              rows: [
+                ["j / k", "Move selection down / up"],
+                ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
+                ["gg / Shift+G", "Move to top / bottom"],
+                ["Enter", "Open selected item"],
+                ["h / l", "Collapse / expand directory"]
+              ]
+            },
+            {
+              title: "Main Panel",
+              rows: [
+                ["j / k", "Move code cursor down / up"],
+                ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
+                ["gg / Shift+G", "Move code cursor to top / bottom"],
+                ["gp / gc", "Switch to Preview / Code tab"]
+              ]
+            }
+          ]
+        }
+      }
+    },
+    ja: {
+      languageLabel: "言語",
+      title: "ヘルプ",
+      sections: {
+        keybindings: {
+          nav: "キーバインド",
+          title: "キーバインド",
+          intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
+          groups: [
+            {
+              title: "グローバル",
+              rows: [
+                ["Ctrl+K", "ファイルパレットを開く"],
+                ["Ctrl+G", "grep パレットを開く"],
+                ["/", "ファイルフィルターへフォーカス"],
+                ["t", "テーマ切り替え"]
+              ]
+            },
+            {
+              title: "パネル",
+              rows: [
+                ["Ctrl+H", "サイドバーへフォーカス"],
+                ["Ctrl+L", "メインパネルへフォーカス"]
+              ]
+            },
+            {
+              title: "サイドバー",
+              rows: [
+                ["j / k", "選択を下 / 上へ移動"],
+                ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
+                ["gg / Shift+G", "先頭 / 末尾へ移動"],
+                ["Enter", "選択項目を開く"],
+                ["h / l", "ディレクトリを閉じる / 開く"]
+              ]
+            },
+            {
+              title: "メインパネル",
+              rows: [
+                ["j / k", "コードカーソルを下 / 上へ移動"],
+                ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
+                ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
+                ["gp / gc", "Preview / Code タブへ切り替え"]
+              ]
+            }
+          ]
+        }
+      }
+    }
+  };
+  function helpLanguageFromRoute(route) {
+    return route.screen === "help" && HELP_LANGUAGES.includes(route.lang) ? route.lang : "en";
+  }
+  function helpSectionFromRoute(route) {
+    return route.screen === "help" && HELP_SECTIONS.includes(route.section) ? route.section : "keybindings";
+  }
+  function createHelpPage(deps) {
+    function renderHelpPage() {
+      deps.cancelActiveSourceLoad("navigation");
+      deps.removeStandaloneSource();
+      deps.clearLoadQueue();
+      const target = deps.$("#diff");
+      const empty = deps.$("#empty");
+      empty.classList.add("hidden");
+      deps.$("#meta").textContent = "";
+      deps.$("#totals").textContent = "";
+      deps.$("#filelist").textContent = "";
+      const lang = helpLanguageFromRoute(deps.getRoute());
+      const section = helpSectionFromRoute(deps.getRoute());
+      const content = HELP_CONTENT[lang];
+      const sectionContent = content.sections[section];
+      const shell = document.createElement("section");
+      shell.className = "gdp-help-shell";
+      const header = document.createElement("header");
+      header.className = "gdp-help-header";
+      const title = document.createElement("h1");
+      title.textContent = content.title;
+      const langSelect = document.createElement("select");
+      langSelect.className = "gdp-help-language";
+      langSelect.setAttribute("aria-label", content.languageLabel);
+      HELP_LANGUAGES.forEach((optionLang) => {
+        const option = document.createElement("option");
+        option.value = optionLang;
+        option.textContent = optionLang.toUpperCase();
+        option.selected = optionLang === lang;
+        langSelect.appendChild(option);
+      });
+      langSelect.addEventListener("change", () => {
+        deps.setRoute({
+          screen: "help",
+          lang: langSelect.value,
+          section,
+          range: deps.currentRange()
+        });
+        deps.setPageMode();
+        renderHelpPage();
+        deps.syncHeaderMenu();
+      });
+      header.append(title, langSelect);
+      const layout = document.createElement("div");
+      layout.className = "gdp-help-layout";
+      const helpNav = document.createElement("nav");
+      helpNav.className = "gdp-help-nav";
+      HELP_SECTIONS.forEach((helpSection) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = helpSection === section ? "active" : "";
+        button.textContent = content.sections[helpSection].nav;
+        button.addEventListener("click", () => {
+          deps.setRoute({
+            screen: "help",
+            lang,
+            section: helpSection,
+            range: deps.currentRange()
+          });
+          renderHelpPage();
+          deps.syncHeaderMenu();
+        });
+        helpNav.appendChild(button);
+      });
+      const article = document.createElement("article");
+      article.className = "gdp-help-content";
+      const h2 = document.createElement("h2");
+      h2.textContent = sectionContent.title;
+      const intro = document.createElement("p");
+      intro.textContent = sectionContent.intro;
+      article.append(h2, intro);
+      sectionContent.groups.forEach((group) => {
+        const groupSection = document.createElement("section");
+        groupSection.className = "gdp-help-group";
+        const groupTitle = document.createElement("h3");
+        groupTitle.textContent = group.title;
+        const table2 = document.createElement("table");
+        group.rows.forEach(([keys, description]) => {
+          const tr = document.createElement("tr");
+          const keyCell = document.createElement("th");
+          keyCell.scope = "row";
+          keys.split(" / ").forEach((key, index) => {
+            if (index > 0)
+              keyCell.append(" / ");
+            const kbd = document.createElement("kbd");
+            kbd.textContent = key;
+            keyCell.appendChild(kbd);
+          });
+          const desc = document.createElement("td");
+          desc.textContent = description;
+          tr.append(keyCell, desc);
+          table2.appendChild(tr);
+        });
+        groupSection.append(groupTitle, table2);
+        article.appendChild(groupSection);
+      });
+      layout.append(helpNav, article);
+      shell.append(header, layout);
+      target.replaceChildren(shell);
+    }
+    return { renderHelpPage };
+  }
+
+  // web-src/views/hunk-expand.ts
+  function createHunkExpand(deps) {
+    function parseHunkHeader(text2) {
+      const m = (text2 || "").match(/@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
+      if (!m)
+        return null;
+      return {
+        oldStart: +m[1],
+        oldCount: m[2] ? +m[2] : 1,
+        newStart: +m[3],
+        newCount: m[4] ? +m[4] : 1
+      };
+    }
+    function nextNewLine(hunk) {
+      return hunk.newStart + hunk.newCount;
+    }
+    function nextOldLine(hunk) {
+      return hunk.oldStart + hunk.oldCount;
+    }
+    function setupHunkExpand(card, file) {
+      if (file.binary)
+        return;
+      if (file.media_kind)
+        return;
+      const infoRows = [];
+      const tables = card.querySelectorAll("table.d2h-diff-table");
+      if (tables.length === 0)
+        return;
+      const perTable = [];
+      tables.forEach((tbl) => {
+        const arr = [];
+        tbl.querySelectorAll("tr").forEach((tr) => {
+          const info = tr.querySelector("td.d2h-info:not(.d2h-code-linenumber):not(.d2h-code-side-linenumber)");
+          if (!info)
+            return;
+          const txt = (info.textContent || "").trim();
+          arr.push({
+            tr,
+            info,
+            hunk: parseHunkHeader(txt)
+          });
+        });
+        perTable.push(arr);
+      });
+      const base2 = perTable.find((arr) => arr.some((x) => x.hunk)) || perTable[0] || [];
+      const usedTrs = new WeakSet;
+      base2.forEach((baseItem) => {
+        const top = baseItem.tr.getBoundingClientRect().top;
+        const group = perTable.map((arr, tableIndex) => {
+          let best = null, bestD = Infinity;
+          for (const item of arr) {
+            if (usedTrs.has(item.tr))
+              continue;
+            const d2 = Math.abs(item.tr.getBoundingClientRect().top - top);
+            if (d2 < bestD) {
+              best = item;
+              bestD = d2;
+            }
+          }
+          if (!best || bestD >= 12)
+            return null;
+          usedTrs.add(best.tr);
+          return Object.assign({ sideIndex: tableIndex }, best);
+        }).filter(Boolean);
+        if (!group.length)
+          return;
+        const parsed = group.find((g) => g.hunk) || group[0];
+        if (!parsed.hunk)
+          return;
+        group.forEach((g) => {
+          g.tr.classList.add("gdp-hunk-row");
+        });
+        infoRows.push({
+          tr: parsed.tr,
+          info: parsed.info,
+          hunk: parsed.hunk,
+          siblings: group,
+          prevHunkEndNew: 0,
+          prevHunkEndOld: 0
+        });
+      });
+      for (let i2 = 1;i2 < infoRows.length; i2++) {
+        const prev = infoRows[i2 - 1].hunk;
+        infoRows[i2].prevHunkEndNew = nextNewLine(prev);
+        infoRows[i2].prevHunkEndOld = nextOldLine(prev);
+      }
+      const ref = deps.getToRef();
+      const refPath = encodeURIComponent(file.path);
+      for (const item of infoRows) {
+        attachExpandControls(item, file, ref, refPath);
+      }
+      const trailingIndex = GdpExpandLogic.trailingExpandTargetIndex(infoRows.length);
+      if (trailingIndex != null) {
+        probeAndAttachTrailingExpandControls(infoRows[trailingIndex], file, ref, refPath);
+      }
+    }
+    function attachExpandControls(item, file, ref, refPath) {
+      const { hunk, prevHunkEndNew, prevHunkEndOld } = item;
+      const fullGapStart = Math.max(1, prevHunkEndNew);
+      const fullGapEnd = hunk.newStart - 1;
+      if (fullGapStart > fullGapEnd) {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.style.display = "none";
+        }
+        return;
+      }
+      const L = GdpExpandLogic;
+      if (item.topExpandedStart == null || item.bottomExpandedEnd == null) {
+        const init = L.initExpandState(prevHunkEndNew, hunk.newStart);
+        item.topExpandedStart = init.topExpandedStart;
+        item.bottomExpandedEnd = init.bottomExpandedEnd;
+      }
+      const gap = L.remainingGap({
+        topExpandedStart: item.topExpandedStart,
+        bottomExpandedEnd: item.bottomExpandedEnd
+      }, prevHunkEndNew);
+      if (!gap) {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.style.display = "none";
+        }
+        return;
+      }
+      const remainingStart = gap.start;
+      const remainingEnd = gap.end;
+      const setBusy = (busy) => {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.querySelectorAll(".gdp-expand-btn").forEach((b2) => {
+            b2.disabled = busy;
+          });
+        }
+      };
+      const fetchAndInsert = (start, end, dir) => {
+        if (start < 1)
+          start = 1;
+        if (end < start)
+          return Promise.resolve();
+        setBusy(true);
+        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
+        return deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+          if (!data?.lines) {
+            setBusy(false);
+            return;
+          }
+          const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
+          const card = item.tr.closest(".d2h-file-wrapper");
+          const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
+          sibs.forEach((sib) => {
+            insertContextRows(sib.tr, data.lines, start, oldStartForGap, dir, sib.sideIndex || 0);
+          });
+          if (card)
+            deps.highlightInsertedSpans(card, file);
+          if (dir === "after")
+            item.topExpandedStart = start;
+          else
+            item.bottomExpandedEnd = end;
+          for (const sib of item.siblings || [{ tr: item.tr }]) {
+            const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
+            const old = ln?.querySelector(".gdp-expand-stack");
+            if (old)
+              old.remove();
+          }
+          attachExpandControls(item, file, ref, refPath);
+        }).catch(() => {
+          setBusy(false);
+        });
+      };
+      const STEP = 20;
+      const remainingSize = remainingEnd - remainingStart + 1;
+      const isFirst = prevHunkEndNew === 0;
+      const buildStack = () => {
+        const buttons = [];
+        if (isFirst) {
+          buttons.push({
+            direction: "up",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
+          });
+        } else {
+          buttons.push({
+            direction: "up",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), "before")
+          });
+          buttons.push({
+            direction: "down",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
+          });
+        }
+        return createExpandStack(buttons);
+      };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(remainingStart, remainingEnd, "after");
+      };
+      const siblings = item.siblings || [{ tr: item.tr }];
+      siblings.forEach((sib) => {
+        const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
+        if (ln && !ln.querySelector(".gdp-expand-stack")) {
+          const stack = buildStack();
+          stack._gdpExpandFully = expandFully;
+          ln.appendChild(stack);
+        }
+      });
+      const firstSib = siblings[0];
+      if (firstSib) {
+        syncExpandRowHeights(siblings.map((sib) => sib.tr), firstSib.tr);
+      }
+    }
+    const EXPAND_ICON_PATHS = {
+      up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
+      down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z"
+    };
+    function createExpandStack(buttons) {
+      const stack = document.createElement("div");
+      stack.className = "gdp-expand-stack";
+      buttons.forEach((spec) => {
+        const button = document.createElement("button");
+        button.className = "gdp-expand-btn";
+        button.title = spec.title;
+        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' + '<path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
+        button.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          if (button.disabled)
+            return;
+          spec.onClick();
+        });
+        stack.appendChild(button);
+      });
+      return stack;
+    }
+    function syncExpandRowHeights(rows, stackRow) {
+      const syncHeight = () => {
+        const stack = stackRow.querySelector(".gdp-expand-stack");
+        const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
+        rows.forEach((row) => {
+          row.style.setProperty("height", `${targetH}px`, "important");
+        });
+      };
+      requestAnimationFrame(syncHeight);
+      setTimeout(syncHeight, 100);
+    }
+    function attachTrailingExpandControls(item, file, ref, refPath) {
+      const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+      if (hasTrailingRow)
+        return;
+      const STEP = 20;
+      let nextNewStart = nextNewLine(item.hunk);
+      let nextOldStart = nextOldLine(item.hunk);
+      const rows = (item.siblings || [{ tr: item.tr, sideIndex: 0 }]).map((sib) => {
+        const tbody = sib.tr.parentElement;
+        if (!tbody)
+          return null;
+        const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
+        const tr = document.createElement("tr");
+        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
+        const ln = document.createElement("td");
+        ln.className = isSplit ? "d2h-code-side-linenumber d2h-info" : "d2h-code-linenumber d2h-info";
+        const info = document.createElement("td");
+        info.className = "d2h-info";
+        const spacer = document.createElement("div");
+        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
+        info.appendChild(spacer);
+        tr.appendChild(ln);
+        tr.appendChild(info);
+        tbody.appendChild(tr);
+        return { tr, ln, sideIndex: sib.sideIndex || 0 };
+      }).filter(Boolean);
+      if (!rows.length)
+        return;
+      const setBusy = (busy) => {
+        rows.forEach((row) => {
+          row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
+            btn.disabled = busy;
+          });
+        });
+      };
+      const fetchAndInsert = (step = STEP) => {
+        const range = GdpExpandLogic.trailingClickRange(nextNewStart, step);
+        const myGen = deps.getServerGeneration();
+        setBusy(true);
+        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
+        return deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+          if (myGen !== deps.getServerGeneration() || data.generation && data.generation !== deps.getServerGeneration()) {
+            setBusy(false);
+            return;
+          }
+          if (!item.tr.isConnected)
+            return;
+          const lines = data?.lines || [];
+          if (!lines.length) {
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
+            return;
+          }
+          const card = item.tr.closest(".d2h-file-wrapper");
+          rows.forEach((row) => {
+            insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
+          });
+          const next = GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, step);
+          nextNewStart = next.newStart;
+          nextOldStart = next.oldStart;
+          if (card)
+            deps.highlightInsertedSpans(card, file);
+          if (next.eof) {
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
+            return;
+          }
+          setBusy(false);
+        }).catch(() => {
+          setBusy(false);
+        });
+      };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(1e5);
+      };
+      rows.forEach((row) => {
+        const stack = createExpandStack([
+          {
+            direction: "down",
+            title: "Show more lines",
+            onClick: () => void fetchAndInsert()
+          }
+        ]);
+        stack._gdpExpandFully = expandFully;
+        row.ln.appendChild(stack);
+      });
+      syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
+    }
+    function probeAndAttachTrailingExpandControls(item, file, ref, refPath) {
+      const start = nextNewLine(item.hunk);
+      const myGen = deps.getServerGeneration();
+      const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + start;
+      deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        if (myGen !== deps.getServerGeneration())
+          return;
+        if (data.generation && data.generation !== deps.getServerGeneration())
+          return;
+        if (!item.tr.isConnected)
+          return;
+        const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+        if (hasTrailingRow)
+          return;
+        if (!GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0))
+          return;
+        attachTrailingExpandControls(item, file, ref, refPath);
+      }).catch(() => {});
+    }
+    function insertContextRows(targetTr, lines, newStart, oldStart, dir, sideIndex) {
+      const tbody = targetTr.parentElement;
+      if (!tbody)
+        return;
+      const anchor = dir === "after" ? targetTr.nextElementSibling : targetTr;
+      const isSplit = !!targetTr.querySelector("td.d2h-code-side-linenumber");
+      const frag = document.createDocumentFragment();
+      for (let i2 = 0;i2 < lines.length; i2++) {
+        const tr = document.createElement("tr");
+        tr.className = "gdp-inserted-ctx";
+        if (dir)
+          tr.dataset.gdpDir = dir;
+        let lnHtml;
+        if (isSplit) {
+          const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
+          lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
+        } else {
+          lnHtml = '<td class="d2h-code-linenumber d2h-cntx">' + '<div class="line-num1">' + (oldStart + i2) + "</div>" + '<div class="line-num2">' + (newStart + i2) + "</div>" + "</td>";
+        }
+        tr.innerHTML = lnHtml + '<td class="d2h-cntx">' + '<div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '">' + '<span class="d2h-code-line-prefix">&nbsp;</span>' + '<span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span>" + "</div>" + "</td>";
+        frag.appendChild(tr);
+      }
+      tbody.insertBefore(frag, anchor);
+    }
+    function escapeHtmlText(s2) {
+      return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    return { setupHunkExpand };
+  }
+
+  // web-src/views/ref-picker.ts
+  function createRefPicker(deps) {
+    function wireRefSelectorInput(input, onPick) {
+      const wrap = input.closest("[data-ref-selector]");
+      wrap?.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        openPopover(input);
+      });
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" || e2.key === " ") {
+          e2.preventDefault();
+          openPopover(input);
+        } else if (e2.key === "Escape") {
+          closePopover();
+          input.blur();
+        }
+      });
+      if (onPick)
+        input.addEventListener("change", () => onPick(input.value || "worktree"));
+    }
+    const REFS = {
+      branches: [],
+      tags: [],
+      commits: [],
+      current: ""
+    };
+    const popover = deps.$("#ref-popover");
+    const popBody = popover.querySelector(".rp-body");
+    const popSearch = popover.querySelector(".rp-search");
+    if (!popBody || !popSearch)
+      return;
+    let popTarget = null;
+    function fetchRefs() {
+      return fetch("/_refs").then((r2) => r2.json()).then((refs) => {
+        Object.assign(REFS, refs);
+      }).catch(() => {});
+    }
+    fetchRefs();
+    let popTab = "commits";
+    let commitSearchTimer = null;
+    let commitSearchSeq = 0;
+    let commitSearchAbort = null;
+    let commitSearchLoading = false;
+    function fetchCommitRefs(query) {
+      const seq = ++commitSearchSeq;
+      if (commitSearchAbort)
+        commitSearchAbort.abort();
+      commitSearchAbort = new AbortController;
+      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
+      return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
+        if (seq !== commitSearchSeq)
+          return;
+        commitSearchLoading = false;
+        REFS.commits = refs.commits || [];
+        if (!popover.hidden && popTab === "commits") {
+          buildPopBody(popSearch.value);
+        }
+      }).catch(() => {
+        if (seq === commitSearchSeq)
+          commitSearchLoading = false;
+      });
+    }
+    function scheduleCommitSearch(query) {
+      if (commitSearchTimer)
+        clearTimeout(commitSearchTimer);
+      commitSearchLoading = true;
+      commitSearchTimer = setTimeout(() => {
+        commitSearchTimer = null;
+        fetchCommitRefs(query);
+      }, 150);
+    }
+    function buildPopBody(query) {
+      const q = (query || "").toLowerCase().trim();
+      const m = (s2) => !q || String(s2).toLowerCase().includes(q);
+      const html = [];
+      if (popTab === "commits") {
+        if (commitSearchLoading) {
+          html.push('<div class="rp-empty">loading commits...</div>');
+          popBody.innerHTML = html.join("");
+          highlightCurrentInPopover();
+          return;
+        }
+        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author}`));
+        if (!commits.length) {
+          html.push('<div class="rp-empty">no commits</div>');
+        }
+        for (const commit of commits) {
+          if (!commit.sha)
+            continue;
+          const shortSha = commit.sha.slice(0, 7);
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when || "") + "</span>" + "</div>" + "</div>");
+        }
+      } else if (popTab === "branches") {
+        const branches = (REFS.branches || []).filter((b2) => m(b2.name));
+        if (!branches.length) {
+          html.push('<div class="rp-empty">no branches</div>');
+        }
+        for (const branch of branches) {
+          const cur = branch.name === REFS.current;
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(branch.name) + '">' + '<div class="row1">' + '<span class="name">' + deps.escapeHtml(branch.name) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>" + (branch.when ? '<div class="row2"><span class="when">' + deps.escapeHtml(branch.when) + "</span></div>" : "") + "</div>");
+        }
+      } else if (popTab === "tags") {
+        const tags = (REFS.tags || []).filter((t2) => m(t2.name));
+        if (!tags.length) {
+          html.push('<div class="rp-empty">no tags</div>');
+        }
+        for (const tag of tags) {
+          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(tag.name) + '">' + '<div class="row1">' + '<span class="name">' + deps.escapeHtml(tag.name) + "</span>" + '<span class="badge">tag</span>' + "</div>" + (tag.when ? '<div class="row2"><span class="when">' + deps.escapeHtml(tag.when) + "</span></div>" : "") + "</div>");
+        }
+      }
+      popBody.innerHTML = html.join("");
+      highlightCurrentInPopover();
+    }
+    function highlightCurrentInPopover() {
+      if (!popTarget)
+        return;
+      const cur = (popTarget.value || "").trim();
+      if (!cur)
+        return;
+      const items = popBody.querySelectorAll("[data-val]");
+      let match2 = null;
+      items.forEach((it) => {
+        if (it.dataset.val === cur)
+          match2 = it;
+      });
+      if (match2) {
+        match2.classList.add("current");
+        const ph = popBody;
+        const r2 = match2.getBoundingClientRect();
+        const pr = ph.getBoundingClientRect();
+        if (r2.top < pr.top || r2.bottom > pr.bottom) {
+          ph.scrollTop = match2.offsetTop - ph.clientHeight / 2;
+        }
+      }
+    }
+    function escapeAttr(s2) {
+      return deps.escapeHtml(s2).replace(/"/g, "&quot;");
+    }
+    function openPopover(input) {
+      popTarget = input;
+      popSearch.value = "";
+      if (popTab === "commits")
+        scheduleCommitSearch("");
+      buildPopBody("");
+      const cur = (input.value || "").trim();
+      popover.querySelectorAll(".rp-chip").forEach((c2) => {
+        c2.classList.toggle("current", c2.dataset.val === cur);
+      });
+      popover.hidden = false;
+      const r2 = input.getBoundingClientRect();
+      const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
+      popover.style.left = `${Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8))}px`;
+      popover.style.top = `${r2.bottom + 4}px`;
+      setTimeout(() => popSearch.focus(), 0);
+    }
+    function closePopover() {
+      popover.hidden = true;
+      popTarget = null;
+    }
+    const refFromInput = deps.$("#ref-from");
+    const refToInput = deps.$("#ref-to");
+    wireRefSelectorInput(refFromInput, () => {
+      const otherEmpty = !refToInput.value;
+      deps.setRange(refFromInput.value, refToInput.value);
+      if (otherEmpty)
+        setTimeout(() => openPopover(refToInput), 0);
+    });
+    wireRefSelectorInput(refToInput, () => deps.setRange(refFromInput.value, refToInput.value));
+    wireRefSelectorInput(deps.$("#repo-target"), (ref) => {
+      const route = deps.getRoute();
+      if (route.screen !== "file")
+        return;
+      deps.setRoute({
+        screen: "file",
+        path: route.path,
+        ref,
+        view: "blob",
+        range: deps.currentRange()
+      });
+      deps.renderStandaloneSource({ path: route.path, ref });
+    });
+    popSearch.addEventListener("input", () => {
+      if (popTab === "commits")
+        scheduleCommitSearch(popSearch.value);
+      buildPopBody(popSearch.value);
+    });
+    popSearch.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape") {
+        closePopover();
+      }
+      if (e2.key === "Enter") {
+        const first = popBody.querySelector(".rp-item-commit, .rp-item-ref");
+        if (first)
+          first.click();
+      }
+    });
+    function handlePicked(val) {
+      if (!popTarget || !val)
+        return;
+      const pickedTarget = popTarget;
+      pickedTarget.value = val;
+      closePopover();
+      pickedTarget.dispatchEvent(new Event("change"));
+    }
+    popBody.addEventListener("click", (e2) => {
+      const item = e2.target.closest(".rp-item-commit, .rp-item-ref");
+      if (!item)
+        return;
+      handlePicked(item.dataset.val);
+    });
+    popover.querySelectorAll(".rp-tab").forEach((t2) => {
+      t2.addEventListener("click", () => {
+        popTab = t2.dataset.tab || "commits";
+        popover.querySelectorAll(".rp-tab").forEach((b2) => {
+          b2.classList.toggle("active", b2 === t2);
+        });
+        if (popTab === "commits")
+          scheduleCommitSearch(popSearch.value);
+        buildPopBody(popSearch.value);
+      });
+    });
+    popover.querySelectorAll(".rp-chip").forEach((c2) => {
+      c2.addEventListener("click", () => handlePicked(c2.dataset.val));
+    });
+    document.addEventListener("mousedown", (e2) => {
+      if (popover.hidden)
+        return;
+      const target = e2.target;
+      if (popover.contains(target))
+        return;
+      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
+        return;
+      closePopover();
+    });
+    return { openPopover, closePopover, wireRefSelectorInput };
+  }
+
+  // web-src/core/directory-name.ts
   function normalizeNewDirectoryName(name) {
     if (typeof name !== "string")
       return null;
@@ -6851,205 +9289,1368 @@ ${frontmatter.yaml}
     return trimmed;
   }
 
-  // web-src/expand-logic.ts
-  function initExpandState(prevHunkEndNew, hunkNewStart) {
-    return {
-      topExpandedStart: hunkNewStart,
-      bottomExpandedEnd: prevHunkEndNew - 1
-    };
-  }
-  function remainingGap(state, prevHunkEndNew) {
-    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
-    const remainingEnd = state.topExpandedStart - 1;
-    if (remainingStart > remainingEnd)
-      return null;
-    return { start: remainingStart, end: remainingEnd };
-  }
-  function isFullyExpanded(state, prevHunkEndNew) {
-    return remainingGap(state, prevHunkEndNew) == null;
-  }
-  function upClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
-  }
-  function downClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
-  }
-  function applyUp(state, range) {
-    return Object.assign({}, state, { bottomExpandedEnd: range.end });
-  }
-  function applyDown(state, range) {
-    return Object.assign({}, state, { topExpandedStart: range.start });
-  }
-  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
-    return prevHunkEndOld + (newLine - prevHunkEndNew);
-  }
-  function trailingClickRange(hunkEndNew, step) {
-    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
-  }
-  function trailingExpandTargetIndex(hunkCount) {
-    return hunkCount > 0 ? hunkCount - 1 : null;
-  }
-  function shouldAttachTrailingExpand(probeLineCount) {
-    return probeLineCount > 0;
-  }
-  function applyTrailingResult(state, receivedCount, step) {
-    return {
-      newStart: state.newStart + receivedCount,
-      oldStart: state.oldStart + receivedCount,
-      eof: receivedCount === 0 || receivedCount < step
-    };
-  }
-  var GdpExpandLogic = {
-    initExpandState,
-    remainingGap,
-    isFullyExpanded,
-    upClickRange,
-    downClickRange,
-    applyUp,
-    applyDown,
-    mapNewToOld,
-    trailingExpandTargetIndex,
-    shouldAttachTrailingExpand,
-    trailingClickRange,
-    applyTrailingResult
+  // web-src/core/source-meta.ts
+  var SOURCE_SHIKI_LANG_ALIASES = {
+    makefile: "make",
+    objectivec: "c",
+    "objective-c": "c",
+    "objective-cpp": "cpp",
+    starlark: "python"
   };
+  function normalizeSourceShikiLang(lang) {
+    if (!lang)
+      return null;
+    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
+  }
+  function isPreviewableSource(path) {
+    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+  }
+  function sourcePreviewKind(path) {
+    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
+      return "markdown";
+    if (/\.(html|htm)$/i.test(path))
+      return "html";
+    return null;
+  }
+  var EXT_TO_LANG = {
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    py: "python",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    kt: "kotlin",
+    swift: "swift",
+    c: "c",
+    h: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    lua: "lua",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    fish: "bash",
+    sql: "sql",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    tf: "terraform",
+    tfvars: "terraform",
+    hcl: "terraform",
+    xml: "xml",
+    html: "xml",
+    vue: "xml",
+    css: "css",
+    scss: "scss",
+    md: "markdown",
+    dockerfile: "dockerfile",
+    proto: "protobuf",
+    gradle: "gradle",
+    properties: "properties",
+    patch: "diff",
+    diff: "diff",
+    nix: "nix",
+    cue: "cue",
+    rego: "rego",
+    bicep: "bicep",
+    bazel: "starlark",
+    bzl: "starlark",
+    cmake: "cmake",
+    groovy: "groovy",
+    dart: "dart",
+    scala: "scala",
+    clj: "clojure",
+    cljs: "clojure",
+    cljc: "clojure",
+    edn: "clojure",
+    ex: "elixir",
+    exs: "elixir",
+    erl: "erlang",
+    hrl: "erlang",
+    hs: "haskell",
+    lhs: "haskell",
+    ml: "ocaml",
+    mli: "ocaml",
+    jl: "julia",
+    r: "r",
+    rmd: "r",
+    pl: "perl",
+    pm: "perl",
+    tcl: "tcl",
+    vim: "vim",
+    f: "fortran",
+    f90: "fortran",
+    m: "objective-c",
+    mm: "objective-cpp",
+    tex: "tex",
+    bib: "bibtex",
+    rst: "rst"
+  };
+  var TEXT_SOURCE_EXTENSIONS = new Set([
+    ...Object.keys(EXT_TO_LANG),
+    "txt",
+    "md",
+    "markdown",
+    "mdown",
+    "mkdn",
+    "mdx",
+    "json",
+    "jsonc",
+    "csv",
+    "tsv",
+    "yaml",
+    "yml",
+    "toml",
+    "hcl",
+    "tf",
+    "tfvars",
+    "tfstate",
+    "xml",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "ts",
+    "tsx",
+    "mts",
+    "cts",
+    "vue",
+    "svelte",
+    "astro",
+    "rs",
+    "go",
+    "py",
+    "rb",
+    "php",
+    "java",
+    "kt",
+    "kts",
+    "c",
+    "cc",
+    "cpp",
+    "cxx",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "ps1",
+    "sql",
+    "graphql",
+    "graphqls",
+    "gql",
+    "ini",
+    "conf",
+    "env",
+    "properties",
+    "gitignore",
+    "dockerignore",
+    "editorconfig",
+    "lock",
+    "log",
+    "patch",
+    "diff",
+    "sum",
+    "mk",
+    "proto",
+    "thrift",
+    "prisma",
+    "gradle",
+    "cmake",
+    "nix",
+    "cue",
+    "rego",
+    "bicep",
+    "bazel",
+    "bzl",
+    "dart",
+    "scala",
+    "clj",
+    "cljs",
+    "cljc",
+    "edn",
+    "ex",
+    "exs",
+    "erl",
+    "hrl",
+    "hs",
+    "lhs",
+    "ml",
+    "mli",
+    "jl",
+    "r",
+    "rmd",
+    "pl",
+    "pm",
+    "tcl",
+    "vim",
+    "groovy",
+    "f",
+    "f90",
+    "m",
+    "mm",
+    "pas",
+    "tex",
+    "bib",
+    "rst",
+    "adoc",
+    "org",
+    "ipynb",
+    "ejs",
+    "hbs",
+    "mustache",
+    "liquid",
+    "pug"
+  ]);
+  var TEXT_SOURCE_FILENAMES = new Set([
+    "readme",
+    "license",
+    "copying",
+    "authors",
+    "contributors",
+    "notice",
+    "changelog",
+    "todo",
+    "manifest",
+    "version",
+    "codeowners",
+    "go.mod",
+    "build.bazel",
+    "workspace.bazel",
+    "module.bazel",
+    "gemfile",
+    "rakefile",
+    "procfile",
+    "brewfile",
+    "gnumakefile",
+    "bsdmakefile",
+    ".gitattributes",
+    ".gitmodules",
+    ".npmrc",
+    ".nvmrc",
+    ".yarnrc",
+    ".prettierrc",
+    ".eslintrc",
+    ".babelrc",
+    ".stylelintrc"
+  ]);
+  var FILENAME_TO_LANG = {
+    dockerfile: "dockerfile",
+    makefile: "makefile",
+    gnumakefile: "makefile",
+    bsdmakefile: "makefile",
+    "go.mod": "go",
+    "build.bazel": "starlark",
+    "workspace.bazel": "starlark",
+    "module.bazel": "starlark"
+  };
+  function sourceFileName(path) {
+    return (path.split("/").pop() || path).toLowerCase();
+  }
+  function sourceFileExtension(name) {
+    const index = name.lastIndexOf(".");
+    return index >= 0 ? name.slice(index + 1) : "";
+  }
+  function isDockerfileName(name) {
+    return /^dockerfile(?:[.-].+)?$/i.test(name);
+  }
+  function isMakefileName(name) {
+    return /^makefile(?:[.-].+)?$/i.test(name);
+  }
+  function sourceDisplayKind(path) {
+    if (isVideo(path))
+      return "video";
+    if (isAudio(path))
+      return "audio";
+    if (isImage(path))
+      return "image";
+    if (/\.pdf$/i.test(path))
+      return "pdf";
+    const name = sourceFileName(path);
+    const ext = sourceFileExtension(name);
+    if (TEXT_SOURCE_EXTENSIONS.has(ext))
+      return "text";
+    if (TEXT_SOURCE_FILENAMES.has(name))
+      return "text";
+    if (isDockerfileName(name) || isMakefileName(name))
+      return "text";
+    return "unsupported";
+  }
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0)
+      return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
+  }
+  function formatFileDate(value) {
+    if (!value)
+      return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+      return "";
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  function humanFileKind(path, mime, fallback) {
+    const ext = (path.split(".").pop() || "").toLowerCase();
+    if (ext === "png")
+      return "PNG image";
+    if (ext === "jpg" || ext === "jpeg")
+      return "JPEG image";
+    if (ext === "gif")
+      return "GIF image";
+    if (ext === "webp")
+      return "WebP image";
+    if (ext === "svg")
+      return "SVG image";
+    if (ext === "pdf")
+      return "PDF document";
+    if (ext === "zip")
+      return "ZIP archive";
+    if (ext === "mp4")
+      return "MP4 video";
+    if (ext === "webm")
+      return "WebM video";
+    if (ext === "mp3")
+      return "MP3 audio";
+    if (ext === "wav")
+      return "WAV audio";
+    if (ext === "ogg")
+      return "Ogg audio";
+    if (ext === "flac")
+      return "FLAC audio";
+    if (ext === "m4a")
+      return "M4A audio";
+    if (ext === "aac")
+      return "AAC audio";
+    if (ext === "opus")
+      return "Opus audio";
+    if (ext === "mid" || ext === "midi")
+      return "MIDI file";
+    if (mime?.startsWith("image/"))
+      return "Image";
+    if (mime?.startsWith("video/"))
+      return "Video";
+    if (mime?.startsWith("audio/"))
+      return "Audio";
+    if (mime === "application/pdf")
+      return "PDF document";
+    if (fallback === "unsupported file")
+      return "Binary file";
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
 
-  // web-src/file-filter.ts
-  function normalizeFileFilterQuery(value) {
-    return (value || "").toLowerCase().trim();
-  }
-  function parseSlashRegex(query) {
-    if (!query.startsWith("/") || query.length < 2)
-      return null;
-    const lastSlash = query.lastIndexOf("/");
-    if (lastSlash <= 0)
-      return null;
-    return {
-      source: query.slice(1, lastSlash),
-      flags: query.slice(lastSlash + 1)
+  // web-src/views/repo-view.ts
+  function createRepoView(deps) {
+    const {
+      $,
+      STATE,
+      setRoute,
+      setPageMode,
+      setStatus,
+      setProjectName,
+      currentRange,
+      appendScopeParams,
+      markActive,
+      applyFilter,
+      renderSidebar,
+      rerenderVirtualSidebar,
+      ensureVirtualSidebarDirLoaded,
+      scrollVirtualSidebarPathIntoView,
+      shouldLazyLoadSidebarDir,
+      setFolderIcon,
+      isRepositorySidebarMode,
+      placeSidebarToggle,
+      createOpenPathButton,
+      removeStandaloneSource,
+      renderStandaloneSource,
+      repoFileTargetFromRoute,
+      trackLoad,
+      syncSidebarHeaderHeight,
+      clearLoadQueue,
+      getProjectName,
+      getRepoSidebarRef,
+      setRepoSidebarRef,
+      syncHeaderMenu,
+      getSidebarRowByPath,
+      getSidebarVirtualActivePath,
+      pushUndo
+    } = deps;
+    let REPO_SORT = {
+      key: "name",
+      direction: "asc"
     };
-  }
-  function compileFileFilter(value) {
-    const raw = (value || "").trim();
-    if (!raw)
-      return { kind: "empty", match: () => true };
-    const slashRegex = parseSlashRegex(raw);
-    if (slashRegex) {
-      try {
-        const regex = new RegExp(slashRegex.source, slashRegex.flags);
-        return { kind: "regex", match: (path) => regex.test(path) };
-      } catch (error2) {
-        return {
-          kind: "invalid",
-          match: () => false,
-          error: error2 instanceof Error ? error2.message : String(error2)
+    function isRepoSidebarReusable(ref) {
+      return getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode();
+    }
+    function syncRepoTargetInput(ref) {
+      const input = document.querySelector("#repo-target");
+      const wrap = document.querySelector("#repo-target-wrap");
+      if (!input || !wrap)
+        return;
+      input.value = ref || "worktree";
+      wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
+      syncSidebarHeaderHeight();
+    }
+    function fileEntryIcon() {
+      return iconSvg("octicon-file", FILE_16_PATH);
+    }
+    function closeRepoContextMenu() {
+      document.querySelector(".gdp-context-menu")?.remove();
+    }
+    function closeTrashDialog() {
+      document.querySelector(".gdp-trash-dialog-backdrop")?.remove();
+    }
+    function createTrashDialog(title, body, actions) {
+      closeTrashDialog();
+      const backdrop = document.createElement("div");
+      backdrop.className = "gdp-trash-dialog-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-trash-dialog";
+      const titleId = "gdp-trash-dialog-title";
+      const bodyId = "gdp-trash-dialog-body";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-labelledby", titleId);
+      dialog.setAttribute("aria-describedby", bodyId);
+      const heading2 = document.createElement("div");
+      heading2.id = titleId;
+      heading2.className = "gdp-trash-dialog-title";
+      heading2.textContent = title;
+      const message = document.createElement("div");
+      message.id = bodyId;
+      message.className = "gdp-trash-dialog-body";
+      message.textContent = body;
+      const actionRow = document.createElement("div");
+      actionRow.className = "gdp-trash-dialog-actions";
+      actionRow.append(...actions);
+      dialog.append(heading2, message, actionRow);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      return backdrop;
+    }
+    function confirmMoveToTrash(path, focusReturnTarget) {
+      return new Promise((resolve) => {
+        const previousFocus = focusReturnTarget || document.activeElement;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "gdp-btn gdp-btn-sm";
+        cancel.textContent = "Cancel";
+        const move = document.createElement("button");
+        move.type = "button";
+        move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
+        move.textContent = "Move to Trash";
+        const done = (ok) => {
+          document.removeEventListener("keydown", onKeydown);
+          closeTrashDialog();
+          previousFocus?.focus?.();
+          resolve(ok);
         };
+        const onKeydown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            done(false);
+            return;
+          }
+          if (event.key !== "Tab")
+            return;
+          const focusables = [cancel, move];
+          const index = focusables.indexOf(document.activeElement);
+          if (index < 0) {
+            event.preventDefault();
+            focusables[0].focus();
+            return;
+          }
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[focusables.length - 1].focus();
+          } else if (!event.shiftKey && index === focusables.length - 1) {
+            event.preventDefault();
+            focusables[0].focus();
+          }
+        };
+        cancel.addEventListener("click", () => done(false));
+        move.addEventListener("click", () => done(true));
+        const backdrop = createTrashDialog("Move to Trash?", `Move "${path}" to Trash?`, [cancel, move]);
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop)
+            done(false);
+        });
+        document.addEventListener("keydown", onKeydown);
+        cancel.focus();
+      });
+    }
+    function askNewDirectoryName(path, focusReturnTarget) {
+      return new Promise((resolve) => {
+        const previousFocus = focusReturnTarget || document.activeElement;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "gdp-btn gdp-btn-sm";
+        cancel.textContent = "Cancel";
+        const create = document.createElement("button");
+        create.type = "button";
+        create.className = "gdp-btn gdp-btn-sm";
+        create.textContent = "Create";
+        const input = document.createElement("input");
+        input.className = "gdp-create-dir-input";
+        input.type = "text";
+        input.autocomplete = "off";
+        input.placeholder = "Folder name";
+        input.setAttribute("aria-label", "Folder name");
+        const error2 = document.createElement("div");
+        error2.className = "gdp-create-dir-error";
+        error2.setAttribute("role", "alert");
+        const syncValidity = () => {
+          const valid = !!normalizeNewDirectoryName(input.value);
+          create.disabled = !valid;
+          error2.textContent = input.value && !valid ? "Use a folder name without slashes, control characters, . or .." : "";
+          return valid;
+        };
+        const done = (name) => {
+          document.removeEventListener("keydown", onKeydown);
+          closeTrashDialog();
+          previousFocus?.focus?.();
+          resolve(name);
+        };
+        const submit = () => {
+          const name = normalizeNewDirectoryName(input.value);
+          if (!name) {
+            syncValidity();
+            input.focus();
+            return;
+          }
+          done(name);
+        };
+        const onKeydown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            done(null);
+            return;
+          }
+          if (event.isComposing || event.keyCode === 229)
+            return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            submit();
+            return;
+          }
+          if (event.key !== "Tab")
+            return;
+          const focusables = [input, cancel, create];
+          const index = focusables.indexOf(document.activeElement);
+          if (index < 0) {
+            event.preventDefault();
+            focusables[0].focus();
+            return;
+          }
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[focusables.length - 1].focus();
+          } else if (!event.shiftKey && index === focusables.length - 1) {
+            event.preventDefault();
+            focusables[0].focus();
+          }
+        };
+        cancel.addEventListener("click", () => done(null));
+        create.addEventListener("click", submit);
+        input.addEventListener("input", syncValidity);
+        create.disabled = true;
+        const backdrop = createTrashDialog("New Folder", `Create a folder in "${path || getProjectName() || "repository"}".`, [cancel, create]);
+        const body = backdrop.querySelector(".gdp-trash-dialog-body");
+        body?.append(input, error2);
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop)
+            done(null);
+        });
+        document.addEventListener("keydown", onKeydown);
+        input.focus();
+      });
+    }
+    async function requestCreateDirectory(path, onCreated, options = {}) {
+      if (creatingDirectory)
+        return;
+      const name = await askNewDirectoryName(path, options.focusReturnTarget);
+      if (!name)
+        return;
+      creatingDirectory = true;
+      try {
+        const res = await fetch("/_create_directory", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ dir: path, name })
+        });
+        if (!res.ok) {
+          showCreateDirectoryError(`Failed to create "${name}": ${await res.text()}`);
+          return;
+        }
+        const body = await res.json();
+        onCreated(body.path || (path ? `${path}/${name}` : name));
+      } finally {
+        creatingDirectory = false;
       }
     }
-    const q = normalizeFileFilterQuery(raw.startsWith("/") ? raw.slice(1) : raw);
-    return {
-      kind: "substring",
-      match: (path) => path.toLowerCase().includes(q)
-    };
-  }
-
-  // web-src/file-navigation.ts
-  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
-    if (itemCount <= 0)
-      return -1;
-    if (currentIndex < 0)
-      return direction > 0 ? 0 : itemCount - 1;
-    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
-  }
-
-  // web-src/file-path-copy.ts
-  function filePathClipboardText(path) {
-    return path || "";
-  }
-  function fileNameClipboardText(path) {
-    if (!path)
-      return "";
-    const parts = path.split("/").filter(Boolean);
-    return parts[parts.length - 1] || "";
-  }
-
-  // web-src/focus-scope.ts
-  function isEditableKeyTarget(target) {
-    if (!target)
-      return false;
-    const tag = target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
-  }
-  function keymapScope(target) {
-    if (target?.closest("#content"))
-      return "main";
-    if (target?.closest("#sidebar"))
-      return "sidebar";
-    return "global";
-  }
-  function prepareKeyboardPanels(doc = document) {
-    const sidebar = doc.querySelector("#sidebar");
-    const content = doc.querySelector("#content");
-    if (sidebar)
-      sidebar.tabIndex = -1;
-    if (content)
-      content.tabIndex = -1;
-  }
-  function getPanelFocusScope(doc = document) {
-    const scope = doc.body?.dataset.focusScope;
-    return scope === "sidebar" || scope === "main" ? scope : null;
-  }
-  function setPanelFocusScope(scope, doc = document) {
-    if (!doc.body)
-      return;
-    if (scope)
-      doc.body.dataset.focusScope = scope;
-    else
-      delete doc.body.dataset.focusScope;
-  }
-  function restorePanelFocusScope(scope, doc = document) {
-    if (scope === "sidebar")
-      focusSidebarPanel(doc);
-    else if (scope === "main")
-      focusMainPanel(doc);
-    else
-      setPanelFocusScope(null, doc);
-  }
-  function focusSidebarPanel(doc = document) {
-    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
-    const sidebar = doc.querySelector("#sidebar");
-    (active || sidebar)?.focus({ preventScroll: true });
-    setPanelFocusScope("sidebar", doc);
-  }
-  function focusMainPanel(doc = document) {
-    doc.querySelector("#content")?.focus({ preventScroll: true });
-    setPanelFocusScope("main", doc);
-  }
-  function findMainScrollTarget(doc = document) {
-    const active = doc.activeElement;
-    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
-    if (activeScroller && activeScroller.offsetParent !== null)
-      return activeScroller;
-    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
-    if (sourceScroller && sourceScroller.offsetParent !== null)
-      return sourceScroller;
-    const content = doc.querySelector("#content");
-    if (!content || content.offsetParent === null)
-      return null;
-    const isScrollable = (item) => {
-      if (item.offsetParent === null)
+    async function requestMoveToTrash(path, onMoved, options = {}) {
+      if (!await confirmMoveToTrash(path, options.focusReturnTarget))
+        return;
+      if (await moveRepoPathToTrash(path))
+        onMoved();
+    }
+    function canTrashWorktreeRef(ref) {
+      return ref === "worktree" || ref === "";
+    }
+    function parentRepoPath(path) {
+      return path.split("/").slice(0, -1).join("/");
+    }
+    async function copyRepoContextText(text2) {
+      if (!text2)
+        return;
+      await navigator.clipboard.writeText(text2);
+    }
+    function createCopyPathButton(path) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-copy-path";
+      button.title = "copy folder path";
+      button.setAttribute("aria-label", "copy folder path");
+      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(filePathClipboardText(path));
+          button.classList.add("copied");
+          setTimeout(() => {
+            button.classList.remove("copied");
+          }, 1200);
+        } catch {
+          button.classList.add("failed");
+          setTimeout(() => {
+            button.classList.remove("failed");
+          }, 1200);
+        }
+      });
+      return button;
+    }
+    function showRepoContextMenu(event, entry, ref, onChanged) {
+      if (document.querySelector(".gdp-trash-dialog-backdrop"))
         return false;
-      const style = doc.defaultView?.getComputedStyle(item);
-      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+      if (!canTrashWorktreeRef(ref))
+        return false;
+      if (entry.children_omitted_reason === "internal")
+        return false;
+      if (entry.type !== "tree" && entry.type !== "blob")
+        return false;
+      event.preventDefault();
+      closeRepoContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "gdp-context-menu";
+      const anchor = event.target;
+      const focusReturnTarget = anchor?.closest("li, .gdp-repo-row");
+      const anchorRect = anchor?.closest("li, .gdp-repo-row")?.getBoundingClientRect();
+      const anchorX = event.clientX > 0 ? event.clientX : anchorRect?.left || window.innerWidth / 2;
+      const anchorY = event.clientY > 0 ? event.clientY : anchorRect?.bottom || window.innerHeight / 2;
+      menu.style.left = `${anchorX}px`;
+      menu.style.top = `${anchorY}px`;
+      const copyPath = document.createElement("button");
+      copyPath.type = "button";
+      copyPath.textContent = "Copy Path";
+      copyPath.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await copyRepoContextText(filePathClipboardText(entry.path));
+      });
+      const copyName = document.createElement("button");
+      copyName.type = "button";
+      copyName.textContent = "Copy Name";
+      copyName.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await copyRepoContextText(fileNameClipboardText(entry.path));
+      });
+      const createDir = document.createElement("button");
+      createDir.type = "button";
+      createDir.textContent = "New Folder...";
+      createDir.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        const targetPath = entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
+        await requestCreateDirectory(targetPath, onChanged, {
+          focusReturnTarget
+        });
+      });
+      const trash = document.createElement("button");
+      trash.type = "button";
+      trash.className = "danger";
+      trash.textContent = "Move to Trash...";
+      trash.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
+      });
+      menu.append(copyPath, copyName, createDir, trash);
+      document.body.appendChild(menu);
+      const rect = menu.getBoundingClientRect();
+      const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
+      const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+      return true;
+    }
+    function sidebarTrashEntryFromEvent(event) {
+      if (!isRepositorySidebarMode())
+        return null;
+      const row = event.target?.closest("#filelist li");
+      if (!row)
+        return null;
+      const path = row.dataset.path || row.dataset.dirpath || "";
+      if (!path)
+        return null;
+      return {
+        path,
+        type: row.dataset.type,
+        children_omitted_reason: row.dataset.childrenOmittedReason
+      };
+    }
+    function handleSidebarContextMenu(event) {
+      const entry = sidebarTrashEntryFromEvent(event);
+      if (!entry)
+        return;
+      if (showRepoContextMenu(event, entry, getRepoSidebarRef() || "worktree", () => loadRepo()))
+        markActive(entry.path);
+    }
+    function createMoveToTrashButton(path, onDeleted) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-trash-path";
+      button.title = "move folder to Trash";
+      button.setAttribute("aria-label", "move folder to Trash");
+      button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
+      });
+      return button;
+    }
+    function createNewFolderButton(path, onCreated) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-create-dir";
+      button.title = "new folder";
+      button.setAttribute("aria-label", "new folder");
+      button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await requestCreateDirectory(path, onCreated, {
+          focusReturnTarget: button
+        });
+      });
+      return button;
+    }
+    function createRepoUploadPanel(path) {
+      const dropPanel = document.createElement("div");
+      dropPanel.className = "gdp-upload-panel";
+      const copy = document.createElement("div");
+      copy.className = "gdp-upload-copy";
+      copy.textContent = `Drop files into ${path || getProjectName() || "repository"}`;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.hidden = true;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-btn gdp-btn-sm";
+      button.textContent = "Upload files";
+      button.addEventListener("click", () => input.click());
+      const error2 = document.createElement("div");
+      error2.className = "gdp-upload-error";
+      const fail = (message = "Upload failed") => {
+        error2.textContent = message;
+        dropPanel.classList.add("failed");
+        setTimeout(() => dropPanel.classList.remove("failed"), 1600);
+      };
+      input.addEventListener("change", async () => {
+        try {
+          if (input.files?.length)
+            await uploadFiles(path, input.files);
+          error2.textContent = "";
+        } catch (uploadError) {
+          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
+        } finally {
+          input.value = "";
+        }
+      });
+      dropPanel.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropPanel.classList.add("dragging");
+      });
+      dropPanel.addEventListener("dragleave", () => dropPanel.classList.remove("dragging"));
+      dropPanel.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        dropPanel.classList.remove("dragging");
+        try {
+          const files = event.dataTransfer?.files;
+          if (files?.length)
+            await uploadFiles(path, files);
+          error2.textContent = "";
+        } catch (uploadError) {
+          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
+        }
+      });
+      dropPanel.append(copy, button, input, error2);
+      return dropPanel;
+    }
+    function repoRoute(ref, path) {
+      return {
+        screen: "repo",
+        ref: ref || "worktree",
+        path,
+        range: currentRange()
+      };
+    }
+    function createRepoBreadcrumb(target, path) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
+      const root = document.createElement("button");
+      root.type = "button";
+      root.className = path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current";
+      root.textContent = getProjectName() || "repository";
+      root.addEventListener("click", () => {
+        setRoute(repoRoute(target, ""));
+        loadRepo();
+      });
+      nav.appendChild(root);
+      const parts = path ? path.split("/") : [];
+      parts.forEach((part, index) => {
+        const sep = document.createElement("span");
+        sep.className = "gdp-file-breadcrumb-sep";
+        sep.textContent = "/";
+        nav.appendChild(sep);
+        const currentPath = parts.slice(0, index + 1).join("/");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = index === parts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        button.textContent = part;
+        button.disabled = index === parts.length - 1;
+        button.addEventListener("click", () => {
+          setRoute(repoRoute(target, currentPath));
+          loadRepo();
+        });
+        nav.appendChild(button);
+      });
+      return nav;
+    }
+    async function renderRepo(meta) {
+      setProjectName(meta.project || "");
+      setPageMode();
+      removeStandaloneSource();
+      $("#empty").classList.add("hidden");
+      $("#diff").replaceChildren();
+      if (!isRepoSidebarReusable(meta.ref))
+        $("#totals").textContent = "";
+      STATE.files = [];
+      clearLoadQueue();
+      renderRepoBlobSidebar(meta.path || "", meta.ref);
+      const target = $("#diff");
+      const shell = document.createElement("section");
+      shell.className = "gdp-repo-shell";
+      const toolbar = document.createElement("div");
+      toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
+      const pathHeader = document.createElement("div");
+      pathHeader.className = "gdp-file-detail-path";
+      pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
+      if (meta.path)
+        pathHeader.appendChild(createCopyPathButton(meta.path));
+      pathHeader.appendChild(createOpenPathButton(meta.path || "", "directory", "open this folder in OS"));
+      toolbar.appendChild(pathHeader);
+      if (canTrashWorktreeRef(meta.ref)) {
+        toolbar.appendChild(createNewFolderButton(meta.path || "", () => loadRepo()));
+        if (meta.path) {
+          toolbar.appendChild(createMoveToTrashButton(meta.path, () => {
+            const parent = meta.path.split("/").slice(0, -1).join("/");
+            setRoute(repoRoute(meta.ref, parent));
+            loadRepo();
+          }));
+        }
+      }
+      shell.appendChild(toolbar);
+      const listCard = document.createElement("section");
+      listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
+      const listWrapper = document.createElement("div");
+      listWrapper.className = "d2h-file-wrapper";
+      if (meta.ref === "worktree" || meta.ref === "") {
+        listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
+      }
+      const sortHost = document.createElement("div");
+      sortHost.className = "gdp-repo-sort-host";
+      const list2 = document.createElement("div");
+      list2.className = "gdp-source-viewer gdp-repo-file-list";
+      const renderRepoRows = (focusSortKey) => {
+        sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
+        if (focusSortKey) {
+          sortHost.querySelector(`[data-repo-sort="${focusSortKey}"]`)?.focus();
+        }
+        list2.replaceChildren();
+        if (meta.path) {
+          const parent = meta.path.split("/").slice(0, -1).join("/");
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "gdp-repo-row parent";
+          const parentIcon = document.createElement("span");
+          parentIcon.className = "dir-icon";
+          setFolderIcon(parentIcon, false);
+          const parentName = document.createElement("span");
+          parentName.className = "name";
+          parentName.textContent = "..";
+          const parentKind = document.createElement("span");
+          parentKind.className = "meta";
+          parentKind.textContent = "";
+          const parentSize = document.createElement("span");
+          parentSize.className = "size";
+          row.append(parentIcon, parentName, parentKind, parentSize);
+          row.addEventListener("click", () => {
+            setRoute(repoRoute(meta.ref, parent));
+            loadRepo();
+          });
+          list2.appendChild(row);
+        }
+        sortedRepoEntries(meta.entries).forEach((entry) => {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = `gdp-repo-row ${entry.type}`;
+          const icon = document.createElement("span");
+          icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
+          if (entry.type === "tree")
+            setFolderIcon(icon, true);
+          else
+            icon.innerHTML = fileEntryIcon();
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = entry.name;
+          const metaBlock = createRepoEntryMeta(entry);
+          const size = createRepoEntrySize(entry);
+          row.append(icon, name, metaBlock, size);
+          row.addEventListener("click", () => {
+            if (entry.type === "tree") {
+              setRoute(repoRoute(meta.ref, entry.path));
+              loadRepo();
+            } else if (entry.type === "blob") {
+              setRoute({
+                screen: "file",
+                path: entry.path,
+                ref: meta.ref,
+                view: "blob",
+                range: currentRange()
+              });
+              renderStandaloneSource({ path: entry.path, ref: meta.ref });
+            }
+          });
+          row.addEventListener("contextmenu", (event) => showRepoContextMenu(event, entry, meta.ref, () => loadRepo()));
+          list2.appendChild(row);
+        });
+        if (!meta.entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "gdp-repo-empty";
+          empty.textContent = "No files in this directory.";
+          list2.appendChild(empty);
+        }
+      };
+      listWrapper.appendChild(sortHost);
+      renderRepoRows();
+      listWrapper.appendChild(list2);
+      listCard.appendChild(listWrapper);
+      shell.appendChild(listCard);
+      if (meta.readme?.text) {
+        const readme = document.createElement("section");
+        readme.className = "gdp-file-shell loaded gdp-repo-readme";
+        const wrapper = document.createElement("div");
+        wrapper.className = "d2h-file-wrapper";
+        const readmeHeader = document.createElement("div");
+        readmeHeader.className = "d2h-file-header";
+        const nameWrapper = document.createElement("div");
+        nameWrapper.className = "d2h-file-name-wrapper";
+        const icon = document.createElement("span");
+        icon.className = "d2h-icon-wrapper";
+        icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
+        const name = document.createElement("span");
+        name.className = "d2h-file-name";
+        name.textContent = meta.readme.path;
+        nameWrapper.append(icon, name);
+        readmeHeader.appendChild(nameWrapper);
+        wrapper.appendChild(readmeHeader);
+        try {
+          wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
+            syntaxHighlight: STATE.syntaxHighlight,
+            onNavigateMarkdown: (path, ref) => {
+              setRoute({
+                screen: "file",
+                path,
+                ref,
+                view: "blob",
+                range: currentRange()
+              });
+              renderStandaloneSource({ path, ref });
+            }
+          }));
+        } catch {
+          const fallback = document.createElement("pre");
+          fallback.className = "gdp-markdown-fallback";
+          fallback.textContent = meta.readme.text;
+          wrapper.appendChild(fallback);
+        }
+        readme.appendChild(wrapper);
+        shell.appendChild(readme);
+      }
+      target.appendChild(shell);
+      placeSidebarToggle();
+    }
+    function renderRepoBlobSidebar(currentPath, ref) {
+      syncRepoTargetInput(ref);
+      const normalizedRef = ref || "worktree";
+      if (isRepoSidebarReusable(normalizedRef)) {
+        activateRepoSidebarPath(currentPath);
+        return Promise.resolve();
+      }
+      if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
+        return REPO_SIDEBAR_LOAD.then(() => {
+          activateRepoSidebarPath(currentPath);
+        });
+      }
+      const params = new URLSearchParams;
+      params.set("ref", normalizedRef);
+      params.set("recursive", "1");
+      appendScopeParams(params);
+      REPO_SIDEBAR_LOAD_REF = normalizedRef;
+      const load = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load repository tree");
+        return r2.json();
+      })).then((meta) => {
+        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
+        if ((activeRepoRef || "worktree") !== normalizedRef)
+          return;
+        const files = meta.entries.map((entry, index) => ({
+          order: index + 1,
+          path: entry.path,
+          display_path: entry.path,
+          type: entry.type,
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason
+        }));
+        setRepoSidebarRef(normalizedRef);
+        renderSidebar(files, (file) => {
+          if (file.type === "tree") {
+            setRoute(repoRoute(normalizedRef, file.path));
+            loadRepo();
+            return;
+          }
+          setRoute({
+            screen: "file",
+            path: file.path,
+            ref: normalizedRef,
+            view: "blob",
+            range: currentRange()
+          });
+          renderStandaloneSource({ path: file.path, ref: normalizedRef });
+        });
+        activateRepoSidebarPath(currentPath);
+      }).catch(() => {
+        setRepoSidebarRef(null);
+        renderSidebar([], undefined);
+        $("#totals").textContent = "Cannot load tree";
+      }).finally(() => {
+        if (REPO_SIDEBAR_LOAD === load) {
+          REPO_SIDEBAR_LOAD_REF = null;
+          REPO_SIDEBAR_LOAD = null;
+        }
+      });
+      REPO_SIDEBAR_LOAD = load;
+      return load;
+    }
+    function activateRepoSidebarPath(currentPath) {
+      markActive(currentPath, { reveal: true });
+      applyFilter();
+      const row = getSidebarRowByPath(currentPath);
+      if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
+        ensureVirtualSidebarDirLoaded(row.dir).then(() => {
+          if (getSidebarVirtualActivePath() === currentPath) {
+            rerenderVirtualSidebar();
+            scrollVirtualSidebarPathIntoView(currentPath);
+          }
+        });
+    }
+    function createRepoEntryMeta(entry) {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
+      const created = formatFileDate(entry.created_at);
+      if (entry.type === "tree" && updated) {
+        meta.textContent = updated;
+        if (created)
+          meta.title = `Created ${created}`;
+        return meta;
+      }
+      if (entry.type !== "blob") {
+        meta.textContent = "-";
+        return meta;
+      }
+      meta.textContent = updated ? updated : created ? created : "-";
+      if (created)
+        meta.title = `Created ${created}`;
+      return meta;
+    }
+    function createRepoEntrySize(entry) {
+      const size = document.createElement("span");
+      size.className = "size";
+      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
+      return size;
+    }
+    function repoEntryUpdatedTime(entry) {
+      const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
+      if (!raw)
+        return -1;
+      const time = new Date(raw).getTime();
+      return Number.isNaN(time) ? -1 : time;
+    }
+    function sortedRepoEntries(entries) {
+      const direction = REPO_SORT.direction === "asc" ? 1 : -1;
+      return [...entries].sort((a2, b2) => {
+        if (REPO_SORT.key === "name" && a2.type !== b2.type) {
+          if (a2.type === "tree")
+            return -1;
+          if (b2.type === "tree")
+            return 1;
+        }
+        let result = 0;
+        if (REPO_SORT.key === "updated") {
+          const aTime = repoEntryUpdatedTime(a2);
+          const bTime = repoEntryUpdatedTime(b2);
+          if (aTime < 0 && bTime >= 0)
+            return 1;
+          if (bTime < 0 && aTime >= 0)
+            return -1;
+          result = aTime - bTime;
+        } else if (REPO_SORT.key === "size") {
+          if (a2.size == null && b2.size != null)
+            return 1;
+          if (b2.size == null && a2.size != null)
+            return -1;
+          result = (a2.size ?? 0) - (b2.size ?? 0);
+        } else {
+          result = a2.name.localeCompare(b2.name);
+        }
+        if (result === 0)
+          result = a2.name.localeCompare(b2.name);
+        return result * direction;
+      });
+    }
+    function createRepoSortHeader(onSortChange) {
+      const header = document.createElement("div");
+      header.className = "gdp-repo-sort-header";
+      const spacer = document.createElement("span");
+      spacer.className = "gdp-repo-sort-spacer";
+      header.appendChild(spacer);
+      const columns = [
+        { key: "name", label: "Name" },
+        { key: "updated", label: "Updated" },
+        { key: "size", label: "Size" }
+      ];
+      columns.forEach((column) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.repoSort = column.key;
+        button.textContent = column.label + (REPO_SORT.key === column.key ? REPO_SORT.direction === "asc" ? " ↑" : " ↓" : "");
+        button.className = REPO_SORT.key === column.key ? "active" : "";
+        button.addEventListener("click", () => {
+          if (REPO_SORT.key === column.key) {
+            REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
+          } else {
+            REPO_SORT = {
+              key: column.key,
+              direction: column.key === "name" ? "asc" : "desc"
+            };
+          }
+          onSortChange(column.key);
+        });
+        header.appendChild(button);
+      });
+      return header;
+    }
+    async function loadRawFileInfo(target) {
+      try {
+        const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
+        if (!res.ok)
+          return {};
+        const rawSize = res.headers.get("content-length");
+        const size = rawSize == null ? NaN : Number(rawSize);
+        return {
+          size: rawSize != null && Number.isFinite(size) ? size : undefined,
+          type: res.headers.get("content-type") || undefined,
+          created_at: res.headers.get("x-code-viewer-created-at") || undefined,
+          updated_at: res.headers.get("x-code-viewer-updated-at") || undefined,
+          commit_updated_at: res.headers.get("x-code-viewer-commit-updated-at") || undefined
+        };
+      } catch {
+        return {};
+      }
+    }
+    function createFileDetailMeta(target, meta) {
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-file-detail-meta";
+      const addItem = (label, value) => {
+        if (!value)
+          return;
+        const item = document.createElement("span");
+        item.className = "gdp-file-detail-meta-item";
+        const labelEl = document.createElement("span");
+        labelEl.className = "label";
+        labelEl.textContent = label;
+        const valueEl = document.createElement("span");
+        valueEl.className = "value";
+        valueEl.textContent = value;
+        item.append(labelEl, valueEl);
+        wrap.appendChild(item);
+      };
+      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+      addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
+      addItem("Created", formatFileDate(meta.created_at));
+      if (!wrap.childElementCount) {
+        wrap.hidden = true;
+        wrap.dataset.path = target.path;
+      }
+      return wrap;
+    }
+    function loadRepo() {
+      if (STATE.route.screen !== "repo")
+        return Promise.resolve();
+      setStatus("refreshing");
+      const params = new URLSearchParams;
+      params.set("ref", STATE.route.ref || "worktree");
+      if (STATE.route.path)
+        params.set("path", STATE.route.path);
+      appendScopeParams(params);
+      return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load repository tree");
+        return r2.json();
+      })).then(async (data) => {
+        await renderRepo(data);
+        setStatus("live");
+        syncHeaderMenu();
+      }).catch(() => setStatus("error"));
+    }
+    let creatingDirectory = false;
+    function showTrashError(message) {
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "gdp-btn gdp-btn-sm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", closeTrashDialog);
+      createTrashDialog("Trash failed", message, [ok]);
+      ok.focus();
+    }
+    function showCreateDirectoryError(message) {
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "gdp-btn gdp-btn-sm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", closeTrashDialog);
+      createTrashDialog("New folder failed", message, [ok]);
+      ok.focus();
+    }
+    async function moveRepoPathToTrash(path) {
+      const res = await fetch("/_trash_path", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify({ path })
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
+        return false;
+      }
+      const body = await res.json();
+      if (body.undo)
+        pushUndo(body.undo);
+      return true;
+    }
+    async function uploadFiles(path, files) {
+      const list2 = Array.from(files);
+      if (!list2.length)
+        return;
+      const label = path || getProjectName() || "repository root";
+      if (!window.confirm("Upload " + list2.length + " file" + (list2.length === 1 ? "" : "s") + " into " + label + "?"))
+        return;
+      const form = new FormData;
+      form.set("dir", path);
+      list2.forEach((file) => {
+        form.append("files", file, file.name);
+      });
+      const res = await fetch("/_upload_files", {
+        method: "POST",
+        headers: { "X-Code-Viewer-Action": "1" },
+        body: form
+      });
+      if (!res.ok)
+        throw new Error(await res.text());
+      invalidateRepoSidebar();
+      await loadRepo();
+    }
+    function invalidateRepoSidebar() {
+      setRepoSidebarRef(null);
+      REPO_SIDEBAR_LOAD_REF = null;
+      REPO_SIDEBAR_LOAD = null;
+    }
+    let REPO_SIDEBAR_LOAD_REF = null;
+    let REPO_SIDEBAR_LOAD = null;
+    return {
+      loadRepo,
+      createFileDetailMeta,
+      createMoveToTrashButton,
+      canTrashWorktreeRef,
+      loadRawFileInfo,
+      repoRoute,
+      renderRepoBlobSidebar,
+      syncRepoTargetInput,
+      closeRepoContextMenu,
+      handleSidebarContextMenu,
+      fileEntryIcon,
+      invalidateRepoSidebar,
+      showTrashError
     };
-    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
-    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
-    return scrollable || doc.scrollingElement;
   }
 
-  // web-src/fuzzy-search.ts
+  // web-src/core/fuzzy-search.ts
   function basenameStart(path) {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? 0 : slash + 1;
@@ -7239,143 +10840,7 @@ ${frontmatter.yaml}
     }));
   }
 
-  // web-src/keymap.ts
-  var DEFAULT_KEY_BINDINGS = [
-    {
-      action: "open-file-palette",
-      key: "k",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-file-palette",
-      key: "k",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    { action: "focus-file-filter", key: "/" },
-    { action: "focus-sidebar", key: "h", ctrl: true },
-    { action: "focus-main", key: "l", ctrl: true },
-    {
-      action: "cancel-source-load",
-      key: "escape",
-      requires: { lightboxClosed: true }
-    },
-    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
-    { action: "open-sidebar-item", key: "enter", scope: "global" },
-    { action: "sidebar-next", key: "j", scope: "sidebar" },
-    { action: "sidebar-next", key: "j", scope: "global" },
-    { action: "sidebar-previous", key: "k", scope: "sidebar" },
-    { action: "sidebar-previous", key: "k", scope: "global" },
-    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
-    { action: "sidebar-expand", key: "l", scope: "sidebar" },
-    { action: "sidebar-expand", key: "l", scope: "global" },
-    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
-    { action: "sidebar-collapse", key: "h", scope: "global" },
-    { action: "scroll-main-down", key: "j", scope: "main" },
-    { action: "scroll-main-up", key: "k", scope: "main" },
-    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
-    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "main",
-      ctrl: true
-    },
-    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "sidebar",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "sidebar",
-      ctrl: true
-    },
-    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
-    { action: "tab-code", key: "c", scope: "main", pendingG: true },
-    { action: "goto-top", key: "g", pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true },
-    { action: "start-g-sequence", key: "g", scope: "sidebar" },
-    { action: "start-g-sequence", key: "g", scope: "main" },
-    { action: "layout-unified", key: "u" },
-    { action: "layout-split", key: "s" },
-    { action: "toggle-theme", key: "t" }
-  ];
-  function resolveKeymapAction(event, context) {
-    const key = event.key.toLowerCase();
-    if (context.composing)
-      return null;
-    for (const binding of DEFAULT_KEY_BINDINGS) {
-      if (binding.key !== key)
-        continue;
-      if (binding.requires?.lightboxClosed && context.lightboxOpen)
-        continue;
-      if (binding.scope && binding.scope !== context.scope)
-        continue;
-      if (!!binding.pendingG !== !!context.pendingG)
-        continue;
-      if (context.paletteOpen && !binding.allowPaletteOpen)
-        continue;
-      if (context.editable && !binding.allowEditable)
-        continue;
-      if (!!binding.ctrl !== !!event.ctrlKey)
-        continue;
-      if (!!binding.meta !== !!event.metaKey)
-        continue;
-      if (!!binding.alt !== !!event.altKey)
-        continue;
-      if (!!binding.shift !== !!event.shiftKey)
-        continue;
-      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
-        continue;
-      return binding.action;
-    }
-    return null;
-  }
-
-  // web-src/search-palette.ts
+  // web-src/core/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
     return items.slice(0, PALETTE_RESULT_LIMIT);
@@ -7388,80 +10853,546 @@ ${frontmatter.yaml}
     return (index + direction + count) % count;
   }
 
-  // web-src/ws-highlight.ts
-  function isWhitespaceOnlyInlineHighlight(text2) {
-    return !!text2 && !/\S/.test(text2);
-  }
-  function suppressWhitespaceOnlyInlineHighlights(root) {
-    root.querySelectorAll("ins, del").forEach((el) => {
-      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
+  // web-src/views/search-palette-ui.ts
+  function createSearchPalette(deps) {
+    const {
+      STATE,
+      setRoute,
+      currentRange,
+      appendScopeParams,
+      isAbortError,
+      scrollToFile,
+      applySourceRouteToShell,
+      fileSourceTarget,
+      renderStandaloneSource,
+      repoFileCacheKey,
+      trackLoad,
+      getServerGeneration
+    } = deps;
+    let PALETTE = null;
+    const REPO_FILE_CACHE = new Map;
+    function paletteSource() {
+      if (STATE.route.screen === "diff")
+        return "diff";
+      if (STATE.route.screen === "file" && STATE.route.view !== "blob")
+        return "diff";
+      return "repo";
+    }
+    function paletteRef(source) {
+      if (source === "diff")
+        return STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
+      if (STATE.route.screen === "repo")
+        return STATE.route.ref || "worktree";
+      if (STATE.route.screen === "file")
+        return STATE.route.ref || "worktree";
+      return STATE.repoRef || "worktree";
+    }
+    function closeSearchPalette() {
+      if (!PALETTE)
         return;
-      const parent = el.parentNode;
-      if (!parent)
+      const previousFocusScope = PALETTE.previousFocusScope;
+      PALETTE.controller?.abort();
+      if (PALETTE.debounce)
+        window.clearTimeout(PALETTE.debounce);
+      PALETTE.root.remove();
+      PALETTE = null;
+      restorePanelFocusScope(previousFocusScope);
+    }
+    function createPalette(mode) {
+      const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
+      closeSearchPalette();
+      const root = document.createElement("div");
+      root.className = "gdp-palette-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-palette";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      const label = document.createElement("div");
+      label.className = "gdp-palette-label";
+      label.textContent = mode === "file" ? "Files" : "Grep";
+      const input = document.createElement("input");
+      input.className = "gdp-palette-input";
+      input.type = "search";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = mode === "file" ? "Search files" : "Search text";
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-expanded", "true");
+      input.setAttribute("aria-controls", "gdp-palette-list");
+      const status = document.createElement("div");
+      status.className = "gdp-palette-status";
+      const controls = document.createElement("div");
+      controls.className = "gdp-palette-controls";
+      const list2 = document.createElement("div");
+      list2.id = "gdp-palette-list";
+      list2.className = "gdp-palette-list";
+      list2.setAttribute("role", "listbox");
+      dialog.append(label, input, controls, status, list2);
+      root.appendChild(dialog);
+      document.body.appendChild(root);
+      const state = {
+        root,
+        input,
+        controls,
+        list: list2,
+        status,
+        mode,
+        grepRegex: false,
+        selected: -1,
+        items: [],
+        composing: false,
+        diffSnapshot: [...STATE.files],
+        previousFocusScope
+      };
+      PALETTE = state;
+      setPanelFocusScope(null);
+      root.addEventListener("mousedown", (e2) => {
+        if (e2.target === root)
+          closeSearchPalette();
+      });
+      input.addEventListener("compositionstart", () => {
+        state.composing = true;
+      });
+      input.addEventListener("compositionend", () => {
+        state.composing = false;
+      });
+      input.addEventListener("input", () => updatePaletteResults(state));
+      input.addEventListener("keydown", (e2) => handlePaletteKeydown(e2, state));
+      input.focus();
+      updatePaletteResults(state);
+      return state;
+    }
+    function renderPaletteControls(state) {
+      state.controls.innerHTML = "";
+      if (state.mode === "file") {
+        const hint2 = document.createElement("span");
+        hint2.className = "gdp-palette-mode-hint";
+        hint2.textContent = isGlobPathQuery(state.input.value) ? "Glob: * ? []" : "Fuzzy path search";
+        state.controls.appendChild(hint2);
         return;
-      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
-    });
+      }
+      const plain = document.createElement("button");
+      plain.type = "button";
+      plain.className = "gdp-palette-mode-button";
+      plain.setAttribute("aria-pressed", String(!state.grepRegex));
+      plain.textContent = "Plain";
+      plain.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = false;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const regex = document.createElement("button");
+      regex.type = "button";
+      regex.className = "gdp-palette-mode-button";
+      regex.setAttribute("aria-pressed", String(state.grepRegex));
+      regex.textContent = ".* Regex";
+      regex.title = "Alt+R";
+      regex.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = true;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const hint = document.createElement("span");
+      hint.className = "gdp-palette-mode-hint";
+      hint.textContent = "Alt+R toggles regex";
+      state.controls.append(plain, regex, hint);
+    }
+    function regexQueryIsValid(query) {
+      try {
+        new RegExp(query);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function appendHighlightedPath(parent, path, ranges) {
+      let cursor = 0;
+      for (const range of ranges) {
+        if (range.start > cursor)
+          parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
+        const mark = document.createElement("mark");
+        mark.textContent = path.slice(range.start, range.end);
+        parent.appendChild(mark);
+        cursor = range.end;
+      }
+      if (cursor < path.length)
+        parent.appendChild(document.createTextNode(path.slice(cursor)));
+    }
+    function renderPalette(state) {
+      state.list.innerHTML = "";
+      state.items.forEach((item, index) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.id = `gdp-palette-item-${index}`;
+        row.className = "gdp-palette-row";
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        const title = document.createElement("span");
+        title.className = "gdp-palette-row-title";
+        const detail = document.createElement("span");
+        detail.className = "gdp-palette-row-detail";
+        if (item.kind === "file") {
+          title.textContent = item.path.split("/").pop() || item.path;
+          appendHighlightedPath(detail, item.displayPath, item.ranges);
+          if (item.old_path && item.displayPath !== item.old_path) {
+            detail.appendChild(document.createTextNode(`  ${item.old_path}`));
+          }
+        } else {
+          title.textContent = `${item.path}:${item.line}`;
+          detail.textContent = item.preview;
+        }
+        row.append(title, detail);
+        row.addEventListener("mouseenter", () => {
+          state.selected = index;
+          syncPaletteSelection(state);
+        });
+        row.addEventListener("mousedown", (e2) => {
+          e2.preventDefault();
+          state.selected = index;
+          selectPaletteItem(state);
+        });
+        state.list.appendChild(row);
+      });
+      syncPaletteSelection(state);
+    }
+    function syncPaletteSelection(state) {
+      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "");
+      state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
+        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        if (index === state.selected)
+          row.scrollIntoView({ block: "nearest" });
+      });
+    }
+    async function repoPaletteFiles(ref) {
+      const cacheKey = repoFileCacheKey(ref);
+      const cached = REPO_FILE_CACHE.get(cacheKey);
+      if (cached && cached.generation === getServerGeneration())
+        return cached;
+      const params = new URLSearchParams;
+      params.set("ref", ref);
+      appendScopeParams(params);
+      const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load files");
+        return r2.json();
+      }));
+      REPO_FILE_CACHE.set(cacheKey, res);
+      return res;
+    }
+    function diffFilePaletteItems(state, query) {
+      const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
+      const candidates = state.diffSnapshot.map((file) => {
+        const current = matchPath(query, file.path);
+        const old = file.old_path ? matchPath(query, file.old_path) : null;
+        const best = old && (!current || old.score > current.score) ? { match: old, displayPath: file.old_path || file.path } : current ? { match: current, displayPath: file.path } : null;
+        return best ? { file, ...best } : null;
+      }).filter((item) => item !== null).sort((a2, b2) => b2.match.score - a2.match.score || a2.file.path.localeCompare(b2.file.path));
+      return limitPaletteResults(candidates).map((candidate) => ({
+        kind: "file",
+        path: candidate.file.path,
+        old_path: candidate.file.old_path,
+        displayPath: candidate.displayPath,
+        ref: paletteRef("diff"),
+        targetPath: fileSourceTarget(candidate.file).path,
+        targetRef: fileSourceTarget(candidate.file).ref,
+        source: "diff",
+        ranges: candidate.match.ranges
+      }));
+    }
+    async function updateFilePalette(state, query) {
+      renderPaletteControls(state);
+      const source = paletteSource();
+      if (!query.trim()) {
+        const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
+          const target = fileSourceTarget(file);
+          return {
+            kind: "file",
+            path: file.path,
+            old_path: file.old_path,
+            displayPath: file.path,
+            ref: paletteRef(source),
+            targetPath: target.path,
+            targetRef: target.ref,
+            source,
+            ranges: []
+          };
+        }) : [];
+        state.items = limitPaletteResults(base2);
+        state.selected = state.items.length ? 0 : -1;
+        state.status.textContent = source === "diff" ? `${state.diffSnapshot.length} diff files` : "Type to search repository files";
+        renderPalette(state);
+        return;
+      }
+      if (source === "diff") {
+        state.items = diffFilePaletteItems(state, query);
+      } else {
+        state.status.textContent = "Loading files...";
+        const ref = paletteRef(source);
+        const response = await repoPaletteFiles(ref);
+        if (PALETTE !== state || state.input.value !== query)
+          return;
+        state.items = limitPaletteResults(rankPathMatches(query, response.files)).map((match2) => ({
+          kind: "file",
+          path: match2.item.path,
+          displayPath: match2.item.path,
+          ref,
+          source,
+          ranges: match2.ranges
+        }));
+      }
+      state.selected = state.items.length ? 0 : -1;
+      state.status.textContent = state.items.length ? `${state.items.length} results` : "No results";
+      renderPalette(state);
+    }
+    function updateGrepPalette(state, query) {
+      renderPaletteControls(state);
+      state.controller?.abort();
+      if (state.debounce)
+        window.clearTimeout(state.debounce);
+      if (!query.trim()) {
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Type to grep";
+        renderPalette(state);
+        return;
+      }
+      if (state.grepRegex && !regexQueryIsValid(query)) {
+        state.controller?.abort();
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Invalid regular expression";
+        renderPalette(state);
+        return;
+      }
+      state.status.textContent = "Searching...";
+      state.debounce = window.setTimeout(() => {
+        const source = paletteSource();
+        const ref = paletteRef(source);
+        const params = new URLSearchParams;
+        params.set("ref", ref);
+        params.set("q", query);
+        params.set("max", "200");
+        if (state.grepRegex)
+          params.set("regex", "1");
+        appendScopeParams(params);
+        if (source === "diff") {
+          for (const file of state.diffSnapshot)
+            params.append("path", file.path);
+        }
+        const controller = new AbortController;
+        state.controller = controller;
+        trackLoad(fetch(`/_grep?${params.toString()}`, {
+          signal: controller.signal
+        }).then((r2) => {
+          if (!r2.ok)
+            throw new Error("grep failed");
+          return r2.json();
+        })).then((response) => {
+          if (PALETTE !== state || controller.signal.aborted)
+            return;
+          state.items = limitPaletteResults(response.matches.map((match2) => ({
+            kind: "grep",
+            path: match2.path,
+            line: match2.line,
+            column: match2.column,
+            preview: match2.preview,
+            ref,
+            source
+          })));
+          state.selected = state.items.length ? 0 : -1;
+          state.status.textContent = response.engine + (state.grepRegex ? " regex" : " plain") + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
+          renderPalette(state);
+        }).catch((err) => {
+          if (isAbortError(err))
+            return;
+          state.status.textContent = "Search failed";
+        });
+      }, 80);
+    }
+    function updatePaletteResults(state) {
+      const query = state.input.value;
+      if (state.mode === "file") {
+        updateFilePalette(state, query).catch(() => {
+          state.status.textContent = "Search failed";
+        });
+      } else {
+        updateGrepPalette(state, query);
+      }
+    }
+    function selectPaletteItem(state) {
+      const item = state.items[state.selected];
+      if (!item)
+        return;
+      closeSearchPalette();
+      if (item.kind === "file") {
+        if (item.source === "diff") {
+          if (STATE.route.screen === "file") {
+            setRoute({
+              screen: "file",
+              path: item.targetPath || item.path,
+              ref: item.targetRef || item.ref,
+              range: currentRange()
+            });
+            applySourceRouteToShell();
+          } else {
+            scrollToFile(item.path);
+          }
+        } else {
+          setRoute({
+            screen: "file",
+            path: item.path,
+            ref: item.ref,
+            view: "blob",
+            range: currentRange()
+          });
+          renderStandaloneSource({ path: item.path, ref: item.ref });
+        }
+        return;
+      }
+      if (item.source === "diff") {
+        setRoute({
+          screen: "diff",
+          range: currentRange(),
+          path: item.path,
+          line: item.line
+        });
+        scrollToFile(item.path, item.line);
+      } else {
+        setRoute({
+          screen: "file",
+          path: item.path,
+          ref: item.ref,
+          view: "blob",
+          line: item.line,
+          range: currentRange()
+        });
+        renderStandaloneSource({ path: item.path, ref: item.ref });
+      }
+    }
+    function handlePaletteKeydown(e2, state) {
+      if (e2.key === "Escape") {
+        e2.preventDefault();
+        closeSearchPalette();
+        return;
+      }
+      if (e2.key === "Enter") {
+        if (state.composing)
+          return;
+        e2.preventDefault();
+        selectPaletteItem(state);
+        return;
+      }
+      if (state.mode === "grep" && e2.altKey && e2.key.toLowerCase() === "r") {
+        e2.preventDefault();
+        state.grepRegex = !state.grepRegex;
+        updatePaletteResults(state);
+        return;
+      }
+      const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
+      if (direction) {
+        e2.preventDefault();
+        state.selected = movePaletteSelection(state.selected, state.items.length, direction);
+        syncPaletteSelection(state);
+      }
+    }
+    function openSearchPalette(mode) {
+      createPalette(mode);
+    }
+    function isPaletteOpen() {
+      return !!PALETTE;
+    }
+    function paletteMode() {
+      return PALETTE ? PALETTE.mode : null;
+    }
+    function clearRepoFileCache() {
+      REPO_FILE_CACHE.clear();
+    }
+    return {
+      openSearchPalette,
+      closeSearchPalette,
+      isPaletteOpen,
+      paletteMode,
+      clearRepoFileCache
+    };
   }
 
-  // web-src/app.ts
-  window.GdpExpandLogic = GdpExpandLogic;
-  (() => {
-    const FOLDER_ICON_PATHS = {
-      closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
-      open: "M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z"
+  // web-src/core/file-filter.ts
+  function normalizeFileFilterQuery(value) {
+    return (value || "").toLowerCase().trim();
+  }
+  function parseSlashRegex(query) {
+    if (!query.startsWith("/") || query.length < 2)
+      return null;
+    const lastSlash = query.lastIndexOf("/");
+    if (lastSlash <= 0)
+      return null;
+    return {
+      source: query.slice(1, lastSlash),
+      flags: query.slice(lastSlash + 1)
     };
-    const CHEVRON_DOWN_12_PATH = "M6 8.825c-.2 0-.4-.1-.5-.2l-3.3-3.3c-.3-.3-.3-.8 0-1.1.3-.3.8-.3 1.1 0l2.7 2.7 2.7-2.7c.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1l-3.2 3.2c-.2.2-.4.3-.6.3Z";
-    const CHEVRON_DOWN_16_PATH = "M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z";
-    const COPY_16_PATHS = [
-      "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z",
-      "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
-    ];
-    const FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
-    const OPEN_EXTERNAL_16_PATH = "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
-    const PLUS_16_PATH = "M7.75 2a.75.75 0 0 1 .75.75V7.5h4.75a.75.75 0 0 1 0 1.5H8.5v4.75a.75.75 0 0 1-1.5 0V9H2.25a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z";
-    const TRASH_16_PATH = "M6.5 1.75A1.75 1.75 0 0 1 8.25 0h1.5A1.75 1.75 0 0 1 11.5 1.75V2h3.75a.75.75 0 0 1 0 1.5h-.75v10.75A1.75 1.75 0 0 1 12.75 16h-9.5A1.75 1.75 0 0 1 1.5 14.25V3.5H.75a.75.75 0 0 1 0-1.5H4.5v-.25ZM6 2h4v-.25a.25.25 0 0 0-.25-.25h-1.5a.25.25 0 0 0-.25.25V2Zm-3 1.5v10.75c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V3.5Zm3 2.25a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 6 5.75Zm4 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 10 5.75Z";
-    const GIT_BRANCH_16_PATH = "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z";
-    const TRIANGLE_DOWN_16_PATH = "m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z";
-    const SIDEBAR_SHOW_16_PATHS = [
-      "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
-      "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z"
-    ];
-    const SIDEBAR_HIDE_16_PATHS = [
-      "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
-      "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z"
-    ];
-    const GEAR_16_PATH = "M8 0a8.2 8.2 0 0 1 1.7.18.75.75 0 0 1 .6.86l-.14.93c.23.1.45.21.67.34l.73-.6a.75.75 0 0 1 1.03.08c.47.37.89.78 1.23 1.23a.75.75 0 0 1 .07 1.03l-.59.73c.13.22.24.44.34.67l.93-.14a.75.75 0 0 1 .86.6c.12.55.18 1.12.18 1.7s-.06 1.15-.18 1.7a.75.75 0 0 1-.86.6l-.93-.14c-.1.23-.21.45-.34.67l.59.73a.75.75 0 0 1-.07 1.03c-.34.45-.76.86-1.23 1.23a.75.75 0 0 1-1.03.08l-.73-.6c-.22.13-.44.24-.67.34l.14.93a.75.75 0 0 1-.6.86A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-1.7-.18.75.75 0 0 1-.6-.86l.14-.93a5.9 5.9 0 0 1-.67-.34l-.73.6a.75.75 0 0 1-1.03-.08 8.1 8.1 0 0 1-1.23-1.23.75.75 0 0 1-.07-1.03l.59-.73a5.9 5.9 0 0 1-.34-.67l-.93.14a.75.75 0 0 1-.86-.6A8.2 8.2 0 0 1 0 8c0-.58.06-1.15.18-1.7a.75.75 0 0 1 .86-.6l.93.14c.1-.23.21-.45.34-.67l-.59-.73a.75.75 0 0 1 .07-1.03 8.1 8.1 0 0 1 1.23-1.23.75.75 0 0 1 1.03-.08l.73.6c.22-.13.44-.24.67-.34l-.14-.93a.75.75 0 0 1 .6-.86A8.2 8.2 0 0 1 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z";
-    const EXPAND_ALL_16_PATHS = [
-      "M3.22 4.47a.75.75 0 0 1 1.06 0L8 8.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 5.53a.75.75 0 0 1 0-1.06Z",
-      "M3.22 8.47a.75.75 0 0 1 1.06 0L8 12.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 9.53a.75.75 0 0 1 0-1.06Z"
-    ];
-    const COLLAPSE_ALL_16_PATHS = [
-      "M7.47 2.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 3.81 4.28 7.53a.75.75 0 0 1-1.06-1.06Z",
-      "M7.47 6.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 7.81l-3.72 3.72a.75.75 0 1 1-1.06-1.06Z"
-    ];
-    const $ = (sel) => document.querySelector(sel);
-    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-    const diffCardSelector = (path) => '.gdp-file-shell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(path) : path) + '"]';
-    const HIGHLIGHT_SRC = "/vendor/highlight.js/highlight.min.js";
-    const DEFAULT_RANGE = { from: "HEAD", to: "worktree" };
-    const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
-    const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
-    const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
-    const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
+  }
+  function compileFileFilter(value) {
+    const raw = (value || "").trim();
+    if (!raw)
+      return { kind: "empty", match: () => true };
+    const slashRegex = parseSlashRegex(raw);
+    if (slashRegex) {
+      try {
+        const regex = new RegExp(slashRegex.source, slashRegex.flags);
+        return { kind: "regex", match: (path) => regex.test(path) };
+      } catch (error2) {
+        return {
+          kind: "invalid",
+          match: () => false,
+          error: error2 instanceof Error ? error2.message : String(error2)
+        };
+      }
+    }
+    const q = normalizeFileFilterQuery(raw.startsWith("/") ? raw.slice(1) : raw);
+    return {
+      kind: "substring",
+      match: (path) => path.toLowerCase().includes(q)
+    };
+  }
+
+  // web-src/core/file-navigation.ts
+  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
+    if (itemCount <= 0)
+      return -1;
+    if (currentIndex < 0)
+      return direction > 0 ? 0 : itemCount - 1;
+    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
+  }
+
+  // web-src/views/sidebar.ts
+  var SIDEBAR_FONT_SIZE_KEY = "gdp:sidebar-font-size";
+  function createSidebar(deps) {
+    const {
+      $,
+      $$,
+      STATE,
+      scrollToFile,
+      prefetchByPath,
+      fileBadge,
+      fileEntryIcon,
+      applyViewedState,
+      appendScopeParams,
+      createOpenPathButton,
+      normalizeViewerFontSize,
+      scheduleMainSurfaceFocus,
+      setChevronIcon,
+      trackLoad,
+      getRepoSidebarRef,
+      setRepoSidebarRef,
+      isTestPath
+    } = deps;
     const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
     const VIRTUAL_SIDEBAR_ROW_HEIGHT = 29;
     const VIRTUAL_SIDEBAR_OVERSCAN = 16;
-    const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
-    const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
-    let highlightLoadPromise = null;
-    let sourceShikiLoadPromise = null;
-    let highlightConfigured = false;
-    let PROJECT_NAME = "";
-    let creatingDirectory = false;
-    let REPO_SIDEBAR_REF = null;
-    let REPO_SIDEBAR_LOAD_REF = null;
-    let REPO_SIDEBAR_LOAD = null;
-    let SIDEBAR_FILES = [];
     let SIDEBAR_ON_FILE_CLICK;
     let SIDEBAR_TREE_ROOT = null;
     let SIDEBAR_TREE_ROWS = [];
@@ -7471,402 +11402,11 @@ ${frontmatter.yaml}
     let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
     const SIDEBAR_LAZY_LOADED_DIRS = new Set;
     const SIDEBAR_LAZY_LOADING_DIRS = new Map;
-    let REPO_SORT = {
-      key: "name",
-      direction: "asc"
-    };
-    let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
-    let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = [];
-    const UNDO_STACK = [];
-    let PENDING_G_SCOPE = null;
-    let PENDING_G_UNTIL = 0;
-    let SOURCE_CURSOR = null;
-    const SOURCE_CURSOR_TOTALS = new Map;
-    const HELP_LANGUAGES = ["en", "ja"];
-    const HELP_SECTIONS = ["keybindings"];
-    const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
-    const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
-    const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
-    const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
-    const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
-      "node_modules",
-      ".venv",
-      "venv",
-      ".next",
-      ".nuxt",
-      ".svelte-kit",
-      ".astro",
-      ".vercel",
-      "dist",
-      "build",
-      "out",
-      "target",
-      ".gradle",
-      "__pycache__",
-      ".pytest_cache",
-      ".tox",
-      ".terraform",
-      ".idea",
-      ".vscode",
-      "vendor",
-      ".cache",
-      "coverage",
-      "DerivedData",
-      "Pods",
-      "bin",
-      "obj"
-    ];
-    const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
-    const HELP_CONTENT = {
-      en: {
-        languageLabel: "Language",
-        title: "Help",
-        sections: {
-          keybindings: {
-            nav: "Keybindings",
-            title: "Keyboard Shortcuts",
-            intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
-            groups: [
-              {
-                title: "Global",
-                rows: [
-                  ["Ctrl+K", "Open file palette"],
-                  ["Ctrl+G", "Open grep palette"],
-                  ["/", "Focus file filter"],
-                  ["t", "Toggle theme"]
-                ]
-              },
-              {
-                title: "Panels",
-                rows: [
-                  ["Ctrl+H", "Focus sidebar"],
-                  ["Ctrl+L", "Focus main panel"]
-                ]
-              },
-              {
-                title: "Sidebar",
-                rows: [
-                  ["j / k", "Move selection down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                  ["gg / Shift+G", "Move to top / bottom"],
-                  ["Enter", "Open selected item"],
-                  ["h / l", "Collapse / expand directory"]
-                ]
-              },
-              {
-                title: "Main Panel",
-                rows: [
-                  ["j / k", "Move code cursor down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                  ["gg / Shift+G", "Move code cursor to top / bottom"],
-                  ["gp / gc", "Switch to Preview / Code tab"]
-                ]
-              }
-            ]
-          }
-        }
-      },
-      ja: {
-        languageLabel: "言語",
-        title: "ヘルプ",
-        sections: {
-          keybindings: {
-            nav: "キーバインド",
-            title: "キーバインド",
-            intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
-            groups: [
-              {
-                title: "グローバル",
-                rows: [
-                  ["Ctrl+K", "ファイルパレットを開く"],
-                  ["Ctrl+G", "grep パレットを開く"],
-                  ["/", "ファイルフィルターへフォーカス"],
-                  ["t", "テーマ切り替え"]
-                ]
-              },
-              {
-                title: "パネル",
-                rows: [
-                  ["Ctrl+H", "サイドバーへフォーカス"],
-                  ["Ctrl+L", "メインパネルへフォーカス"]
-                ]
-              },
-              {
-                title: "サイドバー",
-                rows: [
-                  ["j / k", "選択を下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                  ["Enter", "選択項目を開く"],
-                  ["h / l", "ディレクトリを閉じる / 開く"]
-                ]
-              },
-              {
-                title: "メインパネル",
-                rows: [
-                  ["j / k", "コードカーソルを下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                  ["gp / gc", "Preview / Code タブへ切り替え"]
-                ]
-              }
-            ]
-          }
-        }
-      }
-    };
-    function sourceLineScrollAmount() {
-      const virtualRow = Array.from(document.querySelectorAll("#content .gdp-source-virtual-row")).find((item) => item.offsetParent !== null);
-      if (virtualRow)
-        return virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT;
-      const sourceRow = Array.from(document.querySelectorAll("#content .gdp-source-table tr")).find((item) => item.offsetParent !== null);
-      if (sourceRow)
-        return sourceRow.getBoundingClientRect().height || 20;
-      const preview = document.querySelector("#content .gdp-markdown-preview:not([hidden])");
-      const lineHeight = Number.parseFloat(getComputedStyle(preview || document.body).lineHeight);
-      return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
-    }
-    function hasVisibleSourceCodeSurface() {
-      return Array.from(document.querySelectorAll("#content .gdp-source-virtual-scroller, #content .gdp-source-table")).some((item) => item.offsetParent !== null);
-    }
-    function sourceCursorKey(target) {
-      return `${target.ref}\x00${target.path}`;
-    }
-    function sourceCursorMatches(target, line) {
-      return !!SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target) && SOURCE_CURSOR.line === line;
-    }
-    function syncSourceCursorRows(target) {
-      document.querySelectorAll("#content [data-line]").forEach((row) => {
-        const line = Number(row.dataset.line || "0");
-        row.classList.toggle("gdp-source-cursor", sourceCursorMatches(target, line));
-      });
-    }
-    function visibleSourceLineFallback() {
-      const scroller = findMainScrollTarget();
-      if (scroller)
-        return Math.max(1, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1);
-      const rows = $$("#content .gdp-source-table tr[data-line]");
-      const contentTop = document.querySelector("#content")?.getBoundingClientRect().top ?? 0;
-      const row = rows.find((item) => item.getBoundingClientRect().bottom >= Math.max(0, contentTop));
-      return Math.max(1, Number(row?.dataset.line || "1"));
-    }
-    function ensureSourceCursor(target) {
-      if (SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target))
-        return SOURCE_CURSOR;
-      const routeLine = lineTargetStart(currentSourceLineTarget(target));
-      SOURCE_CURSOR = { target, line: routeLine || visibleSourceLineFallback() };
-      syncSourceCursorRows(target);
-      return SOURCE_CURSOR;
-    }
-    function resetSourceCursorForTarget(target, totalLines) {
-      const routeLine = lineTargetStart(currentSourceLineTarget(target));
-      SOURCE_CURSOR = {
-        target,
-        line: Math.max(1, Math.min(totalLines, routeLine || 1))
-      };
-    }
-    function scrollSourceCursorIntoView(cursor, edge = "nearest") {
-      const scroller = findMainScrollTarget();
-      if (scroller) {
-        const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
-        const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
-        const before = scroller.scrollTop;
-        if (edge === "center")
-          scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
-        else if (edge === "start")
-          scroller.scrollTop = top;
-        else if (top < scroller.scrollTop)
-          scroller.scrollTop = top;
-        else if (bottom > scroller.scrollTop + scroller.clientHeight)
-          scroller.scrollTop = bottom - scroller.clientHeight;
-        if (scroller.scrollTop !== before)
-          scroller.dispatchEvent(new Event("scroll"));
-        scroller.__gdpRenderVirtualSource?.();
-        syncSourceCursorRows(cursor.target);
-        return;
-      }
-      document.querySelector(`#content [data-line="${cursor.line}"]`)?.scrollIntoView({ block: edge });
-    }
-    function moveSourceCursor(direction, unit, edge) {
-      if (!hasVisibleSourceCodeSurface())
-        return false;
-      const target = sourceTargetFromRoute();
-      if (!target)
-        return false;
-      const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
-      if (!total)
-        return false;
-      const cursor = ensureSourceCursor(target);
-      if (unit === "edge") {
-        cursor.line = edge === "bottom" ? total : 1;
-        syncSourceCursorRows(target);
-        scrollSourceCursorIntoView(cursor, "center");
-        return true;
-      }
-      const pageRows = Math.max(1, Math.floor((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55 / (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT)));
-      const delta = unit === "page" ? pageRows : 1;
-      cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
-      syncSourceCursorRows(target);
-      scrollSourceCursorIntoView(cursor, unit === "page" ? "start" : "nearest");
-      return true;
-    }
-    function scrollMainPanel(direction, repeated = false, unit = "line") {
-      if (moveSourceCursor(direction, unit))
-        return;
-      const target = findMainScrollTarget();
-      const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
-      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
-      const behavior = repeated ? "auto" : "smooth";
-      if (target)
-        target.scrollBy({ top, behavior });
-      else
-        window.scrollBy({ top, behavior });
-    }
-    let MAIN_SURFACE_FOCUS_SEQ = 0;
-    function focusMainSurface() {
-      const target = findMainScrollTarget();
-      if (target?.matches("#content .gdp-source-virtual-scroller")) {
-        target.focus({ preventScroll: true });
-        setPanelFocusScope("main");
-        return;
-      }
-      focusMainPanel();
-    }
-    function scheduleMainSurfaceFocus() {
-      const seq = ++MAIN_SURFACE_FOCUS_SEQ;
-      const apply = () => {
-        if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE)
-          return;
-        if (isEditableKeyTarget(document.activeElement))
-          return;
-        focusMainSurface();
-      };
-      focusMainPanel();
-      queueMicrotask(apply);
-      requestAnimationFrame(apply);
-      setTimeout(apply, 100);
-      setTimeout(apply, 300);
-    }
-    function scrollMainToEdge(edge) {
-      if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
-        return;
-      const target = findMainScrollTarget();
-      if (target) {
-        target.scrollTo({
-          top: edge === "top" ? 0 : target.scrollHeight,
-          behavior: "auto"
-        });
-        return;
-      }
-      const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
-      window.scrollTo({ top, behavior: "auto" });
-    }
-    function switchSourceTab(tab) {
-      const tabs = document.querySelector("#content .gdp-source-tabs");
-      if (!tabs)
-        return false;
-      const button = tabs.querySelector(`button[data-source-tab="${tab}"]`);
-      if (!button || button.hidden || button.disabled)
-        return false;
-      button.click();
-      focusMainPanel();
-      return true;
-    }
-    function isFocusableClickTarget(target) {
-      if (!(target instanceof Element))
-        return false;
-      return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
-    }
-    function invalidateRepoSidebar() {
-      REPO_SIDEBAR_REF = null;
-      REPO_SIDEBAR_LOAD_REF = null;
-      REPO_SIDEBAR_LOAD = null;
-    }
-    function normalizeScopeOmitDirs(value) {
-      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
-      return [
-        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
-      ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
-    }
-    function normalizeScopeExcludeNames(value) {
-      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
-      return [
-        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 128 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
-      ].slice(0, 200).sort((a2, b2) => a2.localeCompare(b2));
-    }
-    function scopeOmitDirsStorageKey() {
-      return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-    }
-    function scopeExcludeNamesStorageKey() {
-      return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-    }
-    function setProjectName(project) {
-      if (!project)
-        return;
-      PROJECT_NAME = project;
-      document.title = `${project} - code viewer`;
-      const projectTitle = document.querySelector("#project-title");
-      if (projectTitle) {
-        projectTitle.textContent = project;
-        projectTitle.title = project;
-      }
-    }
-    function savedScopeOmitDirs() {
-      const raw = localStorage.getItem(scopeOmitDirsStorageKey());
-      if (raw == null)
-        return null;
-      try {
-        const parsed = JSON.parse(raw);
-        return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        return normalizeScopeOmitDirs(raw);
-      }
-    }
-    function savedScopeExcludeNames() {
-      const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
-      if (raw == null)
-        return null;
-      try {
-        const parsed = JSON.parse(raw);
-        return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        return normalizeScopeExcludeNames(raw);
-      }
-    }
-    function serverScopeOmitDirsDefault() {
-      return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
-    }
-    function serverScopeExcludeNamesDefault() {
-      return SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT.length ? SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT : CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT;
-    }
-    function effectiveScopeOmitDirs() {
-      return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
-    }
-    function effectiveScopeExcludeNames() {
-      return savedScopeExcludeNames() ?? serverScopeExcludeNamesDefault();
-    }
-    function appendScopeParams(params) {
-      const omit = savedScopeOmitDirs();
-      if (omit != null)
-        params.set("omit_dirs", omit.join(","));
-      const exclude = savedScopeExcludeNames();
-      if (exclude != null)
-        params.set("exclude_names", exclude.join(","));
-    }
-    function normalizeViewerFontSize(value) {
-      return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
-    }
     function savedSidebarFontSize() {
-      return normalizeViewerFontSize(localStorage.getItem(SIDEBAR_FONT_SIZE_STORAGE_KEY));
-    }
-    function savedCodeFontSize() {
-      return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
+      return normalizeViewerFontSize(localStorage.getItem(SIDEBAR_FONT_SIZE_KEY));
     }
     function applySidebarFontSize(size = savedSidebarFontSize()) {
       document.body.dataset.sidebarFontSize = size;
-    }
-    function applyCodeFontSize(size = savedCodeFontSize()) {
-      document.body.dataset.codeFontSize = size;
     }
     function syncSidebarHeaderHeight() {
       requestAnimationFrame(() => {
@@ -7885,299 +11425,10 @@ ${frontmatter.yaml}
       observer.observe(head);
       syncSidebarHeaderHeight();
     }
-    function repoFileCacheKey(ref) {
-      const omit = savedScopeOmitDirs();
-      const exclude = savedScopeExcludeNames();
-      return `${ref}\x00${omit ? omit.join("\x00") : "server"}\x00${exclude ? exclude.join("\x00") : "server"}`;
-    }
-    async function loadSettings() {
-      try {
-        const res = await fetch("/_settings");
-        if (!res.ok)
-          return null;
-        const settings = await res.json();
-        setProjectName(settings.project || "");
-        SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
-        SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
-        return settings;
-      } catch {
-        return null;
-      }
-    }
-    function isRepoSidebarReusable(ref) {
-      return REPO_SIDEBAR_REF === (ref || "worktree") && isRepositorySidebarMode();
-    }
-    const STATE = (() => {
-      const igRaw = localStorage.getItem("gdp:ignore-ws");
-      const fallbackRange = {
-        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
-      };
-      const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
-      const route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
-      return {
-        layout: localStorage.getItem("gdp:layout") || "side-by-side",
-        theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
-        sbView: localStorage.getItem("gdp:sbview") || "tree",
-        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
-        sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
-        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
-        ignoreWs: igRaw === null ? true : igRaw === "1",
-        from: route.range.from,
-        to: route.range.to,
-        collapsed: false,
-        files: [],
-        activeFile: null,
-        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
-        syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
-        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
-        route,
-        repoRef: route.screen === "repo" ? route.ref : "worktree"
-      };
-    })();
-    function setStatus(s2) {
-      const el = $("#status");
-      el.classList.remove("live", "refreshing", "error");
-      if (s2)
-        el.classList.add(s2);
-    }
-    function applyTheme() {
-      document.documentElement.dataset.theme = STATE.theme;
-      $("#hljs-light").disabled = STATE.theme === "dark";
-      $("#hljs-dark").disabled = STATE.theme !== "dark";
-    }
-    function getHljs() {
-      const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
-      if (!hljsRef)
-        return null;
-      if (!highlightConfigured && typeof hljsRef.configure === "function") {
-        hljsRef.configure({ ignoreUnescapedHTML: true });
-        highlightConfigured = true;
-      }
-      return hljsRef;
-    }
-    function setHighlightButton(state) {
-      const btn = $("#syntax-highlight");
-      if (!btn)
-        return;
-      btn.classList.toggle("active", STATE.syntaxHighlight);
-      btn.classList.toggle("loading", state === "loading");
-      btn.textContent = state === "loading" ? "loading..." : STATE.syntaxHighlight ? "syntax on" : "syntax off";
-      btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
-      btn.title = STATE.syntaxHighlight ? "syntax highlighting on" : state === "loading" ? "loading syntax highlighter" : state === "error" ? "failed to load syntax highlighter" : "syntax highlighting off";
-    }
-    function loadSyntaxHighlighter() {
-      const existing = getHljs();
-      if (existing) {
-        setHighlightButton("loaded");
-        return Promise.resolve(existing);
-      }
-      if (highlightLoadPromise)
-        return highlightLoadPromise;
-      setHighlightButton("loading");
-      highlightLoadPromise = new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src = HIGHLIGHT_SRC;
-        script.async = true;
-        script.onload = () => {
-          const hljsRef = getHljs();
-          if (hljsRef) {
-            setHighlightButton("loaded");
-            resolve(hljsRef);
-          } else {
-            setHighlightButton("error");
-            reject(new Error("highlight.js did not expose window.hljs"));
-          }
-        };
-        script.onerror = () => {
-          setHighlightButton("error");
-          reject(new Error("failed to load highlight.js"));
-        };
-        document.head.appendChild(script);
-      }).catch(() => {
-        highlightLoadPromise = null;
-        return null;
-      });
-      return highlightLoadPromise;
-    }
-    const SOURCE_SHIKI_LANGS = Array.from(new Set([
-      "bash",
-      "bibtex",
-      "c",
-      "clojure",
-      "cmake",
-      "cpp",
-      "csharp",
-      "css",
-      "dart",
-      "diff",
-      "dockerfile",
-      "elixir",
-      "erlang",
-      "fortran",
-      "go",
-      "gradle",
-      "graphql",
-      "haskell",
-      "html",
-      "java",
-      "javascript",
-      "json",
-      "julia",
-      "kotlin",
-      "lua",
-      "make",
-      "markdown",
-      "nix",
-      "ocaml",
-      "perl",
-      "php",
-      "properties",
-      "protobuf",
-      "python",
-      "r",
-      "rst",
-      "ruby",
-      "rust",
-      "scala",
-      "scss",
-      "sql",
-      "swift",
-      "terraform",
-      "tex",
-      "toml",
-      "typescript",
-      "vim",
-      "vue",
-      "xml",
-      "yaml"
-    ]));
-    const SOURCE_SHIKI_LANG_ALIASES = {
-      makefile: "make",
-      objectivec: "c",
-      "objective-c": "c",
-      "objective-cpp": "cpp",
-      starlark: "python"
-    };
-    function normalizeSourceShikiLang(lang) {
-      if (!lang)
-        return null;
-      return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
-    }
-    function loadSourceShikiHighlighter() {
-      if (!sourceShikiLoadPromise) {
-        sourceShikiLoadPromise = import("/shiki.js").then((mod) => {
-          const typed = mod;
-          const langs = typed.bundledLanguages ? SOURCE_SHIKI_LANGS.filter((lang) => !!typed.bundledLanguages?.[lang]) : SOURCE_SHIKI_LANGS;
-          return typed.createHighlighter({
-            themes: ["github-light", "github-dark"],
-            langs
-          });
-        }).catch(() => null);
-      }
-      return sourceShikiLoadPromise;
-    }
-    function sourceShikiLines(textValue, lang, highlighter) {
-      try {
-        const html = highlighter.codeToHtml(textValue || " ", {
-          lang,
-          themes: { light: "github-light", dark: "github-dark" },
-          defaultColor: false
-        });
-        const template = document.createElement("template");
-        template.innerHTML = html;
-        const renderedLines = Array.from(template.content.querySelectorAll(".line"));
-        if (!renderedLines.length)
-          return null;
-        return renderedLines.map((line) => line.innerHTML || " ");
-      } catch {
-        return null;
-      }
-    }
-    function rerenderLoadedDiffs() {
-      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
-        const data = card._diffData;
-        const file = card._file;
-        if (!data || !file)
-          return;
-        mountDiff(card, file, data);
-        applyInlineAnnotations();
-        if (data.truncated && data.mode === "preview") {
-          addExpandHunksUI(file, data, card);
-        }
-        scheduleIdleHighlight(card, file);
-      });
-    }
-    function setLayout(layout) {
-      STATE.layout = layout;
-      localStorage.setItem("gdp:layout", layout);
-      $$("#topbar .seg button").forEach((b2) => {
-        b2.classList.toggle("active", b2.dataset.layout === layout);
-      });
-      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
-        const data = card._diffData;
-        const file = card._file;
-        if (!data || !file)
-          return;
-        mountDiff(card, file, data);
-        applyInlineAnnotations();
-        if (data.truncated && data.mode === "preview") {
-          addExpandHunksUI(file, data, card);
-        }
-        scheduleIdleHighlight(card, file);
-      });
-    }
-    function fileBadge(status) {
-      const ch = (status || "M")[0].toUpperCase();
-      const span = document.createElement("span");
-      span.className = `badge ${ch}`;
-      span.textContent = ch;
-      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
-      return span;
-    }
-    function persistViewedFiles() {
-      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
-    }
-    function setFileViewed(path, viewed) {
-      if (viewed)
-        STATE.viewedFiles.add(path);
-      else
-        STATE.viewedFiles.delete(path);
-      persistViewedFiles();
-      applyViewedState();
-      $$(diffCardSelector(path)).forEach((card) => {
-        applyViewedToCard(card, viewed, true);
-      });
-    }
-    function syncViewedCardDisplay(card, viewed) {
-      card.classList.toggle("viewed", viewed);
-      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
-        checkbox.checked = viewed;
-      });
-    }
-    function applyViewedToCard(card, viewed, collapseLoaded = false) {
-      syncViewedCardDisplay(card, viewed);
-      if (collapseLoaded && card.classList.contains("loaded")) {
-        setFileCollapsed(card, viewed);
-      }
-    }
+    let SIDEBAR_FILES = [];
     function setFolderIcon(el, collapsed) {
       const path = collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open;
-      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + path + '"></path></svg>';
-    }
-    function setChevronIcon(el) {
-      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
-    }
-    function iconSvg(className, paths) {
-      const pathList = Array.isArray(paths) ? paths : [paths];
-      return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
-    }
-    function setUnfoldButtonState(button, expanded) {
-      if (!button)
-        return;
-      button.setAttribute("aria-pressed", expanded ? "true" : "false");
-      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
-      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
+      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + path + '"></path></svg>';
     }
     function setSidebarTreeActionIcons() {
       const settings = document.querySelector("#viewer-settings");
@@ -8240,71 +11491,6 @@ ${frontmatter.yaml}
     }
     function toggleSidebarHidden() {
       applySidebarHidden(!STATE.sidebarHidden);
-    }
-    function scopeOmitSourceLabel() {
-      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
-    }
-    function refreshRepositoryTreeAfterSettings() {
-      REPO_FILE_CACHE.clear();
-      invalidateRepoSidebar();
-      if (STATE.route.screen === "repo") {
-        loadRepo();
-        return;
-      }
-      const target = sourceTargetFromRoute();
-      if (target)
-        renderRepoBlobSidebar(target.path, target.ref || "worktree");
-    }
-    async function openScopeSettings() {
-      const pop = document.querySelector("#scope-settings-popover");
-      const input = document.querySelector("#scope-omit-dirs");
-      const excludeInput = document.querySelector("#scope-exclude-names");
-      const sidebarFontSize = document.querySelector("#sidebar-font-size");
-      const codeFontSize = document.querySelector("#code-font-size");
-      const source = document.querySelector("#scope-omit-source");
-      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
-        return;
-      await loadSettings();
-      sidebarFontSize.value = savedSidebarFontSize();
-      codeFontSize.value = savedCodeFontSize();
-      input.value = effectiveScopeOmitDirs().join(`
-`);
-      excludeInput.value = effectiveScopeExcludeNames().join(`
-`);
-      source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
-      pop.hidden = false;
-      sidebarFontSize.focus();
-    }
-    function closeScopeSettings() {
-      const pop = document.querySelector("#scope-settings-popover");
-      if (pop)
-        pop.hidden = true;
-    }
-    function saveScopeSettings() {
-      const input = document.querySelector("#scope-omit-dirs");
-      const excludeInput = document.querySelector("#scope-exclude-names");
-      const sidebarFontSize = document.querySelector("#sidebar-font-size");
-      const codeFontSize = document.querySelector("#code-font-size");
-      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
-        return;
-      localStorage.setItem(SIDEBAR_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
-      localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
-      applySidebarFontSize();
-      applyCodeFontSize();
-      localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
-      localStorage.setItem(scopeExcludeNamesStorageKey(), JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)));
-      closeScopeSettings();
-      refreshRepositoryTreeAfterSettings();
-    }
-    function resetScopeSettings() {
-      localStorage.removeItem(SIDEBAR_FONT_SIZE_STORAGE_KEY);
-      localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
-      applySidebarFontSize("regular");
-      applyCodeFontSize("regular");
-      localStorage.removeItem(scopeOmitDirsStorageKey());
-      localStorage.removeItem(scopeExcludeNamesStorageKey());
-      closeScopeSettings();
-      refreshRepositoryTreeAfterSettings();
     }
     function buildTree(files) {
       const root = {
@@ -8508,26 +11694,6 @@ ${frontmatter.yaml}
         }
       }
     }
-    function treeNodeItems(node) {
-      const cached = SIDEBAR_TREE_ITEMS_CACHE.get(node);
-      if (cached)
-        return cached;
-      const items = [];
-      for (const k of Object.keys(node.dirs)) {
-        const d2 = node.dirs[k];
-        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
-      }
-      for (const f2 of node.files) {
-        items.push({
-          kind: "file",
-          sortKey: f2.order != null ? f2.order : Infinity,
-          file: f2
-        });
-      }
-      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
-      SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
-      return items;
-    }
     function sidebarTreeNodeHasChildren(node) {
       return Object.keys(node.dirs).length > 0 || node.files.length > 0;
     }
@@ -8584,10 +11750,10 @@ ${frontmatter.yaml}
       if (existing)
         return existing;
       const params = new URLSearchParams;
-      params.set("ref", REPO_SIDEBAR_REF || "worktree");
+      params.set("ref", getRepoSidebarRef() || "worktree");
       params.set("path", dir.path);
       appendScopeParams(params);
-      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((response) => {
+      const load = trackLoad(fetch(`/_tree?${params.toString()}`).then((response) => {
         if (!response.ok)
           throw new Error("failed to load repository tree");
         return response.json();
@@ -8605,8 +11771,8 @@ ${frontmatter.yaml}
       }).finally(() => {
         SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
       });
-      SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load2);
-      return load2;
+      SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load);
+      return load;
     }
     function createTreeDirRow(dir, depth, onFileClick) {
       const li = document.createElement("li");
@@ -8708,7 +11874,7 @@ ${frontmatter.yaml}
       li.dataset.path = f2.path;
       li.dataset.type = "blob";
       li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
-      li.classList.toggle("hidden-by-tests", STATE.hideTests && TEST_RE.test(f2.path || ""));
+      li.classList.toggle("hidden-by-tests", STATE.hideTests && isTestPath(f2.path || ""));
       li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
       const spacer = document.createElement("span");
       spacer.className = "chev-spacer";
@@ -8806,7 +11972,7 @@ ${frontmatter.yaml}
             }
             subtreeVisible = subtreeVisible || visible;
           } else {
-            const testHidden = STATE.hideTests && TEST_RE.test(item.file.path || "");
+            const testHidden = STATE.hideTests && isTestPath(item.file.path || "");
             const visible = !testHidden && matches(item.file.path || "");
             if (visible) {
               rows.push({
@@ -8949,7 +12115,7 @@ ${frontmatter.yaml}
       SIDEBAR_FILES = files;
       SIDEBAR_ON_FILE_CLICK = onFileClick;
       if (!onFileClick)
-        REPO_SIDEBAR_REF = null;
+        setRepoSidebarRef(null);
       if (STATE.sbView === "tree") {
         const root = buildTree(files);
         if (onFileClick && files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
@@ -8997,159 +12163,6 @@ ${frontmatter.yaml}
       });
       localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
     }
-    function syncRepoTargetInput(ref) {
-      const input = document.querySelector("#repo-target");
-      const wrap = document.querySelector("#repo-target-wrap");
-      if (!input || !wrap)
-        return;
-      input.value = ref || "worktree";
-      wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
-      syncSidebarHeaderHeight();
-    }
-    function createRefSelectorInput(options) {
-      const wrap = document.createElement("div");
-      wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
-      wrap.dataset.refSelector = "";
-      if (options.wrapperId)
-        wrap.id = options.wrapperId;
-      if (options.hidden)
-        wrap.hidden = true;
-      const icon = document.createElement("span");
-      icon.className = "ref-selector-icon";
-      icon.setAttribute("aria-hidden", "true");
-      icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
-      const input = document.createElement("input");
-      input.className = "ref-input";
-      input.id = options.id;
-      input.readOnly = true;
-      input.autocomplete = "off";
-      input.placeholder = options.placeholder;
-      if (options.title)
-        input.title = options.title;
-      if (options.value != null)
-        input.value = options.value;
-      const caret = document.createElement("span");
-      caret.className = "ref-selector-caret";
-      caret.setAttribute("aria-hidden", "true");
-      caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
-      wrap.append(icon, input, caret);
-      return { wrap, input };
-    }
-    function hydrateRefSelectorMounts() {
-      document.querySelectorAll("[data-ref-selector-mount]").forEach((mount) => {
-        const { wrap } = createRefSelectorInput({
-          id: mount.dataset.refId || "",
-          placeholder: mount.dataset.placeholder || "ref...",
-          title: mount.dataset.title,
-          wrapperId: mount.dataset.wrapperId,
-          extraClass: mount.dataset.extraClass,
-          hidden: mount.hidden
-        });
-        mount.replaceWith(wrap);
-      });
-    }
-    function renderMeta(meta) {
-      const el = $("#meta");
-      if (!meta) {
-        el.textContent = "";
-        return;
-      }
-      setProjectName(meta.project || "");
-      el.innerHTML = "";
-      if (meta.branch) {
-        const b2 = document.createElement("span");
-        b2.className = "ref";
-        b2.textContent = `⎇ ${meta.branch}`;
-        el.appendChild(b2);
-      }
-      if (meta.totals) {
-        const t2 = document.createElement("span");
-        t2.className = "num";
-        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> <span>" + meta.totals.files + " files</span>";
-        el.appendChild(t2);
-      }
-      const u2 = document.createElement("span");
-      u2.className = "updated-at";
-      u2.title = "last updated";
-      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
-      el.appendChild(u2);
-    }
-    let SUPPRESS_SPY_UNTIL = 0;
-    function prefetchByPath(path) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card?.classList.contains("pending"))
-        return;
-      const f2 = STATE.files.find((x) => x.path === path);
-      if (!f2)
-        return;
-      enqueueLoad(f2, card, 5);
-    }
-    function clearDiffLineFocus() {
-      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
-        row.classList.remove("gdp-diff-line-target");
-      });
-    }
-    function diffRowLineNumber(row) {
-      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
-      const raw = (newLine?.textContent || "").trim();
-      const line = Number(raw);
-      return Number.isInteger(line) && line > 0 ? line : null;
-    }
-    function focusDiffLine(card, line) {
-      const start = lineTargetStart(line);
-      if (!start)
-        return false;
-      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
-      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
-      if (!row)
-        return false;
-      clearDiffLineFocus();
-      row.classList.add("gdp-diff-line-target");
-      scrollDiffElementIntoView(row, "center");
-      return true;
-    }
-    function scrollDiffElementIntoView(element, block2) {
-      element.scrollIntoView({ behavior: "auto", block: block2 });
-    }
-    function applyDiffRouteFocus(card) {
-      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
-        return false;
-      if (card && card.dataset.path !== STATE.route.path)
-        return false;
-      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
-      if (!targetCard)
-        return false;
-      return focusDiffLine(targetCard, STATE.route.line);
-    }
-    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
-    window.addEventListener("wheel", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    window.addEventListener("touchmove", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    function scrollToFile(path, line) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card)
-        return;
-      if (line)
-        REANCHOR_UNTIL = performance.now() + 4000;
-      markActive(path);
-      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
-      const onEnd = () => {
-        SUPPRESS_SPY_UNTIL = 0;
-        window.removeEventListener("scrollend", onEnd);
-      };
-      window.addEventListener("scrollend", onEnd, { once: true });
-      if (card.classList.contains("pending")) {
-        const f2 = STATE.files.find((x) => x.path === path);
-        if (f2)
-          enqueueLoad(f2, card, 10);
-      }
-      if (!line || !focusDiffLine(card, line)) {
-        scrollDiffElementIntoView(card, "start");
-      }
-    }
     function sidebarAncestorDirs(path) {
       const parts = path.split("/").filter(Boolean);
       const dirs = [];
@@ -9190,19 +12203,6 @@ ${frontmatter.yaml}
         if (active)
           requestAnimationFrame(() => scrollSidebarItemIntoView(active));
       }
-    }
-    function applyViewedState() {
-      if (isRepositorySidebarMode())
-        return;
-      $$("#filelist li[data-path]").forEach((li) => {
-        const path = li.dataset.path || "";
-        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
-      });
-      $$(".gdp-file-shell[data-path]").forEach((card) => {
-        const path = card.dataset.path || "";
-        const viewed = STATE.viewedFiles.has(path);
-        syncViewedCardDisplay(card, viewed);
-      });
     }
     function applyFilter() {
       const input = $("#sb-filter");
@@ -9271,49 +12271,592 @@ ${frontmatter.yaml}
       SIDEBAR_FILTER_RAF = 0;
       applyFilter();
     }
-    let SERVER_GENERATION = 0;
-    let CLIENT_REQ_SEQ = 0;
-    const LOAD_QUEUE = [];
-    let ACTIVE_LOADS = 0;
-    const MAX_PARALLEL = 2;
-    let lazyObserver = null;
-    let SOURCE_REQ_SEQ = 0;
-    let ACTIVE_SOURCE_LOAD = null;
-    let IN_FLIGHT = 0;
-    function updateLoadBar() {
-      const el = $("#load-bar");
-      if (el)
-        el.classList.toggle("active", IN_FLIGHT > 0);
+    function applySidebarWidth(w) {
+      const cw = Math.max(180, Math.min(900, w));
+      document.documentElement.style.setProperty("--sidebar-w", `${cw}px`);
+      STATE.sbWidth = cw;
+      localStorage.setItem("gdp:sbwidth", String(cw));
     }
-    function trackLoad(promise) {
-      IN_FLIGHT++;
-      updateLoadBar();
-      const done = () => {
-        IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
-        updateLoadBar();
-      };
-      return Promise.resolve(promise).then((v) => {
-        done();
-        return v;
-      }, (e2) => {
-        done();
-        throw e2;
+    function isSidebarRowVisible(row) {
+      if (row.classList.contains("hidden") || row.classList.contains("hidden-by-tests"))
+        return false;
+      let parent = row.parentElement;
+      while (parent && parent.id !== "filelist") {
+        if (parent.classList.contains("tree-children")) {
+          const dir = parent.previousElementSibling;
+          if (dir?.classList.contains("collapsed") || dir?.classList.contains("hidden"))
+            return false;
+        }
+        parent = parent.parentElement;
+      }
+      return true;
+    }
+    const SIDEBAR_ITEM_SELECTOR = "#filelist li[data-path], #filelist .tree-dir[data-dirpath]";
+    function sidebarItemPath(item) {
+      return item.dataset.path || item.dataset.dirpath || "";
+    }
+    function activeSidebarItem() {
+      return document.querySelector(ACTIVE_SIDEBAR_ITEM_SELECTOR);
+    }
+    function sidebarItemByPath(path) {
+      if (isVirtualSidebarActive() && SIDEBAR_ROW_BY_PATH.has(path)) {
+        return document.querySelector(`#filelist li[data-path="${CSS.escape(path)}"], #filelist .tree-dir[data-dirpath="${CSS.escape(path)}"]`) || null;
+      }
+      const escaped = CSS.escape(path);
+      return document.querySelector(`#filelist li[data-path="${escaped}"], #filelist .tree-dir[data-dirpath="${escaped}"]`);
+    }
+    function setActiveSidebarItem(target) {
+      document.querySelectorAll(ACTIVE_SIDEBAR_ITEM_SELECTOR).forEach((item) => {
+        if (item !== target)
+          item.classList.remove("active");
+      });
+      target?.classList.add("active");
+    }
+    function visibleSidebarItems() {
+      return $$(SIDEBAR_ITEM_SELECTOR).filter(isSidebarRowVisible);
+    }
+    function isVirtualSidebarActive() {
+      return $("#filelist").classList.contains("tree-virtual");
+    }
+    function virtualSidebarActiveIndex() {
+      const activePath = SIDEBAR_VIRTUAL_ACTIVE_PATH || STATE.activeFile || "";
+      return SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === activePath);
+    }
+    function selectVirtualSidebarIndex(index, options) {
+      if (!SIDEBAR_VISIBLE_ROWS.length)
+        return null;
+      const safeIndex = Math.max(0, Math.min(SIDEBAR_VISIBLE_ROWS.length - 1, index));
+      const row = SIDEBAR_VISIBLE_ROWS[safeIndex];
+      if (!row)
+        return null;
+      markActive(row.path);
+      scrollVirtualSidebarPathIntoView(row.path);
+      if (options?.open) {
+        if (row.kind === "dir" && row.dir && SIDEBAR_ON_FILE_CLICK) {
+          SIDEBAR_ON_FILE_CLICK({
+            path: row.dir.path,
+            display_path: row.dir.path,
+            type: "tree",
+            children_omitted: row.dir.children_omitted,
+            children_omitted_reason: row.dir.children_omitted_reason
+          });
+        } else if (row.file && SIDEBAR_ON_FILE_CLICK) {
+          SIDEBAR_ON_FILE_CLICK(row.file);
+        }
+      }
+      return row;
+    }
+    function visibleSidebarItemFrom(current, direction) {
+      const root = document.querySelector("#filelist");
+      if (!current.isConnected)
+        return null;
+      if (!root)
+        return null;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+        acceptNode(node) {
+          if (!(node instanceof HTMLElement))
+            return NodeFilter.FILTER_SKIP;
+          if (node.classList.contains("tree-children")) {
+            const dir = node.previousElementSibling;
+            if (dir?.classList.contains("collapsed") || dir?.classList.contains("hidden") || dir?.classList.contains("hidden-by-tests"))
+              return NodeFilter.FILTER_REJECT;
+          }
+          if (!node.matches(SIDEBAR_ITEM_SELECTOR))
+            return NodeFilter.FILTER_SKIP;
+          return isSidebarRowVisible(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+        }
+      });
+      walker.currentNode = current;
+      const next = direction === 1 ? walker.nextNode() : walker.previousNode();
+      return next instanceof HTMLElement ? next : null;
+    }
+    function adjacentVisibleSidebarItem(direction) {
+      const active = activeSidebarItem();
+      if (!active) {
+        const items = visibleSidebarItems();
+        return direction === 1 ? items[0] || null : items[items.length - 1] || null;
+      }
+      if (!isSidebarRowVisible(active)) {
+        const items = visibleSidebarItems();
+        return direction === 1 ? items[0] || null : items[items.length - 1] || null;
+      }
+      return visibleSidebarItemFrom(active, direction) || active;
+    }
+    function scrollSidebarItemIntoView(item, block2 = "nearest") {
+      const sidebar = document.querySelector("#sidebar");
+      if (!sidebar) {
+        item.scrollIntoView({ block: block2 });
+        return;
+      }
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const itemRect = item.getBoundingClientRect();
+      const stickyBottom = Math.max(sidebarRect.top, document.querySelector(".sb-head")?.getBoundingClientRect().bottom || sidebarRect.top, document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top);
+      const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
+      const bottomPadding = 14;
+      const visibleTop = sidebarRect.top + topPadding;
+      const visibleBottom = sidebarRect.bottom - bottomPadding;
+      if (block2 === "start") {
+        sidebar.scrollTop += itemRect.top - visibleTop;
+        return;
+      }
+      if (block2 === "end") {
+        sidebar.scrollTop += itemRect.bottom - visibleBottom;
+        return;
+      }
+      if (itemRect.top < visibleTop)
+        sidebar.scrollTop += itemRect.top - visibleTop;
+      else if (itemRect.bottom > visibleBottom)
+        sidebar.scrollTop += itemRect.bottom - visibleBottom;
+    }
+    function isRepositorySidebarMode() {
+      return document.body.classList.contains("gdp-repo-page") || document.body.classList.contains("gdp-repo-blob-page");
+    }
+    function moveActiveSidebarItem(direction) {
+      if (isVirtualSidebarActive()) {
+        const current2 = virtualSidebarActiveIndex();
+        const start = current2 < 0 ? direction === 1 ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1 : current2 + direction;
+        const row = selectVirtualSidebarIndex(start);
+        if (row?.file)
+          prefetchByPath(row.file.path);
+        return;
+      }
+      const items = visibleSidebarItems();
+      if (!items.length)
+        return;
+      const current = items.findIndex((li) => li.classList.contains("active"));
+      const idx = nextVisibleFileIndex(current, items.length, direction);
+      const target = items[idx];
+      if (!target)
+        return;
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (path)
+        markActive(path);
+      scrollSidebarItemIntoView(target);
+      if (target.dataset.path)
+        prefetchByPath(target.dataset.path);
+    }
+    function moveActiveSidebarPage(direction) {
+      if (isVirtualSidebarActive()) {
+        const sidebar2 = document.querySelector("#sidebar");
+        const halfPageRows2 = Math.max(1, Math.floor((sidebar2?.clientHeight || window.innerHeight) / 2 / VIRTUAL_SIDEBAR_ROW_HEIGHT));
+        const current2 = virtualSidebarActiveIndex();
+        const start2 = current2 < 0 ? 0 : current2;
+        const row = selectVirtualSidebarIndex(start2 + direction * halfPageRows2);
+        if (row?.file)
+          prefetchByPath(row.file.path);
+        return;
+      }
+      const items = visibleSidebarItems();
+      if (!items.length)
+        return;
+      const repoSidebar = isRepositorySidebarMode();
+      const sidebar = document.querySelector("#sidebar");
+      const sample = items.find((item) => item.getBoundingClientRect().height > 0);
+      const rowHeight = sample ? sample.getBoundingClientRect().height : 28;
+      const halfPageRows = Math.max(1, Math.floor((sidebar?.clientHeight || window.innerHeight) / 2 / rowHeight));
+      const current = items.findIndex((li) => li.classList.contains("active"));
+      const start = current < 0 ? 0 : current;
+      const idx = Math.max(0, Math.min(items.length - 1, start + direction * halfPageRows));
+      const target = items[idx];
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (!repoSidebar && target.dataset.path)
+        target.click();
+      else if (path)
+        markActive(path);
+      scrollSidebarItemIntoView(target);
+      if (target.dataset.path)
+        prefetchByPath(target.dataset.path);
+    }
+    function moveActiveSidebarToEdge(edge) {
+      if (isVirtualSidebarActive()) {
+        const row = selectVirtualSidebarIndex(edge === "top" ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1);
+        if (row?.file)
+          prefetchByPath(row.file.path);
+        return;
+      }
+      const items = visibleSidebarItems();
+      const repoSidebar = isRepositorySidebarMode();
+      const target = edge === "top" ? items[0] : items[items.length - 1];
+      if (!target)
+        return;
+      const path = target.dataset.path || target.dataset.dirpath;
+      if (!repoSidebar && target.dataset.path)
+        target.click();
+      else if (path)
+        markActive(path);
+      scrollSidebarItemIntoView(target, edge === "top" ? "start" : "end");
+      if (target.dataset.path)
+        prefetchByPath(target.dataset.path);
+    }
+    function setActiveSidebarDirectoryCollapsed(collapsed) {
+      if (isVirtualSidebarActive()) {
+        const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
+        if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted)
+          return;
+        if (STATE.collapsedDirs.has(row.path) === collapsed)
+          return;
+        if (collapsed)
+          STATE.collapsedDirs.add(row.path);
+        else
+          STATE.collapsedDirs.delete(row.path);
+        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        rerenderVirtualSidebar();
+        scrollVirtualSidebarPathIntoView(row.path);
+        return;
+      }
+      const active = document.querySelector("#filelist .tree-dir.active[data-dirpath]");
+      if (!active)
+        return;
+      if (active.classList.contains("collapsed") === collapsed)
+        return;
+      const control = active.querySelector(".chev");
+      if (control)
+        control.click();
+    }
+    function toggleActiveSidebarDirectoryCollapsed() {
+      if (isVirtualSidebarActive()) {
+        const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
+        if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted)
+          return;
+        setActiveSidebarDirectoryCollapsed(!STATE.collapsedDirs.has(row.path));
+        return;
+      }
+      const active = document.querySelector("#filelist .tree-dir.active[data-dirpath]");
+      if (!active)
+        return;
+      const control = active.querySelector(".chev");
+      if (control)
+        control.click();
+    }
+    function openActiveSidebarItem() {
+      if (isVirtualSidebarActive()) {
+        const index = virtualSidebarActiveIndex();
+        if (index >= 0)
+          selectVirtualSidebarIndex(index, { open: true });
+        return;
+      }
+      const active = document.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+      if (active && isSidebarRowVisible(active))
+        active.click();
+    }
+    function treeNodeItems(node) {
+      const cached = SIDEBAR_TREE_ITEMS_CACHE.get(node);
+      if (cached)
+        return cached;
+      const items = [];
+      for (const k of Object.keys(node.dirs)) {
+        const d2 = node.dirs[k];
+        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
+      }
+      for (const f2 of node.files) {
+        items.push({
+          kind: "file",
+          sortKey: f2.order != null ? f2.order : Infinity,
+          file: f2
+        });
+      }
+      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
+      SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
+      return items;
+    }
+    const ACTIVE_SIDEBAR_ITEM_SELECTOR = "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]";
+    function getSidebarRowByPath(path) {
+      return SIDEBAR_ROW_BY_PATH.get(path);
+    }
+    function getSidebarVirtualActivePath() {
+      return SIDEBAR_VIRTUAL_ACTIVE_PATH;
+    }
+    function getSidebarVisibleRows() {
+      return SIDEBAR_VISIBLE_ROWS;
+    }
+    function getSidebarFiles() {
+      return SIDEBAR_FILES;
+    }
+    function getSidebarOnFileClick() {
+      return SIDEBAR_ON_FILE_CLICK;
+    }
+    return {
+      renderSidebar,
+      applyFilter,
+      scheduleApplyFilter,
+      flushSidebarFilter,
+      markActive,
+      rerenderVirtualSidebar,
+      ensureVirtualSidebarDirLoaded,
+      scrollVirtualSidebarPathIntoView,
+      shouldLazyLoadSidebarDir,
+      setFolderIcon,
+      isRepositorySidebarMode,
+      placeSidebarToggle,
+      placeSidebarFilter,
+      applySidebarHidden,
+      toggleSidebarHidden,
+      applySidebarWidth,
+      applySidebarFontSize,
+      savedSidebarFontSize,
+      syncSidebarHeaderHeight,
+      observeSidebarHeaderHeight,
+      setSidebarTreeActionIcons,
+      setAllSidebarDirsCollapsed,
+      expandSidebarAncestors,
+      updateTreeDirVisibility,
+      moveActiveSidebarItem,
+      moveActiveSidebarPage,
+      moveActiveSidebarToEdge,
+      openActiveSidebarItem,
+      setActiveSidebarDirectoryCollapsed,
+      toggleActiveSidebarDirectoryCollapsed,
+      activeSidebarItem,
+      sidebarItemByPath,
+      setActiveSidebarItem,
+      isVirtualSidebarActive,
+      selectVirtualSidebarIndex,
+      virtualSidebarActiveIndex,
+      adjacentVisibleSidebarItem,
+      scrollSidebarItemIntoView,
+      sidebarItemPath,
+      visibleSidebarItems,
+      upsertSidebarTreeEntry,
+      mergeSidebarTreeEntries,
+      buildTree,
+      getSidebarRowByPath,
+      getSidebarVirtualActivePath,
+      getSidebarFiles,
+      getSidebarOnFileClick,
+      getSidebarVisibleRows,
+      isSidebarRowVisible,
+      visibleSidebarItemFrom
+    };
+  }
+
+  // web-src/views/source-view.ts
+  function createSourceView(deps) {
+    const {
+      $,
+      $$,
+      STATE,
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      isAbortError,
+      loadRepo,
+      repoRoute,
+      repoFileTargetFromRoute,
+      renderRepoBlobSidebar,
+      placeSidebarToggle,
+      createFileBreadcrumb,
+      createFileDetailMeta,
+      createOpenPathButton,
+      createMoveToTrashButton,
+      canTrashWorktreeRef,
+      loadRawFileInfo,
+      loadSyntaxHighlighter,
+      setViewFileButtonState,
+      scrollMainPanel,
+      focusMainSurface,
+      isPaletteOpen
+    } = deps;
+    const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
+    const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
+    const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
+    const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
+    const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
+    let sourceShikiLoadPromise = null;
+    let SOURCE_CURSOR = null;
+    const SOURCE_CURSOR_TOTALS = new Map;
+    function sourceLineScrollAmount() {
+      const virtualRow = Array.from(document.querySelectorAll("#content .gdp-source-virtual-row")).find((item) => item.offsetParent !== null);
+      if (virtualRow)
+        return virtualRow.getBoundingClientRect().height || VIRTUAL_SOURCE_ROW_HEIGHT;
+      const sourceRow = Array.from(document.querySelectorAll("#content .gdp-source-table tr")).find((item) => item.offsetParent !== null);
+      if (sourceRow)
+        return sourceRow.getBoundingClientRect().height || 20;
+      const preview = document.querySelector("#content .gdp-markdown-preview:not([hidden])");
+      const lineHeight = Number.parseFloat(getComputedStyle(preview || document.body).lineHeight);
+      return Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 20;
+    }
+    function hasVisibleSourceCodeSurface() {
+      return Array.from(document.querySelectorAll("#content .gdp-source-virtual-scroller, #content .gdp-source-table")).some((item) => item.offsetParent !== null);
+    }
+    function sourceCursorKey(target) {
+      return `${target.ref}\x00${target.path}`;
+    }
+    function sourceCursorMatches(target, line) {
+      return !!SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target) && SOURCE_CURSOR.line === line;
+    }
+    function syncSourceCursorRows(target) {
+      document.querySelectorAll("#content [data-line]").forEach((row) => {
+        const line = Number(row.dataset.line || "0");
+        row.classList.toggle("gdp-source-cursor", sourceCursorMatches(target, line));
       });
     }
-    function escapeHtml2(s2) {
-      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      })[c2]);
+    function visibleSourceLineFallback() {
+      const scroller = findMainScrollTarget();
+      if (scroller)
+        return Math.max(1, Math.floor(scroller.scrollTop / VIRTUAL_SOURCE_ROW_HEIGHT) + 1);
+      const rows = $$("#content .gdp-source-table tr[data-line]");
+      const contentTop = document.querySelector("#content")?.getBoundingClientRect().top ?? 0;
+      const row = rows.find((item) => item.getBoundingClientRect().bottom >= Math.max(0, contentTop));
+      return Math.max(1, Number(row?.dataset.line || "1"));
     }
+    function ensureSourceCursor(target) {
+      if (SOURCE_CURSOR && sourceTargetsEqual(SOURCE_CURSOR.target, target))
+        return SOURCE_CURSOR;
+      const routeLine = lineTargetStart(currentSourceLineTarget(target));
+      SOURCE_CURSOR = { target, line: routeLine || visibleSourceLineFallback() };
+      syncSourceCursorRows(target);
+      return SOURCE_CURSOR;
+    }
+    function resetSourceCursorForTarget(target, totalLines) {
+      const routeLine = lineTargetStart(currentSourceLineTarget(target));
+      SOURCE_CURSOR = {
+        target,
+        line: Math.max(1, Math.min(totalLines, routeLine || 1))
+      };
+    }
+    function scrollSourceCursorIntoView(cursor, edge = "nearest") {
+      const scroller = findMainScrollTarget();
+      if (scroller) {
+        const top = (cursor.line - 1) * VIRTUAL_SOURCE_ROW_HEIGHT;
+        const bottom = top + VIRTUAL_SOURCE_ROW_HEIGHT;
+        const before = scroller.scrollTop;
+        if (edge === "center")
+          scroller.scrollTop = Math.max(0, top - Math.round(scroller.clientHeight / 2));
+        else if (edge === "start")
+          scroller.scrollTop = top;
+        else if (top < scroller.scrollTop)
+          scroller.scrollTop = top;
+        else if (bottom > scroller.scrollTop + scroller.clientHeight)
+          scroller.scrollTop = bottom - scroller.clientHeight;
+        if (scroller.scrollTop !== before)
+          scroller.dispatchEvent(new Event("scroll"));
+        scroller.__gdpRenderVirtualSource?.();
+        syncSourceCursorRows(cursor.target);
+        return;
+      }
+      document.querySelector(`#content [data-line="${cursor.line}"]`)?.scrollIntoView({ block: edge });
+    }
+    function moveSourceCursor(direction, unit, edge) {
+      if (!hasVisibleSourceCodeSurface())
+        return false;
+      const target = sourceTargetFromRoute();
+      if (!target)
+        return false;
+      const total = SOURCE_CURSOR_TOTALS.get(sourceCursorKey(target));
+      if (!total)
+        return false;
+      const cursor = ensureSourceCursor(target);
+      if (unit === "edge") {
+        cursor.line = edge === "bottom" ? total : 1;
+        syncSourceCursorRows(target);
+        scrollSourceCursorIntoView(cursor, "center");
+        return true;
+      }
+      const pageRows = Math.max(1, Math.floor((findMainScrollTarget()?.clientHeight || window.innerHeight) * 0.55 / (sourceLineScrollAmount() || VIRTUAL_SOURCE_ROW_HEIGHT)));
+      const delta = unit === "page" ? pageRows : 1;
+      cursor.line = Math.max(1, Math.min(total, cursor.line + direction * delta));
+      syncSourceCursorRows(target);
+      scrollSourceCursorIntoView(cursor, unit === "page" ? "start" : "nearest");
+      return true;
+    }
+    function switchSourceTab(tab) {
+      const tabs = document.querySelector("#content .gdp-source-tabs");
+      if (!tabs)
+        return false;
+      const button = tabs.querySelector(`button[data-source-tab="${tab}"]`);
+      if (!button || button.hidden || button.disabled)
+        return false;
+      button.click();
+      focusMainPanel();
+      return true;
+    }
+    const SOURCE_SHIKI_LANGS = Array.from(new Set([
+      "bash",
+      "bibtex",
+      "c",
+      "clojure",
+      "cmake",
+      "cpp",
+      "csharp",
+      "css",
+      "dart",
+      "diff",
+      "dockerfile",
+      "elixir",
+      "erlang",
+      "fortran",
+      "go",
+      "gradle",
+      "graphql",
+      "haskell",
+      "html",
+      "java",
+      "javascript",
+      "json",
+      "julia",
+      "kotlin",
+      "lua",
+      "make",
+      "markdown",
+      "nix",
+      "ocaml",
+      "perl",
+      "php",
+      "properties",
+      "protobuf",
+      "python",
+      "r",
+      "rst",
+      "ruby",
+      "rust",
+      "scala",
+      "scss",
+      "sql",
+      "swift",
+      "terraform",
+      "tex",
+      "toml",
+      "typescript",
+      "vim",
+      "vue",
+      "xml",
+      "yaml"
+    ]));
+    function loadSourceShikiHighlighter() {
+      if (!sourceShikiLoadPromise) {
+        sourceShikiLoadPromise = import("/shiki.js").then((mod) => {
+          const typed = mod;
+          const langs = typed.bundledLanguages ? SOURCE_SHIKI_LANGS.filter((lang) => !!typed.bundledLanguages?.[lang]) : SOURCE_SHIKI_LANGS;
+          return typed.createHighlighter({
+            themes: ["github-light", "github-dark"],
+            langs
+          });
+        }).catch(() => null);
+      }
+      return sourceShikiLoadPromise;
+    }
+    function sourceShikiLines(textValue, lang, highlighter) {
+      try {
+        const html = highlighter.codeToHtml(textValue || " ", {
+          lang,
+          themes: { light: "github-light", dark: "github-dark" },
+          defaultColor: false
+        });
+        const template = document.createElement("template");
+        template.innerHTML = html;
+        const renderedLines = Array.from(template.content.querySelectorAll(".line"));
+        if (!renderedLines.length)
+          return null;
+        return renderedLines.map((line) => line.innerHTML || " ");
+      } catch {
+        return null;
+      }
+    }
+    let SOURCE_REQ_SEQ = 0;
+    let ACTIVE_SOURCE_LOAD = null;
     function sourceTargetsEqual(a2, b2) {
       return !!a2 && !!b2 && a2.path === b2.path && a2.ref === b2.ref;
-    }
-    function isAbortError(err) {
-      return err instanceof DOMException ? err.name === "AbortError" : !!err && typeof err === "object" && ("name" in err) && err.name === "AbortError";
     }
     function finishSourceLoad(req) {
       if (ACTIVE_SOURCE_LOAD?.req === req)
@@ -9338,85 +12881,8 @@ ${frontmatter.yaml}
       const ref = STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
       return { path: file.path, ref };
     }
-    function currentRange() {
-      return {
-        from: STATE.from || DEFAULT_RANGE.from,
-        to: STATE.to || DEFAULT_RANGE.to
-      };
-    }
     function sourceTargetFromRoute() {
       return STATE.route.screen === "file" ? { path: STATE.route.path, ref: STATE.route.ref } : null;
-    }
-    function repoFileTargetFromRoute() {
-      return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
-    }
-    function helpLanguageFromRoute() {
-      return STATE.route.screen === "help" && HELP_LANGUAGES.includes(STATE.route.lang) ? STATE.route.lang : "en";
-    }
-    function helpSectionFromRoute() {
-      return STATE.route.screen === "help" && HELP_SECTIONS.includes(STATE.route.section) ? STATE.route.section : "keybindings";
-    }
-    let ANNOTATIONS_UI = null;
-    function applyInlineAnnotations() {
-      ANNOTATIONS_UI?.applyInlineAnnotations();
-    }
-    function withAnnotationSessionParam(rawUrl) {
-      return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
-    }
-    function setRoute(route, replace2 = false) {
-      const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
-      STATE.route = nextRoute;
-      STATE.from = nextRoute.range.from;
-      STATE.to = nextRoute.range.to;
-      if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
-        STATE.repoRef = nextRoute.ref || "worktree";
-      }
-      const url = withAnnotationSessionParam(buildRoute(nextRoute));
-      const state = nextRoute.screen === "file" ? {
-        screen: "file",
-        path: nextRoute.path,
-        ref: nextRoute.ref,
-        view: nextRoute.view || "detail"
-      } : { view: nextRoute.screen };
-      if (replace2)
-        history.replaceState(state, "", url);
-      else
-        history.pushState(state, "", url);
-      syncHeaderMenu();
-    }
-    function setPageMode() {
-      document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
-      document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
-      document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
-      document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
-      syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
-    }
-    function syncHeaderMenu() {
-      document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
-        const fileRouteOwner = STATE.route.screen === "file" && STATE.route.view === "blob" ? "repo" : "diff";
-        const active = link2.dataset.route === STATE.route.screen || STATE.route.screen === "file" && link2.dataset.route === fileRouteOwner;
-        link2.classList.toggle("active", active);
-        link2.setAttribute("aria-current", active ? "page" : "false");
-        if (link2.dataset.route === "repo") {
-          link2.href = buildRoute({
-            screen: "repo",
-            ref: STATE.repoRef || "worktree",
-            path: "",
-            range: currentRange()
-          });
-        }
-        if (link2.dataset.route === "diff") {
-          link2.href = buildRoute({ screen: "diff", range: currentRange() });
-        }
-        if (link2.dataset.route === "help") {
-          link2.href = buildRoute({
-            screen: "help",
-            lang: helpLanguageFromRoute(),
-            section: helpSectionFromRoute(),
-            range: currentRange()
-          });
-        }
-      });
     }
     function removeStandaloneSource() {
       document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
@@ -9425,1697 +12891,6 @@ ${frontmatter.yaml}
       document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
         el.remove();
       });
-    }
-    function renderHelpPage() {
-      cancelActiveSourceLoad("navigation");
-      removeStandaloneSource();
-      LOAD_QUEUE.length = 0;
-      const target = $("#diff");
-      const empty = $("#empty");
-      empty.classList.add("hidden");
-      $("#meta").textContent = "";
-      $("#totals").textContent = "";
-      $("#filelist").textContent = "";
-      const lang = helpLanguageFromRoute();
-      const section = helpSectionFromRoute();
-      const content = HELP_CONTENT[lang];
-      const sectionContent = content.sections[section];
-      const shell = document.createElement("section");
-      shell.className = "gdp-help-shell";
-      const header = document.createElement("header");
-      header.className = "gdp-help-header";
-      const title = document.createElement("h1");
-      title.textContent = content.title;
-      const langSelect = document.createElement("select");
-      langSelect.className = "gdp-help-language";
-      langSelect.setAttribute("aria-label", content.languageLabel);
-      HELP_LANGUAGES.forEach((optionLang) => {
-        const option = document.createElement("option");
-        option.value = optionLang;
-        option.textContent = optionLang.toUpperCase();
-        option.selected = optionLang === lang;
-        langSelect.appendChild(option);
-      });
-      langSelect.addEventListener("change", () => {
-        setRoute({
-          screen: "help",
-          lang: langSelect.value,
-          section,
-          range: currentRange()
-        });
-        setPageMode();
-        renderHelpPage();
-        syncHeaderMenu();
-      });
-      header.append(title, langSelect);
-      const layout = document.createElement("div");
-      layout.className = "gdp-help-layout";
-      const helpNav = document.createElement("nav");
-      helpNav.className = "gdp-help-nav";
-      HELP_SECTIONS.forEach((helpSection) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = helpSection === section ? "active" : "";
-        button.textContent = content.sections[helpSection].nav;
-        button.addEventListener("click", () => {
-          setRoute({
-            screen: "help",
-            lang,
-            section: helpSection,
-            range: currentRange()
-          });
-          renderHelpPage();
-          syncHeaderMenu();
-        });
-        helpNav.appendChild(button);
-      });
-      const article = document.createElement("article");
-      article.className = "gdp-help-content";
-      const h2 = document.createElement("h2");
-      h2.textContent = sectionContent.title;
-      const intro = document.createElement("p");
-      intro.textContent = sectionContent.intro;
-      article.append(h2, intro);
-      sectionContent.groups.forEach((group) => {
-        const groupSection = document.createElement("section");
-        groupSection.className = "gdp-help-group";
-        const groupTitle = document.createElement("h3");
-        groupTitle.textContent = group.title;
-        const table2 = document.createElement("table");
-        group.rows.forEach(([keys, description]) => {
-          const tr = document.createElement("tr");
-          const keyCell = document.createElement("th");
-          keyCell.scope = "row";
-          keys.split(" / ").forEach((key, index) => {
-            if (index > 0)
-              keyCell.append(" / ");
-            const kbd = document.createElement("kbd");
-            kbd.textContent = key;
-            keyCell.appendChild(kbd);
-          });
-          const desc = document.createElement("td");
-          desc.textContent = description;
-          tr.append(keyCell, desc);
-          table2.appendChild(tr);
-        });
-        groupSection.append(groupTitle, table2);
-        article.appendChild(groupSection);
-      });
-      layout.append(helpNav, article);
-      shell.append(header, layout);
-      target.replaceChildren(shell);
-    }
-    function renderShell(meta) {
-      const newFiles = meta.files || [];
-      STATE.files = newFiles;
-      SERVER_GENERATION = meta.generation || 0;
-      window._lastMeta = meta;
-      renderMeta(meta);
-      renderSidebar(newFiles);
-      const target = $("#diff");
-      const empty = $("#empty");
-      if (!newFiles.length) {
-        if (STATE.route.screen === "file") {
-          empty.classList.add("hidden");
-          applySourceRouteToShell();
-        } else {
-          empty.classList.remove("hidden");
-          target.replaceChildren();
-        }
-        LOAD_QUEUE.length = 0;
-        return;
-      }
-      empty.classList.add("hidden");
-      const oldByKey = new Map;
-      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
-        if (c2.dataset.key)
-          oldByKey.set(c2.dataset.key, c2);
-      });
-      const ordered = [];
-      newFiles.forEach((f2) => {
-        const key = f2.key || f2.path;
-        const old = oldByKey.get(key);
-        if (old) {
-          oldByKey.delete(key);
-          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
-          const statusChanged = old.dataset.status !== (f2.status || "M");
-          if (sizeChanged || statusChanged) {
-            old.classList.remove("loaded", "error");
-            old.classList.add("pending");
-            old.replaceChildren();
-            const tmp = createPlaceholder(f2);
-            while (tmp.firstChild)
-              old.appendChild(tmp.firstChild);
-            old.dataset.sizeClass = f2.size_class || "small";
-            old.dataset.status = f2.status || "M";
-            delete old.dataset.manualRendered;
-            delete old.dataset.manualLoad;
-            delete old.dataset.manualMode;
-            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
-            old._diffData = null;
-            old._file = null;
-          } else {
-            const stats = old.querySelector(".gdp-shell-header .stats");
-            if (stats) {
-              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
-            }
-            old._file = f2;
-          }
-          ordered.push(old);
-        } else {
-          ordered.push(createPlaceholder(f2));
-        }
-      });
-      oldByKey.forEach((c2) => {
-        c2.remove();
-      });
-      target.replaceChildren(...ordered);
-      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
-        if (!LOAD_QUEUE[i2].card.isConnected)
-          LOAD_QUEUE.splice(i2, 1);
-      }
-      setupLazyObserver();
-      enqueueInitialLoads();
-      applySourceRouteToShell();
-      setupScrollSpy();
-      if (typeof applyHideTests === "function")
-        applyHideTests();
-      applyFilter();
-      applyViewedState();
-    }
-    function fileEntryIcon() {
-      return iconSvg("octicon-file", FILE_16_PATH);
-    }
-    async function openPathInOs(path, kind, button) {
-      const oldTitle = button?.title;
-      if (button) {
-        button.disabled = true;
-        button.classList.remove("failed");
-      }
-      try {
-        const res = await fetch("/_open_path", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify({ path, kind })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        button?.classList.add("opened");
-        setTimeout(() => {
-          button?.classList.remove("opened");
-        }, 1200);
-      } catch {
-        if (button) {
-          button.classList.add("failed");
-          button.title = "failed to open in OS";
-          setTimeout(() => {
-            button.classList.remove("failed");
-            button.title = oldTitle || "open in OS";
-          }, 1600);
-        }
-      } finally {
-        if (button)
-          button.disabled = false;
-      }
-    }
-    function closeRepoContextMenu() {
-      document.querySelector(".gdp-context-menu")?.remove();
-    }
-    function closeTrashDialog() {
-      document.querySelector(".gdp-trash-dialog-backdrop")?.remove();
-    }
-    function createTrashDialog(title, body, actions) {
-      closeTrashDialog();
-      const backdrop = document.createElement("div");
-      backdrop.className = "gdp-trash-dialog-backdrop";
-      const dialog = document.createElement("div");
-      dialog.className = "gdp-trash-dialog";
-      const titleId = "gdp-trash-dialog-title";
-      const bodyId = "gdp-trash-dialog-body";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      dialog.setAttribute("aria-labelledby", titleId);
-      dialog.setAttribute("aria-describedby", bodyId);
-      const heading2 = document.createElement("div");
-      heading2.id = titleId;
-      heading2.className = "gdp-trash-dialog-title";
-      heading2.textContent = title;
-      const message = document.createElement("div");
-      message.id = bodyId;
-      message.className = "gdp-trash-dialog-body";
-      message.textContent = body;
-      const actionRow = document.createElement("div");
-      actionRow.className = "gdp-trash-dialog-actions";
-      actionRow.append(...actions);
-      dialog.append(heading2, message, actionRow);
-      backdrop.appendChild(dialog);
-      document.body.appendChild(backdrop);
-      return backdrop;
-    }
-    function confirmMoveToTrash(path, focusReturnTarget) {
-      return new Promise((resolve) => {
-        const previousFocus = focusReturnTarget || document.activeElement;
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "gdp-btn gdp-btn-sm";
-        cancel.textContent = "Cancel";
-        const move = document.createElement("button");
-        move.type = "button";
-        move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
-        move.textContent = "Move to Trash";
-        const done = (ok) => {
-          document.removeEventListener("keydown", onKeydown);
-          closeTrashDialog();
-          previousFocus?.focus?.();
-          resolve(ok);
-        };
-        const onKeydown = (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            done(false);
-            return;
-          }
-          if (event.key !== "Tab")
-            return;
-          const focusables = [cancel, move];
-          const index = focusables.indexOf(document.activeElement);
-          if (index < 0) {
-            event.preventDefault();
-            focusables[0].focus();
-            return;
-          }
-          if (event.shiftKey && index <= 0) {
-            event.preventDefault();
-            focusables[focusables.length - 1].focus();
-          } else if (!event.shiftKey && index === focusables.length - 1) {
-            event.preventDefault();
-            focusables[0].focus();
-          }
-        };
-        cancel.addEventListener("click", () => done(false));
-        move.addEventListener("click", () => done(true));
-        const backdrop = createTrashDialog("Move to Trash?", `Move "${path}" to Trash?`, [cancel, move]);
-        backdrop.addEventListener("pointerdown", (event) => {
-          if (event.target === backdrop)
-            done(false);
-        });
-        document.addEventListener("keydown", onKeydown);
-        cancel.focus();
-      });
-    }
-    function showTrashError(message) {
-      const ok = document.createElement("button");
-      ok.type = "button";
-      ok.className = "gdp-btn gdp-btn-sm";
-      ok.textContent = "OK";
-      ok.addEventListener("click", closeTrashDialog);
-      createTrashDialog("Trash failed", message, [ok]);
-      ok.focus();
-    }
-    function showCreateDirectoryError(message) {
-      const ok = document.createElement("button");
-      ok.type = "button";
-      ok.className = "gdp-btn gdp-btn-sm";
-      ok.textContent = "OK";
-      ok.addEventListener("click", closeTrashDialog);
-      createTrashDialog("New folder failed", message, [ok]);
-      ok.focus();
-    }
-    function askNewDirectoryName(path, focusReturnTarget) {
-      return new Promise((resolve) => {
-        const previousFocus = focusReturnTarget || document.activeElement;
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "gdp-btn gdp-btn-sm";
-        cancel.textContent = "Cancel";
-        const create = document.createElement("button");
-        create.type = "button";
-        create.className = "gdp-btn gdp-btn-sm";
-        create.textContent = "Create";
-        const input = document.createElement("input");
-        input.className = "gdp-create-dir-input";
-        input.type = "text";
-        input.autocomplete = "off";
-        input.placeholder = "Folder name";
-        input.setAttribute("aria-label", "Folder name");
-        const error2 = document.createElement("div");
-        error2.className = "gdp-create-dir-error";
-        error2.setAttribute("role", "alert");
-        const syncValidity = () => {
-          const valid = !!normalizeNewDirectoryName(input.value);
-          create.disabled = !valid;
-          error2.textContent = input.value && !valid ? "Use a folder name without slashes, control characters, . or .." : "";
-          return valid;
-        };
-        const done = (name) => {
-          document.removeEventListener("keydown", onKeydown);
-          closeTrashDialog();
-          previousFocus?.focus?.();
-          resolve(name);
-        };
-        const submit = () => {
-          const name = normalizeNewDirectoryName(input.value);
-          if (!name) {
-            syncValidity();
-            input.focus();
-            return;
-          }
-          done(name);
-        };
-        const onKeydown = (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            done(null);
-            return;
-          }
-          if (event.isComposing || event.keyCode === 229)
-            return;
-          if (event.key === "Enter") {
-            event.preventDefault();
-            submit();
-            return;
-          }
-          if (event.key !== "Tab")
-            return;
-          const focusables = [input, cancel, create];
-          const index = focusables.indexOf(document.activeElement);
-          if (index < 0) {
-            event.preventDefault();
-            focusables[0].focus();
-            return;
-          }
-          if (event.shiftKey && index <= 0) {
-            event.preventDefault();
-            focusables[focusables.length - 1].focus();
-          } else if (!event.shiftKey && index === focusables.length - 1) {
-            event.preventDefault();
-            focusables[0].focus();
-          }
-        };
-        cancel.addEventListener("click", () => done(null));
-        create.addEventListener("click", submit);
-        input.addEventListener("input", syncValidity);
-        create.disabled = true;
-        const backdrop = createTrashDialog("New Folder", `Create a folder in "${path || PROJECT_NAME || "repository"}".`, [cancel, create]);
-        const body = backdrop.querySelector(".gdp-trash-dialog-body");
-        body?.append(input, error2);
-        backdrop.addEventListener("pointerdown", (event) => {
-          if (event.target === backdrop)
-            done(null);
-        });
-        document.addEventListener("keydown", onKeydown);
-        input.focus();
-      });
-    }
-    async function moveRepoPathToTrash(path) {
-      const res = await fetch("/_trash_path", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1"
-        },
-        body: JSON.stringify({ path })
-      });
-      if (!res.ok) {
-        showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
-        return false;
-      }
-      const body = await res.json();
-      if (body.undo)
-        UNDO_STACK.unshift(body.undo);
-      return true;
-    }
-    async function requestCreateDirectory(path, onCreated, options = {}) {
-      if (creatingDirectory)
-        return;
-      const name = await askNewDirectoryName(path, options.focusReturnTarget);
-      if (!name)
-        return;
-      creatingDirectory = true;
-      try {
-        const res = await fetch("/_create_directory", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify({ dir: path, name })
-        });
-        if (!res.ok) {
-          showCreateDirectoryError(`Failed to create "${name}": ${await res.text()}`);
-          return;
-        }
-        const body = await res.json();
-        onCreated(body.path || (path ? `${path}/${name}` : name));
-      } finally {
-        creatingDirectory = false;
-      }
-    }
-    async function runUndoAction(action) {
-      if (action.type !== "trash")
-        return false;
-      const res = await fetch("/_restore_trash", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1"
-        },
-        body: JSON.stringify(action.payload)
-      });
-      if (!res.ok) {
-        showTrashError(`Failed to undo "${action.label}": ${await res.text()}`);
-        return false;
-      }
-      return true;
-    }
-    async function undoLastAction() {
-      const action = UNDO_STACK.shift();
-      if (!action)
-        return false;
-      if (!await runUndoAction(action)) {
-        UNDO_STACK.unshift(action);
-        return true;
-      }
-      invalidateRepoSidebar();
-      await load();
-      return true;
-    }
-    async function requestMoveToTrash(path, onMoved, options = {}) {
-      if (!await confirmMoveToTrash(path, options.focusReturnTarget))
-        return;
-      if (await moveRepoPathToTrash(path))
-        onMoved();
-    }
-    function canTrashWorktreeRef(ref) {
-      return ref === "worktree" || ref === "";
-    }
-    function parentRepoPath(path) {
-      return path.split("/").slice(0, -1).join("/");
-    }
-    async function copyRepoContextText(text2) {
-      if (!text2)
-        return;
-      await navigator.clipboard.writeText(text2);
-    }
-    function createCopyPathButton(path) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-copy-path";
-      button.title = "copy folder path";
-      button.setAttribute("aria-label", "copy folder path");
-      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        try {
-          await navigator.clipboard.writeText(filePathClipboardText(path));
-          button.classList.add("copied");
-          setTimeout(() => {
-            button.classList.remove("copied");
-          }, 1200);
-        } catch {
-          button.classList.add("failed");
-          setTimeout(() => {
-            button.classList.remove("failed");
-          }, 1200);
-        }
-      });
-      return button;
-    }
-    function showRepoContextMenu(event, entry, ref, onChanged) {
-      if (document.querySelector(".gdp-trash-dialog-backdrop"))
-        return false;
-      if (!canTrashWorktreeRef(ref))
-        return false;
-      if (entry.children_omitted_reason === "internal")
-        return false;
-      if (entry.type !== "tree" && entry.type !== "blob")
-        return false;
-      event.preventDefault();
-      closeRepoContextMenu();
-      const menu = document.createElement("div");
-      menu.className = "gdp-context-menu";
-      const anchor = event.target;
-      const focusReturnTarget = anchor?.closest("li, .gdp-repo-row");
-      const anchorRect = anchor?.closest("li, .gdp-repo-row")?.getBoundingClientRect();
-      const anchorX = event.clientX > 0 ? event.clientX : anchorRect?.left || window.innerWidth / 2;
-      const anchorY = event.clientY > 0 ? event.clientY : anchorRect?.bottom || window.innerHeight / 2;
-      menu.style.left = `${anchorX}px`;
-      menu.style.top = `${anchorY}px`;
-      const copyPath = document.createElement("button");
-      copyPath.type = "button";
-      copyPath.textContent = "Copy Path";
-      copyPath.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await copyRepoContextText(filePathClipboardText(entry.path));
-      });
-      const copyName = document.createElement("button");
-      copyName.type = "button";
-      copyName.textContent = "Copy Name";
-      copyName.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await copyRepoContextText(fileNameClipboardText(entry.path));
-      });
-      const createDir = document.createElement("button");
-      createDir.type = "button";
-      createDir.textContent = "New Folder...";
-      createDir.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        const targetPath = entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
-        await requestCreateDirectory(targetPath, onChanged, {
-          focusReturnTarget
-        });
-      });
-      const trash = document.createElement("button");
-      trash.type = "button";
-      trash.className = "danger";
-      trash.textContent = "Move to Trash...";
-      trash.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
-      });
-      menu.append(copyPath, copyName, createDir, trash);
-      document.body.appendChild(menu);
-      const rect = menu.getBoundingClientRect();
-      const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
-      const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
-      menu.style.left = `${Math.max(8, left)}px`;
-      menu.style.top = `${Math.max(8, top)}px`;
-      return true;
-    }
-    function sidebarTrashEntryFromEvent(event) {
-      if (!isRepositorySidebarMode())
-        return null;
-      const row = event.target?.closest("#filelist li");
-      if (!row)
-        return null;
-      const path = row.dataset.path || row.dataset.dirpath || "";
-      if (!path)
-        return null;
-      return {
-        path,
-        type: row.dataset.type,
-        children_omitted_reason: row.dataset.childrenOmittedReason
-      };
-    }
-    function handleSidebarContextMenu(event) {
-      const entry = sidebarTrashEntryFromEvent(event);
-      if (!entry)
-        return;
-      if (showRepoContextMenu(event, entry, REPO_SIDEBAR_REF || "worktree", () => loadRepo()))
-        markActive(entry.path);
-    }
-    function createMoveToTrashButton(path, onDeleted) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-trash-path";
-      button.title = "move folder to Trash";
-      button.setAttribute("aria-label", "move folder to Trash");
-      button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
-      });
-      return button;
-    }
-    function createNewFolderButton(path, onCreated) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-create-dir";
-      button.title = "new folder";
-      button.setAttribute("aria-label", "new folder");
-      button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await requestCreateDirectory(path, onCreated, {
-          focusReturnTarget: button
-        });
-      });
-      return button;
-    }
-    function createOpenPathButton(path, kind, title = "open folder in OS") {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-open-path";
-      button.title = title;
-      button.setAttribute("aria-label", title);
-      button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
-      button.addEventListener("click", (e2) => {
-        e2.stopPropagation();
-        openPathInOs(path, kind, button);
-      });
-      return button;
-    }
-    async function uploadFiles(path, files) {
-      const list2 = Array.from(files);
-      if (!list2.length)
-        return;
-      const label = path || PROJECT_NAME || "repository root";
-      if (!window.confirm("Upload " + list2.length + " file" + (list2.length === 1 ? "" : "s") + " into " + label + "?"))
-        return;
-      const form = new FormData;
-      form.set("dir", path);
-      list2.forEach((file) => {
-        form.append("files", file, file.name);
-      });
-      const res = await fetch("/_upload_files", {
-        method: "POST",
-        headers: { "X-Code-Viewer-Action": "1" },
-        body: form
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      invalidateRepoSidebar();
-      await loadRepo();
-    }
-    function createRepoUploadPanel(path) {
-      const dropPanel = document.createElement("div");
-      dropPanel.className = "gdp-upload-panel";
-      const copy = document.createElement("div");
-      copy.className = "gdp-upload-copy";
-      copy.textContent = `Drop files into ${path || PROJECT_NAME || "repository"}`;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.multiple = true;
-      input.hidden = true;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm";
-      button.textContent = "Upload files";
-      button.addEventListener("click", () => input.click());
-      const error2 = document.createElement("div");
-      error2.className = "gdp-upload-error";
-      const fail = (message = "Upload failed") => {
-        error2.textContent = message;
-        dropPanel.classList.add("failed");
-        setTimeout(() => dropPanel.classList.remove("failed"), 1600);
-      };
-      input.addEventListener("change", async () => {
-        try {
-          if (input.files?.length)
-            await uploadFiles(path, input.files);
-          error2.textContent = "";
-        } catch (uploadError) {
-          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
-        } finally {
-          input.value = "";
-        }
-      });
-      dropPanel.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        dropPanel.classList.add("dragging");
-      });
-      dropPanel.addEventListener("dragleave", () => dropPanel.classList.remove("dragging"));
-      dropPanel.addEventListener("drop", async (event) => {
-        event.preventDefault();
-        dropPanel.classList.remove("dragging");
-        try {
-          const files = event.dataTransfer?.files;
-          if (files?.length)
-            await uploadFiles(path, files);
-          error2.textContent = "";
-        } catch (uploadError) {
-          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
-        }
-      });
-      dropPanel.append(copy, button, input, error2);
-      return dropPanel;
-    }
-    function repoRoute(ref, path) {
-      return {
-        screen: "repo",
-        ref: ref || "worktree",
-        path,
-        range: currentRange()
-      };
-    }
-    function wireRefSelectorInput(input, onPick) {
-      const wrap = input.closest("[data-ref-selector]");
-      wrap?.addEventListener("click", (e2) => {
-        e2.stopPropagation();
-        openPopover(input);
-      });
-      input.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter" || e2.key === " ") {
-          e2.preventDefault();
-          openPopover(input);
-        } else if (e2.key === "Escape") {
-          closePopover();
-          input.blur();
-        }
-      });
-      if (onPick)
-        input.addEventListener("change", () => onPick(input.value || "worktree"));
-    }
-    function createRepoBreadcrumb(target, path) {
-      const nav = document.createElement("nav");
-      nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
-      const root = document.createElement("button");
-      root.type = "button";
-      root.className = path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current";
-      root.textContent = PROJECT_NAME || "repository";
-      root.addEventListener("click", () => {
-        setRoute(repoRoute(target, ""));
-        loadRepo();
-      });
-      nav.appendChild(root);
-      const parts = path ? path.split("/") : [];
-      parts.forEach((part, index) => {
-        const sep = document.createElement("span");
-        sep.className = "gdp-file-breadcrumb-sep";
-        sep.textContent = "/";
-        nav.appendChild(sep);
-        const currentPath = parts.slice(0, index + 1).join("/");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = index === parts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
-        button.textContent = part;
-        button.disabled = index === parts.length - 1;
-        button.addEventListener("click", () => {
-          setRoute(repoRoute(target, currentPath));
-          loadRepo();
-        });
-        nav.appendChild(button);
-      });
-      return nav;
-    }
-    async function renderRepo(meta) {
-      setProjectName(meta.project || "");
-      setPageMode();
-      removeStandaloneSource();
-      $("#empty").classList.add("hidden");
-      $("#diff").replaceChildren();
-      if (!isRepoSidebarReusable(meta.ref))
-        $("#totals").textContent = "";
-      STATE.files = [];
-      LOAD_QUEUE.length = 0;
-      renderRepoBlobSidebar(meta.path || "", meta.ref);
-      const target = $("#diff");
-      const shell = document.createElement("section");
-      shell.className = "gdp-repo-shell";
-      const toolbar = document.createElement("div");
-      toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
-      const pathHeader = document.createElement("div");
-      pathHeader.className = "gdp-file-detail-path";
-      pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
-      if (meta.path)
-        pathHeader.appendChild(createCopyPathButton(meta.path));
-      pathHeader.appendChild(createOpenPathButton(meta.path || "", "directory", "open this folder in OS"));
-      toolbar.appendChild(pathHeader);
-      if (canTrashWorktreeRef(meta.ref)) {
-        toolbar.appendChild(createNewFolderButton(meta.path || "", () => loadRepo()));
-        if (meta.path) {
-          toolbar.appendChild(createMoveToTrashButton(meta.path, () => {
-            const parent = meta.path.split("/").slice(0, -1).join("/");
-            setRoute(repoRoute(meta.ref, parent));
-            loadRepo();
-          }));
-        }
-      }
-      shell.appendChild(toolbar);
-      const listCard = document.createElement("section");
-      listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
-      const listWrapper = document.createElement("div");
-      listWrapper.className = "d2h-file-wrapper";
-      if (meta.ref === "worktree" || meta.ref === "") {
-        listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
-      }
-      const sortHost = document.createElement("div");
-      sortHost.className = "gdp-repo-sort-host";
-      const list2 = document.createElement("div");
-      list2.className = "gdp-source-viewer gdp-repo-file-list";
-      const renderRepoRows = (focusSortKey) => {
-        sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
-        if (focusSortKey) {
-          sortHost.querySelector(`[data-repo-sort="${focusSortKey}"]`)?.focus();
-        }
-        list2.replaceChildren();
-        if (meta.path) {
-          const parent = meta.path.split("/").slice(0, -1).join("/");
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = "gdp-repo-row parent";
-          const parentIcon = document.createElement("span");
-          parentIcon.className = "dir-icon";
-          setFolderIcon(parentIcon, false);
-          const parentName = document.createElement("span");
-          parentName.className = "name";
-          parentName.textContent = "..";
-          const parentKind = document.createElement("span");
-          parentKind.className = "meta";
-          parentKind.textContent = "";
-          const parentSize = document.createElement("span");
-          parentSize.className = "size";
-          row.append(parentIcon, parentName, parentKind, parentSize);
-          row.addEventListener("click", () => {
-            setRoute(repoRoute(meta.ref, parent));
-            loadRepo();
-          });
-          list2.appendChild(row);
-        }
-        sortedRepoEntries(meta.entries).forEach((entry) => {
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = `gdp-repo-row ${entry.type}`;
-          const icon = document.createElement("span");
-          icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
-          if (entry.type === "tree")
-            setFolderIcon(icon, true);
-          else
-            icon.innerHTML = fileEntryIcon();
-          const name = document.createElement("span");
-          name.className = "name";
-          name.textContent = entry.name;
-          const metaBlock = createRepoEntryMeta(entry);
-          const size = createRepoEntrySize(entry);
-          row.append(icon, name, metaBlock, size);
-          row.addEventListener("click", () => {
-            if (entry.type === "tree") {
-              setRoute(repoRoute(meta.ref, entry.path));
-              loadRepo();
-            } else if (entry.type === "blob") {
-              setRoute({
-                screen: "file",
-                path: entry.path,
-                ref: meta.ref,
-                view: "blob",
-                range: currentRange()
-              });
-              renderStandaloneSource({ path: entry.path, ref: meta.ref });
-            }
-          });
-          row.addEventListener("contextmenu", (event) => showRepoContextMenu(event, entry, meta.ref, () => loadRepo()));
-          list2.appendChild(row);
-        });
-        if (!meta.entries.length) {
-          const empty = document.createElement("div");
-          empty.className = "gdp-repo-empty";
-          empty.textContent = "No files in this directory.";
-          list2.appendChild(empty);
-        }
-      };
-      listWrapper.appendChild(sortHost);
-      renderRepoRows();
-      listWrapper.appendChild(list2);
-      listCard.appendChild(listWrapper);
-      shell.appendChild(listCard);
-      if (meta.readme?.text) {
-        const readme = document.createElement("section");
-        readme.className = "gdp-file-shell loaded gdp-repo-readme";
-        const wrapper = document.createElement("div");
-        wrapper.className = "d2h-file-wrapper";
-        const readmeHeader = document.createElement("div");
-        readmeHeader.className = "d2h-file-header";
-        const nameWrapper = document.createElement("div");
-        nameWrapper.className = "d2h-file-name-wrapper";
-        const icon = document.createElement("span");
-        icon.className = "d2h-icon-wrapper";
-        icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
-        const name = document.createElement("span");
-        name.className = "d2h-file-name";
-        name.textContent = meta.readme.path;
-        nameWrapper.append(icon, name);
-        readmeHeader.appendChild(nameWrapper);
-        wrapper.appendChild(readmeHeader);
-        try {
-          wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
-            syntaxHighlight: STATE.syntaxHighlight,
-            onNavigateMarkdown: (path, ref) => {
-              setRoute({
-                screen: "file",
-                path,
-                ref,
-                view: "blob",
-                range: currentRange()
-              });
-              renderStandaloneSource({ path, ref });
-            }
-          }));
-        } catch {
-          const fallback = document.createElement("pre");
-          fallback.className = "gdp-markdown-fallback";
-          fallback.textContent = meta.readme.text;
-          wrapper.appendChild(fallback);
-        }
-        readme.appendChild(wrapper);
-        shell.appendChild(readme);
-      }
-      target.appendChild(shell);
-      placeSidebarToggle();
-    }
-    function renderRepoBlobSidebar(currentPath, ref) {
-      syncRepoTargetInput(ref);
-      const normalizedRef = ref || "worktree";
-      if (isRepoSidebarReusable(normalizedRef)) {
-        activateRepoSidebarPath(currentPath);
-        return Promise.resolve();
-      }
-      if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
-        return REPO_SIDEBAR_LOAD.then(() => {
-          activateRepoSidebarPath(currentPath);
-        });
-      }
-      const params = new URLSearchParams;
-      params.set("ref", normalizedRef);
-      params.set("recursive", "1");
-      appendScopeParams(params);
-      REPO_SIDEBAR_LOAD_REF = normalizedRef;
-      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
-        if (!r2.ok)
-          throw new Error("failed to load repository tree");
-        return r2.json();
-      })).then((meta) => {
-        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
-        if ((activeRepoRef || "worktree") !== normalizedRef)
-          return;
-        const files = meta.entries.map((entry, index) => ({
-          order: index + 1,
-          path: entry.path,
-          display_path: entry.path,
-          type: entry.type,
-          children_omitted: entry.children_omitted,
-          children_omitted_reason: entry.children_omitted_reason
-        }));
-        REPO_SIDEBAR_REF = normalizedRef;
-        renderSidebar(files, (file) => {
-          if (file.type === "tree") {
-            setRoute(repoRoute(normalizedRef, file.path));
-            loadRepo();
-            return;
-          }
-          setRoute({
-            screen: "file",
-            path: file.path,
-            ref: normalizedRef,
-            view: "blob",
-            range: currentRange()
-          });
-          renderStandaloneSource({ path: file.path, ref: normalizedRef });
-        });
-        activateRepoSidebarPath(currentPath);
-      }).catch(() => {
-        REPO_SIDEBAR_REF = null;
-        renderSidebar([], undefined);
-        $("#totals").textContent = "Cannot load tree";
-      }).finally(() => {
-        if (REPO_SIDEBAR_LOAD === load2) {
-          REPO_SIDEBAR_LOAD_REF = null;
-          REPO_SIDEBAR_LOAD = null;
-        }
-      });
-      REPO_SIDEBAR_LOAD = load2;
-      return load2;
-    }
-    function activateRepoSidebarPath(currentPath) {
-      markActive(currentPath, { reveal: true });
-      applyFilter();
-      const row = SIDEBAR_ROW_BY_PATH.get(currentPath);
-      if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
-        ensureVirtualSidebarDirLoaded(row.dir).then(() => {
-          if (SIDEBAR_VIRTUAL_ACTIVE_PATH === currentPath) {
-            rerenderVirtualSidebar();
-            scrollVirtualSidebarPathIntoView(currentPath);
-          }
-        });
-    }
-    function createPlaceholder(f2) {
-      const card = document.createElement("div");
-      card.className = "gdp-file-shell pending";
-      card.dataset.path = f2.path;
-      card.dataset.key = f2.key || f2.path;
-      card.dataset.sizeClass = f2.size_class || "small";
-      card.dataset.status = f2.status || "M";
-      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
-      if (f2.estimated_height_px) {
-        card.style.minHeight = `${f2.estimated_height_px}px`;
-      }
-      const head = document.createElement("div");
-      head.className = "gdp-shell-header";
-      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + '</span><span class="path">' + escapeHtml2(f2.display_path || f2.path) + '</span><span class="stats"><span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + '</span></span><span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
-      card.appendChild(head);
-      const body = document.createElement("div");
-      body.className = "gdp-shell-body";
-      card.appendChild(body);
-      return card;
-    }
-    function setupLazyObserver() {
-      if (lazyObserver)
-        lazyObserver.disconnect();
-      lazyObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting)
-            return;
-          const card = entry.target;
-          if (card.classList.contains("loaded") || card.classList.contains("loading"))
-            return;
-          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-          if (!f2)
-            return;
-          enqueueLoad(f2, card, 0);
-        });
-      }, { rootMargin: "1200px 0px 1600px 0px" });
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
-        lazyObserver.observe(c2);
-      });
-    }
-    window.addEventListener("scroll", () => enqueueInitialLoads(), {
-      passive: true
-    });
-    window.addEventListener("resize", () => {
-      enqueueInitialLoads();
-      syncSidebarHeaderHeight();
-    }, { passive: true });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden)
-        enqueueInitialLoads();
-    });
-    function enqueueInitialLoads() {
-      const viewportBottom = window.innerHeight + 1600;
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
-        const rect = card.getBoundingClientRect();
-        if (rect.top > viewportBottom)
-          return;
-        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-        if (f2)
-          enqueueLoad(f2, card, 0);
-      });
-    }
-    function enqueueLoad(file, card, priority) {
-      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
-        renderManualLoadPlaceholder(card, file);
-        return;
-      }
-      if (LOAD_QUEUE.find((item) => item.card === card))
-        return;
-      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
-      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
-      pumpQueue();
-    }
-    function pumpQueue() {
-      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
-        const item = LOAD_QUEUE.shift();
-        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
-          continue;
-        ACTIVE_LOADS++;
-        loadFile(item.file, item.card).finally(() => {
-          ACTIVE_LOADS--;
-          pumpQueue();
-        });
-      }
-    }
-    function manualLoadReason(file) {
-      const path = file.path || "";
-      if (file.size_class === "huge")
-        return "huge diff";
-      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
-        return "minified or bundled file";
-      if (/\.map$/i.test(path))
-        return "source map";
-      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
-        return "generated or vendored path";
-      return null;
-    }
-    function renderManualLoadPlaceholder(card, file) {
-      if (card.dataset.manualRendered === "1")
-        return;
-      card.dataset.manualRendered = "1";
-      card.classList.remove("loading");
-      card.classList.add("pending", "manual-load");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = true;
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-manual-load";
-      const note = document.createElement("div");
-      note.className = "gdp-manual-note";
-      note.textContent = `${manualLoadReason(file)} - click to load diff`;
-      const previewBtn = document.createElement("button");
-      previewBtn.className = "gdp-show-full";
-      previewBtn.textContent = "Load preview";
-      previewBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "preview";
-        card.classList.remove("manual-load");
-        loadFile(file, card, buildPreviewUrl(file, 3));
-      });
-      const openFileBtn = document.createElement("button");
-      openFileBtn.className = "gdp-show-full";
-      openFileBtn.textContent = "Open as file";
-      openFileBtn.title = "Open this file in the virtualized source viewer";
-      openFileBtn.addEventListener("click", () => {
-        const target = fileSourceTarget(file);
-        setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          range: currentRange()
-        });
-        applySourceRouteToShell();
-      });
-      const fullBtn = document.createElement("button");
-      fullBtn.className = "gdp-show-full secondary";
-      fullBtn.textContent = "Load full diff";
-      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
-      fullBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "full";
-        card.classList.remove("manual-load");
-        loadFile(file, card, file.load_url);
-      });
-      wrap.appendChild(note);
-      if (file.status === "A")
-        wrap.appendChild(openFileBtn);
-      wrap.appendChild(previewBtn);
-      wrap.appendChild(fullBtn);
-      body.appendChild(wrap);
-    }
-    function nextIdle(timeout = 500) {
-      return new Promise((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (done)
-            return;
-          done = true;
-          resolve();
-        };
-        const ric = window.requestIdleCallback;
-        if (typeof ric === "function") {
-          ric(finish, { timeout });
-        } else {
-          requestAnimationFrame(finish);
-          setTimeout(finish, 50);
-        }
-      });
-    }
-    function loadFile(file, card, urlOverride) {
-      card.classList.remove("pending");
-      card.classList.add("loading");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = false;
-      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
-      const myGen = SERVER_GENERATION;
-      const myReq = ++CLIENT_REQ_SEQ;
-      card.dataset.reqId = String(myReq);
-      const retryStale = () => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("pending");
-        if (indicator)
-          indicator.hidden = true;
-        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
-        if (fresh && card.isConnected)
-          enqueueLoad(fresh, card, 0);
-      };
-      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        if (myGen !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        if (data.generation && data.generation !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        await nextIdle();
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        renderFile(file, data, card);
-      }).catch(() => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("error");
-        const body = card.querySelector(".gdp-shell-body");
-        if (!body)
-          return;
-        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
-        const btn = body.querySelector(".retry");
-        if (btn)
-          btn.addEventListener("click", () => {
-            card.classList.remove("error");
-            card.classList.add("pending");
-            body.innerHTML = "";
-            enqueueLoad(file, card, 1);
-          });
-      });
-    }
-    function mountDiff(card, file, data) {
-      const head = card.querySelector(".gdp-shell-header");
-      if (head)
-        head.style.display = "none";
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      if (!data.diff?.trim()) {
-        body.innerHTML = '<div class="gdp-info">No content</div>';
-        return;
-      }
-      const layout = file.force_layout || STATE.layout;
-      const hljsRef = getHljs();
-      const ui = new Diff2HtmlUI(body, data.diff, {
-        drawFileList: false,
-        matching: "lines",
-        outputFormat: layout,
-        synchronisedScroll: true,
-        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
-        fileListToggle: false,
-        fileContentToggle: false
-      }, hljsRef);
-      ui.draw();
-      if (STATE.ignoreWs)
-        suppressWhitespaceOnlyInlineHighlights(body);
-      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
-        ui.highlightCode();
-      enhanceMediaCard(file, card);
-      syncSideScrollCard(card);
-      appendStatSquaresToHeader(card, file);
-      setupHunkExpand(card, file);
-    }
-    function parseHunkHeader(text2) {
-      const m = (text2 || "").match(/@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
-      if (!m)
-        return null;
-      return {
-        oldStart: +m[1],
-        oldCount: m[2] ? +m[2] : 1,
-        newStart: +m[3],
-        newCount: m[4] ? +m[4] : 1
-      };
-    }
-    function nextNewLine(hunk) {
-      return hunk.newStart + hunk.newCount;
-    }
-    function nextOldLine(hunk) {
-      return hunk.oldStart + hunk.oldCount;
-    }
-    function setupHunkExpand(card, file) {
-      if (file.binary)
-        return;
-      if (file.media_kind)
-        return;
-      const infoRows = [];
-      const tables = card.querySelectorAll("table.d2h-diff-table");
-      if (tables.length === 0)
-        return;
-      const perTable = [];
-      tables.forEach((tbl) => {
-        const arr = [];
-        tbl.querySelectorAll("tr").forEach((tr) => {
-          const info = tr.querySelector("td.d2h-info:not(.d2h-code-linenumber):not(.d2h-code-side-linenumber)");
-          if (!info)
-            return;
-          const txt = (info.textContent || "").trim();
-          arr.push({
-            tr,
-            info,
-            hunk: parseHunkHeader(txt)
-          });
-        });
-        perTable.push(arr);
-      });
-      const base2 = perTable.find((arr) => arr.some((x) => x.hunk)) || perTable[0] || [];
-      const usedTrs = new WeakSet;
-      base2.forEach((baseItem) => {
-        const top = baseItem.tr.getBoundingClientRect().top;
-        const group = perTable.map((arr, tableIndex) => {
-          let best = null, bestD = Infinity;
-          for (const item of arr) {
-            if (usedTrs.has(item.tr))
-              continue;
-            const d2 = Math.abs(item.tr.getBoundingClientRect().top - top);
-            if (d2 < bestD) {
-              best = item;
-              bestD = d2;
-            }
-          }
-          if (!best || bestD >= 12)
-            return null;
-          usedTrs.add(best.tr);
-          return Object.assign({ sideIndex: tableIndex }, best);
-        }).filter(Boolean);
-        if (!group.length)
-          return;
-        const parsed = group.find((g) => g.hunk) || group[0];
-        if (!parsed.hunk)
-          return;
-        group.forEach((g) => {
-          g.tr.classList.add("gdp-hunk-row");
-        });
-        infoRows.push({
-          tr: parsed.tr,
-          info: parsed.info,
-          hunk: parsed.hunk,
-          siblings: group,
-          prevHunkEndNew: 0,
-          prevHunkEndOld: 0
-        });
-      });
-      for (let i2 = 1;i2 < infoRows.length; i2++) {
-        const prev = infoRows[i2 - 1].hunk;
-        infoRows[i2].prevHunkEndNew = nextNewLine(prev);
-        infoRows[i2].prevHunkEndOld = nextOldLine(prev);
-      }
-      const ref = STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
-      const refPath = encodeURIComponent(file.path);
-      for (const item of infoRows) {
-        attachExpandControls(item, file, ref, refPath);
-      }
-      const trailingIndex = window.GdpExpandLogic.trailingExpandTargetIndex(infoRows.length);
-      if (trailingIndex != null) {
-        probeAndAttachTrailingExpandControls(infoRows[trailingIndex], file, ref, refPath);
-      }
-    }
-    function attachExpandControls(item, file, ref, refPath) {
-      const { hunk, prevHunkEndNew, prevHunkEndOld } = item;
-      const fullGapStart = Math.max(1, prevHunkEndNew);
-      const fullGapEnd = hunk.newStart - 1;
-      if (fullGapStart > fullGapEnd) {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.style.display = "none";
-        }
-        return;
-      }
-      const L = window.GdpExpandLogic;
-      if (item.topExpandedStart == null || item.bottomExpandedEnd == null) {
-        const init = L.initExpandState(prevHunkEndNew, hunk.newStart);
-        item.topExpandedStart = init.topExpandedStart;
-        item.bottomExpandedEnd = init.bottomExpandedEnd;
-      }
-      const gap = L.remainingGap({
-        topExpandedStart: item.topExpandedStart,
-        bottomExpandedEnd: item.bottomExpandedEnd
-      }, prevHunkEndNew);
-      if (!gap) {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.style.display = "none";
-        }
-        return;
-      }
-      const remainingStart = gap.start;
-      const remainingEnd = gap.end;
-      const setBusy = (busy) => {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.querySelectorAll(".gdp-expand-btn").forEach((b2) => {
-            b2.disabled = busy;
-          });
-        }
-      };
-      const fetchAndInsert = (start, end, dir) => {
-        if (start < 1)
-          start = 1;
-        if (end < start)
-          return Promise.resolve();
-        setBusy(true);
-        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
-        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          if (!data?.lines) {
-            setBusy(false);
-            return;
-          }
-          const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
-          const card = item.tr.closest(".d2h-file-wrapper");
-          const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
-          sibs.forEach((sib) => {
-            insertContextRows(sib.tr, data.lines, start, oldStartForGap, dir, sib.sideIndex || 0);
-          });
-          if (card)
-            highlightInsertedSpans(card, file);
-          if (dir === "after")
-            item.topExpandedStart = start;
-          else
-            item.bottomExpandedEnd = end;
-          for (const sib of item.siblings || [{ tr: item.tr }]) {
-            const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
-            const old = ln?.querySelector(".gdp-expand-stack");
-            if (old)
-              old.remove();
-          }
-          attachExpandControls(item, file, ref, refPath);
-        }).catch(() => {
-          setBusy(false);
-        });
-      };
-      const STEP = 20;
-      const remainingSize = remainingEnd - remainingStart + 1;
-      const isFirst = prevHunkEndNew === 0;
-      const buildStack = () => {
-        const buttons = [];
-        if (isFirst) {
-          buttons.push({
-            direction: "up",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
-          });
-        } else {
-          buttons.push({
-            direction: "up",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), "before")
-          });
-          buttons.push({
-            direction: "down",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
-          });
-        }
-        return createExpandStack(buttons);
-      };
-      let expandFullyStarted = false;
-      const expandFully = () => {
-        if (expandFullyStarted)
-          return Promise.resolve();
-        expandFullyStarted = true;
-        return fetchAndInsert(remainingStart, remainingEnd, "after");
-      };
-      const siblings = item.siblings || [{ tr: item.tr }];
-      siblings.forEach((sib) => {
-        const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
-        if (ln && !ln.querySelector(".gdp-expand-stack")) {
-          const stack = buildStack();
-          stack._gdpExpandFully = expandFully;
-          ln.appendChild(stack);
-        }
-      });
-      const firstSib = siblings[0];
-      if (firstSib) {
-        syncExpandRowHeights(siblings.map((sib) => sib.tr), firstSib.tr);
-      }
-    }
-    const EXPAND_ICON_PATHS = {
-      up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
-      down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z"
-    };
-    function createExpandStack(buttons) {
-      const stack = document.createElement("div");
-      stack.className = "gdp-expand-stack";
-      buttons.forEach((spec) => {
-        const button = document.createElement("button");
-        button.className = "gdp-expand-btn";
-        button.title = spec.title;
-        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
-        button.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          if (button.disabled)
-            return;
-          spec.onClick();
-        });
-        stack.appendChild(button);
-      });
-      return stack;
-    }
-    function syncExpandRowHeights(rows, stackRow) {
-      const syncHeight = () => {
-        const stack = stackRow.querySelector(".gdp-expand-stack");
-        const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
-        rows.forEach((row) => {
-          row.style.setProperty("height", `${targetH}px`, "important");
-        });
-      };
-      requestAnimationFrame(syncHeight);
-      setTimeout(syncHeight, 100);
-    }
-    function attachTrailingExpandControls(item, file, ref, refPath) {
-      const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
-      if (hasTrailingRow)
-        return;
-      const STEP = 20;
-      let nextNewStart = nextNewLine(item.hunk);
-      let nextOldStart = nextOldLine(item.hunk);
-      const rows = (item.siblings || [{ tr: item.tr, sideIndex: 0 }]).map((sib) => {
-        const tbody = sib.tr.parentElement;
-        if (!tbody)
-          return null;
-        const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
-        const tr = document.createElement("tr");
-        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
-        const ln = document.createElement("td");
-        ln.className = isSplit ? "d2h-code-side-linenumber d2h-info" : "d2h-code-linenumber d2h-info";
-        const info = document.createElement("td");
-        info.className = "d2h-info";
-        const spacer = document.createElement("div");
-        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
-        info.appendChild(spacer);
-        tr.appendChild(ln);
-        tr.appendChild(info);
-        tbody.appendChild(tr);
-        return { tr, ln, sideIndex: sib.sideIndex || 0 };
-      }).filter(Boolean);
-      if (!rows.length)
-        return;
-      const setBusy = (busy) => {
-        rows.forEach((row) => {
-          row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
-            btn.disabled = busy;
-          });
-        });
-      };
-      const fetchAndInsert = (step = STEP) => {
-        const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, step);
-        const myGen = SERVER_GENERATION;
-        setBusy(true);
-        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
-        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          if (myGen !== SERVER_GENERATION || data.generation && data.generation !== SERVER_GENERATION) {
-            setBusy(false);
-            return;
-          }
-          if (!item.tr.isConnected)
-            return;
-          const lines = data?.lines || [];
-          if (!lines.length) {
-            rows.forEach((row) => {
-              row.tr.remove();
-            });
-            return;
-          }
-          const card = item.tr.closest(".d2h-file-wrapper");
-          rows.forEach((row) => {
-            insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
-          });
-          const next = window.GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, step);
-          nextNewStart = next.newStart;
-          nextOldStart = next.oldStart;
-          if (card)
-            highlightInsertedSpans(card, file);
-          if (next.eof) {
-            rows.forEach((row) => {
-              row.tr.remove();
-            });
-            return;
-          }
-          setBusy(false);
-        }).catch(() => {
-          setBusy(false);
-        });
-      };
-      let expandFullyStarted = false;
-      const expandFully = () => {
-        if (expandFullyStarted)
-          return Promise.resolve();
-        expandFullyStarted = true;
-        return fetchAndInsert(1e5);
-      };
-      rows.forEach((row) => {
-        const stack = createExpandStack([
-          {
-            direction: "down",
-            title: "Show more lines",
-            onClick: () => void fetchAndInsert()
-          }
-        ]);
-        stack._gdpExpandFully = expandFully;
-        row.ln.appendChild(stack);
-      });
-      syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
-    }
-    function probeAndAttachTrailingExpandControls(item, file, ref, refPath) {
-      const start = nextNewLine(item.hunk);
-      const myGen = SERVER_GENERATION;
-      const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + start;
-      trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-        if (myGen !== SERVER_GENERATION)
-          return;
-        if (data.generation && data.generation !== SERVER_GENERATION)
-          return;
-        if (!item.tr.isConnected)
-          return;
-        const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
-        if (hasTrailingRow)
-          return;
-        if (!window.GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0))
-          return;
-        attachTrailingExpandControls(item, file, ref, refPath);
-      }).catch(() => {});
-    }
-    function insertContextRows(targetTr, lines, newStart, oldStart, dir, sideIndex) {
-      const tbody = targetTr.parentElement;
-      if (!tbody)
-        return;
-      const anchor = dir === "after" ? targetTr.nextElementSibling : targetTr;
-      const isSplit = !!targetTr.querySelector("td.d2h-code-side-linenumber");
-      const frag = document.createDocumentFragment();
-      for (let i2 = 0;i2 < lines.length; i2++) {
-        const tr = document.createElement("tr");
-        tr.className = "gdp-inserted-ctx";
-        if (dir)
-          tr.dataset.gdpDir = dir;
-        let lnHtml;
-        if (isSplit) {
-          const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
-          lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
-        } else {
-          lnHtml = '<td class="d2h-code-linenumber d2h-cntx"><div class="line-num1">' + (oldStart + i2) + '</div><div class="line-num2">' + (newStart + i2) + "</div></td>";
-        }
-        tr.innerHTML = lnHtml + '<td class="d2h-cntx"><div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '"><span class="d2h-code-line-prefix">&nbsp;</span><span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span></div></td>";
-        frag.appendChild(tr);
-      }
-      tbody.insertBefore(frag, anchor);
-    }
-    function escapeHtmlText(s2) {
-      return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    function setFileCollapsed(card, collapsed) {
-      card.classList.toggle("gdp-file-collapsed", collapsed);
-      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
-        body.classList.toggle("d2h-d-none", collapsed);
-      });
-      const button = card.querySelector(".gdp-file-toggle");
-      if (button) {
-        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        button.title = collapsed ? "Expand file" : "Collapse file";
-      }
-      const unfold = card.querySelector(".gdp-file-unfold");
-      if (unfold)
-        unfold.disabled = collapsed;
-      const viewFile = card.querySelector(".gdp-view-file");
-      if (viewFile)
-        viewFile.disabled = collapsed;
-    }
-    function setViewFileButtonState(button, sourceMode) {
-      if (!button)
-        return;
-      button.classList.add("gdp-btn", "gdp-btn-sm");
-      button.textContent = sourceMode ? "View Diff" : "View File";
-      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
-      button.title = sourceMode ? "View diff" : "View file";
     }
     function renderSourceLoading(card, target, onCancel) {
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
@@ -11208,16 +12983,6 @@ ${frontmatter.yaml}
       else
         card.appendChild(view);
     }
-    function isPreviewableSource(path) {
-      return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
-    }
-    function sourcePreviewKind(path) {
-      if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
-        return "markdown";
-      if (/\.(html|htm)$/i.test(path))
-        return "html";
-      return null;
-    }
     function renderHtmlPreview(target, html) {
       const preview = document.createElement("div");
       preview.className = "gdp-html-preview";
@@ -11226,503 +12991,6 @@ ${frontmatter.yaml}
       frame.srcdoc = html;
       preview.appendChild(frame);
       return preview;
-    }
-    const EXT_TO_LANG = {
-      js: "javascript",
-      mjs: "javascript",
-      cjs: "javascript",
-      ts: "typescript",
-      tsx: "typescript",
-      jsx: "javascript",
-      py: "python",
-      rb: "ruby",
-      go: "go",
-      rs: "rust",
-      java: "java",
-      kt: "kotlin",
-      swift: "swift",
-      c: "c",
-      h: "c",
-      cc: "cpp",
-      cpp: "cpp",
-      hpp: "cpp",
-      cs: "csharp",
-      php: "php",
-      lua: "lua",
-      sh: "bash",
-      bash: "bash",
-      zsh: "bash",
-      fish: "bash",
-      sql: "sql",
-      json: "json",
-      yaml: "yaml",
-      yml: "yaml",
-      toml: "toml",
-      tf: "terraform",
-      tfvars: "terraform",
-      hcl: "terraform",
-      xml: "xml",
-      html: "xml",
-      vue: "xml",
-      css: "css",
-      scss: "scss",
-      md: "markdown",
-      dockerfile: "dockerfile",
-      proto: "protobuf",
-      gradle: "gradle",
-      properties: "properties",
-      patch: "diff",
-      diff: "diff",
-      nix: "nix",
-      cue: "cue",
-      rego: "rego",
-      bicep: "bicep",
-      bazel: "starlark",
-      bzl: "starlark",
-      cmake: "cmake",
-      groovy: "groovy",
-      dart: "dart",
-      scala: "scala",
-      clj: "clojure",
-      cljs: "clojure",
-      cljc: "clojure",
-      edn: "clojure",
-      ex: "elixir",
-      exs: "elixir",
-      erl: "erlang",
-      hrl: "erlang",
-      hs: "haskell",
-      lhs: "haskell",
-      ml: "ocaml",
-      mli: "ocaml",
-      jl: "julia",
-      r: "r",
-      rmd: "r",
-      pl: "perl",
-      pm: "perl",
-      tcl: "tcl",
-      vim: "vim",
-      f: "fortran",
-      f90: "fortran",
-      m: "objective-c",
-      mm: "objective-cpp",
-      tex: "tex",
-      bib: "bibtex",
-      rst: "rst"
-    };
-    const TEXT_SOURCE_EXTENSIONS = new Set([
-      ...Object.keys(EXT_TO_LANG),
-      "txt",
-      "md",
-      "markdown",
-      "mdown",
-      "mkdn",
-      "mdx",
-      "json",
-      "jsonc",
-      "csv",
-      "tsv",
-      "yaml",
-      "yml",
-      "toml",
-      "hcl",
-      "tf",
-      "tfvars",
-      "tfstate",
-      "xml",
-      "html",
-      "htm",
-      "css",
-      "scss",
-      "sass",
-      "less",
-      "js",
-      "jsx",
-      "mjs",
-      "cjs",
-      "ts",
-      "tsx",
-      "mts",
-      "cts",
-      "vue",
-      "svelte",
-      "astro",
-      "rs",
-      "go",
-      "py",
-      "rb",
-      "php",
-      "java",
-      "kt",
-      "kts",
-      "c",
-      "cc",
-      "cpp",
-      "cxx",
-      "h",
-      "hpp",
-      "cs",
-      "swift",
-      "sh",
-      "bash",
-      "zsh",
-      "fish",
-      "ps1",
-      "sql",
-      "graphql",
-      "graphqls",
-      "gql",
-      "ini",
-      "conf",
-      "env",
-      "properties",
-      "gitignore",
-      "dockerignore",
-      "editorconfig",
-      "lock",
-      "log",
-      "patch",
-      "diff",
-      "sum",
-      "mk",
-      "proto",
-      "thrift",
-      "prisma",
-      "gradle",
-      "cmake",
-      "nix",
-      "cue",
-      "rego",
-      "bicep",
-      "bazel",
-      "bzl",
-      "dart",
-      "scala",
-      "clj",
-      "cljs",
-      "cljc",
-      "edn",
-      "ex",
-      "exs",
-      "erl",
-      "hrl",
-      "hs",
-      "lhs",
-      "ml",
-      "mli",
-      "jl",
-      "r",
-      "rmd",
-      "pl",
-      "pm",
-      "tcl",
-      "vim",
-      "groovy",
-      "f",
-      "f90",
-      "m",
-      "mm",
-      "pas",
-      "tex",
-      "bib",
-      "rst",
-      "adoc",
-      "org",
-      "ipynb",
-      "ejs",
-      "hbs",
-      "mustache",
-      "liquid",
-      "pug"
-    ]);
-    const TEXT_SOURCE_FILENAMES = new Set([
-      "readme",
-      "license",
-      "copying",
-      "authors",
-      "contributors",
-      "notice",
-      "changelog",
-      "todo",
-      "manifest",
-      "version",
-      "codeowners",
-      "go.mod",
-      "build.bazel",
-      "workspace.bazel",
-      "module.bazel",
-      "gemfile",
-      "rakefile",
-      "procfile",
-      "brewfile",
-      "gnumakefile",
-      "bsdmakefile",
-      ".gitattributes",
-      ".gitmodules",
-      ".npmrc",
-      ".nvmrc",
-      ".yarnrc",
-      ".prettierrc",
-      ".eslintrc",
-      ".babelrc",
-      ".stylelintrc"
-    ]);
-    const FILENAME_TO_LANG = {
-      dockerfile: "dockerfile",
-      makefile: "makefile",
-      gnumakefile: "makefile",
-      bsdmakefile: "makefile",
-      "go.mod": "go",
-      "build.bazel": "starlark",
-      "workspace.bazel": "starlark",
-      "module.bazel": "starlark"
-    };
-    function sourceFileName(path) {
-      return (path.split("/").pop() || path).toLowerCase();
-    }
-    function sourceFileExtension(name) {
-      const index = name.lastIndexOf(".");
-      return index >= 0 ? name.slice(index + 1) : "";
-    }
-    function isDockerfileName(name) {
-      return /^dockerfile(?:[.-].+)?$/i.test(name);
-    }
-    function isMakefileName(name) {
-      return /^makefile(?:[.-].+)?$/i.test(name);
-    }
-    function sourceDisplayKind(path) {
-      if (isVideo(path))
-        return "video";
-      if (isAudio(path))
-        return "audio";
-      if (isImage(path))
-        return "image";
-      if (/\.pdf$/i.test(path))
-        return "pdf";
-      const name = sourceFileName(path);
-      const ext = sourceFileExtension(name);
-      if (TEXT_SOURCE_EXTENSIONS.has(ext))
-        return "text";
-      if (TEXT_SOURCE_FILENAMES.has(name))
-        return "text";
-      if (isDockerfileName(name) || isMakefileName(name))
-        return "text";
-      return "unsupported";
-    }
-    function formatBytes(bytes) {
-      if (!Number.isFinite(bytes) || bytes < 0)
-        return "";
-      const units = ["B", "KB", "MB", "GB"];
-      let value = bytes;
-      let unit = 0;
-      while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit++;
-      }
-      return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
-    }
-    function formatFileDate(value) {
-      if (!value)
-        return "";
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime()))
-        return "";
-      return date.toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-      });
-    }
-    function createRepoEntryMeta(entry) {
-      const meta = document.createElement("span");
-      meta.className = "meta";
-      const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
-      const created = formatFileDate(entry.created_at);
-      if (entry.type === "tree" && updated) {
-        meta.textContent = updated;
-        if (created)
-          meta.title = `Created ${created}`;
-        return meta;
-      }
-      if (entry.type !== "blob") {
-        meta.textContent = "-";
-        return meta;
-      }
-      meta.textContent = updated ? updated : created ? created : "-";
-      if (created)
-        meta.title = `Created ${created}`;
-      return meta;
-    }
-    function createRepoEntrySize(entry) {
-      const size = document.createElement("span");
-      size.className = "size";
-      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
-      return size;
-    }
-    function repoEntryUpdatedTime(entry) {
-      const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
-      if (!raw)
-        return -1;
-      const time = new Date(raw).getTime();
-      return Number.isNaN(time) ? -1 : time;
-    }
-    function sortedRepoEntries(entries) {
-      const direction = REPO_SORT.direction === "asc" ? 1 : -1;
-      return [...entries].sort((a2, b2) => {
-        if (REPO_SORT.key === "name" && a2.type !== b2.type) {
-          if (a2.type === "tree")
-            return -1;
-          if (b2.type === "tree")
-            return 1;
-        }
-        let result = 0;
-        if (REPO_SORT.key === "updated") {
-          const aTime = repoEntryUpdatedTime(a2);
-          const bTime = repoEntryUpdatedTime(b2);
-          if (aTime < 0 && bTime >= 0)
-            return 1;
-          if (bTime < 0 && aTime >= 0)
-            return -1;
-          result = aTime - bTime;
-        } else if (REPO_SORT.key === "size") {
-          if (a2.size == null && b2.size != null)
-            return 1;
-          if (b2.size == null && a2.size != null)
-            return -1;
-          result = (a2.size ?? 0) - (b2.size ?? 0);
-        } else {
-          result = a2.name.localeCompare(b2.name);
-        }
-        if (result === 0)
-          result = a2.name.localeCompare(b2.name);
-        return result * direction;
-      });
-    }
-    function createRepoSortHeader(onSortChange) {
-      const header = document.createElement("div");
-      header.className = "gdp-repo-sort-header";
-      const spacer = document.createElement("span");
-      spacer.className = "gdp-repo-sort-spacer";
-      header.appendChild(spacer);
-      const columns = [
-        { key: "name", label: "Name" },
-        { key: "updated", label: "Updated" },
-        { key: "size", label: "Size" }
-      ];
-      columns.forEach((column) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.dataset.repoSort = column.key;
-        button.textContent = column.label + (REPO_SORT.key === column.key ? REPO_SORT.direction === "asc" ? " ↑" : " ↓" : "");
-        button.className = REPO_SORT.key === column.key ? "active" : "";
-        button.addEventListener("click", () => {
-          if (REPO_SORT.key === column.key) {
-            REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
-          } else {
-            REPO_SORT = {
-              key: column.key,
-              direction: column.key === "name" ? "asc" : "desc"
-            };
-          }
-          onSortChange(column.key);
-        });
-        header.appendChild(button);
-      });
-      return header;
-    }
-    function humanFileKind(path, mime, fallback) {
-      const ext = (path.split(".").pop() || "").toLowerCase();
-      if (ext === "png")
-        return "PNG image";
-      if (ext === "jpg" || ext === "jpeg")
-        return "JPEG image";
-      if (ext === "gif")
-        return "GIF image";
-      if (ext === "webp")
-        return "WebP image";
-      if (ext === "svg")
-        return "SVG image";
-      if (ext === "pdf")
-        return "PDF document";
-      if (ext === "zip")
-        return "ZIP archive";
-      if (ext === "mp4")
-        return "MP4 video";
-      if (ext === "webm")
-        return "WebM video";
-      if (ext === "mp3")
-        return "MP3 audio";
-      if (ext === "wav")
-        return "WAV audio";
-      if (ext === "ogg")
-        return "Ogg audio";
-      if (ext === "flac")
-        return "FLAC audio";
-      if (ext === "m4a")
-        return "M4A audio";
-      if (ext === "aac")
-        return "AAC audio";
-      if (ext === "opus")
-        return "Opus audio";
-      if (ext === "mid" || ext === "midi")
-        return "MIDI file";
-      if (mime?.startsWith("image/"))
-        return "Image";
-      if (mime?.startsWith("video/"))
-        return "Video";
-      if (mime?.startsWith("audio/"))
-        return "Audio";
-      if (mime === "application/pdf")
-        return "PDF document";
-      if (fallback === "unsupported file")
-        return "Binary file";
-      return fallback.charAt(0).toUpperCase() + fallback.slice(1);
-    }
-    async function loadRawFileInfo(target) {
-      try {
-        const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
-        if (!res.ok)
-          return {};
-        const rawSize = res.headers.get("content-length");
-        const size = rawSize == null ? NaN : Number(rawSize);
-        return {
-          size: rawSize != null && Number.isFinite(size) ? size : undefined,
-          type: res.headers.get("content-type") || undefined,
-          created_at: res.headers.get("x-code-viewer-created-at") || undefined,
-          updated_at: res.headers.get("x-code-viewer-updated-at") || undefined,
-          commit_updated_at: res.headers.get("x-code-viewer-commit-updated-at") || undefined
-        };
-      } catch {
-        return {};
-      }
-    }
-    function createFileDetailMeta(target, meta) {
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-file-detail-meta";
-      const addItem = (label, value) => {
-        if (!value)
-          return;
-        const item = document.createElement("span");
-        item.className = "gdp-file-detail-meta-item";
-        const labelEl = document.createElement("span");
-        labelEl.className = "label";
-        labelEl.textContent = label;
-        const valueEl = document.createElement("span");
-        valueEl.className = "value";
-        valueEl.textContent = value;
-        item.append(labelEl, valueEl);
-        wrap.appendChild(item);
-      };
-      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
-      addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
-      addItem("Created", formatFileDate(meta.created_at));
-      if (!wrap.childElementCount) {
-        wrap.hidden = true;
-        wrap.dataset.path = target.path;
-      }
-      return wrap;
     }
     function createSourceFileInfo(target, kind) {
       const info = document.createElement("div");
@@ -12668,42 +13936,6 @@ ${frontmatter.yaml}
       else
         card.appendChild(view);
     }
-    function createFileBreadcrumb(path, ref) {
-      const nav = document.createElement("nav");
-      nav.className = "gdp-file-breadcrumb";
-      nav.setAttribute("aria-label", "File path");
-      const parts = path.split("/").filter(Boolean);
-      const allParts = PROJECT_NAME ? [PROJECT_NAME, ...parts] : parts;
-      allParts.forEach((part, index) => {
-        if (index > 0) {
-          const sep = document.createElement("span");
-          sep.className = "gdp-file-breadcrumb-sep";
-          sep.textContent = "/";
-          nav.appendChild(sep);
-        }
-        const isCurrent = index === allParts.length - 1;
-        const crumb = document.createElement(isCurrent ? "span" : "button");
-        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
-        crumb.textContent = part;
-        if (!isCurrent && crumb instanceof HTMLButtonElement) {
-          crumb.type = "button";
-          crumb.addEventListener("click", () => {
-            const projectOffset = PROJECT_NAME ? 1 : 0;
-            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
-            setRoute(repoRoute(ref || "worktree", currentPath));
-            loadRepo();
-          });
-        }
-        nav.appendChild(crumb);
-      });
-      if (!allParts.length) {
-        const crumb = document.createElement("span");
-        crumb.className = "gdp-file-breadcrumb-current";
-        crumb.textContent = path;
-        nav.appendChild(crumb);
-      }
-      return nav;
-    }
     async function renderStandaloneSource(target) {
       cancelActiveSourceLoad("navigation");
       const req = ++SOURCE_REQ_SEQ;
@@ -12882,260 +14114,6 @@ ${frontmatter.yaml}
       }
       renderStandaloneSource(target);
     }
-    async function expandAllFileContext(card, file) {
-      if (card.classList.contains("gdp-context-expanded")) {
-        const data = card._diffData;
-        if (!data)
-          return;
-        card.classList.remove("gdp-context-expanded");
-        mountDiff(card, file, data);
-        if (data.truncated && data.mode === "preview")
-          addExpandHunksUI(file, data, card);
-        scheduleIdleHighlight(card, file);
-        setUnfoldButtonState(card.querySelector(".gdp-file-unfold"), false);
-        return;
-      }
-      if (card._diffData && (card._diffData.truncated || card._diffData.mode === "preview")) {
-        await loadFile(file, card, file.load_url);
-      }
-      const button = card.querySelector(".gdp-file-unfold");
-      if (button)
-        button.disabled = true;
-      try {
-        for (let round = 0;round < 20; round++) {
-          const tasks = Array.from(card.querySelectorAll(".gdp-expand-stack")).map((stack) => stack._gdpExpandFully).filter((fn) => !!fn);
-          if (!tasks.length)
-            break;
-          const results = await Promise.all(tasks.map((fn) => fn().then(() => true, () => false)));
-          if (!results.some(Boolean))
-            break;
-        }
-        card.classList.add("gdp-context-expanded");
-        setUnfoldButtonState(button || null, true);
-      } finally {
-        if (button)
-          button.disabled = false;
-      }
-    }
-    function appendStatSquaresToHeader(card, file) {
-      const header = card.querySelector(".d2h-file-header");
-      if (!header)
-        return;
-      if (!header.querySelector(".gdp-file-toggle")) {
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "gdp-file-header-icon gdp-file-toggle";
-        toggle.title = "Collapse file";
-        toggle.setAttribute("aria-expanded", "true");
-        toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-        toggle.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          setFileCollapsed(card, !card.classList.contains("gdp-file-collapsed"));
-        });
-        header.insertBefore(toggle, header.firstChild);
-      }
-      header.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
-        checkbox.checked = STATE.viewedFiles.has(file.path);
-        if (checkbox.dataset.gdpBound !== "1") {
-          checkbox.dataset.gdpBound = "1";
-          checkbox.addEventListener("change", () => setFileViewed(file.path, checkbox.checked));
-        }
-      });
-      if (!header.querySelector(".gdp-copy-path")) {
-        const nameWrapper = header.querySelector(".d2h-file-name-wrapper");
-        const copy = document.createElement("button");
-        copy.type = "button";
-        copy.className = "gdp-file-header-icon gdp-copy-path";
-        copy.title = "copy file path";
-        copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-        copy.addEventListener("click", async (e2) => {
-          e2.stopPropagation();
-          const path = filePathClipboardText(file.path);
-          if (!path)
-            return;
-          try {
-            await navigator.clipboard.writeText(path);
-            copy.classList.add("copied");
-            setTimeout(() => {
-              copy.classList.remove("copied");
-            }, 1200);
-          } catch {
-            copy.classList.add("failed");
-            setTimeout(() => {
-              copy.classList.remove("failed");
-            }, 1200);
-          }
-        });
-        const statusTag = nameWrapper ? nameWrapper.querySelector(".d2h-tag") : null;
-        if (statusTag)
-          statusTag.insertAdjacentElement("afterend", copy);
-        else if (nameWrapper)
-          nameWrapper.insertAdjacentElement("beforeend", copy);
-        else
-          header.insertBefore(copy, header.firstChild);
-      }
-      if (!header.querySelector(".gdp-file-unfold")) {
-        const unfold = document.createElement("button");
-        unfold.type = "button";
-        unfold.className = "gdp-file-header-icon gdp-file-unfold";
-        setUnfoldButtonState(unfold, card.classList.contains("gdp-context-expanded"));
-        unfold.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          expandAllFileContext(card, file);
-        });
-        const copy = header.querySelector(".gdp-copy-path");
-        if (copy)
-          copy.insertAdjacentElement("afterend", unfold);
-        else
-          header.appendChild(unfold);
-      }
-      if (!header.querySelector(".gdp-open-path")) {
-        const unfold = header.querySelector(".gdp-file-unfold");
-        const openPath = createOpenPathButton(file.path, "file-parent", "open parent folder in OS");
-        if (unfold)
-          unfold.insertAdjacentElement("afterend", openPath);
-        else
-          header.appendChild(openPath);
-      }
-      if (!header.querySelector(".gdp-stat-text")) {
-        const stats = document.createElement("span");
-        stats.className = "gdp-stat-text";
-        stats.innerHTML = '<span class="a">+' + (file.additions || 0) + "</span>" + '<span class="d">−' + (file.deletions || 0) + "</span>";
-        header.appendChild(stats);
-      }
-      const total = (file.additions || 0) + (file.deletions || 0);
-      const SEG = 5;
-      let aSeg;
-      let dSeg;
-      if (total === 0) {
-        aSeg = 0;
-        dSeg = 0;
-      } else {
-        aSeg = Math.round(file.additions / total * SEG);
-        dSeg = Math.max(0, SEG - aSeg);
-        if (file.additions > 0 && aSeg === 0)
-          aSeg = 1;
-        if (file.deletions > 0 && dSeg === 0)
-          dSeg = 1;
-        const over = aSeg + dSeg - SEG;
-        if (over > 0)
-          dSeg -= over;
-      }
-      const wrap = document.createElement("span");
-      wrap.className = "gdp-stat-squares";
-      for (let i2 = 0;i2 < SEG; i2++) {
-        const box = document.createElement("span");
-        if (i2 < aSeg)
-          box.className = "sq add";
-        else if (i2 < aSeg + dSeg)
-          box.className = "sq del";
-        else
-          box.className = "sq nu";
-        wrap.appendChild(box);
-      }
-      header.appendChild(wrap);
-      if (!header.querySelector(".gdp-view-file")) {
-        const viewFile = document.createElement("button");
-        viewFile.type = "button";
-        viewFile.className = "gdp-view-file gdp-btn gdp-btn-sm";
-        setViewFileButtonState(viewFile, false);
-        viewFile.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          const target = fileSourceTarget(file);
-          setRoute({
-            screen: "file",
-            path: target.path,
-            ref: target.ref,
-            range: currentRange()
-          });
-          applySourceRouteToShell();
-        });
-        header.appendChild(viewFile);
-      } else {
-        setViewFileButtonState(header.querySelector(".gdp-view-file"), false);
-      }
-    }
-    function renderFile(file, data, card) {
-      card._diffData = data;
-      card._file = file;
-      card.classList.remove("loading", "pending");
-      card.classList.add("loaded");
-      card.style.minHeight = "";
-      mountDiff(card, file, data);
-      applyInlineAnnotations();
-      const focused = applyDiffRouteFocus(card);
-      if (!focused && STATE.route.screen === "diff" && STATE.route.path === file.path && STATE.route.line && !card.classList.contains("gdp-context-expanded")) {
-        expandAllFileContext(card, file).then(() => {
-          applyInlineAnnotations();
-          applyDiffRouteFocus(card);
-        });
-      }
-      if (performance.now() < REANCHOR_UNTIL && STATE.route.screen === "diff" && STATE.route.path !== file.path) {
-        applyDiffRouteFocus();
-      }
-      card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
-      applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
-      if (data.truncated && data.mode === "preview") {
-        addExpandHunksUI(file, data, card);
-      }
-      scheduleIdleHighlight(card, file);
-    }
-    function buildPreviewUrl(file, hunks) {
-      const u2 = new URL(file.load_url, window.location.origin);
-      u2.searchParams.set("mode", "preview");
-      u2.searchParams.set("max_hunks", String(hunks));
-      return u2.pathname + u2.search;
-    }
-    function addExpandHunksUI(file, data, card) {
-      const total = data.hunk_count || 0;
-      const rendered = data.rendered_hunk_count || 0;
-      const remaining = total - rendered;
-      if (remaining <= 0)
-        return;
-      const old = card.querySelector(".gdp-show-full-wrap");
-      if (old)
-        old.remove();
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-show-full-wrap";
-      const step = Math.min(10, remaining);
-      const moreBtn = document.createElement("button");
-      moreBtn.className = "gdp-show-full";
-      moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
-      moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
-      const allBtn = document.createElement("button");
-      allBtn.className = "gdp-show-full secondary";
-      allBtn.textContent = `Show all (${remaining} remaining)`;
-      allBtn.addEventListener("click", () => loadMore(total, true));
-      const note = document.createElement("span");
-      note.className = "gdp-hunk-note";
-      note.textContent = `${rendered} / ${total} hunks shown`;
-      wrap.appendChild(note);
-      wrap.appendChild(moreBtn);
-      wrap.appendChild(allBtn);
-      card.appendChild(wrap);
-      function loadMore(count, full) {
-        moreBtn.disabled = allBtn.disabled = true;
-        moreBtn.textContent = "Loading…";
-        const myGen = SERVER_GENERATION;
-        const url = full ? file.load_url : buildPreviewUrl(file, count);
-        trackLoad(fetch(url).then((r2) => r2.json())).then((next) => {
-          if (myGen !== SERVER_GENERATION) {
-            moreBtn.textContent = "Data changed — reload";
-            moreBtn.disabled = allBtn.disabled = false;
-            return;
-          }
-          wrap.remove();
-          card._diffData = next;
-          mountDiff(card, file, next);
-          if (next.truncated || next.mode === "preview" && next.hunk_count > next.rendered_hunk_count) {
-            addExpandHunksUI(file, next, card);
-          }
-        }).catch(() => {
-          moreBtn.disabled = allBtn.disabled = false;
-          moreBtn.textContent = "Failed — retry";
-        });
-      }
-    }
     function inferLang(path) {
       const name = sourceFileName(path);
       const fileLang = FILENAME_TO_LANG[name];
@@ -13150,207 +14128,931 @@ ${frontmatter.yaml}
         return null;
       return EXT_TO_LANG[m[1].toLowerCase()] || null;
     }
-    function highlightInsertedSpans(card, file) {
-      if (file.size_class === "huge")
-        return;
-      if (!STATE.syntaxHighlight)
-        return;
-      const hljsRef = getHljs();
-      if (!hljsRef?.highlight)
-        return;
-      const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage?.(lang))
-        return;
-      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
-      spans.forEach((s2) => {
-        s2.dataset.gdpHl = "1";
-        const text2 = s2.textContent || "";
-        if (text2.length === 0)
-          return;
-        try {
-          s2.innerHTML = hljsRef.highlight(text2, {
-            language: lang,
-            ignoreIllegals: true
-          }).value;
-          if (!s2.classList.contains("hljs"))
-            s2.classList.add("hljs");
-        } catch (_) {}
-      });
+    function handleVirtualSourcePagingKey(e2, targetEl) {
+      if (e2.__gdpVirtualSourcePagingHandled)
+        return true;
+      if (e2.defaultPrevented || e2.isComposing || isPaletteOpen() || document.querySelector(".mkdp-lightbox"))
+        return false;
+      const editable = isEditableKeyTarget(targetEl);
+      const inVirtualSearch = !!targetEl?.closest(".gdp-source-virtual-search");
+      if (editable && !inVirtualSearch)
+        return false;
+      const key = e2.key.toLowerCase();
+      if (e2.altKey || e2.metaKey)
+        return false;
+      const isPlainPageKey = (key === "pagedown" || key === "pageup") && !e2.ctrlKey && !e2.shiftKey;
+      const isCtrlArrowKey = (key === "arrowdown" || key === "arrowup") && e2.ctrlKey && !e2.shiftKey;
+      if (!isPlainPageKey && !isCtrlArrowKey)
+        return false;
+      const scroller = findMainScrollTarget();
+      if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
+        return false;
+      const pageDown = key === "pagedown" || key === "arrowdown";
+      const pageUp = key === "pageup" || key === "arrowup";
+      if (!pageDown && !pageUp)
+        return false;
+      e2.__gdpVirtualSourcePagingHandled = true;
+      e2.preventDefault();
+      e2.stopPropagation();
+      scrollMainPanel(pageDown ? 1 : -1, e2.repeat, "page");
+      focusMainSurface();
+      return true;
     }
-    function scheduleIdleHighlight(card, file) {
-      if (file.highlight)
+    function handleVirtualSourcePagingKeydown(e2) {
+      handleVirtualSourcePagingKey(e2, e2.target);
+    }
+    return {
+      renderStandaloneSource,
+      applySourceRouteToShell,
+      removeStandaloneSource,
+      cancelActiveSourceLoad,
+      finishSourceLoad,
+      sourceTargetsEqual,
+      sourceTargetFromRoute,
+      fileSourceTarget,
+      scrollStandaloneSourceLine,
+      createSourceTabs,
+      switchSourceTab,
+      sourceLineScrollAmount,
+      hasVisibleSourceCodeSurface,
+      moveSourceCursor,
+      ensureSourceCursor,
+      resetSourceCursorForTarget,
+      syncSourceCursorRows,
+      scrollSourceCursorIntoView,
+      visibleSourceLineFallback,
+      handleVirtualSourcePagingKeydown,
+      openVirtualSourceSearchFromKeyboard,
+      isVirtualSourceDisabled,
+      currentSourceLineTarget,
+      lineTargetStart,
+      lineInSourceTarget,
+      setSourceLineRoute,
+      syncRenderedSourceLineHighlights,
+      renderSourceError,
+      loadSourceShikiHighlighter,
+      sourceShikiLines,
+      shouldVirtualizeSource,
+      inferLang
+    };
+  }
+
+  // web-src/app.ts
+  window.GdpExpandLogic = GdpExpandLogic;
+  (() => {
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const diffCardSelector = (path) => '.gdp-file-shell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(path) : path) + '"]';
+    const HIGHLIGHT_SRC = "/vendor/highlight.js/highlight.min.js";
+    const DEFAULT_RANGE = { from: "HEAD", to: "worktree" };
+    const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
+    let highlightLoadPromise = null;
+    let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
+    let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = [];
+    const UNDO_STACK = [];
+    let PENDING_G_SCOPE = null;
+    let PENDING_G_UNTIL = 0;
+    const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
+    const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
+    const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
+    const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
+      "node_modules",
+      ".venv",
+      "venv",
+      ".next",
+      ".nuxt",
+      ".svelte-kit",
+      ".astro",
+      ".vercel",
+      "dist",
+      "build",
+      "out",
+      "target",
+      ".gradle",
+      "__pycache__",
+      ".pytest_cache",
+      ".tox",
+      ".terraform",
+      ".idea",
+      ".vscode",
+      "vendor",
+      ".cache",
+      "coverage",
+      "DerivedData",
+      "Pods",
+      "bin",
+      "obj"
+    ];
+    const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
+    function scrollMainPanel(direction, repeated = false, unit = "line") {
+      if (moveSourceCursor(direction, unit))
         return;
-      if (file.size_class === "huge")
+      const target = findMainScrollTarget();
+      const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
+      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
+      const behavior = repeated ? "auto" : "smooth";
+      if (target)
+        target.scrollBy({ top, behavior });
+      else
+        window.scrollBy({ top, behavior });
+    }
+    let MAIN_SURFACE_FOCUS_SEQ = 0;
+    function focusMainSurface() {
+      const target = findMainScrollTarget();
+      if (target?.matches("#content .gdp-source-virtual-scroller")) {
+        target.focus({ preventScroll: true });
+        setPanelFocusScope("main");
         return;
-      if (!STATE.syntaxHighlight)
-        return;
-      if (!("requestIdleCallback" in window))
-        return;
-      const hljsRef = getHljs();
-      if (!hljsRef?.highlight)
-        return;
-      const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage?.(lang))
-        return;
-      const work = (deadline) => {
-        const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
-        let i2 = 0;
-        while (i2 < spans.length && deadline.timeRemaining() > 4) {
-          const s2 = spans[i2++];
-          s2.dataset.gdpHl = "1";
-          const text2 = s2.textContent || "";
-          if (text2.length === 0)
-            continue;
-          try {
-            s2.innerHTML = hljsRef.highlight(text2, {
-              language: lang,
-              ignoreIllegals: true
-            }).value;
-            if (!s2.classList.contains("hljs"))
-              s2.classList.add("hljs");
-          } catch (_) {}
-        }
-        if (i2 < spans.length)
-          requestIdleCallback(work, { timeout: 1500 });
+      }
+      focusMainPanel();
+    }
+    function scheduleMainSurfaceFocus() {
+      const seq = ++MAIN_SURFACE_FOCUS_SEQ;
+      const apply = () => {
+        if (seq !== MAIN_SURFACE_FOCUS_SEQ || isPaletteOpen())
+          return;
+        if (isEditableKeyTarget(document.activeElement))
+          return;
+        focusMainSurface();
       };
-      requestIdleCallback(work, { timeout: 2000 });
+      focusMainPanel();
+      queueMicrotask(apply);
+      requestAnimationFrame(apply);
+      setTimeout(apply, 100);
+      setTimeout(apply, 300);
     }
-    function syncSideScrollCard(card) {
-      card.querySelectorAll(".d2h-files-diff").forEach((group) => {
-        const sides = group.querySelectorAll(".d2h-code-wrapper");
-        if (sides.length !== 2)
-          return;
-        const [a2, b2] = sides;
-        let syncing = false;
-        const mirror = (src, dst) => {
-          if (syncing)
-            return;
-          syncing = true;
-          dst.scrollLeft = src.scrollLeft;
-          requestAnimationFrame(() => {
-            syncing = false;
-          });
-        };
-        a2.addEventListener("scroll", () => mirror(a2, b2), { passive: true });
-        b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
-      });
-    }
-    const MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
-    const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-    const VIDEO_RE = /\.(mp4|webm|mov)$/i;
-    const AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
-    function isMedia(p2) {
-      return MEDIA_RE.test(p2);
-    }
-    function isImage(p2) {
-      return IMAGE_RE.test(p2);
-    }
-    function isVideo(p2) {
-      return VIDEO_RE.test(p2);
-    }
-    function isAudio(p2) {
-      return AUDIO_RE.test(p2);
-    }
-    function fileURL(path, ref) {
-      return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
-    }
-    function mediaTag(path, ref) {
-      const url = fileURL(path, ref);
-      if (isVideo(path)) {
-        return `<video src="${url}" controls preload="metadata"></video>`;
-      }
-      if (isAudio(path)) {
-        return `<audio src="${url}" controls preload="metadata"></audio>`;
-      }
-      return `<img src="${url}" alt="" loading="lazy">`;
-    }
-    function enhanceMediaCard(file, card) {
-      const path = file.path;
-      if (!file.media_kind && !isMedia(path))
+    function scrollMainToEdge(edge) {
+      if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
         return;
-      const wrapper = card.querySelector(".d2h-file-wrapper");
-      if (!wrapper)
-        return;
-      const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
-      if (!body)
-        return;
-      const container = document.createElement("div");
-      container.className = "gdp-media";
-      let leftHTML;
-      let rightHTML;
-      if (file.status === "A") {
-        leftHTML = '<div class="media-empty">Not in HEAD</div>';
-        rightHTML = mediaTag(path, "worktree");
-      } else if (file.status === "D") {
-        leftHTML = mediaTag(path, "HEAD");
-        rightHTML = '<div class="media-empty">Deleted</div>';
-      } else {
-        leftHTML = mediaTag(path, "HEAD");
-        rightHTML = mediaTag(path, "worktree");
-      }
-      container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + '</div><div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
-      body.replaceWith(container);
-    }
-    function setupScrollSpy() {
-      const handler = () => {
-        if (handler._raf)
-          return;
-        if (performance.now() < SUPPRESS_SPY_UNTIL)
-          return;
-        handler._raf = requestAnimationFrame(() => {
-          handler._raf = null;
-          if (performance.now() < SUPPRESS_SPY_UNTIL)
-            return;
-          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 56;
-          const scanY = topbarH + 24;
-          const cards = document.querySelectorAll(".gdp-file-shell");
-          for (const w of cards) {
-            const r2 = w.getBoundingClientRect();
-            if (r2.top <= scanY && r2.bottom > scanY) {
-              const text2 = w.dataset.path || "";
-              let best = null, bestLen = 0;
-              STATE.files.forEach((f2) => {
-                if ((text2 === f2.path || text2.endsWith(f2.path)) && f2.path.length > bestLen) {
-                  best = f2.path;
-                  bestLen = f2.path.length;
-                }
-              });
-              if (best) {
-                markActive(best);
-                const recentlyTouched = performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
-                if (!recentlyTouched) {
-                  const li = document.querySelector(`#filelist li[data-path="${CSS.escape(best)}"]`);
-                  if (li) {
-                    const sb = document.querySelector("#sidebar");
-                    if (!sb)
-                      return;
-                    const lr = li.getBoundingClientRect();
-                    const sr = sb.getBoundingClientRect();
-                    if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
-                      li.scrollIntoView({ block: "nearest" });
-                    }
-                  }
-                }
-              }
-              return;
-            }
-          }
+      const target = findMainScrollTarget();
+      if (target) {
+        target.scrollTo({
+          top: edge === "top" ? 0 : target.scrollHeight,
+          behavior: "auto"
         });
-      };
-      if (window.__gdpScrollSpy)
-        window.removeEventListener("scroll", window.__gdpScrollSpy);
-      window.__gdpScrollSpy = handler;
-      window.addEventListener("scroll", handler, { passive: true });
-      handler(new Event("scroll"));
+        return;
+      }
+      const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      window.scrollTo({ top, behavior: "auto" });
     }
-    function _collapseAll(force) {
-      STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
-      document.querySelectorAll(".gdp-file-shell.loaded .d2h-file-wrapper").forEach((w) => {
-        const body = w.querySelector(".d2h-files-diff, .d2h-file-diff");
-        if (body)
-          body.style.display = STATE.collapsed ? "none" : "";
+    function isFocusableClickTarget(target) {
+      if (!(target instanceof Element))
+        return false;
+      return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
+    }
+    function normalizeScopeOmitDirs(value) {
+      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
+    }
+    function normalizeScopeExcludeNames(value) {
+      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 128 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 200).sort((a2, b2) => a2.localeCompare(b2));
+    }
+    function scopeOmitDirsStorageKey() {
+      return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
+    }
+    function scopeExcludeNamesStorageKey() {
+      return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
+    }
+    function setProjectName(project) {
+      if (!project)
+        return;
+      PROJECT_NAME = project;
+      document.title = `${project} - code viewer`;
+      const projectTitle = document.querySelector("#project-title");
+      if (projectTitle) {
+        projectTitle.textContent = project;
+        projectTitle.title = project;
+      }
+    }
+    function savedScopeOmitDirs() {
+      const raw = localStorage.getItem(scopeOmitDirsStorageKey());
+      if (raw == null)
+        return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return normalizeScopeOmitDirs(raw);
+      }
+    }
+    function savedScopeExcludeNames() {
+      const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
+      if (raw == null)
+        return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return normalizeScopeExcludeNames(raw);
+      }
+    }
+    function serverScopeOmitDirsDefault() {
+      return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
+    }
+    function serverScopeExcludeNamesDefault() {
+      return SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT.length ? SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT : CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT;
+    }
+    function effectiveScopeOmitDirs() {
+      return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
+    }
+    function effectiveScopeExcludeNames() {
+      return savedScopeExcludeNames() ?? serverScopeExcludeNamesDefault();
+    }
+    function appendScopeParams(params) {
+      const omit = savedScopeOmitDirs();
+      if (omit != null)
+        params.set("omit_dirs", omit.join(","));
+      const exclude = savedScopeExcludeNames();
+      if (exclude != null)
+        params.set("exclude_names", exclude.join(","));
+    }
+    function normalizeViewerFontSize(value) {
+      return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
+    }
+    function savedCodeFontSize() {
+      return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
+    }
+    function applyCodeFontSize(size = savedCodeFontSize()) {
+      document.body.dataset.codeFontSize = size;
+    }
+    function repoFileCacheKey(ref) {
+      const omit = savedScopeOmitDirs();
+      const exclude = savedScopeExcludeNames();
+      return `${ref}\x00${omit ? omit.join("\x00") : "server"}\x00${exclude ? exclude.join("\x00") : "server"}`;
+    }
+    async function loadSettings() {
+      try {
+        const res = await fetch("/_settings");
+        if (!res.ok)
+          return null;
+        const settings = await res.json();
+        setProjectName(settings.project || "");
+        SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
+        SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
+        return settings;
+      } catch {
+        return null;
+      }
+    }
+    const STATE = (() => {
+      const igRaw = localStorage.getItem("gdp:ignore-ws");
+      const fallbackRange = {
+        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
+        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
+      };
+      const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
+      const route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      return {
+        layout: localStorage.getItem("gdp:layout") || "side-by-side",
+        theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+        sbView: localStorage.getItem("gdp:sbview") || "tree",
+        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+        sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
+        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
+        ignoreWs: igRaw === null ? true : igRaw === "1",
+        from: route.range.from,
+        to: route.range.to,
+        collapsed: false,
+        files: [],
+        activeFile: null,
+        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+        syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
+        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
+        route,
+        repoRef: route.screen === "repo" ? route.ref : "worktree"
+      };
+    })();
+    let highlightConfigured = false;
+    let PROJECT_NAME = "";
+    let REPO_SIDEBAR_REF = null;
+    const SIDEBAR = createSidebar({
+      $,
+      $$,
+      STATE,
+      scrollToFile: (path, line) => DIFF_VIEW.scrollToFile(path, line),
+      prefetchByPath: (path) => DIFF_VIEW.prefetchByPath(path),
+      fileBadge: (status) => DIFF_VIEW.fileBadge(status),
+      fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
+      applyViewedState: () => DIFF_VIEW.applyViewedState(),
+      appendScopeParams,
+      createOpenPathButton,
+      normalizeViewerFontSize,
+      scheduleMainSurfaceFocus,
+      setChevronIcon,
+      trackLoad,
+      getRepoSidebarRef: () => REPO_SIDEBAR_REF,
+      setRepoSidebarRef: (ref) => {
+        REPO_SIDEBAR_REF = ref;
+      },
+      isTestPath: (path) => TEST_RE.test(path)
+    });
+    const {
+      renderSidebar,
+      applyFilter,
+      scheduleApplyFilter,
+      flushSidebarFilter,
+      markActive,
+      rerenderVirtualSidebar,
+      ensureVirtualSidebarDirLoaded,
+      scrollVirtualSidebarPathIntoView,
+      shouldLazyLoadSidebarDir,
+      setFolderIcon,
+      isRepositorySidebarMode,
+      placeSidebarToggle,
+      applySidebarHidden,
+      toggleSidebarHidden,
+      applySidebarWidth,
+      applySidebarFontSize,
+      savedSidebarFontSize,
+      syncSidebarHeaderHeight,
+      observeSidebarHeaderHeight,
+      setSidebarTreeActionIcons,
+      setAllSidebarDirsCollapsed,
+      updateTreeDirVisibility,
+      moveActiveSidebarItem,
+      moveActiveSidebarPage,
+      moveActiveSidebarToEdge,
+      openActiveSidebarItem,
+      setActiveSidebarDirectoryCollapsed,
+      toggleActiveSidebarDirectoryCollapsed,
+      isVirtualSidebarActive,
+      selectVirtualSidebarIndex,
+      virtualSidebarActiveIndex,
+      adjacentVisibleSidebarItem,
+      scrollSidebarItemIntoView,
+      sidebarItemPath,
+      visibleSidebarItems,
+      getSidebarRowByPath,
+      getSidebarVirtualActivePath,
+      getSidebarFiles,
+      getSidebarOnFileClick,
+      getSidebarVisibleRows,
+      visibleSidebarItemFrom
+    } = SIDEBAR;
+    const SOURCE_VIEW = createSourceView({
+      $$,
+      $,
+      STATE,
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      isAbortError,
+      loadRepo: () => REPO_VIEW.loadRepo(),
+      repoRoute: (ref, path) => REPO_VIEW.repoRoute(ref, path),
+      repoFileTargetFromRoute,
+      renderRepoBlobSidebar: (path, ref) => REPO_VIEW.renderRepoBlobSidebar(path, ref),
+      placeSidebarToggle,
+      createFileBreadcrumb: (path, ref) => DIFF_VIEW.createFileBreadcrumb(path, ref),
+      createFileDetailMeta: (target, meta) => REPO_VIEW.createFileDetailMeta(target, meta),
+      createOpenPathButton,
+      createMoveToTrashButton: (path, onDeleted) => REPO_VIEW.createMoveToTrashButton(path, onDeleted),
+      canTrashWorktreeRef: (ref) => REPO_VIEW.canTrashWorktreeRef(ref),
+      loadRawFileInfo: (target) => REPO_VIEW.loadRawFileInfo(target),
+      loadSyntaxHighlighter,
+      setViewFileButtonState: (button, sourceMode) => DIFF_VIEW.setViewFileButtonState(button, sourceMode),
+      scrollMainPanel,
+      focusMainSurface,
+      isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen()
+    });
+    const {
+      renderStandaloneSource,
+      applySourceRouteToShell,
+      removeStandaloneSource,
+      cancelActiveSourceLoad,
+      sourceTargetFromRoute,
+      fileSourceTarget,
+      switchSourceTab,
+      sourceLineScrollAmount,
+      moveSourceCursor,
+      handleVirtualSourcePagingKeydown,
+      openVirtualSourceSearchFromKeyboard
+    } = SOURCE_VIEW;
+    const REPO_VIEW = createRepoView({
+      $,
+      STATE,
+      setRoute,
+      setPageMode,
+      setStatus,
+      setProjectName,
+      currentRange,
+      appendScopeParams,
+      markActive,
+      applyFilter,
+      renderSidebar,
+      rerenderVirtualSidebar,
+      ensureVirtualSidebarDirLoaded,
+      scrollVirtualSidebarPathIntoView,
+      shouldLazyLoadSidebarDir,
+      setFolderIcon,
+      isRepositorySidebarMode,
+      placeSidebarToggle,
+      createOpenPathButton,
+      removeStandaloneSource,
+      renderStandaloneSource,
+      repoFileTargetFromRoute,
+      trackLoad,
+      syncSidebarHeaderHeight,
+      clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+      getProjectName: () => PROJECT_NAME,
+      getRepoSidebarRef: () => REPO_SIDEBAR_REF,
+      setRepoSidebarRef: (ref) => {
+        REPO_SIDEBAR_REF = ref;
+      },
+      syncHeaderMenu,
+      getSidebarRowByPath,
+      getSidebarVirtualActivePath,
+      pushUndo: (undo) => {
+        UNDO_STACK.unshift(undo);
+      }
+    });
+    const {
+      loadRepo,
+      renderRepoBlobSidebar,
+      syncRepoTargetInput,
+      closeRepoContextMenu,
+      handleSidebarContextMenu,
+      invalidateRepoSidebar,
+      showTrashError
+    } = REPO_VIEW;
+    const SEARCH_PALETTE = createSearchPalette({
+      STATE,
+      setRoute,
+      currentRange,
+      appendScopeParams,
+      isAbortError,
+      scrollToFile: (path, line) => DIFF_VIEW.scrollToFile(path, line),
+      applySourceRouteToShell,
+      fileSourceTarget,
+      renderStandaloneSource,
+      repoFileCacheKey,
+      trackLoad,
+      getServerGeneration: () => SERVER_GENERATION
+    });
+    const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } = SEARCH_PALETTE;
+    function setStatus(s2) {
+      const el = $("#status");
+      el.classList.remove("live", "refreshing", "error");
+      if (s2)
+        el.classList.add(s2);
+    }
+    function applyTheme() {
+      document.documentElement.dataset.theme = STATE.theme;
+      $("#hljs-light").disabled = STATE.theme === "dark";
+      $("#hljs-dark").disabled = STATE.theme !== "dark";
+    }
+    function getHljs() {
+      const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
+      if (!hljsRef)
+        return null;
+      if (!highlightConfigured && typeof hljsRef.configure === "function") {
+        hljsRef.configure({ ignoreUnescapedHTML: true });
+        highlightConfigured = true;
+      }
+      return hljsRef;
+    }
+    function setHighlightButton(state) {
+      const btn = $("#syntax-highlight");
+      if (!btn)
+        return;
+      btn.classList.toggle("active", STATE.syntaxHighlight);
+      btn.classList.toggle("loading", state === "loading");
+      btn.textContent = state === "loading" ? "loading..." : STATE.syntaxHighlight ? "syntax on" : "syntax off";
+      btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
+      btn.title = STATE.syntaxHighlight ? "syntax highlighting on" : state === "loading" ? "loading syntax highlighter" : state === "error" ? "failed to load syntax highlighter" : "syntax highlighting off";
+    }
+    function loadSyntaxHighlighter() {
+      const existing = getHljs();
+      if (existing) {
+        setHighlightButton("loaded");
+        return Promise.resolve(existing);
+      }
+      if (highlightLoadPromise)
+        return highlightLoadPromise;
+      setHighlightButton("loading");
+      highlightLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = HIGHLIGHT_SRC;
+        script.async = true;
+        script.onload = () => {
+          const hljsRef = getHljs();
+          if (hljsRef) {
+            setHighlightButton("loaded");
+            resolve(hljsRef);
+          } else {
+            setHighlightButton("error");
+            reject(new Error("highlight.js did not expose window.hljs"));
+          }
+        };
+        script.onerror = () => {
+          setHighlightButton("error");
+          reject(new Error("failed to load highlight.js"));
+        };
+        document.head.appendChild(script);
+      }).catch(() => {
+        highlightLoadPromise = null;
+        return null;
+      });
+      return highlightLoadPromise;
+    }
+    function setLayout(layout) {
+      STATE.layout = layout;
+      localStorage.setItem("gdp:layout", layout);
+      $$("#topbar .seg button").forEach((b2) => {
+        b2.classList.toggle("active", b2.dataset.layout === layout);
+      });
+      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
+        const data = card._diffData;
+        const file = card._file;
+        if (!data || !file)
+          return;
+        mountDiff(card, file, data);
+        applyInlineAnnotations();
+        if (data.truncated && data.mode === "preview") {
+          addExpandHunksUI(file, data, card);
+        }
+        scheduleIdleHighlight(card, file);
       });
     }
+    function setChevronIcon(el) {
+      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
+    }
+    function scopeOmitSourceLabel() {
+      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
+    }
+    function refreshRepositoryTreeAfterSettings() {
+      clearRepoFileCache();
+      invalidateRepoSidebar();
+      if (STATE.route.screen === "repo") {
+        loadRepo();
+        return;
+      }
+      const target = sourceTargetFromRoute();
+      if (target)
+        renderRepoBlobSidebar(target.path, target.ref || "worktree");
+    }
+    async function openScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
+      const sidebarFontSize = document.querySelector("#sidebar-font-size");
+      const codeFontSize = document.querySelector("#code-font-size");
+      const source = document.querySelector("#scope-omit-source");
+      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
+        return;
+      await loadSettings();
+      sidebarFontSize.value = savedSidebarFontSize();
+      codeFontSize.value = savedCodeFontSize();
+      input.value = effectiveScopeOmitDirs().join(`
+`);
+      excludeInput.value = effectiveScopeExcludeNames().join(`
+`);
+      source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
+      pop.hidden = false;
+      sidebarFontSize.focus();
+    }
+    function closeScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      if (pop)
+        pop.hidden = true;
+    }
+    function toggleScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      if (pop && !pop.hidden) {
+        closeScopeSettings();
+        return;
+      }
+      openScopeSettings();
+    }
+    function saveScopeSettings() {
+      const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
+      const sidebarFontSize = document.querySelector("#sidebar-font-size");
+      const codeFontSize = document.querySelector("#code-font-size");
+      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
+        return;
+      localStorage.setItem(SIDEBAR_FONT_SIZE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
+      localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
+      applySidebarFontSize();
+      applyCodeFontSize();
+      localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
+      localStorage.setItem(scopeExcludeNamesStorageKey(), JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)));
+      closeScopeSettings();
+      refreshRepositoryTreeAfterSettings();
+    }
+    function resetScopeSettings() {
+      localStorage.removeItem(SIDEBAR_FONT_SIZE_KEY);
+      localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
+      applySidebarFontSize("regular");
+      applyCodeFontSize("regular");
+      localStorage.removeItem(scopeOmitDirsStorageKey());
+      localStorage.removeItem(scopeExcludeNamesStorageKey());
+      closeScopeSettings();
+      refreshRepositoryTreeAfterSettings();
+    }
+    function createRefSelectorInput(options) {
+      const wrap = document.createElement("div");
+      wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
+      wrap.dataset.refSelector = "";
+      if (options.wrapperId)
+        wrap.id = options.wrapperId;
+      if (options.hidden)
+        wrap.hidden = true;
+      const icon = document.createElement("span");
+      icon.className = "ref-selector-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+      const input = document.createElement("input");
+      input.className = "ref-input";
+      input.id = options.id;
+      input.readOnly = true;
+      input.autocomplete = "off";
+      input.placeholder = options.placeholder;
+      if (options.title)
+        input.title = options.title;
+      if (options.value != null)
+        input.value = options.value;
+      const caret = document.createElement("span");
+      caret.className = "ref-selector-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
+      wrap.append(icon, input, caret);
+      return { wrap, input };
+    }
+    function hydrateRefSelectorMounts() {
+      document.querySelectorAll("[data-ref-selector-mount]").forEach((mount) => {
+        const { wrap } = createRefSelectorInput({
+          id: mount.dataset.refId || "",
+          placeholder: mount.dataset.placeholder || "ref...",
+          title: mount.dataset.title,
+          wrapperId: mount.dataset.wrapperId,
+          extraClass: mount.dataset.extraClass,
+          hidden: mount.hidden
+        });
+        mount.replaceWith(wrap);
+      });
+    }
+    let SERVER_GENERATION = 0;
+    let IN_FLIGHT = 0;
+    function updateLoadBar() {
+      const el = $("#load-bar");
+      if (el)
+        el.classList.toggle("active", IN_FLIGHT > 0);
+    }
+    function trackLoad(promise) {
+      IN_FLIGHT++;
+      updateLoadBar();
+      const done = () => {
+        IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
+        updateLoadBar();
+      };
+      return Promise.resolve(promise).then((v) => {
+        done();
+        return v;
+      }, (e2) => {
+        done();
+        throw e2;
+      });
+    }
+    function escapeHtml2(s2) {
+      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c2]);
+    }
+    function isAbortError(err) {
+      return err instanceof DOMException ? err.name === "AbortError" : !!err && typeof err === "object" && ("name" in err) && err.name === "AbortError";
+    }
+    function currentRange() {
+      return {
+        from: STATE.from || DEFAULT_RANGE.from,
+        to: STATE.to || DEFAULT_RANGE.to
+      };
+    }
+    function repoFileTargetFromRoute() {
+      return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
+    }
+    let ANNOTATIONS_UI = null;
+    function applyInlineAnnotations() {
+      ANNOTATIONS_UI?.applyInlineAnnotations();
+    }
+    function withAnnotationSessionParam(rawUrl) {
+      return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+    }
+    function setRoute(route, replace2 = false) {
+      const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
+      STATE.route = nextRoute;
+      STATE.from = nextRoute.range.from;
+      STATE.to = nextRoute.range.to;
+      if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
+        STATE.repoRef = nextRoute.ref || "worktree";
+      }
+      const url = withAnnotationSessionParam(buildRoute(nextRoute));
+      const state = nextRoute.screen === "file" ? {
+        screen: "file",
+        path: nextRoute.path,
+        ref: nextRoute.ref,
+        view: nextRoute.view || "detail"
+      } : { view: nextRoute.screen };
+      if (replace2)
+        history.replaceState(state, "", url);
+      else
+        history.pushState(state, "", url);
+      syncHeaderMenu();
+    }
+    function setPageMode() {
+      document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
+      document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
+      document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
+      document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
+      syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+    }
+    function syncHeaderMenu() {
+      document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
+        const fileRouteOwner = STATE.route.screen === "file" && STATE.route.view === "blob" ? "repo" : "diff";
+        const active = link2.dataset.route === STATE.route.screen || STATE.route.screen === "file" && link2.dataset.route === fileRouteOwner;
+        link2.classList.toggle("active", active);
+        link2.setAttribute("aria-current", active ? "page" : "false");
+        if (link2.dataset.route === "repo") {
+          link2.href = buildRoute({
+            screen: "repo",
+            ref: STATE.repoRef || "worktree",
+            path: "",
+            range: currentRange()
+          });
+        }
+        if (link2.dataset.route === "diff") {
+          link2.href = buildRoute({ screen: "diff", range: currentRange() });
+        }
+        if (link2.dataset.route === "help") {
+          link2.href = buildRoute({
+            screen: "help",
+            lang: helpLanguageFromRoute(STATE.route),
+            section: helpSectionFromRoute(STATE.route),
+            range: currentRange()
+          });
+        }
+      });
+    }
+    async function openPathInOs(path, kind, button) {
+      const oldTitle = button?.title;
+      if (button) {
+        button.disabled = true;
+        button.classList.remove("failed");
+      }
+      try {
+        const res = await fetch("/_open_path", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ path, kind })
+        });
+        if (!res.ok)
+          throw new Error(await res.text());
+        button?.classList.add("opened");
+        setTimeout(() => {
+          button?.classList.remove("opened");
+        }, 1200);
+      } catch {
+        if (button) {
+          button.classList.add("failed");
+          button.title = "failed to open in OS";
+          setTimeout(() => {
+            button.classList.remove("failed");
+            button.title = oldTitle || "open in OS";
+          }, 1600);
+        }
+      } finally {
+        if (button)
+          button.disabled = false;
+      }
+    }
+    async function runUndoAction(action) {
+      if (action.type !== "trash")
+        return false;
+      const res = await fetch("/_restore_trash", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify(action.payload)
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to undo "${action.label}": ${await res.text()}`);
+        return false;
+      }
+      return true;
+    }
+    async function undoLastAction() {
+      const action = UNDO_STACK.shift();
+      if (!action)
+        return false;
+      if (!await runUndoAction(action)) {
+        UNDO_STACK.unshift(action);
+        return true;
+      }
+      invalidateRepoSidebar();
+      await load();
+      return true;
+    }
+    function createOpenPathButton(path, kind, title = "open folder in OS") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-open-path";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
+      button.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        openPathInOs(path, kind, button);
+      });
+      return button;
+    }
+    window.addEventListener("scroll", () => enqueueInitialLoads(), {
+      passive: true
+    });
+    window.addEventListener("resize", () => {
+      enqueueInitialLoads();
+      syncSidebarHeaderHeight();
+    }, { passive: true });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden)
+        enqueueInitialLoads();
+    });
+    const { renderHelpPage } = createHelpPage({
+      $,
+      getRoute: () => STATE.route,
+      setRoute,
+      setPageMode,
+      cancelActiveSourceLoad,
+      removeStandaloneSource,
+      clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+      currentRange,
+      syncHeaderMenu
+    });
+    const { setupHunkExpand } = createHunkExpand({
+      trackLoad,
+      getServerGeneration: () => SERVER_GENERATION,
+      getToRef: () => STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree",
+      highlightInsertedSpans: (card, file) => DIFF_VIEW.highlightInsertedSpans(card, file)
+    });
+    const DIFF_VIEW = createDiffView({
+      $,
+      $$,
+      STATE,
+      setRoute,
+      currentRange,
+      escapeHtml: escapeHtml2,
+      trackLoad,
+      diffCardSelector,
+      getHljs,
+      inferLang: (path) => SOURCE_VIEW.inferLang(path),
+      lineTargetStart: (line) => SOURCE_VIEW.lineTargetStart(line),
+      fileSourceTarget: (file) => SOURCE_VIEW.fileSourceTarget(file),
+      applySourceRouteToShell: () => SOURCE_VIEW.applySourceRouteToShell(),
+      setupHunkExpand,
+      applyInlineAnnotations,
+      applyFilter: () => SIDEBAR.applyFilter(),
+      markActive: (path, options) => SIDEBAR.markActive(path, options),
+      renderSidebar: (files, onFileClick) => SIDEBAR.renderSidebar(files, onFileClick),
+      isRepositorySidebarMode: () => SIDEBAR.isRepositorySidebarMode(),
+      loadRepo: () => REPO_VIEW.loadRepo(),
+      repoRoute: (ref, path) => REPO_VIEW.repoRoute(ref, path),
+      setProjectName,
+      getProjectName: () => PROJECT_NAME,
+      createOpenPathButton,
+      applyHideTests: () => applyHideTests(),
+      getServerGeneration: () => SERVER_GENERATION,
+      setServerGeneration: (generation) => {
+        SERVER_GENERATION = generation;
+      }
+    });
+    const {
+      renderShell,
+      rerenderLoadedDiffs,
+      mountDiff,
+      addExpandHunksUI,
+      scheduleIdleHighlight,
+      scrollToFile,
+      prefetchByPath,
+      diffRowLineNumber,
+      focusDiffLine,
+      scrollDiffElementIntoView,
+      expandAllFileContext,
+      applyViewedState,
+      enqueueInitialLoads
+    } = DIFF_VIEW;
     applySidebarFontSize();
     applyCodeFontSize();
     applySidebarHidden();
@@ -13361,14 +15063,14 @@ ${frontmatter.yaml}
       b2.addEventListener("click", () => {
         STATE.sbView = b2.dataset.view || "tree";
         localStorage.setItem("gdp:sbview", STATE.sbView);
-        if (SIDEBAR_FILES.length)
-          renderSidebar(SIDEBAR_FILES, SIDEBAR_ON_FILE_CLICK);
+        if (getSidebarFiles().length)
+          renderSidebar(getSidebarFiles(), getSidebarOnFileClick());
       });
     });
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
     $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
-    $("#viewer-settings")?.addEventListener("click", openScopeSettings);
+    $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
     $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
     $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
     $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
@@ -13385,12 +15087,6 @@ ${frontmatter.yaml}
       else
         focusMainPanel();
     });
-    function applySidebarWidth(w) {
-      const cw = Math.max(180, Math.min(900, w));
-      document.documentElement.style.setProperty("--sidebar-w", `${cw}px`);
-      STATE.sbWidth = cw;
-      localStorage.setItem("gdp:sbwidth", String(cw));
-    }
     applySidebarWidth(STATE.sbWidth);
     (function trackSidebarInteraction() {
       const sb = document.getElementById("sidebar");
@@ -13455,269 +15151,6 @@ ${frontmatter.yaml}
       localStorage.setItem("gdp:theme", STATE.theme);
       applyTheme();
     });
-    function isSidebarRowVisible(row) {
-      if (row.classList.contains("hidden") || row.classList.contains("hidden-by-tests"))
-        return false;
-      let parent = row.parentElement;
-      while (parent && parent.id !== "filelist") {
-        if (parent.classList.contains("tree-children")) {
-          const dir = parent.previousElementSibling;
-          if (dir?.classList.contains("collapsed") || dir?.classList.contains("hidden"))
-            return false;
-        }
-        parent = parent.parentElement;
-      }
-      return true;
-    }
-    const SIDEBAR_ITEM_SELECTOR = "#filelist li[data-path], #filelist .tree-dir[data-dirpath]";
-    const ACTIVE_SIDEBAR_ITEM_SELECTOR = "#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]";
-    function sidebarItemPath(item) {
-      return item.dataset.path || item.dataset.dirpath || "";
-    }
-    function activeSidebarItem() {
-      return document.querySelector(ACTIVE_SIDEBAR_ITEM_SELECTOR);
-    }
-    function sidebarItemByPath(path) {
-      if (isVirtualSidebarActive() && SIDEBAR_ROW_BY_PATH.has(path)) {
-        return document.querySelector(`#filelist li[data-path="${CSS.escape(path)}"], #filelist .tree-dir[data-dirpath="${CSS.escape(path)}"]`) || null;
-      }
-      const escaped = CSS.escape(path);
-      return document.querySelector(`#filelist li[data-path="${escaped}"], #filelist .tree-dir[data-dirpath="${escaped}"]`);
-    }
-    function setActiveSidebarItem(target) {
-      document.querySelectorAll(ACTIVE_SIDEBAR_ITEM_SELECTOR).forEach((item) => {
-        if (item !== target)
-          item.classList.remove("active");
-      });
-      target?.classList.add("active");
-    }
-    function visibleSidebarItems() {
-      return $$(SIDEBAR_ITEM_SELECTOR).filter(isSidebarRowVisible);
-    }
-    function isVirtualSidebarActive() {
-      return $("#filelist").classList.contains("tree-virtual");
-    }
-    function virtualSidebarActiveIndex() {
-      const activePath = SIDEBAR_VIRTUAL_ACTIVE_PATH || STATE.activeFile || "";
-      return SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === activePath);
-    }
-    function selectVirtualSidebarIndex(index, options) {
-      if (!SIDEBAR_VISIBLE_ROWS.length)
-        return null;
-      const safeIndex = Math.max(0, Math.min(SIDEBAR_VISIBLE_ROWS.length - 1, index));
-      const row = SIDEBAR_VISIBLE_ROWS[safeIndex];
-      if (!row)
-        return null;
-      markActive(row.path);
-      scrollVirtualSidebarPathIntoView(row.path);
-      if (options?.open) {
-        if (row.kind === "dir" && row.dir && SIDEBAR_ON_FILE_CLICK) {
-          SIDEBAR_ON_FILE_CLICK({
-            path: row.dir.path,
-            display_path: row.dir.path,
-            type: "tree",
-            children_omitted: row.dir.children_omitted,
-            children_omitted_reason: row.dir.children_omitted_reason
-          });
-        } else if (row.file && SIDEBAR_ON_FILE_CLICK) {
-          SIDEBAR_ON_FILE_CLICK(row.file);
-        }
-      }
-      return row;
-    }
-    function visibleSidebarItemFrom(current, direction) {
-      const root = document.querySelector("#filelist");
-      if (!current.isConnected)
-        return null;
-      if (!root)
-        return null;
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
-        acceptNode(node) {
-          if (!(node instanceof HTMLElement))
-            return NodeFilter.FILTER_SKIP;
-          if (node.classList.contains("tree-children")) {
-            const dir = node.previousElementSibling;
-            if (dir?.classList.contains("collapsed") || dir?.classList.contains("hidden") || dir?.classList.contains("hidden-by-tests"))
-              return NodeFilter.FILTER_REJECT;
-          }
-          if (!node.matches(SIDEBAR_ITEM_SELECTOR))
-            return NodeFilter.FILTER_SKIP;
-          return isSidebarRowVisible(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
-        }
-      });
-      walker.currentNode = current;
-      const next = direction === 1 ? walker.nextNode() : walker.previousNode();
-      return next instanceof HTMLElement ? next : null;
-    }
-    function adjacentVisibleSidebarItem(direction) {
-      const active = activeSidebarItem();
-      if (!active) {
-        const items = visibleSidebarItems();
-        return direction === 1 ? items[0] || null : items[items.length - 1] || null;
-      }
-      if (!isSidebarRowVisible(active)) {
-        const items = visibleSidebarItems();
-        return direction === 1 ? items[0] || null : items[items.length - 1] || null;
-      }
-      return visibleSidebarItemFrom(active, direction) || active;
-    }
-    function scrollSidebarItemIntoView(item, block2 = "nearest") {
-      const sidebar = document.querySelector("#sidebar");
-      if (!sidebar) {
-        item.scrollIntoView({ block: block2 });
-        return;
-      }
-      const sidebarRect = sidebar.getBoundingClientRect();
-      const itemRect = item.getBoundingClientRect();
-      const stickyBottom = Math.max(sidebarRect.top, document.querySelector(".sb-head")?.getBoundingClientRect().bottom || sidebarRect.top, document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top);
-      const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
-      const bottomPadding = 14;
-      const visibleTop = sidebarRect.top + topPadding;
-      const visibleBottom = sidebarRect.bottom - bottomPadding;
-      if (block2 === "start") {
-        sidebar.scrollTop += itemRect.top - visibleTop;
-        return;
-      }
-      if (block2 === "end") {
-        sidebar.scrollTop += itemRect.bottom - visibleBottom;
-        return;
-      }
-      if (itemRect.top < visibleTop)
-        sidebar.scrollTop += itemRect.top - visibleTop;
-      else if (itemRect.bottom > visibleBottom)
-        sidebar.scrollTop += itemRect.bottom - visibleBottom;
-    }
-    function isRepositorySidebarMode() {
-      return document.body.classList.contains("gdp-repo-page") || document.body.classList.contains("gdp-repo-blob-page");
-    }
-    function moveActiveSidebarItem(direction) {
-      if (isVirtualSidebarActive()) {
-        const current2 = virtualSidebarActiveIndex();
-        const start = current2 < 0 ? direction === 1 ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1 : current2 + direction;
-        const row = selectVirtualSidebarIndex(start);
-        if (row?.file)
-          prefetchByPath(row.file.path);
-        return;
-      }
-      const items = visibleSidebarItems();
-      if (!items.length)
-        return;
-      const current = items.findIndex((li) => li.classList.contains("active"));
-      const idx = nextVisibleFileIndex(current, items.length, direction);
-      const target = items[idx];
-      if (!target)
-        return;
-      const path = target.dataset.path || target.dataset.dirpath;
-      if (path)
-        markActive(path);
-      scrollSidebarItemIntoView(target);
-      if (target.dataset.path)
-        prefetchByPath(target.dataset.path);
-    }
-    function moveActiveSidebarPage(direction) {
-      if (isVirtualSidebarActive()) {
-        const sidebar2 = document.querySelector("#sidebar");
-        const halfPageRows2 = Math.max(1, Math.floor((sidebar2?.clientHeight || window.innerHeight) / 2 / VIRTUAL_SIDEBAR_ROW_HEIGHT));
-        const current2 = virtualSidebarActiveIndex();
-        const start2 = current2 < 0 ? 0 : current2;
-        const row = selectVirtualSidebarIndex(start2 + direction * halfPageRows2);
-        if (row?.file)
-          prefetchByPath(row.file.path);
-        return;
-      }
-      const items = visibleSidebarItems();
-      if (!items.length)
-        return;
-      const repoSidebar = isRepositorySidebarMode();
-      const sidebar = document.querySelector("#sidebar");
-      const sample = items.find((item) => item.getBoundingClientRect().height > 0);
-      const rowHeight = sample ? sample.getBoundingClientRect().height : 28;
-      const halfPageRows = Math.max(1, Math.floor((sidebar?.clientHeight || window.innerHeight) / 2 / rowHeight));
-      const current = items.findIndex((li) => li.classList.contains("active"));
-      const start = current < 0 ? 0 : current;
-      const idx = Math.max(0, Math.min(items.length - 1, start + direction * halfPageRows));
-      const target = items[idx];
-      const path = target.dataset.path || target.dataset.dirpath;
-      if (!repoSidebar && target.dataset.path)
-        target.click();
-      else if (path)
-        markActive(path);
-      scrollSidebarItemIntoView(target);
-      if (target.dataset.path)
-        prefetchByPath(target.dataset.path);
-    }
-    function moveActiveSidebarToEdge(edge) {
-      if (isVirtualSidebarActive()) {
-        const row = selectVirtualSidebarIndex(edge === "top" ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1);
-        if (row?.file)
-          prefetchByPath(row.file.path);
-        return;
-      }
-      const items = visibleSidebarItems();
-      const repoSidebar = isRepositorySidebarMode();
-      const target = edge === "top" ? items[0] : items[items.length - 1];
-      if (!target)
-        return;
-      const path = target.dataset.path || target.dataset.dirpath;
-      if (!repoSidebar && target.dataset.path)
-        target.click();
-      else if (path)
-        markActive(path);
-      scrollSidebarItemIntoView(target, edge === "top" ? "start" : "end");
-      if (target.dataset.path)
-        prefetchByPath(target.dataset.path);
-    }
-    function setActiveSidebarDirectoryCollapsed(collapsed) {
-      if (isVirtualSidebarActive()) {
-        const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
-        if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted)
-          return;
-        if (STATE.collapsedDirs.has(row.path) === collapsed)
-          return;
-        if (collapsed)
-          STATE.collapsedDirs.add(row.path);
-        else
-          STATE.collapsedDirs.delete(row.path);
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-        rerenderVirtualSidebar();
-        scrollVirtualSidebarPathIntoView(row.path);
-        return;
-      }
-      const active = document.querySelector("#filelist .tree-dir.active[data-dirpath]");
-      if (!active)
-        return;
-      if (active.classList.contains("collapsed") === collapsed)
-        return;
-      const control = active.querySelector(".chev");
-      if (control)
-        control.click();
-    }
-    function toggleActiveSidebarDirectoryCollapsed() {
-      if (isVirtualSidebarActive()) {
-        const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
-        if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted)
-          return;
-        setActiveSidebarDirectoryCollapsed(!STATE.collapsedDirs.has(row.path));
-        return;
-      }
-      const active = document.querySelector("#filelist .tree-dir.active[data-dirpath]");
-      if (!active)
-        return;
-      const control = active.querySelector(".chev");
-      if (control)
-        control.click();
-    }
-    function openActiveSidebarItem() {
-      if (isVirtualSidebarActive()) {
-        const index = virtualSidebarActiveIndex();
-        if (index >= 0)
-          selectVirtualSidebarIndex(index, { open: true });
-        return;
-      }
-      const active = document.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
-      if (active && isSidebarRowVisible(active))
-        active.click();
-    }
     function jumpToActiveOrFirstFilteredItem() {
       if (isVirtualSidebarActive()) {
         const current = virtualSidebarActiveIndex();
@@ -13761,451 +15194,18 @@ ${frontmatter.yaml}
       input.focus();
       input.select();
     }
-    let PALETTE = null;
-    const REPO_FILE_CACHE = new Map;
-    function paletteSource() {
-      if (STATE.route.screen === "diff")
-        return "diff";
-      if (STATE.route.screen === "file" && STATE.route.view !== "blob")
-        return "diff";
-      return "repo";
-    }
-    function paletteRef(source) {
-      if (source === "diff")
-        return STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
-      if (STATE.route.screen === "repo")
-        return STATE.route.ref || "worktree";
-      if (STATE.route.screen === "file")
-        return STATE.route.ref || "worktree";
-      return STATE.repoRef || "worktree";
-    }
-    function closeSearchPalette() {
-      if (!PALETTE)
-        return;
-      const previousFocusScope = PALETTE.previousFocusScope;
-      PALETTE.controller?.abort();
-      if (PALETTE.debounce)
-        window.clearTimeout(PALETTE.debounce);
-      PALETTE.root.remove();
-      PALETTE = null;
-      restorePanelFocusScope(previousFocusScope);
-    }
-    function createPalette(mode) {
-      const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
-      closeSearchPalette();
-      const root = document.createElement("div");
-      root.className = "gdp-palette-backdrop";
-      const dialog = document.createElement("div");
-      dialog.className = "gdp-palette";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      const label = document.createElement("div");
-      label.className = "gdp-palette-label";
-      label.textContent = mode === "file" ? "Files" : "Grep";
-      const input = document.createElement("input");
-      input.className = "gdp-palette-input";
-      input.type = "search";
-      input.autocomplete = "off";
-      input.spellcheck = false;
-      input.placeholder = mode === "file" ? "Search files" : "Search text";
-      input.setAttribute("role", "combobox");
-      input.setAttribute("aria-expanded", "true");
-      input.setAttribute("aria-controls", "gdp-palette-list");
-      const status = document.createElement("div");
-      status.className = "gdp-palette-status";
-      const controls = document.createElement("div");
-      controls.className = "gdp-palette-controls";
-      const list2 = document.createElement("div");
-      list2.id = "gdp-palette-list";
-      list2.className = "gdp-palette-list";
-      list2.setAttribute("role", "listbox");
-      dialog.append(label, input, controls, status, list2);
-      root.appendChild(dialog);
-      document.body.appendChild(root);
-      const state = {
-        root,
-        input,
-        controls,
-        list: list2,
-        status,
-        mode,
-        grepRegex: false,
-        selected: -1,
-        items: [],
-        composing: false,
-        diffSnapshot: [...STATE.files],
-        previousFocusScope
-      };
-      PALETTE = state;
-      setPanelFocusScope(null);
-      root.addEventListener("mousedown", (e2) => {
-        if (e2.target === root)
-          closeSearchPalette();
-      });
-      input.addEventListener("compositionstart", () => {
-        state.composing = true;
-      });
-      input.addEventListener("compositionend", () => {
-        state.composing = false;
-      });
-      input.addEventListener("input", () => updatePaletteResults(state));
-      input.addEventListener("keydown", (e2) => handlePaletteKeydown(e2, state));
-      input.focus();
-      updatePaletteResults(state);
-      return state;
-    }
-    function renderPaletteControls(state) {
-      state.controls.innerHTML = "";
-      if (state.mode === "file") {
-        const hint2 = document.createElement("span");
-        hint2.className = "gdp-palette-mode-hint";
-        hint2.textContent = isGlobPathQuery(state.input.value) ? "Glob: * ? []" : "Fuzzy path search";
-        state.controls.appendChild(hint2);
-        return;
-      }
-      const plain = document.createElement("button");
-      plain.type = "button";
-      plain.className = "gdp-palette-mode-button";
-      plain.setAttribute("aria-pressed", String(!state.grepRegex));
-      plain.textContent = "Plain";
-      plain.addEventListener("mousedown", (e2) => {
-        e2.preventDefault();
-        state.grepRegex = false;
-        renderPaletteControls(state);
-        updatePaletteResults(state);
-        state.input.focus();
-      });
-      const regex = document.createElement("button");
-      regex.type = "button";
-      regex.className = "gdp-palette-mode-button";
-      regex.setAttribute("aria-pressed", String(state.grepRegex));
-      regex.textContent = ".* Regex";
-      regex.title = "Alt+R";
-      regex.addEventListener("mousedown", (e2) => {
-        e2.preventDefault();
-        state.grepRegex = true;
-        renderPaletteControls(state);
-        updatePaletteResults(state);
-        state.input.focus();
-      });
-      const hint = document.createElement("span");
-      hint.className = "gdp-palette-mode-hint";
-      hint.textContent = "Alt+R toggles regex";
-      state.controls.append(plain, regex, hint);
-    }
-    function regexQueryIsValid(query) {
-      try {
-        new RegExp(query);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    function appendHighlightedPath(parent, path, ranges) {
-      let cursor = 0;
-      for (const range of ranges) {
-        if (range.start > cursor)
-          parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
-        const mark = document.createElement("mark");
-        mark.textContent = path.slice(range.start, range.end);
-        parent.appendChild(mark);
-        cursor = range.end;
-      }
-      if (cursor < path.length)
-        parent.appendChild(document.createTextNode(path.slice(cursor)));
-    }
-    function renderPalette(state) {
-      state.list.innerHTML = "";
-      state.items.forEach((item, index) => {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.id = `gdp-palette-item-${index}`;
-        row.className = "gdp-palette-row";
-        row.setAttribute("role", "option");
-        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
-        const title = document.createElement("span");
-        title.className = "gdp-palette-row-title";
-        const detail = document.createElement("span");
-        detail.className = "gdp-palette-row-detail";
-        if (item.kind === "file") {
-          title.textContent = item.path.split("/").pop() || item.path;
-          appendHighlightedPath(detail, item.displayPath, item.ranges);
-          if (item.old_path && item.displayPath !== item.old_path) {
-            detail.appendChild(document.createTextNode(`  ${item.old_path}`));
-          }
-        } else {
-          title.textContent = `${item.path}:${item.line}`;
-          detail.textContent = item.preview;
-        }
-        row.append(title, detail);
-        row.addEventListener("mouseenter", () => {
-          state.selected = index;
-          syncPaletteSelection(state);
-        });
-        row.addEventListener("mousedown", (e2) => {
-          e2.preventDefault();
-          state.selected = index;
-          selectPaletteItem(state);
-        });
-        state.list.appendChild(row);
-      });
-      syncPaletteSelection(state);
-    }
-    function syncPaletteSelection(state) {
-      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "");
-      state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
-        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
-        if (index === state.selected)
-          row.scrollIntoView({ block: "nearest" });
-      });
-    }
-    async function repoPaletteFiles(ref) {
-      const cacheKey = repoFileCacheKey(ref);
-      const cached = REPO_FILE_CACHE.get(cacheKey);
-      if (cached && cached.generation === SERVER_GENERATION)
-        return cached;
-      const params = new URLSearchParams;
-      params.set("ref", ref);
-      appendScopeParams(params);
-      const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
-        if (!r2.ok)
-          throw new Error("failed to load files");
-        return r2.json();
-      }));
-      REPO_FILE_CACHE.set(cacheKey, res);
-      return res;
-    }
-    function diffFilePaletteItems(state, query) {
-      const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
-      const candidates = state.diffSnapshot.map((file) => {
-        const current = matchPath(query, file.path);
-        const old = file.old_path ? matchPath(query, file.old_path) : null;
-        const best = old && (!current || old.score > current.score) ? { match: old, displayPath: file.old_path || file.path } : current ? { match: current, displayPath: file.path } : null;
-        return best ? { file, ...best } : null;
-      }).filter((item) => item !== null).sort((a2, b2) => b2.match.score - a2.match.score || a2.file.path.localeCompare(b2.file.path));
-      return limitPaletteResults(candidates).map((candidate) => ({
-        kind: "file",
-        path: candidate.file.path,
-        old_path: candidate.file.old_path,
-        displayPath: candidate.displayPath,
-        ref: paletteRef("diff"),
-        targetPath: fileSourceTarget(candidate.file).path,
-        targetRef: fileSourceTarget(candidate.file).ref,
-        source: "diff",
-        ranges: candidate.match.ranges
-      }));
-    }
-    async function updateFilePalette(state, query) {
-      renderPaletteControls(state);
-      const source = paletteSource();
-      if (!query.trim()) {
-        const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
-          const target = fileSourceTarget(file);
-          return {
-            kind: "file",
-            path: file.path,
-            old_path: file.old_path,
-            displayPath: file.path,
-            ref: paletteRef(source),
-            targetPath: target.path,
-            targetRef: target.ref,
-            source,
-            ranges: []
-          };
-        }) : [];
-        state.items = limitPaletteResults(base2);
-        state.selected = state.items.length ? 0 : -1;
-        state.status.textContent = source === "diff" ? `${state.diffSnapshot.length} diff files` : "Type to search repository files";
-        renderPalette(state);
-        return;
-      }
-      if (source === "diff") {
-        state.items = diffFilePaletteItems(state, query);
-      } else {
-        state.status.textContent = "Loading files...";
-        const ref = paletteRef(source);
-        const response = await repoPaletteFiles(ref);
-        if (PALETTE !== state || state.input.value !== query)
-          return;
-        state.items = limitPaletteResults(rankPathMatches(query, response.files)).map((match2) => ({
-          kind: "file",
-          path: match2.item.path,
-          displayPath: match2.item.path,
-          ref,
-          source,
-          ranges: match2.ranges
-        }));
-      }
-      state.selected = state.items.length ? 0 : -1;
-      state.status.textContent = state.items.length ? `${state.items.length} results` : "No results";
-      renderPalette(state);
-    }
-    function updateGrepPalette(state, query) {
-      renderPaletteControls(state);
-      state.controller?.abort();
-      if (state.debounce)
-        window.clearTimeout(state.debounce);
-      if (!query.trim()) {
-        state.items = [];
-        state.selected = -1;
-        state.status.textContent = "Type to grep";
-        renderPalette(state);
-        return;
-      }
-      if (state.grepRegex && !regexQueryIsValid(query)) {
-        state.controller?.abort();
-        state.items = [];
-        state.selected = -1;
-        state.status.textContent = "Invalid regular expression";
-        renderPalette(state);
-        return;
-      }
-      state.status.textContent = "Searching...";
-      state.debounce = window.setTimeout(() => {
-        const source = paletteSource();
-        const ref = paletteRef(source);
-        const params = new URLSearchParams;
-        params.set("ref", ref);
-        params.set("q", query);
-        params.set("max", "200");
-        if (state.grepRegex)
-          params.set("regex", "1");
-        appendScopeParams(params);
-        if (source === "diff") {
-          for (const file of state.diffSnapshot)
-            params.append("path", file.path);
-        }
-        const controller = new AbortController;
-        state.controller = controller;
-        trackLoad(fetch(`/_grep?${params.toString()}`, {
-          signal: controller.signal
-        }).then((r2) => {
-          if (!r2.ok)
-            throw new Error("grep failed");
-          return r2.json();
-        })).then((response) => {
-          if (PALETTE !== state || controller.signal.aborted)
-            return;
-          state.items = limitPaletteResults(response.matches.map((match2) => ({
-            kind: "grep",
-            path: match2.path,
-            line: match2.line,
-            column: match2.column,
-            preview: match2.preview,
-            ref,
-            source
-          })));
-          state.selected = state.items.length ? 0 : -1;
-          state.status.textContent = response.engine + (state.grepRegex ? " regex" : " plain") + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
-          renderPalette(state);
-        }).catch((err) => {
-          if (isAbortError(err))
-            return;
-          state.status.textContent = "Search failed";
-        });
-      }, 80);
-    }
-    function updatePaletteResults(state) {
-      const query = state.input.value;
-      if (state.mode === "file") {
-        updateFilePalette(state, query).catch(() => {
-          state.status.textContent = "Search failed";
-        });
-      } else {
-        updateGrepPalette(state, query);
-      }
-    }
-    function selectPaletteItem(state) {
-      const item = state.items[state.selected];
-      if (!item)
-        return;
-      closeSearchPalette();
-      if (item.kind === "file") {
-        if (item.source === "diff") {
-          if (STATE.route.screen === "file") {
-            setRoute({
-              screen: "file",
-              path: item.targetPath || item.path,
-              ref: item.targetRef || item.ref,
-              range: currentRange()
-            });
-            applySourceRouteToShell();
-          } else {
-            scrollToFile(item.path);
-          }
-        } else {
-          setRoute({
-            screen: "file",
-            path: item.path,
-            ref: item.ref,
-            view: "blob",
-            range: currentRange()
-          });
-          renderStandaloneSource({ path: item.path, ref: item.ref });
-        }
-        return;
-      }
-      if (item.source === "diff") {
-        setRoute({
-          screen: "diff",
-          range: currentRange(),
-          path: item.path,
-          line: item.line
-        });
-        scrollToFile(item.path, item.line);
-      } else {
-        setRoute({
-          screen: "file",
-          path: item.path,
-          ref: item.ref,
-          view: "blob",
-          line: item.line,
-          range: currentRange()
-        });
-        renderStandaloneSource({ path: item.path, ref: item.ref });
-      }
-    }
-    function handlePaletteKeydown(e2, state) {
-      if (e2.key === "Escape") {
-        e2.preventDefault();
-        closeSearchPalette();
-        return;
-      }
-      if (e2.key === "Enter") {
-        if (state.composing)
-          return;
-        e2.preventDefault();
-        selectPaletteItem(state);
-        return;
-      }
-      if (state.mode === "grep" && e2.altKey && e2.key.toLowerCase() === "r") {
-        e2.preventDefault();
-        state.grepRegex = !state.grepRegex;
-        updatePaletteResults(state);
-        return;
-      }
-      const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
-      if (direction) {
-        e2.preventDefault();
-        state.selected = movePaletteSelection(state.selected, state.items.length, direction);
-        syncPaletteSelection(state);
-      }
-    }
-    function openSearchPalette(mode) {
-      createPalette(mode);
-    }
     function dispatchKeymapAction(action, scope, repeated = false) {
       if (action !== "start-g-sequence") {
         PENDING_G_SCOPE = null;
         PENDING_G_UNTIL = 0;
       }
       if (action === "open-file-palette") {
-        if (PALETTE?.mode !== "file")
+        if (paletteMode() !== "file")
           openSearchPalette("file");
         return true;
       }
       if (action === "open-grep-palette") {
-        if (PALETTE?.mode !== "grep")
+        if (paletteMode() !== "grep")
           openSearchPalette("grep");
         return true;
       }
@@ -14244,9 +15244,9 @@ ${frontmatter.yaml}
         const target = repoSidebar ? isVirtualSidebarActive() ? null : adjacentVisibleSidebarItem(direction) : diffItems[diffIndex];
         if (repoSidebar && isVirtualSidebarActive()) {
           const current = virtualSidebarActiveIndex();
-          const start = current < 0 ? direction === 1 ? 0 : SIDEBAR_VISIBLE_ROWS.length - 1 : current + direction;
+          const start = current < 0 ? direction === 1 ? 0 : getSidebarVisibleRows().length - 1 : current + direction;
           const row = selectVirtualSidebarIndex(start);
-          const next = row ? SIDEBAR_VISIBLE_ROWS[Math.max(0, Math.min(SIDEBAR_VISIBLE_ROWS.length - 1, SIDEBAR_VISIBLE_ROWS.indexOf(row) + direction))] : null;
+          const next = row ? getSidebarVisibleRows()[Math.max(0, Math.min(getSidebarVisibleRows().length - 1, getSidebarVisibleRows().indexOf(row) + direction))] : null;
           if (!repeated && next?.file)
             prefetchByPath(next.file.path);
           return true;
@@ -14325,39 +15325,6 @@ ${frontmatter.yaml}
       }
       return false;
     }
-    function handleVirtualSourcePagingKey(e2, targetEl) {
-      if (e2.__gdpVirtualSourcePagingHandled)
-        return true;
-      if (e2.defaultPrevented || e2.isComposing || PALETTE || document.querySelector(".mkdp-lightbox"))
-        return false;
-      const editable = isEditableKeyTarget(targetEl);
-      const inVirtualSearch = !!targetEl?.closest(".gdp-source-virtual-search");
-      if (editable && !inVirtualSearch)
-        return false;
-      const key = e2.key.toLowerCase();
-      if (e2.altKey || e2.metaKey)
-        return false;
-      const isPlainPageKey = (key === "pagedown" || key === "pageup") && !e2.ctrlKey && !e2.shiftKey;
-      const isCtrlArrowKey = (key === "arrowdown" || key === "arrowup") && e2.ctrlKey && !e2.shiftKey;
-      if (!isPlainPageKey && !isCtrlArrowKey)
-        return false;
-      const scroller = findMainScrollTarget();
-      if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
-        return false;
-      const pageDown = key === "pagedown" || key === "arrowdown";
-      const pageUp = key === "pageup" || key === "arrowup";
-      if (!pageDown && !pageUp)
-        return false;
-      e2.__gdpVirtualSourcePagingHandled = true;
-      e2.preventDefault();
-      e2.stopPropagation();
-      scrollMainPanel(pageDown ? 1 : -1, e2.repeat, "page");
-      focusMainSurface();
-      return true;
-    }
-    function handleVirtualSourcePagingKeydown(e2) {
-      handleVirtualSourcePagingKey(e2, e2.target);
-    }
     document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
       capture: true
     });
@@ -14385,7 +15352,7 @@ ${frontmatter.yaml}
         scope,
         editable: isEditableKeyTarget(targetEl),
         composing: e2.isComposing,
-        paletteOpen: !!PALETTE,
+        paletteOpen: isPaletteOpen(),
         pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
         lightboxOpen: !!document.querySelector(".mkdp-lightbox")
       });
@@ -14399,25 +15366,6 @@ ${frontmatter.yaml}
     setPageMode();
     if (window.location.pathname === "/") {
       setRoute(STATE.route, true);
-    }
-    function loadRepo() {
-      if (STATE.route.screen !== "repo")
-        return Promise.resolve();
-      setStatus("refreshing");
-      const params = new URLSearchParams;
-      params.set("ref", STATE.route.ref || "worktree");
-      if (STATE.route.path)
-        params.set("path", STATE.route.path);
-      appendScopeParams(params);
-      return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
-        if (!r2.ok)
-          throw new Error("failed to load repository tree");
-        return r2.json();
-      })).then(async (data) => {
-        await renderRepo(data);
-        setStatus("live");
-        syncHeaderMenu();
-      }).catch(() => setStatus("error"));
     }
     function load(options = {}) {
       if (STATE.route.screen === "help") {
@@ -14475,8 +15423,8 @@ ${frontmatter.yaml}
       } else if (STATE.route.screen === "help") {
         setRoute({
           screen: "help",
-          lang: helpLanguageFromRoute(),
-          section: helpSectionFromRoute(),
+          lang: helpLanguageFromRoute(STATE.route),
+          section: helpSectionFromRoute(STATE.route),
           range
         }, true);
         renderHelpPage();
@@ -14487,221 +15435,20 @@ ${frontmatter.yaml}
     }
     syncRefInputs();
     syncHeaderMenu();
-    const REFS = {
-      branches: [],
-      tags: [],
-      commits: [],
-      current: ""
-    };
-    const popover = $("#ref-popover");
-    const popBody = popover.querySelector(".rp-body");
-    const popSearch = popover.querySelector(".rp-search");
-    if (!popBody || !popSearch)
-      return;
-    let popTarget = null;
-    function fetchRefs() {
-      return fetch("/_refs").then((r2) => r2.json()).then((refs) => {
-        Object.assign(REFS, refs);
-      }).catch(() => {});
-    }
-    fetchRefs();
-    let popTab = "commits";
-    let commitSearchTimer = null;
-    let commitSearchSeq = 0;
-    let commitSearchAbort = null;
-    let commitSearchLoading = false;
-    function fetchCommitRefs(query) {
-      const seq = ++commitSearchSeq;
-      if (commitSearchAbort)
-        commitSearchAbort.abort();
-      commitSearchAbort = new AbortController;
-      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
-      return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
-        if (seq !== commitSearchSeq)
-          return;
-        commitSearchLoading = false;
-        REFS.commits = refs.commits || [];
-        if (!popover.hidden && popTab === "commits") {
-          buildPopBody(popSearch.value);
-        }
-      }).catch(() => {
-        if (seq === commitSearchSeq)
-          commitSearchLoading = false;
-      });
-    }
-    function scheduleCommitSearch(query) {
-      if (commitSearchTimer)
-        clearTimeout(commitSearchTimer);
-      commitSearchLoading = true;
-      commitSearchTimer = setTimeout(() => {
-        commitSearchTimer = null;
-        fetchCommitRefs(query);
-      }, 150);
-    }
-    function buildPopBody(query) {
-      const q = (query || "").toLowerCase().trim();
-      const m = (s2) => !q || String(s2).toLowerCase().includes(q);
-      const html = [];
-      if (popTab === "commits") {
-        if (commitSearchLoading) {
-          html.push('<div class="rp-empty">loading commits...</div>');
-          popBody.innerHTML = html.join("");
-          highlightCurrentInPopover();
-          return;
-        }
-        const commits = (REFS.commits || []).filter((commit) => m(`${commit.sha} ${commit.subject} ${commit.author}`));
-        if (!commits.length) {
-          html.push('<div class="rp-empty">no commits</div>');
-        }
-        for (const commit of commits) {
-          if (!commit.sha)
-            continue;
-          const shortSha = commit.sha.slice(0, 7);
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '"><div class="row1"><span class="sha">' + escapeHtml2(shortSha) + '</span><span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + escapeHtml2(commit.subject || "") + '</span></div><div class="row2"><span class="author">' + escapeHtml2(commit.author || "") + '</span><span class="when">' + escapeHtml2(commit.when || "") + "</span></div></div>");
-        }
-      } else if (popTab === "branches") {
-        const branches = (REFS.branches || []).filter((b2) => m(b2.name));
-        if (!branches.length) {
-          html.push('<div class="rp-empty">no branches</div>');
-        }
-        for (const branch of branches) {
-          const cur = branch.name === REFS.current;
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(branch.name) + '"><div class="row1"><span class="name">' + escapeHtml2(branch.name) + "</span>" + (cur ? '<span class="badge cur">current</span>' : '<span class="badge">branch</span>') + "</div>" + (branch.when ? '<div class="row2"><span class="when">' + escapeHtml2(branch.when) + "</span></div>" : "") + "</div>");
-        }
-      } else if (popTab === "tags") {
-        const tags = (REFS.tags || []).filter((t2) => m(t2.name));
-        if (!tags.length) {
-          html.push('<div class="rp-empty">no tags</div>');
-        }
-        for (const tag of tags) {
-          html.push('<div class="rp-item-ref" data-val="' + escapeAttr(tag.name) + '"><div class="row1"><span class="name">' + escapeHtml2(tag.name) + '</span><span class="badge">tag</span></div>' + (tag.when ? '<div class="row2"><span class="when">' + escapeHtml2(tag.when) + "</span></div>" : "") + "</div>");
-        }
-      }
-      popBody.innerHTML = html.join("");
-      highlightCurrentInPopover();
-    }
-    function highlightCurrentInPopover() {
-      if (!popTarget)
-        return;
-      const cur = (popTarget.value || "").trim();
-      if (!cur)
-        return;
-      const items = popBody.querySelectorAll("[data-val]");
-      let match2 = null;
-      items.forEach((it) => {
-        if (it.dataset.val === cur)
-          match2 = it;
-      });
-      if (match2) {
-        match2.classList.add("current");
-        const ph = popBody;
-        const r2 = match2.getBoundingClientRect();
-        const pr = ph.getBoundingClientRect();
-        if (r2.top < pr.top || r2.bottom > pr.bottom) {
-          ph.scrollTop = match2.offsetTop - ph.clientHeight / 2;
-        }
-      }
-    }
-    function escapeAttr(s2) {
-      return escapeHtml2(s2).replace(/"/g, "&quot;");
-    }
-    function openPopover(input) {
-      popTarget = input;
-      popSearch.value = "";
-      if (popTab === "commits")
-        scheduleCommitSearch("");
-      buildPopBody("");
-      const cur = (input.value || "").trim();
-      popover.querySelectorAll(".rp-chip").forEach((c2) => {
-        c2.classList.toggle("current", c2.dataset.val === cur);
-      });
-      popover.hidden = false;
-      const r2 = input.getBoundingClientRect();
-      const popWidth = Math.min(560, Math.floor(window.innerWidth * 0.9));
-      popover.style.left = `${Math.max(8, Math.min(r2.left, window.innerWidth - popWidth - 8))}px`;
-      popover.style.top = `${r2.bottom + 4}px`;
-      setTimeout(() => popSearch.focus(), 0);
-    }
-    function closePopover() {
-      popover.hidden = true;
-      popTarget = null;
-    }
-    const refFromInput = $("#ref-from");
-    const refToInput = $("#ref-to");
-    wireRefSelectorInput(refFromInput, () => {
-      const otherEmpty = !refToInput.value;
-      setRange(refFromInput.value, refToInput.value);
-      if (otherEmpty)
-        setTimeout(() => openPopover(refToInput), 0);
-    });
-    wireRefSelectorInput(refToInput, () => setRange(refFromInput.value, refToInput.value));
-    wireRefSelectorInput($("#repo-target"), (ref) => {
-      if (STATE.route.screen !== "file")
-        return;
-      setRoute({
-        screen: "file",
-        path: STATE.route.path,
-        ref,
-        view: "blob",
-        range: currentRange()
-      });
-      renderStandaloneSource({ path: STATE.route.path, ref });
-    });
-    popSearch.addEventListener("input", () => {
-      if (popTab === "commits")
-        scheduleCommitSearch(popSearch.value);
-      buildPopBody(popSearch.value);
-    });
-    popSearch.addEventListener("keydown", (e2) => {
-      if (e2.key === "Escape") {
-        closePopover();
-      }
-      if (e2.key === "Enter") {
-        const first = popBody.querySelector(".rp-item-commit, .rp-item-ref");
-        if (first)
-          first.click();
-      }
-    });
-    function handlePicked(val) {
-      if (!popTarget || !val)
-        return;
-      const pickedTarget = popTarget;
-      pickedTarget.value = val;
-      closePopover();
-      pickedTarget.dispatchEvent(new Event("change"));
-    }
-    popBody.addEventListener("click", (e2) => {
-      const item = e2.target.closest(".rp-item-commit, .rp-item-ref");
-      if (!item)
-        return;
-      handlePicked(item.dataset.val);
-    });
-    popover.querySelectorAll(".rp-tab").forEach((t2) => {
-      t2.addEventListener("click", () => {
-        popTab = t2.dataset.tab || "commits";
-        popover.querySelectorAll(".rp-tab").forEach((b2) => {
-          b2.classList.toggle("active", b2 === t2);
-        });
-        if (popTab === "commits")
-          scheduleCommitSearch(popSearch.value);
-        buildPopBody(popSearch.value);
-      });
-    });
-    popover.querySelectorAll(".rp-chip").forEach((c2) => {
-      c2.addEventListener("click", () => handlePicked(c2.dataset.val));
-    });
-    document.addEventListener("mousedown", (e2) => {
-      if (popover.hidden)
-        return;
-      const target = e2.target;
-      if (popover.contains(target))
-        return;
-      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
-        return;
-      closePopover();
+    createRefPicker({
+      $,
+      escapeHtml: escapeHtml2,
+      currentRange,
+      setRange,
+      setRoute,
+      renderStandaloneSource,
+      getFrom: () => STATE.from,
+      getTo: () => STATE.to,
+      getRepoRef: () => STATE.repoRef,
+      getRoute: () => STATE.route
     });
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
-    window.addEventListener("popstate", () => {
+    function applyRouteFromLocation() {
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       STATE.route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
       STATE.from = STATE.route.range.from;
@@ -14733,6 +15480,18 @@ ${frontmatter.yaml}
         return;
       }
       applySourceRouteToShell();
+    }
+    window.addEventListener("popstate", applyRouteFromLocation);
+    document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
+      link2.addEventListener("click", (e2) => {
+        if (e2.metaKey || e2.ctrlKey || e2.shiftKey || e2.altKey || e2.button !== 0)
+          return;
+        e2.preventDefault();
+        const target = new URL(link2.href, window.location.origin);
+        history.pushState(null, "", target.pathname + target.search);
+        window.scrollTo(0, 0);
+        applyRouteFromLocation();
+      });
     });
     function applyIgnoreWs() {
       const btn = $("#ignore-ws");

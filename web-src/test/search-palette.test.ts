@@ -3,7 +3,7 @@ import {
   PALETTE_RESULT_LIMIT,
   limitPaletteResults,
   movePaletteSelection,
-} from "../search-palette";
+} from "../core/search-palette";
 
 describe("limitPaletteResults", () => {
   test("keeps only the first palette result window", () => {

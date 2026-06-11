@@ -5,7 +5,7 @@ import {
   isGlobPathQuery,
   rankFuzzyPaths,
   rankPathMatches,
-} from "../fuzzy-search";
+} from "../core/fuzzy-search";
 
 describe("fuzzyMatchPath", () => {
   test("prefers basename matches over directory-only matches", () => {

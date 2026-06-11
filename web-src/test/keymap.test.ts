@@ -3,7 +3,7 @@ import {
   DEFAULT_KEY_BINDINGS,
   resolveKeymapAction,
   type KeymapScope,
-} from "../keymap";
+} from "../core/keymap";
 
 function key(
   key: string,

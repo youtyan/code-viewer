@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { nextVisibleFileIndex } from "../file-navigation";
+import { nextVisibleFileIndex } from "../core/file-navigation";
 
 describe("nextVisibleFileIndex", () => {
   test("starts at the first item when moving down with no active item", () => {

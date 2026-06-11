@@ -12,7 +12,7 @@ import {
   trailingExpandTargetIndex,
   trailingClickRange,
   applyTrailingResult,
-} from "../expand-logic";
+} from "../core/expand-logic";
 
 const STEP = 20;
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isWhitespaceOnlyInlineHighlight } from "../ws-highlight";
+import { isWhitespaceOnlyInlineHighlight } from "../core/ws-highlight";
 
 describe("isWhitespaceOnlyInlineHighlight", () => {
   test("matches spaces and tabs but not text changes", () => {
