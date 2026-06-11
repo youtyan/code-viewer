@@ -236,3 +236,32 @@ declare global {
 
   const Diff2HtmlUI: Diff2HtmlGlobal;
 }
+
+export type HljsApi = {
+  configure?: (options: Record<string, unknown>) => void;
+  getLanguage?: (language: string) => unknown;
+  highlight?: (
+    code: string,
+    options: { language: string; ignoreIllegals: boolean },
+  ) => { value: string };
+};
+
+export type SidebarItem = {
+  order?: number;
+  path: string;
+  display_path?: string;
+  type?: RepoTreeEntry["type"];
+  children_omitted?: true;
+  children_omitted_reason?: RepoTreeEntry["children_omitted_reason"];
+  status?: string;
+  additions?: number;
+  deletions?: number;
+};
+
+export type RawFileInfo = {
+  size?: number;
+  type?: string;
+  created_at?: string;
+  updated_at?: string;
+  commit_updated_at?: string;
+};
