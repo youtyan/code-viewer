@@ -30,8 +30,8 @@ import type {
   UndoActionResponse,
 } from "../types";
 import {
-  addAnnotationEntry,
   ANNOTATION_BODY_MAX_BYTES,
+  addAnnotationEntry,
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
@@ -2255,6 +2255,8 @@ async function handleAnnotations(req: Request) {
     return json({
       ok: true,
       session_id: result.session.id,
+      session_title: result.session.title,
+      created_session: result.created_session,
       entry: result.entry,
     });
   }

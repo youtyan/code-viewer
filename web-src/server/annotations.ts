@@ -187,6 +187,7 @@ export type AddAnnotationResult =
       state: AnnotationsState;
       session: AnnotationSession;
       entry: AnnotationEntry;
+      created_session: boolean;
     }
   | { ok: false; error: string };
 
@@ -207,6 +208,7 @@ export function addAnnotationEntry(
 
   let sessions = state.sessions;
   let session: AnnotationSession | undefined;
+  let createdSession = false;
   if (input.session_id) {
     session = sessions.find((s) => s.id === input.session_id);
     if (!session) return { ok: false, error: "session not found" };
@@ -222,6 +224,7 @@ export function addAnnotationEntry(
     );
     sessions = started.state.sessions;
     session = started.session;
+    createdSession = true;
   }
 
   const entry: AnnotationEntry = {
@@ -249,6 +252,7 @@ export function addAnnotationEntry(
     },
     session: updatedSession,
     entry,
+    created_session: createdSession,
   };
 }
 
