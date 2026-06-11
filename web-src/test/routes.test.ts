@@ -61,11 +61,19 @@ describe("routes", () => {
       }),
     ).toBe("/file?path=README.md&target=main&line=12-15");
     expect(
-      buildRoute({ screen: "help", lang: "en", section: "keybindings", range }),
+      buildRoute({ screen: "help", lang: "en", section: "overview", range }),
     ).toBe("/help");
     expect(
-      buildRoute({ screen: "help", lang: "ja", section: "keybindings", range }),
+      buildRoute({ screen: "help", lang: "ja", section: "overview", range }),
     ).toBe("/help?lang=ja");
+    expect(
+      buildRoute({
+        screen: "help",
+        lang: "ja",
+        section: "annotations",
+        range,
+      }),
+    ).toBe("/help?lang=ja&section=annotations");
   });
 
   test("parses repository routes with worktree default ref", () => {
@@ -184,15 +192,15 @@ describe("routes", () => {
     expect(parseRoute("/help", "", defaultRange)).toEqual({
       screen: "help",
       lang: "en",
-      section: "keybindings",
+      section: "overview",
       range: defaultRange,
     });
     expect(
-      parseRoute("/help", "?lang=ja&section=keybindings", defaultRange),
+      parseRoute("/help", "?lang=ja&section=annotations", defaultRange),
     ).toEqual({
       screen: "help",
       lang: "ja",
-      section: "keybindings",
+      section: "annotations",
       range: defaultRange,
     });
   });

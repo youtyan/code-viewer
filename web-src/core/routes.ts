@@ -140,7 +140,7 @@ export function parseRoute(
         screen: "help",
         range,
         lang: params.get("lang") || "en",
-        section: params.get("section") || "keybindings",
+        section: params.get("section") || "overview",
       };
     case "/history": {
       const commit = params.get("commit") || "";
@@ -210,7 +210,7 @@ export function buildRoute(route: AppRoute): string {
     case "help": {
       const params = new URLSearchParams();
       if (route.lang && route.lang !== "en") params.set("lang", route.lang);
-      if (route.section && route.section !== "keybindings")
+      if (route.section && route.section !== "overview")
         params.set("section", route.section);
       const qs = params.toString();
       return `/help${qs ? `?${qs}` : ""}`;
