@@ -138,11 +138,14 @@ location, and entries and sessions can be deleted there too. The "follow"
 checkbox controls whether the tab jumps automatically when an agent adds a
 new annotation.
 
-The `annotate` subcommand reuses the running server for the repository when
-one exists (discovered via `~/.cache/code-viewer/servers/`) and starts one
-automatically otherwise, printing its URL to stderr. Pass `--cwd <repo>` when
-annotating a repository other than the current directory, or `--server <url>`
-to target a specific server.
+The `annotate` subcommand talks to the running server for the repository
+(discovered via `~/.cache/code-viewer/servers/`); start one with
+`code-viewer` first. Pass `--cwd <repo>` when annotating a repository other
+than the current directory, or `--server <url>` to target a specific server.
+
+`add` appends to the most recent session (creating one when none exists);
+run `annotate start` again to begin a new session, or pass `--session <id>`
+to target a specific one.
 
 ## Development
 
