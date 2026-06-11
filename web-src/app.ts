@@ -942,6 +942,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     };
   }
 
+  // While on the history screen, commit selection rewrites STATE.from/to to
+  // drive the diff pane. The from/to the user chose for the Diff Viewer is
+  // parked here on entry and restored on exit so the two screens stay
+  // independent. Declared before the startup calls below to avoid TDZ.
+  let preHistoryRange: DiffRange | null = null;
+  function parkRangeForHistory() {
+    if (preHistoryRange === null)
+      preHistoryRange = { from: STATE.from, to: STATE.to };
+  }
+  function restoreRangeAfterHistory() {
+    if (!preHistoryRange) return;
+    STATE.from = preHistoryRange.from;
+    STATE.to = preHistoryRange.to;
+    preHistoryRange = null;
+    syncRefInputs();
+  }
+
   function repoFileTargetFromRoute(): string | null {
     return STATE.route.screen === "file" && STATE.route.view === "blob"
       ? STATE.route.ref
@@ -1043,7 +1060,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           });
         }
         if (link.dataset.route === "diff") {
-          link.href = buildRoute({ screen: "diff", range: currentRange() });
+          // On the history screen the live range tracks the selected commit;
+          // the Diff Viewer link keeps the range the user picked before.
+          link.href = buildRoute({
+            screen: "diff",
+            range: preHistoryRange ?? currentRange(),
+          });
         }
         if (link.dataset.route === "history") {
           link.href = buildRoute({
@@ -1688,6 +1710,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       applySourceRouteToShell();
     } else if (STATE.route.screen === "history") {
+      parkRangeForHistory();
       setStatus("live");
       HISTORY_VIEW.enterHistory();
     } else load();
@@ -1701,6 +1724,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (ti) ti.value = STATE.to;
   }
   function setRange(from: string, to: string) {
+    // An explicit range pick supersedes whatever was parked for history.
+    preHistoryRange = null;
     STATE.from = from || "";
     STATE.to = to || "";
     localStorage.setItem("gdp:from", STATE.from);
@@ -1786,6 +1811,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
   function applyRouteFromLocation() {
+    // Leaving the history screen: bring back the range the user had picked
+    // for the other screens before the URL fallback below reads it.
+    if (
+      STATE.route.screen === "history" &&
+      window.location.pathname !== "/history"
+    ) {
+      restoreRangeAfterHistory();
+    }
     const parsedRoute = parseRoute(
       window.location.pathname,
       window.location.search,
@@ -1817,6 +1850,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return;
     }
     if (STATE.route.screen === "history") {
+      parkRangeForHistory();
       cancelActiveSourceLoad("navigation");
       setPageMode();
       removeStandaloneSource();
