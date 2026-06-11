@@ -136,8 +136,10 @@ location and renders your explanation directly under the annotated lines.
 
 ## Fixing mistakes and follow-ups
 
-- The human may paste a "[code-viewer annotation <id>] ..." reference copied
-  from the viewer. It names the annotation id, location, and session.
+- The human may paste a reference block copied from the viewer that starts
+  with "code-viewer のコード注釈について依頼があります" and lists the
+  annotation id, location, and session, followed by their question.
+  Read the current body first: code-viewer annotate list --json
 - Revise a wrong annotation IN PLACE (do not delete + re-add; the id and
   its position in the walkthrough are preserved):
     code-viewer annotate edit <id> --body "<corrected markdown>"
