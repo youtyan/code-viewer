@@ -1526,6 +1526,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (action === "tab-preview" || action === "tab-code") {
       return switchSourceTab(action === "tab-preview" ? "preview" : "code");
     }
+    if (action === "annotation-next" || action === "annotation-previous") {
+      ANNOTATIONS_UI?.stepAnnotation(action === "annotation-next" ? 1 : -1);
+      return true;
+    }
     if (action === "start-g-sequence") {
       PENDING_G_SCOPE = scope;
       PENDING_G_UNTIL = performance.now() + 900;

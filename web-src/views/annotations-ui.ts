@@ -85,6 +85,8 @@ export type AnnotationsUi = {
   onAnnotationOpened(cb: (entryId: string) => void): void;
   /** Id of the entry currently shown in the detail panel, or null. */
   getActiveAnnotationId(): string | null;
+  /** Open the next (1) or previous (-1) annotation in the session. */
+  stepAnnotation(direction: 1 | -1): void;
 };
 
 export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
@@ -858,7 +860,17 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   function stepAnnotation(direction: 1 | -1) {
-    if (!activeAnnotationId) return;
+    if (!activeAnnotationId) {
+      // No annotation shown yet: enter the walkthrough at the start (or
+      // the end when stepping backwards), preferring the active session.
+      const session =
+        ANNOTATIONS.sessions.find((s) => s.id === activeSessionId) ??
+        ANNOTATIONS.sessions[0];
+      const entries = session?.entries ?? [];
+      const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
+      if (entry) void openAnnotationEntry(entry.id);
+      return;
+    }
     const found = findAnnotation(activeAnnotationId);
     if (!found) return;
     const next = found.session.entries[found.index + direction];
@@ -944,5 +956,6 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     getActiveAnnotationId() {
       return activeAnnotationId;
     },
+    stepAnnotation,
   };
 }
