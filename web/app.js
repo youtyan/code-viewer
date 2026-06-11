@@ -7016,6 +7016,7 @@ ${frontmatter.yaml}
         cb();
     }
     const annotationOpenedCallbacks = [];
+    let emptyDiffRangeKey = null;
     function notifyAnnotationOpened(entryId) {
       for (const cb of annotationOpenedCallbacks)
         cb(entryId);
@@ -7544,7 +7545,8 @@ ${frontmatter.yaml}
       deps.setRange(from, to);
       deps.syncRefInputs();
       deps.cancelActiveSourceLoad("navigation");
-      const needDiffLoad = rangeChanged || !deps.getFiles().length;
+      const rangeKey = `${from}..${to}`;
+      const needDiffLoad = rangeChanged || !deps.getFiles().length && emptyDiffRangeKey !== rangeKey;
       if (needDiffLoad) {
         deps.setRoute({ screen: "diff", range, path: entry.path, line });
         deps.setPageMode();
@@ -7552,6 +7554,7 @@ ${frontmatter.yaml}
         await deps.load();
         if (stale())
           return;
+        emptyDiffRangeKey = deps.getFiles().length ? null : rangeKey;
       }
       if (deps.getFiles().some((f2) => f2.path === entry.path)) {
         deps.setRoute({ screen: "diff", range, path: entry.path, line }, needDiffLoad);
