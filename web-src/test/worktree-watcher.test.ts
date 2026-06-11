@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -22,6 +22,27 @@ async function waitUntil(
   }
   return predicate();
 }
+
+async function canObserveNativeFsWatch(): Promise<boolean> {
+  const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-probe-"));
+  let observed = false;
+  const watcher = watch(root, { persistent: false }, () => {
+    observed = true;
+  });
+
+  try {
+    await wait(100);
+    writeFileSync(join(root, "probe.txt"), "probe");
+    return await waitUntil(() => observed, 1000);
+  } catch {
+    return false;
+  } finally {
+    watcher.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const realWatcherTest = (await canObserveNativeFsWatch()) ? test : test.skip;
 
 describe("worktree update watcher", () => {
   test("debounces accepted worktree changes into one update", () => {
@@ -304,58 +325,64 @@ describe("worktree update watcher", () => {
     expect(watched).toEqual(["/repo"]);
   });
 
-  test("real watcher updates for normal files but not omitted directories", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-"));
-    const updates: number[] = [];
-    const handle = startWorktreeUpdateWatch({
-      root,
-      omitDirNames: ["node_modules"],
-      excludeNames: [".DS_Store"],
-      onUpdate: () => updates.push(Date.now()),
-      debounceMs: 75,
-    });
+  realWatcherTest(
+    "real watcher updates for normal files but not omitted directories",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-"));
+      const updates: number[] = [];
+      const handle = startWorktreeUpdateWatch({
+        root,
+        omitDirNames: ["node_modules"],
+        excludeNames: [".DS_Store"],
+        onUpdate: () => updates.push(Date.now()),
+        debounceMs: 75,
+      });
 
-    try {
-      expect(handle.started).toBe(true);
-      await wait(500);
-      writeFileSync(join(root, "README.md"), "hello");
-      expect(await waitUntil(() => updates.length >= 1)).toBe(true);
+      try {
+        expect(handle.started).toBe(true);
+        await wait(500);
+        writeFileSync(join(root, "README.md"), "hello");
+        expect(await waitUntil(() => updates.length >= 1)).toBe(true);
 
-      mkdirSync(join(root, "node_modules"));
-      await wait(500);
-      updates.length = 0;
-      writeFileSync(join(root, "node_modules", "pkg.js"), "ignored");
-      await wait(500);
-      expect(updates.length).toBe(0);
-    } finally {
-      handle.close();
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+        mkdirSync(join(root, "node_modules"));
+        await wait(500);
+        updates.length = 0;
+        writeFileSync(join(root, "node_modules", "pkg.js"), "ignored");
+        await wait(500);
+        expect(updates.length).toBe(0);
+      } finally {
+        handle.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
-  test("real watcher keeps updating after a watched directory is recreated", async () => {
-    const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-recreate-"));
-    const sub = join(root, "sub");
-    mkdirSync(sub);
-    const updates: number[] = [];
-    const handle = startWorktreeUpdateWatch({
-      root,
-      omitDirNames: [],
-      excludeNames: [],
-      onUpdate: () => updates.push(Date.now()),
-      debounceMs: 75,
-    });
-
-    try {
-      expect(handle.started).toBe(true);
-      await wait(500);
-      rmSync(sub, { recursive: true, force: true });
+  realWatcherTest(
+    "real watcher keeps updating after a watched directory is recreated",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-watch-recreate-"));
+      const sub = join(root, "sub");
       mkdirSync(sub);
-      writeFileSync(join(sub, "after.txt"), "after");
-      expect(await waitUntil(() => updates.length >= 1)).toBe(true);
-    } finally {
-      handle.close();
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+      const updates: number[] = [];
+      const handle = startWorktreeUpdateWatch({
+        root,
+        omitDirNames: [],
+        excludeNames: [],
+        onUpdate: () => updates.push(Date.now()),
+        debounceMs: 75,
+      });
+
+      try {
+        expect(handle.started).toBe(true);
+        await wait(500);
+        rmSync(sub, { recursive: true, force: true });
+        mkdirSync(sub);
+        writeFileSync(join(sub, "after.txt"), "after");
+        expect(await waitUntil(() => updates.length >= 1)).toBe(true);
+      } finally {
+        handle.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
