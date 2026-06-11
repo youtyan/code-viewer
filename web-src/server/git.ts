@@ -354,9 +354,12 @@ export function refCommits(
   return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
 }
 
-export type GitHistoryCommit = GitCommitMeta & { parents: string[] };
+export type GitHistoryCommit = GitCommitMeta & {
+  parents: string[];
+  body: string;
+};
 
-const HISTORY_FORMAT = "%H%x00%s%x00%an%x00%aI%x00%P";
+const HISTORY_FORMAT = "%H%x00%s%x00%an%x00%aI%x00%P%x00%b";
 const MAX_HISTORY_LIMIT = 200;
 
 function parseHistoryLog(stdout: string): GitHistoryCommit[] {
@@ -372,6 +375,7 @@ function parseHistoryLog(stdout: string): GitHistoryCommit[] {
     const author = parts[index++] || "";
     const when = parts[index++] || "";
     const parentsRaw = (parts[index++] || "").trim();
+    const body = (parts[index++] || "").trim();
     if (sha)
       commits.push({
         sha,
@@ -379,6 +383,7 @@ function parseHistoryLog(stdout: string): GitHistoryCommit[] {
         author,
         when,
         parents: parentsRaw ? parentsRaw.split(/\s+/) : [],
+        body,
       });
   }
   return commits;

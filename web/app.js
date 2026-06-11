@@ -9045,6 +9045,37 @@ ${frontmatter.yaml}
       return false;
     return state.pagesLoaded < HISTORY_AUTO_LOAD_MAX_PAGES;
   }
+  var MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  function historyGroupLabel(whenIso, now) {
+    const t2 = Date.parse(whenIso);
+    if (!Number.isFinite(t2))
+      return "Unknown date";
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (t2 >= dayStart)
+      return "Today";
+    if (t2 >= dayStart - DAY_MS)
+      return "Yesterday";
+    if (t2 >= dayStart - 6 * DAY_MS)
+      return "This week";
+    const d2 = new Date(t2);
+    if (d2.getFullYear() === now.getFullYear() && d2.getMonth() === now.getMonth())
+      return "This month";
+    return `${MONTH_NAMES[d2.getMonth()]} ${d2.getFullYear()}`;
+  }
 
   // web-src/views/history-view.ts
   function createHistoryView(deps) {
@@ -9101,8 +9132,44 @@ ${frontmatter.yaml}
       return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` + `</span>` + `</li>`;
     }
     function renderList() {
-      list2.innerHTML = commits.map(commitRow).join("");
+      const now = new Date;
+      const html = [];
+      let lastGroup = "";
+      for (const commit of commits) {
+        const group = historyGroupLabel(commit.when, now);
+        if (group !== lastGroup) {
+          html.push(`<li class="history-group" aria-hidden="true">${deps.escapeHtml(group)}</li>`);
+          lastGroup = group;
+        }
+        html.push(commitRow(commit));
+      }
+      list2.innerHTML = html.join("");
       setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
+    }
+    function updateCommitInfo(commit) {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      if (!commit) {
+        info.hidden = true;
+        return;
+      }
+      const set2 = (sel, text2) => {
+        const el = info.querySelector(sel);
+        if (el)
+          el.textContent = text2;
+      };
+      set2(".hci-sha", commit.sha);
+      set2(".hci-author", commit.author);
+      const t2 = Date.parse(commit.when);
+      set2(".hci-date", Number.isFinite(t2) ? new Date(t2).toLocaleString() : commit.when);
+      set2(".hci-subject", commit.subject);
+      const body = info.querySelector(".hci-body");
+      if (body) {
+        body.textContent = commit.body;
+        body.hidden = !commit.body;
+      }
+      info.hidden = false;
     }
     function updateActiveRow() {
       list2.querySelectorAll(".history-item").forEach((row) => {
@@ -9141,6 +9208,7 @@ ${frontmatter.yaml}
       const gen = generation;
       selectedSha = commit.sha;
       updateActiveRow();
+      updateCommitInfo(commit);
       if (gen !== generation)
         return;
       if (options.updateUrl !== false) {
@@ -9203,6 +9271,7 @@ ${frontmatter.yaml}
         return;
       if (!single) {
         setBanner(lookupFailed ? `failed to load commit: ${sha}` : `commit not found: ${sha}`);
+        updateCommitInfo(null);
         deps.showEmptyDiffPane();
         return;
       }
@@ -9235,6 +9304,7 @@ ${frontmatter.yaml}
         inFlight = null;
         selectedSha = "";
         setBanner("");
+        updateCommitInfo(null);
         renderList();
         await loadNextPage();
       }
@@ -9246,6 +9316,7 @@ ${frontmatter.yaml}
       } else {
         selectedSha = "";
         updateActiveRow();
+        updateCommitInfo(null);
         deps.showEmptyDiffPane();
       }
     }

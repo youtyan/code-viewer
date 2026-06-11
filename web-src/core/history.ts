@@ -8,6 +8,7 @@ export type HistoryCommit = {
   author: string;
   when: string;
   parents: string[];
+  body: string;
 };
 
 export type HistoryLogResponse = {
@@ -36,4 +37,40 @@ export function shouldContinueAutoLoad(state: {
   if (state.found) return false;
   if (!state.hasMore) return false;
   return state.pagesLoaded < HISTORY_AUTO_LOAD_MAX_PAGES;
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Section label used to group the commit list by age. Future timestamps
+// (clock skew across machines) fold into "Today".
+export function historyGroupLabel(whenIso: string, now: Date): string {
+  const t = Date.parse(whenIso);
+  if (!Number.isFinite(t)) return "Unknown date";
+  const dayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  if (t >= dayStart) return "Today";
+  if (t >= dayStart - DAY_MS) return "Yesterday";
+  if (t >= dayStart - 6 * DAY_MS) return "This week";
+  const d = new Date(t);
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth())
+    return "This month";
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
