@@ -42,6 +42,25 @@ describe("commitHistory", () => {
     expect(res.commits[4].parents).toEqual([]); // root commit
     expect(res.commits[0].author).toBe("tester");
     expect(res.commits[0].when).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(res.commits[0].body).toBe("");
+  });
+
+  test("returns the commit body", () => {
+    writeFileSync(join(repo, "body.txt"), "body\n");
+    git(repo, ["add", "body.txt"]);
+    git(repo, [
+      "commit",
+      "-m",
+      "subject line",
+      "-m",
+      "body first line\n\nbody second paragraph",
+    ]);
+    const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 1 });
+    expect(res.commits[0].subject).toBe("subject line");
+    expect(res.commits[0].body).toBe(
+      "body first line\n\nbody second paragraph",
+    );
+    git(repo, ["reset", "--hard", "HEAD^"]);
   });
 
   test("pages with skip and reports hasMore", () => {

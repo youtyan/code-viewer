@@ -7,6 +7,7 @@ import {
   HISTORY_PAGE_SIZE,
   type HistoryCommit,
   type HistoryLogResponse,
+  historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
 import type { AppRoute } from "../core/routes";
@@ -91,8 +92,48 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function renderList() {
-    list.innerHTML = commits.map(commitRow).join("");
+    const now = new Date();
+    const html: string[] = [];
+    let lastGroup = "";
+    for (const commit of commits) {
+      const group = historyGroupLabel(commit.when, now);
+      if (group !== lastGroup) {
+        html.push(
+          `<li class="history-group" aria-hidden="true">${deps.escapeHtml(group)}</li>`,
+        );
+        lastGroup = group;
+      }
+      html.push(commitRow(commit));
+    }
+    list.innerHTML = html.join("");
     setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
+  }
+
+  function updateCommitInfo(commit: HistoryCommit | null) {
+    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    if (!info) return;
+    if (!commit) {
+      info.hidden = true;
+      return;
+    }
+    const set = (sel: string, text: string) => {
+      const el = info.querySelector<HTMLElement>(sel);
+      if (el) el.textContent = text;
+    };
+    set(".hci-sha", commit.sha);
+    set(".hci-author", commit.author);
+    const t = Date.parse(commit.when);
+    set(
+      ".hci-date",
+      Number.isFinite(t) ? new Date(t).toLocaleString() : commit.when,
+    );
+    set(".hci-subject", commit.subject);
+    const body = info.querySelector<HTMLElement>(".hci-body");
+    if (body) {
+      body.textContent = commit.body;
+      body.hidden = !commit.body;
+    }
+    info.hidden = false;
   }
 
   function updateActiveRow() {
@@ -138,6 +179,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const gen = generation;
     selectedSha = commit.sha;
     updateActiveRow();
+    updateCommitInfo(commit);
     if (gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
@@ -207,6 +249,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
           ? `failed to load commit: ${sha}`
           : `commit not found: ${sha}`,
       );
+      updateCommitInfo(null);
       deps.showEmptyDiffPane();
       return;
     }
@@ -251,6 +294,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       inFlight = null;
       selectedSha = "";
       setBanner("");
+      updateCommitInfo(null);
       renderList();
       await loadNextPage();
     }
@@ -261,6 +305,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     } else {
       selectedSha = "";
       updateActiveRow();
+      updateCommitInfo(null);
       deps.showEmptyDiffPane();
     }
   }
