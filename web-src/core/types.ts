@@ -64,6 +64,7 @@ export type RepoTreeResponse = {
 
 export type SettingsResponse = {
   project: string;
+  repo_web_url: string | null;
   scope: {
     omit_dirs_effective: string[];
     omit_dirs_built_in: string[];

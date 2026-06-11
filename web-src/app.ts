@@ -41,6 +41,7 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView } from "./views/diff-view";
 import {
   createHelpPage,
@@ -49,6 +50,7 @@ import {
 } from "./views/help-page";
 import { createHistoryView } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
+import { createLineRefPill } from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
@@ -354,6 +356,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!res.ok) return null;
       const settings = (await res.json()) as SettingsResponse;
       setProjectName(settings.project || "");
+      const repoLink =
+        document.querySelector<HTMLAnchorElement>("#repo-web-link");
+      if (repoLink && settings.repo_web_url) {
+        repoLink.href = settings.repo_web_url;
+        repoLink.hidden = false;
+      }
       SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(
         settings.scope.omit_dirs_effective,
       );
@@ -413,6 +421,24 @@ window.GdpExpandLogic = GdpExpandLogic;
   let highlightConfigured = false;
   let PROJECT_NAME = "";
   let REPO_SIDEBAR_REF: string | null = null;
+
+  // ---------- Line reference copy (@path#start-end) ----------
+  const LINE_REF_PILL = createLineRefPill();
+  const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
+
+  // The pill follows the file screen's line= route param; on the diff screen
+  // diff-line-select owns it (after-side drag selection).
+  function syncLineRefPill() {
+    const route = STATE.route;
+    if (route.screen === "diff") return;
+    DIFF_LINE_SELECT.clear();
+    if (route.screen === "file" && route.line) {
+      const start =
+        typeof route.line === "number" ? route.line : route.line.start;
+      const end = typeof route.line === "number" ? route.line : route.line.end;
+      LINE_REF_PILL.show(route.path, start, end);
+    }
+  }
 
   // ---------- Sidebar: extracted to sidebar.ts ----------
   const SIDEBAR = createSidebar({
@@ -988,6 +1014,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
     syncHeaderMenu();
+    syncLineRefPill();
   }
 
   function setPageMode() {
@@ -1691,6 +1718,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       HISTORY_VIEW.enterHistory();
     } else load();
+    // Deep links land here without going through setRoute; reflect a line=
+    // selection in the copy pill on first paint too.
+    syncLineRefPill();
   });
 
   // Ref picker (from / to)
@@ -1802,6 +1832,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ANNOTATIONS_UI?.restoreSessionFromUrl();
     syncRefInputs();
     syncHeaderMenu();
+    syncLineRefPill();
     if (STATE.route.screen === "help") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
