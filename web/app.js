@@ -21,562 +21,6 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
-  // web-src/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
-  }
-  function createCatchUpGate(now, minIntervalMs) {
-    let lastForceAt = 0;
-    return function shouldRun() {
-      const current = now();
-      if (current - lastForceAt < minIntervalMs)
-        return false;
-      lastForceAt = current;
-      return true;
-    };
-  }
-
-  // web-src/directory-name.ts
-  function normalizeNewDirectoryName(name) {
-    if (typeof name !== "string")
-      return null;
-    const trimmed = name.trim();
-    if (!trimmed || trimmed.length > 180)
-      return null;
-    if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\x00") || Array.from(trimmed).some((char) => {
-      const code = char.charCodeAt(0);
-      return code < 32 || code === 127;
-    }))
-      return null;
-    if (trimmed === "." || trimmed === ".." || trimmed.toLowerCase() === ".git")
-      return null;
-    return trimmed;
-  }
-
-  // web-src/expand-logic.ts
-  function initExpandState(prevHunkEndNew, hunkNewStart) {
-    return {
-      topExpandedStart: hunkNewStart,
-      bottomExpandedEnd: prevHunkEndNew - 1
-    };
-  }
-  function remainingGap(state, prevHunkEndNew) {
-    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
-    const remainingEnd = state.topExpandedStart - 1;
-    if (remainingStart > remainingEnd)
-      return null;
-    return { start: remainingStart, end: remainingEnd };
-  }
-  function isFullyExpanded(state, prevHunkEndNew) {
-    return remainingGap(state, prevHunkEndNew) == null;
-  }
-  function upClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
-  }
-  function downClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
-  }
-  function applyUp(state, range) {
-    return Object.assign({}, state, { bottomExpandedEnd: range.end });
-  }
-  function applyDown(state, range) {
-    return Object.assign({}, state, { topExpandedStart: range.start });
-  }
-  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
-    return prevHunkEndOld + (newLine - prevHunkEndNew);
-  }
-  function trailingClickRange(hunkEndNew, step) {
-    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
-  }
-  function trailingExpandTargetIndex(hunkCount) {
-    return hunkCount > 0 ? hunkCount - 1 : null;
-  }
-  function shouldAttachTrailingExpand(probeLineCount) {
-    return probeLineCount > 0;
-  }
-  function applyTrailingResult(state, receivedCount, step) {
-    return {
-      newStart: state.newStart + receivedCount,
-      oldStart: state.oldStart + receivedCount,
-      eof: receivedCount === 0 || receivedCount < step
-    };
-  }
-  var GdpExpandLogic = {
-    initExpandState,
-    remainingGap,
-    isFullyExpanded,
-    upClickRange,
-    downClickRange,
-    applyUp,
-    applyDown,
-    mapNewToOld,
-    trailingExpandTargetIndex,
-    shouldAttachTrailingExpand,
-    trailingClickRange,
-    applyTrailingResult
-  };
-
-  // web-src/file-filter.ts
-  function normalizeFileFilterQuery(value) {
-    return (value || "").toLowerCase().trim();
-  }
-  function parseSlashRegex(query) {
-    if (!query.startsWith("/") || query.length < 2)
-      return null;
-    const lastSlash = query.lastIndexOf("/");
-    if (lastSlash <= 0)
-      return null;
-    return {
-      source: query.slice(1, lastSlash),
-      flags: query.slice(lastSlash + 1)
-    };
-  }
-  function compileFileFilter(value) {
-    const raw = (value || "").trim();
-    if (!raw)
-      return { kind: "empty", match: () => true };
-    const slashRegex = parseSlashRegex(raw);
-    if (slashRegex) {
-      try {
-        const regex = new RegExp(slashRegex.source, slashRegex.flags);
-        return { kind: "regex", match: (path) => regex.test(path) };
-      } catch (error) {
-        return {
-          kind: "invalid",
-          match: () => false,
-          error: error instanceof Error ? error.message : String(error)
-        };
-      }
-    }
-    const q = normalizeFileFilterQuery(raw.startsWith("/") ? raw.slice(1) : raw);
-    return {
-      kind: "substring",
-      match: (path) => path.toLowerCase().includes(q)
-    };
-  }
-
-  // web-src/file-navigation.ts
-  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
-    if (itemCount <= 0)
-      return -1;
-    if (currentIndex < 0)
-      return direction > 0 ? 0 : itemCount - 1;
-    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
-  }
-
-  // web-src/file-path-copy.ts
-  function filePathClipboardText(path) {
-    return path || "";
-  }
-  function fileNameClipboardText(path) {
-    if (!path)
-      return "";
-    const parts = path.split("/").filter(Boolean);
-    return parts[parts.length - 1] || "";
-  }
-
-  // web-src/focus-scope.ts
-  function isEditableKeyTarget(target) {
-    if (!target)
-      return false;
-    const tag = target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
-  }
-  function keymapScope(target) {
-    if (target?.closest("#content"))
-      return "main";
-    if (target?.closest("#sidebar"))
-      return "sidebar";
-    return "global";
-  }
-  function prepareKeyboardPanels(doc = document) {
-    const sidebar = doc.querySelector("#sidebar");
-    const content = doc.querySelector("#content");
-    if (sidebar)
-      sidebar.tabIndex = -1;
-    if (content)
-      content.tabIndex = -1;
-  }
-  function getPanelFocusScope(doc = document) {
-    const scope = doc.body?.dataset.focusScope;
-    return scope === "sidebar" || scope === "main" ? scope : null;
-  }
-  function setPanelFocusScope(scope, doc = document) {
-    if (!doc.body)
-      return;
-    if (scope)
-      doc.body.dataset.focusScope = scope;
-    else
-      delete doc.body.dataset.focusScope;
-  }
-  function restorePanelFocusScope(scope, doc = document) {
-    if (scope === "sidebar")
-      focusSidebarPanel(doc);
-    else if (scope === "main")
-      focusMainPanel(doc);
-    else
-      setPanelFocusScope(null, doc);
-  }
-  function focusSidebarPanel(doc = document) {
-    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
-    const sidebar = doc.querySelector("#sidebar");
-    (active || sidebar)?.focus({ preventScroll: true });
-    setPanelFocusScope("sidebar", doc);
-  }
-  function focusMainPanel(doc = document) {
-    doc.querySelector("#content")?.focus({ preventScroll: true });
-    setPanelFocusScope("main", doc);
-  }
-  function findMainScrollTarget(doc = document) {
-    const active = doc.activeElement;
-    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
-    if (activeScroller && activeScroller.offsetParent !== null)
-      return activeScroller;
-    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
-    if (sourceScroller && sourceScroller.offsetParent !== null)
-      return sourceScroller;
-    const content = doc.querySelector("#content");
-    if (!content || content.offsetParent === null)
-      return null;
-    const isScrollable = (item) => {
-      if (item.offsetParent === null)
-        return false;
-      const style = doc.defaultView?.getComputedStyle(item);
-      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
-    };
-    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
-    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
-    return scrollable || doc.scrollingElement;
-  }
-
-  // web-src/fuzzy-search.ts
-  function basenameStart(path) {
-    const slash = path.lastIndexOf("/");
-    return slash < 0 ? 0 : slash + 1;
-  }
-  function isBoundary(path, index) {
-    if (index <= 0)
-      return true;
-    const prev = path[index - 1];
-    return prev === "/" || prev === "-" || prev === "_" || prev === "." || prev === " ";
-  }
-  function toRanges(indices) {
-    const ranges = [];
-    for (const index of indices) {
-      const last = ranges[ranges.length - 1];
-      if (last && last.end === index) {
-        last.end = index + 1;
-      } else {
-        ranges.push({ start: index, end: index + 1 });
-      }
-    }
-    return ranges;
-  }
-  function basenameMatchTier(loweredQuery, loweredBasename) {
-    if (loweredBasename === loweredQuery)
-      return 4;
-    if (loweredBasename.startsWith(`${loweredQuery}.`))
-      return 3;
-    if (loweredBasename.startsWith(loweredQuery))
-      return 2;
-    if (loweredBasename.includes(loweredQuery))
-      return 1;
-    return 0;
-  }
-  function pathMatchTier(loweredQuery, loweredPath, loweredBasename) {
-    if (loweredQuery.includes("/") && (loweredPath === loweredQuery || loweredPath.endsWith(`/${loweredQuery}`)))
-      return 4;
-    return basenameMatchTier(loweredQuery, loweredBasename);
-  }
-  function contiguousPathRange(loweredQuery, loweredPath, baseStart) {
-    const loweredBasename = loweredPath.slice(baseStart);
-    const basenameMatchStart = loweredBasename.indexOf(loweredQuery);
-    if (basenameMatchStart >= 0) {
-      const start = baseStart + basenameMatchStart;
-      return { start, end: start + loweredQuery.length };
-    }
-    if (loweredQuery.includes("/")) {
-      const pathMatchStart = loweredPath.endsWith(`/${loweredQuery}`) ? loweredPath.length - loweredQuery.length : loweredPath === loweredQuery ? 0 : -1;
-      if (pathMatchStart >= 0)
-        return {
-          start: pathMatchStart,
-          end: pathMatchStart + loweredQuery.length
-        };
-    }
-    return null;
-  }
-  function computeFuzzyMatch(query, path) {
-    const q = query.trim().toLowerCase();
-    if (!q)
-      return { score: 0, ranges: [], tier: 0 };
-    const lowerPath = path.toLowerCase();
-    const baseStart = basenameStart(path);
-    const indices = [];
-    let from = 0;
-    let score = 0;
-    for (const ch of q) {
-      const index = lowerPath.indexOf(ch, from);
-      if (index < 0)
-        return null;
-      indices.push(index);
-      score += 10;
-      if (index >= baseStart)
-        score += 8;
-      if (isBoundary(path, index))
-        score += 6;
-      const prev = indices[indices.length - 2];
-      if (prev != null && prev + 1 === index)
-        score += 12;
-      from = index + 1;
-    }
-    const first = indices[0];
-    score -= Math.min(first, 40);
-    if (indices[0] >= baseStart)
-      score += 20;
-    const basename = lowerPath.slice(baseStart);
-    const tier = pathMatchTier(q, lowerPath, basename);
-    const contiguousRange = contiguousPathRange(q, lowerPath, baseStart);
-    return {
-      score,
-      ranges: contiguousRange ? [contiguousRange] : toRanges(indices),
-      tier
-    };
-  }
-  function fuzzyMatchPath(query, path) {
-    const match = computeFuzzyMatch(query, path);
-    return match ? { score: match.score, ranges: match.ranges } : null;
-  }
-  function rankFuzzyPaths(query, items) {
-    return items.map((item) => {
-      const match = computeFuzzyMatch(query, item.path);
-      return match ? { item, score: match.score, ranges: match.ranges, tier: match.tier } : null;
-    }).filter((item) => item !== null).sort((a, b) => b.tier - a.tier || b.score - a.score || a.item.path.localeCompare(b.item.path)).map(({ item, score, ranges }) => ({ item, score, ranges }));
-  }
-  function isGlobPathQuery(query) {
-    return /[*?]/.test(query.trim());
-  }
-  function escapeRegexChar(ch) {
-    return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
-  }
-  function globToRegExp(query) {
-    const pattern = query.trim();
-    if (!pattern)
-      return null;
-    let source = "^";
-    for (let i = 0;i < pattern.length; i++) {
-      const ch = pattern[i];
-      if (ch === "*") {
-        if (pattern[i + 1] === "*") {
-          source += ".*";
-          i++;
-        } else {
-          source += "[^/]*";
-        }
-      } else if (ch === "?") {
-        source += "[^/]";
-      } else if (ch === "[") {
-        const close = pattern.indexOf("]", i + 1);
-        if (close < 0) {
-          source += "\\[";
-        } else {
-          const body = pattern.slice(i + 1, close).replace(/\\/g, "\\\\");
-          source += `[${body}]`;
-          i = close;
-        }
-      } else {
-        source += escapeRegexChar(ch);
-      }
-    }
-    source += "$";
-    try {
-      return new RegExp(source, "i");
-    } catch {
-      return null;
-    }
-  }
-  function globMatchPath(query, path) {
-    const regex = globToRegExp(query);
-    const baseStart = basenameStart(path);
-    const basename = path.slice(baseStart);
-    if (!regex || !regex.test(path) && (query.includes("/") || !regex.test(basename)))
-      return null;
-    const literal = query.replace(/[*?[\]]+/g, " ").trim().split(/\s+/).filter(Boolean);
-    const ranges = [];
-    const lowerPath = path.toLowerCase();
-    for (const part of literal) {
-      const start = lowerPath.indexOf(part.toLowerCase());
-      if (start >= 0)
-        ranges.push({ start, end: start + part.length });
-    }
-    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-    const mergedRanges = [];
-    for (const range of ranges) {
-      const last = mergedRanges[mergedRanges.length - 1];
-      if (last && last.end >= range.start) {
-        last.end = Math.max(last.end, range.end);
-      } else {
-        mergedRanges.push({ ...range });
-      }
-    }
-    const score = 1000 - Math.min(path.length, 200) + (path.slice(baseStart).toLowerCase().endsWith(query.replace(/^\*+/, "").toLowerCase()) ? 50 : 0);
-    return { score, ranges: mergedRanges };
-  }
-  function rankPathMatches(query, items) {
-    if (isGlobPathQuery(query)) {
-      return items.map((item) => {
-        const match = globMatchPath(query, item.path);
-        return match ? {
-          item,
-          score: match.score,
-          ranges: match.ranges,
-          mode: "glob"
-        } : null;
-      }).filter((item) => item !== null).sort((a, b) => b.score - a.score || a.item.path.localeCompare(b.item.path));
-    }
-    return rankFuzzyPaths(query, items).map((item) => ({
-      ...item,
-      mode: "fuzzy"
-    }));
-  }
-
-  // web-src/keymap.ts
-  var DEFAULT_KEY_BINDINGS = [
-    {
-      action: "open-file-palette",
-      key: "k",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-file-palette",
-      key: "k",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    { action: "focus-file-filter", key: "/" },
-    { action: "focus-sidebar", key: "h", ctrl: true },
-    { action: "focus-main", key: "l", ctrl: true },
-    {
-      action: "cancel-source-load",
-      key: "escape",
-      requires: { lightboxClosed: true }
-    },
-    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
-    { action: "open-sidebar-item", key: "enter", scope: "global" },
-    { action: "sidebar-next", key: "j", scope: "sidebar" },
-    { action: "sidebar-next", key: "j", scope: "global" },
-    { action: "sidebar-previous", key: "k", scope: "sidebar" },
-    { action: "sidebar-previous", key: "k", scope: "global" },
-    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
-    { action: "sidebar-expand", key: "l", scope: "sidebar" },
-    { action: "sidebar-expand", key: "l", scope: "global" },
-    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
-    { action: "sidebar-collapse", key: "h", scope: "global" },
-    { action: "scroll-main-down", key: "j", scope: "main" },
-    { action: "scroll-main-up", key: "k", scope: "main" },
-    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
-    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "main",
-      ctrl: true
-    },
-    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "sidebar",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "sidebar",
-      ctrl: true
-    },
-    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
-    { action: "tab-code", key: "c", scope: "main", pendingG: true },
-    { action: "goto-top", key: "g", pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true },
-    { action: "start-g-sequence", key: "g", scope: "sidebar" },
-    { action: "start-g-sequence", key: "g", scope: "main" },
-    { action: "layout-unified", key: "u" },
-    { action: "layout-split", key: "s" },
-    { action: "toggle-theme", key: "t" }
-  ];
-  function resolveKeymapAction(event, context) {
-    const key = event.key.toLowerCase();
-    if (context.composing)
-      return null;
-    for (const binding of DEFAULT_KEY_BINDINGS) {
-      if (binding.key !== key)
-        continue;
-      if (binding.requires?.lightboxClosed && context.lightboxOpen)
-        continue;
-      if (binding.scope && binding.scope !== context.scope)
-        continue;
-      if (!!binding.pendingG !== !!context.pendingG)
-        continue;
-      if (context.paletteOpen && !binding.allowPaletteOpen)
-        continue;
-      if (context.editable && !binding.allowEditable)
-        continue;
-      if (!!binding.ctrl !== !!event.ctrlKey)
-        continue;
-      if (!!binding.meta !== !!event.metaKey)
-        continue;
-      if (!!binding.alt !== !!event.altKey)
-        continue;
-      if (!!binding.shift !== !!event.shiftKey)
-        continue;
-      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
-        continue;
-      return binding.action;
-    }
-    return null;
-  }
-
   // node_modules/markdown-it/lib/common/utils.mjs
   var exports_utils = {};
   __export(exports_utils, {
@@ -6917,6 +6361,953 @@ ${frontmatter.yaml}
     return { width: rect.width || 800, height: rect.height || 600 };
   }
 
+  // web-src/annotations-ui.ts
+  var ANNOTATION_SESSION_PARAM = "annotationSession";
+  function createAnnotationsUi(deps) {
+    const { $ } = deps;
+    let ANNOTATIONS = { version: 1, sessions: [] };
+    let annotationFollow = localStorage.getItem("gdp:annotation-follow") !== "0";
+    let activeAnnotationId = null;
+    let annotationPanelDismissed = false;
+    let activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
+    const annotationPanel = $("#annotation-panel");
+    const annotationSessionsEl = $("#annotation-sessions");
+    const annotationDetail = $("#annotation-detail");
+    const annotationCountEl = $("#annotations-count");
+    const annotationListCountEl = $("#annotation-list-count");
+    function setAnnotationPanelOpen(open) {
+      annotationPanel.hidden = !open;
+      document.body.classList.toggle("annotation-panel-open", open);
+      if (open)
+        annotationPanelDismissed = false;
+    }
+    function annotationLineTarget(entry) {
+      if (!entry.line)
+        return;
+      return entry.line.start === entry.line.end ? entry.line.start : { start: entry.line.start, end: entry.line.end };
+    }
+    function annotationLocationLabel(entry) {
+      if (!entry.line)
+        return entry.path;
+      return entry.line.start === entry.line.end ? `${entry.path}:${entry.line.start}` : `${entry.path}:${entry.line.start}-${entry.line.end}`;
+    }
+    function annotationRefForEntry(entry) {
+      const to = entry.range.to || "worktree";
+      return to === "worktree" || to === "" ? "worktree" : to;
+    }
+    function withSessionParam(rawUrl) {
+      const url = new URL(rawUrl, window.location.origin);
+      if (activeSessionId)
+        url.searchParams.set(ANNOTATION_SESSION_PARAM, activeSessionId);
+      else
+        url.searchParams.delete(ANNOTATION_SESSION_PARAM);
+      return url.pathname + url.search;
+    }
+    function buildInlineAnnotationRow(entry, colSpan) {
+      const tr = document.createElement("tr");
+      tr.className = "gdp-annotation-row";
+      tr.dataset.annotationId = entry.id;
+      tr.classList.toggle("active", entry.id === activeAnnotationId);
+      const td = document.createElement("td");
+      td.colSpan = colSpan;
+      const box = document.createElement("div");
+      box.className = "gdp-annotation-inline";
+      if (entry.title) {
+        const heading2 = document.createElement("strong");
+        heading2.className = "gdp-annotation-inline-title";
+        heading2.textContent = entry.title;
+        box.appendChild(heading2);
+      }
+      const markdown = document.createElement("div");
+      markdown.className = "gdp-annotation-inline-body";
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      box.appendChild(markdown);
+      td.appendChild(box);
+      tr.appendChild(td);
+      return tr;
+    }
+    function inlineAnnotationTargetRow(entry) {
+      if (!entry.line)
+        return null;
+      const line = entry.line.end;
+      const card = document.querySelector(deps.diffCardSelector(entry.path));
+      if (!card)
+        return null;
+      const sourceRow = card.querySelector(`.gdp-source-table tr[data-line="${String(line)}"]`);
+      if (sourceRow)
+        return sourceRow;
+      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
+      return rows.find((row) => deps.diffRowLineNumber(row) === line) || null;
+    }
+    function applyInlineAnnotations() {
+      document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
+        row.remove();
+      });
+      const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId);
+      if (!session)
+        return;
+      for (const entry of session.entries) {
+        const target = inlineAnnotationTargetRow(entry);
+        if (!target)
+          continue;
+        let anchor = target;
+        while (anchor.nextElementSibling?.classList.contains("gdp-annotation-row"))
+          anchor = anchor.nextElementSibling;
+        anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
+      }
+    }
+    function syncSessionUrl() {
+      const current = window.location.pathname + window.location.search;
+      const next = withSessionParam(current);
+      if (next !== current)
+        history.replaceState(history.state, "", next);
+    }
+    function setActiveSession(sessionId) {
+      if (activeSessionId === sessionId)
+        return;
+      activeSessionId = sessionId;
+      syncSessionUrl();
+      renderAnnotationPanel();
+      applyInlineAnnotations();
+    }
+    function restoreSessionFromUrl() {
+      activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
+      renderAnnotationPanel();
+      applyInlineAnnotations();
+    }
+    async function expandAnnotationContext(entry) {
+      if (!entry.line || inlineAnnotationTargetRow(entry))
+        return;
+      const card = document.querySelector(deps.diffCardSelector(entry.path));
+      const file = deps.getFiles().find((f2) => f2.path === entry.path);
+      if (!card || !file || card.classList.contains("gdp-standalone-source"))
+        return;
+      for (let i2 = 0;i2 < 50 && !card.classList.contains("loaded"); i2++)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      if (inlineAnnotationTargetRow(entry))
+        return;
+      if (card.classList.contains("gdp-context-expanded"))
+        return;
+      await deps.expandAllFileContext(card, file);
+      deps.focusDiffLine(card, annotationLineTarget(entry));
+    }
+    function syncInlineAnnotationActive() {
+      document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
+        row.classList.toggle("active", row.dataset.annotationId === activeAnnotationId);
+      });
+    }
+    function findAnnotation(entryId) {
+      for (const session of ANNOTATIONS.sessions) {
+        const index = session.entries.findIndex((e2) => e2.id === entryId);
+        if (index >= 0)
+          return { session, entry: session.entries[index], index };
+      }
+      return null;
+    }
+    function updateAnnotationBadge() {
+      const total = ANNOTATIONS.sessions.reduce((sum, session) => sum + session.entries.length, 0);
+      annotationCountEl.textContent = String(total);
+      annotationCountEl.hidden = total === 0;
+      annotationListCountEl.textContent = `${ANNOTATIONS.sessions.length} sessions / ${total} annotations`;
+    }
+    async function refreshAnnotations() {
+      try {
+        const res = await fetch("/_annotations");
+        if (!res.ok)
+          return;
+        ANNOTATIONS = await res.json();
+      } catch {
+        return;
+      }
+      updateAnnotationBadge();
+      if (activeSessionId && !ANNOTATIONS.sessions.some((s2) => s2.id === activeSessionId)) {
+        activeSessionId = null;
+        syncSessionUrl();
+      }
+      renderAnnotationPanel();
+      applyInlineAnnotations();
+      if (activeAnnotationId && !findAnnotation(activeAnnotationId))
+        hideAnnotationDetail();
+    }
+    async function postAnnotationAction(payload) {
+      try {
+        await fetch("/_annotations", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify(payload)
+        });
+      } catch {}
+      await refreshAnnotations();
+    }
+    function annotationEntrySummary(entry) {
+      const text2 = entry.title || entry.body;
+      const firstLine = text2.split(`
+`)[0].trim();
+      return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
+    }
+    function renderAnnotationPanel() {
+      annotationSessionsEl.replaceChildren();
+      if (!ANNOTATIONS.sessions.length) {
+        const empty = document.createElement("p");
+        empty.className = "annotation-empty";
+        empty.textContent = "No annotations yet. Agents can add them with: code-viewer annotate add";
+        annotationSessionsEl.appendChild(empty);
+        return;
+      }
+      for (const session of [...ANNOTATIONS.sessions].reverse()) {
+        const sessionEl = document.createElement("section");
+        sessionEl.className = "annotation-session";
+        sessionEl.classList.toggle("active", session.id === activeSessionId);
+        const head = document.createElement("div");
+        head.className = "annotation-session-head";
+        const title = document.createElement("button");
+        title.type = "button";
+        title.className = "annotation-session-select";
+        title.textContent = session.title;
+        title.title = session.created_at;
+        title.addEventListener("click", () => {
+          setActiveSession(session.id === activeSessionId ? null : session.id);
+        });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "annotation-delete";
+        del.title = "delete session";
+        del.setAttribute("aria-label", `delete session ${session.title}`);
+        del.textContent = "delete";
+        del.addEventListener("click", () => {
+          if (!window.confirm(`Delete annotation session "${session.title}"?`))
+            return;
+          postAnnotationAction({ action: "delete", id: session.id });
+        });
+        head.append(title, del);
+        sessionEl.appendChild(head);
+        const list2 = document.createElement("ol");
+        list2.className = "annotation-entries";
+        session.entries.forEach((entry) => {
+          const item = document.createElement("li");
+          item.classList.toggle("active", entry.id === activeAnnotationId);
+          const open = document.createElement("button");
+          open.type = "button";
+          open.className = "annotation-entry-open";
+          const location2 = document.createElement("span");
+          location2.className = "annotation-entry-location";
+          location2.textContent = annotationLocationLabel(entry);
+          const summary = document.createElement("span");
+          summary.className = "annotation-entry-summary";
+          summary.textContent = annotationEntrySummary(entry);
+          open.append(location2, summary);
+          open.addEventListener("click", () => {
+            openAnnotationEntry(entry.id);
+          });
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "annotation-delete";
+          remove.title = "delete annotation";
+          remove.setAttribute("aria-label", `delete annotation for ${annotationLocationLabel(entry)}`);
+          remove.textContent = "delete";
+          remove.addEventListener("click", () => {
+            if (!window.confirm(`Delete annotation for ${annotationLocationLabel(entry)}?`))
+              return;
+            postAnnotationAction({ action: "delete", id: entry.id });
+          });
+          item.append(open, remove);
+          list2.appendChild(item);
+        });
+        sessionEl.appendChild(list2);
+        annotationSessionsEl.appendChild(sessionEl);
+      }
+    }
+    function hideAnnotationDetail() {
+      activeAnnotationId = null;
+      annotationDetail.hidden = true;
+      renderAnnotationPanel();
+      syncInlineAnnotationActive();
+    }
+    function showAnnotationDetail(session, entry, index) {
+      activeAnnotationId = entry.id;
+      $("#annotation-detail-session").textContent = session.title;
+      $("#annotation-detail-step").textContent = `${index + 1}/${session.entries.length}`;
+      const location2 = $("#annotation-detail-location");
+      location2.textContent = annotationLocationLabel(entry);
+      const body = $("#annotation-detail-body");
+      body.replaceChildren();
+      if (entry.title) {
+        const heading2 = document.createElement("strong");
+        heading2.className = "annotation-detail-title";
+        heading2.textContent = entry.title;
+        body.appendChild(heading2);
+      }
+      const markdown = document.createElement("div");
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
+      body.appendChild(markdown);
+      $("#annotation-detail-prev").disabled = index <= 0;
+      $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
+      annotationDetail.hidden = false;
+      setAnnotationPanelOpen(true);
+      renderAnnotationPanel();
+      syncInlineAnnotationActive();
+    }
+    async function openAnnotationEntry(entryId) {
+      const found = findAnnotation(entryId);
+      if (!found)
+        return;
+      const { session, entry, index } = found;
+      activeSessionId = session.id;
+      const from = entry.range.from || "HEAD";
+      const to = entry.range.to || "worktree";
+      const range = { from, to };
+      const current = deps.currentRange();
+      const rangeChanged = current.from !== from || current.to !== to;
+      const wasDiffScreen = deps.getRoute().screen === "diff";
+      const line = annotationLineTarget(entry);
+      deps.setRange(from, to);
+      deps.syncRefInputs();
+      deps.cancelActiveSourceLoad("navigation");
+      deps.setRoute({ screen: "diff", range, path: entry.path, line });
+      deps.setPageMode();
+      deps.removeStandaloneSource();
+      if (rangeChanged || !wasDiffScreen || !deps.getFiles().length)
+        await deps.load();
+      if (deps.getFiles().some((f2) => f2.path === entry.path)) {
+        deps.scrollToFile(entry.path, line);
+        await expandAnnotationContext(entry);
+      } else {
+        const ref = annotationRefForEntry(entry);
+        deps.setRoute({ screen: "file", path: entry.path, ref, view: "blob", line, range }, true);
+        deps.setPageMode();
+        await deps.renderStandaloneSource({ path: entry.path, ref });
+      }
+      showAnnotationDetail(session, entry, index);
+      applyInlineAnnotations();
+      const inlineRow = document.querySelector(`.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`);
+      if (inlineRow)
+        deps.scrollDiffElementIntoView(inlineRow, "center");
+    }
+    function stepAnnotation(direction) {
+      if (!activeAnnotationId)
+        return;
+      const found = findAnnotation(activeAnnotationId);
+      if (!found)
+        return;
+      const next = found.session.entries[found.index + direction];
+      if (next)
+        openAnnotationEntry(next.id);
+    }
+    function handleSse(raw) {
+      let event = null;
+      try {
+        event = JSON.parse(raw);
+      } catch {
+        event = null;
+      }
+      refreshAnnotations().then(() => {
+        if (event?.kind === "add" && event.entry_id && annotationFollow && !annotationPanelDismissed && findAnnotation(event.entry_id)) {
+          openAnnotationEntry(event.entry_id);
+        }
+      });
+    }
+    $("#annotations-toggle").addEventListener("click", () => {
+      setAnnotationPanelOpen(annotationPanel.hidden);
+      if (!annotationPanel.hidden)
+        refreshAnnotations();
+    });
+    $("#annotation-panel-close").addEventListener("click", () => {
+      annotationPanelDismissed = true;
+      setAnnotationPanelOpen(false);
+    });
+    const followCheckbox = $("#annotation-follow");
+    followCheckbox.checked = annotationFollow;
+    followCheckbox.addEventListener("change", () => {
+      annotationFollow = followCheckbox.checked;
+      localStorage.setItem("gdp:annotation-follow", annotationFollow ? "1" : "0");
+    });
+    $("#annotation-clear").addEventListener("click", () => {
+      if (!window.confirm("Delete all annotations?"))
+        return;
+      hideAnnotationDetail();
+      postAnnotationAction({ action: "clear" });
+    });
+    $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
+    $("#annotation-detail-prev").addEventListener("click", () => {
+      stepAnnotation(-1);
+    });
+    $("#annotation-detail-next").addEventListener("click", () => {
+      stepAnnotation(1);
+    });
+    $("#annotation-detail-location").addEventListener("click", (e2) => {
+      e2.preventDefault();
+      if (activeAnnotationId)
+        openAnnotationEntry(activeAnnotationId);
+    });
+    refreshAnnotations();
+    return {
+      applyInlineAnnotations,
+      refreshAnnotations,
+      handleSse,
+      withSessionParam,
+      restoreSessionFromUrl
+    };
+  }
+
+  // web-src/catch-up.ts
+  function shouldCatchUpDiff(route) {
+    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  }
+  function createCatchUpGate(now, minIntervalMs) {
+    let lastForceAt = 0;
+    return function shouldRun() {
+      const current = now();
+      if (current - lastForceAt < minIntervalMs)
+        return false;
+      lastForceAt = current;
+      return true;
+    };
+  }
+
+  // web-src/directory-name.ts
+  function normalizeNewDirectoryName(name) {
+    if (typeof name !== "string")
+      return null;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 180)
+      return null;
+    if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\x00") || Array.from(trimmed).some((char) => {
+      const code2 = char.charCodeAt(0);
+      return code2 < 32 || code2 === 127;
+    }))
+      return null;
+    if (trimmed === "." || trimmed === ".." || trimmed.toLowerCase() === ".git")
+      return null;
+    return trimmed;
+  }
+
+  // web-src/expand-logic.ts
+  function initExpandState(prevHunkEndNew, hunkNewStart) {
+    return {
+      topExpandedStart: hunkNewStart,
+      bottomExpandedEnd: prevHunkEndNew - 1
+    };
+  }
+  function remainingGap(state, prevHunkEndNew) {
+    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
+    const remainingEnd = state.topExpandedStart - 1;
+    if (remainingStart > remainingEnd)
+      return null;
+    return { start: remainingStart, end: remainingEnd };
+  }
+  function isFullyExpanded(state, prevHunkEndNew) {
+    return remainingGap(state, prevHunkEndNew) == null;
+  }
+  function upClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
+  }
+  function downClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
+  }
+  function applyUp(state, range) {
+    return Object.assign({}, state, { bottomExpandedEnd: range.end });
+  }
+  function applyDown(state, range) {
+    return Object.assign({}, state, { topExpandedStart: range.start });
+  }
+  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
+    return prevHunkEndOld + (newLine - prevHunkEndNew);
+  }
+  function trailingClickRange(hunkEndNew, step) {
+    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
+  }
+  function trailingExpandTargetIndex(hunkCount) {
+    return hunkCount > 0 ? hunkCount - 1 : null;
+  }
+  function shouldAttachTrailingExpand(probeLineCount) {
+    return probeLineCount > 0;
+  }
+  function applyTrailingResult(state, receivedCount, step) {
+    return {
+      newStart: state.newStart + receivedCount,
+      oldStart: state.oldStart + receivedCount,
+      eof: receivedCount === 0 || receivedCount < step
+    };
+  }
+  var GdpExpandLogic = {
+    initExpandState,
+    remainingGap,
+    isFullyExpanded,
+    upClickRange,
+    downClickRange,
+    applyUp,
+    applyDown,
+    mapNewToOld,
+    trailingExpandTargetIndex,
+    shouldAttachTrailingExpand,
+    trailingClickRange,
+    applyTrailingResult
+  };
+
+  // web-src/file-filter.ts
+  function normalizeFileFilterQuery(value) {
+    return (value || "").toLowerCase().trim();
+  }
+  function parseSlashRegex(query) {
+    if (!query.startsWith("/") || query.length < 2)
+      return null;
+    const lastSlash = query.lastIndexOf("/");
+    if (lastSlash <= 0)
+      return null;
+    return {
+      source: query.slice(1, lastSlash),
+      flags: query.slice(lastSlash + 1)
+    };
+  }
+  function compileFileFilter(value) {
+    const raw = (value || "").trim();
+    if (!raw)
+      return { kind: "empty", match: () => true };
+    const slashRegex = parseSlashRegex(raw);
+    if (slashRegex) {
+      try {
+        const regex = new RegExp(slashRegex.source, slashRegex.flags);
+        return { kind: "regex", match: (path) => regex.test(path) };
+      } catch (error2) {
+        return {
+          kind: "invalid",
+          match: () => false,
+          error: error2 instanceof Error ? error2.message : String(error2)
+        };
+      }
+    }
+    const q = normalizeFileFilterQuery(raw.startsWith("/") ? raw.slice(1) : raw);
+    return {
+      kind: "substring",
+      match: (path) => path.toLowerCase().includes(q)
+    };
+  }
+
+  // web-src/file-navigation.ts
+  function nextVisibleFileIndex(currentIndex, itemCount, direction) {
+    if (itemCount <= 0)
+      return -1;
+    if (currentIndex < 0)
+      return direction > 0 ? 0 : itemCount - 1;
+    return Math.max(0, Math.min(itemCount - 1, currentIndex + direction));
+  }
+
+  // web-src/file-path-copy.ts
+  function filePathClipboardText(path) {
+    return path || "";
+  }
+  function fileNameClipboardText(path) {
+    if (!path)
+      return "";
+    const parts = path.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "";
+  }
+
+  // web-src/focus-scope.ts
+  function isEditableKeyTarget(target) {
+    if (!target)
+      return false;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
+  }
+  function keymapScope(target) {
+    if (target?.closest("#content"))
+      return "main";
+    if (target?.closest("#sidebar"))
+      return "sidebar";
+    return "global";
+  }
+  function prepareKeyboardPanels(doc = document) {
+    const sidebar = doc.querySelector("#sidebar");
+    const content = doc.querySelector("#content");
+    if (sidebar)
+      sidebar.tabIndex = -1;
+    if (content)
+      content.tabIndex = -1;
+  }
+  function getPanelFocusScope(doc = document) {
+    const scope = doc.body?.dataset.focusScope;
+    return scope === "sidebar" || scope === "main" ? scope : null;
+  }
+  function setPanelFocusScope(scope, doc = document) {
+    if (!doc.body)
+      return;
+    if (scope)
+      doc.body.dataset.focusScope = scope;
+    else
+      delete doc.body.dataset.focusScope;
+  }
+  function restorePanelFocusScope(scope, doc = document) {
+    if (scope === "sidebar")
+      focusSidebarPanel(doc);
+    else if (scope === "main")
+      focusMainPanel(doc);
+    else
+      setPanelFocusScope(null, doc);
+  }
+  function focusSidebarPanel(doc = document) {
+    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+    const sidebar = doc.querySelector("#sidebar");
+    (active || sidebar)?.focus({ preventScroll: true });
+    setPanelFocusScope("sidebar", doc);
+  }
+  function focusMainPanel(doc = document) {
+    doc.querySelector("#content")?.focus({ preventScroll: true });
+    setPanelFocusScope("main", doc);
+  }
+  function findMainScrollTarget(doc = document) {
+    const active = doc.activeElement;
+    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
+    if (activeScroller && activeScroller.offsetParent !== null)
+      return activeScroller;
+    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
+    if (sourceScroller && sourceScroller.offsetParent !== null)
+      return sourceScroller;
+    const content = doc.querySelector("#content");
+    if (!content || content.offsetParent === null)
+      return null;
+    const isScrollable = (item) => {
+      if (item.offsetParent === null)
+        return false;
+      const style = doc.defaultView?.getComputedStyle(item);
+      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+    };
+    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
+    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
+    return scrollable || doc.scrollingElement;
+  }
+
+  // web-src/fuzzy-search.ts
+  function basenameStart(path) {
+    const slash = path.lastIndexOf("/");
+    return slash < 0 ? 0 : slash + 1;
+  }
+  function isBoundary(path, index) {
+    if (index <= 0)
+      return true;
+    const prev = path[index - 1];
+    return prev === "/" || prev === "-" || prev === "_" || prev === "." || prev === " ";
+  }
+  function toRanges(indices) {
+    const ranges = [];
+    for (const index of indices) {
+      const last = ranges[ranges.length - 1];
+      if (last && last.end === index) {
+        last.end = index + 1;
+      } else {
+        ranges.push({ start: index, end: index + 1 });
+      }
+    }
+    return ranges;
+  }
+  function basenameMatchTier(loweredQuery, loweredBasename) {
+    if (loweredBasename === loweredQuery)
+      return 4;
+    if (loweredBasename.startsWith(`${loweredQuery}.`))
+      return 3;
+    if (loweredBasename.startsWith(loweredQuery))
+      return 2;
+    if (loweredBasename.includes(loweredQuery))
+      return 1;
+    return 0;
+  }
+  function pathMatchTier(loweredQuery, loweredPath, loweredBasename) {
+    if (loweredQuery.includes("/") && (loweredPath === loweredQuery || loweredPath.endsWith(`/${loweredQuery}`)))
+      return 4;
+    return basenameMatchTier(loweredQuery, loweredBasename);
+  }
+  function contiguousPathRange(loweredQuery, loweredPath, baseStart) {
+    const loweredBasename = loweredPath.slice(baseStart);
+    const basenameMatchStart = loweredBasename.indexOf(loweredQuery);
+    if (basenameMatchStart >= 0) {
+      const start = baseStart + basenameMatchStart;
+      return { start, end: start + loweredQuery.length };
+    }
+    if (loweredQuery.includes("/")) {
+      const pathMatchStart = loweredPath.endsWith(`/${loweredQuery}`) ? loweredPath.length - loweredQuery.length : loweredPath === loweredQuery ? 0 : -1;
+      if (pathMatchStart >= 0)
+        return {
+          start: pathMatchStart,
+          end: pathMatchStart + loweredQuery.length
+        };
+    }
+    return null;
+  }
+  function computeFuzzyMatch(query, path) {
+    const q = query.trim().toLowerCase();
+    if (!q)
+      return { score: 0, ranges: [], tier: 0 };
+    const lowerPath = path.toLowerCase();
+    const baseStart = basenameStart(path);
+    const indices = [];
+    let from = 0;
+    let score = 0;
+    for (const ch of q) {
+      const index = lowerPath.indexOf(ch, from);
+      if (index < 0)
+        return null;
+      indices.push(index);
+      score += 10;
+      if (index >= baseStart)
+        score += 8;
+      if (isBoundary(path, index))
+        score += 6;
+      const prev = indices[indices.length - 2];
+      if (prev != null && prev + 1 === index)
+        score += 12;
+      from = index + 1;
+    }
+    const first = indices[0];
+    score -= Math.min(first, 40);
+    if (indices[0] >= baseStart)
+      score += 20;
+    const basename = lowerPath.slice(baseStart);
+    const tier = pathMatchTier(q, lowerPath, basename);
+    const contiguousRange = contiguousPathRange(q, lowerPath, baseStart);
+    return {
+      score,
+      ranges: contiguousRange ? [contiguousRange] : toRanges(indices),
+      tier
+    };
+  }
+  function fuzzyMatchPath(query, path) {
+    const match2 = computeFuzzyMatch(query, path);
+    return match2 ? { score: match2.score, ranges: match2.ranges } : null;
+  }
+  function rankFuzzyPaths(query, items) {
+    return items.map((item) => {
+      const match2 = computeFuzzyMatch(query, item.path);
+      return match2 ? { item, score: match2.score, ranges: match2.ranges, tier: match2.tier } : null;
+    }).filter((item) => item !== null).sort((a2, b2) => b2.tier - a2.tier || b2.score - a2.score || a2.item.path.localeCompare(b2.item.path)).map(({ item, score, ranges }) => ({ item, score, ranges }));
+  }
+  function isGlobPathQuery(query) {
+    return /[*?]/.test(query.trim());
+  }
+  function escapeRegexChar(ch) {
+    return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
+  }
+  function globToRegExp(query) {
+    const pattern = query.trim();
+    if (!pattern)
+      return null;
+    let source = "^";
+    for (let i2 = 0;i2 < pattern.length; i2++) {
+      const ch = pattern[i2];
+      if (ch === "*") {
+        if (pattern[i2 + 1] === "*") {
+          source += ".*";
+          i2++;
+        } else {
+          source += "[^/]*";
+        }
+      } else if (ch === "?") {
+        source += "[^/]";
+      } else if (ch === "[") {
+        const close = pattern.indexOf("]", i2 + 1);
+        if (close < 0) {
+          source += "\\[";
+        } else {
+          const body = pattern.slice(i2 + 1, close).replace(/\\/g, "\\\\");
+          source += `[${body}]`;
+          i2 = close;
+        }
+      } else {
+        source += escapeRegexChar(ch);
+      }
+    }
+    source += "$";
+    try {
+      return new RegExp(source, "i");
+    } catch {
+      return null;
+    }
+  }
+  function globMatchPath(query, path) {
+    const regex = globToRegExp(query);
+    const baseStart = basenameStart(path);
+    const basename = path.slice(baseStart);
+    if (!regex || !regex.test(path) && (query.includes("/") || !regex.test(basename)))
+      return null;
+    const literal = query.replace(/[*?[\]]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const ranges = [];
+    const lowerPath = path.toLowerCase();
+    for (const part of literal) {
+      const start = lowerPath.indexOf(part.toLowerCase());
+      if (start >= 0)
+        ranges.push({ start, end: start + part.length });
+    }
+    ranges.sort((a2, b2) => a2.start - b2.start || a2.end - b2.end);
+    const mergedRanges = [];
+    for (const range of ranges) {
+      const last = mergedRanges[mergedRanges.length - 1];
+      if (last && last.end >= range.start) {
+        last.end = Math.max(last.end, range.end);
+      } else {
+        mergedRanges.push({ ...range });
+      }
+    }
+    const score = 1000 - Math.min(path.length, 200) + (path.slice(baseStart).toLowerCase().endsWith(query.replace(/^\*+/, "").toLowerCase()) ? 50 : 0);
+    return { score, ranges: mergedRanges };
+  }
+  function rankPathMatches(query, items) {
+    if (isGlobPathQuery(query)) {
+      return items.map((item) => {
+        const match2 = globMatchPath(query, item.path);
+        return match2 ? {
+          item,
+          score: match2.score,
+          ranges: match2.ranges,
+          mode: "glob"
+        } : null;
+      }).filter((item) => item !== null).sort((a2, b2) => b2.score - a2.score || a2.item.path.localeCompare(b2.item.path));
+    }
+    return rankFuzzyPaths(query, items).map((item) => ({
+      ...item,
+      mode: "fuzzy"
+    }));
+  }
+
+  // web-src/keymap.ts
+  var DEFAULT_KEY_BINDINGS = [
+    {
+      action: "open-file-palette",
+      key: "k",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-file-palette",
+      key: "k",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    { action: "focus-file-filter", key: "/" },
+    { action: "focus-sidebar", key: "h", ctrl: true },
+    { action: "focus-main", key: "l", ctrl: true },
+    {
+      action: "cancel-source-load",
+      key: "escape",
+      requires: { lightboxClosed: true }
+    },
+    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
+    { action: "open-sidebar-item", key: "enter", scope: "global" },
+    { action: "sidebar-next", key: "j", scope: "sidebar" },
+    { action: "sidebar-next", key: "j", scope: "global" },
+    { action: "sidebar-previous", key: "k", scope: "sidebar" },
+    { action: "sidebar-previous", key: "k", scope: "global" },
+    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
+    { action: "sidebar-expand", key: "l", scope: "sidebar" },
+    { action: "sidebar-expand", key: "l", scope: "global" },
+    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
+    { action: "sidebar-collapse", key: "h", scope: "global" },
+    { action: "scroll-main-down", key: "j", scope: "main" },
+    { action: "scroll-main-up", key: "k", scope: "main" },
+    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
+    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "main",
+      ctrl: true
+    },
+    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "sidebar",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "sidebar",
+      ctrl: true
+    },
+    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
+    { action: "tab-code", key: "c", scope: "main", pendingG: true },
+    { action: "goto-top", key: "g", pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true },
+    { action: "start-g-sequence", key: "g", scope: "sidebar" },
+    { action: "start-g-sequence", key: "g", scope: "main" },
+    { action: "layout-unified", key: "u" },
+    { action: "layout-split", key: "s" },
+    { action: "toggle-theme", key: "t" }
+  ];
+  function resolveKeymapAction(event, context) {
+    const key = event.key.toLowerCase();
+    if (context.composing)
+      return null;
+    for (const binding of DEFAULT_KEY_BINDINGS) {
+      if (binding.key !== key)
+        continue;
+      if (binding.requires?.lightboxClosed && context.lightboxOpen)
+        continue;
+      if (binding.scope && binding.scope !== context.scope)
+        continue;
+      if (!!binding.pendingG !== !!context.pendingG)
+        continue;
+      if (context.paletteOpen && !binding.allowPaletteOpen)
+        continue;
+      if (context.editable && !binding.allowEditable)
+        continue;
+      if (!!binding.ctrl !== !!event.ctrlKey)
+        continue;
+      if (!!binding.meta !== !!event.metaKey)
+        continue;
+      if (!!binding.alt !== !!event.altKey)
+        continue;
+      if (!!binding.shift !== !!event.shiftKey)
+        continue;
+      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
+        continue;
+      return binding.action;
+    }
+    return null;
+  }
+
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
@@ -7643,6 +8034,7 @@ ${frontmatter.yaml}
         if (!data || !file)
           return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -7661,6 +8053,7 @@ ${frontmatter.yaml}
         if (!data || !file)
           return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -8660,10 +9053,19 @@ ${frontmatter.yaml}
         return false;
       return focusDiffLine(targetCard, STATE.route.line);
     }
+    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
+    window.addEventListener("wheel", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    window.addEventListener("touchmove", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
     function scrollToFile(path, line) {
       const card = document.querySelector(diffCardSelector(path));
       if (!card)
         return;
+      if (line)
+        REANCHOR_UNTIL = performance.now() + 4000;
       markActive(path);
       SUPPRESS_SPY_UNTIL = performance.now() + 1500;
       const onEnd = () => {
@@ -8886,6 +9288,13 @@ ${frontmatter.yaml}
     function helpSectionFromRoute() {
       return STATE.route.screen === "help" && HELP_SECTIONS.includes(STATE.route.section) ? STATE.route.section : "keybindings";
     }
+    let ANNOTATIONS_UI = null;
+    function applyInlineAnnotations() {
+      ANNOTATIONS_UI?.applyInlineAnnotations();
+    }
+    function withAnnotationSessionParam(rawUrl) {
+      return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+    }
     function setRoute(route, replace2 = false) {
       const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
       STATE.route = nextRoute;
@@ -8894,7 +9303,7 @@ ${frontmatter.yaml}
       if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
         STATE.repoRef = nextRoute.ref || "worktree";
       }
-      const url = buildRoute(nextRoute);
+      const url = withAnnotationSessionParam(buildRoute(nextRoute));
       const state = nextRoute.screen === "file" ? {
         screen: "file",
         path: nextRoute.path,
@@ -10365,10 +10774,10 @@ ${frontmatter.yaml}
         if (start < 1)
           start = 1;
         if (end < start)
-          return;
+          return Promise.resolve();
         setBusy(true);
         const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
-        trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
           if (!data?.lines) {
             setBusy(false);
             return;
@@ -10421,11 +10830,20 @@ ${frontmatter.yaml}
         }
         return createExpandStack(buttons);
       };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(remainingStart, remainingEnd, "after");
+      };
       const siblings = item.siblings || [{ tr: item.tr }];
       siblings.forEach((sib) => {
         const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
         if (ln && !ln.querySelector(".gdp-expand-stack")) {
-          ln.appendChild(buildStack());
+          const stack = buildStack();
+          stack._gdpExpandFully = expandFully;
+          ln.appendChild(stack);
         }
       });
       const firstSib = siblings[0];
@@ -10501,12 +10919,12 @@ ${frontmatter.yaml}
           });
         });
       };
-      const fetchAndInsert = () => {
-        const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, STEP);
+      const fetchAndInsert = (step = STEP) => {
+        const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, step);
         const myGen = SERVER_GENERATION;
         setBusy(true);
         const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
-        trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
           if (myGen !== SERVER_GENERATION || data.generation && data.generation !== SERVER_GENERATION) {
             setBusy(false);
             return;
@@ -10524,7 +10942,7 @@ ${frontmatter.yaml}
           rows.forEach((row) => {
             insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
           });
-          const next = window.GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, STEP);
+          const next = window.GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, step);
           nextNewStart = next.newStart;
           nextOldStart = next.oldStart;
           if (card)
@@ -10540,14 +10958,23 @@ ${frontmatter.yaml}
           setBusy(false);
         });
       };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(1e5);
+      };
       rows.forEach((row) => {
-        row.ln.appendChild(createExpandStack([
+        const stack = createExpandStack([
           {
             direction: "down",
             title: "Show more lines",
-            onClick: fetchAndInsert
+            onClick: () => void fetchAndInsert()
           }
-        ]));
+        ]);
+        stack._gdpExpandFully = expandFully;
+        row.ln.appendChild(stack);
       });
       syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
     }
@@ -12402,20 +12829,18 @@ ${frontmatter.yaml}
       }
       if (card._diffData && (card._diffData.truncated || card._diffData.mode === "preview")) {
         await loadFile(file, card, file.load_url);
-        card.classList.add("gdp-context-expanded");
-        setUnfoldButtonState(card.querySelector(".gdp-file-unfold"), true);
-        return;
       }
       const button = card.querySelector(".gdp-file-unfold");
       if (button)
         button.disabled = true;
       try {
-        for (let i2 = 0;i2 < 200; i2++) {
-          const next = card.querySelector(".gdp-expand-btn:not(:disabled)");
-          if (!next)
+        for (let round = 0;round < 20; round++) {
+          const tasks = Array.from(card.querySelectorAll(".gdp-expand-stack")).map((stack) => stack._gdpExpandFully).filter((fn) => !!fn);
+          if (!tasks.length)
             break;
-          next.click();
-          await new Promise((resolve) => setTimeout(resolve, 80));
+          const results = await Promise.all(tasks.map((fn) => fn().then(() => true, () => false)));
+          if (!results.some(Boolean))
+            break;
         }
         card.classList.add("gdp-context-expanded");
         setUnfoldButtonState(button || null, true);
@@ -12569,7 +12994,17 @@ ${frontmatter.yaml}
       card.classList.add("loaded");
       card.style.minHeight = "";
       mountDiff(card, file, data);
-      applyDiffRouteFocus(card);
+      applyInlineAnnotations();
+      const focused = applyDiffRouteFocus(card);
+      if (!focused && STATE.route.screen === "diff" && STATE.route.path === file.path && STATE.route.line && !card.classList.contains("gdp-context-expanded")) {
+        expandAllFileContext(card, file).then(() => {
+          applyInlineAnnotations();
+          applyDiffRouteFocus(card);
+        });
+      }
+      if (performance.now() < REANCHOR_UNTIL && STATE.route.screen === "diff" && STATE.route.path !== file.path) {
+        applyDiffRouteFocus();
+      }
       card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
       applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
       if (data.truncated && data.mode === "preview") {
@@ -14205,6 +14640,7 @@ ${frontmatter.yaml}
       STATE.to = STATE.route.range.to;
       if (STATE.route.screen === "repo")
         STATE.repoRef = STATE.route.ref || "worktree";
+      ANNOTATIONS_UI?.restoreSessionFromUrl();
       syncRefInputs();
       syncHeaderMenu();
       if (STATE.route.screen === "help") {
@@ -14298,256 +14734,31 @@ ${frontmatter.yaml}
       localStorage.setItem("gdp:hide-tests", STATE.hideTests ? "1" : "0");
       applyHideTests();
     });
-    let ANNOTATIONS = { version: 1, sessions: [] };
-    let annotationFollow = localStorage.getItem("gdp:annotation-follow") !== "0";
-    let activeAnnotationId = null;
-    const annotationPanel = $("#annotation-panel");
-    const annotationSessionsEl = $("#annotation-sessions");
-    const annotationDetail = $("#annotation-detail");
-    const annotationCountEl = $("#annotations-count");
-    function setAnnotationPanelOpen(open) {
-      annotationPanel.hidden = !open;
-      document.body.classList.toggle("annotation-panel-open", open);
-    }
-    function annotationLineTarget(entry) {
-      if (!entry.line)
-        return;
-      return entry.line.start === entry.line.end ? entry.line.start : { start: entry.line.start, end: entry.line.end };
-    }
-    function annotationLocationLabel(entry) {
-      if (!entry.line)
-        return entry.path;
-      return entry.line.start === entry.line.end ? `${entry.path}:${entry.line.start}` : `${entry.path}:${entry.line.start}-${entry.line.end}`;
-    }
-    function annotationRefForEntry(entry) {
-      const to = entry.range.to || "worktree";
-      return to === "worktree" || to === "" ? "worktree" : to;
-    }
-    function findAnnotation(entryId) {
-      for (const session of ANNOTATIONS.sessions) {
-        const index = session.entries.findIndex((e2) => e2.id === entryId);
-        if (index >= 0)
-          return { session, entry: session.entries[index], index };
+    ANNOTATIONS_UI = createAnnotationsUi({
+      $,
+      diffCardSelector,
+      diffRowLineNumber,
+      focusDiffLine,
+      scrollDiffElementIntoView,
+      expandAllFileContext,
+      scrollToFile,
+      renderStandaloneSource,
+      removeStandaloneSource,
+      cancelActiveSourceLoad,
+      setRoute,
+      setPageMode,
+      syncRefInputs,
+      load,
+      currentRange,
+      getFiles: () => STATE.files,
+      getRoute: () => STATE.route,
+      setRange: (from, to) => {
+        STATE.from = from;
+        STATE.to = to;
+        localStorage.setItem("gdp:from", from);
+        localStorage.setItem("gdp:to", to);
       }
-      return null;
-    }
-    function updateAnnotationBadge() {
-      const total = ANNOTATIONS.sessions.reduce((sum, session) => sum + session.entries.length, 0);
-      annotationCountEl.textContent = String(total);
-      annotationCountEl.hidden = total === 0;
-    }
-    async function refreshAnnotations() {
-      try {
-        const res = await fetch("/_annotations");
-        if (!res.ok)
-          return;
-        ANNOTATIONS = await res.json();
-      } catch {
-        return;
-      }
-      updateAnnotationBadge();
-      renderAnnotationPanel();
-      if (activeAnnotationId && !findAnnotation(activeAnnotationId))
-        hideAnnotationDetail();
-    }
-    async function postAnnotationAction(payload) {
-      try {
-        await fetch("/_annotations", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify(payload)
-        });
-      } catch {}
-      await refreshAnnotations();
-    }
-    function annotationEntrySummary(entry) {
-      const text2 = entry.title || entry.body;
-      const firstLine = text2.split(`
-`)[0].trim();
-      return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
-    }
-    function renderAnnotationPanel() {
-      annotationSessionsEl.replaceChildren();
-      if (!ANNOTATIONS.sessions.length) {
-        const empty = document.createElement("p");
-        empty.className = "annotation-empty";
-        empty.textContent = "No annotations yet. Agents can add them with: code-viewer annotate add";
-        annotationSessionsEl.appendChild(empty);
-        return;
-      }
-      for (const session of [...ANNOTATIONS.sessions].reverse()) {
-        const sessionEl = document.createElement("section");
-        sessionEl.className = "annotation-session";
-        const head = document.createElement("div");
-        head.className = "annotation-session-head";
-        const title = document.createElement("strong");
-        title.textContent = session.title;
-        title.title = session.created_at;
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "annotation-delete";
-        del.title = "delete session";
-        del.setAttribute("aria-label", `delete session ${session.title}`);
-        del.textContent = "×";
-        del.addEventListener("click", () => {
-          postAnnotationAction({ action: "delete", id: session.id });
-        });
-        head.append(title, del);
-        sessionEl.appendChild(head);
-        const list2 = document.createElement("ol");
-        list2.className = "annotation-entries";
-        session.entries.forEach((entry) => {
-          const item = document.createElement("li");
-          item.classList.toggle("active", entry.id === activeAnnotationId);
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "annotation-entry-open";
-          const location2 = document.createElement("span");
-          location2.className = "annotation-entry-location";
-          location2.textContent = annotationLocationLabel(entry);
-          const summary = document.createElement("span");
-          summary.className = "annotation-entry-summary";
-          summary.textContent = annotationEntrySummary(entry);
-          open.append(location2, summary);
-          open.addEventListener("click", () => {
-            openAnnotationEntry(entry.id);
-          });
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "annotation-delete";
-          remove.title = "delete annotation";
-          remove.setAttribute("aria-label", `delete annotation for ${annotationLocationLabel(entry)}`);
-          remove.textContent = "×";
-          remove.addEventListener("click", () => {
-            postAnnotationAction({ action: "delete", id: entry.id });
-          });
-          item.append(open, remove);
-          list2.appendChild(item);
-        });
-        sessionEl.appendChild(list2);
-        annotationSessionsEl.appendChild(sessionEl);
-      }
-    }
-    function hideAnnotationDetail() {
-      activeAnnotationId = null;
-      annotationDetail.hidden = true;
-      renderAnnotationPanel();
-    }
-    function showAnnotationDetail(session, entry, index) {
-      activeAnnotationId = entry.id;
-      $("#annotation-detail-session").textContent = session.title;
-      $("#annotation-detail-step").textContent = `${index + 1}/${session.entries.length}`;
-      const location2 = $("#annotation-detail-location");
-      location2.textContent = annotationLocationLabel(entry);
-      const body = $("#annotation-detail-body");
-      body.replaceChildren();
-      if (entry.title) {
-        const heading2 = document.createElement("strong");
-        heading2.className = "annotation-detail-title";
-        heading2.textContent = entry.title;
-        body.appendChild(heading2);
-      }
-      const markdown = document.createElement("div");
-      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, null);
-      body.appendChild(markdown);
-      $("#annotation-detail-prev").disabled = index <= 0;
-      $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
-      annotationDetail.hidden = false;
-      setAnnotationPanelOpen(true);
-      renderAnnotationPanel();
-    }
-    async function openAnnotationEntry(entryId) {
-      const found = findAnnotation(entryId);
-      if (!found)
-        return;
-      const { session, entry, index } = found;
-      const from = entry.range.from || "HEAD";
-      const to = entry.range.to || "worktree";
-      const range = { from, to };
-      const current = currentRange();
-      const rangeChanged = current.from !== from || current.to !== to;
-      const wasDiffScreen = STATE.route.screen === "diff";
-      const line = annotationLineTarget(entry);
-      STATE.from = from;
-      STATE.to = to;
-      localStorage.setItem("gdp:from", from);
-      localStorage.setItem("gdp:to", to);
-      syncRefInputs();
-      cancelActiveSourceLoad("navigation");
-      setRoute({ screen: "diff", range, path: entry.path, line });
-      setPageMode();
-      removeStandaloneSource();
-      if (rangeChanged || !wasDiffScreen || !STATE.files.length)
-        await load();
-      if (STATE.files.some((f2) => f2.path === entry.path)) {
-        scrollToFile(entry.path, line);
-      } else {
-        const ref = annotationRefForEntry(entry);
-        setRoute({ screen: "file", path: entry.path, ref, view: "blob", line, range }, true);
-        setPageMode();
-        renderStandaloneSource({ path: entry.path, ref });
-      }
-      showAnnotationDetail(session, entry, index);
-    }
-    function stepAnnotation(direction) {
-      if (!activeAnnotationId)
-        return;
-      const found = findAnnotation(activeAnnotationId);
-      if (!found)
-        return;
-      const next = found.session.entries[found.index + direction];
-      if (next)
-        openAnnotationEntry(next.id);
-    }
-    function handleAnnotationSse(raw) {
-      let event = null;
-      try {
-        event = JSON.parse(raw);
-      } catch {
-        event = null;
-      }
-      refreshAnnotations().then(() => {
-        if (event?.kind === "add" && event.entry_id && annotationFollow && findAnnotation(event.entry_id)) {
-          openAnnotationEntry(event.entry_id);
-        }
-      });
-    }
-    $("#annotations-toggle").addEventListener("click", () => {
-      setAnnotationPanelOpen(annotationPanel.hidden);
-      if (!annotationPanel.hidden)
-        refreshAnnotations();
     });
-    $("#annotation-panel-close").addEventListener("click", () => {
-      setAnnotationPanelOpen(false);
-    });
-    const followCheckbox = $("#annotation-follow");
-    followCheckbox.checked = annotationFollow;
-    followCheckbox.addEventListener("change", () => {
-      annotationFollow = followCheckbox.checked;
-      localStorage.setItem("gdp:annotation-follow", annotationFollow ? "1" : "0");
-    });
-    $("#annotation-clear").addEventListener("click", () => {
-      if (!window.confirm("Delete all annotations?"))
-        return;
-      hideAnnotationDetail();
-      postAnnotationAction({ action: "clear" });
-    });
-    $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
-    $("#annotation-detail-prev").addEventListener("click", () => {
-      stepAnnotation(-1);
-    });
-    $("#annotation-detail-next").addEventListener("click", () => {
-      stepAnnotation(1);
-    });
-    $("#annotation-detail-location").addEventListener("click", (e2) => {
-      e2.preventDefault();
-      if (activeAnnotationId)
-        openAnnotationEntry(activeAnnotationId);
-    });
-    refreshAnnotations();
     let sseTimer = null;
     function scheduleSseLoad() {
       if (sseTimer)
@@ -14575,7 +14786,7 @@ ${frontmatter.yaml}
     es.addEventListener("update", () => scheduleSseLoad());
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
-      handleAnnotationSse(event.data);
+      ANNOTATIONS_UI?.handleSse(event.data);
     });
     es.addEventListener("error", () => setStatus("error"));
     es.addEventListener("open", () => {
