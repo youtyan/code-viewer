@@ -14553,6 +14553,14 @@ ${frontmatter.yaml}
       if (pop)
         pop.hidden = true;
     }
+    function toggleScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      if (pop && !pop.hidden) {
+        closeScopeSettings();
+        return;
+      }
+      openScopeSettings();
+    }
     function saveScopeSettings() {
       const input = document.querySelector("#scope-omit-dirs");
       const excludeInput = document.querySelector("#scope-exclude-names");
@@ -14894,7 +14902,7 @@ ${frontmatter.yaml}
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
     $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
-    $("#viewer-settings")?.addEventListener("click", openScopeSettings);
+    $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
     $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
     $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
     $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
@@ -15272,7 +15280,7 @@ ${frontmatter.yaml}
       getRoute: () => STATE.route
     });
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
-    window.addEventListener("popstate", () => {
+    function applyRouteFromLocation() {
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       STATE.route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
       STATE.from = STATE.route.range.from;
@@ -15304,6 +15312,18 @@ ${frontmatter.yaml}
         return;
       }
       applySourceRouteToShell();
+    }
+    window.addEventListener("popstate", applyRouteFromLocation);
+    document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
+      link2.addEventListener("click", (e2) => {
+        if (e2.metaKey || e2.ctrlKey || e2.shiftKey || e2.altKey || e2.button !== 0)
+          return;
+        e2.preventDefault();
+        const target = new URL(link2.href, window.location.origin);
+        history.pushState(null, "", target.pathname + target.search);
+        window.scrollTo(0, 0);
+        applyRouteFromLocation();
+      });
     });
     function applyIgnoreWs() {
       const btn = $("#ignore-ws");
