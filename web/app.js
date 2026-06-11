@@ -21,6 +21,467 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
+  // web-src/core/catch-up.ts
+  function shouldCatchUpDiff(route) {
+    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  }
+  function createCatchUpGate(now, minIntervalMs) {
+    let lastForceAt = 0;
+    return function shouldRun() {
+      const current = now();
+      if (current - lastForceAt < minIntervalMs)
+        return false;
+      lastForceAt = current;
+      return true;
+    };
+  }
+
+  // web-src/core/expand-logic.ts
+  function initExpandState(prevHunkEndNew, hunkNewStart) {
+    return {
+      topExpandedStart: hunkNewStart,
+      bottomExpandedEnd: prevHunkEndNew - 1
+    };
+  }
+  function remainingGap(state, prevHunkEndNew) {
+    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
+    const remainingEnd = state.topExpandedStart - 1;
+    if (remainingStart > remainingEnd)
+      return null;
+    return { start: remainingStart, end: remainingEnd };
+  }
+  function isFullyExpanded(state, prevHunkEndNew) {
+    return remainingGap(state, prevHunkEndNew) == null;
+  }
+  function upClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
+  }
+  function downClickRange(state, prevHunkEndNew, step) {
+    const gap = remainingGap(state, prevHunkEndNew);
+    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
+  }
+  function applyUp(state, range) {
+    return Object.assign({}, state, { bottomExpandedEnd: range.end });
+  }
+  function applyDown(state, range) {
+    return Object.assign({}, state, { topExpandedStart: range.start });
+  }
+  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
+    return prevHunkEndOld + (newLine - prevHunkEndNew);
+  }
+  function trailingClickRange(hunkEndNew, step) {
+    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
+  }
+  function trailingExpandTargetIndex(hunkCount) {
+    return hunkCount > 0 ? hunkCount - 1 : null;
+  }
+  function shouldAttachTrailingExpand(probeLineCount) {
+    return probeLineCount > 0;
+  }
+  function applyTrailingResult(state, receivedCount, step) {
+    return {
+      newStart: state.newStart + receivedCount,
+      oldStart: state.oldStart + receivedCount,
+      eof: receivedCount === 0 || receivedCount < step
+    };
+  }
+  var GdpExpandLogic = {
+    initExpandState,
+    remainingGap,
+    isFullyExpanded,
+    upClickRange,
+    downClickRange,
+    applyUp,
+    applyDown,
+    mapNewToOld,
+    trailingExpandTargetIndex,
+    shouldAttachTrailingExpand,
+    trailingClickRange,
+    applyTrailingResult
+  };
+
+  // web-src/core/focus-scope.ts
+  function isEditableKeyTarget(target) {
+    if (!target)
+      return false;
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
+  }
+  function keymapScope(target) {
+    if (target?.closest("#content"))
+      return "main";
+    if (target?.closest("#sidebar"))
+      return "sidebar";
+    return "global";
+  }
+  function prepareKeyboardPanels(doc = document) {
+    const sidebar = doc.querySelector("#sidebar");
+    const content = doc.querySelector("#content");
+    if (sidebar)
+      sidebar.tabIndex = -1;
+    if (content)
+      content.tabIndex = -1;
+  }
+  function getPanelFocusScope(doc = document) {
+    const scope = doc.body?.dataset.focusScope;
+    return scope === "sidebar" || scope === "main" ? scope : null;
+  }
+  function setPanelFocusScope(scope, doc = document) {
+    if (!doc.body)
+      return;
+    if (scope)
+      doc.body.dataset.focusScope = scope;
+    else
+      delete doc.body.dataset.focusScope;
+  }
+  function restorePanelFocusScope(scope, doc = document) {
+    if (scope === "sidebar")
+      focusSidebarPanel(doc);
+    else if (scope === "main")
+      focusMainPanel(doc);
+    else
+      setPanelFocusScope(null, doc);
+  }
+  function focusSidebarPanel(doc = document) {
+    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
+    const sidebar = doc.querySelector("#sidebar");
+    (active || sidebar)?.focus({ preventScroll: true });
+    setPanelFocusScope("sidebar", doc);
+  }
+  function focusMainPanel(doc = document) {
+    doc.querySelector("#content")?.focus({ preventScroll: true });
+    setPanelFocusScope("main", doc);
+  }
+  function findMainScrollTarget(doc = document) {
+    const active = doc.activeElement;
+    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
+    if (activeScroller && activeScroller.offsetParent !== null)
+      return activeScroller;
+    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
+    if (sourceScroller && sourceScroller.offsetParent !== null)
+      return sourceScroller;
+    const content = doc.querySelector("#content");
+    if (!content || content.offsetParent === null)
+      return null;
+    const isScrollable = (item) => {
+      if (item.offsetParent === null)
+        return false;
+      const style = doc.defaultView?.getComputedStyle(item);
+      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+    };
+    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
+    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
+    return scrollable || doc.scrollingElement;
+  }
+
+  // web-src/core/icons.ts
+  var FOLDER_ICON_PATHS = {
+    closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
+    open: "M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z"
+  };
+  var CHEVRON_DOWN_12_PATH = "M6 8.825c-.2 0-.4-.1-.5-.2l-3.3-3.3c-.3-.3-.3-.8 0-1.1.3-.3.8-.3 1.1 0l2.7 2.7 2.7-2.7c.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1l-3.2 3.2c-.2.2-.4.3-.6.3Z";
+  var CHEVRON_DOWN_16_PATH = "M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z";
+  var COPY_16_PATHS = [
+    "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z",
+    "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
+  ];
+  var FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
+  var OPEN_EXTERNAL_16_PATH = "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
+  var PLUS_16_PATH = "M7.75 2a.75.75 0 0 1 .75.75V7.5h4.75a.75.75 0 0 1 0 1.5H8.5v4.75a.75.75 0 0 1-1.5 0V9H2.25a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z";
+  var TRASH_16_PATH = "M6.5 1.75A1.75 1.75 0 0 1 8.25 0h1.5A1.75 1.75 0 0 1 11.5 1.75V2h3.75a.75.75 0 0 1 0 1.5h-.75v10.75A1.75 1.75 0 0 1 12.75 16h-9.5A1.75 1.75 0 0 1 1.5 14.25V3.5H.75a.75.75 0 0 1 0-1.5H4.5v-.25ZM6 2h4v-.25a.25.25 0 0 0-.25-.25h-1.5a.25.25 0 0 0-.25.25V2Zm-3 1.5v10.75c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V3.5Zm3 2.25a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 6 5.75Zm4 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 10 5.75Z";
+  var GIT_BRANCH_16_PATH = "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z";
+  var TRIANGLE_DOWN_16_PATH = "m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z";
+  var SIDEBAR_SHOW_16_PATHS = [
+    "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
+    "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z"
+  ];
+  var SIDEBAR_HIDE_16_PATHS = [
+    "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
+    "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z"
+  ];
+  var GEAR_16_PATH = "M8 0a8.2 8.2 0 0 1 1.7.18.75.75 0 0 1 .6.86l-.14.93c.23.1.45.21.67.34l.73-.6a.75.75 0 0 1 1.03.08c.47.37.89.78 1.23 1.23a.75.75 0 0 1 .07 1.03l-.59.73c.13.22.24.44.34.67l.93-.14a.75.75 0 0 1 .86.6c.12.55.18 1.12.18 1.7s-.06 1.15-.18 1.7a.75.75 0 0 1-.86.6l-.93-.14c-.1.23-.21.45-.34.67l.59.73a.75.75 0 0 1-.07 1.03c-.34.45-.76.86-1.23 1.23a.75.75 0 0 1-1.03.08l-.73-.6c-.22.13-.44.24-.67.34l.14.93a.75.75 0 0 1-.6.86A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-1.7-.18.75.75 0 0 1-.6-.86l.14-.93a5.9 5.9 0 0 1-.67-.34l-.73.6a.75.75 0 0 1-1.03-.08 8.1 8.1 0 0 1-1.23-1.23.75.75 0 0 1-.07-1.03l.59-.73a5.9 5.9 0 0 1-.34-.67l-.93.14a.75.75 0 0 1-.86-.6A8.2 8.2 0 0 1 0 8c0-.58.06-1.15.18-1.7a.75.75 0 0 1 .86-.6l.93.14c.1-.23.21-.45.34-.67l-.59-.73a.75.75 0 0 1 .07-1.03 8.1 8.1 0 0 1 1.23-1.23.75.75 0 0 1 1.03-.08l.73.6c.22-.13.44-.24.67-.34l-.14-.93a.75.75 0 0 1 .6-.86A8.2 8.2 0 0 1 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z";
+  var EXPAND_ALL_16_PATHS = [
+    "M3.22 4.47a.75.75 0 0 1 1.06 0L8 8.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 5.53a.75.75 0 0 1 0-1.06Z",
+    "M3.22 8.47a.75.75 0 0 1 1.06 0L8 12.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 9.53a.75.75 0 0 1 0-1.06Z"
+  ];
+  var COLLAPSE_ALL_16_PATHS = [
+    "M7.47 2.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 3.81 4.28 7.53a.75.75 0 0 1-1.06-1.06Z",
+    "M7.47 6.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 7.81l-3.72 3.72a.75.75 0 1 1-1.06-1.06Z"
+  ];
+  function iconSvg(className, paths) {
+    const pathList = Array.isArray(paths) ? paths : [paths];
+    return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
+  }
+
+  // web-src/core/keymap.ts
+  var DEFAULT_KEY_BINDINGS = [
+    {
+      action: "open-file-palette",
+      key: "k",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-file-palette",
+      key: "k",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      ctrl: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    {
+      action: "open-grep-palette",
+      key: "g",
+      meta: true,
+      allowEditable: true,
+      allowPaletteOpen: true
+    },
+    { action: "focus-file-filter", key: "/" },
+    { action: "focus-sidebar", key: "h", ctrl: true },
+    { action: "focus-main", key: "l", ctrl: true },
+    {
+      action: "cancel-source-load",
+      key: "escape",
+      requires: { lightboxClosed: true }
+    },
+    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
+    { action: "open-sidebar-item", key: "enter", scope: "global" },
+    { action: "sidebar-next", key: "j", scope: "sidebar" },
+    { action: "sidebar-next", key: "j", scope: "global" },
+    { action: "sidebar-previous", key: "k", scope: "sidebar" },
+    { action: "sidebar-previous", key: "k", scope: "global" },
+    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
+    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
+    { action: "sidebar-expand", key: "l", scope: "sidebar" },
+    { action: "sidebar-expand", key: "l", scope: "global" },
+    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
+    { action: "sidebar-collapse", key: "h", scope: "global" },
+    { action: "scroll-main-down", key: "j", scope: "main" },
+    { action: "scroll-main-up", key: "k", scope: "main" },
+    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
+    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
+    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
+    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "main",
+      ctrl: true
+    },
+    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "global",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-down",
+      key: "arrowdown",
+      scope: "sidebar",
+      ctrl: true
+    },
+    {
+      action: "scroll-main-page-up",
+      key: "arrowup",
+      scope: "sidebar",
+      ctrl: true
+    },
+    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
+    { action: "tab-code", key: "c", scope: "main", pendingG: true },
+    { action: "goto-top", key: "g", pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
+    { action: "goto-bottom", key: "g", shift: true },
+    { action: "start-g-sequence", key: "g", scope: "sidebar" },
+    { action: "start-g-sequence", key: "g", scope: "main" },
+    { action: "layout-unified", key: "u" },
+    { action: "layout-split", key: "s" },
+    { action: "toggle-theme", key: "t" }
+  ];
+  function resolveKeymapAction(event, context) {
+    const key = event.key.toLowerCase();
+    if (context.composing)
+      return null;
+    for (const binding of DEFAULT_KEY_BINDINGS) {
+      if (binding.key !== key)
+        continue;
+      if (binding.requires?.lightboxClosed && context.lightboxOpen)
+        continue;
+      if (binding.scope && binding.scope !== context.scope)
+        continue;
+      if (!!binding.pendingG !== !!context.pendingG)
+        continue;
+      if (context.paletteOpen && !binding.allowPaletteOpen)
+        continue;
+      if (context.editable && !binding.allowEditable)
+        continue;
+      if (!!binding.ctrl !== !!event.ctrlKey)
+        continue;
+      if (!!binding.meta !== !!event.metaKey)
+        continue;
+      if (!!binding.alt !== !!event.altKey)
+        continue;
+      if (!!binding.shift !== !!event.shiftKey)
+        continue;
+      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
+        continue;
+      return binding.action;
+    }
+    return null;
+  }
+
+  // web-src/core/routes.ts
+  function assertNever(value) {
+    throw new Error(`unhandled route: ${JSON.stringify(value)}`);
+  }
+  function parseLegacyRange(value, fallback) {
+    const raw = value || "";
+    const sep = raw.indexOf("..");
+    if (sep < 0)
+      return fallback;
+    return {
+      from: raw.slice(0, sep) || fallback.from,
+      to: raw.slice(sep + 2) || fallback.to
+    };
+  }
+  function parseLineTarget(value) {
+    const raw = value || "";
+    const range = /^(\d+)-(\d+)$/.exec(raw);
+    if (range) {
+      const a = Number(range[1]);
+      const b = Number(range[2]);
+      const start = Math.min(a, b);
+      const end = Math.max(a, b);
+      if (start > 0)
+        return { start, end };
+      return;
+    }
+    const line = Number(raw);
+    return Number.isInteger(line) && line > 0 ? line : undefined;
+  }
+  function formatLineTarget(line) {
+    return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
+  }
+  function parseRoute(pathname, search, fallbackRange) {
+    const params = new URLSearchParams(search);
+    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
+    const range = {
+      from: params.get("from") || legacyRange.from,
+      to: params.get("to") || legacyRange.to
+    };
+    switch (pathname) {
+      case "/":
+      case "/index.html":
+        return {
+          screen: "repo",
+          ref: params.get("ref") || params.get("target") || "worktree",
+          path: params.get("path") || "",
+          range
+        };
+      case "/todif":
+      case "/todiff":
+        return {
+          screen: "diff",
+          range,
+          ...params.get("path") ? { path: params.get("path") || "" } : {},
+          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
+        };
+      case "/file": {
+        const path = params.get("path") || "";
+        const target = params.get("target") || "";
+        const ref = target || params.get("ref") || "worktree";
+        const line = parseLineTarget(params.get("line"));
+        if (!path)
+          return {
+            screen: "unknown",
+            reason: "missing-path",
+            rawPathname: pathname,
+            rawSearch: search,
+            range
+          };
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: target ? "blob" : "detail",
+          ...line ? { line } : {}
+        };
+      }
+      case "/help":
+        return {
+          screen: "help",
+          range,
+          lang: params.get("lang") || "en",
+          section: params.get("section") || "keybindings"
+        };
+      default:
+        return {
+          screen: "unknown",
+          reason: "unknown-pathname",
+          rawPathname: pathname,
+          rawSearch: search,
+          range
+        };
+    }
+  }
+  function buildRoute(route) {
+    switch (route.screen) {
+      case "repo": {
+        const params = new URLSearchParams;
+        if (route.ref && route.ref !== "worktree")
+          params.set("ref", route.ref);
+        if (route.path)
+          params.set("path", route.path);
+        const qs = params.toString();
+        return `/${qs ? `?${qs}` : ""}`;
+      }
+      case "file":
+        if (route.view === "blob") {
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+        }
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+      case "diff":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+      case "help": {
+        const params = new URLSearchParams;
+        if (route.lang && route.lang !== "en")
+          params.set("lang", route.lang);
+        if (route.section && route.section !== "keybindings")
+          params.set("section", route.section);
+        const qs = params.toString();
+        return `/help${qs ? `?${qs}` : ""}`;
+      }
+      case "unknown":
+        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
+      default:
+        return assertNever(route);
+    }
+  }
+  function buildRawFileUrl(target) {
+    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
+  }
+
   // node_modules/markdown-it/lib/common/utils.mjs
   var exports_utils = {};
   __export(exports_utils, {
@@ -5602,138 +6063,6 @@
     md.core.ruler.after("inline", "footnote_tail", footnote_tail);
   }
 
-  // web-src/core/routes.ts
-  function assertNever(value) {
-    throw new Error(`unhandled route: ${JSON.stringify(value)}`);
-  }
-  function parseLegacyRange(value, fallback) {
-    const raw = value || "";
-    const sep = raw.indexOf("..");
-    if (sep < 0)
-      return fallback;
-    return {
-      from: raw.slice(0, sep) || fallback.from,
-      to: raw.slice(sep + 2) || fallback.to
-    };
-  }
-  function parseLineTarget(value) {
-    const raw = value || "";
-    const range = /^(\d+)-(\d+)$/.exec(raw);
-    if (range) {
-      const a2 = Number(range[1]);
-      const b2 = Number(range[2]);
-      const start = Math.min(a2, b2);
-      const end = Math.max(a2, b2);
-      if (start > 0)
-        return { start, end };
-      return;
-    }
-    const line = Number(raw);
-    return Number.isInteger(line) && line > 0 ? line : undefined;
-  }
-  function formatLineTarget(line) {
-    return typeof line === "number" ? String(line) : `${line.start}-${line.end}`;
-  }
-  function parseRoute(pathname, search, fallbackRange) {
-    const params = new URLSearchParams(search);
-    const legacyRange = parseLegacyRange(params.get("range"), fallbackRange);
-    const range = {
-      from: params.get("from") || legacyRange.from,
-      to: params.get("to") || legacyRange.to
-    };
-    switch (pathname) {
-      case "/":
-      case "/index.html":
-        return {
-          screen: "repo",
-          ref: params.get("ref") || params.get("target") || "worktree",
-          path: params.get("path") || "",
-          range
-        };
-      case "/todif":
-      case "/todiff":
-        return {
-          screen: "diff",
-          range,
-          ...params.get("path") ? { path: params.get("path") || "" } : {},
-          ...parseLineTarget(params.get("line")) ? { line: parseLineTarget(params.get("line")) } : {}
-        };
-      case "/file": {
-        const path = params.get("path") || "";
-        const target = params.get("target") || "";
-        const ref = target || params.get("ref") || "worktree";
-        const line = parseLineTarget(params.get("line"));
-        if (!path)
-          return {
-            screen: "unknown",
-            reason: "missing-path",
-            rawPathname: pathname,
-            rawSearch: search,
-            range
-          };
-        return {
-          screen: "file",
-          path,
-          ref,
-          range,
-          view: target ? "blob" : "detail",
-          ...line ? { line } : {}
-        };
-      }
-      case "/help":
-        return {
-          screen: "help",
-          range,
-          lang: params.get("lang") || "en",
-          section: params.get("section") || "keybindings"
-        };
-      default:
-        return {
-          screen: "unknown",
-          reason: "unknown-pathname",
-          rawPathname: pathname,
-          rawSearch: search,
-          range
-        };
-    }
-  }
-  function buildRoute(route) {
-    switch (route.screen) {
-      case "repo": {
-        const params = new URLSearchParams;
-        if (route.ref && route.ref !== "worktree")
-          params.set("ref", route.ref);
-        if (route.path)
-          params.set("path", route.path);
-        const qs = params.toString();
-        return `/${qs ? `?${qs}` : ""}`;
-      }
-      case "file":
-        if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-        }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-      case "diff":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
-      case "help": {
-        const params = new URLSearchParams;
-        if (route.lang && route.lang !== "en")
-          params.set("lang", route.lang);
-        if (route.section && route.section !== "keybindings")
-          params.set("section", route.section);
-        const qs = params.toString();
-        return `/help${qs ? `?${qs}` : ""}`;
-      }
-      case "unknown":
-        return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
-      default:
-        return assertNever(route);
-    }
-  }
-  function buildRawFileUrl(target) {
-    return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
-  }
-
   // web-src/core/markdown-preview.ts
   var mermaidPromise = null;
   var mermaidInitialized = false;
@@ -6819,86 +7148,6 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/core/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
-  }
-  function createCatchUpGate(now, minIntervalMs) {
-    let lastForceAt = 0;
-    return function shouldRun() {
-      const current = now();
-      if (current - lastForceAt < minIntervalMs)
-        return false;
-      lastForceAt = current;
-      return true;
-    };
-  }
-
-  // web-src/core/expand-logic.ts
-  function initExpandState(prevHunkEndNew, hunkNewStart) {
-    return {
-      topExpandedStart: hunkNewStart,
-      bottomExpandedEnd: prevHunkEndNew - 1
-    };
-  }
-  function remainingGap(state, prevHunkEndNew) {
-    const remainingStart = Math.max(1, prevHunkEndNew, state.bottomExpandedEnd + 1);
-    const remainingEnd = state.topExpandedStart - 1;
-    if (remainingStart > remainingEnd)
-      return null;
-    return { start: remainingStart, end: remainingEnd };
-  }
-  function isFullyExpanded(state, prevHunkEndNew) {
-    return remainingGap(state, prevHunkEndNew) == null;
-  }
-  function upClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: gap.start, end: Math.min(gap.end, gap.start + step - 1) } : null;
-  }
-  function downClickRange(state, prevHunkEndNew, step) {
-    const gap = remainingGap(state, prevHunkEndNew);
-    return gap ? { start: Math.max(gap.start, gap.end - step + 1), end: gap.end } : null;
-  }
-  function applyUp(state, range) {
-    return Object.assign({}, state, { bottomExpandedEnd: range.end });
-  }
-  function applyDown(state, range) {
-    return Object.assign({}, state, { topExpandedStart: range.start });
-  }
-  function mapNewToOld(newLine, prevHunkEndNew, prevHunkEndOld) {
-    return prevHunkEndOld + (newLine - prevHunkEndNew);
-  }
-  function trailingClickRange(hunkEndNew, step) {
-    return { start: hunkEndNew, end: hunkEndNew + step - 1 };
-  }
-  function trailingExpandTargetIndex(hunkCount) {
-    return hunkCount > 0 ? hunkCount - 1 : null;
-  }
-  function shouldAttachTrailingExpand(probeLineCount) {
-    return probeLineCount > 0;
-  }
-  function applyTrailingResult(state, receivedCount, step) {
-    return {
-      newStart: state.newStart + receivedCount,
-      oldStart: state.oldStart + receivedCount,
-      eof: receivedCount === 0 || receivedCount < step
-    };
-  }
-  var GdpExpandLogic = {
-    initExpandState,
-    remainingGap,
-    isFullyExpanded,
-    upClickRange,
-    downClickRange,
-    applyUp,
-    applyDown,
-    mapNewToOld,
-    trailingExpandTargetIndex,
-    shouldAttachTrailingExpand,
-    trailingClickRange,
-    applyTrailingResult
-  };
-
   // web-src/core/file-path-copy.ts
   function filePathClipboardText(path) {
     return path || "";
@@ -6910,78 +7159,1114 @@ ${frontmatter.yaml}
     return parts[parts.length - 1] || "";
   }
 
-  // web-src/core/focus-scope.ts
-  function isEditableKeyTarget(target) {
-    if (!target)
-      return false;
-    const tag = target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || target.closest('[contenteditable="true"]') != null;
+  // web-src/core/ws-highlight.ts
+  function isWhitespaceOnlyInlineHighlight(text2) {
+    return !!text2 && !/\S/.test(text2);
   }
-  function keymapScope(target) {
-    if (target?.closest("#content"))
-      return "main";
-    if (target?.closest("#sidebar"))
-      return "sidebar";
-    return "global";
+  function suppressWhitespaceOnlyInlineHighlights(root) {
+    root.querySelectorAll("ins, del").forEach((el) => {
+      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
+        return;
+      const parent = el.parentNode;
+      if (!parent)
+        return;
+      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
+    });
   }
-  function prepareKeyboardPanels(doc = document) {
-    const sidebar = doc.querySelector("#sidebar");
-    const content = doc.querySelector("#content");
-    if (sidebar)
-      sidebar.tabIndex = -1;
-    if (content)
-      content.tabIndex = -1;
+
+  // web-src/views/media-embed.ts
+  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
+  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
+  function isMedia(p2) {
+    return MEDIA_RE.test(p2);
   }
-  function getPanelFocusScope(doc = document) {
-    const scope = doc.body?.dataset.focusScope;
-    return scope === "sidebar" || scope === "main" ? scope : null;
+  function isImage(p2) {
+    return IMAGE_RE.test(p2);
   }
-  function setPanelFocusScope(scope, doc = document) {
-    if (!doc.body)
+  function isVideo(p2) {
+    return VIDEO_RE.test(p2);
+  }
+  function isAudio(p2) {
+    return AUDIO_RE.test(p2);
+  }
+  function fileURL(path, ref) {
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  }
+  function mediaTag(path, ref) {
+    const url = fileURL(path, ref);
+    if (isVideo(path)) {
+      return `<video src="${url}" controls preload="metadata"></video>`;
+    }
+    if (isAudio(path)) {
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
+    }
+    return `<img src="${url}" alt="" loading="lazy">`;
+  }
+  function enhanceMediaCard(file, card) {
+    const path = file.path;
+    if (!file.media_kind && !isMedia(path))
       return;
-    if (scope)
-      doc.body.dataset.focusScope = scope;
-    else
-      delete doc.body.dataset.focusScope;
+    const wrapper = card.querySelector(".d2h-file-wrapper");
+    if (!wrapper)
+      return;
+    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
+    if (!body)
+      return;
+    const container = document.createElement("div");
+    container.className = "gdp-media";
+    let leftHTML;
+    let rightHTML;
+    if (file.status === "A") {
+      leftHTML = '<div class="media-empty">Not in HEAD</div>';
+      rightHTML = mediaTag(path, "worktree");
+    } else if (file.status === "D") {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = '<div class="media-empty">Deleted</div>';
+    } else {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = mediaTag(path, "worktree");
+    }
+    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+    body.replaceWith(container);
   }
-  function restorePanelFocusScope(scope, doc = document) {
-    if (scope === "sidebar")
-      focusSidebarPanel(doc);
-    else if (scope === "main")
-      focusMainPanel(doc);
-    else
-      setPanelFocusScope(null, doc);
-  }
-  function focusSidebarPanel(doc = document) {
-    const active = doc.querySelector("#filelist li.active[data-path], #filelist .tree-dir.active[data-dirpath]");
-    const sidebar = doc.querySelector("#sidebar");
-    (active || sidebar)?.focus({ preventScroll: true });
-    setPanelFocusScope("sidebar", doc);
-  }
-  function focusMainPanel(doc = document) {
-    doc.querySelector("#content")?.focus({ preventScroll: true });
-    setPanelFocusScope("main", doc);
-  }
-  function findMainScrollTarget(doc = document) {
-    const active = doc.activeElement;
-    const activeScroller = active?.closest("#content .gdp-source-virtual-scroller");
-    if (activeScroller && activeScroller.offsetParent !== null)
-      return activeScroller;
-    const sourceScroller = doc.querySelector("#content .gdp-source-virtual-scroller");
-    if (sourceScroller && sourceScroller.offsetParent !== null)
-      return sourceScroller;
-    const content = doc.querySelector("#content");
-    if (!content || content.offsetParent === null)
-      return null;
-    const isScrollable = (item) => {
-      if (item.offsetParent === null)
+
+  // web-src/views/diff-view.ts
+  function createDiffView(deps) {
+    const {
+      $,
+      $$,
+      STATE,
+      setRoute,
+      currentRange,
+      escapeHtml: escapeHtml2,
+      trackLoad,
+      diffCardSelector,
+      getHljs,
+      inferLang,
+      lineTargetStart,
+      fileSourceTarget,
+      applySourceRouteToShell,
+      setupHunkExpand,
+      applyInlineAnnotations,
+      applyFilter,
+      markActive,
+      renderSidebar,
+      isRepositorySidebarMode,
+      loadRepo,
+      repoRoute,
+      setProjectName,
+      getProjectName,
+      createOpenPathButton,
+      applyHideTests,
+      getServerGeneration,
+      setServerGeneration
+    } = deps;
+    function rerenderLoadedDiffs() {
+      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
+        const data = card._diffData;
+        const file = card._file;
+        if (!data || !file)
+          return;
+        mountDiff(card, file, data);
+        applyInlineAnnotations();
+        if (data.truncated && data.mode === "preview") {
+          addExpandHunksUI(file, data, card);
+        }
+        scheduleIdleHighlight(card, file);
+      });
+    }
+    function fileBadge(status) {
+      const ch = (status || "M")[0].toUpperCase();
+      const span = document.createElement("span");
+      span.className = `badge ${ch}`;
+      span.textContent = ch;
+      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
+      return span;
+    }
+    function persistViewedFiles() {
+      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
+    }
+    function setFileViewed(path, viewed) {
+      if (viewed)
+        STATE.viewedFiles.add(path);
+      else
+        STATE.viewedFiles.delete(path);
+      persistViewedFiles();
+      applyViewedState();
+      $$(diffCardSelector(path)).forEach((card) => {
+        applyViewedToCard(card, viewed, true);
+      });
+    }
+    function syncViewedCardDisplay(card, viewed) {
+      card.classList.toggle("viewed", viewed);
+      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
+        checkbox.checked = viewed;
+      });
+    }
+    function applyViewedToCard(card, viewed, collapseLoaded = false) {
+      syncViewedCardDisplay(card, viewed);
+      if (collapseLoaded && card.classList.contains("loaded")) {
+        setFileCollapsed(card, viewed);
+      }
+    }
+    function setUnfoldButtonState(button, expanded) {
+      if (!button)
+        return;
+      button.setAttribute("aria-pressed", expanded ? "true" : "false");
+      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
+      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
+    }
+    function renderMeta(meta) {
+      const el = $("#meta");
+      if (!meta) {
+        el.textContent = "";
+        return;
+      }
+      setProjectName(meta.project || "");
+      el.innerHTML = "";
+      if (meta.branch) {
+        const b2 = document.createElement("span");
+        b2.className = "ref";
+        b2.textContent = `⎇ ${meta.branch}`;
+        el.appendChild(b2);
+      }
+      if (meta.totals) {
+        const t2 = document.createElement("span");
+        t2.className = "num";
+        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> " + "<span>" + meta.totals.files + " files</span>";
+        el.appendChild(t2);
+      }
+      const u2 = document.createElement("span");
+      u2.className = "updated-at";
+      u2.title = "last updated";
+      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+      el.appendChild(u2);
+    }
+    let SUPPRESS_SPY_UNTIL = 0;
+    function prefetchByPath(path) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card?.classList.contains("pending"))
+        return;
+      const f2 = STATE.files.find((x) => x.path === path);
+      if (!f2)
+        return;
+      enqueueLoad(f2, card, 5);
+    }
+    function clearDiffLineFocus() {
+      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
+        row.classList.remove("gdp-diff-line-target");
+      });
+    }
+    function diffRowLineNumber(row) {
+      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
+      const raw = (newLine?.textContent || "").trim();
+      const line = Number(raw);
+      return Number.isInteger(line) && line > 0 ? line : null;
+    }
+    function focusDiffLine(card, line) {
+      const start = lineTargetStart(line);
+      if (!start)
         return false;
-      const style = doc.defaultView?.getComputedStyle(item);
-      return !!style && /(auto|scroll)/.test(style.overflowY) && item.scrollHeight > item.clientHeight;
+      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
+      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
+      if (!row)
+        return false;
+      clearDiffLineFocus();
+      row.classList.add("gdp-diff-line-target");
+      scrollDiffElementIntoView(row, "center");
+      return true;
+    }
+    function scrollDiffElementIntoView(element, block2) {
+      element.scrollIntoView({ behavior: "auto", block: block2 });
+    }
+    function applyDiffRouteFocus(card) {
+      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
+        return false;
+      if (card && card.dataset.path !== STATE.route.path)
+        return false;
+      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
+      if (!targetCard)
+        return false;
+      return focusDiffLine(targetCard, STATE.route.line);
+    }
+    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
+    window.addEventListener("wheel", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    window.addEventListener("touchmove", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    function scrollToFile(path, line) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card)
+        return;
+      if (line)
+        REANCHOR_UNTIL = performance.now() + 4000;
+      markActive(path);
+      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
+      const onEnd = () => {
+        SUPPRESS_SPY_UNTIL = 0;
+        window.removeEventListener("scrollend", onEnd);
+      };
+      window.addEventListener("scrollend", onEnd, { once: true });
+      if (card.classList.contains("pending")) {
+        const f2 = STATE.files.find((x) => x.path === path);
+        if (f2)
+          enqueueLoad(f2, card, 10);
+      }
+      if (!line || !focusDiffLine(card, line)) {
+        scrollDiffElementIntoView(card, "start");
+      }
+    }
+    function applyViewedState() {
+      if (isRepositorySidebarMode())
+        return;
+      $$("#filelist li[data-path]").forEach((li) => {
+        const path = li.dataset.path || "";
+        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
+      });
+      $$(".gdp-file-shell[data-path]").forEach((card) => {
+        const path = card.dataset.path || "";
+        const viewed = STATE.viewedFiles.has(path);
+        syncViewedCardDisplay(card, viewed);
+      });
+    }
+    let CLIENT_REQ_SEQ = 0;
+    const LOAD_QUEUE = [];
+    let ACTIVE_LOADS = 0;
+    const MAX_PARALLEL = 2;
+    let lazyObserver = null;
+    function renderShell(meta) {
+      const newFiles = meta.files || [];
+      STATE.files = newFiles;
+      setServerGeneration(meta.generation || 0);
+      window._lastMeta = meta;
+      renderMeta(meta);
+      renderSidebar(newFiles);
+      const target = $("#diff");
+      const empty = $("#empty");
+      if (!newFiles.length) {
+        if (STATE.route.screen === "file") {
+          empty.classList.add("hidden");
+          applySourceRouteToShell();
+        } else {
+          empty.classList.remove("hidden");
+          target.replaceChildren();
+        }
+        LOAD_QUEUE.length = 0;
+        return;
+      }
+      empty.classList.add("hidden");
+      const oldByKey = new Map;
+      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
+        if (c2.dataset.key)
+          oldByKey.set(c2.dataset.key, c2);
+      });
+      const ordered = [];
+      newFiles.forEach((f2) => {
+        const key = f2.key || f2.path;
+        const old = oldByKey.get(key);
+        if (old) {
+          oldByKey.delete(key);
+          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
+          const statusChanged = old.dataset.status !== (f2.status || "M");
+          if (sizeChanged || statusChanged) {
+            old.classList.remove("loaded", "error");
+            old.classList.add("pending");
+            old.replaceChildren();
+            const tmp = createPlaceholder(f2);
+            while (tmp.firstChild)
+              old.appendChild(tmp.firstChild);
+            old.dataset.sizeClass = f2.size_class || "small";
+            old.dataset.status = f2.status || "M";
+            delete old.dataset.manualRendered;
+            delete old.dataset.manualLoad;
+            delete old.dataset.manualMode;
+            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
+            old._diffData = null;
+            old._file = null;
+          } else {
+            const stats = old.querySelector(".gdp-shell-header .stats");
+            if (stats) {
+              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
+            }
+            old._file = f2;
+          }
+          ordered.push(old);
+        } else {
+          ordered.push(createPlaceholder(f2));
+        }
+      });
+      oldByKey.forEach((c2) => {
+        c2.remove();
+      });
+      target.replaceChildren(...ordered);
+      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
+        if (!LOAD_QUEUE[i2].card.isConnected)
+          LOAD_QUEUE.splice(i2, 1);
+      }
+      setupLazyObserver();
+      enqueueInitialLoads();
+      applySourceRouteToShell();
+      setupScrollSpy();
+      if (typeof applyHideTests === "function")
+        applyHideTests();
+      applyFilter();
+      applyViewedState();
+    }
+    function createPlaceholder(f2) {
+      const card = document.createElement("div");
+      card.className = "gdp-file-shell pending";
+      card.dataset.path = f2.path;
+      card.dataset.key = f2.key || f2.path;
+      card.dataset.sizeClass = f2.size_class || "small";
+      card.dataset.status = f2.status || "M";
+      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
+      if (f2.estimated_height_px) {
+        card.style.minHeight = `${f2.estimated_height_px}px`;
+      }
+      const head = document.createElement("div");
+      head.className = "gdp-shell-header";
+      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + "</span>" + '<span class="path">' + escapeHtml2(f2.display_path || f2.path) + "</span>" + '<span class="stats">' + '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>" + "</span>" + '<span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
+      card.appendChild(head);
+      const body = document.createElement("div");
+      body.className = "gdp-shell-body";
+      card.appendChild(body);
+      return card;
+    }
+    function setupLazyObserver() {
+      if (lazyObserver)
+        lazyObserver.disconnect();
+      lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting)
+            return;
+          const card = entry.target;
+          if (card.classList.contains("loaded") || card.classList.contains("loading"))
+            return;
+          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+          if (!f2)
+            return;
+          enqueueLoad(f2, card, 0);
+        });
+      }, { rootMargin: "1200px 0px 1600px 0px" });
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
+        lazyObserver.observe(c2);
+      });
+    }
+    function enqueueInitialLoads() {
+      const viewportBottom = window.innerHeight + 1600;
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
+        const rect = card.getBoundingClientRect();
+        if (rect.top > viewportBottom)
+          return;
+        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+        if (f2)
+          enqueueLoad(f2, card, 0);
+      });
+    }
+    function enqueueLoad(file, card, priority) {
+      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
+        renderManualLoadPlaceholder(card, file);
+        return;
+      }
+      if (LOAD_QUEUE.find((item) => item.card === card))
+        return;
+      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
+      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
+      pumpQueue();
+    }
+    function pumpQueue() {
+      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
+        const item = LOAD_QUEUE.shift();
+        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
+          continue;
+        ACTIVE_LOADS++;
+        loadFile(item.file, item.card).finally(() => {
+          ACTIVE_LOADS--;
+          pumpQueue();
+        });
+      }
+    }
+    function manualLoadReason(file) {
+      const path = file.path || "";
+      if (file.size_class === "huge")
+        return "huge diff";
+      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
+        return "minified or bundled file";
+      if (/\.map$/i.test(path))
+        return "source map";
+      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
+        return "generated or vendored path";
+      return null;
+    }
+    function renderManualLoadPlaceholder(card, file) {
+      if (card.dataset.manualRendered === "1")
+        return;
+      card.dataset.manualRendered = "1";
+      card.classList.remove("loading");
+      card.classList.add("pending", "manual-load");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = true;
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-manual-load";
+      const note = document.createElement("div");
+      note.className = "gdp-manual-note";
+      note.textContent = `${manualLoadReason(file)} - click to load diff`;
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "gdp-show-full";
+      previewBtn.textContent = "Load preview";
+      previewBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "preview";
+        card.classList.remove("manual-load");
+        loadFile(file, card, buildPreviewUrl(file, 3));
+      });
+      const openFileBtn = document.createElement("button");
+      openFileBtn.className = "gdp-show-full";
+      openFileBtn.textContent = "Open as file";
+      openFileBtn.title = "Open this file in the virtualized source viewer";
+      openFileBtn.addEventListener("click", () => {
+        const target = fileSourceTarget(file);
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: target.ref,
+          range: currentRange()
+        });
+        applySourceRouteToShell();
+      });
+      const fullBtn = document.createElement("button");
+      fullBtn.className = "gdp-show-full secondary";
+      fullBtn.textContent = "Load full diff";
+      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
+      fullBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "full";
+        card.classList.remove("manual-load");
+        loadFile(file, card, file.load_url);
+      });
+      wrap.appendChild(note);
+      if (file.status === "A")
+        wrap.appendChild(openFileBtn);
+      wrap.appendChild(previewBtn);
+      wrap.appendChild(fullBtn);
+      body.appendChild(wrap);
+    }
+    function nextIdle(timeout = 500) {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done)
+            return;
+          done = true;
+          resolve();
+        };
+        const ric = window.requestIdleCallback;
+        if (typeof ric === "function") {
+          ric(finish, { timeout });
+        } else {
+          requestAnimationFrame(finish);
+          setTimeout(finish, 50);
+        }
+      });
+    }
+    function loadFile(file, card, urlOverride) {
+      card.classList.remove("pending");
+      card.classList.add("loading");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = false;
+      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
+      const myGen = getServerGeneration();
+      const myReq = ++CLIENT_REQ_SEQ;
+      card.dataset.reqId = String(myReq);
+      const retryStale = () => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("pending");
+        if (indicator)
+          indicator.hidden = true;
+        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
+        if (fresh && card.isConnected)
+          enqueueLoad(fresh, card, 0);
+      };
+      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        if (myGen !== getServerGeneration()) {
+          retryStale();
+          return;
+        }
+        if (data.generation && data.generation !== getServerGeneration()) {
+          retryStale();
+          return;
+        }
+        await nextIdle();
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        renderFile(file, data, card);
+      }).catch(() => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("error");
+        const body = card.querySelector(".gdp-shell-body");
+        if (!body)
+          return;
+        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
+        const btn = body.querySelector(".retry");
+        if (btn)
+          btn.addEventListener("click", () => {
+            card.classList.remove("error");
+            card.classList.add("pending");
+            body.innerHTML = "";
+            enqueueLoad(file, card, 1);
+          });
+      });
+    }
+    function mountDiff(card, file, data) {
+      const head = card.querySelector(".gdp-shell-header");
+      if (head)
+        head.style.display = "none";
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      if (!data.diff?.trim()) {
+        body.innerHTML = '<div class="gdp-info">No content</div>';
+        return;
+      }
+      const layout = file.force_layout || STATE.layout;
+      const hljsRef = getHljs();
+      const ui = new Diff2HtmlUI(body, data.diff, {
+        drawFileList: false,
+        matching: "lines",
+        outputFormat: layout,
+        synchronisedScroll: true,
+        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
+        fileListToggle: false,
+        fileContentToggle: false
+      }, hljsRef);
+      ui.draw();
+      if (STATE.ignoreWs)
+        suppressWhitespaceOnlyInlineHighlights(body);
+      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
+        ui.highlightCode();
+      enhanceMediaCard(file, card);
+      syncSideScrollCard(card);
+      appendStatSquaresToHeader(card, file);
+      setupHunkExpand(card, file);
+    }
+    function setFileCollapsed(card, collapsed) {
+      card.classList.toggle("gdp-file-collapsed", collapsed);
+      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
+        body.classList.toggle("d2h-d-none", collapsed);
+      });
+      const button = card.querySelector(".gdp-file-toggle");
+      if (button) {
+        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        button.title = collapsed ? "Expand file" : "Collapse file";
+      }
+      const unfold = card.querySelector(".gdp-file-unfold");
+      if (unfold)
+        unfold.disabled = collapsed;
+      const viewFile = card.querySelector(".gdp-view-file");
+      if (viewFile)
+        viewFile.disabled = collapsed;
+    }
+    function setViewFileButtonState(button, sourceMode) {
+      if (!button)
+        return;
+      button.classList.add("gdp-btn", "gdp-btn-sm");
+      button.textContent = sourceMode ? "View Diff" : "View File";
+      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
+      button.title = sourceMode ? "View diff" : "View file";
+    }
+    function createFileBreadcrumb(path, ref) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb";
+      nav.setAttribute("aria-label", "File path");
+      const parts = path.split("/").filter(Boolean);
+      const allParts = getProjectName() ? [getProjectName(), ...parts] : parts;
+      allParts.forEach((part, index) => {
+        if (index > 0) {
+          const sep = document.createElement("span");
+          sep.className = "gdp-file-breadcrumb-sep";
+          sep.textContent = "/";
+          nav.appendChild(sep);
+        }
+        const isCurrent = index === allParts.length - 1;
+        const crumb = document.createElement(isCurrent ? "span" : "button");
+        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        crumb.textContent = part;
+        if (!isCurrent && crumb instanceof HTMLButtonElement) {
+          crumb.type = "button";
+          crumb.addEventListener("click", () => {
+            const projectOffset = getProjectName() ? 1 : 0;
+            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
+            setRoute(repoRoute(ref || "worktree", currentPath));
+            loadRepo();
+          });
+        }
+        nav.appendChild(crumb);
+      });
+      if (!allParts.length) {
+        const crumb = document.createElement("span");
+        crumb.className = "gdp-file-breadcrumb-current";
+        crumb.textContent = path;
+        nav.appendChild(crumb);
+      }
+      return nav;
+    }
+    async function expandAllFileContext(card, file) {
+      if (card.classList.contains("gdp-context-expanded")) {
+        const data = card._diffData;
+        if (!data)
+          return;
+        card.classList.remove("gdp-context-expanded");
+        mountDiff(card, file, data);
+        if (data.truncated && data.mode === "preview")
+          addExpandHunksUI(file, data, card);
+        scheduleIdleHighlight(card, file);
+        setUnfoldButtonState(card.querySelector(".gdp-file-unfold"), false);
+        return;
+      }
+      if (card._diffData && (card._diffData.truncated || card._diffData.mode === "preview")) {
+        await loadFile(file, card, file.load_url);
+      }
+      const button = card.querySelector(".gdp-file-unfold");
+      if (button)
+        button.disabled = true;
+      try {
+        for (let round = 0;round < 20; round++) {
+          const tasks = Array.from(card.querySelectorAll(".gdp-expand-stack")).map((stack) => stack._gdpExpandFully).filter((fn) => !!fn);
+          if (!tasks.length)
+            break;
+          const results = await Promise.all(tasks.map((fn) => fn().then(() => true, () => false)));
+          if (!results.some(Boolean))
+            break;
+        }
+        card.classList.add("gdp-context-expanded");
+        setUnfoldButtonState(button || null, true);
+      } finally {
+        if (button)
+          button.disabled = false;
+      }
+    }
+    function appendStatSquaresToHeader(card, file) {
+      const header = card.querySelector(".d2h-file-header");
+      if (!header)
+        return;
+      if (!header.querySelector(".gdp-file-toggle")) {
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "gdp-file-header-icon gdp-file-toggle";
+        toggle.title = "Collapse file";
+        toggle.setAttribute("aria-expanded", "true");
+        toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
+        toggle.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          setFileCollapsed(card, !card.classList.contains("gdp-file-collapsed"));
+        });
+        header.insertBefore(toggle, header.firstChild);
+      }
+      header.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
+        checkbox.checked = STATE.viewedFiles.has(file.path);
+        if (checkbox.dataset.gdpBound !== "1") {
+          checkbox.dataset.gdpBound = "1";
+          checkbox.addEventListener("change", () => setFileViewed(file.path, checkbox.checked));
+        }
+      });
+      if (!header.querySelector(".gdp-copy-path")) {
+        const nameWrapper = header.querySelector(".d2h-file-name-wrapper");
+        const copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "gdp-file-header-icon gdp-copy-path";
+        copy.title = "copy file path";
+        copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+        copy.addEventListener("click", async (e2) => {
+          e2.stopPropagation();
+          const path = filePathClipboardText(file.path);
+          if (!path)
+            return;
+          try {
+            await navigator.clipboard.writeText(path);
+            copy.classList.add("copied");
+            setTimeout(() => {
+              copy.classList.remove("copied");
+            }, 1200);
+          } catch {
+            copy.classList.add("failed");
+            setTimeout(() => {
+              copy.classList.remove("failed");
+            }, 1200);
+          }
+        });
+        const statusTag = nameWrapper ? nameWrapper.querySelector(".d2h-tag") : null;
+        if (statusTag)
+          statusTag.insertAdjacentElement("afterend", copy);
+        else if (nameWrapper)
+          nameWrapper.insertAdjacentElement("beforeend", copy);
+        else
+          header.insertBefore(copy, header.firstChild);
+      }
+      if (!header.querySelector(".gdp-file-unfold")) {
+        const unfold = document.createElement("button");
+        unfold.type = "button";
+        unfold.className = "gdp-file-header-icon gdp-file-unfold";
+        setUnfoldButtonState(unfold, card.classList.contains("gdp-context-expanded"));
+        unfold.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          expandAllFileContext(card, file);
+        });
+        const copy = header.querySelector(".gdp-copy-path");
+        if (copy)
+          copy.insertAdjacentElement("afterend", unfold);
+        else
+          header.appendChild(unfold);
+      }
+      if (!header.querySelector(".gdp-open-path")) {
+        const unfold = header.querySelector(".gdp-file-unfold");
+        const openPath = createOpenPathButton(file.path, "file-parent", "open parent folder in OS");
+        if (unfold)
+          unfold.insertAdjacentElement("afterend", openPath);
+        else
+          header.appendChild(openPath);
+      }
+      if (!header.querySelector(".gdp-stat-text")) {
+        const stats = document.createElement("span");
+        stats.className = "gdp-stat-text";
+        stats.innerHTML = '<span class="a">+' + (file.additions || 0) + "</span>" + '<span class="d">−' + (file.deletions || 0) + "</span>";
+        header.appendChild(stats);
+      }
+      const total = (file.additions || 0) + (file.deletions || 0);
+      const SEG = 5;
+      let aSeg;
+      let dSeg;
+      if (total === 0) {
+        aSeg = 0;
+        dSeg = 0;
+      } else {
+        aSeg = Math.round(file.additions / total * SEG);
+        dSeg = Math.max(0, SEG - aSeg);
+        if (file.additions > 0 && aSeg === 0)
+          aSeg = 1;
+        if (file.deletions > 0 && dSeg === 0)
+          dSeg = 1;
+        const over = aSeg + dSeg - SEG;
+        if (over > 0)
+          dSeg -= over;
+      }
+      const wrap = document.createElement("span");
+      wrap.className = "gdp-stat-squares";
+      for (let i2 = 0;i2 < SEG; i2++) {
+        const box = document.createElement("span");
+        if (i2 < aSeg)
+          box.className = "sq add";
+        else if (i2 < aSeg + dSeg)
+          box.className = "sq del";
+        else
+          box.className = "sq nu";
+        wrap.appendChild(box);
+      }
+      header.appendChild(wrap);
+      if (!header.querySelector(".gdp-view-file")) {
+        const viewFile = document.createElement("button");
+        viewFile.type = "button";
+        viewFile.className = "gdp-view-file gdp-btn gdp-btn-sm";
+        setViewFileButtonState(viewFile, false);
+        viewFile.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          const target = fileSourceTarget(file);
+          setRoute({
+            screen: "file",
+            path: target.path,
+            ref: target.ref,
+            range: currentRange()
+          });
+          applySourceRouteToShell();
+        });
+        header.appendChild(viewFile);
+      } else {
+        setViewFileButtonState(header.querySelector(".gdp-view-file"), false);
+      }
+    }
+    function renderFile(file, data, card) {
+      card._diffData = data;
+      card._file = file;
+      card.classList.remove("loading", "pending");
+      card.classList.add("loaded");
+      card.style.minHeight = "";
+      mountDiff(card, file, data);
+      applyInlineAnnotations();
+      const focused = applyDiffRouteFocus(card);
+      if (!focused && STATE.route.screen === "diff" && STATE.route.path === file.path && STATE.route.line && !card.classList.contains("gdp-context-expanded")) {
+        expandAllFileContext(card, file).then(() => {
+          applyInlineAnnotations();
+          applyDiffRouteFocus(card);
+        });
+      }
+      if (performance.now() < REANCHOR_UNTIL && STATE.route.screen === "diff" && STATE.route.path !== file.path) {
+        applyDiffRouteFocus();
+      }
+      card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
+      applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
+      if (data.truncated && data.mode === "preview") {
+        addExpandHunksUI(file, data, card);
+      }
+      scheduleIdleHighlight(card, file);
+    }
+    function buildPreviewUrl(file, hunks) {
+      const u2 = new URL(file.load_url, window.location.origin);
+      u2.searchParams.set("mode", "preview");
+      u2.searchParams.set("max_hunks", String(hunks));
+      return u2.pathname + u2.search;
+    }
+    function addExpandHunksUI(file, data, card) {
+      const total = data.hunk_count || 0;
+      const rendered = data.rendered_hunk_count || 0;
+      const remaining = total - rendered;
+      if (remaining <= 0)
+        return;
+      const old = card.querySelector(".gdp-show-full-wrap");
+      if (old)
+        old.remove();
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-show-full-wrap";
+      const step = Math.min(10, remaining);
+      const moreBtn = document.createElement("button");
+      moreBtn.className = "gdp-show-full";
+      moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
+      moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
+      const allBtn = document.createElement("button");
+      allBtn.className = "gdp-show-full secondary";
+      allBtn.textContent = `Show all (${remaining} remaining)`;
+      allBtn.addEventListener("click", () => loadMore(total, true));
+      const note = document.createElement("span");
+      note.className = "gdp-hunk-note";
+      note.textContent = `${rendered} / ${total} hunks shown`;
+      wrap.appendChild(note);
+      wrap.appendChild(moreBtn);
+      wrap.appendChild(allBtn);
+      card.appendChild(wrap);
+      function loadMore(count, full) {
+        moreBtn.disabled = allBtn.disabled = true;
+        moreBtn.textContent = "Loading…";
+        const myGen = getServerGeneration();
+        const url = full ? file.load_url : buildPreviewUrl(file, count);
+        trackLoad(fetch(url).then((r2) => r2.json())).then((next) => {
+          if (myGen !== getServerGeneration()) {
+            moreBtn.textContent = "Data changed — reload";
+            moreBtn.disabled = allBtn.disabled = false;
+            return;
+          }
+          wrap.remove();
+          card._diffData = next;
+          mountDiff(card, file, next);
+          if (next.truncated || next.mode === "preview" && next.hunk_count > next.rendered_hunk_count) {
+            addExpandHunksUI(file, next, card);
+          }
+        }).catch(() => {
+          moreBtn.disabled = allBtn.disabled = false;
+          moreBtn.textContent = "Failed — retry";
+        });
+      }
+    }
+    function highlightInsertedSpans(card, file) {
+      if (file.size_class === "huge")
+        return;
+      if (!STATE.syntaxHighlight)
+        return;
+      const hljsRef = getHljs();
+      if (!hljsRef?.highlight)
+        return;
+      const lang = inferLang(file.path);
+      if (!lang || !hljsRef.getLanguage?.(lang))
+        return;
+      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
+      spans.forEach((s2) => {
+        s2.dataset.gdpHl = "1";
+        const text2 = s2.textContent || "";
+        if (text2.length === 0)
+          return;
+        try {
+          s2.innerHTML = hljsRef.highlight(text2, {
+            language: lang,
+            ignoreIllegals: true
+          }).value;
+          if (!s2.classList.contains("hljs"))
+            s2.classList.add("hljs");
+        } catch (_) {}
+      });
+    }
+    function scheduleIdleHighlight(card, file) {
+      if (file.highlight)
+        return;
+      if (file.size_class === "huge")
+        return;
+      if (!STATE.syntaxHighlight)
+        return;
+      if (!("requestIdleCallback" in window))
+        return;
+      const hljsRef = getHljs();
+      if (!hljsRef?.highlight)
+        return;
+      const lang = inferLang(file.path);
+      if (!lang || !hljsRef.getLanguage?.(lang))
+        return;
+      const work = (deadline) => {
+        const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
+        let i2 = 0;
+        while (i2 < spans.length && deadline.timeRemaining() > 4) {
+          const s2 = spans[i2++];
+          s2.dataset.gdpHl = "1";
+          const text2 = s2.textContent || "";
+          if (text2.length === 0)
+            continue;
+          try {
+            s2.innerHTML = hljsRef.highlight(text2, {
+              language: lang,
+              ignoreIllegals: true
+            }).value;
+            if (!s2.classList.contains("hljs"))
+              s2.classList.add("hljs");
+          } catch (_) {}
+        }
+        if (i2 < spans.length)
+          requestIdleCallback(work, { timeout: 1500 });
+      };
+      requestIdleCallback(work, { timeout: 2000 });
+    }
+    function syncSideScrollCard(card) {
+      card.querySelectorAll(".d2h-files-diff").forEach((group) => {
+        const sides = group.querySelectorAll(".d2h-code-wrapper");
+        if (sides.length !== 2)
+          return;
+        const [a2, b2] = sides;
+        let syncing = false;
+        const mirror = (src, dst) => {
+          if (syncing)
+            return;
+          syncing = true;
+          dst.scrollLeft = src.scrollLeft;
+          requestAnimationFrame(() => {
+            syncing = false;
+          });
+        };
+        a2.addEventListener("scroll", () => mirror(a2, b2), { passive: true });
+        b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
+      });
+    }
+    function setupScrollSpy() {
+      const handler = () => {
+        if (handler._raf)
+          return;
+        if (performance.now() < SUPPRESS_SPY_UNTIL)
+          return;
+        handler._raf = requestAnimationFrame(() => {
+          handler._raf = null;
+          if (performance.now() < SUPPRESS_SPY_UNTIL)
+            return;
+          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 56;
+          const scanY = topbarH + 24;
+          const cards = document.querySelectorAll(".gdp-file-shell");
+          for (const w of cards) {
+            const r2 = w.getBoundingClientRect();
+            if (r2.top <= scanY && r2.bottom > scanY) {
+              const text2 = w.dataset.path || "";
+              let best = null, bestLen = 0;
+              STATE.files.forEach((f2) => {
+                if ((text2 === f2.path || text2.endsWith(f2.path)) && f2.path.length > bestLen) {
+                  best = f2.path;
+                  bestLen = f2.path.length;
+                }
+              });
+              if (best) {
+                markActive(best);
+                const recentlyTouched = performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
+                if (!recentlyTouched) {
+                  const li = document.querySelector(`#filelist li[data-path="${CSS.escape(best)}"]`);
+                  if (li) {
+                    const sb = document.querySelector("#sidebar");
+                    if (!sb)
+                      return;
+                    const lr = li.getBoundingClientRect();
+                    const sr = sb.getBoundingClientRect();
+                    if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
+                      li.scrollIntoView({ block: "nearest" });
+                    }
+                  }
+                }
+              }
+              return;
+            }
+          }
+        });
+      };
+      if (window.__gdpScrollSpy)
+        window.removeEventListener("scroll", window.__gdpScrollSpy);
+      window.__gdpScrollSpy = handler;
+      window.addEventListener("scroll", handler, { passive: true });
+      handler(new Event("scroll"));
+    }
+    function _collapseAll(force) {
+      STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
+      document.querySelectorAll(".gdp-file-shell.loaded .d2h-file-wrapper").forEach((w) => {
+        const body = w.querySelector(".d2h-files-diff, .d2h-file-diff");
+        if (body)
+          body.style.display = STATE.collapsed ? "none" : "";
+      });
+    }
+    function clearLoadQueue() {
+      LOAD_QUEUE.length = 0;
+    }
+    return {
+      renderMeta,
+      renderShell,
+      renderFile,
+      rerenderLoadedDiffs,
+      mountDiff,
+      addExpandHunksUI,
+      scheduleIdleHighlight,
+      scrollToFile,
+      prefetchByPath,
+      applyDiffRouteFocus,
+      clearDiffLineFocus,
+      diffRowLineNumber,
+      focusDiffLine,
+      scrollDiffElementIntoView,
+      expandAllFileContext,
+      applyViewedState,
+      applyViewedToCard,
+      setFileViewed,
+      fileBadge,
+      setViewFileButtonState,
+      setupScrollSpy,
+      setupLazyObserver,
+      enqueueInitialLoads,
+      enqueueLoad,
+      loadFile,
+      createFileBreadcrumb,
+      highlightInsertedSpans,
+      setFileCollapsed,
+      clearLoadQueue,
+      persistViewedFiles
     };
-    const preferred = Array.from(content.querySelectorAll(".gdp-source-viewer, .gdp-markdown-layout, .gdp-markdown-preview, .d2h-files-diff, .d2h-file-diff"));
-    const scrollable = preferred.find(isScrollable) || (isScrollable(content) ? content : null) || Array.from(content.querySelectorAll("*")).find(isScrollable);
-    return scrollable || doc.scrollingElement;
   }
 
   // web-src/views/help-page.ts
@@ -7580,239 +8865,6 @@ ${frontmatter.yaml}
       return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
     return { setupHunkExpand };
-  }
-
-  // web-src/core/icons.ts
-  var FOLDER_ICON_PATHS = {
-    closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
-    open: "M.513 1.513A1.75 1.75 0 0 1 1.75 1h3.5c.55 0 1.07.26 1.4.7l.9 1.2a.25.25 0 0 0 .2.1H13a1 1 0 0 1 1 1v.5H2.75a.75.75 0 0 0 0 1.5h11.978a1 1 0 0 1 .994 1.117L15 13.25A1.75 1.75 0 0 1 13.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75c0-.464.184-.91.513-1.237Z"
-  };
-  var CHEVRON_DOWN_12_PATH = "M6 8.825c-.2 0-.4-.1-.5-.2l-3.3-3.3c-.3-.3-.3-.8 0-1.1.3-.3.8-.3 1.1 0l2.7 2.7 2.7-2.7c.3-.3.8-.3 1.1 0 .3.3.3.8 0 1.1l-3.2 3.2c-.2.2-.4.3-.6.3Z";
-  var CHEVRON_DOWN_16_PATH = "M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z";
-  var COPY_16_PATHS = [
-    "M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z",
-    "M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"
-  ];
-  var FILE_16_PATH = "M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 8 4.25V1.5Zm5.75.062V4.25c0 .138.112.25.25.25h2.688Z";
-  var OPEN_EXTERNAL_16_PATH = "M3.75 2A1.75 1.75 0 0 0 2 3.75v8.5C2 13.216 2.784 14 3.75 14h8.5A1.75 1.75 0 0 0 14 12.25v-3.5a.75.75 0 0 0-1.5 0v3.5a.25.25 0 0 1-.25.25h-8.5a.25.25 0 0 1-.25-.25v-8.5a.25.25 0 0 1 .25-.25h3.5a.75.75 0 0 0 0-1.5h-3.5Zm6.5 0a.75.75 0 0 0 0 1.5h1.19L7.72 7.22a.749.749 0 1 0 1.06 1.06l3.72-3.72v1.19a.75.75 0 0 0 1.5 0v-3A.75.75 0 0 0 13.25 2h-3Z";
-  var PLUS_16_PATH = "M7.75 2a.75.75 0 0 1 .75.75V7.5h4.75a.75.75 0 0 1 0 1.5H8.5v4.75a.75.75 0 0 1-1.5 0V9H2.25a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z";
-  var TRASH_16_PATH = "M6.5 1.75A1.75 1.75 0 0 1 8.25 0h1.5A1.75 1.75 0 0 1 11.5 1.75V2h3.75a.75.75 0 0 1 0 1.5h-.75v10.75A1.75 1.75 0 0 1 12.75 16h-9.5A1.75 1.75 0 0 1 1.5 14.25V3.5H.75a.75.75 0 0 1 0-1.5H4.5v-.25ZM6 2h4v-.25a.25.25 0 0 0-.25-.25h-1.5a.25.25 0 0 0-.25.25V2Zm-3 1.5v10.75c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V3.5Zm3 2.25a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 6 5.75Zm4 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5A.75.75 0 0 1 10 5.75Z";
-  var GIT_BRANCH_16_PATH = "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z";
-  var TRIANGLE_DOWN_16_PATH = "m4.427 7.427 3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z";
-  var SIDEBAR_SHOW_16_PATHS = [
-    "M6.823 7.823a.25.25 0 0 1 0 .354l-2.396 2.396A.25.25 0 0 1 4 10.396V5.604a.25.25 0 0 1 .427-.177Z",
-    "M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0ZM1.5 1.75v12.5c0 .138.112.25.25.25H9.5v-13H1.75a.25.25 0 0 0-.25.25ZM11 14.5h3.25a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11Z"
-  ];
-  var SIDEBAR_HIDE_16_PATHS = [
-    "m4.177 7.823 2.396-2.396A.25.25 0 0 1 7 5.604v4.792a.25.25 0 0 1-.427.177L4.177 8.177a.25.25 0 0 1 0-.354Z",
-    "M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25H9.5v-13Zm12.5 13a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H11v13Z"
-  ];
-  var GEAR_16_PATH = "M8 0a8.2 8.2 0 0 1 1.7.18.75.75 0 0 1 .6.86l-.14.93c.23.1.45.21.67.34l.73-.6a.75.75 0 0 1 1.03.08c.47.37.89.78 1.23 1.23a.75.75 0 0 1 .07 1.03l-.59.73c.13.22.24.44.34.67l.93-.14a.75.75 0 0 1 .86.6c.12.55.18 1.12.18 1.7s-.06 1.15-.18 1.7a.75.75 0 0 1-.86.6l-.93-.14c-.1.23-.21.45-.34.67l.59.73a.75.75 0 0 1-.07 1.03c-.34.45-.76.86-1.23 1.23a.75.75 0 0 1-1.03.08l-.73-.6c-.22.13-.44.24-.67.34l.14.93a.75.75 0 0 1-.6.86A8.2 8.2 0 0 1 8 16a8.2 8.2 0 0 1-1.7-.18.75.75 0 0 1-.6-.86l.14-.93a5.9 5.9 0 0 1-.67-.34l-.73.6a.75.75 0 0 1-1.03-.08 8.1 8.1 0 0 1-1.23-1.23.75.75 0 0 1-.07-1.03l.59-.73a5.9 5.9 0 0 1-.34-.67l-.93.14a.75.75 0 0 1-.86-.6A8.2 8.2 0 0 1 0 8c0-.58.06-1.15.18-1.7a.75.75 0 0 1 .86-.6l.93.14c.1-.23.21-.45.34-.67l-.59-.73a.75.75 0 0 1 .07-1.03 8.1 8.1 0 0 1 1.23-1.23.75.75 0 0 1 1.03-.08l.73.6c.22-.13.44-.24.67-.34l-.14-.93a.75.75 0 0 1 .6-.86A8.2 8.2 0 0 1 8 0Zm0 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z";
-  var EXPAND_ALL_16_PATHS = [
-    "M3.22 4.47a.75.75 0 0 1 1.06 0L8 8.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 5.53a.75.75 0 0 1 0-1.06Z",
-    "M3.22 8.47a.75.75 0 0 1 1.06 0L8 12.19l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 9.53a.75.75 0 0 1 0-1.06Z"
-  ];
-  var COLLAPSE_ALL_16_PATHS = [
-    "M7.47 2.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 3.81 4.28 7.53a.75.75 0 0 1-1.06-1.06Z",
-    "M7.47 6.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8 7.81l-3.72 3.72a.75.75 0 1 1-1.06-1.06Z"
-  ];
-  function iconSvg(className, paths) {
-    const pathList = Array.isArray(paths) ? paths : [paths];
-    return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
-  }
-
-  // web-src/core/keymap.ts
-  var DEFAULT_KEY_BINDINGS = [
-    {
-      action: "open-file-palette",
-      key: "k",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-file-palette",
-      key: "k",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      ctrl: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    {
-      action: "open-grep-palette",
-      key: "g",
-      meta: true,
-      allowEditable: true,
-      allowPaletteOpen: true
-    },
-    { action: "focus-file-filter", key: "/" },
-    { action: "focus-sidebar", key: "h", ctrl: true },
-    { action: "focus-main", key: "l", ctrl: true },
-    {
-      action: "cancel-source-load",
-      key: "escape",
-      requires: { lightboxClosed: true }
-    },
-    { action: "open-sidebar-item", key: "enter", scope: "sidebar" },
-    { action: "open-sidebar-item", key: "enter", scope: "global" },
-    { action: "sidebar-next", key: "j", scope: "sidebar" },
-    { action: "sidebar-next", key: "j", scope: "global" },
-    { action: "sidebar-previous", key: "k", scope: "sidebar" },
-    { action: "sidebar-previous", key: "k", scope: "global" },
-    { action: "sidebar-page-down", key: "d", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-down", key: "d", scope: "global", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "sidebar", ctrl: true },
-    { action: "sidebar-page-up", key: "u", scope: "global", ctrl: true },
-    { action: "sidebar-expand", key: "l", scope: "sidebar" },
-    { action: "sidebar-expand", key: "l", scope: "global" },
-    { action: "sidebar-collapse", key: "h", scope: "sidebar" },
-    { action: "sidebar-collapse", key: "h", scope: "global" },
-    { action: "scroll-main-down", key: "j", scope: "main" },
-    { action: "scroll-main-up", key: "k", scope: "main" },
-    { action: "scroll-main-page-down", key: "d", scope: "main", ctrl: true },
-    { action: "scroll-main-page-up", key: "u", scope: "main", ctrl: true },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "main" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "main" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "global" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "global" },
-    { action: "scroll-main-page-down", key: "pagedown", scope: "sidebar" },
-    { action: "scroll-main-page-up", key: "pageup", scope: "sidebar" },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "main",
-      ctrl: true
-    },
-    { action: "scroll-main-page-up", key: "arrowup", scope: "main", ctrl: true },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "global",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-down",
-      key: "arrowdown",
-      scope: "sidebar",
-      ctrl: true
-    },
-    {
-      action: "scroll-main-page-up",
-      key: "arrowup",
-      scope: "sidebar",
-      ctrl: true
-    },
-    { action: "tab-preview", key: "p", scope: "main", pendingG: true },
-    { action: "tab-code", key: "c", scope: "main", pendingG: true },
-    { action: "goto-top", key: "g", pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true, pendingG: true },
-    { action: "goto-bottom", key: "g", shift: true },
-    { action: "start-g-sequence", key: "g", scope: "sidebar" },
-    { action: "start-g-sequence", key: "g", scope: "main" },
-    { action: "layout-unified", key: "u" },
-    { action: "layout-split", key: "s" },
-    { action: "toggle-theme", key: "t" }
-  ];
-  function resolveKeymapAction(event, context) {
-    const key = event.key.toLowerCase();
-    if (context.composing)
-      return null;
-    for (const binding of DEFAULT_KEY_BINDINGS) {
-      if (binding.key !== key)
-        continue;
-      if (binding.requires?.lightboxClosed && context.lightboxOpen)
-        continue;
-      if (binding.scope && binding.scope !== context.scope)
-        continue;
-      if (!!binding.pendingG !== !!context.pendingG)
-        continue;
-      if (context.paletteOpen && !binding.allowPaletteOpen)
-        continue;
-      if (context.editable && !binding.allowEditable)
-        continue;
-      if (!!binding.ctrl !== !!event.ctrlKey)
-        continue;
-      if (!!binding.meta !== !!event.metaKey)
-        continue;
-      if (!!binding.alt !== !!event.altKey)
-        continue;
-      if (!!binding.shift !== !!event.shiftKey)
-        continue;
-      if (!binding.ctrl && !binding.meta && !binding.alt && !binding.shift && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
-        continue;
-      return binding.action;
-    }
-    return null;
-  }
-
-  // web-src/views/media-embed.ts
-  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
-  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
-  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
-  function isMedia(p2) {
-    return MEDIA_RE.test(p2);
-  }
-  function isImage(p2) {
-    return IMAGE_RE.test(p2);
-  }
-  function isVideo(p2) {
-    return VIDEO_RE.test(p2);
-  }
-  function isAudio(p2) {
-    return AUDIO_RE.test(p2);
-  }
-  function fileURL(path, ref) {
-    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
-  }
-  function mediaTag(path, ref) {
-    const url = fileURL(path, ref);
-    if (isVideo(path)) {
-      return `<video src="${url}" controls preload="metadata"></video>`;
-    }
-    if (isAudio(path)) {
-      return `<audio src="${url}" controls preload="metadata"></audio>`;
-    }
-    return `<img src="${url}" alt="" loading="lazy">`;
-  }
-  function enhanceMediaCard(file, card) {
-    const path = file.path;
-    if (!file.media_kind && !isMedia(path))
-      return;
-    const wrapper = card.querySelector(".d2h-file-wrapper");
-    if (!wrapper)
-      return;
-    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
-    if (!body)
-      return;
-    const container = document.createElement("div");
-    container.className = "gdp-media";
-    let leftHTML;
-    let rightHTML;
-    if (file.status === "A") {
-      leftHTML = '<div class="media-empty">Not in HEAD</div>';
-      rightHTML = mediaTag(path, "worktree");
-    } else if (file.status === "D") {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = '<div class="media-empty">Deleted</div>';
-    } else {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = mediaTag(path, "worktree");
-    }
-    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
-    body.replaceWith(container);
   }
 
   // web-src/views/ref-picker.ts
@@ -12977,21 +14029,6 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/core/ws-highlight.ts
-  function isWhitespaceOnlyInlineHighlight(text2) {
-    return !!text2 && !/\S/.test(text2);
-  }
-  function suppressWhitespaceOnlyInlineHighlights(root) {
-    root.querySelectorAll("ins, del").forEach((el) => {
-      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
-        return;
-      const parent = el.parentNode;
-      if (!parent)
-        return;
-      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
-    });
-  }
-
   // web-src/app.ts
   window.GdpExpandLogic = GdpExpandLogic;
   (() => {
@@ -13229,11 +14266,11 @@ ${frontmatter.yaml}
       $,
       $$,
       STATE,
-      scrollToFile,
-      prefetchByPath,
-      fileBadge,
+      scrollToFile: (path, line) => DIFF_VIEW.scrollToFile(path, line),
+      prefetchByPath: (path) => DIFF_VIEW.prefetchByPath(path),
+      fileBadge: (status) => DIFF_VIEW.fileBadge(status),
       fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
-      applyViewedState,
+      applyViewedState: () => DIFF_VIEW.applyViewedState(),
       appendScopeParams,
       createOpenPathButton,
       normalizeViewerFontSize,
@@ -13303,14 +14340,14 @@ ${frontmatter.yaml}
       repoFileTargetFromRoute,
       renderRepoBlobSidebar: (path, ref) => REPO_VIEW.renderRepoBlobSidebar(path, ref),
       placeSidebarToggle,
-      createFileBreadcrumb,
+      createFileBreadcrumb: (path, ref) => DIFF_VIEW.createFileBreadcrumb(path, ref),
       createFileDetailMeta: (target, meta) => REPO_VIEW.createFileDetailMeta(target, meta),
       createOpenPathButton,
       createMoveToTrashButton: (path, onDeleted) => REPO_VIEW.createMoveToTrashButton(path, onDeleted),
       canTrashWorktreeRef: (ref) => REPO_VIEW.canTrashWorktreeRef(ref),
       loadRawFileInfo: (target) => REPO_VIEW.loadRawFileInfo(target),
       loadSyntaxHighlighter,
-      setViewFileButtonState,
+      setViewFileButtonState: (button, sourceMode) => DIFF_VIEW.setViewFileButtonState(button, sourceMode),
       scrollMainPanel,
       focusMainSurface,
       isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen()
@@ -13326,9 +14363,7 @@ ${frontmatter.yaml}
       sourceLineScrollAmount,
       moveSourceCursor,
       handleVirtualSourcePagingKeydown,
-      openVirtualSourceSearchFromKeyboard,
-      lineTargetStart,
-      inferLang
+      openVirtualSourceSearchFromKeyboard
     } = SOURCE_VIEW;
     const REPO_VIEW = createRepoView({
       $,
@@ -13355,9 +14390,7 @@ ${frontmatter.yaml}
       repoFileTargetFromRoute,
       trackLoad,
       syncSidebarHeaderHeight,
-      clearLoadQueue: () => {
-        LOAD_QUEUE.length = 0;
-      },
+      clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
       getProjectName: () => PROJECT_NAME,
       getRepoSidebarRef: () => REPO_SIDEBAR_REF,
       setRepoSidebarRef: (ref) => {
@@ -13372,7 +14405,6 @@ ${frontmatter.yaml}
     });
     const {
       loadRepo,
-      repoRoute,
       renderRepoBlobSidebar,
       syncRepoTargetInput,
       closeRepoContextMenu,
@@ -13386,7 +14418,7 @@ ${frontmatter.yaml}
       currentRange,
       appendScopeParams,
       isAbortError,
-      scrollToFile,
+      scrollToFile: (path, line) => DIFF_VIEW.scrollToFile(path, line),
       applySourceRouteToShell,
       fileSourceTarget,
       renderStandaloneSource,
@@ -13460,20 +14492,6 @@ ${frontmatter.yaml}
       });
       return highlightLoadPromise;
     }
-    function rerenderLoadedDiffs() {
-      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
-        const data = card._diffData;
-        const file = card._file;
-        if (!data || !file)
-          return;
-        mountDiff(card, file, data);
-        applyInlineAnnotations();
-        if (data.truncated && data.mode === "preview") {
-          addExpandHunksUI(file, data, card);
-        }
-        scheduleIdleHighlight(card, file);
-      });
-    }
     function setLayout(layout) {
       STATE.layout = layout;
       localStorage.setItem("gdp:layout", layout);
@@ -13493,49 +14511,8 @@ ${frontmatter.yaml}
         scheduleIdleHighlight(card, file);
       });
     }
-    function fileBadge(status) {
-      const ch = (status || "M")[0].toUpperCase();
-      const span = document.createElement("span");
-      span.className = `badge ${ch}`;
-      span.textContent = ch;
-      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
-      return span;
-    }
-    function persistViewedFiles() {
-      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
-    }
-    function setFileViewed(path, viewed) {
-      if (viewed)
-        STATE.viewedFiles.add(path);
-      else
-        STATE.viewedFiles.delete(path);
-      persistViewedFiles();
-      applyViewedState();
-      $$(diffCardSelector(path)).forEach((card) => {
-        applyViewedToCard(card, viewed, true);
-      });
-    }
-    function syncViewedCardDisplay(card, viewed) {
-      card.classList.toggle("viewed", viewed);
-      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
-        checkbox.checked = viewed;
-      });
-    }
-    function applyViewedToCard(card, viewed, collapseLoaded = false) {
-      syncViewedCardDisplay(card, viewed);
-      if (collapseLoaded && card.classList.contains("loaded")) {
-        setFileCollapsed(card, viewed);
-      }
-    }
     function setChevronIcon(el) {
       el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
-    }
-    function setUnfoldButtonState(button, expanded) {
-      if (!button)
-        return;
-      button.setAttribute("aria-pressed", expanded ? "true" : "false");
-      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
-      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
     }
     function scopeOmitSourceLabel() {
       return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
@@ -13644,127 +14621,7 @@ ${frontmatter.yaml}
         mount.replaceWith(wrap);
       });
     }
-    function renderMeta(meta) {
-      const el = $("#meta");
-      if (!meta) {
-        el.textContent = "";
-        return;
-      }
-      setProjectName(meta.project || "");
-      el.innerHTML = "";
-      if (meta.branch) {
-        const b2 = document.createElement("span");
-        b2.className = "ref";
-        b2.textContent = `⎇ ${meta.branch}`;
-        el.appendChild(b2);
-      }
-      if (meta.totals) {
-        const t2 = document.createElement("span");
-        t2.className = "num";
-        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> " + "<span>" + meta.totals.files + " files</span>";
-        el.appendChild(t2);
-      }
-      const u2 = document.createElement("span");
-      u2.className = "updated-at";
-      u2.title = "last updated";
-      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
-      el.appendChild(u2);
-    }
-    let SUPPRESS_SPY_UNTIL = 0;
-    function prefetchByPath(path) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card?.classList.contains("pending"))
-        return;
-      const f2 = STATE.files.find((x) => x.path === path);
-      if (!f2)
-        return;
-      enqueueLoad(f2, card, 5);
-    }
-    function clearDiffLineFocus() {
-      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
-        row.classList.remove("gdp-diff-line-target");
-      });
-    }
-    function diffRowLineNumber(row) {
-      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
-      const raw = (newLine?.textContent || "").trim();
-      const line = Number(raw);
-      return Number.isInteger(line) && line > 0 ? line : null;
-    }
-    function focusDiffLine(card, line) {
-      const start = lineTargetStart(line);
-      if (!start)
-        return false;
-      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
-      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
-      if (!row)
-        return false;
-      clearDiffLineFocus();
-      row.classList.add("gdp-diff-line-target");
-      scrollDiffElementIntoView(row, "center");
-      return true;
-    }
-    function scrollDiffElementIntoView(element, block2) {
-      element.scrollIntoView({ behavior: "auto", block: block2 });
-    }
-    function applyDiffRouteFocus(card) {
-      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
-        return false;
-      if (card && card.dataset.path !== STATE.route.path)
-        return false;
-      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
-      if (!targetCard)
-        return false;
-      return focusDiffLine(targetCard, STATE.route.line);
-    }
-    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
-    window.addEventListener("wheel", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    window.addEventListener("touchmove", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    function scrollToFile(path, line) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card)
-        return;
-      if (line)
-        REANCHOR_UNTIL = performance.now() + 4000;
-      markActive(path);
-      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
-      const onEnd = () => {
-        SUPPRESS_SPY_UNTIL = 0;
-        window.removeEventListener("scrollend", onEnd);
-      };
-      window.addEventListener("scrollend", onEnd, { once: true });
-      if (card.classList.contains("pending")) {
-        const f2 = STATE.files.find((x) => x.path === path);
-        if (f2)
-          enqueueLoad(f2, card, 10);
-      }
-      if (!line || !focusDiffLine(card, line)) {
-        scrollDiffElementIntoView(card, "start");
-      }
-    }
-    function applyViewedState() {
-      if (isRepositorySidebarMode())
-        return;
-      $$("#filelist li[data-path]").forEach((li) => {
-        const path = li.dataset.path || "";
-        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
-      });
-      $$(".gdp-file-shell[data-path]").forEach((card) => {
-        const path = card.dataset.path || "";
-        const viewed = STATE.viewedFiles.has(path);
-        syncViewedCardDisplay(card, viewed);
-      });
-    }
     let SERVER_GENERATION = 0;
-    let CLIENT_REQ_SEQ = 0;
-    const LOAD_QUEUE = [];
-    let ACTIVE_LOADS = 0;
-    const MAX_PARALLEL = 2;
-    let lazyObserver = null;
     let IN_FLIGHT = 0;
     function updateLoadBar() {
       const el = $("#load-bar");
@@ -13869,84 +14726,6 @@ ${frontmatter.yaml}
         }
       });
     }
-    function renderShell(meta) {
-      const newFiles = meta.files || [];
-      STATE.files = newFiles;
-      SERVER_GENERATION = meta.generation || 0;
-      window._lastMeta = meta;
-      renderMeta(meta);
-      renderSidebar(newFiles);
-      const target = $("#diff");
-      const empty = $("#empty");
-      if (!newFiles.length) {
-        if (STATE.route.screen === "file") {
-          empty.classList.add("hidden");
-          applySourceRouteToShell();
-        } else {
-          empty.classList.remove("hidden");
-          target.replaceChildren();
-        }
-        LOAD_QUEUE.length = 0;
-        return;
-      }
-      empty.classList.add("hidden");
-      const oldByKey = new Map;
-      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
-        if (c2.dataset.key)
-          oldByKey.set(c2.dataset.key, c2);
-      });
-      const ordered = [];
-      newFiles.forEach((f2) => {
-        const key = f2.key || f2.path;
-        const old = oldByKey.get(key);
-        if (old) {
-          oldByKey.delete(key);
-          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
-          const statusChanged = old.dataset.status !== (f2.status || "M");
-          if (sizeChanged || statusChanged) {
-            old.classList.remove("loaded", "error");
-            old.classList.add("pending");
-            old.replaceChildren();
-            const tmp = createPlaceholder(f2);
-            while (tmp.firstChild)
-              old.appendChild(tmp.firstChild);
-            old.dataset.sizeClass = f2.size_class || "small";
-            old.dataset.status = f2.status || "M";
-            delete old.dataset.manualRendered;
-            delete old.dataset.manualLoad;
-            delete old.dataset.manualMode;
-            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
-            old._diffData = null;
-            old._file = null;
-          } else {
-            const stats = old.querySelector(".gdp-shell-header .stats");
-            if (stats) {
-              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
-            }
-            old._file = f2;
-          }
-          ordered.push(old);
-        } else {
-          ordered.push(createPlaceholder(f2));
-        }
-      });
-      oldByKey.forEach((c2) => {
-        c2.remove();
-      });
-      target.replaceChildren(...ordered);
-      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
-        if (!LOAD_QUEUE[i2].card.isConnected)
-          LOAD_QUEUE.splice(i2, 1);
-      }
-      setupLazyObserver();
-      enqueueInitialLoads();
-      applySourceRouteToShell();
-      setupScrollSpy();
-      if (typeof applyHideTests === "function")
-        applyHideTests();
-      applyFilter();
-      applyViewedState();
-    }
     async function openPathInOs(path, kind, button) {
       const oldTitle = button?.title;
       if (button) {
@@ -14024,46 +14803,6 @@ ${frontmatter.yaml}
       });
       return button;
     }
-    function createPlaceholder(f2) {
-      const card = document.createElement("div");
-      card.className = "gdp-file-shell pending";
-      card.dataset.path = f2.path;
-      card.dataset.key = f2.key || f2.path;
-      card.dataset.sizeClass = f2.size_class || "small";
-      card.dataset.status = f2.status || "M";
-      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
-      if (f2.estimated_height_px) {
-        card.style.minHeight = `${f2.estimated_height_px}px`;
-      }
-      const head = document.createElement("div");
-      head.className = "gdp-shell-header";
-      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + "</span>" + '<span class="path">' + escapeHtml2(f2.display_path || f2.path) + "</span>" + '<span class="stats">' + '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>" + "</span>" + '<span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
-      card.appendChild(head);
-      const body = document.createElement("div");
-      body.className = "gdp-shell-body";
-      card.appendChild(body);
-      return card;
-    }
-    function setupLazyObserver() {
-      if (lazyObserver)
-        lazyObserver.disconnect();
-      lazyObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting)
-            return;
-          const card = entry.target;
-          if (card.classList.contains("loaded") || card.classList.contains("loading"))
-            return;
-          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-          if (!f2)
-            return;
-          enqueueLoad(f2, card, 0);
-        });
-      }, { rootMargin: "1200px 0px 1600px 0px" });
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
-        lazyObserver.observe(c2);
-      });
-    }
     window.addEventListener("scroll", () => enqueueInitialLoads(), {
       passive: true
     });
@@ -14075,222 +14814,6 @@ ${frontmatter.yaml}
       if (!document.hidden)
         enqueueInitialLoads();
     });
-    function enqueueInitialLoads() {
-      const viewportBottom = window.innerHeight + 1600;
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
-        const rect = card.getBoundingClientRect();
-        if (rect.top > viewportBottom)
-          return;
-        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-        if (f2)
-          enqueueLoad(f2, card, 0);
-      });
-    }
-    function enqueueLoad(file, card, priority) {
-      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
-        renderManualLoadPlaceholder(card, file);
-        return;
-      }
-      if (LOAD_QUEUE.find((item) => item.card === card))
-        return;
-      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
-      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
-      pumpQueue();
-    }
-    function pumpQueue() {
-      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
-        const item = LOAD_QUEUE.shift();
-        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
-          continue;
-        ACTIVE_LOADS++;
-        loadFile(item.file, item.card).finally(() => {
-          ACTIVE_LOADS--;
-          pumpQueue();
-        });
-      }
-    }
-    function manualLoadReason(file) {
-      const path = file.path || "";
-      if (file.size_class === "huge")
-        return "huge diff";
-      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
-        return "minified or bundled file";
-      if (/\.map$/i.test(path))
-        return "source map";
-      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
-        return "generated or vendored path";
-      return null;
-    }
-    function renderManualLoadPlaceholder(card, file) {
-      if (card.dataset.manualRendered === "1")
-        return;
-      card.dataset.manualRendered = "1";
-      card.classList.remove("loading");
-      card.classList.add("pending", "manual-load");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = true;
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-manual-load";
-      const note = document.createElement("div");
-      note.className = "gdp-manual-note";
-      note.textContent = `${manualLoadReason(file)} - click to load diff`;
-      const previewBtn = document.createElement("button");
-      previewBtn.className = "gdp-show-full";
-      previewBtn.textContent = "Load preview";
-      previewBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "preview";
-        card.classList.remove("manual-load");
-        loadFile(file, card, buildPreviewUrl(file, 3));
-      });
-      const openFileBtn = document.createElement("button");
-      openFileBtn.className = "gdp-show-full";
-      openFileBtn.textContent = "Open as file";
-      openFileBtn.title = "Open this file in the virtualized source viewer";
-      openFileBtn.addEventListener("click", () => {
-        const target = fileSourceTarget(file);
-        setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          range: currentRange()
-        });
-        applySourceRouteToShell();
-      });
-      const fullBtn = document.createElement("button");
-      fullBtn.className = "gdp-show-full secondary";
-      fullBtn.textContent = "Load full diff";
-      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
-      fullBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "full";
-        card.classList.remove("manual-load");
-        loadFile(file, card, file.load_url);
-      });
-      wrap.appendChild(note);
-      if (file.status === "A")
-        wrap.appendChild(openFileBtn);
-      wrap.appendChild(previewBtn);
-      wrap.appendChild(fullBtn);
-      body.appendChild(wrap);
-    }
-    function nextIdle(timeout = 500) {
-      return new Promise((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (done)
-            return;
-          done = true;
-          resolve();
-        };
-        const ric = window.requestIdleCallback;
-        if (typeof ric === "function") {
-          ric(finish, { timeout });
-        } else {
-          requestAnimationFrame(finish);
-          setTimeout(finish, 50);
-        }
-      });
-    }
-    function loadFile(file, card, urlOverride) {
-      card.classList.remove("pending");
-      card.classList.add("loading");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = false;
-      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
-      const myGen = SERVER_GENERATION;
-      const myReq = ++CLIENT_REQ_SEQ;
-      card.dataset.reqId = String(myReq);
-      const retryStale = () => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("pending");
-        if (indicator)
-          indicator.hidden = true;
-        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
-        if (fresh && card.isConnected)
-          enqueueLoad(fresh, card, 0);
-      };
-      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        if (myGen !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        if (data.generation && data.generation !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        await nextIdle();
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        renderFile(file, data, card);
-      }).catch(() => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("error");
-        const body = card.querySelector(".gdp-shell-body");
-        if (!body)
-          return;
-        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
-        const btn = body.querySelector(".retry");
-        if (btn)
-          btn.addEventListener("click", () => {
-            card.classList.remove("error");
-            card.classList.add("pending");
-            body.innerHTML = "";
-            enqueueLoad(file, card, 1);
-          });
-      });
-    }
-    function mountDiff(card, file, data) {
-      const head = card.querySelector(".gdp-shell-header");
-      if (head)
-        head.style.display = "none";
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      if (!data.diff?.trim()) {
-        body.innerHTML = '<div class="gdp-info">No content</div>';
-        return;
-      }
-      const layout = file.force_layout || STATE.layout;
-      const hljsRef = getHljs();
-      const ui = new Diff2HtmlUI(body, data.diff, {
-        drawFileList: false,
-        matching: "lines",
-        outputFormat: layout,
-        synchronisedScroll: true,
-        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
-        fileListToggle: false,
-        fileContentToggle: false
-      }, hljsRef);
-      ui.draw();
-      if (STATE.ignoreWs)
-        suppressWhitespaceOnlyInlineHighlights(body);
-      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
-        ui.highlightCode();
-      enhanceMediaCard(file, card);
-      syncSideScrollCard(card);
-      appendStatSquaresToHeader(card, file);
-      setupHunkExpand(card, file);
-    }
     const { renderHelpPage } = createHelpPage({
       $,
       getRoute: () => STATE.route,
@@ -14298,9 +14821,7 @@ ${frontmatter.yaml}
       setPageMode,
       cancelActiveSourceLoad,
       removeStandaloneSource,
-      clearLoadQueue: () => {
-        LOAD_QUEUE.length = 0;
-      },
+      clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
       currentRange,
       syncHeaderMenu
     });
@@ -14308,468 +14829,54 @@ ${frontmatter.yaml}
       trackLoad,
       getServerGeneration: () => SERVER_GENERATION,
       getToRef: () => STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree",
-      highlightInsertedSpans
+      highlightInsertedSpans: (card, file) => DIFF_VIEW.highlightInsertedSpans(card, file)
     });
-    function setFileCollapsed(card, collapsed) {
-      card.classList.toggle("gdp-file-collapsed", collapsed);
-      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
-        body.classList.toggle("d2h-d-none", collapsed);
-      });
-      const button = card.querySelector(".gdp-file-toggle");
-      if (button) {
-        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        button.title = collapsed ? "Expand file" : "Collapse file";
+    const DIFF_VIEW = createDiffView({
+      $,
+      $$,
+      STATE,
+      setRoute,
+      currentRange,
+      escapeHtml: escapeHtml2,
+      trackLoad,
+      diffCardSelector,
+      getHljs,
+      inferLang: (path) => SOURCE_VIEW.inferLang(path),
+      lineTargetStart: (line) => SOURCE_VIEW.lineTargetStart(line),
+      fileSourceTarget: (file) => SOURCE_VIEW.fileSourceTarget(file),
+      applySourceRouteToShell: () => SOURCE_VIEW.applySourceRouteToShell(),
+      setupHunkExpand,
+      applyInlineAnnotations,
+      applyFilter: () => SIDEBAR.applyFilter(),
+      markActive: (path, options) => SIDEBAR.markActive(path, options),
+      renderSidebar: (files, onFileClick) => SIDEBAR.renderSidebar(files, onFileClick),
+      isRepositorySidebarMode: () => SIDEBAR.isRepositorySidebarMode(),
+      loadRepo: () => REPO_VIEW.loadRepo(),
+      repoRoute: (ref, path) => REPO_VIEW.repoRoute(ref, path),
+      setProjectName,
+      getProjectName: () => PROJECT_NAME,
+      createOpenPathButton,
+      applyHideTests: () => applyHideTests(),
+      getServerGeneration: () => SERVER_GENERATION,
+      setServerGeneration: (generation) => {
+        SERVER_GENERATION = generation;
       }
-      const unfold = card.querySelector(".gdp-file-unfold");
-      if (unfold)
-        unfold.disabled = collapsed;
-      const viewFile = card.querySelector(".gdp-view-file");
-      if (viewFile)
-        viewFile.disabled = collapsed;
-    }
-    function setViewFileButtonState(button, sourceMode) {
-      if (!button)
-        return;
-      button.classList.add("gdp-btn", "gdp-btn-sm");
-      button.textContent = sourceMode ? "View Diff" : "View File";
-      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
-      button.title = sourceMode ? "View diff" : "View file";
-    }
-    function createFileBreadcrumb(path, ref) {
-      const nav = document.createElement("nav");
-      nav.className = "gdp-file-breadcrumb";
-      nav.setAttribute("aria-label", "File path");
-      const parts = path.split("/").filter(Boolean);
-      const allParts = PROJECT_NAME ? [PROJECT_NAME, ...parts] : parts;
-      allParts.forEach((part, index) => {
-        if (index > 0) {
-          const sep = document.createElement("span");
-          sep.className = "gdp-file-breadcrumb-sep";
-          sep.textContent = "/";
-          nav.appendChild(sep);
-        }
-        const isCurrent = index === allParts.length - 1;
-        const crumb = document.createElement(isCurrent ? "span" : "button");
-        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
-        crumb.textContent = part;
-        if (!isCurrent && crumb instanceof HTMLButtonElement) {
-          crumb.type = "button";
-          crumb.addEventListener("click", () => {
-            const projectOffset = PROJECT_NAME ? 1 : 0;
-            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
-            setRoute(repoRoute(ref || "worktree", currentPath));
-            loadRepo();
-          });
-        }
-        nav.appendChild(crumb);
-      });
-      if (!allParts.length) {
-        const crumb = document.createElement("span");
-        crumb.className = "gdp-file-breadcrumb-current";
-        crumb.textContent = path;
-        nav.appendChild(crumb);
-      }
-      return nav;
-    }
-    async function expandAllFileContext(card, file) {
-      if (card.classList.contains("gdp-context-expanded")) {
-        const data = card._diffData;
-        if (!data)
-          return;
-        card.classList.remove("gdp-context-expanded");
-        mountDiff(card, file, data);
-        if (data.truncated && data.mode === "preview")
-          addExpandHunksUI(file, data, card);
-        scheduleIdleHighlight(card, file);
-        setUnfoldButtonState(card.querySelector(".gdp-file-unfold"), false);
-        return;
-      }
-      if (card._diffData && (card._diffData.truncated || card._diffData.mode === "preview")) {
-        await loadFile(file, card, file.load_url);
-      }
-      const button = card.querySelector(".gdp-file-unfold");
-      if (button)
-        button.disabled = true;
-      try {
-        for (let round = 0;round < 20; round++) {
-          const tasks = Array.from(card.querySelectorAll(".gdp-expand-stack")).map((stack) => stack._gdpExpandFully).filter((fn) => !!fn);
-          if (!tasks.length)
-            break;
-          const results = await Promise.all(tasks.map((fn) => fn().then(() => true, () => false)));
-          if (!results.some(Boolean))
-            break;
-        }
-        card.classList.add("gdp-context-expanded");
-        setUnfoldButtonState(button || null, true);
-      } finally {
-        if (button)
-          button.disabled = false;
-      }
-    }
-    function appendStatSquaresToHeader(card, file) {
-      const header = card.querySelector(".d2h-file-header");
-      if (!header)
-        return;
-      if (!header.querySelector(".gdp-file-toggle")) {
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "gdp-file-header-icon gdp-file-toggle";
-        toggle.title = "Collapse file";
-        toggle.setAttribute("aria-expanded", "true");
-        toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
-        toggle.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          setFileCollapsed(card, !card.classList.contains("gdp-file-collapsed"));
-        });
-        header.insertBefore(toggle, header.firstChild);
-      }
-      header.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
-        checkbox.checked = STATE.viewedFiles.has(file.path);
-        if (checkbox.dataset.gdpBound !== "1") {
-          checkbox.dataset.gdpBound = "1";
-          checkbox.addEventListener("change", () => setFileViewed(file.path, checkbox.checked));
-        }
-      });
-      if (!header.querySelector(".gdp-copy-path")) {
-        const nameWrapper = header.querySelector(".d2h-file-name-wrapper");
-        const copy = document.createElement("button");
-        copy.type = "button";
-        copy.className = "gdp-file-header-icon gdp-copy-path";
-        copy.title = "copy file path";
-        copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-        copy.addEventListener("click", async (e2) => {
-          e2.stopPropagation();
-          const path = filePathClipboardText(file.path);
-          if (!path)
-            return;
-          try {
-            await navigator.clipboard.writeText(path);
-            copy.classList.add("copied");
-            setTimeout(() => {
-              copy.classList.remove("copied");
-            }, 1200);
-          } catch {
-            copy.classList.add("failed");
-            setTimeout(() => {
-              copy.classList.remove("failed");
-            }, 1200);
-          }
-        });
-        const statusTag = nameWrapper ? nameWrapper.querySelector(".d2h-tag") : null;
-        if (statusTag)
-          statusTag.insertAdjacentElement("afterend", copy);
-        else if (nameWrapper)
-          nameWrapper.insertAdjacentElement("beforeend", copy);
-        else
-          header.insertBefore(copy, header.firstChild);
-      }
-      if (!header.querySelector(".gdp-file-unfold")) {
-        const unfold = document.createElement("button");
-        unfold.type = "button";
-        unfold.className = "gdp-file-header-icon gdp-file-unfold";
-        setUnfoldButtonState(unfold, card.classList.contains("gdp-context-expanded"));
-        unfold.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          expandAllFileContext(card, file);
-        });
-        const copy = header.querySelector(".gdp-copy-path");
-        if (copy)
-          copy.insertAdjacentElement("afterend", unfold);
-        else
-          header.appendChild(unfold);
-      }
-      if (!header.querySelector(".gdp-open-path")) {
-        const unfold = header.querySelector(".gdp-file-unfold");
-        const openPath = createOpenPathButton(file.path, "file-parent", "open parent folder in OS");
-        if (unfold)
-          unfold.insertAdjacentElement("afterend", openPath);
-        else
-          header.appendChild(openPath);
-      }
-      if (!header.querySelector(".gdp-stat-text")) {
-        const stats = document.createElement("span");
-        stats.className = "gdp-stat-text";
-        stats.innerHTML = '<span class="a">+' + (file.additions || 0) + "</span>" + '<span class="d">−' + (file.deletions || 0) + "</span>";
-        header.appendChild(stats);
-      }
-      const total = (file.additions || 0) + (file.deletions || 0);
-      const SEG = 5;
-      let aSeg;
-      let dSeg;
-      if (total === 0) {
-        aSeg = 0;
-        dSeg = 0;
-      } else {
-        aSeg = Math.round(file.additions / total * SEG);
-        dSeg = Math.max(0, SEG - aSeg);
-        if (file.additions > 0 && aSeg === 0)
-          aSeg = 1;
-        if (file.deletions > 0 && dSeg === 0)
-          dSeg = 1;
-        const over = aSeg + dSeg - SEG;
-        if (over > 0)
-          dSeg -= over;
-      }
-      const wrap = document.createElement("span");
-      wrap.className = "gdp-stat-squares";
-      for (let i2 = 0;i2 < SEG; i2++) {
-        const box = document.createElement("span");
-        if (i2 < aSeg)
-          box.className = "sq add";
-        else if (i2 < aSeg + dSeg)
-          box.className = "sq del";
-        else
-          box.className = "sq nu";
-        wrap.appendChild(box);
-      }
-      header.appendChild(wrap);
-      if (!header.querySelector(".gdp-view-file")) {
-        const viewFile = document.createElement("button");
-        viewFile.type = "button";
-        viewFile.className = "gdp-view-file gdp-btn gdp-btn-sm";
-        setViewFileButtonState(viewFile, false);
-        viewFile.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          const target = fileSourceTarget(file);
-          setRoute({
-            screen: "file",
-            path: target.path,
-            ref: target.ref,
-            range: currentRange()
-          });
-          applySourceRouteToShell();
-        });
-        header.appendChild(viewFile);
-      } else {
-        setViewFileButtonState(header.querySelector(".gdp-view-file"), false);
-      }
-    }
-    function renderFile(file, data, card) {
-      card._diffData = data;
-      card._file = file;
-      card.classList.remove("loading", "pending");
-      card.classList.add("loaded");
-      card.style.minHeight = "";
-      mountDiff(card, file, data);
-      applyInlineAnnotations();
-      const focused = applyDiffRouteFocus(card);
-      if (!focused && STATE.route.screen === "diff" && STATE.route.path === file.path && STATE.route.line && !card.classList.contains("gdp-context-expanded")) {
-        expandAllFileContext(card, file).then(() => {
-          applyInlineAnnotations();
-          applyDiffRouteFocus(card);
-        });
-      }
-      if (performance.now() < REANCHOR_UNTIL && STATE.route.screen === "diff" && STATE.route.path !== file.path) {
-        applyDiffRouteFocus();
-      }
-      card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
-      applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
-      if (data.truncated && data.mode === "preview") {
-        addExpandHunksUI(file, data, card);
-      }
-      scheduleIdleHighlight(card, file);
-    }
-    function buildPreviewUrl(file, hunks) {
-      const u2 = new URL(file.load_url, window.location.origin);
-      u2.searchParams.set("mode", "preview");
-      u2.searchParams.set("max_hunks", String(hunks));
-      return u2.pathname + u2.search;
-    }
-    function addExpandHunksUI(file, data, card) {
-      const total = data.hunk_count || 0;
-      const rendered = data.rendered_hunk_count || 0;
-      const remaining = total - rendered;
-      if (remaining <= 0)
-        return;
-      const old = card.querySelector(".gdp-show-full-wrap");
-      if (old)
-        old.remove();
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-show-full-wrap";
-      const step = Math.min(10, remaining);
-      const moreBtn = document.createElement("button");
-      moreBtn.className = "gdp-show-full";
-      moreBtn.textContent = `Show next ${step} hunk${step === 1 ? "" : "s"}`;
-      moreBtn.addEventListener("click", () => loadMore(rendered + step, false));
-      const allBtn = document.createElement("button");
-      allBtn.className = "gdp-show-full secondary";
-      allBtn.textContent = `Show all (${remaining} remaining)`;
-      allBtn.addEventListener("click", () => loadMore(total, true));
-      const note = document.createElement("span");
-      note.className = "gdp-hunk-note";
-      note.textContent = `${rendered} / ${total} hunks shown`;
-      wrap.appendChild(note);
-      wrap.appendChild(moreBtn);
-      wrap.appendChild(allBtn);
-      card.appendChild(wrap);
-      function loadMore(count, full) {
-        moreBtn.disabled = allBtn.disabled = true;
-        moreBtn.textContent = "Loading…";
-        const myGen = SERVER_GENERATION;
-        const url = full ? file.load_url : buildPreviewUrl(file, count);
-        trackLoad(fetch(url).then((r2) => r2.json())).then((next) => {
-          if (myGen !== SERVER_GENERATION) {
-            moreBtn.textContent = "Data changed — reload";
-            moreBtn.disabled = allBtn.disabled = false;
-            return;
-          }
-          wrap.remove();
-          card._diffData = next;
-          mountDiff(card, file, next);
-          if (next.truncated || next.mode === "preview" && next.hunk_count > next.rendered_hunk_count) {
-            addExpandHunksUI(file, next, card);
-          }
-        }).catch(() => {
-          moreBtn.disabled = allBtn.disabled = false;
-          moreBtn.textContent = "Failed — retry";
-        });
-      }
-    }
-    function highlightInsertedSpans(card, file) {
-      if (file.size_class === "huge")
-        return;
-      if (!STATE.syntaxHighlight)
-        return;
-      const hljsRef = getHljs();
-      if (!hljsRef?.highlight)
-        return;
-      const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage?.(lang))
-        return;
-      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
-      spans.forEach((s2) => {
-        s2.dataset.gdpHl = "1";
-        const text2 = s2.textContent || "";
-        if (text2.length === 0)
-          return;
-        try {
-          s2.innerHTML = hljsRef.highlight(text2, {
-            language: lang,
-            ignoreIllegals: true
-          }).value;
-          if (!s2.classList.contains("hljs"))
-            s2.classList.add("hljs");
-        } catch (_) {}
-      });
-    }
-    function scheduleIdleHighlight(card, file) {
-      if (file.highlight)
-        return;
-      if (file.size_class === "huge")
-        return;
-      if (!STATE.syntaxHighlight)
-        return;
-      if (!("requestIdleCallback" in window))
-        return;
-      const hljsRef = getHljs();
-      if (!hljsRef?.highlight)
-        return;
-      const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage?.(lang))
-        return;
-      const work = (deadline) => {
-        const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
-        let i2 = 0;
-        while (i2 < spans.length && deadline.timeRemaining() > 4) {
-          const s2 = spans[i2++];
-          s2.dataset.gdpHl = "1";
-          const text2 = s2.textContent || "";
-          if (text2.length === 0)
-            continue;
-          try {
-            s2.innerHTML = hljsRef.highlight(text2, {
-              language: lang,
-              ignoreIllegals: true
-            }).value;
-            if (!s2.classList.contains("hljs"))
-              s2.classList.add("hljs");
-          } catch (_) {}
-        }
-        if (i2 < spans.length)
-          requestIdleCallback(work, { timeout: 1500 });
-      };
-      requestIdleCallback(work, { timeout: 2000 });
-    }
-    function syncSideScrollCard(card) {
-      card.querySelectorAll(".d2h-files-diff").forEach((group) => {
-        const sides = group.querySelectorAll(".d2h-code-wrapper");
-        if (sides.length !== 2)
-          return;
-        const [a2, b2] = sides;
-        let syncing = false;
-        const mirror = (src, dst) => {
-          if (syncing)
-            return;
-          syncing = true;
-          dst.scrollLeft = src.scrollLeft;
-          requestAnimationFrame(() => {
-            syncing = false;
-          });
-        };
-        a2.addEventListener("scroll", () => mirror(a2, b2), { passive: true });
-        b2.addEventListener("scroll", () => mirror(b2, a2), { passive: true });
-      });
-    }
-    function setupScrollSpy() {
-      const handler = () => {
-        if (handler._raf)
-          return;
-        if (performance.now() < SUPPRESS_SPY_UNTIL)
-          return;
-        handler._raf = requestAnimationFrame(() => {
-          handler._raf = null;
-          if (performance.now() < SUPPRESS_SPY_UNTIL)
-            return;
-          const topbarH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 56;
-          const scanY = topbarH + 24;
-          const cards = document.querySelectorAll(".gdp-file-shell");
-          for (const w of cards) {
-            const r2 = w.getBoundingClientRect();
-            if (r2.top <= scanY && r2.bottom > scanY) {
-              const text2 = w.dataset.path || "";
-              let best = null, bestLen = 0;
-              STATE.files.forEach((f2) => {
-                if ((text2 === f2.path || text2.endsWith(f2.path)) && f2.path.length > bestLen) {
-                  best = f2.path;
-                  bestLen = f2.path.length;
-                }
-              });
-              if (best) {
-                markActive(best);
-                const recentlyTouched = performance.now() - (window.__gdpSidebarTouchedAt || 0) < 1500;
-                if (!recentlyTouched) {
-                  const li = document.querySelector(`#filelist li[data-path="${CSS.escape(best)}"]`);
-                  if (li) {
-                    const sb = document.querySelector("#sidebar");
-                    if (!sb)
-                      return;
-                    const lr = li.getBoundingClientRect();
-                    const sr = sb.getBoundingClientRect();
-                    if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
-                      li.scrollIntoView({ block: "nearest" });
-                    }
-                  }
-                }
-              }
-              return;
-            }
-          }
-        });
-      };
-      if (window.__gdpScrollSpy)
-        window.removeEventListener("scroll", window.__gdpScrollSpy);
-      window.__gdpScrollSpy = handler;
-      window.addEventListener("scroll", handler, { passive: true });
-      handler(new Event("scroll"));
-    }
-    function _collapseAll(force) {
-      STATE.collapsed = typeof force === "boolean" ? force : !STATE.collapsed;
-      document.querySelectorAll(".gdp-file-shell.loaded .d2h-file-wrapper").forEach((w) => {
-        const body = w.querySelector(".d2h-files-diff, .d2h-file-diff");
-        if (body)
-          body.style.display = STATE.collapsed ? "none" : "";
-      });
-    }
+    });
+    const {
+      renderShell,
+      rerenderLoadedDiffs,
+      mountDiff,
+      addExpandHunksUI,
+      scheduleIdleHighlight,
+      scrollToFile,
+      prefetchByPath,
+      diffRowLineNumber,
+      focusDiffLine,
+      scrollDiffElementIntoView,
+      expandAllFileContext,
+      applyViewedState,
+      enqueueInitialLoads
+    } = DIFF_VIEW;
     applySidebarFontSize();
     applyCodeFontSize();
     applySidebarHidden();
