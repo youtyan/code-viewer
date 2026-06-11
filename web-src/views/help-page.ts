@@ -1,6 +1,6 @@
 // Help page (keybindings reference), extracted from app.ts.
 
-import type { AppRoute } from "./routes";
+import type { AppRoute } from "../core/routes";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;

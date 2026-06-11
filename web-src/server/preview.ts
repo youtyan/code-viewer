@@ -15,8 +15,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
-import { normalizeNewDirectoryName } from "../directory-name";
-import { APP_ENTRY_PATHS, SPA_PATHS } from "../routes";
+import { normalizeNewDirectoryName } from "../core/directory-name";
+import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   DiffMeta,
   FileDiffResponse,
@@ -28,7 +28,7 @@ import type {
   RepoTreeResponse,
   SettingsResponse,
   UndoActionResponse,
-} from "../types";
+} from "../core/types";
 import {
   ANNOTATION_BODY_MAX_BYTES,
   addAnnotationEntry,

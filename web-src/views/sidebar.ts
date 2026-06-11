@@ -2,8 +2,8 @@
 // filtering, folder icons, keyboard navigation, and sidebar chrome
 // (width / font size / hide toggle). Extracted from app.ts.
 
-import { compileFileFilter } from "./file-filter";
-import { nextVisibleFileIndex } from "./file-navigation";
+import { compileFileFilter } from "../core/file-filter";
+import { nextVisibleFileIndex } from "../core/file-navigation";
 import {
   COLLAPSE_ALL_16_PATHS,
   EXPAND_ALL_16_PATHS,
@@ -12,13 +12,13 @@ import {
   iconSvg,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
-} from "./icons";
+} from "../core/icons";
 import type {
   FileMeta,
   RepoTreeEntry,
   RepoTreeResponse,
   SidebarItem,
-} from "./types";
+} from "../core/types";
 
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
 export const SIDEBAR_FONT_SIZE_KEY = "gdp:sidebar-font-size";

@@ -1,7 +1,7 @@
-import { type AnnotationsUi, createAnnotationsUi } from "./annotations-ui";
-import { createCatchUpGate, shouldCatchUpDiff } from "./catch-up";
-import { GdpExpandLogic } from "./expand-logic";
-import { filePathClipboardText } from "./file-path-copy";
+import { type AnnotationsUi, createAnnotationsUi } from "./views/annotations-ui";
+import { createCatchUpGate, shouldCatchUpDiff } from "./core/catch-up";
+import { GdpExpandLogic } from "./core/expand-logic";
+import { filePathClipboardText } from "./core/file-path-copy";
 import {
   findMainScrollTarget,
   focusMainPanel,
@@ -10,13 +10,13 @@ import {
   keymapScope,
   prepareKeyboardPanels,
   setPanelFocusScope,
-} from "./focus-scope";
+} from "./core/focus-scope";
 import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
-} from "./help-page";
-import { createHunkExpand, type ExpandStackElement } from "./hunk-expand";
+} from "./views/help-page";
+import { createHunkExpand, type ExpandStackElement } from "./views/hunk-expand";
 import {
   CHEVRON_DOWN_12_PATH,
   CHEVRON_DOWN_16_PATH,
@@ -27,32 +27,32 @@ import {
   iconSvg,
   OPEN_EXTERNAL_16_PATH,
   TRIANGLE_DOWN_16_PATH,
-} from "./icons";
+} from "./core/icons";
 import {
   type KeymapAction,
   type KeymapScope,
   resolveKeymapAction,
-} from "./keymap";
-import { enhanceMediaCard } from "./media-embed";
-import { createRefPicker } from "./ref-picker";
-import { createRepoView } from "./repo-view";
+} from "./core/keymap";
+import { enhanceMediaCard } from "./views/media-embed";
+import { createRefPicker } from "./views/ref-picker";
+import { createRepoView } from "./views/repo-view";
 import {
   type AppRoute,
   buildRoute,
   type DiffRange,
   parseRoute,
   type SourceLineTarget,
-} from "./routes";
-import { createSearchPalette } from "./search-palette-ui";
+} from "./core/routes";
+import { createSearchPalette } from "./views/search-palette-ui";
 import {
   createSidebar,
   SIDEBAR_FONT_SIZE_KEY,
   type ViewerFontSize,
-} from "./sidebar";
+} from "./views/sidebar";
 import {
   createSourceView,
   type VirtualSourcePagingKeyboardEvent,
-} from "./source-view";
+} from "./views/source-view";
 import type {
   DiffCardElement,
   DiffMeta,
@@ -61,8 +61,8 @@ import type {
   HljsApi,
   SettingsResponse,
   UndoActionResponse,
-} from "./types";
-import { suppressWhitespaceOnlyInlineHighlights } from "./ws-highlight";
+} from "./core/types";
+import { suppressWhitespaceOnlyInlineHighlights } from "./core/ws-highlight";
 
 window.GdpExpandLogic = GdpExpandLogic;
 

@@ -1,7 +1,7 @@
 // Media (image / video / audio) embedding for binary file diffs.
 // Pure helpers extracted from app.ts — no app state involved.
 
-import type { FileMeta } from "./types";
+import type { FileMeta } from "../core/types";
 
 const MEDIA_RE =
   /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;

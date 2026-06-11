@@ -11,7 +11,7 @@ import type {
   AnnotationLineRange,
   AnnotationSession,
   AnnotationsState,
-} from "../types";
+} from "../core/types";
 
 export const CODE_VIEWER_DIR = ".code-viewer";
 export const ANNOTATIONS_FILE_NAME = "annotations.json";

@@ -4,8 +4,8 @@
 // (20-line steps via /file_range) plus one-shot full-gap expansion used by
 // "expand all context", and trailing expansion below the last hunk.
 
-import { GdpExpandLogic } from "./expand-logic";
-import type { DiffCardElement, FileMeta, FileRangeResponse } from "./types";
+import { GdpExpandLogic } from "../core/expand-logic";
+import type { DiffCardElement, FileMeta, FileRangeResponse } from "../core/types";
 
 type HunkInfo = {
   oldStart: number;

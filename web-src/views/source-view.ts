@@ -7,9 +7,9 @@ import {
   findMainScrollTarget,
   focusMainPanel,
   isEditableKeyTarget,
-} from "./focus-scope";
-import { COPY_16_PATHS, iconSvg } from "./icons";
-import { renderMarkdownPreview } from "./markdown-preview";
+} from "../core/focus-scope";
+import { COPY_16_PATHS, iconSvg } from "../core/icons";
+import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
   buildRawFileUrl,
@@ -18,7 +18,7 @@ import {
   parseRoute,
   type SourceFileTarget,
   type SourceLineTarget,
-} from "./routes";
+} from "../core/routes";
 import {
   EXT_TO_LANG,
   FILENAME_TO_LANG,
@@ -31,14 +31,14 @@ import {
   sourceDisplayKind,
   sourceFileName,
   sourcePreviewKind,
-} from "./source-meta";
+} from "../core/source-meta";
 import type {
   DiffCardElement,
   FileMeta,
   FileRangeResponse,
   HljsApi,
   RawFileInfo,
-} from "./types";
+} from "../core/types";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;

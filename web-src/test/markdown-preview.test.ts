@@ -5,17 +5,17 @@ import {
   renderMarkdownHtml,
   resolveMarkdownAssetPath,
   resolveMarkdownRelativePath,
-} from "../markdown-preview";
+} from "../core/markdown-preview";
 import { sourceFixture } from "./source-fixture";
 
 // Source view rendering (tabs/preview wiring) lives in source-view.ts.
 const app = sourceFixture(
   readFileSync(new URL("../app.ts", import.meta.url), "utf8") +
-    readFileSync(new URL("../source-view.ts", import.meta.url), "utf8") +
-    readFileSync(new URL("../repo-view.ts", import.meta.url), "utf8"),
+    readFileSync(new URL("../views/source-view.ts", import.meta.url), "utf8") +
+    readFileSync(new URL("../views/repo-view.ts", import.meta.url), "utf8"),
 );
 const markdown = sourceFixture(
-  readFileSync(new URL("../markdown-preview.ts", import.meta.url), "utf8"),
+  readFileSync(new URL("../core/markdown-preview.ts", import.meta.url), "utf8"),
 );
 const server = sourceFixture(
   readFileSync(new URL("../server/preview.ts", import.meta.url), "utf8"),
@@ -202,7 +202,7 @@ describe("markdown preview", () => {
   test("app wires markdown preview into README and file detail previews", () => {
     expect(
       app.includes(
-        "import { renderMarkdownPreview } from './markdown-preview'",
+        "import { renderMarkdownPreview } from '../core/markdown-preview'",
       ),
     ).toBe(true);
     expect(app.includes("onNavigateMarkdown: (path, ref) => {")).toBe(true);
