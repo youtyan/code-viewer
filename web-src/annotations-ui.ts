@@ -334,6 +334,15 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     await refreshAnnotations();
   }
 
+  // "2026-06-11T04:21:08.296Z" → "6/11 13:21" (local time). Same-day noise
+  // like seconds is dropped; the full ISO string stays in the tooltip.
+  function sessionTimeLabel(createdAt: string): string {
+    const date = new Date(createdAt);
+    if (Number.isNaN(date.getTime())) return "";
+    const hm = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    return `${date.getMonth() + 1}/${date.getDate()} ${hm}`;
+  }
+
   function annotationEntrySummary(entry: AnnotationEntry): string {
     const text = entry.title || entry.body;
     const firstLine = text.split("\n")[0].trim();
@@ -362,6 +371,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       title.className = "annotation-session-select";
       title.textContent = session.title;
       title.title = session.created_at;
+      const time = document.createElement("span");
+      time.className = "annotation-session-time";
+      time.textContent = sessionTimeLabel(session.created_at);
+      time.title = session.created_at;
       title.addEventListener("click", () => {
         // Click toggles: selecting shows this session inline, re-clicking
         // the active session clears the inline walkthrough.
@@ -378,7 +391,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
           return;
         void postAnnotationAction({ action: "delete", id: session.id });
       });
-      head.append(title, del);
+      head.append(title, time, del);
       sessionEl.appendChild(head);
 
       const list = document.createElement("ol");
