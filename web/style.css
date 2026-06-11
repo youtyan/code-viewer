@@ -4051,6 +4051,63 @@ body.annotation-panel-open #content {
   color: var(--danger);
   border-color: var(--danger);
 }
+/* ---- Annotation playback toolbar ---- */
+#annotation-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+#annotation-player[hidden] { display: none; }
+#annotation-player-toggle,
+#annotation-player-prev,
+#annotation-player-next,
+#annotation-player-mute {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1;
+}
+#annotation-player-toggle:hover,
+#annotation-player-prev:hover,
+#annotation-player-next:hover,
+#annotation-player-mute:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+#annotation-player-progress {
+  margin-left: auto;
+  opacity: .7;
+  font-variant-numeric: tabular-nums;
+}
+#annotation-player.playing #annotation-player-toggle {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+#annotation-player-rate {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+#annotation-player-rate:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+/* ---- end annotation playback toolbar ---- */
 #annotation-sessions {
   flex: 1;
   overflow-y: auto;
