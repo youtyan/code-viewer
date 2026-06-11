@@ -11,6 +11,13 @@ describe("parseAnnotateArgs", () => {
     expect(help.ok && help.args.command.kind === "help").toBe(true);
   });
 
+  test("agent-help prints the agent guide", () => {
+    expect(parseAnnotateArgs(["agent-help"])).toEqual({
+      ok: true,
+      args: { command: { kind: "agent-help" } },
+    });
+  });
+
   test("start captures the title and global options", () => {
     const parsed = parseAnnotateArgs([
       "start",
