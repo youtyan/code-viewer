@@ -229,7 +229,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (activeSessionId === sessionId) return;
     activeSessionId = sessionId;
     syncSessionUrl();
-    renderAnnotationPanel();
+    updateActiveHighlights();
     applyInlineAnnotations();
   }
 
@@ -362,6 +362,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     for (const session of [...ANNOTATIONS.sessions].reverse()) {
       const sessionEl = document.createElement("section");
       sessionEl.className = "annotation-session";
+      sessionEl.dataset.sessionId = session.id;
       sessionEl.classList.toggle("active", session.id === activeSessionId);
 
       const head = document.createElement("div");
@@ -398,6 +399,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       list.className = "annotation-entries";
       session.entries.forEach((entry) => {
         const item = document.createElement("li");
+        item.dataset.entryId = entry.id;
         item.classList.toggle("active", entry.id === activeAnnotationId);
         const open = document.createElement("button");
         open.type = "button";
@@ -438,10 +440,30 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     }
   }
 
+  // Toggle .active classes in place. Rebuilding the whole panel for a
+  // selection change resets the list scroll position and causes visible
+  // layout shift, so full renderAnnotationPanel() is reserved for data
+  // changes (refresh/delete).
+  function updateActiveHighlights() {
+    annotationSessionsEl
+      .querySelectorAll<HTMLElement>(".annotation-session")
+      .forEach((el) => {
+        el.classList.toggle("active", el.dataset.sessionId === activeSessionId);
+      });
+    annotationSessionsEl
+      .querySelectorAll<HTMLElement>(".annotation-entries li")
+      .forEach((el) => {
+        el.classList.toggle(
+          "active",
+          el.dataset.entryId === activeAnnotationId,
+        );
+      });
+  }
+
   function hideAnnotationDetail() {
     activeAnnotationId = null;
     annotationDetail.hidden = true;
-    renderAnnotationPanel();
+    updateActiveHighlights();
     syncInlineAnnotationActive();
   }
 
@@ -476,7 +498,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       index >= session.entries.length - 1;
     annotationDetail.hidden = false;
     setAnnotationPanelOpen(true);
-    renderAnnotationPanel();
+    updateActiveHighlights();
     syncInlineAnnotationActive();
   }
 
@@ -486,6 +508,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const { session, entry, index } = found;
     // Opening an entry activates its session so the inline walkthrough and
     // the URL param follow along; setRoute below pushes the URL with it.
+    const sessionChanged = activeSessionId !== session.id;
     activeSessionId = session.id;
     const from = entry.range.from || "HEAD";
     const to = entry.range.to || "worktree";
@@ -519,10 +542,13 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       await deps.renderStandaloneSource({ path: entry.path, ref });
     }
     showAnnotationDetail(session, entry, index);
-    applyInlineAnnotations();
-    const inlineRow = document.querySelector<HTMLElement>(
-      `.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`,
-    );
+    // Re-inserting every inline row shifts the code layout; when only the
+    // selection moved within the already-rendered session, the active class
+    // sync from showAnnotationDetail is enough.
+    const rowSelector = `.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`;
+    if (sessionChanged || !document.querySelector(rowSelector))
+      applyInlineAnnotations();
+    const inlineRow = document.querySelector<HTMLElement>(rowSelector);
     if (inlineRow) deps.scrollDiffElementIntoView(inlineRow, "center");
   }
 
