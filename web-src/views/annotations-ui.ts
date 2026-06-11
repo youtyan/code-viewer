@@ -12,7 +12,11 @@
 // The active session travels in the URL as `annotationSession` so a shared
 // link or reload restores the same inline walkthrough.
 
-import { renderMarkdownHtml } from "../core/markdown-preview";
+import {
+  loadMarkdownHighlighter,
+  renderMarkdownHtml,
+  type ShikiHighlighter,
+} from "../core/markdown-preview";
 import type { AppRoute, DiffRange, SourceLineTarget } from "../core/routes";
 import type {
   AnnotationEntry,
@@ -75,6 +79,26 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   let activeSessionId: string | null = new URLSearchParams(
     window.location.search,
   ).get(ANNOTATION_SESSION_PARAM);
+
+  // Code blocks inside annotation bodies get shiki highlighting once the
+  // (lazily loaded) markdown highlighter is ready; until then they render
+  // unhighlighted and are upgraded in place on load.
+  let mdHighlighter: ShikiHighlighter | null = null;
+  let mdHighlighterRequested = false;
+  function ensureMarkdownHighlighter() {
+    if (mdHighlighter || mdHighlighterRequested) return;
+    mdHighlighterRequested = true;
+    void loadMarkdownHighlighter().then((highlighter) => {
+      mdHighlighter = highlighter;
+      if (!highlighter) return;
+      applyInlineAnnotations();
+      if (activeAnnotationId) {
+        const found = findAnnotation(activeAnnotationId);
+        if (found)
+          showAnnotationDetail(found.session, found.entry, found.index);
+      }
+    });
+  }
 
   const annotationPanel = $("#annotation-panel");
   const annotationSessionsEl = $("#annotation-sessions");
@@ -140,10 +164,11 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     }
     const markdown = document.createElement("div");
     markdown.className = "gdp-annotation-inline-body";
+    ensureMarkdownHighlighter();
     markdown.innerHTML = renderMarkdownHtml(
       entry.body,
       { path: entry.path, ref: annotationRefForEntry(entry) },
-      null,
+      mdHighlighter,
     );
     box.appendChild(markdown);
     td.appendChild(box);
@@ -487,10 +512,11 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       body.appendChild(heading);
     }
     const markdown = document.createElement("div");
+    ensureMarkdownHighlighter();
     markdown.innerHTML = renderMarkdownHtml(
       entry.body,
       { path: entry.path, ref: annotationRefForEntry(entry) },
-      null,
+      mdHighlighter,
     );
     body.appendChild(markdown);
     $<HTMLButtonElement>("#annotation-detail-prev").disabled = index <= 0;
