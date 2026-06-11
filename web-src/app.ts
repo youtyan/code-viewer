@@ -36,6 +36,7 @@ import type {
   SettingsResponse,
   UndoActionResponse,
 } from "./core/types";
+import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
   type AnnotationsUi,
   createAnnotationsUi,
@@ -1862,6 +1863,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       localStorage.setItem("gdp:from", from);
       localStorage.setItem("gdp:to", to);
     },
+  });
+
+  createAnnotationsPlayer({
+    $,
+    getActiveSessionEntries: () =>
+      ANNOTATIONS_UI?.getActiveSessionEntries() ?? [],
+    openAnnotationEntry: (id) =>
+      ANNOTATIONS_UI
+        ? ANNOTATIONS_UI.openAnnotationEntry(id)
+        : Promise.resolve(),
+    setAnnotationPanelOpen: (open) =>
+      ANNOTATIONS_UI?.setAnnotationPanelOpen(open),
+    onAnnotationsChanged: (cb) => ANNOTATIONS_UI?.onAnnotationsChanged(cb),
   });
 
   // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession

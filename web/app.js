@@ -483,6 +483,271 @@
     return "/_file?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree");
   }
 
+  // web-src/core/annotation-player-core.ts
+  function createAnnotationPlayerCore(deps) {
+    let status = "idle";
+    let index = -1;
+    let muted = false;
+    let rate = 1;
+    let cancelCurrent = null;
+    let generation = 0;
+    function getState() {
+      return { status, index, total: deps.items().length, muted, rate };
+    }
+    function emit() {
+      deps.onStateChange(getState());
+    }
+    function cancelPending() {
+      cancelCurrent?.();
+      cancelCurrent = null;
+      generation += 1;
+    }
+    function startEntry(at) {
+      const items = deps.items();
+      if (at < 0 || at >= items.length) {
+        stop();
+        return;
+      }
+      cancelPending();
+      index = at;
+      status = "playing";
+      emit();
+      const gen = generation;
+      const item = items[at];
+      const proceed = () => {
+        if (gen !== generation || status !== "playing")
+          return;
+        const text = item.speechText;
+        const advance = () => {
+          if (gen !== generation || status !== "playing")
+            return;
+          cancelCurrent = null;
+          startEntry(index + 1);
+        };
+        if (!muted && text && deps.speechAvailable()) {
+          cancelCurrent = deps.speak(text, rate, advance);
+        } else {
+          cancelCurrent = deps.schedule(deps.displayMs(text), advance);
+        }
+      };
+      deps.jump(item.entryId).then(proceed, proceed);
+    }
+    function play() {
+      if (status === "playing")
+        return;
+      if (status === "paused") {
+        startEntry(index);
+        return;
+      }
+      if (deps.items().length === 0)
+        return;
+      startEntry(0);
+    }
+    function pause() {
+      if (status !== "playing")
+        return;
+      cancelPending();
+      status = "paused";
+      emit();
+    }
+    function stop() {
+      cancelPending();
+      status = "idle";
+      index = -1;
+      emit();
+    }
+    function moveTo(at) {
+      const total = deps.items().length;
+      const clamped = Math.max(0, at);
+      if (clamped >= total) {
+        stop();
+        return;
+      }
+      if (status === "playing") {
+        startEntry(clamped);
+      } else if (status === "paused") {
+        cancelPending();
+        index = clamped;
+        emit();
+        const item = deps.items()[clamped];
+        if (item)
+          deps.jump(item.entryId).catch(() => {});
+      }
+    }
+    function next() {
+      if (status === "idle")
+        return;
+      moveTo(index + 1);
+    }
+    function prev() {
+      if (status === "idle")
+        return;
+      moveTo(Math.max(0, index - 1));
+    }
+    function restartCurrentIfPlaying() {
+      if (status === "playing") {
+        startEntry(index);
+      } else {
+        emit();
+      }
+    }
+    function setMuted(value) {
+      if (muted === value)
+        return;
+      muted = value;
+      restartCurrentIfPlaying();
+    }
+    function setRate(value) {
+      if (rate === value)
+        return;
+      rate = value;
+      restartCurrentIfPlaying();
+    }
+    return { play, pause, stop, next, prev, setMuted, setRate, getState };
+  }
+
+  // web-src/core/annotation-speech.ts
+  var MS_PER_CHAR = 150;
+  var MIN_DISPLAY_MS = 3000;
+  function annotationSpeechText(body) {
+    let text = body;
+    text = text.replace(/```[\s\S]*?```/g, " ");
+    text = text.replace(/```[\s\S]*$/g, " ");
+    text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+    text = text.replace(/`([^`]*)`/g, "$1");
+    text = text.replace(/https?:\/\/\S+/g, "URL");
+    text = text.replace(/^[ \t]*(?:#{1,6}|>|[-*+]|\d+\.)[ \t]+/gm, "");
+    text = text.replace(/(\*\*|__|\*|_)/g, "");
+    return text.replace(/\s+/g, " ").trim();
+  }
+  function annotationDisplayMs(text) {
+    return Math.max(MIN_DISPLAY_MS, text.length * MS_PER_CHAR);
+  }
+
+  // web-src/views/annotations-player.ts
+  var MUTE_KEY = "gdp:annotation-muted";
+  var RATE_KEY = "gdp:annotation-rate";
+  function createAnnotationsPlayer(deps) {
+    const bar = deps.$("#annotation-player");
+    const toggleBtn = deps.$("#annotation-player-toggle");
+    const prevBtn = deps.$("#annotation-player-prev");
+    const nextBtn = deps.$("#annotation-player-next");
+    const muteBtn = deps.$("#annotation-player-mute");
+    const rateSel = deps.$("#annotation-player-rate");
+    const progress = deps.$("#annotation-player-progress");
+    const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+    let jaVoice = null;
+    function refreshJaVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      jaVoice = voices.find((v) => v.lang.toLowerCase().startsWith("ja")) ?? null;
+    }
+    if (speechSupported) {
+      refreshJaVoice();
+      window.speechSynthesis.addEventListener("voiceschanged", refreshJaVoice);
+    }
+    let _currentUtterance = null;
+    function speak(text, rate, onEnd) {
+      let done = false;
+      const finish = () => {
+        if (done)
+          return;
+        done = true;
+        _currentUtterance = null;
+        onEnd();
+      };
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = rate;
+      utterance.lang = "ja-JP";
+      if (jaVoice)
+        utterance.voice = jaVoice;
+      utterance.onend = finish;
+      utterance.onerror = (event) => {
+        if (event.error === "interrupted" || event.error === "canceled")
+          return;
+        finish();
+      };
+      window.speechSynthesis.cancel();
+      _currentUtterance = utterance;
+      window.speechSynthesis.speak(utterance);
+      return () => {
+        done = true;
+        _currentUtterance = null;
+        window.speechSynthesis.cancel();
+      };
+    }
+    function items() {
+      return deps.getActiveSessionEntries().map((entry) => ({
+        entryId: entry.id,
+        speechText: annotationSpeechText(entry.body)
+      }));
+    }
+    function render(state) {
+      bar.classList.toggle("playing", state.status === "playing");
+      toggleBtn.textContent = state.status === "playing" ? "⏸" : "▶";
+      progress.textContent = state.status === "idle" || state.index < 0 ? `${state.total}` : `${state.index + 1}/${state.total}`;
+      muteBtn.textContent = state.muted ? "\uD83D\uDD07" : "\uD83D\uDD0A";
+      prevBtn.disabled = state.status === "idle";
+      nextBtn.disabled = state.status === "idle";
+    }
+    const core = createAnnotationPlayerCore({
+      items,
+      jump: (entryId) => deps.openAnnotationEntry(entryId),
+      speak,
+      schedule: (ms, cb) => {
+        const id = window.setTimeout(cb, ms);
+        return () => window.clearTimeout(id);
+      },
+      displayMs: annotationDisplayMs,
+      speechAvailable: () => speechSupported,
+      onStateChange: render
+    });
+    if (localStorage.getItem(MUTE_KEY) === "1")
+      core.setMuted(true);
+    const savedRate = Number(localStorage.getItem(RATE_KEY));
+    if (savedRate && savedRate >= 0.5 && savedRate <= 2 && Array.from(rateSel.options).some((o) => o.value === String(savedRate))) {
+      core.setRate(savedRate);
+      rateSel.value = String(savedRate);
+    }
+    if (!speechSupported) {
+      muteBtn.disabled = true;
+      rateSel.disabled = true;
+      core.setMuted(true);
+    }
+    toggleBtn.addEventListener("click", () => {
+      const state = core.getState();
+      if (state.status === "playing") {
+        core.pause();
+      } else {
+        deps.setAnnotationPanelOpen(true);
+        core.play();
+      }
+    });
+    prevBtn.addEventListener("click", () => core.prev());
+    nextBtn.addEventListener("click", () => core.next());
+    muteBtn.addEventListener("click", () => {
+      const muted = !core.getState().muted;
+      core.setMuted(muted);
+      localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+    });
+    rateSel.addEventListener("change", () => {
+      const rate = Number(rateSel.value) || 1;
+      core.setRate(rate);
+      localStorage.setItem(RATE_KEY, String(rate));
+    });
+    function syncVisibility() {
+      const hasEntries = deps.getActiveSessionEntries().length > 0;
+      bar.hidden = !hasEntries;
+      render(core.getState());
+    }
+    deps.onAnnotationsChanged(() => {
+      core.stop();
+      syncVisibility();
+    });
+    syncVisibility();
+    render(core.getState());
+    return { stop: () => core.stop(), syncVisibility };
+  }
+
   // node_modules/markdown-it/lib/common/utils.mjs
   var exports_utils = {};
   __export(exports_utils, {
@@ -6700,6 +6965,11 @@ ${frontmatter.yaml}
     let activeAnnotationId = null;
     let annotationPanelDismissed = false;
     let activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
+    const annotationsChangedCallbacks = [];
+    function notifyAnnotationsChanged() {
+      for (const cb of annotationsChangedCallbacks)
+        cb();
+    }
     let mdHighlighter = null;
     let mdHighlighterRequested = false;
     function ensureMarkdownHighlighter() {
@@ -6877,6 +7147,7 @@ ${frontmatter.yaml}
       syncSessionUrl();
       updateActiveHighlights();
       applyInlineAnnotations();
+      notifyAnnotationsChanged();
     }
     function restoreSessionFromUrl() {
       activeSessionId = new URLSearchParams(window.location.search).get(ANNOTATION_SESSION_PARAM);
@@ -6978,6 +7249,7 @@ ${frontmatter.yaml}
       applyInlineAnnotations();
       if (activeAnnotationId && !findAnnotation(activeAnnotationId))
         hideAnnotationDetail();
+      notifyAnnotationsChanged();
     }
     async function postAnnotationAction(payload) {
       try {
@@ -7201,6 +7473,8 @@ ${frontmatter.yaml}
       const { session, entry, index } = found;
       const sessionChanged = activeSessionId !== session.id;
       activeSessionId = session.id;
+      if (sessionChanged)
+        notifyAnnotationsChanged();
       showAnnotationDetail(session, entry, index);
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
@@ -7312,7 +7586,16 @@ ${frontmatter.yaml}
       refreshAnnotations,
       handleSse,
       withSessionParam,
-      restoreSessionFromUrl
+      restoreSessionFromUrl,
+      openAnnotationEntry,
+      setAnnotationPanelOpen,
+      getActiveSessionEntries() {
+        const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId);
+        return session ? session.entries : [];
+      },
+      onAnnotationsChanged(cb) {
+        annotationsChangedCallbacks.push(cb);
+      }
     };
   }
 
@@ -15585,6 +15868,13 @@ ${frontmatter.yaml}
         localStorage.setItem("gdp:from", from);
         localStorage.setItem("gdp:to", to);
       }
+    });
+    createAnnotationsPlayer({
+      $,
+      getActiveSessionEntries: () => ANNOTATIONS_UI?.getActiveSessionEntries() ?? [],
+      openAnnotationEntry: (id) => ANNOTATIONS_UI ? ANNOTATIONS_UI.openAnnotationEntry(id) : Promise.resolve(),
+      setAnnotationPanelOpen: (open) => ANNOTATIONS_UI?.setAnnotationPanelOpen(open),
+      onAnnotationsChanged: (cb) => ANNOTATIONS_UI?.onAnnotationsChanged(cb)
     });
     let sseTimer = null;
     function scheduleSseLoad() {

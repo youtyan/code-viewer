@@ -73,6 +73,14 @@ export type AnnotationsUi = {
   withSessionParam(rawUrl: string): string;
   /** Re-read the session param from location (popstate) and re-render. */
   restoreSessionFromUrl(): void;
+  /** Jump to an entry (file/line navigation + detail panel). */
+  openAnnotationEntry(entryId: string): Promise<void>;
+  /** Show or hide the annotation panel. */
+  setAnnotationPanelOpen(open: boolean): void;
+  /** Entries of the active session, or [] when none is active. */
+  getActiveSessionEntries(): AnnotationEntry[];
+  /** Register a callback fired after refresh or active-session change. */
+  onAnnotationsChanged(cb: () => void): void;
 };
 
 export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
@@ -85,6 +93,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   let activeSessionId: string | null = new URLSearchParams(
     window.location.search,
   ).get(ANNOTATION_SESSION_PARAM);
+  const annotationsChangedCallbacks: Array<() => void> = [];
+  function notifyAnnotationsChanged() {
+    for (const cb of annotationsChangedCallbacks) cb();
+  }
 
   // Code blocks inside annotation bodies get shiki highlighting once the
   // (lazily loaded) markdown highlighter is ready; until then they render
@@ -325,6 +337,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     syncSessionUrl();
     updateActiveHighlights();
     applyInlineAnnotations();
+    notifyAnnotationsChanged();
   }
 
   function restoreSessionFromUrl() {
@@ -468,6 +481,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     applyInlineAnnotations();
     if (activeAnnotationId && !findAnnotation(activeAnnotationId))
       hideAnnotationDetail();
+    notifyAnnotationsChanged();
   }
 
   async function postAnnotationAction(
@@ -763,6 +777,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     // the active highlight classes from this value.
     const sessionChanged = activeSessionId !== session.id;
     activeSessionId = session.id;
+    if (sessionChanged) notifyAnnotationsChanged();
     // Show the detail panel immediately — the navigation below can involve
     // loads and context expansion; the panel must not lag behind the click.
     showAnnotationDetail(session, entry, index);
@@ -903,5 +918,16 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     handleSse,
     withSessionParam,
     restoreSessionFromUrl,
+    openAnnotationEntry,
+    setAnnotationPanelOpen,
+    getActiveSessionEntries() {
+      const session = ANNOTATIONS.sessions.find(
+        (s) => s.id === activeSessionId,
+      );
+      return session ? session.entries : [];
+    },
+    onAnnotationsChanged(cb: () => void) {
+      annotationsChangedCallbacks.push(cb);
+    },
   };
 }
