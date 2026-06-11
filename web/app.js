@@ -7239,6 +7239,394 @@ ${frontmatter.yaml}
     }));
   }
 
+  // web-src/hunk-expand.ts
+  function createHunkExpand(deps) {
+    function parseHunkHeader(text2) {
+      const m = (text2 || "").match(/@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
+      if (!m)
+        return null;
+      return {
+        oldStart: +m[1],
+        oldCount: m[2] ? +m[2] : 1,
+        newStart: +m[3],
+        newCount: m[4] ? +m[4] : 1
+      };
+    }
+    function nextNewLine(hunk) {
+      return hunk.newStart + hunk.newCount;
+    }
+    function nextOldLine(hunk) {
+      return hunk.oldStart + hunk.oldCount;
+    }
+    function setupHunkExpand(card, file) {
+      if (file.binary)
+        return;
+      if (file.media_kind)
+        return;
+      const infoRows = [];
+      const tables = card.querySelectorAll("table.d2h-diff-table");
+      if (tables.length === 0)
+        return;
+      const perTable = [];
+      tables.forEach((tbl) => {
+        const arr = [];
+        tbl.querySelectorAll("tr").forEach((tr) => {
+          const info = tr.querySelector("td.d2h-info:not(.d2h-code-linenumber):not(.d2h-code-side-linenumber)");
+          if (!info)
+            return;
+          const txt = (info.textContent || "").trim();
+          arr.push({
+            tr,
+            info,
+            hunk: parseHunkHeader(txt)
+          });
+        });
+        perTable.push(arr);
+      });
+      const base2 = perTable.find((arr) => arr.some((x) => x.hunk)) || perTable[0] || [];
+      const usedTrs = new WeakSet;
+      base2.forEach((baseItem) => {
+        const top = baseItem.tr.getBoundingClientRect().top;
+        const group = perTable.map((arr, tableIndex) => {
+          let best = null, bestD = Infinity;
+          for (const item of arr) {
+            if (usedTrs.has(item.tr))
+              continue;
+            const d2 = Math.abs(item.tr.getBoundingClientRect().top - top);
+            if (d2 < bestD) {
+              best = item;
+              bestD = d2;
+            }
+          }
+          if (!best || bestD >= 12)
+            return null;
+          usedTrs.add(best.tr);
+          return Object.assign({ sideIndex: tableIndex }, best);
+        }).filter(Boolean);
+        if (!group.length)
+          return;
+        const parsed = group.find((g) => g.hunk) || group[0];
+        if (!parsed.hunk)
+          return;
+        group.forEach((g) => {
+          g.tr.classList.add("gdp-hunk-row");
+        });
+        infoRows.push({
+          tr: parsed.tr,
+          info: parsed.info,
+          hunk: parsed.hunk,
+          siblings: group,
+          prevHunkEndNew: 0,
+          prevHunkEndOld: 0
+        });
+      });
+      for (let i2 = 1;i2 < infoRows.length; i2++) {
+        const prev = infoRows[i2 - 1].hunk;
+        infoRows[i2].prevHunkEndNew = nextNewLine(prev);
+        infoRows[i2].prevHunkEndOld = nextOldLine(prev);
+      }
+      const ref = deps.getToRef();
+      const refPath = encodeURIComponent(file.path);
+      for (const item of infoRows) {
+        attachExpandControls(item, file, ref, refPath);
+      }
+      const trailingIndex = GdpExpandLogic.trailingExpandTargetIndex(infoRows.length);
+      if (trailingIndex != null) {
+        probeAndAttachTrailingExpandControls(infoRows[trailingIndex], file, ref, refPath);
+      }
+    }
+    function attachExpandControls(item, file, ref, refPath) {
+      const { hunk, prevHunkEndNew, prevHunkEndOld } = item;
+      const fullGapStart = Math.max(1, prevHunkEndNew);
+      const fullGapEnd = hunk.newStart - 1;
+      if (fullGapStart > fullGapEnd) {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.style.display = "none";
+        }
+        return;
+      }
+      const L = GdpExpandLogic;
+      if (item.topExpandedStart == null || item.bottomExpandedEnd == null) {
+        const init = L.initExpandState(prevHunkEndNew, hunk.newStart);
+        item.topExpandedStart = init.topExpandedStart;
+        item.bottomExpandedEnd = init.bottomExpandedEnd;
+      }
+      const gap = L.remainingGap({
+        topExpandedStart: item.topExpandedStart,
+        bottomExpandedEnd: item.bottomExpandedEnd
+      }, prevHunkEndNew);
+      if (!gap) {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.style.display = "none";
+        }
+        return;
+      }
+      const remainingStart = gap.start;
+      const remainingEnd = gap.end;
+      const setBusy = (busy) => {
+        for (const sib of item.siblings || [{ tr: item.tr }]) {
+          sib.tr.querySelectorAll(".gdp-expand-btn").forEach((b2) => {
+            b2.disabled = busy;
+          });
+        }
+      };
+      const fetchAndInsert = (start, end, dir) => {
+        if (start < 1)
+          start = 1;
+        if (end < start)
+          return Promise.resolve();
+        setBusy(true);
+        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
+        return deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+          if (!data?.lines) {
+            setBusy(false);
+            return;
+          }
+          const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
+          const card = item.tr.closest(".d2h-file-wrapper");
+          const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
+          sibs.forEach((sib) => {
+            insertContextRows(sib.tr, data.lines, start, oldStartForGap, dir, sib.sideIndex || 0);
+          });
+          if (card)
+            deps.highlightInsertedSpans(card, file);
+          if (dir === "after")
+            item.topExpandedStart = start;
+          else
+            item.bottomExpandedEnd = end;
+          for (const sib of item.siblings || [{ tr: item.tr }]) {
+            const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
+            const old = ln?.querySelector(".gdp-expand-stack");
+            if (old)
+              old.remove();
+          }
+          attachExpandControls(item, file, ref, refPath);
+        }).catch(() => {
+          setBusy(false);
+        });
+      };
+      const STEP = 20;
+      const remainingSize = remainingEnd - remainingStart + 1;
+      const isFirst = prevHunkEndNew === 0;
+      const buildStack = () => {
+        const buttons = [];
+        if (isFirst) {
+          buttons.push({
+            direction: "up",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
+          });
+        } else {
+          buttons.push({
+            direction: "up",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), "before")
+          });
+          buttons.push({
+            direction: "down",
+            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
+            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
+          });
+        }
+        return createExpandStack(buttons);
+      };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(remainingStart, remainingEnd, "after");
+      };
+      const siblings = item.siblings || [{ tr: item.tr }];
+      siblings.forEach((sib) => {
+        const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
+        if (ln && !ln.querySelector(".gdp-expand-stack")) {
+          const stack = buildStack();
+          stack._gdpExpandFully = expandFully;
+          ln.appendChild(stack);
+        }
+      });
+      const firstSib = siblings[0];
+      if (firstSib) {
+        syncExpandRowHeights(siblings.map((sib) => sib.tr), firstSib.tr);
+      }
+    }
+    const EXPAND_ICON_PATHS = {
+      up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
+      down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z"
+    };
+    function createExpandStack(buttons) {
+      const stack = document.createElement("div");
+      stack.className = "gdp-expand-stack";
+      buttons.forEach((spec) => {
+        const button = document.createElement("button");
+        button.className = "gdp-expand-btn";
+        button.title = spec.title;
+        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' + '<path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
+        button.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          if (button.disabled)
+            return;
+          spec.onClick();
+        });
+        stack.appendChild(button);
+      });
+      return stack;
+    }
+    function syncExpandRowHeights(rows, stackRow) {
+      const syncHeight = () => {
+        const stack = stackRow.querySelector(".gdp-expand-stack");
+        const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
+        rows.forEach((row) => {
+          row.style.setProperty("height", `${targetH}px`, "important");
+        });
+      };
+      requestAnimationFrame(syncHeight);
+      setTimeout(syncHeight, 100);
+    }
+    function attachTrailingExpandControls(item, file, ref, refPath) {
+      const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+      if (hasTrailingRow)
+        return;
+      const STEP = 20;
+      let nextNewStart = nextNewLine(item.hunk);
+      let nextOldStart = nextOldLine(item.hunk);
+      const rows = (item.siblings || [{ tr: item.tr, sideIndex: 0 }]).map((sib) => {
+        const tbody = sib.tr.parentElement;
+        if (!tbody)
+          return null;
+        const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
+        const tr = document.createElement("tr");
+        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
+        const ln = document.createElement("td");
+        ln.className = isSplit ? "d2h-code-side-linenumber d2h-info" : "d2h-code-linenumber d2h-info";
+        const info = document.createElement("td");
+        info.className = "d2h-info";
+        const spacer = document.createElement("div");
+        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
+        info.appendChild(spacer);
+        tr.appendChild(ln);
+        tr.appendChild(info);
+        tbody.appendChild(tr);
+        return { tr, ln, sideIndex: sib.sideIndex || 0 };
+      }).filter(Boolean);
+      if (!rows.length)
+        return;
+      const setBusy = (busy) => {
+        rows.forEach((row) => {
+          row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
+            btn.disabled = busy;
+          });
+        });
+      };
+      const fetchAndInsert = (step = STEP) => {
+        const range = GdpExpandLogic.trailingClickRange(nextNewStart, step);
+        const myGen = deps.getServerGeneration();
+        setBusy(true);
+        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
+        return deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+          if (myGen !== deps.getServerGeneration() || data.generation && data.generation !== deps.getServerGeneration()) {
+            setBusy(false);
+            return;
+          }
+          if (!item.tr.isConnected)
+            return;
+          const lines = data?.lines || [];
+          if (!lines.length) {
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
+            return;
+          }
+          const card = item.tr.closest(".d2h-file-wrapper");
+          rows.forEach((row) => {
+            insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
+          });
+          const next = GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, step);
+          nextNewStart = next.newStart;
+          nextOldStart = next.oldStart;
+          if (card)
+            deps.highlightInsertedSpans(card, file);
+          if (next.eof) {
+            rows.forEach((row) => {
+              row.tr.remove();
+            });
+            return;
+          }
+          setBusy(false);
+        }).catch(() => {
+          setBusy(false);
+        });
+      };
+      let expandFullyStarted = false;
+      const expandFully = () => {
+        if (expandFullyStarted)
+          return Promise.resolve();
+        expandFullyStarted = true;
+        return fetchAndInsert(1e5);
+      };
+      rows.forEach((row) => {
+        const stack = createExpandStack([
+          {
+            direction: "down",
+            title: "Show more lines",
+            onClick: () => void fetchAndInsert()
+          }
+        ]);
+        stack._gdpExpandFully = expandFully;
+        row.ln.appendChild(stack);
+      });
+      syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
+    }
+    function probeAndAttachTrailingExpandControls(item, file, ref, refPath) {
+      const start = nextNewLine(item.hunk);
+      const myGen = deps.getServerGeneration();
+      const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + start;
+      deps.trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        if (myGen !== deps.getServerGeneration())
+          return;
+        if (data.generation && data.generation !== deps.getServerGeneration())
+          return;
+        if (!item.tr.isConnected)
+          return;
+        const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
+        if (hasTrailingRow)
+          return;
+        if (!GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0))
+          return;
+        attachTrailingExpandControls(item, file, ref, refPath);
+      }).catch(() => {});
+    }
+    function insertContextRows(targetTr, lines, newStart, oldStart, dir, sideIndex) {
+      const tbody = targetTr.parentElement;
+      if (!tbody)
+        return;
+      const anchor = dir === "after" ? targetTr.nextElementSibling : targetTr;
+      const isSplit = !!targetTr.querySelector("td.d2h-code-side-linenumber");
+      const frag = document.createDocumentFragment();
+      for (let i2 = 0;i2 < lines.length; i2++) {
+        const tr = document.createElement("tr");
+        tr.className = "gdp-inserted-ctx";
+        if (dir)
+          tr.dataset.gdpDir = dir;
+        let lnHtml;
+        if (isSplit) {
+          const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
+          lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
+        } else {
+          lnHtml = '<td class="d2h-code-linenumber d2h-cntx">' + '<div class="line-num1">' + (oldStart + i2) + "</div>" + '<div class="line-num2">' + (newStart + i2) + "</div>" + "</td>";
+        }
+        tr.innerHTML = lnHtml + '<td class="d2h-cntx">' + '<div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '">' + '<span class="d2h-code-line-prefix">&nbsp;</span>' + '<span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span>" + "</div>" + "</td>";
+        frag.appendChild(tr);
+      }
+      tbody.insertBefore(frag, anchor);
+    }
+    function escapeHtmlText(s2) {
+      return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    return { setupHunkExpand };
+  }
+
   // web-src/keymap.ts
   var DEFAULT_KEY_BINDINGS = [
     {
@@ -10709,389 +11097,12 @@ ${frontmatter.yaml}
       appendStatSquaresToHeader(card, file);
       setupHunkExpand(card, file);
     }
-    function parseHunkHeader(text2) {
-      const m = (text2 || "").match(/@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
-      if (!m)
-        return null;
-      return {
-        oldStart: +m[1],
-        oldCount: m[2] ? +m[2] : 1,
-        newStart: +m[3],
-        newCount: m[4] ? +m[4] : 1
-      };
-    }
-    function nextNewLine(hunk) {
-      return hunk.newStart + hunk.newCount;
-    }
-    function nextOldLine(hunk) {
-      return hunk.oldStart + hunk.oldCount;
-    }
-    function setupHunkExpand(card, file) {
-      if (file.binary)
-        return;
-      if (file.media_kind)
-        return;
-      const infoRows = [];
-      const tables = card.querySelectorAll("table.d2h-diff-table");
-      if (tables.length === 0)
-        return;
-      const perTable = [];
-      tables.forEach((tbl) => {
-        const arr = [];
-        tbl.querySelectorAll("tr").forEach((tr) => {
-          const info = tr.querySelector("td.d2h-info:not(.d2h-code-linenumber):not(.d2h-code-side-linenumber)");
-          if (!info)
-            return;
-          const txt = (info.textContent || "").trim();
-          arr.push({
-            tr,
-            info,
-            hunk: parseHunkHeader(txt)
-          });
-        });
-        perTable.push(arr);
-      });
-      const base2 = perTable.find((arr) => arr.some((x) => x.hunk)) || perTable[0] || [];
-      const usedTrs = new WeakSet;
-      base2.forEach((baseItem) => {
-        const top = baseItem.tr.getBoundingClientRect().top;
-        const group = perTable.map((arr, tableIndex) => {
-          let best = null, bestD = Infinity;
-          for (const item of arr) {
-            if (usedTrs.has(item.tr))
-              continue;
-            const d2 = Math.abs(item.tr.getBoundingClientRect().top - top);
-            if (d2 < bestD) {
-              best = item;
-              bestD = d2;
-            }
-          }
-          if (!best || bestD >= 12)
-            return null;
-          usedTrs.add(best.tr);
-          return Object.assign({ sideIndex: tableIndex }, best);
-        }).filter(Boolean);
-        if (!group.length)
-          return;
-        const parsed = group.find((g) => g.hunk) || group[0];
-        if (!parsed.hunk)
-          return;
-        group.forEach((g) => {
-          g.tr.classList.add("gdp-hunk-row");
-        });
-        infoRows.push({
-          tr: parsed.tr,
-          info: parsed.info,
-          hunk: parsed.hunk,
-          siblings: group,
-          prevHunkEndNew: 0,
-          prevHunkEndOld: 0
-        });
-      });
-      for (let i2 = 1;i2 < infoRows.length; i2++) {
-        const prev = infoRows[i2 - 1].hunk;
-        infoRows[i2].prevHunkEndNew = nextNewLine(prev);
-        infoRows[i2].prevHunkEndOld = nextOldLine(prev);
-      }
-      const ref = STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
-      const refPath = encodeURIComponent(file.path);
-      for (const item of infoRows) {
-        attachExpandControls(item, file, ref, refPath);
-      }
-      const trailingIndex = window.GdpExpandLogic.trailingExpandTargetIndex(infoRows.length);
-      if (trailingIndex != null) {
-        probeAndAttachTrailingExpandControls(infoRows[trailingIndex], file, ref, refPath);
-      }
-    }
-    function attachExpandControls(item, file, ref, refPath) {
-      const { hunk, prevHunkEndNew, prevHunkEndOld } = item;
-      const fullGapStart = Math.max(1, prevHunkEndNew);
-      const fullGapEnd = hunk.newStart - 1;
-      if (fullGapStart > fullGapEnd) {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.style.display = "none";
-        }
-        return;
-      }
-      const L = window.GdpExpandLogic;
-      if (item.topExpandedStart == null || item.bottomExpandedEnd == null) {
-        const init = L.initExpandState(prevHunkEndNew, hunk.newStart);
-        item.topExpandedStart = init.topExpandedStart;
-        item.bottomExpandedEnd = init.bottomExpandedEnd;
-      }
-      const gap = L.remainingGap({
-        topExpandedStart: item.topExpandedStart,
-        bottomExpandedEnd: item.bottomExpandedEnd
-      }, prevHunkEndNew);
-      if (!gap) {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.style.display = "none";
-        }
-        return;
-      }
-      const remainingStart = gap.start;
-      const remainingEnd = gap.end;
-      const setBusy = (busy) => {
-        for (const sib of item.siblings || [{ tr: item.tr }]) {
-          sib.tr.querySelectorAll(".gdp-expand-btn").forEach((b2) => {
-            b2.disabled = busy;
-          });
-        }
-      };
-      const fetchAndInsert = (start, end, dir) => {
-        if (start < 1)
-          start = 1;
-        if (end < start)
-          return Promise.resolve();
-        setBusy(true);
-        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + end;
-        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          if (!data?.lines) {
-            setBusy(false);
-            return;
-          }
-          const oldStartForGap = prevHunkEndOld + (start - prevHunkEndNew);
-          const card = item.tr.closest(".d2h-file-wrapper");
-          const sibs = item.siblings || [{ tr: item.tr, sideIndex: 0 }];
-          sibs.forEach((sib) => {
-            insertContextRows(sib.tr, data.lines, start, oldStartForGap, dir, sib.sideIndex || 0);
-          });
-          if (card)
-            highlightInsertedSpans(card, file);
-          if (dir === "after")
-            item.topExpandedStart = start;
-          else
-            item.bottomExpandedEnd = end;
-          for (const sib of item.siblings || [{ tr: item.tr }]) {
-            const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
-            const old = ln?.querySelector(".gdp-expand-stack");
-            if (old)
-              old.remove();
-          }
-          attachExpandControls(item, file, ref, refPath);
-        }).catch(() => {
-          setBusy(false);
-        });
-      };
-      const STEP = 20;
-      const remainingSize = remainingEnd - remainingStart + 1;
-      const isFirst = prevHunkEndNew === 0;
-      const buildStack = () => {
-        const buttons = [];
-        if (isFirst) {
-          buttons.push({
-            direction: "up",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
-          });
-        } else {
-          buttons.push({
-            direction: "up",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(remainingStart, Math.min(remainingEnd, remainingStart + STEP - 1), "before")
-          });
-          buttons.push({
-            direction: "down",
-            title: `Show ${Math.min(STEP, remainingSize)} more lines`,
-            onClick: () => fetchAndInsert(Math.max(remainingStart, remainingEnd - STEP + 1), remainingEnd, "after")
-          });
-        }
-        return createExpandStack(buttons);
-      };
-      let expandFullyStarted = false;
-      const expandFully = () => {
-        if (expandFullyStarted)
-          return Promise.resolve();
-        expandFullyStarted = true;
-        return fetchAndInsert(remainingStart, remainingEnd, "after");
-      };
-      const siblings = item.siblings || [{ tr: item.tr }];
-      siblings.forEach((sib) => {
-        const ln = sib.tr.querySelector(".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info");
-        if (ln && !ln.querySelector(".gdp-expand-stack")) {
-          const stack = buildStack();
-          stack._gdpExpandFully = expandFully;
-          ln.appendChild(stack);
-        }
-      });
-      const firstSib = siblings[0];
-      if (firstSib) {
-        syncExpandRowHeights(siblings.map((sib) => sib.tr), firstSib.tr);
-      }
-    }
-    const EXPAND_ICON_PATHS = {
-      up: "M8 3.5 3.75 7.75l1.06 1.06L7.25 6.37V13h1.5V6.37l2.44 2.44 1.06-1.06L8 3.5z",
-      down: "M8 12.5 12.25 8.25l-1.06-1.06L8.75 9.63V3h-1.5v6.63L4.81 7.19 3.75 8.25 8 12.5z"
-    };
-    function createExpandStack(buttons) {
-      const stack = document.createElement("div");
-      stack.className = "gdp-expand-stack";
-      buttons.forEach((spec) => {
-        const button = document.createElement("button");
-        button.className = "gdp-expand-btn";
-        button.title = spec.title;
-        button.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="' + EXPAND_ICON_PATHS[spec.direction] + '"/></svg>';
-        button.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          if (button.disabled)
-            return;
-          spec.onClick();
-        });
-        stack.appendChild(button);
-      });
-      return stack;
-    }
-    function syncExpandRowHeights(rows, stackRow) {
-      const syncHeight = () => {
-        const stack = stackRow.querySelector(".gdp-expand-stack");
-        const targetH = stack ? Math.max(20, stack.getBoundingClientRect().height) : 20;
-        rows.forEach((row) => {
-          row.style.setProperty("height", `${targetH}px`, "important");
-        });
-      };
-      requestAnimationFrame(syncHeight);
-      setTimeout(syncHeight, 100);
-    }
-    function attachTrailingExpandControls(item, file, ref, refPath) {
-      const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
-      if (hasTrailingRow)
-        return;
-      const STEP = 20;
-      let nextNewStart = nextNewLine(item.hunk);
-      let nextOldStart = nextOldLine(item.hunk);
-      const rows = (item.siblings || [{ tr: item.tr, sideIndex: 0 }]).map((sib) => {
-        const tbody = sib.tr.parentElement;
-        if (!tbody)
-          return null;
-        const isSplit = !!sib.tr.querySelector("td.d2h-code-side-linenumber");
-        const tr = document.createElement("tr");
-        tr.className = "gdp-hunk-row gdp-trailing-expand-row";
-        const ln = document.createElement("td");
-        ln.className = isSplit ? "d2h-code-side-linenumber d2h-info" : "d2h-code-linenumber d2h-info";
-        const info = document.createElement("td");
-        info.className = "d2h-info";
-        const spacer = document.createElement("div");
-        spacer.className = isSplit ? "d2h-code-side-line" : "d2h-code-line";
-        info.appendChild(spacer);
-        tr.appendChild(ln);
-        tr.appendChild(info);
-        tbody.appendChild(tr);
-        return { tr, ln, sideIndex: sib.sideIndex || 0 };
-      }).filter(Boolean);
-      if (!rows.length)
-        return;
-      const setBusy = (busy) => {
-        rows.forEach((row) => {
-          row.ln.querySelectorAll(".gdp-expand-btn").forEach((btn) => {
-            btn.disabled = busy;
-          });
-        });
-      };
-      const fetchAndInsert = (step = STEP) => {
-        const range = window.GdpExpandLogic.trailingClickRange(nextNewStart, step);
-        const myGen = SERVER_GENERATION;
-        setBusy(true);
-        const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + range.start + "&end=" + range.end;
-        return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-          if (myGen !== SERVER_GENERATION || data.generation && data.generation !== SERVER_GENERATION) {
-            setBusy(false);
-            return;
-          }
-          if (!item.tr.isConnected)
-            return;
-          const lines = data?.lines || [];
-          if (!lines.length) {
-            rows.forEach((row) => {
-              row.tr.remove();
-            });
-            return;
-          }
-          const card = item.tr.closest(".d2h-file-wrapper");
-          rows.forEach((row) => {
-            insertContextRows(row.tr, lines, range.start, nextOldStart, "before", row.sideIndex);
-          });
-          const next = window.GdpExpandLogic.applyTrailingResult({ newStart: nextNewStart, oldStart: nextOldStart }, lines.length, step);
-          nextNewStart = next.newStart;
-          nextOldStart = next.oldStart;
-          if (card)
-            highlightInsertedSpans(card, file);
-          if (next.eof) {
-            rows.forEach((row) => {
-              row.tr.remove();
-            });
-            return;
-          }
-          setBusy(false);
-        }).catch(() => {
-          setBusy(false);
-        });
-      };
-      let expandFullyStarted = false;
-      const expandFully = () => {
-        if (expandFullyStarted)
-          return Promise.resolve();
-        expandFullyStarted = true;
-        return fetchAndInsert(1e5);
-      };
-      rows.forEach((row) => {
-        const stack = createExpandStack([
-          {
-            direction: "down",
-            title: "Show more lines",
-            onClick: () => void fetchAndInsert()
-          }
-        ]);
-        stack._gdpExpandFully = expandFully;
-        row.ln.appendChild(stack);
-      });
-      syncExpandRowHeights(rows.map((row) => row.tr), rows[0].tr);
-    }
-    function probeAndAttachTrailingExpandControls(item, file, ref, refPath) {
-      const start = nextNewLine(item.hunk);
-      const myGen = SERVER_GENERATION;
-      const url = "/file_range?path=" + refPath + "&ref=" + encodeURIComponent(ref) + "&start=" + start + "&end=" + start;
-      trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-        if (myGen !== SERVER_GENERATION)
-          return;
-        if (data.generation && data.generation !== SERVER_GENERATION)
-          return;
-        if (!item.tr.isConnected)
-          return;
-        const hasTrailingRow = (item.siblings || []).some((sib) => !!sib.tr.parentElement?.querySelector(".gdp-trailing-expand-row"));
-        if (hasTrailingRow)
-          return;
-        if (!window.GdpExpandLogic.shouldAttachTrailingExpand(data?.lines?.length || 0))
-          return;
-        attachTrailingExpandControls(item, file, ref, refPath);
-      }).catch(() => {});
-    }
-    function insertContextRows(targetTr, lines, newStart, oldStart, dir, sideIndex) {
-      const tbody = targetTr.parentElement;
-      if (!tbody)
-        return;
-      const anchor = dir === "after" ? targetTr.nextElementSibling : targetTr;
-      const isSplit = !!targetTr.querySelector("td.d2h-code-side-linenumber");
-      const frag = document.createDocumentFragment();
-      for (let i2 = 0;i2 < lines.length; i2++) {
-        const tr = document.createElement("tr");
-        tr.className = "gdp-inserted-ctx";
-        if (dir)
-          tr.dataset.gdpDir = dir;
-        let lnHtml;
-        if (isSplit) {
-          const num = sideIndex === 0 ? oldStart + i2 : newStart + i2;
-          lnHtml = `<td class="d2h-code-side-linenumber d2h-cntx">${num}</td>`;
-        } else {
-          lnHtml = '<td class="d2h-code-linenumber d2h-cntx"><div class="line-num1">' + (oldStart + i2) + '</div><div class="line-num2">' + (newStart + i2) + "</div></td>";
-        }
-        tr.innerHTML = lnHtml + '<td class="d2h-cntx"><div class="' + (isSplit ? "d2h-code-side-line" : "d2h-code-line") + '"><span class="d2h-code-line-prefix">&nbsp;</span><span class="d2h-code-line-ctn">' + escapeHtmlText(lines[i2]) + "</span></div></td>";
-        frag.appendChild(tr);
-      }
-      tbody.insertBefore(frag, anchor);
-    }
-    function escapeHtmlText(s2) {
-      return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
+    const { setupHunkExpand } = createHunkExpand({
+      trackLoad,
+      getServerGeneration: () => SERVER_GENERATION,
+      getToRef: () => STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree",
+      highlightInsertedSpans
+    });
     function setFileCollapsed(card, collapsed) {
       card.classList.toggle("gdp-file-collapsed", collapsed);
       card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
