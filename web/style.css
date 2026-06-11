@@ -2071,6 +2071,55 @@ table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line-ctn {
 table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
 }
+
+/* After-side drag selection (diff screen) — same yellow as the file view. */
+table.d2h-diff-table tr.gdp-diff-line-selected > td,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-line,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-side-line,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-line-ctn {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+table.d2h-diff-table tr.gdp-diff-line-selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
+}
+table.d2h-diff-table td.d2h-code-linenumber,
+table.d2h-diff-table td.d2h-code-side-linenumber {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Floating "copy @path#start-end" pill shown while lines are selected. */
+#line-ref-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 400;
+  max-width: min(640px, calc(100vw - 48px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgba(31, 35, 40, 0.22);
+}
+#line-ref-pill:hover {
+  background: var(--bg-mute);
+}
+#line-ref-pill.copied {
+  color: var(--success, #2ea043);
+  border-color: var(--success, #2ea043);
+}
+#line-ref-pill[hidden] {
+  display: none;
+}
 /* Stack height = number of buttons * 20px. With 1 button = 20px row,
  * with 2 (↑+↓) = 40px row, matching GitHub. */
 .gdp-expand-stack {
