@@ -81,6 +81,10 @@ export type AnnotationsUi = {
   getActiveSessionEntries(): AnnotationEntry[];
   /** Register a callback fired after refresh or active-session change. */
   onAnnotationsChanged(cb: () => void): void;
+  /** Register a callback fired when an entry is opened (clicked etc). */
+  onAnnotationOpened(cb: (entryId: string) => void): void;
+  /** Id of the entry currently shown in the detail panel, or null. */
+  getActiveAnnotationId(): string | null;
 };
 
 export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
@@ -96,6 +100,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   const annotationsChangedCallbacks: Array<() => void> = [];
   function notifyAnnotationsChanged() {
     for (const cb of annotationsChangedCallbacks) cb();
+  }
+  const annotationOpenedCallbacks: Array<(entryId: string) => void> = [];
+  function notifyAnnotationOpened(entryId: string) {
+    for (const cb of annotationOpenedCallbacks) cb(entryId);
   }
 
   // Code blocks inside annotation bodies get shiki highlighting once the
@@ -778,6 +786,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const sessionChanged = activeSessionId !== session.id;
     activeSessionId = session.id;
     if (sessionChanged) notifyAnnotationsChanged();
+    notifyAnnotationOpened(entry.id);
     // Show the detail panel immediately — the navigation below can involve
     // loads and context expansion; the panel must not lag behind the click.
     showAnnotationDetail(session, entry, index);
@@ -928,6 +937,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     },
     onAnnotationsChanged(cb: () => void) {
       annotationsChangedCallbacks.push(cb);
+    },
+    onAnnotationOpened(cb: (entryId: string) => void) {
+      annotationOpenedCallbacks.push(cb);
+    },
+    getActiveAnnotationId() {
+      return activeAnnotationId;
     },
   };
 }

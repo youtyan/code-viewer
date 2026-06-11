@@ -28,6 +28,12 @@ describe("annotationSpeechText", () => {
     );
   });
 
+  test("unwraps angle bracket placeholders so speech does not cut off", () => {
+    expect(
+      annotationSpeechText("registry is ~/.cache/servers/<hash>.json here"),
+    ).toBe("registry is ~/.cache/servers/ hash .json here");
+  });
+
   test("collapses bare urls to a short token", () => {
     expect(
       annotationSpeechText("see https://example.com/very/long?x=1 now"),
