@@ -4174,11 +4174,15 @@ body.annotation-panel-open #content {
 }
 
 #annotation-detail {
+  /* Docked under the session list with a FIXED height: the list above never
+     moves when the entry body is longer or shorter, so click targets stay
+     put while stepping through a walkthrough. */
   flex: none;
   display: flex;
   flex-direction: column;
-  max-height: 55%;
-  border-bottom: 1px solid var(--border);
+  height: 45%;
+  min-height: 220px;
+  border-top: 1px solid var(--border);
   background: var(--bg-soft);
 }
 .annotation-detail-head {
@@ -4229,6 +4233,7 @@ body.annotation-panel-open #content {
   text-decoration: underline;
 }
 #annotation-detail-body {
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 12px 12px;
