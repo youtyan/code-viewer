@@ -502,10 +502,35 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     syncInlineAnnotationActive();
   }
 
+  // In-place retarget of the source line highlight, used when an entry
+  // click stays within the already-rendered standalone source file.
+  function focusStandaloneSourceLines(
+    card: HTMLElement,
+    entry: AnnotationEntry,
+  ) {
+    if (!entry.line) return;
+    const { start, end } = entry.line;
+    card
+      .querySelectorAll<HTMLElement>(".gdp-source-table tr[data-line]")
+      .forEach((tr) => {
+        const n = Number(tr.dataset.line);
+        tr.classList.toggle("gdp-source-line-target", n >= start && n <= end);
+      });
+  }
+
+  // Rapid clicks must not interleave: each open invalidates the previous
+  // one at every await point, so the LAST click always wins.
+  let openEntrySeq = 0;
+
   async function openAnnotationEntry(entryId: string): Promise<void> {
+    const seq = ++openEntrySeq;
+    const stale = () => seq !== openEntrySeq;
     const found = findAnnotation(entryId);
     if (!found) return;
     const { session, entry, index } = found;
+    // Show the detail panel immediately — the navigation below can involve
+    // loads and context expansion; the panel must not lag behind the click.
+    showAnnotationDetail(session, entry, index);
     // Opening an entry activates its session so the inline walkthrough and
     // the URL param follow along; setRoute below pushes the URL with it.
     const sessionChanged = activeSessionId !== session.id;
@@ -515,7 +540,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const range = { from, to };
     const current = deps.currentRange();
     const rangeChanged = current.from !== from || current.to !== to;
-    const wasDiffScreen = deps.getRoute().screen === "diff";
+    const prevRoute = deps.getRoute();
     const line = annotationLineTarget(entry);
 
     deps.setRange(from, to);
@@ -523,25 +548,50 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     deps.cancelActiveSourceLoad("navigation");
     deps.setRoute({ screen: "diff", range, path: entry.path, line });
     deps.setPageMode();
-    deps.removeStandaloneSource();
-    if (rangeChanged || !wasDiffScreen || !deps.getFiles().length)
+    // Reload the diff only when the rendered cards cannot be reused: a full
+    // load() tears down and rebuilds every file card, which is the heaviest
+    // re-render an entry click can trigger.
+    const hasDiffCards = !!document.querySelector(
+      ".gdp-file-shell:not(.gdp-standalone-source)",
+    );
+    if (rangeChanged || !deps.getFiles().length || !hasDiffCards) {
+      deps.removeStandaloneSource();
       await deps.load();
+      if (stale()) return;
+    }
 
     if (deps.getFiles().some((f) => f.path === entry.path)) {
+      deps.removeStandaloneSource();
       deps.scrollToFile(entry.path, line);
       await expandAnnotationContext(entry);
+      if (stale()) return;
     } else {
       // The annotated file has no diff in this range — show its source
       // directly so unchanged code can be explained too.
       const ref = annotationRefForEntry(entry);
+      const card = document.querySelector<HTMLElement>(
+        ".gdp-standalone-source",
+      );
+      // Moving between annotations within the same rendered file must not
+      // rebuild the whole source view — retarget the highlight in place.
+      const reusable =
+        prevRoute.screen === "file" &&
+        prevRoute.path === entry.path &&
+        prevRoute.ref === ref &&
+        card?.dataset.path === entry.path &&
+        !!card.querySelector(".gdp-source-table");
       deps.setRoute(
         { screen: "file", path: entry.path, ref, view: "blob", line, range },
         true,
       );
       deps.setPageMode();
-      await deps.renderStandaloneSource({ path: entry.path, ref });
+      if (reusable && card) {
+        focusStandaloneSourceLines(card, entry);
+      } else {
+        await deps.renderStandaloneSource({ path: entry.path, ref });
+        if (stale()) return;
+      }
     }
-    showAnnotationDetail(session, entry, index);
     // Re-inserting every inline row shifts the code layout; when only the
     // selection moved within the already-rendered session, the active class
     // sync from showAnnotationDetail is enough.
