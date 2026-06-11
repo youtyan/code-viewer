@@ -3511,10 +3511,25 @@ body.gdp-repo-page .sb-filter-wrap,
 body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap {
   grid-area: filter;
   position: relative;
+  /* The base rule is sticky with top: var(--sidebar-head-h); keeping that
+     offset while relative shifts the filter below the .sb-head grid. */
+  top: 0;
   width: 100%;
   margin: 0;
   padding: 6px 0 0;
   border-bottom: 0;
+}
+/* The magnifier glyph offsets assume the default 7px 12px wrap padding;
+   the grid layout drops the horizontal padding, so shift it back in. */
+body.gdp-repo-page .sb-filter-wrap::before,
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::before {
+  left: 11px;
+  top: 16px;
+}
+body.gdp-repo-page .sb-filter-wrap::after,
+body.gdp-file-detail-page.gdp-repo-blob-page .sb-filter-wrap::after {
+  left: 22px;
+  top: 27px;
 }
 body.gdp-file-detail-page {
   --chrome-h: var(--global-header-h);
