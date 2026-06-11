@@ -116,6 +116,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     annotationPanel.hidden = !open;
     document.body.classList.toggle("annotation-panel-open", open);
     if (open) annotationPanelDismissed = false;
+    localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
   }
 
   function annotationLineTarget(
@@ -756,13 +757,15 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const found = findAnnotation(entryId);
     if (!found) return;
     const { session, entry, index } = found;
+    // Opening an entry activates its session so the inline walkthrough and
+    // the URL param follow along; setRoute below pushes the URL with it.
+    // The assignment must happen BEFORE showAnnotationDetail, which syncs
+    // the active highlight classes from this value.
+    const sessionChanged = activeSessionId !== session.id;
+    activeSessionId = session.id;
     // Show the detail panel immediately — the navigation below can involve
     // loads and context expansion; the panel must not lag behind the click.
     showAnnotationDetail(session, entry, index);
-    // Opening an entry activates its session so the inline walkthrough and
-    // the URL param follow along; setRoute below pushes the URL with it.
-    const sessionChanged = activeSessionId !== session.id;
-    activeSessionId = session.id;
     const from = entry.range.from || "HEAD";
     const to = entry.range.to || "worktree";
     const range = { from, to };
@@ -857,6 +860,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       }
     });
   }
+
+  // Restore the panel open/closed state across reloads.
+  if (localStorage.getItem("gdp:annotation-panel") === "1")
+    setAnnotationPanelOpen(true);
 
   $("#annotations-toggle").addEventListener("click", () => {
     setAnnotationPanelOpen(annotationPanel.hidden);
