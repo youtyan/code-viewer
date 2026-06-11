@@ -151,17 +151,18 @@ to target a specific one.
 
 ### Agent Skill
 
-The package bundles an [Agent Skill](https://code.claude.com/docs/en/skills)
-that teaches AI coding agents when and how to use `annotate`. Install it
-into the current project (`.claude/skills/`):
+The package bundles an [Agent Skill](https://agentskills.io) (the SKILL.md
+open standard) that teaches AI coding agents when and how to use
+`annotate`. Install it into the current project:
 
 ```sh
-npx -y @youtyan/code-viewer skill install
+npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
+npx -y @youtyan/code-viewer skill install --agent codex,gemini  # other agents
+npx -y @youtyan/code-viewer skill install --agent all           # claude, codex, gemini, cursor, .agents
 ```
 
-Or install it once for all projects with `--global`
-(`~/.claude/skills/`). Running the same command again updates an existing
-installation.
+Or install it once for all projects with `--global` (`~/.claude/skills/`
+etc). Running the same command again updates an existing installation.
 
 ## Development
 
