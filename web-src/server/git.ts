@@ -354,6 +354,73 @@ export function refCommits(
   return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
 }
 
+export type GitHistoryCommit = GitCommitMeta & { parents: string[] };
+
+const HISTORY_FORMAT = "%H%x00%s%x00%an%x00%aI%x00%P";
+const MAX_HISTORY_LIMIT = 200;
+
+function parseHistoryLog(stdout: string): GitHistoryCommit[] {
+  const parts = stdout.split("\0");
+  const commits: GitHistoryCommit[] = [];
+  for (let index = 0; index < parts.length; ) {
+    if (!parts[index]) {
+      index++;
+      continue;
+    }
+    const sha = parts[index++] || "";
+    const subject = parts[index++] || "";
+    const author = parts[index++] || "";
+    const when = parts[index++] || "";
+    const parentsRaw = (parts[index++] || "").trim();
+    if (sha)
+      commits.push({
+        sha,
+        subject,
+        author,
+        when,
+        parents: parentsRaw ? parentsRaw.split(/\s+/) : [],
+      });
+  }
+  return commits;
+}
+
+export function commitHistory(
+  cwd: string,
+  options: { ref: string; skip: number; limit: number },
+): { commits: GitHistoryCommit[]; hasMore: boolean; error?: string } {
+  const ref = (options.ref || "HEAD").trim();
+  if (!ref || ref.startsWith("-") || ref.includes("\0"))
+    return { commits: [], hasMore: false, error: "invalid ref" };
+  const verified = run(
+    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+    cwd,
+  );
+  if (verified.code !== 0)
+    return { commits: [], hasMore: false, error: "unknown ref" };
+  const skip = Math.max(0, Math.floor(options.skip) || 0);
+  const limit = Math.max(
+    1,
+    Math.min(Math.floor(options.limit) || 1, MAX_HISTORY_LIMIT),
+  );
+  const res = run(
+    [
+      "git",
+      "log",
+      "-z",
+      `--skip=${skip}`,
+      `--max-count=${limit + 1}`,
+      `--format=${HISTORY_FORMAT}`,
+      verified.stdout.trim(),
+    ],
+    cwd,
+  );
+  if (res.code !== 0)
+    return { commits: [], hasMore: false, error: "git log failed" };
+  const parsed = parseHistoryLog(res.stdout);
+  const hasMore = parsed.length > limit;
+  return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
+}
+
 export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
   const res = run(
     [
