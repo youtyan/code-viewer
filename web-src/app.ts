@@ -2182,7 +2182,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     SIDEBAR_ROW_BY_PATH = new Map();
     SIDEBAR_LAZY_LOADED_DIRS.clear();
     SIDEBAR_LAZY_LOADING_DIRS.clear();
-    STATE.files = files as FileMeta[];
+    // Repo-mode sidebars (custom onFileClick) list the whole repository;
+    // writing that into STATE.files would make every file look like part of
+    // the current diff. Only the diff sidebar owns STATE.files.
+    if (!onFileClick) STATE.files = files as FileMeta[];
     SIDEBAR_FILES = files;
     SIDEBAR_ON_FILE_CLICK = onFileClick;
     if (!onFileClick) REPO_SIDEBAR_REF = null;
@@ -7071,7 +7074,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       layout.className = "gdp-repo-blob-layout";
       renderRepoBlobSidebar(target.path, repoTarget);
       layout.appendChild(card);
-      root.replaceChildren(layout);
+      // Prepend instead of replaceChildren: the rendered diff cards stay
+      // alive (hidden via body.gdp-repo-blob-page CSS), so leaving the blob
+      // view does not force a full diff reload.
+      root.prepend(layout);
     } else {
       root.prepend(card);
     }
