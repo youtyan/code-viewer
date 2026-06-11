@@ -645,14 +645,14 @@
       refreshJaVoice();
       window.speechSynthesis.addEventListener("voiceschanged", refreshJaVoice);
     }
-    let currentUtterance = null;
+    let _currentUtterance = null;
     function speak(text, rate, onEnd) {
       let done = false;
       const finish = () => {
         if (done)
           return;
         done = true;
-        currentUtterance = null;
+        _currentUtterance = null;
         onEnd();
       };
       const utterance = new SpeechSynthesisUtterance(text);
@@ -667,11 +667,11 @@
         finish();
       };
       window.speechSynthesis.cancel();
-      currentUtterance = utterance;
+      _currentUtterance = utterance;
       window.speechSynthesis.speak(utterance);
       return () => {
         done = true;
-        currentUtterance = null;
+        _currentUtterance = null;
         window.speechSynthesis.cancel();
       };
     }

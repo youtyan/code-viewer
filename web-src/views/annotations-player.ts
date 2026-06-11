@@ -49,14 +49,14 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
 
   // Keep a strong reference to the active utterance so Chrome does not
   // garbage-collect it mid-speech (which silently drops onend).
-  let currentUtterance: SpeechSynthesisUtterance | null = null;
+  let _currentUtterance: SpeechSynthesisUtterance | null = null;
 
   function speak(text: string, rate: number, onEnd: () => void): () => void {
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      currentUtterance = null;
+      _currentUtterance = null;
       onEnd();
     };
     const utterance = new SpeechSynthesisUtterance(text);
@@ -71,11 +71,11 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
       finish();
     };
     window.speechSynthesis.cancel();
-    currentUtterance = utterance;
+    _currentUtterance = utterance;
     window.speechSynthesis.speak(utterance);
     return () => {
       done = true;
-      currentUtterance = null;
+      _currentUtterance = null;
       window.speechSynthesis.cancel();
     };
   }
