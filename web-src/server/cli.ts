@@ -1,3 +1,10 @@
 #!/usr/bin/env node
 
-import "./preview";
+export {};
+
+if (process.argv[2] === "annotate") {
+  const { runAnnotateCli } = await import("./annotate-cli");
+  await runAnnotateCli(process.argv.slice(3));
+} else {
+  await import("./preview");
+}

@@ -3970,3 +3970,304 @@ body.gdp-file-detail-page #empty {
   font-style: italic;
   background: var(--bg-soft);
 }
+
+/* ---- Code annotations (AI walkthrough) ---- */
+#annotations-toggle {
+  position: relative;
+}
+#annotations-count {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--fg-onemphasis);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+#annotation-panel {
+  position: fixed;
+  right: 0;
+  top: var(--chrome-h);
+  bottom: 0;
+  width: min(380px, calc(100vw - 32px));
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow-md);
+}
+#annotation-panel[hidden],
+#annotation-detail[hidden] {
+  display: none;
+}
+/* Pages without the diff topbar start the panel right below the header. */
+body.gdp-repo-page #annotation-panel,
+body.gdp-file-detail-page #annotation-panel,
+body.gdp-help-page #annotation-panel {
+  top: var(--global-header-h);
+}
+/* Keep code readable next to the panel instead of underneath it. */
+body.annotation-panel-open #content {
+  margin-right: min(380px, calc(100vw - 32px));
+}
+.annotation-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.annotation-panel-head strong {
+  flex: 1;
+  font-size: 13px;
+}
+.annotation-follow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+#annotation-clear,
+#annotation-panel-close {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+#annotation-clear:hover,
+#annotation-panel-close:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+#annotation-sessions {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+}
+.annotation-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+.annotation-list-head strong {
+  font-size: 12px;
+}
+#annotation-list-count {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.annotation-empty {
+  color: var(--fg-subtle);
+  font-size: 12px;
+}
+.annotation-session {
+  margin-bottom: 14px;
+}
+.annotation-session-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.annotation-session-select {
+  flex: 1;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-session-select:hover {
+  background: var(--accent-subtle);
+}
+.annotation-session.active .annotation-session-select {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.annotation-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: annotation-step;
+}
+.annotation-entries li {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  border-radius: 6px;
+  counter-increment: annotation-step;
+}
+.annotation-entries li.active {
+  background: var(--accent-subtle);
+}
+.annotation-entry-open {
+  flex: 1;
+  display: block;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 5px 6px;
+  cursor: pointer;
+  color: inherit;
+  min-width: 0;
+}
+.annotation-entry-open::before {
+  content: counter(annotation-step) ". ";
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+.annotation-entry-location {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  word-break: break-all;
+}
+.annotation-entry-summary {
+  display: block;
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-delete {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 3px 6px;
+}
+.annotation-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+#annotation-detail {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 55%;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.annotation-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+}
+#annotation-detail-session {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#annotation-detail-step {
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+#annotation-detail-prev,
+#annotation-detail-next,
+#annotation-detail-close {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+#annotation-detail-prev:disabled,
+#annotation-detail-next:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+#annotation-detail-location {
+  display: block;
+  padding: 0 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+#annotation-detail-location:hover {
+  text-decoration: underline;
+}
+#annotation-detail-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 12px 12px;
+  font-size: 13px;
+}
+#annotation-detail-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.annotation-detail-title {
+  display: block;
+  margin-bottom: 6px;
+}
+/* Inline annotation rows under the annotated code line */
+.gdp-annotation-row td {
+  padding: 0;
+  background: var(--bg-soft);
+}
+.gdp-annotation-inline {
+  margin: 4px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+    Arial, sans-serif;
+  line-height: 1.5;
+  white-space: normal;
+  word-break: break-word;
+}
+.gdp-annotation-row.active .gdp-annotation-inline {
+  border-left-color: var(--attn);
+  box-shadow: 0 0 0 1px var(--attn) inset;
+}
+.gdp-annotation-inline-title {
+  display: block;
+  margin-bottom: 6px;
+}
+.gdp-annotation-inline-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.gdp-annotation-inline-body p:last-child {
+  margin-bottom: 0;
+}
