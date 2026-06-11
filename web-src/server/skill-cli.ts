@@ -5,28 +5,65 @@ import { ROOT } from "./root";
 
 const SKILL_NAME = "code-viewer-annotate";
 
+// Skill directory name per agent. SKILL.md is an open standard; only the
+// install location differs. "agents" is the vendor-neutral .agents/skills.
+export const AGENT_SKILL_DIRS = {
+  claude: ".claude",
+  codex: ".codex",
+  gemini: ".gemini",
+  cursor: ".cursor",
+  agents: ".agents",
+} as const;
+
+export type AgentName = keyof typeof AGENT_SKILL_DIRS;
+
+const AGENT_NAMES = Object.keys(AGENT_SKILL_DIRS) as AgentName[];
+
 export const SKILL_HELP = `code-viewer skill — manage the bundled agent skill
 
 Usage:
-  code-viewer skill install [--global] [--cwd <dir>]
+  code-viewer skill install [--agent <list>] [--global] [--cwd <dir>]
 
-Installs the ${SKILL_NAME} skill (SKILL.md for AI coding agents) into
-.claude/skills/ of the current project, or into ~/.claude/skills/ with
---global. Running install again overwrites the files, so the same command
-also updates an existing installation.
+Installs the ${SKILL_NAME} skill (SKILL.md for AI coding agents) into the
+skills directory of each selected agent in the current project, or into the
+home directory equivalents with --global. Running install again overwrites
+the files, so the same command also updates an existing installation.
 
 Options:
-  --global      install into ~/.claude/skills/ instead of the project
-  --cwd <dir>   project directory to install into (ignored with --global)
+  --agent <list>  comma separated agents: ${AGENT_NAMES.join(", ")}, or all
+                  (default: claude)
+  --global        install into the home directory (~/.claude/skills/ etc)
+  --cwd <dir>     project directory to install into (ignored with --global)
+
+Examples:
+  code-viewer skill install
+  code-viewer skill install --agent claude,codex,gemini
+  code-viewer skill install --agent all --global
 `;
 
 export type SkillArgs =
   | { kind: "help" }
-  | { kind: "install"; global: boolean; cwd?: string };
+  | { kind: "install"; agents: AgentName[]; global: boolean; cwd?: string };
 
 export type SkillParseResult =
   | { ok: true; args: SkillArgs }
   | { ok: false; error: string };
+
+function parseAgentList(value: string): AgentName[] | null {
+  if (value === "all") return [...AGENT_NAMES];
+  const names = value
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (names.length === 0) return null;
+  const result: AgentName[] = [];
+  for (const name of names) {
+    if (!(name in AGENT_SKILL_DIRS)) return null;
+    const agent = name as AgentName;
+    if (!result.includes(agent)) result.push(agent);
+  }
+  return result;
+}
 
 export function parseSkillArgs(argv: string[]): SkillParseResult {
   if (argv.length === 0 || argv.includes("--help") || argv[0] === "help") {
@@ -38,6 +75,7 @@ export function parseSkillArgs(argv: string[]): SkillParseResult {
   }
   let global = false;
   let cwd: string | undefined;
+  let agents: AgentName[] = ["claude"];
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--global") {
@@ -45,11 +83,22 @@ export function parseSkillArgs(argv: string[]): SkillParseResult {
     } else if (arg === "--cwd") {
       cwd = rest[++i];
       if (!cwd) return { ok: false, error: "--cwd requires a directory" };
+    } else if (arg === "--agent") {
+      const value = rest[++i];
+      if (!value) return { ok: false, error: "--agent requires a list" };
+      const parsed = parseAgentList(value);
+      if (!parsed) {
+        return {
+          ok: false,
+          error: `unknown agent in "${value}" (valid: ${AGENT_NAMES.join(", ")}, all)`,
+        };
+      }
+      agents = parsed;
     } else {
       return { ok: false, error: `unknown option: ${arg}` };
     }
   }
-  return { ok: true, args: { kind: "install", global, cwd } };
+  return { ok: true, args: { kind: "install", agents, global, cwd } };
 }
 
 export type InstallSkillDeps = {
@@ -59,11 +108,18 @@ export type InstallSkillDeps = {
 };
 
 export type InstallSkillResult =
-  | { ok: true; action: "installed" | "updated"; target: string }
+  | {
+      ok: true;
+      results: {
+        agent: AgentName;
+        action: "installed" | "updated";
+        target: string;
+      }[];
+    }
   | { ok: false; error: string };
 
 export function installSkill(
-  args: { global: boolean; cwd?: string },
+  args: { agents: AgentName[]; global: boolean; cwd?: string },
   deps: InstallSkillDeps,
 ): InstallSkillResult {
   if (!existsSync(join(deps.sourceDir, "SKILL.md"))) {
@@ -75,15 +131,23 @@ export function installSkill(
   const base = args.global
     ? deps.homeDir
     : resolve(args.cwd ?? deps.projectDir);
-  const target = join(base, ".claude", "skills", SKILL_NAME);
-  const action = existsSync(target) ? "updated" : "installed";
-  try {
-    mkdirSync(target, { recursive: true });
-    cpSync(deps.sourceDir, target, { recursive: true });
-  } catch (error) {
-    return { ok: false, error: String(error) };
+  const results: {
+    agent: AgentName;
+    action: "installed" | "updated";
+    target: string;
+  }[] = [];
+  for (const agent of args.agents) {
+    const target = join(base, AGENT_SKILL_DIRS[agent], "skills", SKILL_NAME);
+    const action = existsSync(target) ? "updated" : "installed";
+    try {
+      mkdirSync(target, { recursive: true });
+      cpSync(deps.sourceDir, target, { recursive: true });
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+    results.push({ agent, action, target });
   }
-  return { ok: true, action, target };
+  return { ok: true, results };
 }
 
 export function runSkillCli(argv: string[]): void {
@@ -106,8 +170,10 @@ export function runSkillCli(argv: string[]): void {
     console.error(result.error);
     process.exit(1);
   }
-  console.log(`${result.action}: ${result.target}`);
-  if (result.action === "installed") {
+  for (const entry of result.results) {
+    console.log(`${entry.action} (${entry.agent}): ${entry.target}`);
+  }
+  if (result.results.some((entry) => entry.action === "installed")) {
     console.log("Re-run the same command anytime to update the skill.");
   }
 }
