@@ -811,21 +811,39 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     deps.setRange(from, to);
     deps.syncRefInputs();
     deps.cancelActiveSourceLoad("navigation");
-    deps.setRoute({ screen: "diff", range, path: entry.path, line });
-    deps.setPageMode();
-    // Reload the diff only when the rendered cards cannot be reused: a full
-    // load() tears down and rebuilds every file card, which is the heaviest
-    // re-render an entry click can trigger.
-    const hasDiffCards = !!document.querySelector(
-      ".gdp-file-shell:not(.gdp-standalone-source)",
-    );
-    if (rangeChanged || !deps.getFiles().length || !hasDiffCards) {
+    // Decide the destination (diff card vs standalone source) BEFORE any
+    // route or page-mode switch: flipping to the diff route first and then
+    // correcting to the file route repaints the whole layout and makes the
+    // header menu flicker on every annotation step.
+    const needDiffLoad = rangeChanged || !deps.getFiles().length;
+    if (needDiffLoad) {
+      // The file list for this range is unknown — the diff has to load.
+      deps.setRoute({ screen: "diff", range, path: entry.path, line });
+      deps.setPageMode();
       deps.removeStandaloneSource();
       await deps.load();
       if (stale()) return;
     }
 
     if (deps.getFiles().some((f) => f.path === entry.path)) {
+      // Replace the route pushed for the load above instead of stacking a
+      // second history entry for the same step.
+      deps.setRoute(
+        { screen: "diff", range, path: entry.path, line },
+        needDiffLoad,
+      );
+      deps.setPageMode();
+      // Reload the diff only when the rendered cards cannot be reused: a
+      // full load() tears down and rebuilds every file card, which is the
+      // heaviest re-render an entry click can trigger.
+      const hasDiffCards = !!document.querySelector(
+        ".gdp-file-shell:not(.gdp-standalone-source)",
+      );
+      if (!hasDiffCards) {
+        deps.removeStandaloneSource();
+        await deps.load();
+        if (stale()) return;
+      }
       deps.removeStandaloneSource();
       deps.scrollToFile(entry.path, line);
       await expandAnnotationContext(entry);
@@ -847,7 +865,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         !!card.querySelector(".gdp-source-table");
       deps.setRoute(
         { screen: "file", path: entry.path, ref, view: "blob", line, range },
-        true,
+        needDiffLoad,
       );
       deps.setPageMode();
       if (reusable && card) {
