@@ -7341,6 +7341,13 @@ ${frontmatter.yaml}
         sessionEl.className = "annotation-session";
         sessionEl.dataset.sessionId = session.id;
         sessionEl.classList.toggle("active", session.id === activeSessionId);
+        sessionEl.addEventListener("click", (event) => {
+          const target = event.target;
+          if (target.closest("button, a, input"))
+            return;
+          if (session.id !== activeSessionId)
+            setActiveSession(session.id);
+        });
         const head = document.createElement("div");
         head.className = "annotation-session-head";
         const title = document.createElement("button");
@@ -7574,20 +7581,18 @@ ${frontmatter.yaml}
         deps.scrollDiffElementIntoView(inlineRow, "center");
     }
     function stepAnnotation(direction) {
-      if (!activeAnnotationId) {
-        const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId) ?? ANNOTATIONS.sessions[0];
-        const entries = session?.entries ?? [];
-        const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
-        if (entry)
-          openAnnotationEntry(entry.id);
+      const found = activeAnnotationId ? findAnnotation(activeAnnotationId) : null;
+      if (found && (!activeSessionId || found.session.id === activeSessionId)) {
+        const next = found.session.entries[found.index + direction];
+        if (next)
+          openAnnotationEntry(next.id);
         return;
       }
-      const found = findAnnotation(activeAnnotationId);
-      if (!found)
-        return;
-      const next = found.session.entries[found.index + direction];
-      if (next)
-        openAnnotationEntry(next.id);
+      const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId) ?? ANNOTATIONS.sessions[0];
+      const entries = session?.entries ?? [];
+      const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
+      if (entry)
+        openAnnotationEntry(entry.id);
     }
     function handleSse(raw) {
       let event = null;
