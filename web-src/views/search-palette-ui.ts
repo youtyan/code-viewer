@@ -15,8 +15,15 @@ import {
   rankPathMatches,
 } from "../core/fuzzy-search";
 import type { AppRoute } from "../core/routes";
-import { limitPaletteResults, movePaletteSelection } from "../core/search-palette";
-import type { FileMeta, FileSearchListResponse, GrepResponse } from "../core/types";
+import {
+  limitPaletteResults,
+  movePaletteSelection,
+} from "../core/search-palette";
+import type {
+  FileMeta,
+  FileSearchListResponse,
+  GrepResponse,
+} from "../core/types";
 
 export type SearchPaletteDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;

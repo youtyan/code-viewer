@@ -3,7 +3,10 @@
 // sidebar. Extracted from app.ts as a deps-injected factory.
 
 import { normalizeNewDirectoryName } from "../core/directory-name";
-import { fileNameClipboardText, filePathClipboardText } from "../core/file-path-copy";
+import {
+  fileNameClipboardText,
+  filePathClipboardText,
+} from "../core/file-path-copy";
 import {
   COPY_16_PATHS,
   FILE_16_PATH,

@@ -5,7 +5,11 @@
 // "expand all context", and trailing expansion below the last hunk.
 
 import { GdpExpandLogic } from "../core/expand-logic";
-import type { DiffCardElement, FileMeta, FileRangeResponse } from "../core/types";
+import type {
+  DiffCardElement,
+  FileMeta,
+  FileRangeResponse,
+} from "../core/types";
 
 type HunkInfo = {
   oldStart: number;
