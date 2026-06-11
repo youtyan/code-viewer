@@ -11,7 +11,8 @@ import { sourceFixture } from "./source-fixture";
 // Source view rendering (tabs/preview wiring) lives in source-view.ts.
 const app = sourceFixture(
   readFileSync(new URL("../app.ts", import.meta.url), "utf8") +
-    readFileSync(new URL("../source-view.ts", import.meta.url), "utf8"),
+    readFileSync(new URL("../source-view.ts", import.meta.url), "utf8") +
+    readFileSync(new URL("../repo-view.ts", import.meta.url), "utf8"),
 );
 const markdown = sourceFixture(
   readFileSync(new URL("../markdown-preview.ts", import.meta.url), "utf8"),
