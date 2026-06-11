@@ -213,6 +213,7 @@
     const pathList = Array.isArray(paths) ? paths : [paths];
     return '<svg class="octicon ' + className + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + pathList.map((path) => `<path fill="currentColor" d="${path}"></path>`).join("") + "</svg>";
   }
+  var PENCIL_16_PATH = "M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.609Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z";
 
   // web-src/core/keymap.ts
   var DEFAULT_KEY_BINDINGS = [
@@ -6765,6 +6766,7 @@ ${frontmatter.yaml}
         heading2.textContent = entry.title;
         box.appendChild(heading2);
       }
+      box.appendChild(createCopyRefButton(entry, "gdp-annotation-inline-copy"));
       const markdown = document.createElement("div");
       markdown.className = "gdp-annotation-inline-body";
       ensureMarkdownHighlighter();
@@ -6787,6 +6789,30 @@ ${frontmatter.yaml}
       const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
       return rows.find((row) => deps.diffRowLineNumber(row) === line) || null;
     }
+    function siblingSideRow(row) {
+      const side = row.closest(".d2h-file-side-diff");
+      if (!side)
+        return null;
+      const sides = side.parentElement?.querySelectorAll(".d2h-file-side-diff");
+      const other = sides ? [...sides].find((s2) => s2 !== side) : null;
+      if (!other)
+        return null;
+      const rows = (tbody) => tbody ? [...tbody.children].filter((r2) => !r2.classList.contains("gdp-annotation-row")) : [];
+      const mine = rows(row.parentElement);
+      const theirs = rows(other.querySelector("table.d2h-diff-table tbody"));
+      const index = mine.indexOf(row);
+      return theirs[index] || null;
+    }
+    function buildInlineSpacerRow(entry, colSpan) {
+      const tr = document.createElement("tr");
+      tr.className = "gdp-annotation-row gdp-annotation-spacer";
+      tr.dataset.annotationId = entry.id;
+      const td = document.createElement("td");
+      td.colSpan = colSpan;
+      td.appendChild(document.createElement("div"));
+      tr.appendChild(td);
+      return tr;
+    }
     function applyInlineAnnotations() {
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.remove();
@@ -6802,8 +6828,24 @@ ${frontmatter.yaml}
         while (anchor.nextElementSibling?.classList.contains("gdp-annotation-row"))
           anchor = anchor.nextElementSibling;
         anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
+        const sibling = siblingSideRow(target);
+        if (sibling) {
+          let sibAnchor = sibling;
+          while (sibAnchor.nextElementSibling?.classList.contains("gdp-annotation-row"))
+            sibAnchor = sibAnchor.nextElementSibling;
+          sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
+        }
       }
       syncInlineAnnotationWidths();
+    }
+    function syncInlineAnnotationSpacerHeights() {
+      document.querySelectorAll(".gdp-annotation-spacer").forEach((spacer) => {
+        const id = spacer.dataset.annotationId || "";
+        const note = document.querySelector(`.gdp-annotation-row:not(.gdp-annotation-spacer)[data-annotation-id="${CSS.escape(id)}"]`);
+        const div = spacer.querySelector("td > div");
+        if (note && div)
+          div.style.height = `${note.offsetHeight}px`;
+      });
     }
     function syncInlineAnnotationWidths() {
       document.querySelectorAll(".gdp-annotation-inline").forEach((box) => {
@@ -6818,6 +6860,7 @@ ${frontmatter.yaml}
         const width = scroller?.clientWidth || 0;
         box.style.width = width > 32 ? `${width - 16}px` : "";
       });
+      syncInlineAnnotationSpacerHeights();
     }
     window.addEventListener("resize", syncInlineAnnotationWidths);
     function syncSessionUrl() {
@@ -6859,6 +6902,48 @@ ${frontmatter.yaml}
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.classList.toggle("active", row.dataset.annotationId === activeAnnotationId);
       });
+    }
+    function annotationAiReference(session, entry) {
+      const location2 = annotationLocationLabel(entry);
+      const lineArg = entry.line ? ` --line ${entry.line.start === entry.line.end ? entry.line.start : `${entry.line.start}-${entry.line.end}`}` : "";
+      return [
+        `[code-viewer annotation ${entry.id}] ${location2}`,
+        `session: ${session.id} "${session.title}"`,
+        `この注釈を読む:   code-viewer annotate list --json`,
+        `この注釈を修正:   code-viewer annotate edit ${entry.id} --body "<markdown>"  (長文は --body-file / stdin)`,
+        `追加回答を投稿:   code-viewer annotate add --session ${session.id} --file ${entry.path}${lineArg} --body "<markdown>"`
+      ].join(`
+`);
+    }
+    function annotationIconButton(icon, paths, title) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "annotation-icon-btn";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = iconSvg(icon, paths);
+      return button;
+    }
+    function createCopyRefButton(entry, extraClass = "") {
+      const button = annotationIconButton("octicon-copy", COPY_16_PATHS, "copy AI-ready reference (id / location / edit commands)");
+      if (extraClass)
+        button.classList.add(extraClass);
+      button.addEventListener("click", async (e2) => {
+        e2.stopPropagation();
+        const found = findAnnotation(entry.id);
+        if (!found)
+          return;
+        try {
+          await navigator.clipboard.writeText(annotationAiReference(found.session, found.entry));
+          button.classList.add("copied");
+        } catch {
+          button.classList.add("failed");
+        }
+        setTimeout(() => {
+          button.classList.remove("copied", "failed");
+        }, 1200);
+      });
+      return button;
     }
     function findAnnotation(entryId) {
       for (const session of ANNOTATIONS.sessions) {
@@ -6947,18 +7032,24 @@ ${frontmatter.yaml}
         title.addEventListener("click", () => {
           setActiveSession(session.id === activeSessionId ? null : session.id);
         });
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "annotation-delete";
-        del.title = "delete session";
-        del.setAttribute("aria-label", `delete session ${session.title}`);
-        del.textContent = "delete";
+        const rename = annotationIconButton("octicon-pencil", PENCIL_16_PATH, `rename session ${session.title}`);
+        rename.addEventListener("click", () => {
+          const next = window.prompt("Rename session", session.title);
+          if (next === null || !next.trim())
+            return;
+          postAnnotationAction({
+            action: "rename",
+            id: session.id,
+            title: next
+          });
+        });
+        const del = annotationIconButton("octicon-trash", TRASH_16_PATH, `delete session ${session.title}`);
         del.addEventListener("click", () => {
           if (!window.confirm(`Delete annotation session "${session.title}"?`))
             return;
           postAnnotationAction({ action: "delete", id: session.id });
         });
-        head.append(title, time, del);
+        head.append(title, time, rename, del);
         sessionEl.appendChild(head);
         const list2 = document.createElement("ol");
         list2.className = "annotation-entries";
@@ -6979,12 +7070,7 @@ ${frontmatter.yaml}
           open.addEventListener("click", () => {
             openAnnotationEntry(entry.id);
           });
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.className = "annotation-delete";
-          remove.title = "delete annotation";
-          remove.setAttribute("aria-label", `delete annotation for ${annotationLocationLabel(entry)}`);
-          remove.textContent = "delete";
+          const remove = annotationIconButton("octicon-trash", TRASH_16_PATH, `delete annotation for ${annotationLocationLabel(entry)}`);
           remove.addEventListener("click", () => {
             if (!window.confirm(`Delete annotation for ${annotationLocationLabel(entry)}?`))
               return;
@@ -7029,6 +7115,19 @@ ${frontmatter.yaml}
       ensureMarkdownHighlighter();
       markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
       body.appendChild(markdown);
+      const head = annotationDetail.querySelector(".annotation-detail-head");
+      head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+        el.remove();
+      });
+      const copyRef = createCopyRefButton(entry, "annotation-detail-head-action");
+      const edit = annotationIconButton("octicon-pencil", PENCIL_16_PATH, "edit this annotation");
+      edit.classList.add("annotation-detail-head-action");
+      edit.addEventListener("click", () => {
+        openAnnotationEditForm(entry);
+      });
+      const prev = $("#annotation-detail-prev");
+      head?.insertBefore(copyRef, prev);
+      head?.insertBefore(edit, prev);
       $("#annotation-detail-prev").disabled = index <= 0;
       $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
       annotationDetail.hidden = false;
@@ -7046,6 +7145,52 @@ ${frontmatter.yaml}
       });
     }
     let openEntrySeq = 0;
+    function openAnnotationEditForm(entry) {
+      const body = $("#annotation-detail-body");
+      body.replaceChildren();
+      const form = document.createElement("div");
+      form.className = "annotation-edit-form";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "title (optional)";
+      titleInput.value = entry.title || "";
+      const bodyInput = document.createElement("textarea");
+      bodyInput.value = entry.body;
+      bodyInput.rows = 10;
+      const buttons = document.createElement("div");
+      buttons.className = "annotation-edit-buttons";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "gdp-btn gdp-btn-sm";
+      save.textContent = "Save";
+      save.addEventListener("click", async () => {
+        if (!bodyInput.value.trim())
+          return;
+        save.disabled = true;
+        await postAnnotationAction({
+          action: "update",
+          id: entry.id,
+          title: titleInput.value,
+          body: bodyInput.value
+        });
+        const found = findAnnotation(entry.id);
+        if (found)
+          showAnnotationDetail(found.session, found.entry, found.index);
+      });
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "gdp-btn gdp-btn-sm";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        const found = findAnnotation(entry.id);
+        if (found)
+          showAnnotationDetail(found.session, found.entry, found.index);
+      });
+      buttons.append(save, cancel);
+      form.append(titleInput, bodyInput, buttons);
+      body.appendChild(form);
+      bodyInput.focus();
+    }
     async function openAnnotationEntry(entryId) {
       const seq = ++openEntrySeq;
       const stale = () => seq !== openEntrySeq;

@@ -10,8 +10,10 @@ import {
   loadAnnotationsState,
   normalizeAnnotationsState,
   parseAnnotationLine,
+  renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
+  updateAnnotationEntry,
 } from "../server/annotations";
 
 const NOW = "2026-06-10T00:00:00.000Z";
@@ -219,5 +221,71 @@ describe("annotations persistence", () => {
       start: 2,
       end: 2,
     });
+  });
+});
+
+describe("renameAnnotationSession / updateAnnotationEntry", () => {
+  function seeded() {
+    const started = startAnnotationSession(
+      emptyAnnotationsState(),
+      "Original title",
+      NOW,
+      "s-seed",
+    );
+    const added = addAnnotationEntry(
+      started.state,
+      { session_id: "s-seed", path: "src/app.ts", body: "first body" },
+      NOW,
+      () => "a-seed",
+    );
+    if (added.ok === false) throw new Error(added.error);
+    return added.state;
+  }
+
+  test("rename changes the session title and rejects unknown ids", () => {
+    const state = seeded();
+    const renamed = renameAnnotationSession(state, "s-seed", "  New name  ");
+    expect(renamed.renamed).toBe(true);
+    expect(renamed.state.sessions[0].title).toBe("New name");
+    expect(renameAnnotationSession(state, "s-missing", "x").renamed).toBe(
+      false,
+    );
+  });
+
+  test("rename falls back to the default title for empty input", () => {
+    const renamed = renameAnnotationSession(seeded(), "s-seed", "   ");
+    expect(renamed.state.sessions[0].title).toBe("Untitled session");
+  });
+
+  test("update patches title and body in place", () => {
+    const state = seeded();
+    const updated = updateAnnotationEntry(state, "a-seed", {
+      title: "fixed",
+      body: "corrected body",
+    });
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.entry.title).toBe("fixed");
+      expect(updated.entry.body).toBe("corrected body");
+      expect(updated.state.sessions[0].entries[0].body).toBe("corrected body");
+    }
+  });
+
+  test("update clears the title when blank and keeps body when omitted", () => {
+    const state = seeded();
+    const updated = updateAnnotationEntry(state, "a-seed", { title: "  " });
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.entry.title ?? null).toBeNull();
+      expect(updated.entry.body).toBe("first body");
+    }
+  });
+
+  test("update rejects empty bodies and unknown ids", () => {
+    const state = seeded();
+    expect(updateAnnotationEntry(state, "a-seed", { body: "  " }).ok).toBe(
+      false,
+    );
+    expect(updateAnnotationEntry(state, "a-x", { body: "ok" }).ok).toBe(false);
   });
 });

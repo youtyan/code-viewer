@@ -161,7 +161,7 @@ export type AnnotationsState = {
 };
 
 export type AnnotationSseEvent = {
-  kind: "start" | "add" | "delete" | "clear";
+  kind: "start" | "add" | "delete" | "clear" | "update";
   session_id?: string;
   entry_id?: string;
 };

@@ -13,6 +13,12 @@
 // link or reload restores the same inline walkthrough.
 
 import {
+  COPY_16_PATHS,
+  iconSvg,
+  PENCIL_16_PATH,
+  TRASH_16_PATH,
+} from "../core/icons";
+import {
   loadMarkdownHighlighter,
   renderMarkdownHtml,
   type ShikiHighlighter,
@@ -162,6 +168,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       heading.textContent = entry.title;
       box.appendChild(heading);
     }
+    box.appendChild(createCopyRefButton(entry, "gdp-annotation-inline-copy"));
     const markdown = document.createElement("div");
     markdown.className = "gdp-annotation-inline-body";
     ensureMarkdownHighlighter();
@@ -195,6 +202,44 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     return rows.find((row) => deps.diffRowLineNumber(row) === line) || null;
   }
 
+  // Side-by-side diffs render LEFT and RIGHT as two separate tables whose
+  // rows are paired by index. Inserting the note into one side only would
+  // shear the panes apart, so the opposite side gets a spacer row that is
+  // kept at exactly the same height.
+  function siblingSideRow(
+    row: HTMLTableRowElement,
+  ): HTMLTableRowElement | null {
+    const side = row.closest(".d2h-file-side-diff");
+    if (!side) return null;
+    const sides = side.parentElement?.querySelectorAll(".d2h-file-side-diff");
+    const other = sides ? [...sides].find((s) => s !== side) : null;
+    if (!other) return null;
+    const rows = (tbody: Element | null) =>
+      tbody
+        ? [...tbody.children].filter(
+            (r) => !r.classList.contains("gdp-annotation-row"),
+          )
+        : [];
+    const mine = rows(row.parentElement);
+    const theirs = rows(other.querySelector("table.d2h-diff-table tbody"));
+    const index = mine.indexOf(row);
+    return (theirs[index] as HTMLTableRowElement) || null;
+  }
+
+  function buildInlineSpacerRow(
+    entry: AnnotationEntry,
+    colSpan: number,
+  ): HTMLTableRowElement {
+    const tr = document.createElement("tr");
+    tr.className = "gdp-annotation-row gdp-annotation-spacer";
+    tr.dataset.annotationId = entry.id;
+    const td = document.createElement("td");
+    td.colSpan = colSpan;
+    td.appendChild(document.createElement("div"));
+    tr.appendChild(td);
+    return tr;
+  }
+
   function applyInlineAnnotations() {
     document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
       row.remove();
@@ -213,6 +258,15 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       )
         anchor = anchor.nextElementSibling as HTMLTableRowElement;
       anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
+      const sibling = siblingSideRow(target);
+      if (sibling) {
+        let sibAnchor: HTMLTableRowElement = sibling;
+        while (
+          sibAnchor.nextElementSibling?.classList.contains("gdp-annotation-row")
+        )
+          sibAnchor = sibAnchor.nextElementSibling as HTMLTableRowElement;
+        sibAnchor.after(buildInlineSpacerRow(entry, sibling.cells.length));
+      }
     }
     syncInlineAnnotationWidths();
   }
@@ -221,6 +275,19 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   // horizontally). A colspan cell stretches to the full table width, so the
   // note box gets an explicit width matching the visible scroll area and
   // sticks to its left edge while the code scrolls underneath.
+  function syncInlineAnnotationSpacerHeights() {
+    document
+      .querySelectorAll<HTMLElement>(".gdp-annotation-spacer")
+      .forEach((spacer) => {
+        const id = spacer.dataset.annotationId || "";
+        const note = document.querySelector<HTMLElement>(
+          `.gdp-annotation-row:not(.gdp-annotation-spacer)[data-annotation-id="${CSS.escape(id)}"]`,
+        );
+        const div = spacer.querySelector<HTMLElement>("td > div");
+        if (note && div) div.style.height = `${note.offsetHeight}px`;
+      });
+  }
+
   function syncInlineAnnotationWidths() {
     document
       .querySelectorAll<HTMLElement>(".gdp-annotation-inline")
@@ -241,6 +308,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         // 16px = the 8px horizontal margins on both sides of the box.
         box.style.width = width > 32 ? `${width - 16}px` : "";
       });
+    syncInlineAnnotationSpacerHeights();
   }
   window.addEventListener("resize", syncInlineAnnotationWidths);
 
@@ -295,6 +363,68 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
           row.dataset.annotationId === activeAnnotationId,
         );
       });
+  }
+
+  // A paste-ready reference for AI agents: identifies the annotation and
+  // shows the exact CLI commands to revise it or post a follow-up answer.
+  function annotationAiReference(
+    session: AnnotationSession,
+    entry: AnnotationEntry,
+  ): string {
+    const location = annotationLocationLabel(entry);
+    const lineArg = entry.line
+      ? ` --line ${entry.line.start === entry.line.end ? entry.line.start : `${entry.line.start}-${entry.line.end}`}`
+      : "";
+    return [
+      `[code-viewer annotation ${entry.id}] ${location}`,
+      `session: ${session.id} "${session.title}"`,
+      `この注釈を読む:   code-viewer annotate list --json`,
+      `この注釈を修正:   code-viewer annotate edit ${entry.id} --body "<markdown>"  (長文は --body-file / stdin)`,
+      `追加回答を投稿:   code-viewer annotate add --session ${session.id} --file ${entry.path}${lineArg} --body "<markdown>"`,
+    ].join("\n");
+  }
+
+  function annotationIconButton(
+    icon: string,
+    paths: string | string[],
+    title: string,
+  ): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "annotation-icon-btn";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.innerHTML = iconSvg(icon, paths);
+    return button;
+  }
+
+  function createCopyRefButton(
+    entry: AnnotationEntry,
+    extraClass = "",
+  ): HTMLButtonElement {
+    const button = annotationIconButton(
+      "octicon-copy",
+      COPY_16_PATHS,
+      "copy AI-ready reference (id / location / edit commands)",
+    );
+    if (extraClass) button.classList.add(extraClass);
+    button.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const found = findAnnotation(entry.id);
+      if (!found) return;
+      try {
+        await navigator.clipboard.writeText(
+          annotationAiReference(found.session, found.entry),
+        );
+        button.classList.add("copied");
+      } catch {
+        button.classList.add("failed");
+      }
+      setTimeout(() => {
+        button.classList.remove("copied", "failed");
+      }, 1200);
+    });
+    return button;
   }
 
   function findAnnotation(entryId: string): {
@@ -406,18 +536,31 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         // the active session clears the inline walkthrough.
         setActiveSession(session.id === activeSessionId ? null : session.id);
       });
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "annotation-delete";
-      del.title = "delete session";
-      del.setAttribute("aria-label", `delete session ${session.title}`);
-      del.textContent = "delete";
+      const rename = annotationIconButton(
+        "octicon-pencil",
+        PENCIL_16_PATH,
+        `rename session ${session.title}`,
+      );
+      rename.addEventListener("click", () => {
+        const next = window.prompt("Rename session", session.title);
+        if (next === null || !next.trim()) return;
+        void postAnnotationAction({
+          action: "rename",
+          id: session.id,
+          title: next,
+        });
+      });
+      const del = annotationIconButton(
+        "octicon-trash",
+        TRASH_16_PATH,
+        `delete session ${session.title}`,
+      );
       del.addEventListener("click", () => {
         if (!window.confirm(`Delete annotation session "${session.title}"?`))
           return;
         void postAnnotationAction({ action: "delete", id: session.id });
       });
-      head.append(title, time, del);
+      head.append(title, time, rename, del);
       sessionEl.appendChild(head);
 
       const list = document.createElement("ol");
@@ -439,15 +582,11 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         open.addEventListener("click", () => {
           void openAnnotationEntry(entry.id);
         });
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "annotation-delete";
-        remove.title = "delete annotation";
-        remove.setAttribute(
-          "aria-label",
+        const remove = annotationIconButton(
+          "octicon-trash",
+          TRASH_16_PATH,
           `delete annotation for ${annotationLocationLabel(entry)}`,
         );
-        remove.textContent = "delete";
         remove.addEventListener("click", () => {
           if (
             !window.confirm(
@@ -519,6 +658,25 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       mdHighlighter,
     );
     body.appendChild(markdown);
+    const head = annotationDetail.querySelector<HTMLElement>(
+      ".annotation-detail-head",
+    );
+    head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+      el.remove();
+    });
+    const copyRef = createCopyRefButton(entry, "annotation-detail-head-action");
+    const edit = annotationIconButton(
+      "octicon-pencil",
+      PENCIL_16_PATH,
+      "edit this annotation",
+    );
+    edit.classList.add("annotation-detail-head-action");
+    edit.addEventListener("click", () => {
+      openAnnotationEditForm(entry);
+    });
+    const prev = $("#annotation-detail-prev");
+    head?.insertBefore(copyRef, prev);
+    head?.insertBefore(edit, prev);
     $<HTMLButtonElement>("#annotation-detail-prev").disabled = index <= 0;
     $<HTMLButtonElement>("#annotation-detail-next").disabled =
       index >= session.entries.length - 1;
@@ -547,6 +705,52 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   // Rapid clicks must not interleave: each open invalidates the previous
   // one at every await point, so the LAST click always wins.
   let openEntrySeq = 0;
+
+  // Inline edit form inside the detail dock: fix up an annotation the AI
+  // got wrong without leaving the browser.
+  function openAnnotationEditForm(entry: AnnotationEntry) {
+    const body = $("#annotation-detail-body");
+    body.replaceChildren();
+    const form = document.createElement("div");
+    form.className = "annotation-edit-form";
+    const titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.placeholder = "title (optional)";
+    titleInput.value = entry.title || "";
+    const bodyInput = document.createElement("textarea");
+    bodyInput.value = entry.body;
+    bodyInput.rows = 10;
+    const buttons = document.createElement("div");
+    buttons.className = "annotation-edit-buttons";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "gdp-btn gdp-btn-sm";
+    save.textContent = "Save";
+    save.addEventListener("click", async () => {
+      if (!bodyInput.value.trim()) return;
+      save.disabled = true;
+      await postAnnotationAction({
+        action: "update",
+        id: entry.id,
+        title: titleInput.value,
+        body: bodyInput.value,
+      });
+      const found = findAnnotation(entry.id);
+      if (found) showAnnotationDetail(found.session, found.entry, found.index);
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "gdp-btn gdp-btn-sm";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => {
+      const found = findAnnotation(entry.id);
+      if (found) showAnnotationDetail(found.session, found.entry, found.index);
+    });
+    buttons.append(save, cancel);
+    form.append(titleInput, bodyInput, buttons);
+    body.appendChild(form);
+    bodyInput.focus();
+  }
 
   async function openAnnotationEntry(entryId: string): Promise<void> {
     const seq = ++openEntrySeq;
