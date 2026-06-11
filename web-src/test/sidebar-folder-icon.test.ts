@@ -5,7 +5,8 @@ import { sourceFixture } from "./source-fixture";
 // Octicon path data lives in icons.ts; app.ts wires it into the sidebar.
 const appSource = sourceFixture(
   readFileSync("web-src/app.ts", "utf8") +
-    readFileSync("web-src/icons.ts", "utf8"),
+    readFileSync("web-src/icons.ts", "utf8") +
+    readFileSync("web-src/sidebar.ts", "utf8"),
 );
 const style = readFileSync("web/style.css", "utf8");
 
