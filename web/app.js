@@ -6728,6 +6728,7 @@ ${frontmatter.yaml}
       document.body.classList.toggle("annotation-panel-open", open);
       if (open)
         annotationPanelDismissed = false;
+      localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
     }
     function annotationLineTarget(entry) {
       if (!entry.line)
@@ -7198,9 +7199,9 @@ ${frontmatter.yaml}
       if (!found)
         return;
       const { session, entry, index } = found;
-      showAnnotationDetail(session, entry, index);
       const sessionChanged = activeSessionId !== session.id;
       activeSessionId = session.id;
+      showAnnotationDetail(session, entry, index);
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
       const range = { from, to };
@@ -7270,6 +7271,8 @@ ${frontmatter.yaml}
         }
       });
     }
+    if (localStorage.getItem("gdp:annotation-panel") === "1")
+      setAnnotationPanelOpen(true);
     $("#annotations-toggle").addEventListener("click", () => {
       setAnnotationPanelOpen(annotationPanel.hidden);
       if (!annotationPanel.hidden)
