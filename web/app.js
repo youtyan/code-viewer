@@ -16616,6 +16616,8 @@ ${frontmatter.yaml}
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
       document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
       document.body.classList.toggle("gdp-history-page", STATE.route.screen === "history");
+      placeSidebarToggle();
+      syncSidebarHeaderHeight();
       const historyPanel = $("#history-panel");
       if (historyPanel)
         historyPanel.hidden = STATE.route.screen !== "history";

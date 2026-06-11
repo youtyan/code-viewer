@@ -1538,6 +1538,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-history-page",
       STATE.route.screen === "history",
     );
+    // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
+    // pages expect it back outside as the sticky sibling. Re-place it every
+    // time the page classes flip, or SPA navigation away from the repo view
+    // keeps the repo-only DOM layout until a full reload.
+    placeSidebarToggle();
+    syncSidebarHeaderHeight();
     const historyPanel = $("#history-panel");
     if (historyPanel) historyPanel.hidden = STATE.route.screen !== "history";
     if (STATE.route.screen === "history") {
