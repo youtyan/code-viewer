@@ -207,23 +207,15 @@ describe("annotation-player-core", () => {
       { entryId: "a", speechText: "Hello" },
       { entryId: "b", speechText: "World" },
     ];
-    let pendingEnd: (() => void) | null = null;
     const deps: PlayerCoreDeps = {
       items: () => items,
-      jump: (id) => {
+      jump: () => {
         callCount++;
         if (callCount === 1) return Promise.reject(new Error("jump failed"));
         return Promise.resolve();
       },
-      speak: (text, rate, onEnd) => {
-        pendingEnd = onEnd;
-        return () => {
-          pendingEnd = null;
-        };
-      },
-      schedule: (ms, cb) => {
-        return () => {};
-      },
+      speak: () => () => {},
+      schedule: () => () => {},
       displayMs: () => 3000,
       speechAvailable: () => true,
       onStateChange: (s) => states.push(s),
