@@ -26,6 +26,7 @@
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
+      <a class="app-menu-item" data-route="history" href="/history">History</a>
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
@@ -76,6 +77,19 @@
 
   <div id="load-bar" aria-hidden="true"></div>
 
+  <aside id="history-panel" aria-label="Commit history" hidden>
+    <div class="history-head">
+      <span class="history-title">Commits</span>
+      <span data-ref-selector-mount data-ref-id="history-ref" data-placeholder="ref..." data-title="history ref"></span>
+    </div>
+    <div class="history-filter-wrap">
+      <input id="history-filter" type="search" placeholder="filter commits… (message, sha, author:name, path:file)" autocomplete="off" />
+    </div>
+    <div id="history-banner" class="history-banner" role="status" hidden></div>
+    <ol id="history-list"></ol>
+    <div id="history-sentinel" aria-hidden="true"></div>
+    <div id="history-status" class="history-status" role="status" hidden></div>
+  </aside>
   <aside id="sidebar">
     <div class="sb-head">
       <span class="sb-title">Files</span>
@@ -180,6 +194,15 @@
   </aside>
 
   <main id="content">
+    <section id="history-commit-info" hidden aria-label="Selected commit">
+      <div class="hci-head">
+        <span id="hci-sha" class="hci-sha"></span>
+        <span id="hci-author" class="hci-author"></span>
+        <span id="hci-date" class="hci-date"></span>
+      </div>
+      <h2 id="hci-subject" class="hci-subject"></h2>
+      <pre id="hci-body" class="hci-body" hidden></pre>
+    </section>
     <div id="empty" class="empty hidden">
       <div class="emoji">✨</div>
       <h2>No changes</h2>

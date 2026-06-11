@@ -438,6 +438,15 @@
           lang: params.get("lang") || "en",
           section: params.get("section") || "keybindings"
         };
+      case "/history": {
+        const commit = params.get("commit") || "";
+        return {
+          screen: "history",
+          ref: params.get("ref") || "HEAD",
+          ...commit ? { commit } : {},
+          range
+        };
+      }
       default:
         return {
           screen: "unknown",
@@ -474,6 +483,15 @@
           params.set("section", route.section);
         const qs = params.toString();
         return `/help${qs ? `?${qs}` : ""}`;
+      }
+      case "history": {
+        const params = new URLSearchParams;
+        if (route.ref && route.ref !== "HEAD")
+          params.set("ref", route.ref);
+        if (route.commit)
+          params.set("commit", route.commit);
+        const qs = params.toString();
+        return `/history${qs ? `?${qs}` : ""}`;
       }
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
@@ -9013,6 +9031,356 @@ ${frontmatter.yaml}
     return { renderHelpPage };
   }
 
+  // web-src/core/history.ts
+  var EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+  var HISTORY_PAGE_SIZE = 50;
+  var HISTORY_AUTO_LOAD_MAX_PAGES = 20;
+  function commitDiffRange(commit) {
+    return { from: commit.parents[0] || EMPTY_TREE_SHA, to: commit.sha };
+  }
+  function shouldContinueAutoLoad(state) {
+    if (state.found)
+      return false;
+    if (!state.hasMore)
+      return false;
+    return state.pagesLoaded < HISTORY_AUTO_LOAD_MAX_PAGES;
+  }
+  var MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  function historyGroupLabel(whenIso, now) {
+    const t2 = Date.parse(whenIso);
+    if (!Number.isFinite(t2))
+      return "Unknown date";
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (t2 >= dayStart)
+      return "Today";
+    if (t2 >= dayStart - DAY_MS)
+      return "Yesterday";
+    if (t2 >= dayStart - 6 * DAY_MS)
+      return "This week";
+    const d2 = new Date(t2);
+    if (d2.getFullYear() === now.getFullYear() && d2.getMonth() === now.getMonth())
+      return "This month";
+    return `${MONTH_NAMES[d2.getMonth()]} ${d2.getFullYear()}`;
+  }
+
+  // web-src/views/history-view.ts
+  function createHistoryView(deps) {
+    const panel = deps.$("#history-panel");
+    const list2 = deps.$("#history-list");
+    const banner = deps.$("#history-banner");
+    const statusEl = deps.$("#history-status");
+    const sentinel = deps.$("#history-sentinel");
+    let ref = "HEAD";
+    let commits = [];
+    let hasMore = false;
+    let loading = false;
+    let generation = 0;
+    let selectedSha = "";
+    let query = "";
+    function setBanner(message) {
+      banner.textContent = message;
+      banner.hidden = !message;
+    }
+    function setStatusText(message) {
+      statusEl.textContent = message;
+      statusEl.hidden = !message;
+    }
+    function relativeWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const sec = Math.round((Date.now() - t2) / 1000);
+      if (sec < 60)
+        return "just now";
+      const min = Math.round(sec / 60);
+      if (min < 60)
+        return `${min}m ago`;
+      const hour = Math.round(min / 60);
+      if (hour < 24)
+        return `${hour}h ago`;
+      const day = Math.round(hour / 24);
+      if (day < 30)
+        return `${day}d ago`;
+      return iso.slice(0, 10);
+    }
+    function fetchPage(skip) {
+      const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` + (query ? `&q=${encodeURIComponent(query)}` : "");
+      return deps.trackLoad(fetch(url).then(async (r2) => {
+        if (!r2.ok)
+          throw new Error(await r2.text());
+        return await r2.json();
+      })).catch((err) => {
+        setBanner(err instanceof Error ? err.message : "failed to load log");
+        return null;
+      });
+    }
+    function commitRow(commit) {
+      const active = commit.sha === selectedSha ? " active" : "";
+      return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` + `</span>` + `</li>`;
+    }
+    function renderList() {
+      const now = new Date;
+      const html = [];
+      let lastGroup = "";
+      for (const commit of commits) {
+        const group = historyGroupLabel(commit.when, now);
+        if (group !== lastGroup) {
+          html.push(`<li class="history-group" aria-hidden="true">${deps.escapeHtml(group)}</li>`);
+          lastGroup = group;
+        }
+        html.push(commitRow(commit));
+      }
+      list2.innerHTML = html.join("");
+      setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
+    }
+    function updateCommitInfo(commit) {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      if (!commit) {
+        info.hidden = true;
+        return;
+      }
+      const set2 = (sel, text2) => {
+        const el = info.querySelector(sel);
+        if (el)
+          el.textContent = text2;
+      };
+      set2(".hci-sha", commit.sha);
+      set2(".hci-author", commit.author);
+      const t2 = Date.parse(commit.when);
+      set2(".hci-date", Number.isFinite(t2) ? new Date(t2).toLocaleString() : commit.when);
+      set2(".hci-subject", commit.subject);
+      const body = info.querySelector(".hci-body");
+      if (body) {
+        body.textContent = commit.body;
+        body.hidden = !commit.body;
+      }
+      info.hidden = false;
+    }
+    function updateActiveRow() {
+      list2.querySelectorAll(".history-item").forEach((row) => {
+        row.classList.toggle("active", row.dataset.sha === selectedSha);
+      });
+    }
+    let inFlight = null;
+    function loadNextPage() {
+      if (inFlight)
+        return inFlight;
+      const started = doLoadNextPage().finally(() => {
+        if (inFlight === started)
+          inFlight = null;
+      });
+      inFlight = started;
+      return started;
+    }
+    async function doLoadNextPage() {
+      loading = true;
+      const gen = generation;
+      setStatusText("loading...");
+      const page = await fetchPage(commits.length);
+      if (gen !== generation)
+        return false;
+      loading = false;
+      if (!page) {
+        setStatusText("");
+        return false;
+      }
+      commits = commits.concat(page.commits);
+      hasMore = page.hasMore;
+      renderList();
+      return page.commits.length > 0;
+    }
+    async function selectCommit(commit, options = {}) {
+      const gen = generation;
+      selectedSha = commit.sha;
+      updateActiveRow();
+      updateCommitInfo(commit);
+      if (gen !== generation)
+        return;
+      if (options.updateUrl !== false) {
+        const range = commitDiffRange(commit);
+        deps.setRoute({ screen: "history", ref, commit: commit.sha, range }, true);
+      }
+      if (gen !== generation)
+        return;
+      await deps.applyCommitRange(commitDiffRange(commit));
+      if (gen !== generation)
+        return;
+    }
+    let lookupFailed = false;
+    async function fetchSingleCommit(sha) {
+      const url = `/_log?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
+      lookupFailed = false;
+      try {
+        const res = await deps.trackLoad(fetch(url).then(async (r2) => {
+          if (r2.status === 400)
+            return null;
+          if (!r2.ok)
+            throw new Error(await r2.text());
+          return await r2.json();
+        }));
+        return res?.commits[0] || null;
+      } catch {
+        lookupFailed = true;
+        return null;
+      }
+    }
+    async function resolveDeepLink(sha) {
+      const gen = generation;
+      let pagesLoaded = 0;
+      if (commits.length === 0) {
+        await loadNextPage();
+        if (gen !== generation)
+          return;
+        pagesLoaded = 1;
+      } else {
+        pagesLoaded = 1;
+      }
+      for (;; ) {
+        const found = commits.find((c2) => c2.sha.startsWith(sha));
+        if (found) {
+          await selectCommit(found, { updateUrl: false });
+          scrollToSelected();
+          return;
+        }
+        if (!shouldContinueAutoLoad({ pagesLoaded, found: false, hasMore }))
+          break;
+        const got = await loadNextPage();
+        if (gen !== generation)
+          return;
+        pagesLoaded++;
+        if (!got && !hasMore)
+          break;
+      }
+      const single = await fetchSingleCommit(sha);
+      if (gen !== generation)
+        return;
+      if (!single) {
+        setBanner(lookupFailed ? `failed to load commit: ${sha}` : `commit not found: ${sha}`);
+        updateCommitInfo(null);
+        deps.showEmptyDiffPane();
+        return;
+      }
+      setBanner(`showing commit outside the loaded ${ref} log`);
+      commits = [single, ...commits];
+      renderList();
+      await selectCommit(single, { updateUrl: false });
+      scrollToSelected();
+    }
+    function scrollToSelected() {
+      list2.querySelector(`.history-item[data-sha="${CSS.escape(selectedSha)}"]`)?.scrollIntoView({ block: "center" });
+    }
+    let entering = Promise.resolve();
+    function enterHistory(force) {
+      entering = entering.then(() => doEnterHistory(force === true)).catch(() => {});
+      return entering;
+    }
+    async function doEnterHistory(force = false) {
+      const route = deps.getRoute();
+      if (route.screen !== "history")
+        return;
+      const nextRef = route.ref || "HEAD";
+      const refChanged = nextRef !== ref;
+      if (refChanged || force || commits.length === 0) {
+        generation++;
+        ref = nextRef;
+        commits = [];
+        hasMore = false;
+        loading = false;
+        inFlight = null;
+        selectedSha = "";
+        setBanner("");
+        updateCommitInfo(null);
+        renderList();
+        await loadNextPage();
+      }
+      const route2 = deps.getRoute();
+      if (route2.screen !== "history")
+        return;
+      if (route2.commit) {
+        await resolveDeepLink(route2.commit);
+      } else {
+        selectedSha = "";
+        updateActiveRow();
+        updateCommitInfo(null);
+        deps.showEmptyDiffPane();
+      }
+    }
+    function onRefPicked(nextRef) {
+      const value = nextRef && nextRef !== "worktree" ? nextRef : "HEAD";
+      deps.setRoute({
+        screen: "history",
+        ref: value,
+        range: { from: "HEAD", to: "worktree" }
+      }, false);
+      enterHistory(true);
+    }
+    list2.addEventListener("click", (e2) => {
+      const row = e2.target.closest(".history-item");
+      if (!row?.dataset.sha)
+        return;
+      const commit = commits.find((c2) => c2.sha === row.dataset.sha);
+      if (commit)
+        selectCommit(commit);
+    });
+    function applyFilter(next) {
+      const value = next.trim();
+      if (value === query)
+        return;
+      query = value;
+      generation++;
+      commits = [];
+      hasMore = false;
+      loading = false;
+      inFlight = null;
+      setBanner("");
+      renderList();
+      loadNextPage();
+    }
+    const filterInput = document.querySelector("#history-filter");
+    let filterTimer = null;
+    filterInput?.addEventListener("input", () => {
+      if (filterTimer)
+        clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        filterTimer = null;
+        applyFilter(filterInput.value);
+      }, 250);
+    });
+    filterInput?.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape" && filterInput.value) {
+        filterInput.value = "";
+        applyFilter("");
+        e2.stopPropagation();
+      }
+    });
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting))
+        return;
+      if (deps.getRoute().screen !== "history")
+        return;
+      if (hasMore && !loading)
+        loadNextPage();
+    }, { root: panel, rootMargin: "200px" });
+    observer.observe(sentinel);
+    return { enterHistory, onRefPicked };
+  }
+
   // web-src/views/hunk-expand.ts
   function createHunkExpand(deps) {
     function parseHunkHeader(text2) {
@@ -9631,7 +9999,7 @@ ${frontmatter.yaml}
       const target = e2.target;
       if (popover.contains(target))
         return;
-      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target")
+      if (target.id === "ref-from" || target.id === "ref-to" || target.id === "repo-ref" || target.id === "repo-target" || target.id === "history-ref")
         return;
       closePopover();
     });
@@ -15239,6 +15607,15 @@ ${frontmatter.yaml}
       document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
       document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
+      document.body.classList.toggle("gdp-history-page", STATE.route.screen === "history");
+      const historyPanel = $("#history-panel");
+      if (historyPanel)
+        historyPanel.hidden = STATE.route.screen !== "history";
+      if (STATE.route.screen === "history") {
+        const historyRefInput = $("#history-ref");
+        if (historyRefInput)
+          historyRefInput.value = STATE.route.ref || "HEAD";
+      }
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
     }
     function syncHeaderMenu() {
@@ -15257,6 +15634,13 @@ ${frontmatter.yaml}
         }
         if (link2.dataset.route === "diff") {
           link2.href = buildRoute({ screen: "diff", range: currentRange() });
+        }
+        if (link2.dataset.route === "history") {
+          link2.href = buildRoute({
+            screen: "history",
+            ref: "HEAD",
+            range: currentRange()
+          });
         }
         if (link2.dataset.route === "help") {
           link2.href = buildRoute({
@@ -15747,6 +16131,18 @@ ${frontmatter.yaml}
       }
       if (STATE.route.screen === "repo")
         return loadRepo();
+      {
+        const empty = $("#empty");
+        if (empty) {
+          const onHistory = STATE.route.screen === "history";
+          const h2 = empty.querySelector("h2");
+          if (h2)
+            h2.textContent = onHistory ? "Empty diff" : "No changes";
+          const p2 = empty.querySelector("p");
+          if (p2)
+            p2.textContent = onHistory ? "This commit has no changes against its first parent." : "The working tree is clean against this ref.";
+        }
+      }
       setStatus("refreshing");
       const params = new URLSearchParams;
       if (STATE.ignoreWs)
@@ -15772,6 +16168,9 @@ ${frontmatter.yaml}
       else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
         setStatus("live");
         applySourceRouteToShell();
+      } else if (STATE.route.screen === "history") {
+        setStatus("live");
+        HISTORY_VIEW.enterHistory();
       } else
         load();
     });
@@ -15801,12 +16200,42 @@ ${frontmatter.yaml}
         renderHelpPage();
       } else {
         setRoute({ screen: "diff", range }, true);
+        setPageMode();
         load();
       }
     }
     syncRefInputs();
     syncHeaderMenu();
-    createRefPicker({
+    const HISTORY_VIEW = createHistoryView({
+      $,
+      escapeHtml: escapeHtml2,
+      getRoute: () => STATE.route,
+      setRoute,
+      applyCommitRange: (range) => {
+        STATE.from = range.from;
+        STATE.to = range.to;
+        syncRefInputs();
+        return load();
+      },
+      showEmptyDiffPane: () => {
+        const diff = $("#diff");
+        if (diff)
+          diff.innerHTML = "";
+        const empty = $("#empty");
+        if (empty) {
+          empty.classList.remove("hidden");
+          const h2 = empty.querySelector("h2");
+          if (h2)
+            h2.textContent = "No commit selected";
+          const p2 = empty.querySelector("p");
+          if (p2)
+            p2.textContent = "Select a commit from the list to see its changes.";
+        }
+        setStatus("live");
+      },
+      trackLoad
+    });
+    const REF_PICKER = createRefPicker({
       $,
       escapeHtml: escapeHtml2,
       currentRange,
@@ -15818,6 +16247,13 @@ ${frontmatter.yaml}
       getRepoRef: () => STATE.repoRef,
       getRoute: () => STATE.route
     });
+    if (REF_PICKER) {
+      const historyRefInput = document.querySelector("#history-ref");
+      if (historyRefInput) {
+        historyRefInput.value = "HEAD";
+        REF_PICKER.wireRefSelectorInput(historyRefInput, (ref) => HISTORY_VIEW.onRefPicked(ref));
+      }
+    }
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
     function applyRouteFromLocation() {
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
@@ -15841,6 +16277,13 @@ ${frontmatter.yaml}
         setPageMode();
         removeStandaloneSource();
         loadRepo();
+        return;
+      }
+      if (STATE.route.screen === "history") {
+        cancelActiveSourceLoad("navigation");
+        setPageMode();
+        removeStandaloneSource();
+        HISTORY_VIEW.enterHistory();
         return;
       }
       if (STATE.route.screen !== "file") {
