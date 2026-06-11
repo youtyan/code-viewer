@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { parseAnnotationLine } from "./annotations";
 import * as git from "./git";
+import { spawnDetached } from "./runtime";
 import { readServerRegistry } from "./server-registry";
 
 export type AnnotateCommand =
@@ -41,8 +42,9 @@ export type AnnotateParseResult =
 export const ANNOTATE_HELP = `code-viewer annotate — attach explanations to code locations
 
 The annotations show up live in the code-viewer browser UI and are stored
-in <repo>/.code-viewer/annotations.json. A code-viewer server must be
-running for the same repository.
+in <repo>/.code-viewer/annotations.json. A running code-viewer server for
+the repository is reused when one exists; otherwise one is started
+automatically and its URL is printed to stderr.
 
 Usage:
   code-viewer annotate start [--title <text>]
@@ -203,15 +205,55 @@ function resolveRepoRoot(cwdOption: string | undefined): string {
   }
 }
 
-function discoverServerUrl(root: string, override?: string): string {
-  if (override) return override.replace(/\/+$/, "");
-  const entry = readServerRegistry(root);
-  if (entry) return entry.url.replace(/\/+$/, "");
+async function serverReachable(serverUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${serverUrl}/_annotations`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Reuse a running server for this repository when one is registered and
+// reachable; otherwise start a detached one and wait for it to register.
+async function ensureServerUrl(
+  root: string,
+  override?: string,
+): Promise<string> {
+  if (override) {
+    const url = override.replace(/\/+$/, "");
+    if (await serverReachable(url)) return url;
+    console.error(`could not reach the code-viewer server at ${url}.`);
+    process.exit(1);
+  }
+  const registered = readServerRegistry(root);
+  if (registered) {
+    const url = registered.url.replace(/\/+$/, "");
+    if (await serverReachable(url)) return url;
+  }
+  const stalePid = registered?.pid || 0;
+  spawnDetached([process.execPath, process.argv[1], "--cwd", root]);
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    await sleep(250);
+    const entry = readServerRegistry(root);
+    if (!entry || entry.pid === stalePid) continue;
+    const url = entry.url.replace(/\/+$/, "");
+    if (await serverReachable(url)) {
+      console.error(`started code-viewer server at ${url}/`);
+      return url;
+    }
+  }
   console.error(
-    "no running code-viewer server found for this repository.\n" +
-      `Start one first (from ${root}):\n` +
-      "  code-viewer\n" +
-      "or pass --server <url> explicitly.",
+    "failed to start a code-viewer server for this repository.\n" +
+      `Start one manually (from ${root}):\n` +
+      "  code-viewer",
   );
   process.exit(1);
 }
@@ -238,10 +280,7 @@ async function request(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    console.error(
-      `could not reach the code-viewer server at ${serverUrl}.\n` +
-        "Start one first with: code-viewer",
-    );
+    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
     process.exit(1);
   }
   if (!res.ok) {
@@ -286,7 +325,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   const root = resolveRepoRoot(cwd);
-  const serverUrl = discoverServerUrl(root, server);
+  const serverUrl = await ensureServerUrl(root, server);
 
   if (command.kind === "start") {
     const result = (await request(serverUrl, "POST", {
