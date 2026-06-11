@@ -13,6 +13,8 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Open files directly from the repository or diff view, including large generated files.
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot be rendered.
+- Switch the viewer UI between English and Japanese from Viewer Settings.
+- Read the built-in Help page for repository browsing, diffs, annotations, agent skills, and shortcuts.
 - Open repository folders in the OS file manager from localhost-only actions.
 - Upload files into worktree folders when upload is explicitly enabled.
 
@@ -63,6 +65,11 @@ npx @youtyan/code-viewer --staged
 code-viewer HEAD~1 HEAD
 code-viewer --cwd /path/to/repo --staged
 ```
+
+Open **Viewer Settings** in the header to change display options such as
+theme, layout, sidebar mode, font sizes, and UI language. The language setting
+translates the viewer chrome itself, including the Help page, settings labels,
+sidebars, history controls, and annotation panel labels.
 
 ## Repository View
 
@@ -149,6 +156,10 @@ than the current directory, or `--server <url>` to target a specific server.
 `add` appends to the most recent session (creating one when none exists);
 run `annotate start` again to begin a new session, or pass `--session <id>`
 to target a specific one.
+
+The in-app Help page includes a dedicated annotations guide for AI agents,
+covering when to start a session, how to choose focused line ranges, how to
+write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
