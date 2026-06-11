@@ -1528,6 +1528,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "annotation-next" || action === "annotation-previous") {
       ANNOTATIONS_UI?.stepAnnotation(action === "annotation-next" ? 1 : -1);
+      // Hand focus to the code surface so j / k scroll the jumped-to code
+      // instead of moving the sidebar selection (global scope).
+      scheduleMainSurfaceFocus();
       return true;
     }
     if (action === "start-g-sequence") {
