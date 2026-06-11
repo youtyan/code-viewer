@@ -18,6 +18,8 @@ export type AnnotationsPlayerDeps = {
   openAnnotationEntry(entryId: string): Promise<void>;
   setAnnotationPanelOpen(open: boolean): void;
   onAnnotationsChanged(cb: () => void): void;
+  onAnnotationOpened(cb: (entryId: string) => void): void;
+  getActiveAnnotationId(): string | null;
 };
 
 const MUTE_KEY = "gdp:annotation-muted";
@@ -99,9 +101,20 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
     nextBtn.disabled = state.status === "idle";
   }
 
+  // Distinguishes jumps the player itself triggers from user clicks on
+  // annotation rows; only the latter should move the playback position.
+  let selfJumping = false;
+
   const core = createAnnotationPlayerCore({
     items,
-    jump: (entryId) => deps.openAnnotationEntry(entryId),
+    jump: async (entryId) => {
+      selfJumping = true;
+      try {
+        await deps.openAnnotationEntry(entryId);
+      } finally {
+        selfJumping = false;
+      }
+    },
     speak,
     schedule: (ms, cb) => {
       const id = window.setTimeout(cb, ms);
@@ -130,13 +143,26 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
     core.setMuted(true);
   }
 
+  function entryIndexOf(entryId: string | null): number {
+    if (!entryId) return -1;
+    return deps
+      .getActiveSessionEntries()
+      .findIndex((entry) => entry.id === entryId);
+  }
+
   toggleBtn.addEventListener("click", () => {
     const state = core.getState();
     if (state.status === "playing") {
       core.pause();
     } else {
       deps.setAnnotationPanelOpen(true);
-      core.play();
+      if (state.status === "idle") {
+        // Start from the annotation currently shown, when there is one.
+        const activeIndex = entryIndexOf(deps.getActiveAnnotationId());
+        core.play(activeIndex >= 0 ? activeIndex : 0);
+      } else {
+        core.play();
+      }
     }
   });
   prevBtn.addEventListener("click", () => core.prev());
@@ -163,6 +189,15 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   deps.onAnnotationsChanged(() => {
     core.stop();
     syncVisibility();
+  });
+
+  // A user click on an annotation row moves the playback position there
+  // while playing or paused; jumps issued by the player are ignored.
+  deps.onAnnotationOpened((entryId) => {
+    if (selfJumping) return;
+    if (core.getState().status === "idle") return;
+    const index = entryIndexOf(entryId);
+    if (index >= 0) core.jumpTo(index);
   });
 
   syncVisibility();
