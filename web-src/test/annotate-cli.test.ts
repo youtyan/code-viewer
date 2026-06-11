@@ -11,6 +11,27 @@ describe("parseAnnotateArgs", () => {
     expect(help.ok && help.args.command.kind === "help").toBe(true);
   });
 
+  test("rename and edit parse ids and options", () => {
+    expect(parseAnnotateArgs(["rename", "s-1", "--title", "New"])).toEqual({
+      ok: true,
+      args: {
+        command: { kind: "rename", id: "s-1", title: "New" },
+        cwd: undefined,
+        server: undefined,
+      },
+    });
+    const edit = parseAnnotateArgs(["edit", "a-1", "--body", "fixed"]);
+    expect(
+      edit.ok &&
+        edit.args.command.kind === "edit" &&
+        edit.args.command.body === "fixed",
+    ).toBe(true);
+    expect(parseAnnotateArgs(["rename"]).ok).toBe(false);
+    expect(
+      parseAnnotateArgs(["edit", "a-1", "--body", "x", "--body-file", "y"]).ok,
+    ).toBe(false);
+  });
+
   test("agent-help prints the agent guide", () => {
     expect(parseAnnotateArgs(["agent-help"])).toEqual({
       ok: true,

@@ -35,8 +35,10 @@ import {
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
+  renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
+  updateAnnotationEntry,
 } from "./annotations";
 import {
   cacheFresh,
@@ -2178,7 +2180,7 @@ async function handleRestoreTrash(req: Request) {
 }
 
 function annotationSse(
-  kind: "start" | "add" | "delete" | "clear",
+  kind: "start" | "add" | "delete" | "clear" | "update",
   sessionId?: string,
   entryId?: string,
 ) {
@@ -2269,6 +2271,32 @@ async function handleAnnotations(req: Request) {
       annotationSse("delete");
     }
     return json({ ok: true, removed: result.removed });
+  }
+  if (action === "rename") {
+    const id = typeof body.id === "string" ? body.id : "";
+    const title = typeof body.title === "string" ? body.title : "";
+    if (!id) return text("invalid id", 400);
+    const result = renameAnnotationSession(
+      loadAnnotationsState(cwd),
+      id,
+      title,
+    );
+    if (!result.renamed) return text("session not found", 404);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", id);
+    return json({ ok: true });
+  }
+  if (action === "update") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return text("invalid id", 400);
+    const result = updateAnnotationEntry(loadAnnotationsState(cwd), id, {
+      title: typeof body.title === "string" ? body.title : undefined,
+      body: typeof body.body === "string" ? body.body : undefined,
+    });
+    if (result.ok === false) return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", undefined, id);
+    return json({ ok: true, entry: result.entry });
   }
   if (action === "clear") {
     saveAnnotationsState(cwd, emptyAnnotationsState());

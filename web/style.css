@@ -4101,7 +4101,7 @@ body.annotation-panel-open #content {
   white-space: nowrap;
 }
 .annotation-session-select:hover {
-  background: var(--accent-subtle);
+  background: var(--bg-soft);
 }
 .annotation-session-time {
   flex: none;
@@ -4112,6 +4112,7 @@ body.annotation-panel-open #content {
 .annotation-session.active .annotation-session-select {
   background: var(--accent-subtle);
   color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .annotation-entries {
   list-style: none;
@@ -4287,4 +4288,76 @@ body.annotation-panel-open #content {
 }
 .gdp-annotation-inline-body p:last-child {
   margin-bottom: 0;
+}
+
+/* Annotation editing + AI-ready reference copy */
+.gdp-annotation-inline {
+  position: sticky;
+}
+.annotation-icon-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.annotation-icon-btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+.annotation-icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.annotation-icon-btn.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.annotation-icon-btn.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.gdp-annotation-inline-copy {
+  float: right;
+  margin-left: 8px;
+}
+.annotation-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+.annotation-edit-form input,
+.annotation-edit-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.annotation-edit-form textarea {
+  flex: 1;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+.annotation-edit-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.gdp-annotation-spacer td {
+  padding: 0;
+  background: var(--bg-soft);
+}
+.gdp-annotation-spacer td > div {
+  height: 0;
 }
