@@ -106,10 +106,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let inFlight: Promise<boolean> | null = null;
   function loadNextPage(): Promise<boolean> {
     if (inFlight) return inFlight;
-    inFlight = doLoadNextPage().finally(() => {
-      inFlight = null;
+    const started: Promise<boolean> = doLoadNextPage().finally(() => {
+      // Only clear our own promise; a generation reset may have replaced it.
+      if (inFlight === started) inFlight = null;
     });
-    return inFlight;
+    inFlight = started;
+    return started;
   }
 
   async function doLoadNextPage(): Promise<boolean> {
@@ -246,6 +248,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       commits = [];
       hasMore = false;
       loading = false;
+      inFlight = null;
       selectedSha = "";
       setBanner("");
       renderList();
