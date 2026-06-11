@@ -1190,6 +1190,19 @@ function handleRefCommits(url: URL) {
   return json({ commits: git.refCommits(cwd, query, max) });
 }
 
+function handleLog(url: URL) {
+  const ref = url.searchParams.get("ref") || "HEAD";
+  const skip = Number(url.searchParams.get("skip") || "0");
+  const limit = Number(url.searchParams.get("limit") || "50");
+  const result = git.commitHistory(cwd, {
+    ref,
+    skip: Number.isFinite(skip) ? skip : 0,
+    limit: Number.isFinite(limit) ? limit : 50,
+  });
+  if (result.error) return text(result.error, 400);
+  return json({ commits: result.commits, hasMore: result.hasMore });
+}
+
 function handleFileDiff(url: URL) {
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
@@ -2349,6 +2362,7 @@ const server = await startServer({
     if (url.pathname === "/_files") return handleFiles(url);
     if (url.pathname === "/_grep") return handleGrep(url);
     if (url.pathname === "/_commits") return handleRefCommits(url);
+    if (url.pathname === "/_log") return handleLog(url);
     if (url.pathname === "/file_diff") return handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);
     if (url.pathname === "/_file") return handleRawFile(req, url);
