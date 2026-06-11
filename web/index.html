@@ -26,6 +26,7 @@
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
+      <a class="app-menu-item" data-route="history" href="/history">History</a>
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
@@ -76,6 +77,16 @@
 
   <div id="load-bar" aria-hidden="true"></div>
 
+  <aside id="history-panel" hidden>
+    <div class="history-head">
+      <span class="history-title">Commits</span>
+      <span data-ref-selector-mount data-ref-id="history-ref" data-placeholder="ref..." data-title="history ref"></span>
+    </div>
+    <div id="history-banner" class="history-banner" hidden></div>
+    <ol id="history-list"></ol>
+    <div id="history-sentinel" aria-hidden="true"></div>
+    <div id="history-status" class="history-status" hidden></div>
+  </aside>
   <aside id="sidebar">
     <div class="sb-head">
       <span class="sb-title">Files</span>
