@@ -47,6 +47,7 @@ import {
   helpLanguageFromRoute,
   helpSectionFromRoute,
 } from "./views/help-page";
+import { createHistoryView } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
@@ -1006,6 +1007,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-help-page",
       STATE.route.screen === "help",
     );
+    document.body.classList.toggle(
+      "gdp-history-page",
+      STATE.route.screen === "history",
+    );
+    const historyPanel = $("#history-panel");
+    if (historyPanel) historyPanel.hidden = STATE.route.screen !== "history";
+    if (STATE.route.screen === "history") {
+      const historyRefInput = $<HTMLInputElement>("#history-ref");
+      if (historyRefInput) historyRefInput.value = STATE.route.ref || "HEAD";
+    }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
   }
 
@@ -1033,6 +1044,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
         if (link.dataset.route === "diff") {
           link.href = buildRoute({ screen: "diff", range: currentRange() });
+        }
+        if (link.dataset.route === "history") {
+          link.href = buildRoute({
+            screen: "history",
+            ref: "HEAD",
+            range: currentRange(),
+          });
         }
         if (link.dataset.route === "help") {
           link.href = buildRoute({
@@ -1631,6 +1649,22 @@ window.GdpExpandLogic = GdpExpandLogic;
       return Promise.resolve();
     }
     if (STATE.route.screen === "repo") return loadRepo();
+    // The history screen rewrites the #empty heading/body for its
+    // no-commit-selected state; restore copy that matches the current screen
+    // so a clean worktree or an empty commit does not show stale text.
+    {
+      const empty = $("#empty");
+      if (empty) {
+        const onHistory = STATE.route.screen === "history";
+        const h2 = empty.querySelector("h2");
+        if (h2) h2.textContent = onHistory ? "Empty diff" : "No changes";
+        const p = empty.querySelector("p");
+        if (p)
+          p.textContent = onHistory
+            ? "This commit has no changes against its first parent."
+            : "The working tree is clean against this ref.";
+      }
+    }
     setStatus("refreshing");
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set("ignore_ws", "1");
@@ -1653,6 +1687,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
       setStatus("live");
       applySourceRouteToShell();
+    } else if (STATE.route.screen === "history") {
+      setStatus("live");
+      HISTORY_VIEW.enterHistory();
     } else load();
   });
 
@@ -1688,13 +1725,43 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderHelpPage();
     } else {
       setRoute({ screen: "diff", range }, true);
+      // Leaving the history screen here: drop its body class and panel layout.
+      setPageMode();
       load();
     }
   }
   syncRefInputs();
   syncHeaderMenu();
 
-  createRefPicker({
+  const HISTORY_VIEW = createHistoryView({
+    $,
+    escapeHtml,
+    getRoute: () => STATE.route,
+    setRoute,
+    applyCommitRange: (range) => {
+      STATE.from = range.from;
+      STATE.to = range.to;
+      syncRefInputs();
+      return load();
+    },
+    showEmptyDiffPane: () => {
+      const diff = $("#diff");
+      if (diff) diff.innerHTML = "";
+      const empty = $("#empty");
+      if (empty) {
+        empty.classList.remove("hidden");
+        const h2 = empty.querySelector("h2");
+        if (h2) h2.textContent = "No commit selected";
+        const p = empty.querySelector("p");
+        if (p)
+          p.textContent = "Select a commit from the list to see its changes.";
+      }
+      setStatus("live");
+    },
+    trackLoad,
+  });
+
+  const REF_PICKER = createRefPicker({
     $,
     escapeHtml,
     currentRange,
@@ -1706,6 +1773,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     getRepoRef: () => STATE.repoRef,
     getRoute: () => STATE.route,
   });
+  if (REF_PICKER) {
+    const historyRefInput =
+      document.querySelector<HTMLInputElement>("#history-ref");
+    if (historyRefInput) {
+      historyRefInput.value = "HEAD";
+      REF_PICKER.wireRefSelectorInput(historyRefInput, (ref) =>
+        HISTORY_VIEW.onRefPicked(ref),
+      );
+    }
+  }
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
   function applyRouteFromLocation() {
@@ -1737,6 +1814,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       setPageMode();
       removeStandaloneSource();
       loadRepo();
+      return;
+    }
+    if (STATE.route.screen === "history") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      HISTORY_VIEW.enterHistory();
       return;
     }
     if (STATE.route.screen !== "file") {

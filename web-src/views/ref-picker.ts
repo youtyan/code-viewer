@@ -328,7 +328,8 @@ export function createRefPicker(deps: RefPickerDeps) {
       target.id === "ref-from" ||
       target.id === "ref-to" ||
       target.id === "repo-ref" ||
-      target.id === "repo-target"
+      target.id === "repo-target" ||
+      target.id === "history-ref"
     )
       return;
     closePopover();

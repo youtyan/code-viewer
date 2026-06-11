@@ -232,6 +232,34 @@ describe("routes", () => {
     ).toBe(buildRoute(route));
   });
 
+  test("parses and builds history routes", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    expect(parseRoute("/history", "", fallback)).toEqual({
+      screen: "history",
+      ref: "HEAD",
+      range: fallback,
+    });
+    expect(
+      parseRoute("/history", "?ref=main&commit=abc1234", fallback),
+    ).toEqual({
+      screen: "history",
+      ref: "main",
+      commit: "abc1234",
+      range: fallback,
+    });
+    expect(
+      buildRoute({ screen: "history", ref: "HEAD", range: fallback }),
+    ).toBe("/history");
+    expect(
+      buildRoute({
+        screen: "history",
+        ref: "feature/x",
+        commit: "abc1234",
+        range: fallback,
+      }),
+    ).toBe("/history?ref=feature%2Fx&commit=abc1234");
+  });
+
   test("builds raw file API URLs from path and ref only", () => {
     expect(buildRawFileUrl({ path: "src/a.ts", ref: "worktree" })).toBe(
       "/_file?path=src%2Fa.ts&ref=worktree",
