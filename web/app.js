@@ -7239,6 +7239,216 @@ ${frontmatter.yaml}
     }));
   }
 
+  // web-src/help-page.ts
+  var HELP_LANGUAGES = ["en", "ja"];
+  var HELP_SECTIONS = ["keybindings"];
+  var HELP_CONTENT = {
+    en: {
+      languageLabel: "Language",
+      title: "Help",
+      sections: {
+        keybindings: {
+          nav: "Keybindings",
+          title: "Keyboard Shortcuts",
+          intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
+          groups: [
+            {
+              title: "Global",
+              rows: [
+                ["Ctrl+K", "Open file palette"],
+                ["Ctrl+G", "Open grep palette"],
+                ["/", "Focus file filter"],
+                ["t", "Toggle theme"]
+              ]
+            },
+            {
+              title: "Panels",
+              rows: [
+                ["Ctrl+H", "Focus sidebar"],
+                ["Ctrl+L", "Focus main panel"]
+              ]
+            },
+            {
+              title: "Sidebar",
+              rows: [
+                ["j / k", "Move selection down / up"],
+                ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
+                ["gg / Shift+G", "Move to top / bottom"],
+                ["Enter", "Open selected item"],
+                ["h / l", "Collapse / expand directory"]
+              ]
+            },
+            {
+              title: "Main Panel",
+              rows: [
+                ["j / k", "Move code cursor down / up"],
+                ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
+                ["gg / Shift+G", "Move code cursor to top / bottom"],
+                ["gp / gc", "Switch to Preview / Code tab"]
+              ]
+            }
+          ]
+        }
+      }
+    },
+    ja: {
+      languageLabel: "言語",
+      title: "ヘルプ",
+      sections: {
+        keybindings: {
+          nav: "キーバインド",
+          title: "キーバインド",
+          intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
+          groups: [
+            {
+              title: "グローバル",
+              rows: [
+                ["Ctrl+K", "ファイルパレットを開く"],
+                ["Ctrl+G", "grep パレットを開く"],
+                ["/", "ファイルフィルターへフォーカス"],
+                ["t", "テーマ切り替え"]
+              ]
+            },
+            {
+              title: "パネル",
+              rows: [
+                ["Ctrl+H", "サイドバーへフォーカス"],
+                ["Ctrl+L", "メインパネルへフォーカス"]
+              ]
+            },
+            {
+              title: "サイドバー",
+              rows: [
+                ["j / k", "選択を下 / 上へ移動"],
+                ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
+                ["gg / Shift+G", "先頭 / 末尾へ移動"],
+                ["Enter", "選択項目を開く"],
+                ["h / l", "ディレクトリを閉じる / 開く"]
+              ]
+            },
+            {
+              title: "メインパネル",
+              rows: [
+                ["j / k", "コードカーソルを下 / 上へ移動"],
+                ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
+                ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
+                ["gp / gc", "Preview / Code タブへ切り替え"]
+              ]
+            }
+          ]
+        }
+      }
+    }
+  };
+  function helpLanguageFromRoute(route) {
+    return route.screen === "help" && HELP_LANGUAGES.includes(route.lang) ? route.lang : "en";
+  }
+  function helpSectionFromRoute(route) {
+    return route.screen === "help" && HELP_SECTIONS.includes(route.section) ? route.section : "keybindings";
+  }
+  function createHelpPage(deps) {
+    function renderHelpPage() {
+      deps.cancelActiveSourceLoad("navigation");
+      deps.removeStandaloneSource();
+      deps.clearLoadQueue();
+      const target = deps.$("#diff");
+      const empty = deps.$("#empty");
+      empty.classList.add("hidden");
+      deps.$("#meta").textContent = "";
+      deps.$("#totals").textContent = "";
+      deps.$("#filelist").textContent = "";
+      const lang = helpLanguageFromRoute(deps.getRoute());
+      const section = helpSectionFromRoute(deps.getRoute());
+      const content = HELP_CONTENT[lang];
+      const sectionContent = content.sections[section];
+      const shell = document.createElement("section");
+      shell.className = "gdp-help-shell";
+      const header = document.createElement("header");
+      header.className = "gdp-help-header";
+      const title = document.createElement("h1");
+      title.textContent = content.title;
+      const langSelect = document.createElement("select");
+      langSelect.className = "gdp-help-language";
+      langSelect.setAttribute("aria-label", content.languageLabel);
+      HELP_LANGUAGES.forEach((optionLang) => {
+        const option = document.createElement("option");
+        option.value = optionLang;
+        option.textContent = optionLang.toUpperCase();
+        option.selected = optionLang === lang;
+        langSelect.appendChild(option);
+      });
+      langSelect.addEventListener("change", () => {
+        deps.setRoute({
+          screen: "help",
+          lang: langSelect.value,
+          section,
+          range: deps.currentRange()
+        });
+        deps.setPageMode();
+        renderHelpPage();
+        deps.syncHeaderMenu();
+      });
+      header.append(title, langSelect);
+      const layout = document.createElement("div");
+      layout.className = "gdp-help-layout";
+      const helpNav = document.createElement("nav");
+      helpNav.className = "gdp-help-nav";
+      HELP_SECTIONS.forEach((helpSection) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = helpSection === section ? "active" : "";
+        button.textContent = content.sections[helpSection].nav;
+        button.addEventListener("click", () => {
+          deps.setRoute({
+            screen: "help",
+            lang,
+            section: helpSection,
+            range: deps.currentRange()
+          });
+          renderHelpPage();
+          deps.syncHeaderMenu();
+        });
+        helpNav.appendChild(button);
+      });
+      const article = document.createElement("article");
+      article.className = "gdp-help-content";
+      const h2 = document.createElement("h2");
+      h2.textContent = sectionContent.title;
+      const intro = document.createElement("p");
+      intro.textContent = sectionContent.intro;
+      article.append(h2, intro);
+      sectionContent.groups.forEach((group) => {
+        const groupSection = document.createElement("section");
+        groupSection.className = "gdp-help-group";
+        const groupTitle = document.createElement("h3");
+        groupTitle.textContent = group.title;
+        const table2 = document.createElement("table");
+        group.rows.forEach(([keys, description]) => {
+          const tr = document.createElement("tr");
+          const keyCell = document.createElement("th");
+          keyCell.scope = "row";
+          keys.split(" / ").forEach((key, index) => {
+            if (index > 0)
+              keyCell.append(" / ");
+            const kbd = document.createElement("kbd");
+            kbd.textContent = key;
+            keyCell.appendChild(kbd);
+          });
+          const desc = document.createElement("td");
+          desc.textContent = description;
+          tr.append(keyCell, desc);
+          table2.appendChild(tr);
+        });
+        groupSection.append(groupTitle, table2);
+        article.appendChild(groupSection);
+      });
+      layout.append(helpNav, article);
+      shell.append(header, layout);
+      target.replaceChildren(shell);
+    }
+    return { renderHelpPage };
+  }
+
   // web-src/hunk-expand.ts
   function createHunkExpand(deps) {
     function parseHunkHeader(text2) {
@@ -7934,8 +8144,6 @@ ${frontmatter.yaml}
     let PENDING_G_UNTIL = 0;
     let SOURCE_CURSOR = null;
     const SOURCE_CURSOR_TOTALS = new Map;
-    const HELP_LANGUAGES = ["en", "ja"];
-    const HELP_SECTIONS = ["keybindings"];
     const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
     const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
@@ -7969,104 +8177,6 @@ ${frontmatter.yaml}
       "obj"
     ];
     const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
-    const HELP_CONTENT = {
-      en: {
-        languageLabel: "Language",
-        title: "Help",
-        sections: {
-          keybindings: {
-            nav: "Keybindings",
-            title: "Keyboard Shortcuts",
-            intro: "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
-            groups: [
-              {
-                title: "Global",
-                rows: [
-                  ["Ctrl+K", "Open file palette"],
-                  ["Ctrl+G", "Open grep palette"],
-                  ["/", "Focus file filter"],
-                  ["t", "Toggle theme"]
-                ]
-              },
-              {
-                title: "Panels",
-                rows: [
-                  ["Ctrl+H", "Focus sidebar"],
-                  ["Ctrl+L", "Focus main panel"]
-                ]
-              },
-              {
-                title: "Sidebar",
-                rows: [
-                  ["j / k", "Move selection down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                  ["gg / Shift+G", "Move to top / bottom"],
-                  ["Enter", "Open selected item"],
-                  ["h / l", "Collapse / expand directory"]
-                ]
-              },
-              {
-                title: "Main Panel",
-                rows: [
-                  ["j / k", "Move code cursor down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                  ["gg / Shift+G", "Move code cursor to top / bottom"],
-                  ["gp / gc", "Switch to Preview / Code tab"]
-                ]
-              }
-            ]
-          }
-        }
-      },
-      ja: {
-        languageLabel: "言語",
-        title: "ヘルプ",
-        sections: {
-          keybindings: {
-            nav: "キーバインド",
-            title: "キーバインド",
-            intro: "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
-            groups: [
-              {
-                title: "グローバル",
-                rows: [
-                  ["Ctrl+K", "ファイルパレットを開く"],
-                  ["Ctrl+G", "grep パレットを開く"],
-                  ["/", "ファイルフィルターへフォーカス"],
-                  ["t", "テーマ切り替え"]
-                ]
-              },
-              {
-                title: "パネル",
-                rows: [
-                  ["Ctrl+H", "サイドバーへフォーカス"],
-                  ["Ctrl+L", "メインパネルへフォーカス"]
-                ]
-              },
-              {
-                title: "サイドバー",
-                rows: [
-                  ["j / k", "選択を下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                  ["Enter", "選択項目を開く"],
-                  ["h / l", "ディレクトリを閉じる / 開く"]
-                ]
-              },
-              {
-                title: "メインパネル",
-                rows: [
-                  ["j / k", "コードカーソルを下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                  ["gp / gc", "Preview / Code タブへ切り替え"]
-                ]
-              }
-            ]
-          }
-        }
-      }
-    };
     function sourceLineScrollAmount() {
       const virtualRow = Array.from(document.querySelectorAll("#content .gdp-source-virtual-row")).find((item) => item.offsetParent !== null);
       if (virtualRow)
@@ -9798,12 +9908,6 @@ ${frontmatter.yaml}
     function repoFileTargetFromRoute() {
       return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
     }
-    function helpLanguageFromRoute() {
-      return STATE.route.screen === "help" && HELP_LANGUAGES.includes(STATE.route.lang) ? STATE.route.lang : "en";
-    }
-    function helpSectionFromRoute() {
-      return STATE.route.screen === "help" && HELP_SECTIONS.includes(STATE.route.section) ? STATE.route.section : "keybindings";
-    }
     let ANNOTATIONS_UI = null;
     function applyInlineAnnotations() {
       ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -9859,8 +9963,8 @@ ${frontmatter.yaml}
         if (link2.dataset.route === "help") {
           link2.href = buildRoute({
             screen: "help",
-            lang: helpLanguageFromRoute(),
-            section: helpSectionFromRoute(),
+            lang: helpLanguageFromRoute(STATE.route),
+            section: helpSectionFromRoute(STATE.route),
             range: currentRange()
           });
         }
@@ -9873,105 +9977,6 @@ ${frontmatter.yaml}
       document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
         el.remove();
       });
-    }
-    function renderHelpPage() {
-      cancelActiveSourceLoad("navigation");
-      removeStandaloneSource();
-      LOAD_QUEUE.length = 0;
-      const target = $("#diff");
-      const empty = $("#empty");
-      empty.classList.add("hidden");
-      $("#meta").textContent = "";
-      $("#totals").textContent = "";
-      $("#filelist").textContent = "";
-      const lang = helpLanguageFromRoute();
-      const section = helpSectionFromRoute();
-      const content = HELP_CONTENT[lang];
-      const sectionContent = content.sections[section];
-      const shell = document.createElement("section");
-      shell.className = "gdp-help-shell";
-      const header = document.createElement("header");
-      header.className = "gdp-help-header";
-      const title = document.createElement("h1");
-      title.textContent = content.title;
-      const langSelect = document.createElement("select");
-      langSelect.className = "gdp-help-language";
-      langSelect.setAttribute("aria-label", content.languageLabel);
-      HELP_LANGUAGES.forEach((optionLang) => {
-        const option = document.createElement("option");
-        option.value = optionLang;
-        option.textContent = optionLang.toUpperCase();
-        option.selected = optionLang === lang;
-        langSelect.appendChild(option);
-      });
-      langSelect.addEventListener("change", () => {
-        setRoute({
-          screen: "help",
-          lang: langSelect.value,
-          section,
-          range: currentRange()
-        });
-        setPageMode();
-        renderHelpPage();
-        syncHeaderMenu();
-      });
-      header.append(title, langSelect);
-      const layout = document.createElement("div");
-      layout.className = "gdp-help-layout";
-      const helpNav = document.createElement("nav");
-      helpNav.className = "gdp-help-nav";
-      HELP_SECTIONS.forEach((helpSection) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = helpSection === section ? "active" : "";
-        button.textContent = content.sections[helpSection].nav;
-        button.addEventListener("click", () => {
-          setRoute({
-            screen: "help",
-            lang,
-            section: helpSection,
-            range: currentRange()
-          });
-          renderHelpPage();
-          syncHeaderMenu();
-        });
-        helpNav.appendChild(button);
-      });
-      const article = document.createElement("article");
-      article.className = "gdp-help-content";
-      const h2 = document.createElement("h2");
-      h2.textContent = sectionContent.title;
-      const intro = document.createElement("p");
-      intro.textContent = sectionContent.intro;
-      article.append(h2, intro);
-      sectionContent.groups.forEach((group) => {
-        const groupSection = document.createElement("section");
-        groupSection.className = "gdp-help-group";
-        const groupTitle = document.createElement("h3");
-        groupTitle.textContent = group.title;
-        const table2 = document.createElement("table");
-        group.rows.forEach(([keys, description]) => {
-          const tr = document.createElement("tr");
-          const keyCell = document.createElement("th");
-          keyCell.scope = "row";
-          keys.split(" / ").forEach((key, index) => {
-            if (index > 0)
-              keyCell.append(" / ");
-            const kbd = document.createElement("kbd");
-            kbd.textContent = key;
-            keyCell.appendChild(kbd);
-          });
-          const desc = document.createElement("td");
-          desc.textContent = description;
-          tr.append(keyCell, desc);
-          table2.appendChild(tr);
-        });
-        groupSection.append(groupTitle, table2);
-        article.appendChild(groupSection);
-      });
-      layout.append(helpNav, article);
-      shell.append(header, layout);
-      target.replaceChildren(shell);
     }
     function renderShell(meta) {
       const newFiles = meta.files || [];
@@ -11157,6 +11162,19 @@ ${frontmatter.yaml}
       appendStatSquaresToHeader(card, file);
       setupHunkExpand(card, file);
     }
+    const { renderHelpPage } = createHelpPage({
+      $,
+      getRoute: () => STATE.route,
+      setRoute,
+      setPageMode,
+      cancelActiveSourceLoad,
+      removeStandaloneSource,
+      clearLoadQueue: () => {
+        LOAD_QUEUE.length = 0;
+      },
+      currentRange,
+      syncHeaderMenu
+    });
     const { setupHunkExpand } = createHunkExpand({
       trackLoad,
       getServerGeneration: () => SERVER_GENERATION,
@@ -14490,8 +14508,8 @@ ${frontmatter.yaml}
       } else if (STATE.route.screen === "help") {
         setRoute({
           screen: "help",
-          lang: helpLanguageFromRoute(),
-          section: helpSectionFromRoute(),
+          lang: helpLanguageFromRoute(STATE.route),
+          section: helpSectionFromRoute(STATE.route),
           range
         }, true);
         renderHelpPage();
