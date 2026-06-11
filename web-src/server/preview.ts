@@ -2411,11 +2411,28 @@ writeServerRegistry({
   started_at: new Date().toISOString(),
 });
 process.on("exit", () => removeServerRegistry(cwd, process.pid));
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
     removeServerRegistry(cwd, process.pid);
     process.exit(0);
   });
+}
+
+// Under the dev wrapper, exit when the parent dies so a crashed or
+// force-killed dev.ts never leaves this server holding the port.
+// Note: Bun caches process.ppid at startup, so poll the captured pid
+// with signal 0 instead of re-reading process.ppid.
+if (process.env.CODE_VIEWER_DEV === "1") {
+  const parentPid = process.ppid;
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      console.log("dev wrapper exited; shutting down preview server");
+      removeServerRegistry(cwd, process.pid);
+      process.exit(0);
+    }
+  }, 1000).unref();
 }
 
 startDevAssetReload({
