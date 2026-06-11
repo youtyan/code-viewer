@@ -1,6 +1,6 @@
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "description": "Local browser-based code and git diff viewer",
   "type": "module",
   "bin": {
@@ -65,6 +65,5 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "dependencies": {}
+  }
 }
