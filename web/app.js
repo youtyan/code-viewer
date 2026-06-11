@@ -246,6 +246,8 @@
       allowPaletteOpen: true
     },
     { action: "focus-file-filter", key: "/" },
+    { action: "annotation-next", key: "]" },
+    { action: "annotation-previous", key: "[" },
     { action: "focus-sidebar", key: "h", ctrl: true },
     { action: "focus-main", key: "l", ctrl: true },
     {
@@ -7339,6 +7341,13 @@ ${frontmatter.yaml}
         sessionEl.className = "annotation-session";
         sessionEl.dataset.sessionId = session.id;
         sessionEl.classList.toggle("active", session.id === activeSessionId);
+        sessionEl.addEventListener("click", (event) => {
+          const target = event.target;
+          if (target.closest("button, a, input"))
+            return;
+          if (session.id !== activeSessionId)
+            setActiveSession(session.id);
+        });
         const head = document.createElement("div");
         head.className = "annotation-session-head";
         const title = document.createElement("button");
@@ -7572,14 +7581,18 @@ ${frontmatter.yaml}
         deps.scrollDiffElementIntoView(inlineRow, "center");
     }
     function stepAnnotation(direction) {
-      if (!activeAnnotationId)
+      const found = activeAnnotationId ? findAnnotation(activeAnnotationId) : null;
+      if (found && (!activeSessionId || found.session.id === activeSessionId)) {
+        const next = found.session.entries[found.index + direction];
+        if (next)
+          openAnnotationEntry(next.id);
         return;
-      const found = findAnnotation(activeAnnotationId);
-      if (!found)
-        return;
-      const next = found.session.entries[found.index + direction];
-      if (next)
-        openAnnotationEntry(next.id);
+      }
+      const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId) ?? ANNOTATIONS.sessions[0];
+      const entries = session?.entries ?? [];
+      const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
+      if (entry)
+        openAnnotationEntry(entry.id);
     }
     function handleSse(raw) {
       let event = null;
@@ -7650,7 +7663,8 @@ ${frontmatter.yaml}
       },
       getActiveAnnotationId() {
         return activeAnnotationId;
-      }
+      },
+      stepAnnotation
     };
   }
 
@@ -8794,7 +8808,8 @@ ${frontmatter.yaml}
                 ["Ctrl+K", "Open file palette"],
                 ["Ctrl+G", "Open grep palette"],
                 ["/", "Focus file filter"],
-                ["t", "Toggle theme"]
+                ["t", "Toggle theme"],
+                ["[ / ]", "Previous / next annotation"]
               ]
             },
             {
@@ -8842,7 +8857,8 @@ ${frontmatter.yaml}
                 ["Ctrl+K", "ファイルパレットを開く"],
                 ["Ctrl+G", "grep パレットを開く"],
                 ["/", "ファイルフィルターへフォーカス"],
-                ["t", "テーマ切り替え"]
+                ["t", "テーマ切り替え"],
+                ["[ / ]", "前 / 次の注釈へ移動"]
               ]
             },
             {
@@ -15630,6 +15646,10 @@ ${frontmatter.yaml}
       }
       if (action === "tab-preview" || action === "tab-code") {
         return switchSourceTab(action === "tab-preview" ? "preview" : "code");
+      }
+      if (action === "annotation-next" || action === "annotation-previous") {
+        ANNOTATIONS_UI?.stepAnnotation(action === "annotation-next" ? 1 : -1);
+        return true;
       }
       if (action === "start-g-sequence") {
         PENDING_G_SCOPE = scope;
