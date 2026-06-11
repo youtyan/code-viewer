@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { sourceFixture } from "./source-fixture";
 
-const appSource = sourceFixture(readFileSync("web-src/app.ts", "utf8"));
+// Octicon path data lives in icons.ts; app.ts wires it into the sidebar.
+const appSource = sourceFixture(
+  readFileSync("web-src/app.ts", "utf8") +
+    readFileSync("web-src/icons.ts", "utf8"),
+);
 const style = readFileSync("web/style.css", "utf8");
 
 describe("sidebar folder icons", () => {
