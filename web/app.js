@@ -16028,12 +16028,13 @@ ${frontmatter.yaml}
       {
         const empty = $("#empty");
         if (empty) {
+          const onHistory = STATE.route.screen === "history";
           const h2 = empty.querySelector("h2");
           if (h2)
-            h2.textContent = "No changes";
+            h2.textContent = onHistory ? "Empty diff" : "No changes";
           const p2 = empty.querySelector("p");
           if (p2)
-            p2.textContent = "The working tree is clean against this ref.";
+            p2.textContent = onHistory ? "This commit has no changes against its first parent." : "The working tree is clean against this ref.";
         }
       }
       setStatus("refreshing");
@@ -16093,6 +16094,7 @@ ${frontmatter.yaml}
         renderHelpPage();
       } else {
         setRoute({ screen: "diff", range }, true);
+        setPageMode();
         load();
       }
     }

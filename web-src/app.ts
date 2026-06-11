@@ -1648,15 +1648,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (STATE.route.screen === "repo") return loadRepo();
     // The history screen rewrites the #empty heading/body for its
-    // no-commit-selected state; restore the diff-screen defaults so a clean
-    // worktree does not show stale commit-selection copy.
+    // no-commit-selected state; restore copy that matches the current screen
+    // so a clean worktree or an empty commit does not show stale text.
     {
       const empty = $("#empty");
       if (empty) {
+        const onHistory = STATE.route.screen === "history";
         const h2 = empty.querySelector("h2");
-        if (h2) h2.textContent = "No changes";
+        if (h2) h2.textContent = onHistory ? "Empty diff" : "No changes";
         const p = empty.querySelector("p");
-        if (p) p.textContent = "The working tree is clean against this ref.";
+        if (p)
+          p.textContent = onHistory
+            ? "This commit has no changes against its first parent."
+            : "The working tree is clean against this ref.";
       }
     }
     setStatus("refreshing");
@@ -1719,6 +1723,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderHelpPage();
     } else {
       setRoute({ screen: "diff", range }, true);
+      // Leaving the history screen here: drop its body class and panel layout.
+      setPageMode();
       load();
     }
   }
