@@ -122,7 +122,9 @@ code-viewer annotate add --file web-src/app.ts --line 9650 \
 
 The body is Markdown. Long bodies can be passed with `--body-file <path>` or
 piped through stdin. `code-viewer annotate --help` shows all commands,
-including `list`, `delete <id>`, and `clear`.
+including `list`, `delete <id>`, and `clear`. For AI agents,
+`code-viewer annotate agent-help` prints a skill-style guide covering the
+workflow, conventions, and pitfalls for writing good walkthroughs.
 
 Annotations are grouped into sessions and persisted in
 `.code-viewer/annotations.json` at the repository root, so the walkthrough

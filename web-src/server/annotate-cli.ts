@@ -11,6 +11,7 @@ import { readServerRegistry } from "./server-registry";
 
 export type AnnotateCommand =
   | { kind: "help" }
+  | { kind: "agent-help" }
   | { kind: "start"; title: string }
   | {
       kind: "add";
@@ -45,6 +46,9 @@ in <repo>/.code-viewer/annotations.json. A running code-viewer server for
 the repository is required: start one with "code-viewer" before using
 annotate (or point at one explicitly with --server).
 
+Run "code-viewer annotate agent-help" for an AI-agent oriented guide
+(workflow, conventions, and pitfalls for writing good walkthroughs).
+
 Usage:
   code-viewer annotate start [--title <text>]
   code-viewer annotate add --file <path> [--line <n>|<n>-<m>]
@@ -64,6 +68,66 @@ Examples:
       --body "This endpoint keeps one SSE stream per browser tab."
   git diff HEAD~1 | code-viewer annotate add --file src/app.ts --line 10 \\
       --from HEAD~1 --to worktree --body "The fix moves the guard up here."
+`;
+
+export const ANNOTATE_AGENT_HELP = `code-viewer annotate — agent guide
+
+You are an AI coding agent. Use this tool to walk a human through code in
+their browser: each annotation jumps every open code-viewer tab to a file
+location and renders your explanation directly under the annotated lines.
+
+## When to use
+
+- Explaining a change you just made (per-file, per-hunk commentary)
+- Guiding a code review: point at the risky lines, in reading order
+- Onboarding walkthroughs: "how does feature X flow through the code"
+
+## Requirements
+
+- A code-viewer server must already be running for the repository
+  (the human starts it with: code-viewer). This command never starts one.
+- Run from inside the repository, or pass --cwd <repo>.
+- If "code-viewer" is not on PATH (e.g. the human runs it via npx), invoke
+  every command below as: npx -y @youtyan/code-viewer annotate ...
+
+## Workflow
+
+1. Start a session per walkthrough topic. The title is shown to the human:
+     code-viewer annotate start --title "How the cache invalidation works"
+2. Add annotations in READING ORDER (the order you want the human to
+   follow). Each add without --session appends to the most recent session:
+     code-viewer annotate add --file src/cache.ts --line 120-145 \\
+         --title "Entry point" --body "Writes land here first. ..."
+3. Verify what you posted:
+     code-viewer annotate list
+
+## Conventions for good walkthroughs
+
+- One idea per annotation. Prefer 5-10 focused annotations over 2 huge ones.
+- Always pass --line. Use the smallest range that covers the idea; the
+  body is rendered inline directly under the LAST line of the range.
+- Line numbers must match the "to" side of the range (default: the current
+  worktree state of the file). When annotating a diff against another ref,
+  pass --from/--to and use NEW-side line numbers.
+- The body is Markdown. Code spans, fenced blocks, and links work. Long
+  bodies: use --body-file <path> or pipe via stdin instead of --body.
+- Give every annotation a short --title; it becomes the inline heading.
+- Annotating unchanged code is fine: the viewer auto-expands diff context
+  or falls back to the full source view.
+
+## Sessions
+
+- add (no --session) → appends to the most recent session.
+- annotate start      → begins a NEW session; later adds go there.
+- add --session <id>  → targets a specific session (ids: annotate list).
+- The human can share a walkthrough as a URL; one session = one shareable
+  walkthrough. Do not mix unrelated topics in one session.
+
+## Cleanup
+
+- delete <id> removes one annotation or a whole session by its id.
+- clear removes everything. Ask the human before clearing state you did
+  not create.
 `;
 
 function takeValue(
@@ -121,6 +185,9 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
   const subcommand = rest[0];
   if (!subcommand) return { ok: true, args: { command: { kind: "help" } } };
 
+  if (subcommand === "agent-help") {
+    return { ok: true, args: { command: { kind: "agent-help" } } };
+  }
   if (subcommand === "start") {
     return {
       ok: true,
@@ -304,6 +371,10 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   const { command, cwd, server } = parsed.args;
   if (command.kind === "help") {
     console.log(ANNOTATE_HELP);
+    return;
+  }
+  if (command.kind === "agent-help") {
+    console.log(ANNOTATE_AGENT_HELP);
     return;
   }
   const root = resolveRepoRoot(cwd);
