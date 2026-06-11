@@ -149,6 +149,20 @@ than the current directory, or `--server <url>` to target a specific server.
 run `annotate start` again to begin a new session, or pass `--session <id>`
 to target a specific one.
 
+### Agent Skill
+
+The package bundles an [Agent Skill](https://code.claude.com/docs/en/skills)
+that teaches AI coding agents when and how to use `annotate`. Install it
+into the current project (`.claude/skills/`):
+
+```sh
+npx -y @youtyan/code-viewer skill install
+```
+
+Or install it once for all projects with `--global`
+(`~/.claude/skills/`). Running the same command again updates an existing
+installation.
+
 ## Development
 
 ```sh

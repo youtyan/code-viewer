@@ -23,7 +23,8 @@
     "dist",
     "web",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "skills"
   ],
   "scripts": {
     "build": "bun run build:web && bun run build:server",
