@@ -354,6 +354,27 @@ export function refCommits(
   return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
 }
 
+// Converts a git remote URL to the matching https web URL (GitHub-style
+// hosts). Returns null for local paths and other non-web remotes.
+export function parseRemoteWebUrl(remote: string): string | null {
+  const raw = (remote || "").trim();
+  if (!raw) return null;
+  const sshShorthand = /^[\w.-]+@([\w.-]+):(.+?)(?:\.git)?\/?$/.exec(raw);
+  if (sshShorthand) return `https://${sshShorthand[1]}/${sshShorthand[2]}`;
+  const sshUrl =
+    /^ssh:\/\/(?:[\w.-]+@)?([\w.-]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/.exec(raw);
+  if (sshUrl) return `https://${sshUrl[1]}/${sshUrl[2]}`;
+  const httpUrl = /^https?:\/\/([\w.-]+)\/(.+?)(?:\.git)?\/?$/.exec(raw);
+  if (httpUrl) return `https://${httpUrl[1]}/${httpUrl[2]}`;
+  return null;
+}
+
+export function remoteWebUrl(cwd: string): string | null {
+  const res = run(["git", "remote", "get-url", "origin"], cwd);
+  if (res.code !== 0) return null;
+  return parseRemoteWebUrl(res.stdout.trim());
+}
+
 export type GitHistoryCommit = GitCommitMeta & {
   parents: string[];
   body: string;

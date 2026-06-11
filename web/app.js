@@ -7698,6 +7698,114 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/diff-line-select.ts
+  var SELECTED_CLASS = "gdp-diff-line-selected";
+  function cardPath(el) {
+    return el.closest(".gdp-file-shell[data-path]")?.dataset.path || "";
+  }
+  function afterLineFromCell(cell) {
+    const sideCell = cell.closest("td.d2h-code-side-linenumber");
+    if (sideCell) {
+      const side = sideCell.closest(".d2h-file-side-diff");
+      const wrapper = sideCell.closest(".d2h-file-wrapper");
+      if (!side || !wrapper)
+        return null;
+      const sides = wrapper.querySelectorAll(".d2h-file-side-diff");
+      if (sides.length < 2 || side !== sides[1])
+        return null;
+      const line2 = Number((sideCell.textContent || "").trim());
+      return Number.isInteger(line2) && line2 > 0 ? line2 : null;
+    }
+    const numCell = cell.closest("td.d2h-code-linenumber");
+    if (!numCell)
+      return null;
+    const raw = (numCell.querySelector(".line-num2")?.textContent || "").trim();
+    const line = Number(raw);
+    return Number.isInteger(line) && line > 0 ? line : null;
+  }
+  function rowsWithAfterLines(card) {
+    const out = [];
+    card.querySelectorAll("table.d2h-diff-table tr").forEach((row) => {
+      const cell = row.querySelector("td.d2h-code-linenumber, td.d2h-code-side-linenumber");
+      if (!cell)
+        return;
+      const line = afterLineFromCell(cell);
+      if (line !== null)
+        out.push({ row, line });
+    });
+    return out;
+  }
+  function createDiffLineSelect(deps) {
+    let drag = null;
+    let selection = null;
+    function clearHighlights() {
+      document.querySelectorAll(`.${SELECTED_CLASS}`).forEach((row) => {
+        row.classList.remove(SELECTED_CLASS);
+      });
+    }
+    function applySelection(next) {
+      selection = next;
+      clearHighlights();
+      if (!next) {
+        deps.pill.hide();
+        return;
+      }
+      const start = Math.min(next.start, next.end);
+      const end = Math.max(next.start, next.end);
+      const card = document.querySelector(`.gdp-file-shell[data-path="${CSS.escape(next.path)}"]`);
+      if (card) {
+        for (const item of rowsWithAfterLines(card)) {
+          if (item.line >= start && item.line <= end)
+            item.row.classList.add(SELECTED_CLASS);
+        }
+      }
+      deps.pill.show(next.path, start, end);
+    }
+    function clear() {
+      drag = null;
+      applySelection(null);
+    }
+    const diff = document.querySelector("#diff");
+    if (!diff)
+      return { clear };
+    diff.addEventListener("mousedown", (e2) => {
+      const target = e2.target;
+      const cell = target.closest("td.d2h-code-linenumber, td.d2h-code-side-linenumber");
+      if (!cell)
+        return;
+      const line = afterLineFromCell(cell);
+      const path = cardPath(cell);
+      if (line === null || !path) {
+        if (selection)
+          clear();
+        return;
+      }
+      e2.preventDefault();
+      drag = { path, start: line };
+      applySelection({ path, start: line, end: line });
+    });
+    diff.addEventListener("mouseover", (e2) => {
+      if (!drag)
+        return;
+      const target = e2.target;
+      const cell = target.closest("td.d2h-code-linenumber, td.d2h-code-side-linenumber");
+      if (!cell || cardPath(cell) !== drag.path)
+        return;
+      const line = afterLineFromCell(cell);
+      if (line === null)
+        return;
+      applySelection({ path: drag.path, start: drag.start, end: line });
+    });
+    document.addEventListener("mouseup", () => {
+      drag = null;
+    });
+    document.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape" && selection && !drag)
+        clear();
+    });
+    return { clear };
+  }
+
   // web-src/core/file-path-copy.ts
   function filePathClipboardText(path) {
     return path || "";
@@ -7707,6 +7815,13 @@ ${frontmatter.yaml}
       return "";
     const parts = path.split("/").filter(Boolean);
     return parts[parts.length - 1] || "";
+  }
+  function fileReferenceClipboardText(path, start, end) {
+    if (!path)
+      return "";
+    const a2 = Math.max(1, Math.floor(Math.min(start, end)));
+    const b2 = Math.max(1, Math.floor(Math.max(start, end)));
+    return a2 === b2 ? `@${path}#${a2}` : `@${path}#${a2}-${b2}`;
   }
 
   // web-src/core/ws-highlight.ts
@@ -9767,6 +9882,76 @@ ${frontmatter.yaml}
       return String(s2 == null ? "" : s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
     return { setupHunkExpand };
+  }
+
+  // web-src/views/line-ref-pill.ts
+  var COPY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' + '<path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/>' + '<path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/>' + "</svg>";
+  var CHECK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' + '<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>' + "</svg>";
+  function escapeHtml2(value) {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function createLineRefPill() {
+    const pill = document.createElement("button");
+    pill.id = "line-ref-pill";
+    pill.type = "button";
+    pill.title = "選択行の参照をコピー（Claude Code / Codex に貼り付け用）";
+    pill.hidden = true;
+    document.body.appendChild(pill);
+    let refText = "";
+    let feedbackTimer = null;
+    function render(state) {
+      pill.classList.toggle("copied", state === "copied");
+      if (state === "copied") {
+        pill.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied!</span>`;
+        return;
+      }
+      if (state === "failed") {
+        pill.innerHTML = `${COPY_ICON}<span class="lrp-label">copy failed</span>`;
+        return;
+      }
+      pill.innerHTML = `${COPY_ICON}<span class="lrp-label">Copy</span>` + `<span class="lrp-ref">${escapeHtml2(refText)}</span>`;
+    }
+    pill.addEventListener("click", async () => {
+      if (!refText)
+        return;
+      try {
+        await navigator.clipboard.writeText(refText);
+        render("copied");
+      } catch {
+        render("failed");
+      }
+      if (feedbackTimer)
+        clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => {
+        feedbackTimer = null;
+        if (!pill.hidden)
+          render("ready");
+      }, 1200);
+    });
+    return {
+      show(path, start, end) {
+        const next = fileReferenceClipboardText(path, start, end);
+        if (!next)
+          return;
+        const changed = next !== refText;
+        refText = next;
+        if (feedbackTimer) {
+          clearTimeout(feedbackTimer);
+          feedbackTimer = null;
+        }
+        render("ready");
+        if (pill.hidden || changed) {
+          pill.classList.remove("pop");
+          pill.offsetWidth;
+          pill.classList.add("pop");
+        }
+        pill.hidden = false;
+      },
+      hide() {
+        refText = "";
+        pill.hidden = true;
+      }
+    };
   }
 
   // web-src/views/ref-picker.ts
@@ -15126,6 +15311,11 @@ ${frontmatter.yaml}
           return null;
         const settings = await res.json();
         setProjectName(settings.project || "");
+        const repoLink = document.querySelector("#repo-web-link");
+        if (repoLink && settings.repo_web_url) {
+          repoLink.href = settings.repo_web_url;
+          repoLink.hidden = false;
+        }
         SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
         SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
         return settings;
@@ -15164,6 +15354,19 @@ ${frontmatter.yaml}
     let highlightConfigured = false;
     let PROJECT_NAME = "";
     let REPO_SIDEBAR_REF = null;
+    const LINE_REF_PILL = createLineRefPill();
+    const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
+    function syncLineRefPill() {
+      const route = STATE.route;
+      if (route.screen === "diff")
+        return;
+      DIFF_LINE_SELECT.clear();
+      if (route.screen === "file" && route.line) {
+        const start = typeof route.line === "number" ? route.line : route.line.start;
+        const end = typeof route.line === "number" ? route.line : route.line.end;
+        LINE_REF_PILL.show(route.path, start, end);
+      }
+    }
     const SIDEBAR = createSidebar({
       $,
       $$,
@@ -15553,7 +15756,7 @@ ${frontmatter.yaml}
         throw e2;
       });
     }
-    function escapeHtml2(s2) {
+    function escapeHtml3(s2) {
       return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
         "&": "&amp;",
         "<": "&lt;",
@@ -15614,6 +15817,7 @@ ${frontmatter.yaml}
       else
         history.pushState(state, "", url);
       syncHeaderMenu();
+      syncLineRefPill();
     }
     function setPageMode() {
       document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
@@ -15779,7 +15983,7 @@ ${frontmatter.yaml}
       STATE,
       setRoute,
       currentRange,
-      escapeHtml: escapeHtml2,
+      escapeHtml: escapeHtml3,
       trackLoad,
       diffCardSelector,
       getHljs,
@@ -16190,6 +16394,7 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
       } else
         load();
+      syncLineRefPill();
     });
     function syncRefInputs() {
       const fi = $("#ref-from"), ti = $("#ref-to");
@@ -16226,7 +16431,7 @@ ${frontmatter.yaml}
     syncHeaderMenu();
     const HISTORY_VIEW = createHistoryView({
       $,
-      escapeHtml: escapeHtml2,
+      escapeHtml: escapeHtml3,
       getRoute: () => STATE.route,
       setRoute,
       applyCommitRange: (range) => {
@@ -16255,7 +16460,7 @@ ${frontmatter.yaml}
     });
     const REF_PICKER = createRefPicker({
       $,
-      escapeHtml: escapeHtml2,
+      escapeHtml: escapeHtml3,
       currentRange,
       setRange,
       setRoute,
@@ -16286,6 +16491,7 @@ ${frontmatter.yaml}
       ANNOTATIONS_UI?.restoreSessionFromUrl();
       syncRefInputs();
       syncHeaderMenu();
+      syncLineRefPill();
       if (STATE.route.screen === "help") {
         cancelActiveSourceLoad("navigation");
         setPageMode();

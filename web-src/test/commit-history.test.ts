@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { commitHistory } from "../server/git";
+import { commitHistory, parseRemoteWebUrl } from "../server/git";
 
 function git(cwd: string, args: string[]) {
   const proc = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -190,5 +190,34 @@ describe("commitHistory", () => {
     const res = commitHistory(repo, { ref: "HEAD", skip: 0, limit: 1 });
     expect(res.commits[0].subject).toBe("merge topic");
     expect(res.commits[0].parents).toEqual([shas[4], topicSha]);
+  });
+});
+
+describe("remoteWebUrl", () => {
+  test("converts ssh shorthand remotes to https", () => {
+    expect(parseRemoteWebUrl("git@github.com:youtyan/code-viewer.git")).toBe(
+      "https://github.com/youtyan/code-viewer",
+    );
+  });
+
+  test("strips .git from https remotes", () => {
+    expect(
+      parseRemoteWebUrl("https://github.com/youtyan/code-viewer.git"),
+    ).toBe("https://github.com/youtyan/code-viewer");
+    expect(parseRemoteWebUrl("https://github.com/youtyan/code-viewer")).toBe(
+      "https://github.com/youtyan/code-viewer",
+    );
+  });
+
+  test("converts ssh:// remotes", () => {
+    expect(
+      parseRemoteWebUrl("ssh://git@github.com/youtyan/code-viewer.git"),
+    ).toBe("https://github.com/youtyan/code-viewer");
+  });
+
+  test("returns null for unusable remotes", () => {
+    expect(parseRemoteWebUrl("")).toBeNull();
+    expect(parseRemoteWebUrl("/local/path/repo.git")).toBeNull();
+    expect(parseRemoteWebUrl("file:///tmp/repo.git")).toBeNull();
   });
 });

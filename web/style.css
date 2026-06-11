@@ -2079,6 +2079,86 @@ table.d2h-diff-table tr.gdp-diff-line-target .d2h-code-line-ctn {
 table.d2h-diff-table tr.gdp-diff-line-target > td:first-child {
   box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
 }
+
+/* After-side drag selection (diff screen) — same yellow as the file view. */
+table.d2h-diff-table tr.gdp-diff-line-selected > td,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-line,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-side-line,
+table.d2h-diff-table tr.gdp-diff-line-selected .d2h-code-line-ctn {
+  background: var(--line-hit-bg) !important;
+  background-color: var(--line-hit-bg) !important;
+}
+table.d2h-diff-table tr.gdp-diff-line-selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--line-hit-border), inset -1px 0 0 var(--border-muted);
+}
+table.d2h-diff-table td.d2h-code-linenumber,
+table.d2h-diff-table td.d2h-code-side-linenumber {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Floating "copy @path#start-end" pill shown while lines are selected. */
+#line-ref-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 400;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, calc(100vw - 48px));
+  white-space: nowrap;
+  padding: 9px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(31, 35, 40, 0.35);
+}
+#line-ref-pill:hover {
+  filter: brightness(1.1);
+}
+#line-ref-pill svg {
+  flex: 0 0 auto;
+}
+#line-ref-pill .lrp-label {
+  flex: 0 0 auto;
+}
+#line-ref-pill .lrp-ref {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.18);
+  font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 400;
+}
+#line-ref-pill.copied {
+  background: var(--success, #2ea043);
+  border-color: var(--success, #2ea043);
+}
+#line-ref-pill.pop {
+  animation: lrp-pop 0.22s ease-out;
+}
+@keyframes lrp-pop {
+  0% {
+    transform: translateX(-50%) translateY(14px) scale(0.92);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(-50%) translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+#line-ref-pill[hidden] {
+  display: none;
+}
 /* Stack height = number of buttons * 20px. With 1 button = 20px row,
  * with 2 (↑+↓) = 40px row, matching GitHub. */
 .gdp-expand-stack {
