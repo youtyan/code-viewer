@@ -6984,196 +6984,6 @@ ${frontmatter.yaml}
     return scrollable || doc.scrollingElement;
   }
 
-  // web-src/fuzzy-search.ts
-  function basenameStart(path) {
-    const slash = path.lastIndexOf("/");
-    return slash < 0 ? 0 : slash + 1;
-  }
-  function isBoundary(path, index) {
-    if (index <= 0)
-      return true;
-    const prev = path[index - 1];
-    return prev === "/" || prev === "-" || prev === "_" || prev === "." || prev === " ";
-  }
-  function toRanges(indices) {
-    const ranges = [];
-    for (const index of indices) {
-      const last = ranges[ranges.length - 1];
-      if (last && last.end === index) {
-        last.end = index + 1;
-      } else {
-        ranges.push({ start: index, end: index + 1 });
-      }
-    }
-    return ranges;
-  }
-  function basenameMatchTier(loweredQuery, loweredBasename) {
-    if (loweredBasename === loweredQuery)
-      return 4;
-    if (loweredBasename.startsWith(`${loweredQuery}.`))
-      return 3;
-    if (loweredBasename.startsWith(loweredQuery))
-      return 2;
-    if (loweredBasename.includes(loweredQuery))
-      return 1;
-    return 0;
-  }
-  function pathMatchTier(loweredQuery, loweredPath, loweredBasename) {
-    if (loweredQuery.includes("/") && (loweredPath === loweredQuery || loweredPath.endsWith(`/${loweredQuery}`)))
-      return 4;
-    return basenameMatchTier(loweredQuery, loweredBasename);
-  }
-  function contiguousPathRange(loweredQuery, loweredPath, baseStart) {
-    const loweredBasename = loweredPath.slice(baseStart);
-    const basenameMatchStart = loweredBasename.indexOf(loweredQuery);
-    if (basenameMatchStart >= 0) {
-      const start = baseStart + basenameMatchStart;
-      return { start, end: start + loweredQuery.length };
-    }
-    if (loweredQuery.includes("/")) {
-      const pathMatchStart = loweredPath.endsWith(`/${loweredQuery}`) ? loweredPath.length - loweredQuery.length : loweredPath === loweredQuery ? 0 : -1;
-      if (pathMatchStart >= 0)
-        return {
-          start: pathMatchStart,
-          end: pathMatchStart + loweredQuery.length
-        };
-    }
-    return null;
-  }
-  function computeFuzzyMatch(query, path) {
-    const q = query.trim().toLowerCase();
-    if (!q)
-      return { score: 0, ranges: [], tier: 0 };
-    const lowerPath = path.toLowerCase();
-    const baseStart = basenameStart(path);
-    const indices = [];
-    let from = 0;
-    let score = 0;
-    for (const ch of q) {
-      const index = lowerPath.indexOf(ch, from);
-      if (index < 0)
-        return null;
-      indices.push(index);
-      score += 10;
-      if (index >= baseStart)
-        score += 8;
-      if (isBoundary(path, index))
-        score += 6;
-      const prev = indices[indices.length - 2];
-      if (prev != null && prev + 1 === index)
-        score += 12;
-      from = index + 1;
-    }
-    const first = indices[0];
-    score -= Math.min(first, 40);
-    if (indices[0] >= baseStart)
-      score += 20;
-    const basename = lowerPath.slice(baseStart);
-    const tier = pathMatchTier(q, lowerPath, basename);
-    const contiguousRange = contiguousPathRange(q, lowerPath, baseStart);
-    return {
-      score,
-      ranges: contiguousRange ? [contiguousRange] : toRanges(indices),
-      tier
-    };
-  }
-  function fuzzyMatchPath(query, path) {
-    const match2 = computeFuzzyMatch(query, path);
-    return match2 ? { score: match2.score, ranges: match2.ranges } : null;
-  }
-  function rankFuzzyPaths(query, items) {
-    return items.map((item) => {
-      const match2 = computeFuzzyMatch(query, item.path);
-      return match2 ? { item, score: match2.score, ranges: match2.ranges, tier: match2.tier } : null;
-    }).filter((item) => item !== null).sort((a2, b2) => b2.tier - a2.tier || b2.score - a2.score || a2.item.path.localeCompare(b2.item.path)).map(({ item, score, ranges }) => ({ item, score, ranges }));
-  }
-  function isGlobPathQuery(query) {
-    return /[*?]/.test(query.trim());
-  }
-  function escapeRegexChar(ch) {
-    return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
-  }
-  function globToRegExp(query) {
-    const pattern = query.trim();
-    if (!pattern)
-      return null;
-    let source = "^";
-    for (let i2 = 0;i2 < pattern.length; i2++) {
-      const ch = pattern[i2];
-      if (ch === "*") {
-        if (pattern[i2 + 1] === "*") {
-          source += ".*";
-          i2++;
-        } else {
-          source += "[^/]*";
-        }
-      } else if (ch === "?") {
-        source += "[^/]";
-      } else if (ch === "[") {
-        const close = pattern.indexOf("]", i2 + 1);
-        if (close < 0) {
-          source += "\\[";
-        } else {
-          const body = pattern.slice(i2 + 1, close).replace(/\\/g, "\\\\");
-          source += `[${body}]`;
-          i2 = close;
-        }
-      } else {
-        source += escapeRegexChar(ch);
-      }
-    }
-    source += "$";
-    try {
-      return new RegExp(source, "i");
-    } catch {
-      return null;
-    }
-  }
-  function globMatchPath(query, path) {
-    const regex = globToRegExp(query);
-    const baseStart = basenameStart(path);
-    const basename = path.slice(baseStart);
-    if (!regex || !regex.test(path) && (query.includes("/") || !regex.test(basename)))
-      return null;
-    const literal = query.replace(/[*?[\]]+/g, " ").trim().split(/\s+/).filter(Boolean);
-    const ranges = [];
-    const lowerPath = path.toLowerCase();
-    for (const part of literal) {
-      const start = lowerPath.indexOf(part.toLowerCase());
-      if (start >= 0)
-        ranges.push({ start, end: start + part.length });
-    }
-    ranges.sort((a2, b2) => a2.start - b2.start || a2.end - b2.end);
-    const mergedRanges = [];
-    for (const range of ranges) {
-      const last = mergedRanges[mergedRanges.length - 1];
-      if (last && last.end >= range.start) {
-        last.end = Math.max(last.end, range.end);
-      } else {
-        mergedRanges.push({ ...range });
-      }
-    }
-    const score = 1000 - Math.min(path.length, 200) + (path.slice(baseStart).toLowerCase().endsWith(query.replace(/^\*+/, "").toLowerCase()) ? 50 : 0);
-    return { score, ranges: mergedRanges };
-  }
-  function rankPathMatches(query, items) {
-    if (isGlobPathQuery(query)) {
-      return items.map((item) => {
-        const match2 = globMatchPath(query, item.path);
-        return match2 ? {
-          item,
-          score: match2.score,
-          ranges: match2.ranges,
-          mode: "glob"
-        } : null;
-      }).filter((item) => item !== null).sort((a2, b2) => b2.score - a2.score || a2.item.path.localeCompare(b2.item.path));
-    }
-    return rankFuzzyPaths(query, items).map((item) => ({
-      ...item,
-      mode: "fuzzy"
-    }));
-  }
-
   // web-src/help-page.ts
   var HELP_LANGUAGES = ["en", "ja"];
   var HELP_SECTIONS = ["keybindings"];
@@ -9620,6 +9430,196 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/fuzzy-search.ts
+  function basenameStart(path) {
+    const slash = path.lastIndexOf("/");
+    return slash < 0 ? 0 : slash + 1;
+  }
+  function isBoundary(path, index) {
+    if (index <= 0)
+      return true;
+    const prev = path[index - 1];
+    return prev === "/" || prev === "-" || prev === "_" || prev === "." || prev === " ";
+  }
+  function toRanges(indices) {
+    const ranges = [];
+    for (const index of indices) {
+      const last = ranges[ranges.length - 1];
+      if (last && last.end === index) {
+        last.end = index + 1;
+      } else {
+        ranges.push({ start: index, end: index + 1 });
+      }
+    }
+    return ranges;
+  }
+  function basenameMatchTier(loweredQuery, loweredBasename) {
+    if (loweredBasename === loweredQuery)
+      return 4;
+    if (loweredBasename.startsWith(`${loweredQuery}.`))
+      return 3;
+    if (loweredBasename.startsWith(loweredQuery))
+      return 2;
+    if (loweredBasename.includes(loweredQuery))
+      return 1;
+    return 0;
+  }
+  function pathMatchTier(loweredQuery, loweredPath, loweredBasename) {
+    if (loweredQuery.includes("/") && (loweredPath === loweredQuery || loweredPath.endsWith(`/${loweredQuery}`)))
+      return 4;
+    return basenameMatchTier(loweredQuery, loweredBasename);
+  }
+  function contiguousPathRange(loweredQuery, loweredPath, baseStart) {
+    const loweredBasename = loweredPath.slice(baseStart);
+    const basenameMatchStart = loweredBasename.indexOf(loweredQuery);
+    if (basenameMatchStart >= 0) {
+      const start = baseStart + basenameMatchStart;
+      return { start, end: start + loweredQuery.length };
+    }
+    if (loweredQuery.includes("/")) {
+      const pathMatchStart = loweredPath.endsWith(`/${loweredQuery}`) ? loweredPath.length - loweredQuery.length : loweredPath === loweredQuery ? 0 : -1;
+      if (pathMatchStart >= 0)
+        return {
+          start: pathMatchStart,
+          end: pathMatchStart + loweredQuery.length
+        };
+    }
+    return null;
+  }
+  function computeFuzzyMatch(query, path) {
+    const q = query.trim().toLowerCase();
+    if (!q)
+      return { score: 0, ranges: [], tier: 0 };
+    const lowerPath = path.toLowerCase();
+    const baseStart = basenameStart(path);
+    const indices = [];
+    let from = 0;
+    let score = 0;
+    for (const ch of q) {
+      const index = lowerPath.indexOf(ch, from);
+      if (index < 0)
+        return null;
+      indices.push(index);
+      score += 10;
+      if (index >= baseStart)
+        score += 8;
+      if (isBoundary(path, index))
+        score += 6;
+      const prev = indices[indices.length - 2];
+      if (prev != null && prev + 1 === index)
+        score += 12;
+      from = index + 1;
+    }
+    const first = indices[0];
+    score -= Math.min(first, 40);
+    if (indices[0] >= baseStart)
+      score += 20;
+    const basename = lowerPath.slice(baseStart);
+    const tier = pathMatchTier(q, lowerPath, basename);
+    const contiguousRange = contiguousPathRange(q, lowerPath, baseStart);
+    return {
+      score,
+      ranges: contiguousRange ? [contiguousRange] : toRanges(indices),
+      tier
+    };
+  }
+  function fuzzyMatchPath(query, path) {
+    const match2 = computeFuzzyMatch(query, path);
+    return match2 ? { score: match2.score, ranges: match2.ranges } : null;
+  }
+  function rankFuzzyPaths(query, items) {
+    return items.map((item) => {
+      const match2 = computeFuzzyMatch(query, item.path);
+      return match2 ? { item, score: match2.score, ranges: match2.ranges, tier: match2.tier } : null;
+    }).filter((item) => item !== null).sort((a2, b2) => b2.tier - a2.tier || b2.score - a2.score || a2.item.path.localeCompare(b2.item.path)).map(({ item, score, ranges }) => ({ item, score, ranges }));
+  }
+  function isGlobPathQuery(query) {
+    return /[*?]/.test(query.trim());
+  }
+  function escapeRegexChar(ch) {
+    return /[\\^$+?.()|{}]/.test(ch) ? `\\${ch}` : ch;
+  }
+  function globToRegExp(query) {
+    const pattern = query.trim();
+    if (!pattern)
+      return null;
+    let source = "^";
+    for (let i2 = 0;i2 < pattern.length; i2++) {
+      const ch = pattern[i2];
+      if (ch === "*") {
+        if (pattern[i2 + 1] === "*") {
+          source += ".*";
+          i2++;
+        } else {
+          source += "[^/]*";
+        }
+      } else if (ch === "?") {
+        source += "[^/]";
+      } else if (ch === "[") {
+        const close = pattern.indexOf("]", i2 + 1);
+        if (close < 0) {
+          source += "\\[";
+        } else {
+          const body = pattern.slice(i2 + 1, close).replace(/\\/g, "\\\\");
+          source += `[${body}]`;
+          i2 = close;
+        }
+      } else {
+        source += escapeRegexChar(ch);
+      }
+    }
+    source += "$";
+    try {
+      return new RegExp(source, "i");
+    } catch {
+      return null;
+    }
+  }
+  function globMatchPath(query, path) {
+    const regex = globToRegExp(query);
+    const baseStart = basenameStart(path);
+    const basename = path.slice(baseStart);
+    if (!regex || !regex.test(path) && (query.includes("/") || !regex.test(basename)))
+      return null;
+    const literal = query.replace(/[*?[\]]+/g, " ").trim().split(/\s+/).filter(Boolean);
+    const ranges = [];
+    const lowerPath = path.toLowerCase();
+    for (const part of literal) {
+      const start = lowerPath.indexOf(part.toLowerCase());
+      if (start >= 0)
+        ranges.push({ start, end: start + part.length });
+    }
+    ranges.sort((a2, b2) => a2.start - b2.start || a2.end - b2.end);
+    const mergedRanges = [];
+    for (const range of ranges) {
+      const last = mergedRanges[mergedRanges.length - 1];
+      if (last && last.end >= range.start) {
+        last.end = Math.max(last.end, range.end);
+      } else {
+        mergedRanges.push({ ...range });
+      }
+    }
+    const score = 1000 - Math.min(path.length, 200) + (path.slice(baseStart).toLowerCase().endsWith(query.replace(/^\*+/, "").toLowerCase()) ? 50 : 0);
+    return { score, ranges: mergedRanges };
+  }
+  function rankPathMatches(query, items) {
+    if (isGlobPathQuery(query)) {
+      return items.map((item) => {
+        const match2 = globMatchPath(query, item.path);
+        return match2 ? {
+          item,
+          score: match2.score,
+          ranges: match2.ranges,
+          mode: "glob"
+        } : null;
+      }).filter((item) => item !== null).sort((a2, b2) => b2.score - a2.score || a2.item.path.localeCompare(b2.item.path));
+    }
+    return rankFuzzyPaths(query, items).map((item) => ({
+      ...item,
+      mode: "fuzzy"
+    }));
+  }
+
   // web-src/search-palette.ts
   var PALETTE_RESULT_LIMIT = 50;
   function limitPaletteResults(items) {
@@ -9631,6 +9631,473 @@ ${frontmatter.yaml}
     if (index < 0)
       return direction > 0 ? 0 : count - 1;
     return (index + direction + count) % count;
+  }
+
+  // web-src/search-palette-ui.ts
+  function createSearchPalette(deps) {
+    const {
+      STATE,
+      setRoute,
+      currentRange,
+      appendScopeParams,
+      isAbortError,
+      scrollToFile,
+      applySourceRouteToShell,
+      fileSourceTarget,
+      renderStandaloneSource,
+      repoFileCacheKey,
+      trackLoad,
+      getServerGeneration
+    } = deps;
+    let PALETTE = null;
+    const REPO_FILE_CACHE = new Map;
+    function paletteSource() {
+      if (STATE.route.screen === "diff")
+        return "diff";
+      if (STATE.route.screen === "file" && STATE.route.view !== "blob")
+        return "diff";
+      return "repo";
+    }
+    function paletteRef(source) {
+      if (source === "diff")
+        return STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
+      if (STATE.route.screen === "repo")
+        return STATE.route.ref || "worktree";
+      if (STATE.route.screen === "file")
+        return STATE.route.ref || "worktree";
+      return STATE.repoRef || "worktree";
+    }
+    function closeSearchPalette() {
+      if (!PALETTE)
+        return;
+      const previousFocusScope = PALETTE.previousFocusScope;
+      PALETTE.controller?.abort();
+      if (PALETTE.debounce)
+        window.clearTimeout(PALETTE.debounce);
+      PALETTE.root.remove();
+      PALETTE = null;
+      restorePanelFocusScope(previousFocusScope);
+    }
+    function createPalette(mode) {
+      const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
+      closeSearchPalette();
+      const root = document.createElement("div");
+      root.className = "gdp-palette-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-palette";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      const label = document.createElement("div");
+      label.className = "gdp-palette-label";
+      label.textContent = mode === "file" ? "Files" : "Grep";
+      const input = document.createElement("input");
+      input.className = "gdp-palette-input";
+      input.type = "search";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = mode === "file" ? "Search files" : "Search text";
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-expanded", "true");
+      input.setAttribute("aria-controls", "gdp-palette-list");
+      const status = document.createElement("div");
+      status.className = "gdp-palette-status";
+      const controls = document.createElement("div");
+      controls.className = "gdp-palette-controls";
+      const list2 = document.createElement("div");
+      list2.id = "gdp-palette-list";
+      list2.className = "gdp-palette-list";
+      list2.setAttribute("role", "listbox");
+      dialog.append(label, input, controls, status, list2);
+      root.appendChild(dialog);
+      document.body.appendChild(root);
+      const state = {
+        root,
+        input,
+        controls,
+        list: list2,
+        status,
+        mode,
+        grepRegex: false,
+        selected: -1,
+        items: [],
+        composing: false,
+        diffSnapshot: [...STATE.files],
+        previousFocusScope
+      };
+      PALETTE = state;
+      setPanelFocusScope(null);
+      root.addEventListener("mousedown", (e2) => {
+        if (e2.target === root)
+          closeSearchPalette();
+      });
+      input.addEventListener("compositionstart", () => {
+        state.composing = true;
+      });
+      input.addEventListener("compositionend", () => {
+        state.composing = false;
+      });
+      input.addEventListener("input", () => updatePaletteResults(state));
+      input.addEventListener("keydown", (e2) => handlePaletteKeydown(e2, state));
+      input.focus();
+      updatePaletteResults(state);
+      return state;
+    }
+    function renderPaletteControls(state) {
+      state.controls.innerHTML = "";
+      if (state.mode === "file") {
+        const hint2 = document.createElement("span");
+        hint2.className = "gdp-palette-mode-hint";
+        hint2.textContent = isGlobPathQuery(state.input.value) ? "Glob: * ? []" : "Fuzzy path search";
+        state.controls.appendChild(hint2);
+        return;
+      }
+      const plain = document.createElement("button");
+      plain.type = "button";
+      plain.className = "gdp-palette-mode-button";
+      plain.setAttribute("aria-pressed", String(!state.grepRegex));
+      plain.textContent = "Plain";
+      plain.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = false;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const regex = document.createElement("button");
+      regex.type = "button";
+      regex.className = "gdp-palette-mode-button";
+      regex.setAttribute("aria-pressed", String(state.grepRegex));
+      regex.textContent = ".* Regex";
+      regex.title = "Alt+R";
+      regex.addEventListener("mousedown", (e2) => {
+        e2.preventDefault();
+        state.grepRegex = true;
+        renderPaletteControls(state);
+        updatePaletteResults(state);
+        state.input.focus();
+      });
+      const hint = document.createElement("span");
+      hint.className = "gdp-palette-mode-hint";
+      hint.textContent = "Alt+R toggles regex";
+      state.controls.append(plain, regex, hint);
+    }
+    function regexQueryIsValid(query) {
+      try {
+        new RegExp(query);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function appendHighlightedPath(parent, path, ranges) {
+      let cursor = 0;
+      for (const range of ranges) {
+        if (range.start > cursor)
+          parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
+        const mark = document.createElement("mark");
+        mark.textContent = path.slice(range.start, range.end);
+        parent.appendChild(mark);
+        cursor = range.end;
+      }
+      if (cursor < path.length)
+        parent.appendChild(document.createTextNode(path.slice(cursor)));
+    }
+    function renderPalette(state) {
+      state.list.innerHTML = "";
+      state.items.forEach((item, index) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.id = `gdp-palette-item-${index}`;
+        row.className = "gdp-palette-row";
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        const title = document.createElement("span");
+        title.className = "gdp-palette-row-title";
+        const detail = document.createElement("span");
+        detail.className = "gdp-palette-row-detail";
+        if (item.kind === "file") {
+          title.textContent = item.path.split("/").pop() || item.path;
+          appendHighlightedPath(detail, item.displayPath, item.ranges);
+          if (item.old_path && item.displayPath !== item.old_path) {
+            detail.appendChild(document.createTextNode(`  ${item.old_path}`));
+          }
+        } else {
+          title.textContent = `${item.path}:${item.line}`;
+          detail.textContent = item.preview;
+        }
+        row.append(title, detail);
+        row.addEventListener("mouseenter", () => {
+          state.selected = index;
+          syncPaletteSelection(state);
+        });
+        row.addEventListener("mousedown", (e2) => {
+          e2.preventDefault();
+          state.selected = index;
+          selectPaletteItem(state);
+        });
+        state.list.appendChild(row);
+      });
+      syncPaletteSelection(state);
+    }
+    function syncPaletteSelection(state) {
+      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "");
+      state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
+        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
+        if (index === state.selected)
+          row.scrollIntoView({ block: "nearest" });
+      });
+    }
+    async function repoPaletteFiles(ref) {
+      const cacheKey = repoFileCacheKey(ref);
+      const cached = REPO_FILE_CACHE.get(cacheKey);
+      if (cached && cached.generation === getServerGeneration())
+        return cached;
+      const params = new URLSearchParams;
+      params.set("ref", ref);
+      appendScopeParams(params);
+      const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load files");
+        return r2.json();
+      }));
+      REPO_FILE_CACHE.set(cacheKey, res);
+      return res;
+    }
+    function diffFilePaletteItems(state, query) {
+      const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
+      const candidates = state.diffSnapshot.map((file) => {
+        const current = matchPath(query, file.path);
+        const old = file.old_path ? matchPath(query, file.old_path) : null;
+        const best = old && (!current || old.score > current.score) ? { match: old, displayPath: file.old_path || file.path } : current ? { match: current, displayPath: file.path } : null;
+        return best ? { file, ...best } : null;
+      }).filter((item) => item !== null).sort((a2, b2) => b2.match.score - a2.match.score || a2.file.path.localeCompare(b2.file.path));
+      return limitPaletteResults(candidates).map((candidate) => ({
+        kind: "file",
+        path: candidate.file.path,
+        old_path: candidate.file.old_path,
+        displayPath: candidate.displayPath,
+        ref: paletteRef("diff"),
+        targetPath: fileSourceTarget(candidate.file).path,
+        targetRef: fileSourceTarget(candidate.file).ref,
+        source: "diff",
+        ranges: candidate.match.ranges
+      }));
+    }
+    async function updateFilePalette(state, query) {
+      renderPaletteControls(state);
+      const source = paletteSource();
+      if (!query.trim()) {
+        const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
+          const target = fileSourceTarget(file);
+          return {
+            kind: "file",
+            path: file.path,
+            old_path: file.old_path,
+            displayPath: file.path,
+            ref: paletteRef(source),
+            targetPath: target.path,
+            targetRef: target.ref,
+            source,
+            ranges: []
+          };
+        }) : [];
+        state.items = limitPaletteResults(base2);
+        state.selected = state.items.length ? 0 : -1;
+        state.status.textContent = source === "diff" ? `${state.diffSnapshot.length} diff files` : "Type to search repository files";
+        renderPalette(state);
+        return;
+      }
+      if (source === "diff") {
+        state.items = diffFilePaletteItems(state, query);
+      } else {
+        state.status.textContent = "Loading files...";
+        const ref = paletteRef(source);
+        const response = await repoPaletteFiles(ref);
+        if (PALETTE !== state || state.input.value !== query)
+          return;
+        state.items = limitPaletteResults(rankPathMatches(query, response.files)).map((match2) => ({
+          kind: "file",
+          path: match2.item.path,
+          displayPath: match2.item.path,
+          ref,
+          source,
+          ranges: match2.ranges
+        }));
+      }
+      state.selected = state.items.length ? 0 : -1;
+      state.status.textContent = state.items.length ? `${state.items.length} results` : "No results";
+      renderPalette(state);
+    }
+    function updateGrepPalette(state, query) {
+      renderPaletteControls(state);
+      state.controller?.abort();
+      if (state.debounce)
+        window.clearTimeout(state.debounce);
+      if (!query.trim()) {
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Type to grep";
+        renderPalette(state);
+        return;
+      }
+      if (state.grepRegex && !regexQueryIsValid(query)) {
+        state.controller?.abort();
+        state.items = [];
+        state.selected = -1;
+        state.status.textContent = "Invalid regular expression";
+        renderPalette(state);
+        return;
+      }
+      state.status.textContent = "Searching...";
+      state.debounce = window.setTimeout(() => {
+        const source = paletteSource();
+        const ref = paletteRef(source);
+        const params = new URLSearchParams;
+        params.set("ref", ref);
+        params.set("q", query);
+        params.set("max", "200");
+        if (state.grepRegex)
+          params.set("regex", "1");
+        appendScopeParams(params);
+        if (source === "diff") {
+          for (const file of state.diffSnapshot)
+            params.append("path", file.path);
+        }
+        const controller = new AbortController;
+        state.controller = controller;
+        trackLoad(fetch(`/_grep?${params.toString()}`, {
+          signal: controller.signal
+        }).then((r2) => {
+          if (!r2.ok)
+            throw new Error("grep failed");
+          return r2.json();
+        })).then((response) => {
+          if (PALETTE !== state || controller.signal.aborted)
+            return;
+          state.items = limitPaletteResults(response.matches.map((match2) => ({
+            kind: "grep",
+            path: match2.path,
+            line: match2.line,
+            column: match2.column,
+            preview: match2.preview,
+            ref,
+            source
+          })));
+          state.selected = state.items.length ? 0 : -1;
+          state.status.textContent = response.engine + (state.grepRegex ? " regex" : " plain") + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
+          renderPalette(state);
+        }).catch((err) => {
+          if (isAbortError(err))
+            return;
+          state.status.textContent = "Search failed";
+        });
+      }, 80);
+    }
+    function updatePaletteResults(state) {
+      const query = state.input.value;
+      if (state.mode === "file") {
+        updateFilePalette(state, query).catch(() => {
+          state.status.textContent = "Search failed";
+        });
+      } else {
+        updateGrepPalette(state, query);
+      }
+    }
+    function selectPaletteItem(state) {
+      const item = state.items[state.selected];
+      if (!item)
+        return;
+      closeSearchPalette();
+      if (item.kind === "file") {
+        if (item.source === "diff") {
+          if (STATE.route.screen === "file") {
+            setRoute({
+              screen: "file",
+              path: item.targetPath || item.path,
+              ref: item.targetRef || item.ref,
+              range: currentRange()
+            });
+            applySourceRouteToShell();
+          } else {
+            scrollToFile(item.path);
+          }
+        } else {
+          setRoute({
+            screen: "file",
+            path: item.path,
+            ref: item.ref,
+            view: "blob",
+            range: currentRange()
+          });
+          renderStandaloneSource({ path: item.path, ref: item.ref });
+        }
+        return;
+      }
+      if (item.source === "diff") {
+        setRoute({
+          screen: "diff",
+          range: currentRange(),
+          path: item.path,
+          line: item.line
+        });
+        scrollToFile(item.path, item.line);
+      } else {
+        setRoute({
+          screen: "file",
+          path: item.path,
+          ref: item.ref,
+          view: "blob",
+          line: item.line,
+          range: currentRange()
+        });
+        renderStandaloneSource({ path: item.path, ref: item.ref });
+      }
+    }
+    function handlePaletteKeydown(e2, state) {
+      if (e2.key === "Escape") {
+        e2.preventDefault();
+        closeSearchPalette();
+        return;
+      }
+      if (e2.key === "Enter") {
+        if (state.composing)
+          return;
+        e2.preventDefault();
+        selectPaletteItem(state);
+        return;
+      }
+      if (state.mode === "grep" && e2.altKey && e2.key.toLowerCase() === "r") {
+        e2.preventDefault();
+        state.grepRegex = !state.grepRegex;
+        updatePaletteResults(state);
+        return;
+      }
+      const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
+      if (direction) {
+        e2.preventDefault();
+        state.selected = movePaletteSelection(state.selected, state.items.length, direction);
+        syncPaletteSelection(state);
+      }
+    }
+    function openSearchPalette(mode) {
+      createPalette(mode);
+    }
+    function isPaletteOpen() {
+      return !!PALETTE;
+    }
+    function paletteMode() {
+      return PALETTE ? PALETTE.mode : null;
+    }
+    function clearRepoFileCache() {
+      REPO_FILE_CACHE.clear();
+    }
+    return {
+      openSearchPalette,
+      closeSearchPalette,
+      isPaletteOpen,
+      paletteMode,
+      clearRepoFileCache
+    };
   }
 
   // web-src/file-filter.ts
@@ -12597,7 +13064,7 @@ ${frontmatter.yaml}
     function scheduleMainSurfaceFocus() {
       const seq = ++MAIN_SURFACE_FOCUS_SEQ;
       const apply = () => {
-        if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE)
+        if (seq !== MAIN_SURFACE_FOCUS_SEQ || isPaletteOpen())
           return;
         if (isEditableKeyTarget(document.activeElement))
           return;
@@ -12846,7 +13313,7 @@ ${frontmatter.yaml}
       setViewFileButtonState,
       scrollMainPanel,
       focusMainSurface,
-      isPaletteOpen: () => !!PALETTE
+      isPaletteOpen: () => SEARCH_PALETTE.isPaletteOpen()
     });
     const {
       renderStandaloneSource,
@@ -12913,6 +13380,21 @@ ${frontmatter.yaml}
       invalidateRepoSidebar,
       showTrashError
     } = REPO_VIEW;
+    const SEARCH_PALETTE = createSearchPalette({
+      STATE,
+      setRoute,
+      currentRange,
+      appendScopeParams,
+      isAbortError,
+      scrollToFile,
+      applySourceRouteToShell,
+      fileSourceTarget,
+      renderStandaloneSource,
+      repoFileCacheKey,
+      trackLoad,
+      getServerGeneration: () => SERVER_GENERATION
+    });
+    const { openSearchPalette, isPaletteOpen, paletteMode, clearRepoFileCache } = SEARCH_PALETTE;
     function setStatus(s2) {
       const el = $("#status");
       el.classList.remove("live", "refreshing", "error");
@@ -13059,7 +13541,7 @@ ${frontmatter.yaml}
       return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
     }
     function refreshRepositoryTreeAfterSettings() {
-      REPO_FILE_CACHE.clear();
+      clearRepoFileCache();
       invalidateRepoSidebar();
       if (STATE.route.screen === "repo") {
         loadRepo();
@@ -14429,451 +14911,18 @@ ${frontmatter.yaml}
       input.focus();
       input.select();
     }
-    let PALETTE = null;
-    const REPO_FILE_CACHE = new Map;
-    function paletteSource() {
-      if (STATE.route.screen === "diff")
-        return "diff";
-      if (STATE.route.screen === "file" && STATE.route.view !== "blob")
-        return "diff";
-      return "repo";
-    }
-    function paletteRef(source) {
-      if (source === "diff")
-        return STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
-      if (STATE.route.screen === "repo")
-        return STATE.route.ref || "worktree";
-      if (STATE.route.screen === "file")
-        return STATE.route.ref || "worktree";
-      return STATE.repoRef || "worktree";
-    }
-    function closeSearchPalette() {
-      if (!PALETTE)
-        return;
-      const previousFocusScope = PALETTE.previousFocusScope;
-      PALETTE.controller?.abort();
-      if (PALETTE.debounce)
-        window.clearTimeout(PALETTE.debounce);
-      PALETTE.root.remove();
-      PALETTE = null;
-      restorePanelFocusScope(previousFocusScope);
-    }
-    function createPalette(mode) {
-      const previousFocusScope = PALETTE ? PALETTE.previousFocusScope : getPanelFocusScope();
-      closeSearchPalette();
-      const root = document.createElement("div");
-      root.className = "gdp-palette-backdrop";
-      const dialog = document.createElement("div");
-      dialog.className = "gdp-palette";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      const label = document.createElement("div");
-      label.className = "gdp-palette-label";
-      label.textContent = mode === "file" ? "Files" : "Grep";
-      const input = document.createElement("input");
-      input.className = "gdp-palette-input";
-      input.type = "search";
-      input.autocomplete = "off";
-      input.spellcheck = false;
-      input.placeholder = mode === "file" ? "Search files" : "Search text";
-      input.setAttribute("role", "combobox");
-      input.setAttribute("aria-expanded", "true");
-      input.setAttribute("aria-controls", "gdp-palette-list");
-      const status = document.createElement("div");
-      status.className = "gdp-palette-status";
-      const controls = document.createElement("div");
-      controls.className = "gdp-palette-controls";
-      const list2 = document.createElement("div");
-      list2.id = "gdp-palette-list";
-      list2.className = "gdp-palette-list";
-      list2.setAttribute("role", "listbox");
-      dialog.append(label, input, controls, status, list2);
-      root.appendChild(dialog);
-      document.body.appendChild(root);
-      const state = {
-        root,
-        input,
-        controls,
-        list: list2,
-        status,
-        mode,
-        grepRegex: false,
-        selected: -1,
-        items: [],
-        composing: false,
-        diffSnapshot: [...STATE.files],
-        previousFocusScope
-      };
-      PALETTE = state;
-      setPanelFocusScope(null);
-      root.addEventListener("mousedown", (e2) => {
-        if (e2.target === root)
-          closeSearchPalette();
-      });
-      input.addEventListener("compositionstart", () => {
-        state.composing = true;
-      });
-      input.addEventListener("compositionend", () => {
-        state.composing = false;
-      });
-      input.addEventListener("input", () => updatePaletteResults(state));
-      input.addEventListener("keydown", (e2) => handlePaletteKeydown(e2, state));
-      input.focus();
-      updatePaletteResults(state);
-      return state;
-    }
-    function renderPaletteControls(state) {
-      state.controls.innerHTML = "";
-      if (state.mode === "file") {
-        const hint2 = document.createElement("span");
-        hint2.className = "gdp-palette-mode-hint";
-        hint2.textContent = isGlobPathQuery(state.input.value) ? "Glob: * ? []" : "Fuzzy path search";
-        state.controls.appendChild(hint2);
-        return;
-      }
-      const plain = document.createElement("button");
-      plain.type = "button";
-      plain.className = "gdp-palette-mode-button";
-      plain.setAttribute("aria-pressed", String(!state.grepRegex));
-      plain.textContent = "Plain";
-      plain.addEventListener("mousedown", (e2) => {
-        e2.preventDefault();
-        state.grepRegex = false;
-        renderPaletteControls(state);
-        updatePaletteResults(state);
-        state.input.focus();
-      });
-      const regex = document.createElement("button");
-      regex.type = "button";
-      regex.className = "gdp-palette-mode-button";
-      regex.setAttribute("aria-pressed", String(state.grepRegex));
-      regex.textContent = ".* Regex";
-      regex.title = "Alt+R";
-      regex.addEventListener("mousedown", (e2) => {
-        e2.preventDefault();
-        state.grepRegex = true;
-        renderPaletteControls(state);
-        updatePaletteResults(state);
-        state.input.focus();
-      });
-      const hint = document.createElement("span");
-      hint.className = "gdp-palette-mode-hint";
-      hint.textContent = "Alt+R toggles regex";
-      state.controls.append(plain, regex, hint);
-    }
-    function regexQueryIsValid(query) {
-      try {
-        new RegExp(query);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    function appendHighlightedPath(parent, path, ranges) {
-      let cursor = 0;
-      for (const range of ranges) {
-        if (range.start > cursor)
-          parent.appendChild(document.createTextNode(path.slice(cursor, range.start)));
-        const mark = document.createElement("mark");
-        mark.textContent = path.slice(range.start, range.end);
-        parent.appendChild(mark);
-        cursor = range.end;
-      }
-      if (cursor < path.length)
-        parent.appendChild(document.createTextNode(path.slice(cursor)));
-    }
-    function renderPalette(state) {
-      state.list.innerHTML = "";
-      state.items.forEach((item, index) => {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.id = `gdp-palette-item-${index}`;
-        row.className = "gdp-palette-row";
-        row.setAttribute("role", "option");
-        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
-        const title = document.createElement("span");
-        title.className = "gdp-palette-row-title";
-        const detail = document.createElement("span");
-        detail.className = "gdp-palette-row-detail";
-        if (item.kind === "file") {
-          title.textContent = item.path.split("/").pop() || item.path;
-          appendHighlightedPath(detail, item.displayPath, item.ranges);
-          if (item.old_path && item.displayPath !== item.old_path) {
-            detail.appendChild(document.createTextNode(`  ${item.old_path}`));
-          }
-        } else {
-          title.textContent = `${item.path}:${item.line}`;
-          detail.textContent = item.preview;
-        }
-        row.append(title, detail);
-        row.addEventListener("mouseenter", () => {
-          state.selected = index;
-          syncPaletteSelection(state);
-        });
-        row.addEventListener("mousedown", (e2) => {
-          e2.preventDefault();
-          state.selected = index;
-          selectPaletteItem(state);
-        });
-        state.list.appendChild(row);
-      });
-      syncPaletteSelection(state);
-    }
-    function syncPaletteSelection(state) {
-      state.input.setAttribute("aria-activedescendant", state.selected >= 0 ? `gdp-palette-item-${state.selected}` : "");
-      state.list.querySelectorAll(".gdp-palette-row").forEach((row, index) => {
-        row.setAttribute("aria-selected", index === state.selected ? "true" : "false");
-        if (index === state.selected)
-          row.scrollIntoView({ block: "nearest" });
-      });
-    }
-    async function repoPaletteFiles(ref) {
-      const cacheKey = repoFileCacheKey(ref);
-      const cached = REPO_FILE_CACHE.get(cacheKey);
-      if (cached && cached.generation === SERVER_GENERATION)
-        return cached;
-      const params = new URLSearchParams;
-      params.set("ref", ref);
-      appendScopeParams(params);
-      const res = await trackLoad(fetch(`/_files?${params.toString()}`).then((r2) => {
-        if (!r2.ok)
-          throw new Error("failed to load files");
-        return r2.json();
-      }));
-      REPO_FILE_CACHE.set(cacheKey, res);
-      return res;
-    }
-    function diffFilePaletteItems(state, query) {
-      const matchPath = isGlobPathQuery(query) ? globMatchPath : fuzzyMatchPath;
-      const candidates = state.diffSnapshot.map((file) => {
-        const current = matchPath(query, file.path);
-        const old = file.old_path ? matchPath(query, file.old_path) : null;
-        const best = old && (!current || old.score > current.score) ? { match: old, displayPath: file.old_path || file.path } : current ? { match: current, displayPath: file.path } : null;
-        return best ? { file, ...best } : null;
-      }).filter((item) => item !== null).sort((a2, b2) => b2.match.score - a2.match.score || a2.file.path.localeCompare(b2.file.path));
-      return limitPaletteResults(candidates).map((candidate) => ({
-        kind: "file",
-        path: candidate.file.path,
-        old_path: candidate.file.old_path,
-        displayPath: candidate.displayPath,
-        ref: paletteRef("diff"),
-        targetPath: fileSourceTarget(candidate.file).path,
-        targetRef: fileSourceTarget(candidate.file).ref,
-        source: "diff",
-        ranges: candidate.match.ranges
-      }));
-    }
-    async function updateFilePalette(state, query) {
-      renderPaletteControls(state);
-      const source = paletteSource();
-      if (!query.trim()) {
-        const base2 = source === "diff" ? state.diffSnapshot.map((file) => {
-          const target = fileSourceTarget(file);
-          return {
-            kind: "file",
-            path: file.path,
-            old_path: file.old_path,
-            displayPath: file.path,
-            ref: paletteRef(source),
-            targetPath: target.path,
-            targetRef: target.ref,
-            source,
-            ranges: []
-          };
-        }) : [];
-        state.items = limitPaletteResults(base2);
-        state.selected = state.items.length ? 0 : -1;
-        state.status.textContent = source === "diff" ? `${state.diffSnapshot.length} diff files` : "Type to search repository files";
-        renderPalette(state);
-        return;
-      }
-      if (source === "diff") {
-        state.items = diffFilePaletteItems(state, query);
-      } else {
-        state.status.textContent = "Loading files...";
-        const ref = paletteRef(source);
-        const response = await repoPaletteFiles(ref);
-        if (PALETTE !== state || state.input.value !== query)
-          return;
-        state.items = limitPaletteResults(rankPathMatches(query, response.files)).map((match2) => ({
-          kind: "file",
-          path: match2.item.path,
-          displayPath: match2.item.path,
-          ref,
-          source,
-          ranges: match2.ranges
-        }));
-      }
-      state.selected = state.items.length ? 0 : -1;
-      state.status.textContent = state.items.length ? `${state.items.length} results` : "No results";
-      renderPalette(state);
-    }
-    function updateGrepPalette(state, query) {
-      renderPaletteControls(state);
-      state.controller?.abort();
-      if (state.debounce)
-        window.clearTimeout(state.debounce);
-      if (!query.trim()) {
-        state.items = [];
-        state.selected = -1;
-        state.status.textContent = "Type to grep";
-        renderPalette(state);
-        return;
-      }
-      if (state.grepRegex && !regexQueryIsValid(query)) {
-        state.controller?.abort();
-        state.items = [];
-        state.selected = -1;
-        state.status.textContent = "Invalid regular expression";
-        renderPalette(state);
-        return;
-      }
-      state.status.textContent = "Searching...";
-      state.debounce = window.setTimeout(() => {
-        const source = paletteSource();
-        const ref = paletteRef(source);
-        const params = new URLSearchParams;
-        params.set("ref", ref);
-        params.set("q", query);
-        params.set("max", "200");
-        if (state.grepRegex)
-          params.set("regex", "1");
-        appendScopeParams(params);
-        if (source === "diff") {
-          for (const file of state.diffSnapshot)
-            params.append("path", file.path);
-        }
-        const controller = new AbortController;
-        state.controller = controller;
-        trackLoad(fetch(`/_grep?${params.toString()}`, {
-          signal: controller.signal
-        }).then((r2) => {
-          if (!r2.ok)
-            throw new Error("grep failed");
-          return r2.json();
-        })).then((response) => {
-          if (PALETTE !== state || controller.signal.aborted)
-            return;
-          state.items = limitPaletteResults(response.matches.map((match2) => ({
-            kind: "grep",
-            path: match2.path,
-            line: match2.line,
-            column: match2.column,
-            preview: match2.preview,
-            ref,
-            source
-          })));
-          state.selected = state.items.length ? 0 : -1;
-          state.status.textContent = response.engine + (state.grepRegex ? " regex" : " plain") + (response.truncated ? " truncated" : "") + " - " + state.items.length + " results";
-          renderPalette(state);
-        }).catch((err) => {
-          if (isAbortError(err))
-            return;
-          state.status.textContent = "Search failed";
-        });
-      }, 80);
-    }
-    function updatePaletteResults(state) {
-      const query = state.input.value;
-      if (state.mode === "file") {
-        updateFilePalette(state, query).catch(() => {
-          state.status.textContent = "Search failed";
-        });
-      } else {
-        updateGrepPalette(state, query);
-      }
-    }
-    function selectPaletteItem(state) {
-      const item = state.items[state.selected];
-      if (!item)
-        return;
-      closeSearchPalette();
-      if (item.kind === "file") {
-        if (item.source === "diff") {
-          if (STATE.route.screen === "file") {
-            setRoute({
-              screen: "file",
-              path: item.targetPath || item.path,
-              ref: item.targetRef || item.ref,
-              range: currentRange()
-            });
-            applySourceRouteToShell();
-          } else {
-            scrollToFile(item.path);
-          }
-        } else {
-          setRoute({
-            screen: "file",
-            path: item.path,
-            ref: item.ref,
-            view: "blob",
-            range: currentRange()
-          });
-          renderStandaloneSource({ path: item.path, ref: item.ref });
-        }
-        return;
-      }
-      if (item.source === "diff") {
-        setRoute({
-          screen: "diff",
-          range: currentRange(),
-          path: item.path,
-          line: item.line
-        });
-        scrollToFile(item.path, item.line);
-      } else {
-        setRoute({
-          screen: "file",
-          path: item.path,
-          ref: item.ref,
-          view: "blob",
-          line: item.line,
-          range: currentRange()
-        });
-        renderStandaloneSource({ path: item.path, ref: item.ref });
-      }
-    }
-    function handlePaletteKeydown(e2, state) {
-      if (e2.key === "Escape") {
-        e2.preventDefault();
-        closeSearchPalette();
-        return;
-      }
-      if (e2.key === "Enter") {
-        if (state.composing)
-          return;
-        e2.preventDefault();
-        selectPaletteItem(state);
-        return;
-      }
-      if (state.mode === "grep" && e2.altKey && e2.key.toLowerCase() === "r") {
-        e2.preventDefault();
-        state.grepRegex = !state.grepRegex;
-        updatePaletteResults(state);
-        return;
-      }
-      const direction = e2.key === "ArrowDown" || e2.ctrlKey && e2.key.toLowerCase() === "n" ? 1 : e2.key === "ArrowUp" || e2.ctrlKey && e2.key.toLowerCase() === "p" ? -1 : 0;
-      if (direction) {
-        e2.preventDefault();
-        state.selected = movePaletteSelection(state.selected, state.items.length, direction);
-        syncPaletteSelection(state);
-      }
-    }
-    function openSearchPalette(mode) {
-      createPalette(mode);
-    }
     function dispatchKeymapAction(action, scope, repeated = false) {
       if (action !== "start-g-sequence") {
         PENDING_G_SCOPE = null;
         PENDING_G_UNTIL = 0;
       }
       if (action === "open-file-palette") {
-        if (PALETTE?.mode !== "file")
+        if (paletteMode() !== "file")
           openSearchPalette("file");
         return true;
       }
       if (action === "open-grep-palette") {
-        if (PALETTE?.mode !== "grep")
+        if (paletteMode() !== "grep")
           openSearchPalette("grep");
         return true;
       }
@@ -15020,7 +15069,7 @@ ${frontmatter.yaml}
         scope,
         editable: isEditableKeyTarget(targetEl),
         composing: e2.isComposing,
-        paletteOpen: !!PALETTE,
+        paletteOpen: isPaletteOpen(),
         pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
         lightboxOpen: !!document.querySelector(".mkdp-lightbox")
       });
