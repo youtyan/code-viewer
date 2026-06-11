@@ -543,6 +543,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       sessionEl.dataset.sessionId = session.id;
       sessionEl.classList.toggle("active", session.id === activeSessionId);
 
+      sessionEl.addEventListener("click", (event) => {
+        // Clicking the card body (not its buttons or entries) selects the
+        // session so [ and ] navigate inside it.
+        const target = event.target as HTMLElement;
+        if (target.closest("button, a, input")) return;
+        if (session.id !== activeSessionId) setActiveSession(session.id);
+      });
+
       const head = document.createElement("div");
       head.className = "annotation-session-head";
       const title = document.createElement("button");
@@ -860,21 +868,25 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   function stepAnnotation(direction: 1 | -1) {
-    if (!activeAnnotationId) {
-      // No annotation shown yet: enter the walkthrough at the start (or
-      // the end when stepping backwards), preferring the active session.
-      const session =
-        ANNOTATIONS.sessions.find((s) => s.id === activeSessionId) ??
-        ANNOTATIONS.sessions[0];
-      const entries = session?.entries ?? [];
-      const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
-      if (entry) void openAnnotationEntry(entry.id);
+    const found = activeAnnotationId
+      ? findAnnotation(activeAnnotationId)
+      : null;
+    // Step within the current annotation only while it belongs to the
+    // active session; after the user selects another session the keys
+    // must navigate that session instead.
+    if (found && (!activeSessionId || found.session.id === activeSessionId)) {
+      const next = found.session.entries[found.index + direction];
+      if (next) void openAnnotationEntry(next.id);
       return;
     }
-    const found = findAnnotation(activeAnnotationId);
-    if (!found) return;
-    const next = found.session.entries[found.index + direction];
-    if (next) void openAnnotationEntry(next.id);
+    // Enter the walkthrough at the start (or the end when stepping
+    // backwards), preferring the active session.
+    const session =
+      ANNOTATIONS.sessions.find((s) => s.id === activeSessionId) ??
+      ANNOTATIONS.sessions[0];
+    const entries = session?.entries ?? [];
+    const entry = direction === 1 ? entries[0] : entries[entries.length - 1];
+    if (entry) void openAnnotationEntry(entry.id);
   }
 
   function handleSse(raw: string) {
