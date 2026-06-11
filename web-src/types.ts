@@ -133,6 +133,39 @@ export type FileRangeResponse = {
   generation?: number;
 };
 
+export type AnnotationLineRange = {
+  start: number;
+  end: number;
+};
+
+export type AnnotationEntry = {
+  id: string;
+  created_at: string;
+  path: string;
+  line?: AnnotationLineRange;
+  range: { from: string; to: string };
+  title?: string;
+  body: string;
+};
+
+export type AnnotationSession = {
+  id: string;
+  title: string;
+  created_at: string;
+  entries: AnnotationEntry[];
+};
+
+export type AnnotationsState = {
+  version: 1;
+  sessions: AnnotationSession[];
+};
+
+export type AnnotationSseEvent = {
+  kind: "start" | "add" | "delete" | "clear";
+  session_id?: string;
+  entry_id?: string;
+};
+
 export type DiffCardElement = HTMLElement & {
   _diffData?: FileDiffResponse | null;
   _file?: FileMeta | null;

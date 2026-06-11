@@ -28,6 +28,7 @@
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
     </nav>
     <div class="global-actions">
+      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
@@ -135,6 +136,33 @@
       </div>
     </div>
   </div>
+
+  <aside id="annotation-panel" hidden>
+    <div class="annotation-panel-head">
+      <strong>Code annotations</strong>
+      <label class="annotation-follow-label" title="jump to new annotations as they arrive">
+        <input type="checkbox" id="annotation-follow" checked /> follow
+      </label>
+      <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
+      <button id="annotation-panel-close" type="button">close</button>
+    </div>
+    <div id="annotation-detail" hidden>
+      <div class="annotation-detail-head">
+        <span id="annotation-detail-session"></span>
+        <span id="annotation-detail-step"></span>
+        <button id="annotation-detail-prev" type="button" title="previous annotation">‹</button>
+        <button id="annotation-detail-next" type="button" title="next annotation">›</button>
+        <button id="annotation-detail-close" type="button">close</button>
+      </div>
+      <a id="annotation-detail-location" href="#"></a>
+      <div id="annotation-detail-body" class="markdown-body"></div>
+    </div>
+    <div class="annotation-list-head">
+      <strong>Sessions</strong>
+      <span id="annotation-list-count"></span>
+    </div>
+    <div id="annotation-sessions"></div>
+  </aside>
 
   <main id="content">
     <div id="empty" class="empty hidden">

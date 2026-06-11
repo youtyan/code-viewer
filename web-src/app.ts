@@ -1,3 +1,4 @@
+import { type AnnotationsUi, createAnnotationsUi } from "./annotations-ui";
 import { createCatchUpGate, shouldCatchUpDiff } from "./catch-up";
 import { normalizeNewDirectoryName } from "./directory-name";
 import { GdpExpandLogic } from "./expand-logic";
@@ -1112,6 +1113,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const file = card._file;
         if (!data || !file) return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -1134,6 +1136,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         const file = card._file;
         if (!data || !file) return;
         mountDiff(card, file, data);
+        applyInlineAnnotations();
         if (data.truncated && data.mode === "preview") {
           addExpandHunksUI(file, data, card);
         }
@@ -2409,11 +2412,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     return focusDiffLine(targetCard, STATE.route.line);
   }
 
+  // Lazy diff loads above the focused line change the document height and
+  // push the target away after we already scrolled to it. While this window
+  // is open, every finished card load re-anchors the viewport on the target
+  // line of the route; any manual scroll intent (wheel/touch) closes it so the
+  // user is never yanked back.
+  let REANCHOR_UNTIL =
+    STATE.route.screen === "diff" && STATE.route.line
+      ? performance.now() + 6000
+      : 0;
+  window.addEventListener(
+    "wheel",
+    () => {
+      REANCHOR_UNTIL = 0;
+    },
+    { passive: true },
+  );
+  window.addEventListener(
+    "touchmove",
+    () => {
+      REANCHOR_UNTIL = 0;
+    },
+    { passive: true },
+  );
+
   function scrollToFile(path: string, line?: SourceLineTarget) {
     const card = document.querySelector<DiffCardElement>(
       diffCardSelector(path),
     );
     if (!card) return;
+    if (line) REANCHOR_UNTIL = performance.now() + 4000;
     markActive(path);
     SUPPRESS_SPY_UNTIL = performance.now() + 1500;
     const onEnd = () => {
@@ -2708,6 +2736,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       : "keybindings";
   }
 
+  // Annotations UI (annotations-ui.ts) is constructed near the end of this
+  // file once its dependencies exist; the few call sites that can run before
+  // that (setRoute, lazy diff renders) go through this late-bound handle.
+  let ANNOTATIONS_UI: AnnotationsUi | null = null;
+
+  function applyInlineAnnotations() {
+    ANNOTATIONS_UI?.applyInlineAnnotations();
+  }
+
+  function withAnnotationSessionParam(rawUrl: string): string {
+    return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute =
       route.screen === "unknown"
@@ -2722,7 +2763,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
-    const url = buildRoute(nextRoute);
+    const url = withAnnotationSessionParam(buildRoute(nextRoute));
     const state =
       nextRoute.screen === "file"
         ? {
@@ -4526,9 +4567,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       start: number,
       end: number,
       dir: "before" | "after",
-    ) => {
+    ): Promise<void> => {
       if (start < 1) start = 1;
-      if (end < start) return;
+      if (end < start) return Promise.resolve();
       setBusy(true);
       const url =
         "/file_range?path=" +
@@ -4539,7 +4580,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         start +
         "&end=" +
         end;
-      trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
+      return trackLoad<{ lines?: string[] }>(fetch(url).then((r) => r.json()))
         .then((data) => {
           if (!data?.lines) {
             setBusy(false);
@@ -4632,13 +4673,25 @@ window.GdpExpandLogic = GdpExpandLogic;
       return createExpandStack(buttons);
     };
 
+    // One-shot full-gap expansion for "expand all context": fetches the
+    // whole remaining gap in a single request instead of 20-line clicks.
+    // Sibling stacks (split view) share the guard so the gap loads once.
+    let expandFullyStarted = false;
+    const expandFully = (): Promise<void> => {
+      if (expandFullyStarted) return Promise.resolve();
+      expandFullyStarted = true;
+      return fetchAndInsert(remainingStart, remainingEnd, "after");
+    };
+
     const siblings = item.siblings || [{ tr: item.tr }];
     siblings.forEach((sib) => {
       const ln = sib.tr.querySelector(
         ".d2h-code-linenumber.d2h-info, .d2h-code-side-linenumber.d2h-info",
       );
       if (ln && !ln.querySelector(".gdp-expand-stack")) {
-        ln.appendChild(buildStack());
+        const stack = buildStack() as ExpandStackElement;
+        stack._gdpExpandFully = expandFully;
+        ln.appendChild(stack);
       }
     });
     const firstSib = siblings[0];
@@ -4654,6 +4707,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     direction: "up" | "down";
     title: string;
     onClick: () => void;
+  };
+
+  type ExpandStackElement = HTMLElement & {
+    _gdpExpandFully?: () => Promise<void>;
   };
 
   const EXPAND_ICON_PATHS = {
@@ -4747,10 +4804,10 @@ window.GdpExpandLogic = GdpExpandLogic;
           });
       });
     };
-    const fetchAndInsert = () => {
+    const fetchAndInsert = (step = STEP): Promise<void> => {
       const range = window.GdpExpandLogic.trailingClickRange(
         nextNewStart,
-        STEP,
+        step,
       );
       const myGen = SERVER_GENERATION;
       setBusy(true);
@@ -4763,7 +4820,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         range.start +
         "&end=" +
         range.end;
-      trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
+      return trackLoad<FileRangeResponse>(fetch(url).then((r) => r.json()))
         .then((data) => {
           if (
             myGen !== SERVER_GENERATION ||
@@ -4794,7 +4851,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           const next = window.GdpExpandLogic.applyTrailingResult(
             { newStart: nextNewStart, oldStart: nextOldStart },
             lines.length,
-            STEP,
+            step,
           );
           nextNewStart = next.newStart;
           nextOldStart = next.oldStart;
@@ -4811,16 +4868,24 @@ window.GdpExpandLogic = GdpExpandLogic;
           setBusy(false);
         });
     };
+    // One-shot expansion to EOF for "expand all context": a single large
+    // range request instead of repeated 20-line clicks.
+    let expandFullyStarted = false;
+    const expandFully = (): Promise<void> => {
+      if (expandFullyStarted) return Promise.resolve();
+      expandFullyStarted = true;
+      return fetchAndInsert(100000);
+    };
     rows.forEach((row) => {
-      row.ln.appendChild(
-        createExpandStack([
-          {
-            direction: "down",
-            title: "Show more lines",
-            onClick: fetchAndInsert,
-          },
-        ]),
-      );
+      const stack = createExpandStack([
+        {
+          direction: "down",
+          title: "Show more lines",
+          onClick: () => void fetchAndInsert(),
+        },
+      ]) as ExpandStackElement;
+      stack._gdpExpandFully = expandFully;
+      row.ln.appendChild(stack);
     });
     syncExpandRowHeights(
       rows.map((row) => row.tr),
@@ -7198,24 +7263,32 @@ window.GdpExpandLogic = GdpExpandLogic;
       card._diffData &&
       (card._diffData.truncated || card._diffData.mode === "preview")
     ) {
+      // Load the full diff first, then fall through to expand its gaps too.
       await loadFile(file, card, file.load_url);
-      card.classList.add("gdp-context-expanded");
-      setUnfoldButtonState(
-        card.querySelector<HTMLButtonElement>(".gdp-file-unfold"),
-        true,
-      );
-      return;
     }
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (button) button.disabled = true;
     try {
-      for (let i = 0; i < 200; i++) {
-        const next = card.querySelector<HTMLButtonElement>(
-          ".gdp-expand-btn:not(:disabled)",
+      // Expand every gap fully in parallel: each stack exposes a one-shot
+      // whole-gap fetch, so a round costs one request per gap instead of
+      // a 20-line click every 80ms. Extra rounds only pick up stacks the
+      // previous round created (e.g. trailing EOF probing).
+      for (let round = 0; round < 20; round++) {
+        const tasks = Array.from(
+          card.querySelectorAll<ExpandStackElement>(".gdp-expand-stack"),
+        )
+          .map((stack) => stack._gdpExpandFully)
+          .filter((fn): fn is () => Promise<void> => !!fn);
+        if (!tasks.length) break;
+        const results = await Promise.all(
+          tasks.map((fn) =>
+            fn().then(
+              () => true,
+              () => false,
+            ),
+          ),
         );
-        if (!next) break;
-        next.click();
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        if (!results.some(Boolean)) break;
       }
       card.classList.add("gdp-context-expanded");
       setUnfoldButtonState(button || null, true);
@@ -7386,7 +7459,31 @@ window.GdpExpandLogic = GdpExpandLogic;
     card.style.minHeight = "";
 
     mountDiff(card, file, data);
-    applyDiffRouteFocus(card);
+    applyInlineAnnotations();
+    const focused = applyDiffRouteFocus(card);
+    // A shared/annotation URL can point at a line outside the diff hunks
+    // (unchanged code). Expand the file context so the target is visible.
+    if (
+      !focused &&
+      STATE.route.screen === "diff" &&
+      STATE.route.path === file.path &&
+      STATE.route.line &&
+      !card.classList.contains("gdp-context-expanded")
+    ) {
+      void expandAllFileContext(card, file).then(() => {
+        applyInlineAnnotations();
+        applyDiffRouteFocus(card);
+      });
+    }
+    // Another card finishing its lazy load can shift the already-focused
+    // target line; re-anchor on it while the navigation window is open.
+    if (
+      performance.now() < REANCHOR_UNTIL &&
+      STATE.route.screen === "diff" &&
+      STATE.route.path !== file.path
+    ) {
+      applyDiffRouteFocus();
+    }
     card.style.containIntrinsicSize = `${Math.max(card.offsetHeight, file.estimated_height_px || 200)}px`;
     applyViewedToCard(card, STATE.viewedFiles.has(file.path), true);
 
@@ -9417,6 +9514,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.to = STATE.route.range.to;
     if (STATE.route.screen === "repo")
       STATE.repoRef = STATE.route.ref || "worktree";
+    ANNOTATIONS_UI?.restoreSessionFromUrl();
     syncRefInputs();
     syncHeaderMenu();
     if (STATE.route.screen === "help") {
@@ -9518,6 +9616,34 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTests();
   });
 
+  // ---- Code annotations (AI walkthrough) ----
+  // Panel + inline rows live in annotations-ui.ts; this wires it to the app.
+  ANNOTATIONS_UI = createAnnotationsUi({
+    $,
+    diffCardSelector,
+    diffRowLineNumber,
+    focusDiffLine,
+    scrollDiffElementIntoView,
+    expandAllFileContext,
+    scrollToFile,
+    renderStandaloneSource,
+    removeStandaloneSource,
+    cancelActiveSourceLoad,
+    setRoute,
+    setPageMode,
+    syncRefInputs,
+    load,
+    currentRange,
+    getFiles: () => STATE.files,
+    getRoute: () => STATE.route,
+    setRange: (from, to) => {
+      STATE.from = from;
+      STATE.to = to;
+      localStorage.setItem("gdp:from", from);
+      localStorage.setItem("gdp:to", to);
+    },
+  });
+
   // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession
   // collapse into one fetch. Scroll + active file are preserved across reload.
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -9548,6 +9674,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let openedOnce = false;
   es.addEventListener("update", () => scheduleSseLoad());
   es.addEventListener("reload", () => location.reload());
+  es.addEventListener("annotation", (event) => {
+    ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+  });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {
     setStatus("live");
