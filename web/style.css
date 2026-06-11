@@ -926,6 +926,11 @@ body.gdp-history-page.gdp-sidebar-hidden main#content {
 body.gdp-history-page #sidebar-resizer {
   left: calc(var(--history-w) + var(--sidebar-w) - 4px);
 }
+/* The history screen drives its diff range from the commit list; the topbar
+   from/to pickers belong to the Diff Viewer and are hidden here. */
+body.gdp-history-page #topbar .ref-pickers {
+  display: none;
+}
 #history-panel[hidden] {
   display: none !important;
 }
