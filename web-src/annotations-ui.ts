@@ -189,7 +189,35 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         anchor = anchor.nextElementSibling as HTMLTableRowElement;
       anchor.after(buildInlineAnnotationRow(entry, target.cells.length));
     }
+    syncInlineAnnotationWidths();
   }
+
+  // The code tables can be much wider than the viewport (long lines scroll
+  // horizontally). A colspan cell stretches to the full table width, so the
+  // note box gets an explicit width matching the visible scroll area and
+  // sticks to its left edge while the code scrolls underneath.
+  function syncInlineAnnotationWidths() {
+    document
+      .querySelectorAll<HTMLElement>(".gdp-annotation-inline")
+      .forEach((box) => {
+        let scroller: HTMLElement | null = null;
+        for (
+          let el = box.parentElement;
+          el && el !== document.body;
+          el = el.parentElement
+        ) {
+          const overflowX = getComputedStyle(el).overflowX;
+          if (overflowX === "auto" || overflowX === "scroll") {
+            scroller = el;
+            break;
+          }
+        }
+        const width = scroller?.clientWidth || 0;
+        // 16px = the 8px horizontal margins on both sides of the box.
+        box.style.width = width > 32 ? `${width - 16}px` : "";
+      });
+  }
+  window.addEventListener("resize", syncInlineAnnotationWidths);
 
   function syncSessionUrl() {
     const current = window.location.pathname + window.location.search;
