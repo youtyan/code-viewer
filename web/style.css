@@ -1132,7 +1132,8 @@ body.gdp-resizing * { user-select: none !important; }
   top: calc(var(--global-header-h) + 8px);
   width: min(460px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
-  z-index: 40;
+  /* Transient popover: must sit above the annotation panel (45). */
+  z-index: 70;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
