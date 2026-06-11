@@ -8700,100 +8700,42 @@ ${frontmatter.yaml}
     return fallback.charAt(0).toUpperCase() + fallback.slice(1);
   }
 
-  // web-src/ws-highlight.ts
-  function isWhitespaceOnlyInlineHighlight(text2) {
-    return !!text2 && !/\S/.test(text2);
-  }
-  function suppressWhitespaceOnlyInlineHighlights(root) {
-    root.querySelectorAll("ins, del").forEach((el) => {
-      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
-        return;
-      const parent = el.parentNode;
-      if (!parent)
-        return;
-      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
-    });
-  }
-
-  // web-src/app.ts
-  window.GdpExpandLogic = GdpExpandLogic;
-  (() => {
-    const $ = (sel) => document.querySelector(sel);
-    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-    const diffCardSelector = (path) => '.gdp-file-shell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(path) : path) + '"]';
-    const HIGHLIGHT_SRC = "/vendor/highlight.js/highlight.min.js";
-    const DEFAULT_RANGE = { from: "HEAD", to: "worktree" };
+  // web-src/source-view.ts
+  function createSourceView(deps) {
+    const {
+      $,
+      $$,
+      STATE,
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      isAbortError,
+      loadRepo,
+      repoRoute,
+      repoFileTargetFromRoute,
+      renderRepoBlobSidebar,
+      placeSidebarToggle,
+      createFileBreadcrumb,
+      createFileDetailMeta,
+      createOpenPathButton,
+      createMoveToTrashButton,
+      canTrashWorktreeRef,
+      loadRawFileInfo,
+      loadSyntaxHighlighter,
+      setViewFileButtonState,
+      scrollMainPanel,
+      focusMainSurface,
+      isPaletteOpen
+    } = deps;
     const VIRTUAL_SOURCE_LINE_THRESHOLD = 3000;
     const VIRTUAL_SOURCE_SIZE_THRESHOLD = 1024 * 1024;
     const VIRTUAL_SOURCE_PAGE_SIZE = 2000;
     const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
-    const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
-    const VIRTUAL_SIDEBAR_ROW_HEIGHT = 29;
-    const VIRTUAL_SIDEBAR_OVERSCAN = 16;
     const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
-    const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
-    let highlightLoadPromise = null;
     let sourceShikiLoadPromise = null;
-    let highlightConfigured = false;
-    let PROJECT_NAME = "";
-    let creatingDirectory = false;
-    let REPO_SIDEBAR_REF = null;
-    let REPO_SIDEBAR_LOAD_REF = null;
-    let REPO_SIDEBAR_LOAD = null;
-    let SIDEBAR_FILES = [];
-    let SIDEBAR_ON_FILE_CLICK;
-    let SIDEBAR_TREE_ROOT = null;
-    let SIDEBAR_TREE_ROWS = [];
-    let SIDEBAR_VISIBLE_ROWS = [];
-    let SIDEBAR_ROW_BY_PATH = new Map;
-    let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
-    let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
-    const SIDEBAR_LAZY_LOADED_DIRS = new Set;
-    const SIDEBAR_LAZY_LOADING_DIRS = new Map;
-    let REPO_SORT = {
-      key: "name",
-      direction: "asc"
-    };
-    let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
-    let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = [];
-    const UNDO_STACK = [];
-    let PENDING_G_SCOPE = null;
-    let PENDING_G_UNTIL = 0;
     let SOURCE_CURSOR = null;
     const SOURCE_CURSOR_TOTALS = new Map;
-    const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
-    const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
-    const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
-    const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
-    const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
-      "node_modules",
-      ".venv",
-      "venv",
-      ".next",
-      ".nuxt",
-      ".svelte-kit",
-      ".astro",
-      ".vercel",
-      "dist",
-      "build",
-      "out",
-      "target",
-      ".gradle",
-      "__pycache__",
-      ".pytest_cache",
-      ".tox",
-      ".terraform",
-      ".idea",
-      ".vscode",
-      "vendor",
-      ".cache",
-      "coverage",
-      "DerivedData",
-      "Pods",
-      "bin",
-      "obj"
-    ];
-    const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
     function sourceLineScrollAmount() {
       const virtualRow = Array.from(document.querySelectorAll("#content .gdp-source-virtual-row")).find((item) => item.offsetParent !== null);
       if (virtualRow)
@@ -8889,57 +8831,6 @@ ${frontmatter.yaml}
       scrollSourceCursorIntoView(cursor, unit === "page" ? "start" : "nearest");
       return true;
     }
-    function scrollMainPanel(direction, repeated = false, unit = "line") {
-      if (moveSourceCursor(direction, unit))
-        return;
-      const target = findMainScrollTarget();
-      const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
-      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
-      const behavior = repeated ? "auto" : "smooth";
-      if (target)
-        target.scrollBy({ top, behavior });
-      else
-        window.scrollBy({ top, behavior });
-    }
-    let MAIN_SURFACE_FOCUS_SEQ = 0;
-    function focusMainSurface() {
-      const target = findMainScrollTarget();
-      if (target?.matches("#content .gdp-source-virtual-scroller")) {
-        target.focus({ preventScroll: true });
-        setPanelFocusScope("main");
-        return;
-      }
-      focusMainPanel();
-    }
-    function scheduleMainSurfaceFocus() {
-      const seq = ++MAIN_SURFACE_FOCUS_SEQ;
-      const apply = () => {
-        if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE)
-          return;
-        if (isEditableKeyTarget(document.activeElement))
-          return;
-        focusMainSurface();
-      };
-      focusMainPanel();
-      queueMicrotask(apply);
-      requestAnimationFrame(apply);
-      setTimeout(apply, 100);
-      setTimeout(apply, 300);
-    }
-    function scrollMainToEdge(edge) {
-      if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
-        return;
-      const target = findMainScrollTarget();
-      if (target) {
-        target.scrollTo({
-          top: edge === "top" ? 0 : target.scrollHeight,
-          behavior: "auto"
-        });
-        return;
-      }
-      const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
-      window.scrollTo({ top, behavior: "auto" });
-    }
     function switchSourceTab(tab) {
       const tabs = document.querySelector("#content .gdp-source-tabs");
       if (!tabs)
@@ -8950,234 +8841,6 @@ ${frontmatter.yaml}
       button.click();
       focusMainPanel();
       return true;
-    }
-    function isFocusableClickTarget(target) {
-      if (!(target instanceof Element))
-        return false;
-      return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
-    }
-    function invalidateRepoSidebar() {
-      REPO_SIDEBAR_REF = null;
-      REPO_SIDEBAR_LOAD_REF = null;
-      REPO_SIDEBAR_LOAD = null;
-    }
-    function normalizeScopeOmitDirs(value) {
-      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
-      return [
-        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
-      ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
-    }
-    function normalizeScopeExcludeNames(value) {
-      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
-      return [
-        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 128 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
-      ].slice(0, 200).sort((a2, b2) => a2.localeCompare(b2));
-    }
-    function scopeOmitDirsStorageKey() {
-      return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-    }
-    function scopeExcludeNamesStorageKey() {
-      return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-    }
-    function setProjectName(project) {
-      if (!project)
-        return;
-      PROJECT_NAME = project;
-      document.title = `${project} - code viewer`;
-      const projectTitle = document.querySelector("#project-title");
-      if (projectTitle) {
-        projectTitle.textContent = project;
-        projectTitle.title = project;
-      }
-    }
-    function savedScopeOmitDirs() {
-      const raw = localStorage.getItem(scopeOmitDirsStorageKey());
-      if (raw == null)
-        return null;
-      try {
-        const parsed = JSON.parse(raw);
-        return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        return normalizeScopeOmitDirs(raw);
-      }
-    }
-    function savedScopeExcludeNames() {
-      const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
-      if (raw == null)
-        return null;
-      try {
-        const parsed = JSON.parse(raw);
-        return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        return normalizeScopeExcludeNames(raw);
-      }
-    }
-    function serverScopeOmitDirsDefault() {
-      return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
-    }
-    function serverScopeExcludeNamesDefault() {
-      return SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT.length ? SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT : CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT;
-    }
-    function effectiveScopeOmitDirs() {
-      return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
-    }
-    function effectiveScopeExcludeNames() {
-      return savedScopeExcludeNames() ?? serverScopeExcludeNamesDefault();
-    }
-    function appendScopeParams(params) {
-      const omit = savedScopeOmitDirs();
-      if (omit != null)
-        params.set("omit_dirs", omit.join(","));
-      const exclude = savedScopeExcludeNames();
-      if (exclude != null)
-        params.set("exclude_names", exclude.join(","));
-    }
-    function normalizeViewerFontSize(value) {
-      return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
-    }
-    function savedSidebarFontSize() {
-      return normalizeViewerFontSize(localStorage.getItem(SIDEBAR_FONT_SIZE_STORAGE_KEY));
-    }
-    function savedCodeFontSize() {
-      return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
-    }
-    function applySidebarFontSize(size = savedSidebarFontSize()) {
-      document.body.dataset.sidebarFontSize = size;
-    }
-    function applyCodeFontSize(size = savedCodeFontSize()) {
-      document.body.dataset.codeFontSize = size;
-    }
-    function syncSidebarHeaderHeight() {
-      requestAnimationFrame(() => {
-        const head = document.querySelector(".sb-head");
-        if (head)
-          document.documentElement.style.setProperty("--sidebar-head-h", `${Math.ceil(head.getBoundingClientRect().height)}px`);
-      });
-    }
-    function observeSidebarHeaderHeight() {
-      const head = document.querySelector(".sb-head");
-      if (!head || typeof ResizeObserver === "undefined") {
-        syncSidebarHeaderHeight();
-        return;
-      }
-      const observer = new ResizeObserver(syncSidebarHeaderHeight);
-      observer.observe(head);
-      syncSidebarHeaderHeight();
-    }
-    function repoFileCacheKey(ref) {
-      const omit = savedScopeOmitDirs();
-      const exclude = savedScopeExcludeNames();
-      return `${ref}\x00${omit ? omit.join("\x00") : "server"}\x00${exclude ? exclude.join("\x00") : "server"}`;
-    }
-    async function loadSettings() {
-      try {
-        const res = await fetch("/_settings");
-        if (!res.ok)
-          return null;
-        const settings = await res.json();
-        setProjectName(settings.project || "");
-        SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
-        SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
-        return settings;
-      } catch {
-        return null;
-      }
-    }
-    function isRepoSidebarReusable(ref) {
-      return REPO_SIDEBAR_REF === (ref || "worktree") && isRepositorySidebarMode();
-    }
-    const STATE = (() => {
-      const igRaw = localStorage.getItem("gdp:ignore-ws");
-      const fallbackRange = {
-        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
-      };
-      const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
-      const route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
-      return {
-        layout: localStorage.getItem("gdp:layout") || "side-by-side",
-        theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
-        sbView: localStorage.getItem("gdp:sbview") || "tree",
-        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
-        sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
-        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
-        ignoreWs: igRaw === null ? true : igRaw === "1",
-        from: route.range.from,
-        to: route.range.to,
-        collapsed: false,
-        files: [],
-        activeFile: null,
-        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
-        syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
-        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
-        route,
-        repoRef: route.screen === "repo" ? route.ref : "worktree"
-      };
-    })();
-    function setStatus(s2) {
-      const el = $("#status");
-      el.classList.remove("live", "refreshing", "error");
-      if (s2)
-        el.classList.add(s2);
-    }
-    function applyTheme() {
-      document.documentElement.dataset.theme = STATE.theme;
-      $("#hljs-light").disabled = STATE.theme === "dark";
-      $("#hljs-dark").disabled = STATE.theme !== "dark";
-    }
-    function getHljs() {
-      const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
-      if (!hljsRef)
-        return null;
-      if (!highlightConfigured && typeof hljsRef.configure === "function") {
-        hljsRef.configure({ ignoreUnescapedHTML: true });
-        highlightConfigured = true;
-      }
-      return hljsRef;
-    }
-    function setHighlightButton(state) {
-      const btn = $("#syntax-highlight");
-      if (!btn)
-        return;
-      btn.classList.toggle("active", STATE.syntaxHighlight);
-      btn.classList.toggle("loading", state === "loading");
-      btn.textContent = state === "loading" ? "loading..." : STATE.syntaxHighlight ? "syntax on" : "syntax off";
-      btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
-      btn.title = STATE.syntaxHighlight ? "syntax highlighting on" : state === "loading" ? "loading syntax highlighter" : state === "error" ? "failed to load syntax highlighter" : "syntax highlighting off";
-    }
-    function loadSyntaxHighlighter() {
-      const existing = getHljs();
-      if (existing) {
-        setHighlightButton("loaded");
-        return Promise.resolve(existing);
-      }
-      if (highlightLoadPromise)
-        return highlightLoadPromise;
-      setHighlightButton("loading");
-      highlightLoadPromise = new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src = HIGHLIGHT_SRC;
-        script.async = true;
-        script.onload = () => {
-          const hljsRef = getHljs();
-          if (hljsRef) {
-            setHighlightButton("loaded");
-            resolve(hljsRef);
-          } else {
-            setHighlightButton("error");
-            reject(new Error("highlight.js did not expose window.hljs"));
-          }
-        };
-        script.onerror = () => {
-          setHighlightButton("error");
-          reject(new Error("failed to load highlight.js"));
-        };
-        document.head.appendChild(script);
-      }).catch(() => {
-        highlightLoadPromise = null;
-        return null;
-      });
-      return highlightLoadPromise;
     }
     const SOURCE_SHIKI_LANGS = Array.from(new Set([
       "bash",
@@ -9261,1222 +8924,10 @@ ${frontmatter.yaml}
         return null;
       }
     }
-    function rerenderLoadedDiffs() {
-      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
-        const data = card._diffData;
-        const file = card._file;
-        if (!data || !file)
-          return;
-        mountDiff(card, file, data);
-        applyInlineAnnotations();
-        if (data.truncated && data.mode === "preview") {
-          addExpandHunksUI(file, data, card);
-        }
-        scheduleIdleHighlight(card, file);
-      });
-    }
-    function setLayout(layout) {
-      STATE.layout = layout;
-      localStorage.setItem("gdp:layout", layout);
-      $$("#topbar .seg button").forEach((b2) => {
-        b2.classList.toggle("active", b2.dataset.layout === layout);
-      });
-      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
-        const data = card._diffData;
-        const file = card._file;
-        if (!data || !file)
-          return;
-        mountDiff(card, file, data);
-        applyInlineAnnotations();
-        if (data.truncated && data.mode === "preview") {
-          addExpandHunksUI(file, data, card);
-        }
-        scheduleIdleHighlight(card, file);
-      });
-    }
-    function fileBadge(status) {
-      const ch = (status || "M")[0].toUpperCase();
-      const span = document.createElement("span");
-      span.className = `badge ${ch}`;
-      span.textContent = ch;
-      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
-      return span;
-    }
-    function persistViewedFiles() {
-      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
-    }
-    function setFileViewed(path, viewed) {
-      if (viewed)
-        STATE.viewedFiles.add(path);
-      else
-        STATE.viewedFiles.delete(path);
-      persistViewedFiles();
-      applyViewedState();
-      $$(diffCardSelector(path)).forEach((card) => {
-        applyViewedToCard(card, viewed, true);
-      });
-    }
-    function syncViewedCardDisplay(card, viewed) {
-      card.classList.toggle("viewed", viewed);
-      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
-        checkbox.checked = viewed;
-      });
-    }
-    function applyViewedToCard(card, viewed, collapseLoaded = false) {
-      syncViewedCardDisplay(card, viewed);
-      if (collapseLoaded && card.classList.contains("loaded")) {
-        setFileCollapsed(card, viewed);
-      }
-    }
-    function setFolderIcon(el, collapsed) {
-      const path = collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open;
-      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + path + '"></path></svg>';
-    }
-    function setChevronIcon(el) {
-      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
-    }
-    function setUnfoldButtonState(button, expanded) {
-      if (!button)
-        return;
-      button.setAttribute("aria-pressed", expanded ? "true" : "false");
-      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
-      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
-    }
-    function setSidebarTreeActionIcons() {
-      const settings = document.querySelector("#viewer-settings");
-      const sidebarToggle = document.querySelector("#sidebar-toggle");
-      const expand = document.querySelector("#sb-expand-all");
-      const collapse = document.querySelector("#sb-collapse-all");
-      if (settings)
-        settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
-      if (sidebarToggle)
-        sidebarToggle.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
-      if (expand)
-        expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
-      if (collapse)
-        collapse.innerHTML = iconSvg("octicon-chevron-up", COLLAPSE_ALL_16_PATHS);
-    }
-    function attachSidebarToggle(host) {
-      const button = document.querySelector("#sidebar-toggle");
-      if (!button || button.parentElement === host)
-        return;
-      host.prepend(button);
-    }
-    function placeSidebarToggle() {
-      const sidebarHead = document.querySelector(".sb-head");
-      const toolbar = document.querySelector(".gdp-repo-toolbar, .gdp-file-detail-header");
-      const restoreHost = toolbar || document.querySelector("#topbar") || document.querySelector("#global-header");
-      if (STATE.sidebarHidden && restoreHost)
-        attachSidebarToggle(restoreHost);
-      else if (sidebarHead)
-        attachSidebarToggle(sidebarHead);
-      placeSidebarFilter();
-    }
-    function placeSidebarFilter() {
-      const sidebarHead = document.querySelector(".sb-head");
-      const filter = document.querySelector(".sb-filter-wrap");
-      const list2 = document.querySelector("#filelist");
-      if (!sidebarHead || !filter || !list2)
-        return;
-      const repoSidebar = isRepositorySidebarMode();
-      if (repoSidebar && filter.parentElement !== sidebarHead) {
-        sidebarHead.appendChild(filter);
-        return;
-      }
-      if (!repoSidebar && filter.parentElement === sidebarHead) {
-        sidebarHead.after(filter);
-      }
-    }
-    function applySidebarHidden(hidden = STATE.sidebarHidden) {
-      STATE.sidebarHidden = hidden;
-      document.body.classList.toggle("gdp-sidebar-hidden", hidden);
-      localStorage.setItem("gdp:sidebar-hidden", hidden ? "1" : "0");
-      const button = document.querySelector("#sidebar-toggle");
-      if (button) {
-        button.setAttribute("aria-pressed", hidden ? "true" : "false");
-        button.title = hidden ? "show sidebar" : "hide sidebar";
-        button.setAttribute("aria-label", hidden ? "show sidebar" : "hide sidebar");
-      }
-      setSidebarTreeActionIcons();
-      placeSidebarToggle();
-      syncSidebarHeaderHeight();
-    }
-    function toggleSidebarHidden() {
-      applySidebarHidden(!STATE.sidebarHidden);
-    }
-    function scopeOmitSourceLabel() {
-      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
-    }
-    function refreshRepositoryTreeAfterSettings() {
-      REPO_FILE_CACHE.clear();
-      invalidateRepoSidebar();
-      if (STATE.route.screen === "repo") {
-        loadRepo();
-        return;
-      }
-      const target = sourceTargetFromRoute();
-      if (target)
-        renderRepoBlobSidebar(target.path, target.ref || "worktree");
-    }
-    async function openScopeSettings() {
-      const pop = document.querySelector("#scope-settings-popover");
-      const input = document.querySelector("#scope-omit-dirs");
-      const excludeInput = document.querySelector("#scope-exclude-names");
-      const sidebarFontSize = document.querySelector("#sidebar-font-size");
-      const codeFontSize = document.querySelector("#code-font-size");
-      const source = document.querySelector("#scope-omit-source");
-      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
-        return;
-      await loadSettings();
-      sidebarFontSize.value = savedSidebarFontSize();
-      codeFontSize.value = savedCodeFontSize();
-      input.value = effectiveScopeOmitDirs().join(`
-`);
-      excludeInput.value = effectiveScopeExcludeNames().join(`
-`);
-      source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
-      pop.hidden = false;
-      sidebarFontSize.focus();
-    }
-    function closeScopeSettings() {
-      const pop = document.querySelector("#scope-settings-popover");
-      if (pop)
-        pop.hidden = true;
-    }
-    function saveScopeSettings() {
-      const input = document.querySelector("#scope-omit-dirs");
-      const excludeInput = document.querySelector("#scope-exclude-names");
-      const sidebarFontSize = document.querySelector("#sidebar-font-size");
-      const codeFontSize = document.querySelector("#code-font-size");
-      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
-        return;
-      localStorage.setItem(SIDEBAR_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
-      localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
-      applySidebarFontSize();
-      applyCodeFontSize();
-      localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
-      localStorage.setItem(scopeExcludeNamesStorageKey(), JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)));
-      closeScopeSettings();
-      refreshRepositoryTreeAfterSettings();
-    }
-    function resetScopeSettings() {
-      localStorage.removeItem(SIDEBAR_FONT_SIZE_STORAGE_KEY);
-      localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
-      applySidebarFontSize("regular");
-      applyCodeFontSize("regular");
-      localStorage.removeItem(scopeOmitDirsStorageKey());
-      localStorage.removeItem(scopeExcludeNamesStorageKey());
-      closeScopeSettings();
-      refreshRepositoryTreeAfterSettings();
-    }
-    function buildTree(files) {
-      const root = {
-        name: "",
-        dirs: {},
-        files: [],
-        path: "",
-        minOrder: Infinity,
-        explicit: true
-      };
-      for (const f2 of files) {
-        const parts = f2.path.split("/");
-        let node = root;
-        let acc = "";
-        const dirPartCount = f2.type === "tree" ? parts.length : parts.length - 1;
-        for (let i2 = 0;i2 < dirPartCount; i2++) {
-          const p2 = parts[i2];
-          acc = acc ? `${acc}/${p2}` : p2;
-          if (!node.dirs[p2]) {
-            node.dirs[p2] = {
-              name: p2,
-              dirs: {},
-              files: [],
-              path: acc,
-              minOrder: Infinity
-            };
-          }
-          node = node.dirs[p2];
-          if (typeof f2.order === "number" && f2.order < node.minOrder)
-            node.minOrder = f2.order;
-        }
-        if (f2.type === "tree") {
-          node.explicit = true;
-          if (f2.children_omitted === true) {
-            node.children_omitted = true;
-            node.children_omitted_reason = f2.children_omitted_reason;
-          }
-          continue;
-        }
-        node.files.push(f2);
-      }
-      function compress(node) {
-        const ks = Object.keys(node.dirs);
-        while (ks.length === 1 && node.files.length === 0 && !node.explicit && node !== root) {
-          const only = node.dirs[ks[0]];
-          node.name = node.name ? `${node.name}/${only.name}` : only.name;
-          node.dirs = only.dirs;
-          node.files = only.files;
-          node.path = only.path;
-          node.minOrder = Math.min(node.minOrder, only.minOrder);
-          ks.length = 0;
-          Object.keys(node.dirs).forEach((k) => {
-            ks.push(k);
-          });
-        }
-        Object.values(node.dirs).forEach(compress);
-      }
-      Object.values(root.dirs).forEach(compress);
-      return root;
-    }
-    function renderTreeNode(node, depth, ul, onFileClick) {
-      const items = [];
-      for (const k of Object.keys(node.dirs)) {
-        const d2 = node.dirs[k];
-        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
-      }
-      for (const f2 of node.files) {
-        items.push({
-          kind: "file",
-          sortKey: f2.order != null ? f2.order : Infinity,
-          file: f2
-        });
-      }
-      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
-      for (const item of items) {
-        if (item.kind === "dir") {
-          const dir = item.dir;
-          const li = document.createElement("li");
-          li.className = "tree-dir";
-          li.tabIndex = -1;
-          li.dataset.dirpath = dir.path;
-          li.dataset.type = "tree";
-          if (dir.children_omitted_reason)
-            li.dataset.childrenOmittedReason = dir.children_omitted_reason;
-          if (dir.explicit)
-            li.dataset.explicit = "true";
-          if (dir.children_omitted) {
-            li.classList.add("children-omitted");
-            li.classList.add(dir.children_omitted_reason === "heavy" ? "children-omitted-heavy" : "children-omitted-internal");
-            li.title = dir.children_omitted_reason === "heavy" ? "Large generated/vendor directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
-          }
-          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-          const chev = document.createElement("span");
-          if (dir.children_omitted) {
-            chev.className = "chev-spacer";
-            chev.setAttribute("aria-hidden", "true");
-          } else {
-            chev.className = "chev";
-            setChevronIcon(chev);
-          }
-          li.appendChild(chev);
-          const dirIcon = document.createElement("span");
-          dirIcon.className = "dir-icon";
-          li.appendChild(dirIcon);
-          const label = document.createElement("span");
-          label.className = "dir-label";
-          const dn = document.createElement("span");
-          dn.className = "dir-name";
-          dn.textContent = dir.name;
-          dn.title = dir.path;
-          label.appendChild(dn);
-          if (dir.children_omitted) {
-            const omitted = document.createElement("span");
-            omitted.className = "dir-omitted " + (dir.children_omitted_reason === "heavy" ? "dir-omitted-heavy" : "dir-omitted-internal");
-            omitted.textContent = dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-            omitted.title = dir.children_omitted_reason === "heavy" ? "Tree expansion is skipped, but the directory detail can be opened" : "This directory cannot be opened from the browser";
-            label.appendChild(omitted);
-          }
-          li.appendChild(label);
-          li.appendChild(createOpenPathButton(dir.path, "directory", "open this folder in OS"));
-          const collapsed = STATE.collapsedDirs.has(dir.path);
-          if (collapsed)
-            li.classList.add("collapsed");
-          const updateIcon = () => {
-            setFolderIcon(dirIcon, li.classList.contains("collapsed"));
-          };
-          updateIcon();
-          const childUl = document.createElement("ul");
-          childUl.className = "tree-children";
-          renderTreeNode(dir, depth + 1, childUl, onFileClick);
-          const toggleDir = (e2) => {
-            e2.stopPropagation();
-            li.classList.toggle("collapsed");
-            updateIcon();
-            if (li.classList.contains("collapsed"))
-              STATE.collapsedDirs.add(dir.path);
-            else
-              STATE.collapsedDirs.delete(dir.path);
-            localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-          };
-          if (!dir.children_omitted) {
-            chev.addEventListener("click", toggleDir);
-            dirIcon.addEventListener("click", toggleDir);
-          }
-          if (onFileClick) {
-            li.addEventListener("click", (e2) => {
-              e2.stopPropagation();
-              if (dir.children_omitted_reason === "internal" || dir.children_omitted_reason === "truncated")
-                return;
-              onFileClick({
-                path: dir.path,
-                display_path: dir.path,
-                type: "tree",
-                children_omitted: dir.children_omitted,
-                children_omitted_reason: dir.children_omitted_reason
-              });
-              scheduleMainSurfaceFocus();
-            });
-          } else {
-            li.addEventListener("click", toggleDir);
-          }
-          ul.appendChild(li);
-          ul.appendChild(childUl);
-        } else {
-          const f2 = item.file;
-          const li = document.createElement("li");
-          li.className = "tree-file";
-          li.tabIndex = -1;
-          li.dataset.path = f2.path;
-          li.dataset.type = "blob";
-          li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
-          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-          const spacer = document.createElement("span");
-          spacer.className = "chev-spacer";
-          li.appendChild(spacer);
-          if (f2.status) {
-            li.appendChild(fileBadge(f2.status));
-          } else {
-            const icon = document.createElement("span");
-            icon.className = "d2h-icon-wrapper";
-            icon.innerHTML = fileEntryIcon();
-            li.appendChild(icon);
-          }
-          const name = document.createElement("span");
-          name.className = "name";
-          name.textContent = f2.path.split("/").pop();
-          name.title = f2.path;
-          li.appendChild(name);
-          li.addEventListener("click", () => {
-            if (onFileClick)
-              onFileClick(f2);
-            else
-              scrollToFile(f2.path);
-            scheduleMainSurfaceFocus();
-          });
-          if (!onFileClick)
-            li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
-              passive: true
-            });
-          ul.appendChild(li);
-        }
-      }
-    }
-    function treeNodeItems(node) {
-      const cached = SIDEBAR_TREE_ITEMS_CACHE.get(node);
-      if (cached)
-        return cached;
-      const items = [];
-      for (const k of Object.keys(node.dirs)) {
-        const d2 = node.dirs[k];
-        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
-      }
-      for (const f2 of node.files) {
-        items.push({
-          kind: "file",
-          sortKey: f2.order != null ? f2.order : Infinity,
-          file: f2
-        });
-      }
-      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
-      SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
-      return items;
-    }
-    function sidebarTreeNodeHasChildren(node) {
-      return Object.keys(node.dirs).length > 0 || node.files.length > 0;
-    }
-    function shouldLazyLoadSidebarDir(dir) {
-      return isRepositorySidebarMode() && isVirtualSidebarActive() && !dir.children_omitted && !sidebarTreeNodeHasChildren(dir) && !SIDEBAR_LAZY_LOADED_DIRS.has(dir.path);
-    }
-    function upsertSidebarTreeEntry(entry, order) {
-      if (!SIDEBAR_TREE_ROOT)
-        return;
-      const parts = entry.path.split("/").filter(Boolean);
-      if (!parts.length)
-        return;
-      let node = SIDEBAR_TREE_ROOT;
-      let acc = "";
-      const dirPartCount = entry.type === "tree" ? parts.length : parts.length - 1;
-      for (let i2 = 0;i2 < dirPartCount; i2++) {
-        const part = parts[i2];
-        acc = acc ? `${acc}/${part}` : part;
-        if (!node.dirs[part]) {
-          node.dirs[part] = {
-            name: part,
-            dirs: {},
-            files: [],
-            path: acc,
-            minOrder: order
-          };
-        }
-        node = node.dirs[part];
-        node.minOrder = Math.min(node.minOrder, order);
-      }
-      if (entry.type === "tree") {
-        node.explicit = true;
-        if (entry.children_omitted === true) {
-          node.children_omitted = true;
-          node.children_omitted_reason = entry.children_omitted_reason;
-        }
-        return;
-      }
-      if (!node.files.some((file) => file.path === entry.path))
-        node.files.push({ ...entry, order });
-    }
-    function mergeSidebarTreeEntries(entries) {
-      entries.forEach((entry, index) => {
-        upsertSidebarTreeEntry(entry, entry.order ?? index + 1);
-      });
-      SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
-      if (SIDEBAR_TREE_ROOT)
-        buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
-    }
-    function ensureVirtualSidebarDirLoaded(dir) {
-      if (!shouldLazyLoadSidebarDir(dir))
-        return Promise.resolve();
-      const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
-      if (existing)
-        return existing;
-      const params = new URLSearchParams;
-      params.set("ref", REPO_SIDEBAR_REF || "worktree");
-      params.set("path", dir.path);
-      appendScopeParams(params);
-      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((response) => {
-        if (!response.ok)
-          throw new Error("failed to load repository tree");
-        return response.json();
-      })).then((meta) => {
-        const entries = meta.entries.map((entry, index) => ({
-          order: dir.minOrder + (index + 1) / 1e5,
-          path: entry.path,
-          display_path: entry.path,
-          type: entry.type,
-          children_omitted: entry.children_omitted,
-          children_omitted_reason: entry.children_omitted_reason
-        }));
-        mergeSidebarTreeEntries(entries);
-        SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
-      }).finally(() => {
-        SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
-      });
-      SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load2);
-      return load2;
-    }
-    function createTreeDirRow(dir, depth, onFileClick) {
-      const li = document.createElement("li");
-      li.className = "tree-dir";
-      li.tabIndex = -1;
-      li.dataset.dirpath = dir.path;
-      li.dataset.type = "tree";
-      if (dir.children_omitted_reason)
-        li.dataset.childrenOmittedReason = dir.children_omitted_reason;
-      if (dir.explicit)
-        li.dataset.explicit = "true";
-      if (dir.children_omitted) {
-        li.classList.add("children-omitted");
-        li.classList.add(dir.children_omitted_reason === "heavy" ? "children-omitted-heavy" : "children-omitted-internal");
-        li.title = dir.children_omitted_reason === "heavy" ? "Large generated/vendor directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
-      }
-      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-      const chev = document.createElement("span");
-      if (dir.children_omitted) {
-        chev.className = "chev-spacer";
-        chev.setAttribute("aria-hidden", "true");
-      } else {
-        chev.className = "chev";
-        setChevronIcon(chev);
-      }
-      li.appendChild(chev);
-      const dirIcon = document.createElement("span");
-      dirIcon.className = "dir-icon";
-      li.appendChild(dirIcon);
-      const label = document.createElement("span");
-      label.className = "dir-label";
-      const dn = document.createElement("span");
-      dn.className = "dir-name";
-      dn.textContent = dir.name;
-      dn.title = dir.path;
-      label.appendChild(dn);
-      if (dir.children_omitted) {
-        const omitted = document.createElement("span");
-        omitted.className = "dir-omitted " + (dir.children_omitted_reason === "heavy" ? "dir-omitted-heavy" : "dir-omitted-internal");
-        omitted.textContent = dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-        omitted.title = dir.children_omitted_reason === "heavy" ? "Tree expansion is skipped, but the directory detail can be opened" : "This directory cannot be opened from the browser";
-        label.appendChild(omitted);
-      }
-      li.appendChild(label);
-      li.appendChild(createOpenPathButton(dir.path, "directory", "open this folder in OS"));
-      const updateIcon = () => {
-        setFolderIcon(dirIcon, li.classList.contains("collapsed"));
-      };
-      const toggleDir = async (e2) => {
-        e2.stopPropagation();
-        if (li.dataset.toggling === "true")
-          return;
-        const expanding = li.classList.contains("collapsed");
-        li.dataset.toggling = "true";
-        try {
-          if (expanding)
-            await ensureVirtualSidebarDirLoaded(dir);
-          li.classList.toggle("collapsed");
-          updateIcon();
-          if (li.classList.contains("collapsed"))
-            STATE.collapsedDirs.add(dir.path);
-          else
-            STATE.collapsedDirs.delete(dir.path);
-          localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-          rerenderVirtualSidebar();
-        } finally {
-          delete li.dataset.toggling;
-        }
-      };
-      li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
-      updateIcon();
-      if (!dir.children_omitted) {
-        chev.addEventListener("click", toggleDir);
-        dirIcon.addEventListener("click", toggleDir);
-      }
-      if (onFileClick) {
-        li.addEventListener("click", (e2) => {
-          e2.stopPropagation();
-          if (dir.children_omitted_reason === "internal" || dir.children_omitted_reason === "truncated")
-            return;
-          onFileClick({
-            path: dir.path,
-            display_path: dir.path,
-            type: "tree",
-            children_omitted: dir.children_omitted,
-            children_omitted_reason: dir.children_omitted_reason
-          });
-          scheduleMainSurfaceFocus();
-        });
-      } else {
-        li.addEventListener("click", toggleDir);
-      }
-      return li;
-    }
-    function createTreeFileRow(f2, depth, onFileClick) {
-      const li = document.createElement("li");
-      li.className = "tree-file";
-      li.tabIndex = -1;
-      li.dataset.path = f2.path;
-      li.dataset.type = "blob";
-      li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
-      li.classList.toggle("hidden-by-tests", STATE.hideTests && TEST_RE.test(f2.path || ""));
-      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-      const spacer = document.createElement("span");
-      spacer.className = "chev-spacer";
-      li.appendChild(spacer);
-      if (f2.status) {
-        li.appendChild(fileBadge(f2.status));
-      } else {
-        const icon = document.createElement("span");
-        icon.className = "d2h-icon-wrapper";
-        icon.innerHTML = fileEntryIcon();
-        li.appendChild(icon);
-      }
-      const name = document.createElement("span");
-      name.className = "name";
-      name.textContent = f2.path.split("/").pop();
-      name.title = f2.path;
-      li.appendChild(name);
-      li.addEventListener("click", () => {
-        if (onFileClick)
-          onFileClick(f2);
-        else
-          scrollToFile(f2.path);
-        scheduleMainSurfaceFocus();
-      });
-      if (!onFileClick)
-        li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
-          passive: true
-        });
-      return li;
-    }
-    function buildSidebarTreeRows(root) {
-      const rows = [];
-      const byPath = new Map;
-      const walk = (node, depth) => {
-        for (const item of treeNodeItems(node)) {
-          if (item.kind === "dir") {
-            const row = {
-              kind: "dir",
-              path: item.dir.path,
-              name: item.dir.name,
-              depth,
-              dir: item.dir
-            };
-            rows.push(row);
-            byPath.set(row.path, row);
-            walk(item.dir, depth + 1);
-          } else {
-            const row = {
-              kind: "file",
-              path: item.file.path,
-              name: item.file.path.split("/").pop() || item.file.path,
-              depth,
-              file: item.file
-            };
-            rows.push(row);
-            byPath.set(row.path, row);
-          }
-        }
-      };
-      walk(root, 0);
-      SIDEBAR_TREE_ROWS = rows;
-      SIDEBAR_ROW_BY_PATH = byPath;
-    }
-    function computeVirtualSidebarVisibleRows() {
-      if (!SIDEBAR_TREE_ROOT) {
-        SIDEBAR_VISIBLE_ROWS = [];
-        return;
-      }
-      const input = $("#sb-filter");
-      const filter = compileFileFilter(input.value);
-      const invalid = filter.kind === "invalid";
-      input.toggleAttribute("aria-invalid", invalid);
-      input.title = invalid ? filter.error || "invalid regular expression" : "";
-      const filterActive = filter.kind !== "empty" && !invalid;
-      const matches = invalid ? () => true : filter.match;
-      const walk = (node, depth) => {
-        let subtreeVisible = false;
-        const rows = [];
-        for (const item of treeNodeItems(node)) {
-          if (item.kind === "dir") {
-            const dirMatches = filterActive && matches(item.dir.path);
-            const expanded = !item.dir.children_omitted && (filterActive || !STATE.collapsedDirs.has(item.dir.path));
-            const child = walk(item.dir, depth + 1);
-            const visible = item.dir.explicit && !filterActive ? true : dirMatches || child.visible;
-            if (visible) {
-              rows.push({
-                kind: "dir",
-                path: item.dir.path,
-                name: item.dir.name,
-                depth,
-                dir: item.dir
-              });
-              if (expanded)
-                rows.push(...child.rows);
-            }
-            subtreeVisible = subtreeVisible || visible;
-          } else {
-            const testHidden = STATE.hideTests && TEST_RE.test(item.file.path || "");
-            const visible = !testHidden && matches(item.file.path || "");
-            if (visible) {
-              rows.push({
-                kind: "file",
-                path: item.file.path,
-                name: item.file.path.split("/").pop() || item.file.path,
-                depth,
-                file: item.file
-              });
-            }
-            subtreeVisible = subtreeVisible || visible;
-          }
-        }
-        return { visible: subtreeVisible, rows };
-      };
-      SIDEBAR_VISIBLE_ROWS = walk(SIDEBAR_TREE_ROOT, 0).rows;
-    }
-    function sidebarVirtualRange() {
-      const sidebar = document.querySelector("#sidebar");
-      const scrollTop = sidebar?.scrollTop || 0;
-      const height = sidebar?.clientHeight || window.innerHeight;
-      const start = Math.max(0, Math.floor(scrollTop / VIRTUAL_SIDEBAR_ROW_HEIGHT) - VIRTUAL_SIDEBAR_OVERSCAN);
-      const end = Math.min(SIDEBAR_VISIBLE_ROWS.length, Math.ceil((scrollTop + height) / VIRTUAL_SIDEBAR_ROW_HEIGHT) + VIRTUAL_SIDEBAR_OVERSCAN);
-      return { start, end };
-    }
-    function renderVirtualSidebarWindow() {
-      const ul = $("#filelist");
-      if (!ul.classList.contains("tree-virtual"))
-        return;
-      const { start, end } = sidebarVirtualRange();
-      const fragment = document.createDocumentFragment();
-      for (let i2 = start;i2 < end; i2++) {
-        const row = SIDEBAR_VISIBLE_ROWS[i2];
-        const li = row.kind === "dir" && row.dir ? createTreeDirRow(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK) : row.file ? createTreeFileRow(row.file, row.depth, SIDEBAR_ON_FILE_CLICK) : null;
-        if (!li)
-          continue;
-        li.classList.toggle("active", row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH);
-        li.style.position = "absolute";
-        li.style.top = `${i2 * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
-        li.style.left = "0";
-        li.style.right = "0";
-        fragment.appendChild(li);
-      }
-      ul.replaceChildren(fragment);
-      ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
-    }
-    function scrollVirtualSidebarPathIntoView(path) {
-      const index = SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === path);
-      if (index < 0)
-        return;
-      const sidebar = document.querySelector("#sidebar");
-      if (!sidebar)
-        return;
-      const ul = $("#filelist");
-      const top = index * VIRTUAL_SIDEBAR_ROW_HEIGHT;
-      const bottom = top + VIRTUAL_SIDEBAR_ROW_HEIGHT;
-      const sidebarRect = sidebar.getBoundingClientRect();
-      const stickyBottom = Math.max(sidebarRect.top, document.querySelector(".sb-head")?.getBoundingClientRect().bottom || sidebarRect.top, document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top);
-      const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
-      const bottomPadding = 14;
-      const listTop = ul.offsetTop;
-      const maxHeight = Number.parseFloat(getComputedStyle(sidebar).maxHeight);
-      const visibleHeight = Number.isFinite(maxHeight) && maxHeight > 0 ? Math.min(sidebar.clientHeight, maxHeight) : sidebar.clientHeight;
-      const visibleTop = sidebar.scrollTop + topPadding - listTop;
-      const visibleBottom = sidebar.scrollTop + visibleHeight - bottomPadding - listTop;
-      if (top < visibleTop)
-        sidebar.scrollTop = Math.max(0, top + listTop - topPadding);
-      else if (bottom > visibleBottom)
-        sidebar.scrollTop = bottom + listTop - visibleHeight + bottomPadding;
-      renderVirtualSidebarWindow();
-    }
-    function rerenderVirtualSidebar() {
-      const ul = document.querySelector("#filelist");
-      if (!ul?.classList.contains("tree-virtual"))
-        return;
-      computeVirtualSidebarVisibleRows();
-      renderVirtualSidebarWindow();
-    }
-    function renderVirtualTreeSidebar(root) {
-      const ul = $("#filelist");
-      SIDEBAR_TREE_ROOT = root;
-      buildSidebarTreeRows(root);
-      ul.classList.add("tree-virtual");
-      ul.style.position = "relative";
-      computeVirtualSidebarVisibleRows();
-      renderVirtualSidebarWindow();
-      document.querySelector("#sidebar")?.addEventListener("scroll", renderVirtualSidebarWindow, {
-        passive: true
-      });
-    }
-    function renderFlat(files, ul, onFileClick) {
-      files.forEach((f2, i2) => {
-        const li = document.createElement("li");
-        li.tabIndex = -1;
-        li.dataset.index = String(i2);
-        li.dataset.path = f2.path;
-        li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
-        if (f2.status) {
-          li.appendChild(fileBadge(f2.status));
-        } else {
-          const icon = document.createElement("span");
-          icon.className = "d2h-icon-wrapper";
-          icon.innerHTML = fileEntryIcon();
-          li.appendChild(icon);
-        }
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = f2.path;
-        name.title = f2.path;
-        li.appendChild(name);
-        li.addEventListener("click", () => {
-          if (onFileClick)
-            onFileClick(f2);
-          else
-            scrollToFile(f2.path);
-          scheduleMainSurfaceFocus();
-        });
-        if (!onFileClick)
-          li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
-            passive: true
-          });
-        ul.appendChild(li);
-      });
-    }
-    function renderSidebar(files, onFileClick) {
-      const ul = $("#filelist");
-      ul.innerHTML = "";
-      ul.classList.toggle("tree", STATE.sbView === "tree");
-      ul.classList.remove("tree-virtual");
-      ul.style.removeProperty("height");
-      ul.style.removeProperty("position");
-      SIDEBAR_TREE_ROOT = null;
-      SIDEBAR_TREE_ROWS = [];
-      SIDEBAR_VISIBLE_ROWS = [];
-      SIDEBAR_ROW_BY_PATH = new Map;
-      SIDEBAR_LAZY_LOADED_DIRS.clear();
-      SIDEBAR_LAZY_LOADING_DIRS.clear();
-      if (!onFileClick)
-        STATE.files = files;
-      SIDEBAR_FILES = files;
-      SIDEBAR_ON_FILE_CLICK = onFileClick;
-      if (!onFileClick)
-        REPO_SIDEBAR_REF = null;
-      if (STATE.sbView === "tree") {
-        const root = buildTree(files);
-        if (onFileClick && files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
-          renderVirtualTreeSidebar(root);
-        else
-          renderTreeNode(root, 0, ul, onFileClick);
-      } else {
-        renderFlat(files, ul, onFileClick);
-      }
-      $("#totals").textContent = files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "";
-      $$(".sb-view-seg button").forEach((b2) => {
-        b2.classList.toggle("active", b2.dataset.view === STATE.sbView);
-      });
-      $$(".sb-tree-action").forEach((b2) => {
-        b2.disabled = STATE.sbView !== "tree" || !STATE.files.length;
-      });
-      if (STATE.activeFile)
-        markActive(STATE.activeFile);
-      applyFilter();
-    }
-    function setAllSidebarDirsCollapsed(collapsed) {
-      if (!collapsed)
-        STATE.collapsedDirs.clear();
-      if ($("#filelist").classList.contains("tree-virtual")) {
-        if (collapsed) {
-          for (const row of SIDEBAR_TREE_ROWS) {
-            if (row.kind === "dir")
-              STATE.collapsedDirs.add(row.path);
-          }
-        }
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-        rerenderVirtualSidebar();
-        return;
-      }
-      $$("#filelist .tree-dir[data-dirpath]").forEach((li) => {
-        const path = li.dataset.dirpath || "";
-        if (!path)
-          return;
-        li.classList.toggle("collapsed", collapsed);
-        const dirIcon = li.querySelector(".dir-icon");
-        if (dirIcon)
-          setFolderIcon(dirIcon, collapsed);
-        if (collapsed)
-          STATE.collapsedDirs.add(path);
-      });
-      localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-    }
-    function syncRepoTargetInput(ref) {
-      const input = document.querySelector("#repo-target");
-      const wrap = document.querySelector("#repo-target-wrap");
-      if (!input || !wrap)
-        return;
-      input.value = ref || "worktree";
-      wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
-      syncSidebarHeaderHeight();
-    }
-    function createRefSelectorInput(options) {
-      const wrap = document.createElement("div");
-      wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
-      wrap.dataset.refSelector = "";
-      if (options.wrapperId)
-        wrap.id = options.wrapperId;
-      if (options.hidden)
-        wrap.hidden = true;
-      const icon = document.createElement("span");
-      icon.className = "ref-selector-icon";
-      icon.setAttribute("aria-hidden", "true");
-      icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
-      const input = document.createElement("input");
-      input.className = "ref-input";
-      input.id = options.id;
-      input.readOnly = true;
-      input.autocomplete = "off";
-      input.placeholder = options.placeholder;
-      if (options.title)
-        input.title = options.title;
-      if (options.value != null)
-        input.value = options.value;
-      const caret = document.createElement("span");
-      caret.className = "ref-selector-caret";
-      caret.setAttribute("aria-hidden", "true");
-      caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
-      wrap.append(icon, input, caret);
-      return { wrap, input };
-    }
-    function hydrateRefSelectorMounts() {
-      document.querySelectorAll("[data-ref-selector-mount]").forEach((mount) => {
-        const { wrap } = createRefSelectorInput({
-          id: mount.dataset.refId || "",
-          placeholder: mount.dataset.placeholder || "ref...",
-          title: mount.dataset.title,
-          wrapperId: mount.dataset.wrapperId,
-          extraClass: mount.dataset.extraClass,
-          hidden: mount.hidden
-        });
-        mount.replaceWith(wrap);
-      });
-    }
-    function renderMeta(meta) {
-      const el = $("#meta");
-      if (!meta) {
-        el.textContent = "";
-        return;
-      }
-      setProjectName(meta.project || "");
-      el.innerHTML = "";
-      if (meta.branch) {
-        const b2 = document.createElement("span");
-        b2.className = "ref";
-        b2.textContent = `⎇ ${meta.branch}`;
-        el.appendChild(b2);
-      }
-      if (meta.totals) {
-        const t2 = document.createElement("span");
-        t2.className = "num";
-        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> <span>" + meta.totals.files + " files</span>";
-        el.appendChild(t2);
-      }
-      const u2 = document.createElement("span");
-      u2.className = "updated-at";
-      u2.title = "last updated";
-      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
-      el.appendChild(u2);
-    }
-    let SUPPRESS_SPY_UNTIL = 0;
-    function prefetchByPath(path) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card?.classList.contains("pending"))
-        return;
-      const f2 = STATE.files.find((x) => x.path === path);
-      if (!f2)
-        return;
-      enqueueLoad(f2, card, 5);
-    }
-    function clearDiffLineFocus() {
-      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
-        row.classList.remove("gdp-diff-line-target");
-      });
-    }
-    function diffRowLineNumber(row) {
-      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
-      const raw = (newLine?.textContent || "").trim();
-      const line = Number(raw);
-      return Number.isInteger(line) && line > 0 ? line : null;
-    }
-    function focusDiffLine(card, line) {
-      const start = lineTargetStart(line);
-      if (!start)
-        return false;
-      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
-      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
-      if (!row)
-        return false;
-      clearDiffLineFocus();
-      row.classList.add("gdp-diff-line-target");
-      scrollDiffElementIntoView(row, "center");
-      return true;
-    }
-    function scrollDiffElementIntoView(element, block2) {
-      element.scrollIntoView({ behavior: "auto", block: block2 });
-    }
-    function applyDiffRouteFocus(card) {
-      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
-        return false;
-      if (card && card.dataset.path !== STATE.route.path)
-        return false;
-      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
-      if (!targetCard)
-        return false;
-      return focusDiffLine(targetCard, STATE.route.line);
-    }
-    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
-    window.addEventListener("wheel", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    window.addEventListener("touchmove", () => {
-      REANCHOR_UNTIL = 0;
-    }, { passive: true });
-    function scrollToFile(path, line) {
-      const card = document.querySelector(diffCardSelector(path));
-      if (!card)
-        return;
-      if (line)
-        REANCHOR_UNTIL = performance.now() + 4000;
-      markActive(path);
-      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
-      const onEnd = () => {
-        SUPPRESS_SPY_UNTIL = 0;
-        window.removeEventListener("scrollend", onEnd);
-      };
-      window.addEventListener("scrollend", onEnd, { once: true });
-      if (card.classList.contains("pending")) {
-        const f2 = STATE.files.find((x) => x.path === path);
-        if (f2)
-          enqueueLoad(f2, card, 10);
-      }
-      if (!line || !focusDiffLine(card, line)) {
-        scrollDiffElementIntoView(card, "start");
-      }
-    }
-    function sidebarAncestorDirs(path) {
-      const parts = path.split("/").filter(Boolean);
-      const dirs = [];
-      for (let i2 = 1;i2 < parts.length; i2++)
-        dirs.push(parts.slice(0, i2).join("/"));
-      return dirs;
-    }
-    function expandSidebarAncestors(path) {
-      if (STATE.sbView !== "tree")
-        return;
-      let changed = false;
-      for (const dir of sidebarAncestorDirs(path)) {
-        if (STATE.collapsedDirs.delete(dir))
-          changed = true;
-        const row = document.querySelector(`#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`);
-        row?.classList.remove("collapsed");
-        const icon = row?.querySelector(".dir-icon");
-        if (icon)
-          setFolderIcon(icon, false);
-      }
-      if (changed)
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
-      rerenderVirtualSidebar();
-    }
-    function markActive(path, options = {}) {
-      STATE.activeFile = path;
-      SIDEBAR_VIRTUAL_ACTIVE_PATH = path;
-      if (options.reveal && STATE.sbView === "tree")
-        expandSidebarAncestors(path);
-      setActiveSidebarItem(sidebarItemByPath(path));
-      if ($("#filelist").classList.contains("tree-virtual")) {
-        renderVirtualSidebarWindow();
-        scrollVirtualSidebarPathIntoView(path);
-        return;
-      }
-      if (options.reveal) {
-        const active = activeSidebarItem();
-        if (active)
-          requestAnimationFrame(() => scrollSidebarItemIntoView(active));
-      }
-    }
-    function applyViewedState() {
-      if (isRepositorySidebarMode())
-        return;
-      $$("#filelist li[data-path]").forEach((li) => {
-        const path = li.dataset.path || "";
-        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
-      });
-      $$(".gdp-file-shell[data-path]").forEach((card) => {
-        const path = card.dataset.path || "";
-        const viewed = STATE.viewedFiles.has(path);
-        syncViewedCardDisplay(card, viewed);
-      });
-    }
-    function applyFilter() {
-      const input = $("#sb-filter");
-      if ($("#filelist").classList.contains("tree-virtual")) {
-        rerenderVirtualSidebar();
-        return;
-      }
-      const filter = compileFileFilter(input.value);
-      const invalid = filter.kind === "invalid";
-      input.toggleAttribute("aria-invalid", invalid);
-      input.title = invalid ? filter.error || "invalid regular expression" : "";
-      const matches = invalid ? () => true : filter.match;
-      const filterActive = filter.kind !== "empty" && !invalid;
-      $$("#filelist li[data-path]").forEach((li) => {
-        const match2 = matches(li.dataset.path || "");
-        li.classList.toggle("hidden", !match2);
-      });
-      if (!isRepositorySidebarMode()) {
-        document.querySelectorAll(".gdp-file-shell").forEach((card) => {
-          const match2 = matches(card.dataset.path || "");
-          card.classList.toggle("hidden-by-filter", !match2);
-        });
-      }
-      updateTreeDirVisibility(matches, filterActive);
-      if (!isRepositorySidebarMode() && typeof applyViewedState === "function")
-        applyViewedState();
-    }
-    function updateTreeDirVisibility(dirMatches, filterActive = false) {
-      const dirs = $$("#filelist .tree-dir");
-      for (let i2 = dirs.length - 1;i2 >= 0; i2--) {
-        const dir = dirs[i2];
-        const childUl = dir.nextElementSibling;
-        if (!childUl?.classList.contains("tree-children"))
-          continue;
-        let anyVisible = false;
-        for (const child of childUl.children) {
-          if (!(child instanceof HTMLElement))
-            continue;
-          if (child.classList.contains("tree-file") && !child.classList.contains("hidden") && !child.classList.contains("hidden-by-tests")) {
-            anyVisible = true;
-            break;
-          }
-          if (child.classList.contains("tree-dir") && !child.classList.contains("hidden") && !child.classList.contains("hidden-by-tests")) {
-            anyVisible = true;
-            break;
-          }
-        }
-        const explicitVisible = dir.dataset.explicit === "true" && !filterActive;
-        const selfMatches = filterActive && !!dirMatches && dirMatches(dir.dataset.dirpath || "");
-        dir.classList.toggle("hidden", !anyVisible && !explicitVisible && !selfMatches);
-      }
-    }
-    let SIDEBAR_FILTER_RAF = 0;
-    function scheduleApplyFilter() {
-      if (SIDEBAR_FILTER_RAF)
-        cancelAnimationFrame(SIDEBAR_FILTER_RAF);
-      SIDEBAR_FILTER_RAF = requestAnimationFrame(() => {
-        SIDEBAR_FILTER_RAF = 0;
-        applyFilter();
-      });
-    }
-    function flushSidebarFilter() {
-      if (!SIDEBAR_FILTER_RAF)
-        return;
-      cancelAnimationFrame(SIDEBAR_FILTER_RAF);
-      SIDEBAR_FILTER_RAF = 0;
-      applyFilter();
-    }
-    let SERVER_GENERATION = 0;
-    let CLIENT_REQ_SEQ = 0;
-    const LOAD_QUEUE = [];
-    let ACTIVE_LOADS = 0;
-    const MAX_PARALLEL = 2;
-    let lazyObserver = null;
     let SOURCE_REQ_SEQ = 0;
     let ACTIVE_SOURCE_LOAD = null;
-    let IN_FLIGHT = 0;
-    function updateLoadBar() {
-      const el = $("#load-bar");
-      if (el)
-        el.classList.toggle("active", IN_FLIGHT > 0);
-    }
-    function trackLoad(promise) {
-      IN_FLIGHT++;
-      updateLoadBar();
-      const done = () => {
-        IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
-        updateLoadBar();
-      };
-      return Promise.resolve(promise).then((v) => {
-        done();
-        return v;
-      }, (e2) => {
-        done();
-        throw e2;
-      });
-    }
-    function escapeHtml2(s2) {
-      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      })[c2]);
-    }
     function sourceTargetsEqual(a2, b2) {
       return !!a2 && !!b2 && a2.path === b2.path && a2.ref === b2.ref;
-    }
-    function isAbortError(err) {
-      return err instanceof DOMException ? err.name === "AbortError" : !!err && typeof err === "object" && ("name" in err) && err.name === "AbortError";
     }
     function finishSourceLoad(req) {
       if (ACTIVE_SOURCE_LOAD?.req === req)
@@ -10501,79 +8952,8 @@ ${frontmatter.yaml}
       const ref = STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree";
       return { path: file.path, ref };
     }
-    function currentRange() {
-      return {
-        from: STATE.from || DEFAULT_RANGE.from,
-        to: STATE.to || DEFAULT_RANGE.to
-      };
-    }
     function sourceTargetFromRoute() {
       return STATE.route.screen === "file" ? { path: STATE.route.path, ref: STATE.route.ref } : null;
-    }
-    function repoFileTargetFromRoute() {
-      return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
-    }
-    let ANNOTATIONS_UI = null;
-    function applyInlineAnnotations() {
-      ANNOTATIONS_UI?.applyInlineAnnotations();
-    }
-    function withAnnotationSessionParam(rawUrl) {
-      return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
-    }
-    function setRoute(route, replace2 = false) {
-      const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
-      STATE.route = nextRoute;
-      STATE.from = nextRoute.range.from;
-      STATE.to = nextRoute.range.to;
-      if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
-        STATE.repoRef = nextRoute.ref || "worktree";
-      }
-      const url = withAnnotationSessionParam(buildRoute(nextRoute));
-      const state = nextRoute.screen === "file" ? {
-        screen: "file",
-        path: nextRoute.path,
-        ref: nextRoute.ref,
-        view: nextRoute.view || "detail"
-      } : { view: nextRoute.screen };
-      if (replace2)
-        history.replaceState(state, "", url);
-      else
-        history.pushState(state, "", url);
-      syncHeaderMenu();
-    }
-    function setPageMode() {
-      document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
-      document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
-      document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
-      document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
-      syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
-    }
-    function syncHeaderMenu() {
-      document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
-        const fileRouteOwner = STATE.route.screen === "file" && STATE.route.view === "blob" ? "repo" : "diff";
-        const active = link2.dataset.route === STATE.route.screen || STATE.route.screen === "file" && link2.dataset.route === fileRouteOwner;
-        link2.classList.toggle("active", active);
-        link2.setAttribute("aria-current", active ? "page" : "false");
-        if (link2.dataset.route === "repo") {
-          link2.href = buildRoute({
-            screen: "repo",
-            ref: STATE.repoRef || "worktree",
-            path: "",
-            range: currentRange()
-          });
-        }
-        if (link2.dataset.route === "diff") {
-          link2.href = buildRoute({ screen: "diff", range: currentRange() });
-        }
-        if (link2.dataset.route === "help") {
-          link2.href = buildRoute({
-            screen: "help",
-            lang: helpLanguageFromRoute(STATE.route),
-            section: helpSectionFromRoute(STATE.route),
-            range: currentRange()
-          });
-        }
-      });
     }
     function removeStandaloneSource() {
       document.querySelectorAll(".gdp-standalone-source").forEach((el) => {
@@ -10582,1216 +8962,6 @@ ${frontmatter.yaml}
       document.querySelectorAll(".gdp-repo-blob-layout").forEach((el) => {
         el.remove();
       });
-    }
-    function renderShell(meta) {
-      const newFiles = meta.files || [];
-      STATE.files = newFiles;
-      SERVER_GENERATION = meta.generation || 0;
-      window._lastMeta = meta;
-      renderMeta(meta);
-      renderSidebar(newFiles);
-      const target = $("#diff");
-      const empty = $("#empty");
-      if (!newFiles.length) {
-        if (STATE.route.screen === "file") {
-          empty.classList.add("hidden");
-          applySourceRouteToShell();
-        } else {
-          empty.classList.remove("hidden");
-          target.replaceChildren();
-        }
-        LOAD_QUEUE.length = 0;
-        return;
-      }
-      empty.classList.add("hidden");
-      const oldByKey = new Map;
-      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
-        if (c2.dataset.key)
-          oldByKey.set(c2.dataset.key, c2);
-      });
-      const ordered = [];
-      newFiles.forEach((f2) => {
-        const key = f2.key || f2.path;
-        const old = oldByKey.get(key);
-        if (old) {
-          oldByKey.delete(key);
-          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
-          const statusChanged = old.dataset.status !== (f2.status || "M");
-          if (sizeChanged || statusChanged) {
-            old.classList.remove("loaded", "error");
-            old.classList.add("pending");
-            old.replaceChildren();
-            const tmp = createPlaceholder(f2);
-            while (tmp.firstChild)
-              old.appendChild(tmp.firstChild);
-            old.dataset.sizeClass = f2.size_class || "small";
-            old.dataset.status = f2.status || "M";
-            delete old.dataset.manualRendered;
-            delete old.dataset.manualLoad;
-            delete old.dataset.manualMode;
-            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
-            old._diffData = null;
-            old._file = null;
-          } else {
-            const stats = old.querySelector(".gdp-shell-header .stats");
-            if (stats) {
-              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
-            }
-            old._file = f2;
-          }
-          ordered.push(old);
-        } else {
-          ordered.push(createPlaceholder(f2));
-        }
-      });
-      oldByKey.forEach((c2) => {
-        c2.remove();
-      });
-      target.replaceChildren(...ordered);
-      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
-        if (!LOAD_QUEUE[i2].card.isConnected)
-          LOAD_QUEUE.splice(i2, 1);
-      }
-      setupLazyObserver();
-      enqueueInitialLoads();
-      applySourceRouteToShell();
-      setupScrollSpy();
-      if (typeof applyHideTests === "function")
-        applyHideTests();
-      applyFilter();
-      applyViewedState();
-    }
-    function fileEntryIcon() {
-      return iconSvg("octicon-file", FILE_16_PATH);
-    }
-    async function openPathInOs(path, kind, button) {
-      const oldTitle = button?.title;
-      if (button) {
-        button.disabled = true;
-        button.classList.remove("failed");
-      }
-      try {
-        const res = await fetch("/_open_path", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify({ path, kind })
-        });
-        if (!res.ok)
-          throw new Error(await res.text());
-        button?.classList.add("opened");
-        setTimeout(() => {
-          button?.classList.remove("opened");
-        }, 1200);
-      } catch {
-        if (button) {
-          button.classList.add("failed");
-          button.title = "failed to open in OS";
-          setTimeout(() => {
-            button.classList.remove("failed");
-            button.title = oldTitle || "open in OS";
-          }, 1600);
-        }
-      } finally {
-        if (button)
-          button.disabled = false;
-      }
-    }
-    function closeRepoContextMenu() {
-      document.querySelector(".gdp-context-menu")?.remove();
-    }
-    function closeTrashDialog() {
-      document.querySelector(".gdp-trash-dialog-backdrop")?.remove();
-    }
-    function createTrashDialog(title, body, actions) {
-      closeTrashDialog();
-      const backdrop = document.createElement("div");
-      backdrop.className = "gdp-trash-dialog-backdrop";
-      const dialog = document.createElement("div");
-      dialog.className = "gdp-trash-dialog";
-      const titleId = "gdp-trash-dialog-title";
-      const bodyId = "gdp-trash-dialog-body";
-      dialog.setAttribute("role", "dialog");
-      dialog.setAttribute("aria-modal", "true");
-      dialog.setAttribute("aria-labelledby", titleId);
-      dialog.setAttribute("aria-describedby", bodyId);
-      const heading2 = document.createElement("div");
-      heading2.id = titleId;
-      heading2.className = "gdp-trash-dialog-title";
-      heading2.textContent = title;
-      const message = document.createElement("div");
-      message.id = bodyId;
-      message.className = "gdp-trash-dialog-body";
-      message.textContent = body;
-      const actionRow = document.createElement("div");
-      actionRow.className = "gdp-trash-dialog-actions";
-      actionRow.append(...actions);
-      dialog.append(heading2, message, actionRow);
-      backdrop.appendChild(dialog);
-      document.body.appendChild(backdrop);
-      return backdrop;
-    }
-    function confirmMoveToTrash(path, focusReturnTarget) {
-      return new Promise((resolve) => {
-        const previousFocus = focusReturnTarget || document.activeElement;
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "gdp-btn gdp-btn-sm";
-        cancel.textContent = "Cancel";
-        const move = document.createElement("button");
-        move.type = "button";
-        move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
-        move.textContent = "Move to Trash";
-        const done = (ok) => {
-          document.removeEventListener("keydown", onKeydown);
-          closeTrashDialog();
-          previousFocus?.focus?.();
-          resolve(ok);
-        };
-        const onKeydown = (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            done(false);
-            return;
-          }
-          if (event.key !== "Tab")
-            return;
-          const focusables = [cancel, move];
-          const index = focusables.indexOf(document.activeElement);
-          if (index < 0) {
-            event.preventDefault();
-            focusables[0].focus();
-            return;
-          }
-          if (event.shiftKey && index <= 0) {
-            event.preventDefault();
-            focusables[focusables.length - 1].focus();
-          } else if (!event.shiftKey && index === focusables.length - 1) {
-            event.preventDefault();
-            focusables[0].focus();
-          }
-        };
-        cancel.addEventListener("click", () => done(false));
-        move.addEventListener("click", () => done(true));
-        const backdrop = createTrashDialog("Move to Trash?", `Move "${path}" to Trash?`, [cancel, move]);
-        backdrop.addEventListener("pointerdown", (event) => {
-          if (event.target === backdrop)
-            done(false);
-        });
-        document.addEventListener("keydown", onKeydown);
-        cancel.focus();
-      });
-    }
-    function showTrashError(message) {
-      const ok = document.createElement("button");
-      ok.type = "button";
-      ok.className = "gdp-btn gdp-btn-sm";
-      ok.textContent = "OK";
-      ok.addEventListener("click", closeTrashDialog);
-      createTrashDialog("Trash failed", message, [ok]);
-      ok.focus();
-    }
-    function showCreateDirectoryError(message) {
-      const ok = document.createElement("button");
-      ok.type = "button";
-      ok.className = "gdp-btn gdp-btn-sm";
-      ok.textContent = "OK";
-      ok.addEventListener("click", closeTrashDialog);
-      createTrashDialog("New folder failed", message, [ok]);
-      ok.focus();
-    }
-    function askNewDirectoryName(path, focusReturnTarget) {
-      return new Promise((resolve) => {
-        const previousFocus = focusReturnTarget || document.activeElement;
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "gdp-btn gdp-btn-sm";
-        cancel.textContent = "Cancel";
-        const create = document.createElement("button");
-        create.type = "button";
-        create.className = "gdp-btn gdp-btn-sm";
-        create.textContent = "Create";
-        const input = document.createElement("input");
-        input.className = "gdp-create-dir-input";
-        input.type = "text";
-        input.autocomplete = "off";
-        input.placeholder = "Folder name";
-        input.setAttribute("aria-label", "Folder name");
-        const error2 = document.createElement("div");
-        error2.className = "gdp-create-dir-error";
-        error2.setAttribute("role", "alert");
-        const syncValidity = () => {
-          const valid = !!normalizeNewDirectoryName(input.value);
-          create.disabled = !valid;
-          error2.textContent = input.value && !valid ? "Use a folder name without slashes, control characters, . or .." : "";
-          return valid;
-        };
-        const done = (name) => {
-          document.removeEventListener("keydown", onKeydown);
-          closeTrashDialog();
-          previousFocus?.focus?.();
-          resolve(name);
-        };
-        const submit = () => {
-          const name = normalizeNewDirectoryName(input.value);
-          if (!name) {
-            syncValidity();
-            input.focus();
-            return;
-          }
-          done(name);
-        };
-        const onKeydown = (event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            done(null);
-            return;
-          }
-          if (event.isComposing || event.keyCode === 229)
-            return;
-          if (event.key === "Enter") {
-            event.preventDefault();
-            submit();
-            return;
-          }
-          if (event.key !== "Tab")
-            return;
-          const focusables = [input, cancel, create];
-          const index = focusables.indexOf(document.activeElement);
-          if (index < 0) {
-            event.preventDefault();
-            focusables[0].focus();
-            return;
-          }
-          if (event.shiftKey && index <= 0) {
-            event.preventDefault();
-            focusables[focusables.length - 1].focus();
-          } else if (!event.shiftKey && index === focusables.length - 1) {
-            event.preventDefault();
-            focusables[0].focus();
-          }
-        };
-        cancel.addEventListener("click", () => done(null));
-        create.addEventListener("click", submit);
-        input.addEventListener("input", syncValidity);
-        create.disabled = true;
-        const backdrop = createTrashDialog("New Folder", `Create a folder in "${path || PROJECT_NAME || "repository"}".`, [cancel, create]);
-        const body = backdrop.querySelector(".gdp-trash-dialog-body");
-        body?.append(input, error2);
-        backdrop.addEventListener("pointerdown", (event) => {
-          if (event.target === backdrop)
-            done(null);
-        });
-        document.addEventListener("keydown", onKeydown);
-        input.focus();
-      });
-    }
-    async function moveRepoPathToTrash(path) {
-      const res = await fetch("/_trash_path", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1"
-        },
-        body: JSON.stringify({ path })
-      });
-      if (!res.ok) {
-        showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
-        return false;
-      }
-      const body = await res.json();
-      if (body.undo)
-        UNDO_STACK.unshift(body.undo);
-      return true;
-    }
-    async function requestCreateDirectory(path, onCreated, options = {}) {
-      if (creatingDirectory)
-        return;
-      const name = await askNewDirectoryName(path, options.focusReturnTarget);
-      if (!name)
-        return;
-      creatingDirectory = true;
-      try {
-        const res = await fetch("/_create_directory", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify({ dir: path, name })
-        });
-        if (!res.ok) {
-          showCreateDirectoryError(`Failed to create "${name}": ${await res.text()}`);
-          return;
-        }
-        const body = await res.json();
-        onCreated(body.path || (path ? `${path}/${name}` : name));
-      } finally {
-        creatingDirectory = false;
-      }
-    }
-    async function runUndoAction(action) {
-      if (action.type !== "trash")
-        return false;
-      const res = await fetch("/_restore_trash", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1"
-        },
-        body: JSON.stringify(action.payload)
-      });
-      if (!res.ok) {
-        showTrashError(`Failed to undo "${action.label}": ${await res.text()}`);
-        return false;
-      }
-      return true;
-    }
-    async function undoLastAction() {
-      const action = UNDO_STACK.shift();
-      if (!action)
-        return false;
-      if (!await runUndoAction(action)) {
-        UNDO_STACK.unshift(action);
-        return true;
-      }
-      invalidateRepoSidebar();
-      await load();
-      return true;
-    }
-    async function requestMoveToTrash(path, onMoved, options = {}) {
-      if (!await confirmMoveToTrash(path, options.focusReturnTarget))
-        return;
-      if (await moveRepoPathToTrash(path))
-        onMoved();
-    }
-    function canTrashWorktreeRef(ref) {
-      return ref === "worktree" || ref === "";
-    }
-    function parentRepoPath(path) {
-      return path.split("/").slice(0, -1).join("/");
-    }
-    async function copyRepoContextText(text2) {
-      if (!text2)
-        return;
-      await navigator.clipboard.writeText(text2);
-    }
-    function createCopyPathButton(path) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-copy-path";
-      button.title = "copy folder path";
-      button.setAttribute("aria-label", "copy folder path");
-      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        try {
-          await navigator.clipboard.writeText(filePathClipboardText(path));
-          button.classList.add("copied");
-          setTimeout(() => {
-            button.classList.remove("copied");
-          }, 1200);
-        } catch {
-          button.classList.add("failed");
-          setTimeout(() => {
-            button.classList.remove("failed");
-          }, 1200);
-        }
-      });
-      return button;
-    }
-    function showRepoContextMenu(event, entry, ref, onChanged) {
-      if (document.querySelector(".gdp-trash-dialog-backdrop"))
-        return false;
-      if (!canTrashWorktreeRef(ref))
-        return false;
-      if (entry.children_omitted_reason === "internal")
-        return false;
-      if (entry.type !== "tree" && entry.type !== "blob")
-        return false;
-      event.preventDefault();
-      closeRepoContextMenu();
-      const menu = document.createElement("div");
-      menu.className = "gdp-context-menu";
-      const anchor = event.target;
-      const focusReturnTarget = anchor?.closest("li, .gdp-repo-row");
-      const anchorRect = anchor?.closest("li, .gdp-repo-row")?.getBoundingClientRect();
-      const anchorX = event.clientX > 0 ? event.clientX : anchorRect?.left || window.innerWidth / 2;
-      const anchorY = event.clientY > 0 ? event.clientY : anchorRect?.bottom || window.innerHeight / 2;
-      menu.style.left = `${anchorX}px`;
-      menu.style.top = `${anchorY}px`;
-      const copyPath = document.createElement("button");
-      copyPath.type = "button";
-      copyPath.textContent = "Copy Path";
-      copyPath.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await copyRepoContextText(filePathClipboardText(entry.path));
-      });
-      const copyName = document.createElement("button");
-      copyName.type = "button";
-      copyName.textContent = "Copy Name";
-      copyName.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await copyRepoContextText(fileNameClipboardText(entry.path));
-      });
-      const createDir = document.createElement("button");
-      createDir.type = "button";
-      createDir.textContent = "New Folder...";
-      createDir.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        const targetPath = entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
-        await requestCreateDirectory(targetPath, onChanged, {
-          focusReturnTarget
-        });
-      });
-      const trash = document.createElement("button");
-      trash.type = "button";
-      trash.className = "danger";
-      trash.textContent = "Move to Trash...";
-      trash.addEventListener("click", async () => {
-        closeRepoContextMenu();
-        await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
-      });
-      menu.append(copyPath, copyName, createDir, trash);
-      document.body.appendChild(menu);
-      const rect = menu.getBoundingClientRect();
-      const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
-      const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
-      menu.style.left = `${Math.max(8, left)}px`;
-      menu.style.top = `${Math.max(8, top)}px`;
-      return true;
-    }
-    function sidebarTrashEntryFromEvent(event) {
-      if (!isRepositorySidebarMode())
-        return null;
-      const row = event.target?.closest("#filelist li");
-      if (!row)
-        return null;
-      const path = row.dataset.path || row.dataset.dirpath || "";
-      if (!path)
-        return null;
-      return {
-        path,
-        type: row.dataset.type,
-        children_omitted_reason: row.dataset.childrenOmittedReason
-      };
-    }
-    function handleSidebarContextMenu(event) {
-      const entry = sidebarTrashEntryFromEvent(event);
-      if (!entry)
-        return;
-      if (showRepoContextMenu(event, entry, REPO_SIDEBAR_REF || "worktree", () => loadRepo()))
-        markActive(entry.path);
-    }
-    function createMoveToTrashButton(path, onDeleted) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-trash-path";
-      button.title = "move folder to Trash";
-      button.setAttribute("aria-label", "move folder to Trash");
-      button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
-      });
-      return button;
-    }
-    function createNewFolderButton(path, onCreated) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-create-dir";
-      button.title = "new folder";
-      button.setAttribute("aria-label", "new folder");
-      button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
-      button.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        await requestCreateDirectory(path, onCreated, {
-          focusReturnTarget: button
-        });
-      });
-      return button;
-    }
-    function createOpenPathButton(path, kind, title = "open folder in OS") {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-file-header-icon gdp-open-path";
-      button.title = title;
-      button.setAttribute("aria-label", title);
-      button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
-      button.addEventListener("click", (e2) => {
-        e2.stopPropagation();
-        openPathInOs(path, kind, button);
-      });
-      return button;
-    }
-    async function uploadFiles(path, files) {
-      const list2 = Array.from(files);
-      if (!list2.length)
-        return;
-      const label = path || PROJECT_NAME || "repository root";
-      if (!window.confirm("Upload " + list2.length + " file" + (list2.length === 1 ? "" : "s") + " into " + label + "?"))
-        return;
-      const form = new FormData;
-      form.set("dir", path);
-      list2.forEach((file) => {
-        form.append("files", file, file.name);
-      });
-      const res = await fetch("/_upload_files", {
-        method: "POST",
-        headers: { "X-Code-Viewer-Action": "1" },
-        body: form
-      });
-      if (!res.ok)
-        throw new Error(await res.text());
-      invalidateRepoSidebar();
-      await loadRepo();
-    }
-    function createRepoUploadPanel(path) {
-      const dropPanel = document.createElement("div");
-      dropPanel.className = "gdp-upload-panel";
-      const copy = document.createElement("div");
-      copy.className = "gdp-upload-copy";
-      copy.textContent = `Drop files into ${path || PROJECT_NAME || "repository"}`;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.multiple = true;
-      input.hidden = true;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "gdp-btn gdp-btn-sm";
-      button.textContent = "Upload files";
-      button.addEventListener("click", () => input.click());
-      const error2 = document.createElement("div");
-      error2.className = "gdp-upload-error";
-      const fail = (message = "Upload failed") => {
-        error2.textContent = message;
-        dropPanel.classList.add("failed");
-        setTimeout(() => dropPanel.classList.remove("failed"), 1600);
-      };
-      input.addEventListener("change", async () => {
-        try {
-          if (input.files?.length)
-            await uploadFiles(path, input.files);
-          error2.textContent = "";
-        } catch (uploadError) {
-          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
-        } finally {
-          input.value = "";
-        }
-      });
-      dropPanel.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        dropPanel.classList.add("dragging");
-      });
-      dropPanel.addEventListener("dragleave", () => dropPanel.classList.remove("dragging"));
-      dropPanel.addEventListener("drop", async (event) => {
-        event.preventDefault();
-        dropPanel.classList.remove("dragging");
-        try {
-          const files = event.dataTransfer?.files;
-          if (files?.length)
-            await uploadFiles(path, files);
-          error2.textContent = "";
-        } catch (uploadError) {
-          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
-        }
-      });
-      dropPanel.append(copy, button, input, error2);
-      return dropPanel;
-    }
-    function repoRoute(ref, path) {
-      return {
-        screen: "repo",
-        ref: ref || "worktree",
-        path,
-        range: currentRange()
-      };
-    }
-    function createRepoBreadcrumb(target, path) {
-      const nav = document.createElement("nav");
-      nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
-      const root = document.createElement("button");
-      root.type = "button";
-      root.className = path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current";
-      root.textContent = PROJECT_NAME || "repository";
-      root.addEventListener("click", () => {
-        setRoute(repoRoute(target, ""));
-        loadRepo();
-      });
-      nav.appendChild(root);
-      const parts = path ? path.split("/") : [];
-      parts.forEach((part, index) => {
-        const sep = document.createElement("span");
-        sep.className = "gdp-file-breadcrumb-sep";
-        sep.textContent = "/";
-        nav.appendChild(sep);
-        const currentPath = parts.slice(0, index + 1).join("/");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = index === parts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
-        button.textContent = part;
-        button.disabled = index === parts.length - 1;
-        button.addEventListener("click", () => {
-          setRoute(repoRoute(target, currentPath));
-          loadRepo();
-        });
-        nav.appendChild(button);
-      });
-      return nav;
-    }
-    async function renderRepo(meta) {
-      setProjectName(meta.project || "");
-      setPageMode();
-      removeStandaloneSource();
-      $("#empty").classList.add("hidden");
-      $("#diff").replaceChildren();
-      if (!isRepoSidebarReusable(meta.ref))
-        $("#totals").textContent = "";
-      STATE.files = [];
-      LOAD_QUEUE.length = 0;
-      renderRepoBlobSidebar(meta.path || "", meta.ref);
-      const target = $("#diff");
-      const shell = document.createElement("section");
-      shell.className = "gdp-repo-shell";
-      const toolbar = document.createElement("div");
-      toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
-      const pathHeader = document.createElement("div");
-      pathHeader.className = "gdp-file-detail-path";
-      pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
-      if (meta.path)
-        pathHeader.appendChild(createCopyPathButton(meta.path));
-      pathHeader.appendChild(createOpenPathButton(meta.path || "", "directory", "open this folder in OS"));
-      toolbar.appendChild(pathHeader);
-      if (canTrashWorktreeRef(meta.ref)) {
-        toolbar.appendChild(createNewFolderButton(meta.path || "", () => loadRepo()));
-        if (meta.path) {
-          toolbar.appendChild(createMoveToTrashButton(meta.path, () => {
-            const parent = meta.path.split("/").slice(0, -1).join("/");
-            setRoute(repoRoute(meta.ref, parent));
-            loadRepo();
-          }));
-        }
-      }
-      shell.appendChild(toolbar);
-      const listCard = document.createElement("section");
-      listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
-      const listWrapper = document.createElement("div");
-      listWrapper.className = "d2h-file-wrapper";
-      if (meta.ref === "worktree" || meta.ref === "") {
-        listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
-      }
-      const sortHost = document.createElement("div");
-      sortHost.className = "gdp-repo-sort-host";
-      const list2 = document.createElement("div");
-      list2.className = "gdp-source-viewer gdp-repo-file-list";
-      const renderRepoRows = (focusSortKey) => {
-        sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
-        if (focusSortKey) {
-          sortHost.querySelector(`[data-repo-sort="${focusSortKey}"]`)?.focus();
-        }
-        list2.replaceChildren();
-        if (meta.path) {
-          const parent = meta.path.split("/").slice(0, -1).join("/");
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = "gdp-repo-row parent";
-          const parentIcon = document.createElement("span");
-          parentIcon.className = "dir-icon";
-          setFolderIcon(parentIcon, false);
-          const parentName = document.createElement("span");
-          parentName.className = "name";
-          parentName.textContent = "..";
-          const parentKind = document.createElement("span");
-          parentKind.className = "meta";
-          parentKind.textContent = "";
-          const parentSize = document.createElement("span");
-          parentSize.className = "size";
-          row.append(parentIcon, parentName, parentKind, parentSize);
-          row.addEventListener("click", () => {
-            setRoute(repoRoute(meta.ref, parent));
-            loadRepo();
-          });
-          list2.appendChild(row);
-        }
-        sortedRepoEntries(meta.entries).forEach((entry) => {
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = `gdp-repo-row ${entry.type}`;
-          const icon = document.createElement("span");
-          icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
-          if (entry.type === "tree")
-            setFolderIcon(icon, true);
-          else
-            icon.innerHTML = fileEntryIcon();
-          const name = document.createElement("span");
-          name.className = "name";
-          name.textContent = entry.name;
-          const metaBlock = createRepoEntryMeta(entry);
-          const size = createRepoEntrySize(entry);
-          row.append(icon, name, metaBlock, size);
-          row.addEventListener("click", () => {
-            if (entry.type === "tree") {
-              setRoute(repoRoute(meta.ref, entry.path));
-              loadRepo();
-            } else if (entry.type === "blob") {
-              setRoute({
-                screen: "file",
-                path: entry.path,
-                ref: meta.ref,
-                view: "blob",
-                range: currentRange()
-              });
-              renderStandaloneSource({ path: entry.path, ref: meta.ref });
-            }
-          });
-          row.addEventListener("contextmenu", (event) => showRepoContextMenu(event, entry, meta.ref, () => loadRepo()));
-          list2.appendChild(row);
-        });
-        if (!meta.entries.length) {
-          const empty = document.createElement("div");
-          empty.className = "gdp-repo-empty";
-          empty.textContent = "No files in this directory.";
-          list2.appendChild(empty);
-        }
-      };
-      listWrapper.appendChild(sortHost);
-      renderRepoRows();
-      listWrapper.appendChild(list2);
-      listCard.appendChild(listWrapper);
-      shell.appendChild(listCard);
-      if (meta.readme?.text) {
-        const readme = document.createElement("section");
-        readme.className = "gdp-file-shell loaded gdp-repo-readme";
-        const wrapper = document.createElement("div");
-        wrapper.className = "d2h-file-wrapper";
-        const readmeHeader = document.createElement("div");
-        readmeHeader.className = "d2h-file-header";
-        const nameWrapper = document.createElement("div");
-        nameWrapper.className = "d2h-file-name-wrapper";
-        const icon = document.createElement("span");
-        icon.className = "d2h-icon-wrapper";
-        icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
-        const name = document.createElement("span");
-        name.className = "d2h-file-name";
-        name.textContent = meta.readme.path;
-        nameWrapper.append(icon, name);
-        readmeHeader.appendChild(nameWrapper);
-        wrapper.appendChild(readmeHeader);
-        try {
-          wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
-            syntaxHighlight: STATE.syntaxHighlight,
-            onNavigateMarkdown: (path, ref) => {
-              setRoute({
-                screen: "file",
-                path,
-                ref,
-                view: "blob",
-                range: currentRange()
-              });
-              renderStandaloneSource({ path, ref });
-            }
-          }));
-        } catch {
-          const fallback = document.createElement("pre");
-          fallback.className = "gdp-markdown-fallback";
-          fallback.textContent = meta.readme.text;
-          wrapper.appendChild(fallback);
-        }
-        readme.appendChild(wrapper);
-        shell.appendChild(readme);
-      }
-      target.appendChild(shell);
-      placeSidebarToggle();
-    }
-    function renderRepoBlobSidebar(currentPath, ref) {
-      syncRepoTargetInput(ref);
-      const normalizedRef = ref || "worktree";
-      if (isRepoSidebarReusable(normalizedRef)) {
-        activateRepoSidebarPath(currentPath);
-        return Promise.resolve();
-      }
-      if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
-        return REPO_SIDEBAR_LOAD.then(() => {
-          activateRepoSidebarPath(currentPath);
-        });
-      }
-      const params = new URLSearchParams;
-      params.set("ref", normalizedRef);
-      params.set("recursive", "1");
-      appendScopeParams(params);
-      REPO_SIDEBAR_LOAD_REF = normalizedRef;
-      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
-        if (!r2.ok)
-          throw new Error("failed to load repository tree");
-        return r2.json();
-      })).then((meta) => {
-        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
-        if ((activeRepoRef || "worktree") !== normalizedRef)
-          return;
-        const files = meta.entries.map((entry, index) => ({
-          order: index + 1,
-          path: entry.path,
-          display_path: entry.path,
-          type: entry.type,
-          children_omitted: entry.children_omitted,
-          children_omitted_reason: entry.children_omitted_reason
-        }));
-        REPO_SIDEBAR_REF = normalizedRef;
-        renderSidebar(files, (file) => {
-          if (file.type === "tree") {
-            setRoute(repoRoute(normalizedRef, file.path));
-            loadRepo();
-            return;
-          }
-          setRoute({
-            screen: "file",
-            path: file.path,
-            ref: normalizedRef,
-            view: "blob",
-            range: currentRange()
-          });
-          renderStandaloneSource({ path: file.path, ref: normalizedRef });
-        });
-        activateRepoSidebarPath(currentPath);
-      }).catch(() => {
-        REPO_SIDEBAR_REF = null;
-        renderSidebar([], undefined);
-        $("#totals").textContent = "Cannot load tree";
-      }).finally(() => {
-        if (REPO_SIDEBAR_LOAD === load2) {
-          REPO_SIDEBAR_LOAD_REF = null;
-          REPO_SIDEBAR_LOAD = null;
-        }
-      });
-      REPO_SIDEBAR_LOAD = load2;
-      return load2;
-    }
-    function activateRepoSidebarPath(currentPath) {
-      markActive(currentPath, { reveal: true });
-      applyFilter();
-      const row = SIDEBAR_ROW_BY_PATH.get(currentPath);
-      if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
-        ensureVirtualSidebarDirLoaded(row.dir).then(() => {
-          if (SIDEBAR_VIRTUAL_ACTIVE_PATH === currentPath) {
-            rerenderVirtualSidebar();
-            scrollVirtualSidebarPathIntoView(currentPath);
-          }
-        });
-    }
-    function createPlaceholder(f2) {
-      const card = document.createElement("div");
-      card.className = "gdp-file-shell pending";
-      card.dataset.path = f2.path;
-      card.dataset.key = f2.key || f2.path;
-      card.dataset.sizeClass = f2.size_class || "small";
-      card.dataset.status = f2.status || "M";
-      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
-      if (f2.estimated_height_px) {
-        card.style.minHeight = `${f2.estimated_height_px}px`;
-      }
-      const head = document.createElement("div");
-      head.className = "gdp-shell-header";
-      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + '</span><span class="path">' + escapeHtml2(f2.display_path || f2.path) + '</span><span class="stats"><span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + '</span></span><span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
-      card.appendChild(head);
-      const body = document.createElement("div");
-      body.className = "gdp-shell-body";
-      card.appendChild(body);
-      return card;
-    }
-    function setupLazyObserver() {
-      if (lazyObserver)
-        lazyObserver.disconnect();
-      lazyObserver = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting)
-            return;
-          const card = entry.target;
-          if (card.classList.contains("loaded") || card.classList.contains("loading"))
-            return;
-          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-          if (!f2)
-            return;
-          enqueueLoad(f2, card, 0);
-        });
-      }, { rootMargin: "1200px 0px 1600px 0px" });
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
-        lazyObserver.observe(c2);
-      });
-    }
-    window.addEventListener("scroll", () => enqueueInitialLoads(), {
-      passive: true
-    });
-    window.addEventListener("resize", () => {
-      enqueueInitialLoads();
-      syncSidebarHeaderHeight();
-    }, { passive: true });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden)
-        enqueueInitialLoads();
-    });
-    function enqueueInitialLoads() {
-      const viewportBottom = window.innerHeight + 1600;
-      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
-        const rect = card.getBoundingClientRect();
-        if (rect.top > viewportBottom)
-          return;
-        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
-        if (f2)
-          enqueueLoad(f2, card, 0);
-      });
-    }
-    function enqueueLoad(file, card, priority) {
-      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
-        renderManualLoadPlaceholder(card, file);
-        return;
-      }
-      if (LOAD_QUEUE.find((item) => item.card === card))
-        return;
-      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
-      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
-      pumpQueue();
-    }
-    function pumpQueue() {
-      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
-        const item = LOAD_QUEUE.shift();
-        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
-          continue;
-        ACTIVE_LOADS++;
-        loadFile(item.file, item.card).finally(() => {
-          ACTIVE_LOADS--;
-          pumpQueue();
-        });
-      }
-    }
-    function manualLoadReason(file) {
-      const path = file.path || "";
-      if (file.size_class === "huge")
-        return "huge diff";
-      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
-        return "minified or bundled file";
-      if (/\.map$/i.test(path))
-        return "source map";
-      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
-        return "generated or vendored path";
-      return null;
-    }
-    function renderManualLoadPlaceholder(card, file) {
-      if (card.dataset.manualRendered === "1")
-        return;
-      card.dataset.manualRendered = "1";
-      card.classList.remove("loading");
-      card.classList.add("pending", "manual-load");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = true;
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-manual-load";
-      const note = document.createElement("div");
-      note.className = "gdp-manual-note";
-      note.textContent = `${manualLoadReason(file)} - click to load diff`;
-      const previewBtn = document.createElement("button");
-      previewBtn.className = "gdp-show-full";
-      previewBtn.textContent = "Load preview";
-      previewBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "preview";
-        card.classList.remove("manual-load");
-        loadFile(file, card, buildPreviewUrl(file, 3));
-      });
-      const openFileBtn = document.createElement("button");
-      openFileBtn.className = "gdp-show-full";
-      openFileBtn.textContent = "Open as file";
-      openFileBtn.title = "Open this file in the virtualized source viewer";
-      openFileBtn.addEventListener("click", () => {
-        const target = fileSourceTarget(file);
-        setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          range: currentRange()
-        });
-        applySourceRouteToShell();
-      });
-      const fullBtn = document.createElement("button");
-      fullBtn.className = "gdp-show-full secondary";
-      fullBtn.textContent = "Load full diff";
-      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
-      fullBtn.addEventListener("click", () => {
-        body.innerHTML = "";
-        card.dataset.manualLoad = "1";
-        card.dataset.manualMode = "full";
-        card.classList.remove("manual-load");
-        loadFile(file, card, file.load_url);
-      });
-      wrap.appendChild(note);
-      if (file.status === "A")
-        wrap.appendChild(openFileBtn);
-      wrap.appendChild(previewBtn);
-      wrap.appendChild(fullBtn);
-      body.appendChild(wrap);
-    }
-    function nextIdle(timeout = 500) {
-      return new Promise((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (done)
-            return;
-          done = true;
-          resolve();
-        };
-        const ric = window.requestIdleCallback;
-        if (typeof ric === "function") {
-          ric(finish, { timeout });
-        } else {
-          requestAnimationFrame(finish);
-          setTimeout(finish, 50);
-        }
-      });
-    }
-    function loadFile(file, card, urlOverride) {
-      card.classList.remove("pending");
-      card.classList.add("loading");
-      if (lazyObserver)
-        lazyObserver.unobserve(card);
-      const indicator = card.querySelector(".loading-indicator");
-      if (indicator)
-        indicator.hidden = false;
-      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
-      const myGen = SERVER_GENERATION;
-      const myReq = ++CLIENT_REQ_SEQ;
-      card.dataset.reqId = String(myReq);
-      const retryStale = () => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("pending");
-        if (indicator)
-          indicator.hidden = true;
-        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
-        if (fresh && card.isConnected)
-          enqueueLoad(fresh, card, 0);
-      };
-      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        if (myGen !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        if (data.generation && data.generation !== SERVER_GENERATION) {
-          retryStale();
-          return;
-        }
-        await nextIdle();
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        renderFile(file, data, card);
-      }).catch(() => {
-        if (String(myReq) !== card.dataset.reqId)
-          return;
-        card.classList.remove("loading");
-        card.classList.add("error");
-        const body = card.querySelector(".gdp-shell-body");
-        if (!body)
-          return;
-        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
-        const btn = body.querySelector(".retry");
-        if (btn)
-          btn.addEventListener("click", () => {
-            card.classList.remove("error");
-            card.classList.add("pending");
-            body.innerHTML = "";
-            enqueueLoad(file, card, 1);
-          });
-      });
-    }
-    function mountDiff(card, file, data) {
-      const head = card.querySelector(".gdp-shell-header");
-      if (head)
-        head.style.display = "none";
-      const body = card.querySelector(".gdp-shell-body");
-      if (!body)
-        return;
-      body.innerHTML = "";
-      if (!data.diff?.trim()) {
-        body.innerHTML = '<div class="gdp-info">No content</div>';
-        return;
-      }
-      const layout = file.force_layout || STATE.layout;
-      const hljsRef = getHljs();
-      const ui = new Diff2HtmlUI(body, data.diff, {
-        drawFileList: false,
-        matching: "lines",
-        outputFormat: layout,
-        synchronisedScroll: true,
-        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
-        fileListToggle: false,
-        fileContentToggle: false
-      }, hljsRef);
-      ui.draw();
-      if (STATE.ignoreWs)
-        suppressWhitespaceOnlyInlineHighlights(body);
-      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
-        ui.highlightCode();
-      enhanceMediaCard(file, card);
-      syncSideScrollCard(card);
-      appendStatSquaresToHeader(card, file);
-      setupHunkExpand(card, file);
-    }
-    const { renderHelpPage } = createHelpPage({
-      $,
-      getRoute: () => STATE.route,
-      setRoute,
-      setPageMode,
-      cancelActiveSourceLoad,
-      removeStandaloneSource,
-      clearLoadQueue: () => {
-        LOAD_QUEUE.length = 0;
-      },
-      currentRange,
-      syncHeaderMenu
-    });
-    const { setupHunkExpand } = createHunkExpand({
-      trackLoad,
-      getServerGeneration: () => SERVER_GENERATION,
-      getToRef: () => STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree",
-      highlightInsertedSpans
-    });
-    function setFileCollapsed(card, collapsed) {
-      card.classList.toggle("gdp-file-collapsed", collapsed);
-      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
-        body.classList.toggle("d2h-d-none", collapsed);
-      });
-      const button = card.querySelector(".gdp-file-toggle");
-      if (button) {
-        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        button.title = collapsed ? "Expand file" : "Collapse file";
-      }
-      const unfold = card.querySelector(".gdp-file-unfold");
-      if (unfold)
-        unfold.disabled = collapsed;
-      const viewFile = card.querySelector(".gdp-view-file");
-      if (viewFile)
-        viewFile.disabled = collapsed;
-    }
-    function setViewFileButtonState(button, sourceMode) {
-      if (!button)
-        return;
-      button.classList.add("gdp-btn", "gdp-btn-sm");
-      button.textContent = sourceMode ? "View Diff" : "View File";
-      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
-      button.title = sourceMode ? "View diff" : "View file";
     }
     function renderSourceLoading(card, target, onCancel) {
       const body = card.querySelector(".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer");
@@ -11892,147 +9062,6 @@ ${frontmatter.yaml}
       frame.srcdoc = html;
       preview.appendChild(frame);
       return preview;
-    }
-    function createRepoEntryMeta(entry) {
-      const meta = document.createElement("span");
-      meta.className = "meta";
-      const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
-      const created = formatFileDate(entry.created_at);
-      if (entry.type === "tree" && updated) {
-        meta.textContent = updated;
-        if (created)
-          meta.title = `Created ${created}`;
-        return meta;
-      }
-      if (entry.type !== "blob") {
-        meta.textContent = "-";
-        return meta;
-      }
-      meta.textContent = updated ? updated : created ? created : "-";
-      if (created)
-        meta.title = `Created ${created}`;
-      return meta;
-    }
-    function createRepoEntrySize(entry) {
-      const size = document.createElement("span");
-      size.className = "size";
-      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
-      return size;
-    }
-    function repoEntryUpdatedTime(entry) {
-      const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
-      if (!raw)
-        return -1;
-      const time = new Date(raw).getTime();
-      return Number.isNaN(time) ? -1 : time;
-    }
-    function sortedRepoEntries(entries) {
-      const direction = REPO_SORT.direction === "asc" ? 1 : -1;
-      return [...entries].sort((a2, b2) => {
-        if (REPO_SORT.key === "name" && a2.type !== b2.type) {
-          if (a2.type === "tree")
-            return -1;
-          if (b2.type === "tree")
-            return 1;
-        }
-        let result = 0;
-        if (REPO_SORT.key === "updated") {
-          const aTime = repoEntryUpdatedTime(a2);
-          const bTime = repoEntryUpdatedTime(b2);
-          if (aTime < 0 && bTime >= 0)
-            return 1;
-          if (bTime < 0 && aTime >= 0)
-            return -1;
-          result = aTime - bTime;
-        } else if (REPO_SORT.key === "size") {
-          if (a2.size == null && b2.size != null)
-            return 1;
-          if (b2.size == null && a2.size != null)
-            return -1;
-          result = (a2.size ?? 0) - (b2.size ?? 0);
-        } else {
-          result = a2.name.localeCompare(b2.name);
-        }
-        if (result === 0)
-          result = a2.name.localeCompare(b2.name);
-        return result * direction;
-      });
-    }
-    function createRepoSortHeader(onSortChange) {
-      const header = document.createElement("div");
-      header.className = "gdp-repo-sort-header";
-      const spacer = document.createElement("span");
-      spacer.className = "gdp-repo-sort-spacer";
-      header.appendChild(spacer);
-      const columns = [
-        { key: "name", label: "Name" },
-        { key: "updated", label: "Updated" },
-        { key: "size", label: "Size" }
-      ];
-      columns.forEach((column) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.dataset.repoSort = column.key;
-        button.textContent = column.label + (REPO_SORT.key === column.key ? REPO_SORT.direction === "asc" ? " ↑" : " ↓" : "");
-        button.className = REPO_SORT.key === column.key ? "active" : "";
-        button.addEventListener("click", () => {
-          if (REPO_SORT.key === column.key) {
-            REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
-          } else {
-            REPO_SORT = {
-              key: column.key,
-              direction: column.key === "name" ? "asc" : "desc"
-            };
-          }
-          onSortChange(column.key);
-        });
-        header.appendChild(button);
-      });
-      return header;
-    }
-    async function loadRawFileInfo(target) {
-      try {
-        const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
-        if (!res.ok)
-          return {};
-        const rawSize = res.headers.get("content-length");
-        const size = rawSize == null ? NaN : Number(rawSize);
-        return {
-          size: rawSize != null && Number.isFinite(size) ? size : undefined,
-          type: res.headers.get("content-type") || undefined,
-          created_at: res.headers.get("x-code-viewer-created-at") || undefined,
-          updated_at: res.headers.get("x-code-viewer-updated-at") || undefined,
-          commit_updated_at: res.headers.get("x-code-viewer-commit-updated-at") || undefined
-        };
-      } catch {
-        return {};
-      }
-    }
-    function createFileDetailMeta(target, meta) {
-      const wrap = document.createElement("div");
-      wrap.className = "gdp-file-detail-meta";
-      const addItem = (label, value) => {
-        if (!value)
-          return;
-        const item = document.createElement("span");
-        item.className = "gdp-file-detail-meta-item";
-        const labelEl = document.createElement("span");
-        labelEl.className = "label";
-        labelEl.textContent = label;
-        const valueEl = document.createElement("span");
-        valueEl.className = "value";
-        valueEl.textContent = value;
-        item.append(labelEl, valueEl);
-        wrap.appendChild(item);
-      };
-      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
-      addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
-      addItem("Created", formatFileDate(meta.created_at));
-      if (!wrap.childElementCount) {
-        wrap.hidden = true;
-        wrap.dataset.path = target.path;
-      }
-      return wrap;
     }
     function createSourceFileInfo(target, kind) {
       const info = document.createElement("div");
@@ -12978,42 +10007,6 @@ ${frontmatter.yaml}
       else
         card.appendChild(view);
     }
-    function createFileBreadcrumb(path, ref) {
-      const nav = document.createElement("nav");
-      nav.className = "gdp-file-breadcrumb";
-      nav.setAttribute("aria-label", "File path");
-      const parts = path.split("/").filter(Boolean);
-      const allParts = PROJECT_NAME ? [PROJECT_NAME, ...parts] : parts;
-      allParts.forEach((part, index) => {
-        if (index > 0) {
-          const sep = document.createElement("span");
-          sep.className = "gdp-file-breadcrumb-sep";
-          sep.textContent = "/";
-          nav.appendChild(sep);
-        }
-        const isCurrent = index === allParts.length - 1;
-        const crumb = document.createElement(isCurrent ? "span" : "button");
-        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
-        crumb.textContent = part;
-        if (!isCurrent && crumb instanceof HTMLButtonElement) {
-          crumb.type = "button";
-          crumb.addEventListener("click", () => {
-            const projectOffset = PROJECT_NAME ? 1 : 0;
-            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
-            setRoute(repoRoute(ref || "worktree", currentPath));
-            loadRepo();
-          });
-        }
-        nav.appendChild(crumb);
-      });
-      if (!allParts.length) {
-        const crumb = document.createElement("span");
-        crumb.className = "gdp-file-breadcrumb-current";
-        crumb.textContent = path;
-        nav.appendChild(crumb);
-      }
-      return nav;
-    }
     async function renderStandaloneSource(target) {
       cancelActiveSourceLoad("navigation");
       const req = ++SOURCE_REQ_SEQ;
@@ -13191,6 +10184,3165 @@ ${frontmatter.yaml}
         return;
       }
       renderStandaloneSource(target);
+    }
+    function inferLang(path) {
+      const name = sourceFileName(path);
+      const fileLang = FILENAME_TO_LANG[name];
+      if (fileLang)
+        return fileLang;
+      if (isDockerfileName(name))
+        return "dockerfile";
+      if (isMakefileName(name))
+        return "makefile";
+      const m = path.match(/\.([^.]+)$/);
+      if (!m)
+        return null;
+      return EXT_TO_LANG[m[1].toLowerCase()] || null;
+    }
+    function handleVirtualSourcePagingKey(e2, targetEl) {
+      if (e2.__gdpVirtualSourcePagingHandled)
+        return true;
+      if (e2.defaultPrevented || e2.isComposing || isPaletteOpen() || document.querySelector(".mkdp-lightbox"))
+        return false;
+      const editable = isEditableKeyTarget(targetEl);
+      const inVirtualSearch = !!targetEl?.closest(".gdp-source-virtual-search");
+      if (editable && !inVirtualSearch)
+        return false;
+      const key = e2.key.toLowerCase();
+      if (e2.altKey || e2.metaKey)
+        return false;
+      const isPlainPageKey = (key === "pagedown" || key === "pageup") && !e2.ctrlKey && !e2.shiftKey;
+      const isCtrlArrowKey = (key === "arrowdown" || key === "arrowup") && e2.ctrlKey && !e2.shiftKey;
+      if (!isPlainPageKey && !isCtrlArrowKey)
+        return false;
+      const scroller = findMainScrollTarget();
+      if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
+        return false;
+      const pageDown = key === "pagedown" || key === "arrowdown";
+      const pageUp = key === "pageup" || key === "arrowup";
+      if (!pageDown && !pageUp)
+        return false;
+      e2.__gdpVirtualSourcePagingHandled = true;
+      e2.preventDefault();
+      e2.stopPropagation();
+      scrollMainPanel(pageDown ? 1 : -1, e2.repeat, "page");
+      focusMainSurface();
+      return true;
+    }
+    function handleVirtualSourcePagingKeydown(e2) {
+      handleVirtualSourcePagingKey(e2, e2.target);
+    }
+    return {
+      renderStandaloneSource,
+      applySourceRouteToShell,
+      removeStandaloneSource,
+      cancelActiveSourceLoad,
+      finishSourceLoad,
+      sourceTargetsEqual,
+      sourceTargetFromRoute,
+      fileSourceTarget,
+      scrollStandaloneSourceLine,
+      createSourceTabs,
+      switchSourceTab,
+      sourceLineScrollAmount,
+      hasVisibleSourceCodeSurface,
+      moveSourceCursor,
+      ensureSourceCursor,
+      resetSourceCursorForTarget,
+      syncSourceCursorRows,
+      scrollSourceCursorIntoView,
+      visibleSourceLineFallback,
+      handleVirtualSourcePagingKeydown,
+      openVirtualSourceSearchFromKeyboard,
+      isVirtualSourceDisabled,
+      currentSourceLineTarget,
+      lineTargetStart,
+      lineInSourceTarget,
+      setSourceLineRoute,
+      syncRenderedSourceLineHighlights,
+      renderSourceError,
+      loadSourceShikiHighlighter,
+      sourceShikiLines,
+      shouldVirtualizeSource,
+      inferLang
+    };
+  }
+
+  // web-src/ws-highlight.ts
+  function isWhitespaceOnlyInlineHighlight(text2) {
+    return !!text2 && !/\S/.test(text2);
+  }
+  function suppressWhitespaceOnlyInlineHighlights(root) {
+    root.querySelectorAll("ins, del").forEach((el) => {
+      if (!isWhitespaceOnlyInlineHighlight(el.textContent))
+        return;
+      const parent = el.parentNode;
+      if (!parent)
+        return;
+      parent.replaceChild(document.createTextNode(el.textContent || ""), el);
+    });
+  }
+
+  // web-src/app.ts
+  window.GdpExpandLogic = GdpExpandLogic;
+  (() => {
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const diffCardSelector = (path) => '.gdp-file-shell[data-path="' + (window.CSS && CSS.escape ? CSS.escape(path) : path) + '"]';
+    const HIGHLIGHT_SRC = "/vendor/highlight.js/highlight.min.js";
+    const DEFAULT_RANGE = { from: "HEAD", to: "worktree" };
+    const VIRTUAL_SIDEBAR_THRESHOLD = 3000;
+    const VIRTUAL_SIDEBAR_ROW_HEIGHT = 29;
+    const VIRTUAL_SIDEBAR_OVERSCAN = 16;
+    const TEST_RE = /(^|[/_.])(test|spec|__tests__)([/_.]|$)/i;
+    let highlightLoadPromise = null;
+    let SIDEBAR_ON_FILE_CLICK;
+    let SIDEBAR_TREE_ROOT = null;
+    let SIDEBAR_TREE_ROWS = [];
+    let SIDEBAR_VISIBLE_ROWS = [];
+    let SIDEBAR_ROW_BY_PATH = new Map;
+    let SIDEBAR_VIRTUAL_ACTIVE_PATH = "";
+    let SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+    const SIDEBAR_LAZY_LOADED_DIRS = new Set;
+    const SIDEBAR_LAZY_LOADING_DIRS = new Map;
+    let REPO_SORT = {
+      key: "name",
+      direction: "asc"
+    };
+    let SERVER_SCOPE_OMIT_DIRS_DEFAULT = [];
+    let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = [];
+    const UNDO_STACK = [];
+    let PENDING_G_SCOPE = null;
+    let PENDING_G_UNTIL = 0;
+    const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
+    const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
+    const SIDEBAR_FONT_SIZE_STORAGE_KEY = "gdp:sidebar-font-size";
+    const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
+    const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
+      "node_modules",
+      ".venv",
+      "venv",
+      ".next",
+      ".nuxt",
+      ".svelte-kit",
+      ".astro",
+      ".vercel",
+      "dist",
+      "build",
+      "out",
+      "target",
+      ".gradle",
+      "__pycache__",
+      ".pytest_cache",
+      ".tox",
+      ".terraform",
+      ".idea",
+      ".vscode",
+      "vendor",
+      ".cache",
+      "coverage",
+      "DerivedData",
+      "Pods",
+      "bin",
+      "obj"
+    ];
+    const CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT = [".DS_Store"];
+    function scrollMainPanel(direction, repeated = false, unit = "line") {
+      if (moveSourceCursor(direction, unit))
+        return;
+      const target = findMainScrollTarget();
+      const viewportHeight = target?.clientHeight || document.scrollingElement?.clientHeight || window.innerHeight;
+      const top = direction * (unit === "line" ? Math.round(sourceLineScrollAmount() || 32) : Math.round(viewportHeight * 0.55));
+      const behavior = repeated ? "auto" : "smooth";
+      if (target)
+        target.scrollBy({ top, behavior });
+      else
+        window.scrollBy({ top, behavior });
+    }
+    let MAIN_SURFACE_FOCUS_SEQ = 0;
+    function focusMainSurface() {
+      const target = findMainScrollTarget();
+      if (target?.matches("#content .gdp-source-virtual-scroller")) {
+        target.focus({ preventScroll: true });
+        setPanelFocusScope("main");
+        return;
+      }
+      focusMainPanel();
+    }
+    function scheduleMainSurfaceFocus() {
+      const seq = ++MAIN_SURFACE_FOCUS_SEQ;
+      const apply = () => {
+        if (seq !== MAIN_SURFACE_FOCUS_SEQ || PALETTE)
+          return;
+        if (isEditableKeyTarget(document.activeElement))
+          return;
+        focusMainSurface();
+      };
+      focusMainPanel();
+      queueMicrotask(apply);
+      requestAnimationFrame(apply);
+      setTimeout(apply, 100);
+      setTimeout(apply, 300);
+    }
+    function scrollMainToEdge(edge) {
+      if (moveSourceCursor(edge === "bottom" ? 1 : -1, "edge", edge))
+        return;
+      const target = findMainScrollTarget();
+      if (target) {
+        target.scrollTo({
+          top: edge === "top" ? 0 : target.scrollHeight,
+          behavior: "auto"
+        });
+        return;
+      }
+      const top = edge === "top" ? 0 : Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+      window.scrollTo({ top, behavior: "auto" });
+    }
+    function isFocusableClickTarget(target) {
+      if (!(target instanceof Element))
+        return false;
+      return !!target.closest('a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]');
+    }
+    function invalidateRepoSidebar() {
+      REPO_SIDEBAR_REF = null;
+      REPO_SIDEBAR_LOAD_REF = null;
+      REPO_SIDEBAR_LOAD = null;
+    }
+    function normalizeScopeOmitDirs(value) {
+      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 64 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 100).sort((a2, b2) => a2.localeCompare(b2));
+    }
+    function normalizeScopeExcludeNames(value) {
+      const raw = Array.isArray(value) ? value : value.split(/[\n,]+/);
+      return [
+        ...new Set(raw.map((item) => item.trim()).filter((item) => item && item.length <= 128 && !item.includes("/") && !item.includes("\\") && item !== "." && item !== ".." && item !== ".git"))
+      ].slice(0, 200).sort((a2, b2) => a2.localeCompare(b2));
+    }
+    function scopeOmitDirsStorageKey() {
+      return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
+    }
+    function scopeExcludeNamesStorageKey() {
+      return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
+    }
+    function setProjectName(project) {
+      if (!project)
+        return;
+      PROJECT_NAME = project;
+      document.title = `${project} - code viewer`;
+      const projectTitle = document.querySelector("#project-title");
+      if (projectTitle) {
+        projectTitle.textContent = project;
+        projectTitle.title = project;
+      }
+    }
+    function savedScopeOmitDirs() {
+      const raw = localStorage.getItem(scopeOmitDirsStorageKey());
+      if (raw == null)
+        return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return normalizeScopeOmitDirs(raw);
+      }
+    }
+    function savedScopeExcludeNames() {
+      const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
+      if (raw == null)
+        return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        return normalizeScopeExcludeNames(raw);
+      }
+    }
+    function serverScopeOmitDirsDefault() {
+      return SERVER_SCOPE_OMIT_DIRS_DEFAULT.length ? SERVER_SCOPE_OMIT_DIRS_DEFAULT : CLIENT_SCOPE_OMIT_DIRS_DEFAULT;
+    }
+    function serverScopeExcludeNamesDefault() {
+      return SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT.length ? SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT : CLIENT_SCOPE_EXCLUDE_NAMES_DEFAULT;
+    }
+    function effectiveScopeOmitDirs() {
+      return savedScopeOmitDirs() ?? serverScopeOmitDirsDefault();
+    }
+    function effectiveScopeExcludeNames() {
+      return savedScopeExcludeNames() ?? serverScopeExcludeNamesDefault();
+    }
+    function appendScopeParams(params) {
+      const omit = savedScopeOmitDirs();
+      if (omit != null)
+        params.set("omit_dirs", omit.join(","));
+      const exclude = savedScopeExcludeNames();
+      if (exclude != null)
+        params.set("exclude_names", exclude.join(","));
+    }
+    function normalizeViewerFontSize(value) {
+      return value === "compact" || value === "large" || value === "xlarge" ? value : "regular";
+    }
+    function savedSidebarFontSize() {
+      return normalizeViewerFontSize(localStorage.getItem(SIDEBAR_FONT_SIZE_STORAGE_KEY));
+    }
+    function savedCodeFontSize() {
+      return normalizeViewerFontSize(localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY));
+    }
+    function applySidebarFontSize(size = savedSidebarFontSize()) {
+      document.body.dataset.sidebarFontSize = size;
+    }
+    function applyCodeFontSize(size = savedCodeFontSize()) {
+      document.body.dataset.codeFontSize = size;
+    }
+    function syncSidebarHeaderHeight() {
+      requestAnimationFrame(() => {
+        const head = document.querySelector(".sb-head");
+        if (head)
+          document.documentElement.style.setProperty("--sidebar-head-h", `${Math.ceil(head.getBoundingClientRect().height)}px`);
+      });
+    }
+    function observeSidebarHeaderHeight() {
+      const head = document.querySelector(".sb-head");
+      if (!head || typeof ResizeObserver === "undefined") {
+        syncSidebarHeaderHeight();
+        return;
+      }
+      const observer = new ResizeObserver(syncSidebarHeaderHeight);
+      observer.observe(head);
+      syncSidebarHeaderHeight();
+    }
+    function repoFileCacheKey(ref) {
+      const omit = savedScopeOmitDirs();
+      const exclude = savedScopeExcludeNames();
+      return `${ref}\x00${omit ? omit.join("\x00") : "server"}\x00${exclude ? exclude.join("\x00") : "server"}`;
+    }
+    async function loadSettings() {
+      try {
+        const res = await fetch("/_settings");
+        if (!res.ok)
+          return null;
+        const settings = await res.json();
+        setProjectName(settings.project || "");
+        SERVER_SCOPE_OMIT_DIRS_DEFAULT = normalizeScopeOmitDirs(settings.scope.omit_dirs_effective);
+        SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(settings.scope.exclude_names_effective);
+        return settings;
+      } catch {
+        return null;
+      }
+    }
+    function isRepoSidebarReusable(ref) {
+      return REPO_SIDEBAR_REF === (ref || "worktree") && isRepositorySidebarMode();
+    }
+    const STATE = (() => {
+      const igRaw = localStorage.getItem("gdp:ignore-ws");
+      const fallbackRange = {
+        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
+        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
+      };
+      const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
+      const route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      return {
+        layout: localStorage.getItem("gdp:layout") || "side-by-side",
+        theme: localStorage.getItem("gdp:theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+        sbView: localStorage.getItem("gdp:sbview") || "tree",
+        sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+        sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
+        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
+        ignoreWs: igRaw === null ? true : igRaw === "1",
+        from: route.range.from,
+        to: route.range.to,
+        collapsed: false,
+        files: [],
+        activeFile: null,
+        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+        syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
+        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
+        route,
+        repoRef: route.screen === "repo" ? route.ref : "worktree"
+      };
+    })();
+    let highlightConfigured = false;
+    let PROJECT_NAME = "";
+    let creatingDirectory = false;
+    let REPO_SIDEBAR_REF = null;
+    let REPO_SIDEBAR_LOAD_REF = null;
+    let REPO_SIDEBAR_LOAD = null;
+    let SIDEBAR_FILES = [];
+    const SOURCE_VIEW = createSourceView({
+      $$,
+      $,
+      STATE,
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      isAbortError,
+      loadRepo,
+      repoRoute,
+      repoFileTargetFromRoute,
+      renderRepoBlobSidebar,
+      placeSidebarToggle,
+      createFileBreadcrumb,
+      createFileDetailMeta,
+      createOpenPathButton,
+      createMoveToTrashButton,
+      canTrashWorktreeRef,
+      loadRawFileInfo,
+      loadSyntaxHighlighter,
+      setViewFileButtonState,
+      scrollMainPanel,
+      focusMainSurface,
+      isPaletteOpen: () => !!PALETTE
+    });
+    const {
+      renderStandaloneSource,
+      applySourceRouteToShell,
+      removeStandaloneSource,
+      cancelActiveSourceLoad,
+      sourceTargetFromRoute,
+      fileSourceTarget,
+      switchSourceTab,
+      sourceLineScrollAmount,
+      moveSourceCursor,
+      handleVirtualSourcePagingKeydown,
+      openVirtualSourceSearchFromKeyboard,
+      lineTargetStart,
+      inferLang
+    } = SOURCE_VIEW;
+    function setStatus(s2) {
+      const el = $("#status");
+      el.classList.remove("live", "refreshing", "error");
+      if (s2)
+        el.classList.add(s2);
+    }
+    function applyTheme() {
+      document.documentElement.dataset.theme = STATE.theme;
+      $("#hljs-light").disabled = STATE.theme === "dark";
+      $("#hljs-dark").disabled = STATE.theme !== "dark";
+    }
+    function getHljs() {
+      const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
+      if (!hljsRef)
+        return null;
+      if (!highlightConfigured && typeof hljsRef.configure === "function") {
+        hljsRef.configure({ ignoreUnescapedHTML: true });
+        highlightConfigured = true;
+      }
+      return hljsRef;
+    }
+    function setHighlightButton(state) {
+      const btn = $("#syntax-highlight");
+      if (!btn)
+        return;
+      btn.classList.toggle("active", STATE.syntaxHighlight);
+      btn.classList.toggle("loading", state === "loading");
+      btn.textContent = state === "loading" ? "loading..." : STATE.syntaxHighlight ? "syntax on" : "syntax off";
+      btn.setAttribute("aria-pressed", STATE.syntaxHighlight ? "true" : "false");
+      btn.title = STATE.syntaxHighlight ? "syntax highlighting on" : state === "loading" ? "loading syntax highlighter" : state === "error" ? "failed to load syntax highlighter" : "syntax highlighting off";
+    }
+    function loadSyntaxHighlighter() {
+      const existing = getHljs();
+      if (existing) {
+        setHighlightButton("loaded");
+        return Promise.resolve(existing);
+      }
+      if (highlightLoadPromise)
+        return highlightLoadPromise;
+      setHighlightButton("loading");
+      highlightLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = HIGHLIGHT_SRC;
+        script.async = true;
+        script.onload = () => {
+          const hljsRef = getHljs();
+          if (hljsRef) {
+            setHighlightButton("loaded");
+            resolve(hljsRef);
+          } else {
+            setHighlightButton("error");
+            reject(new Error("highlight.js did not expose window.hljs"));
+          }
+        };
+        script.onerror = () => {
+          setHighlightButton("error");
+          reject(new Error("failed to load highlight.js"));
+        };
+        document.head.appendChild(script);
+      }).catch(() => {
+        highlightLoadPromise = null;
+        return null;
+      });
+      return highlightLoadPromise;
+    }
+    function rerenderLoadedDiffs() {
+      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
+        const data = card._diffData;
+        const file = card._file;
+        if (!data || !file)
+          return;
+        mountDiff(card, file, data);
+        applyInlineAnnotations();
+        if (data.truncated && data.mode === "preview") {
+          addExpandHunksUI(file, data, card);
+        }
+        scheduleIdleHighlight(card, file);
+      });
+    }
+    function setLayout(layout) {
+      STATE.layout = layout;
+      localStorage.setItem("gdp:layout", layout);
+      $$("#topbar .seg button").forEach((b2) => {
+        b2.classList.toggle("active", b2.dataset.layout === layout);
+      });
+      document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
+        const data = card._diffData;
+        const file = card._file;
+        if (!data || !file)
+          return;
+        mountDiff(card, file, data);
+        applyInlineAnnotations();
+        if (data.truncated && data.mode === "preview") {
+          addExpandHunksUI(file, data, card);
+        }
+        scheduleIdleHighlight(card, file);
+      });
+    }
+    function fileBadge(status) {
+      const ch = (status || "M")[0].toUpperCase();
+      const span = document.createElement("span");
+      span.className = `badge ${ch}`;
+      span.textContent = ch;
+      span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
+      return span;
+    }
+    function persistViewedFiles() {
+      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
+    }
+    function setFileViewed(path, viewed) {
+      if (viewed)
+        STATE.viewedFiles.add(path);
+      else
+        STATE.viewedFiles.delete(path);
+      persistViewedFiles();
+      applyViewedState();
+      $$(diffCardSelector(path)).forEach((card) => {
+        applyViewedToCard(card, viewed, true);
+      });
+    }
+    function syncViewedCardDisplay(card, viewed) {
+      card.classList.toggle("viewed", viewed);
+      card.querySelectorAll(".d2h-file-collapse-input").forEach((checkbox) => {
+        checkbox.checked = viewed;
+      });
+    }
+    function applyViewedToCard(card, viewed, collapseLoaded = false) {
+      syncViewedCardDisplay(card, viewed);
+      if (collapseLoaded && card.classList.contains("loaded")) {
+        setFileCollapsed(card, viewed);
+      }
+    }
+    function setFolderIcon(el, collapsed) {
+      const path = collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open;
+      el.innerHTML = '<svg class="octicon octicon-file-directory-' + (collapsed ? "fill" : "open-fill") + '" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + path + '"></path></svg>';
+    }
+    function setChevronIcon(el) {
+      el.innerHTML = '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' + '<path fill="currentColor" d="' + CHEVRON_DOWN_12_PATH + '"></path></svg>';
+    }
+    function setUnfoldButtonState(button, expanded) {
+      if (!button)
+        return;
+      button.setAttribute("aria-pressed", expanded ? "true" : "false");
+      button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
+      button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
+    }
+    function setSidebarTreeActionIcons() {
+      const settings = document.querySelector("#viewer-settings");
+      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      const expand = document.querySelector("#sb-expand-all");
+      const collapse = document.querySelector("#sb-collapse-all");
+      if (settings)
+        settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
+      if (sidebarToggle)
+        sidebarToggle.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+      if (expand)
+        expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
+      if (collapse)
+        collapse.innerHTML = iconSvg("octicon-chevron-up", COLLAPSE_ALL_16_PATHS);
+    }
+    function attachSidebarToggle(host) {
+      const button = document.querySelector("#sidebar-toggle");
+      if (!button || button.parentElement === host)
+        return;
+      host.prepend(button);
+    }
+    function placeSidebarToggle() {
+      const sidebarHead = document.querySelector(".sb-head");
+      const toolbar = document.querySelector(".gdp-repo-toolbar, .gdp-file-detail-header");
+      const restoreHost = toolbar || document.querySelector("#topbar") || document.querySelector("#global-header");
+      if (STATE.sidebarHidden && restoreHost)
+        attachSidebarToggle(restoreHost);
+      else if (sidebarHead)
+        attachSidebarToggle(sidebarHead);
+      placeSidebarFilter();
+    }
+    function placeSidebarFilter() {
+      const sidebarHead = document.querySelector(".sb-head");
+      const filter = document.querySelector(".sb-filter-wrap");
+      const list2 = document.querySelector("#filelist");
+      if (!sidebarHead || !filter || !list2)
+        return;
+      const repoSidebar = isRepositorySidebarMode();
+      if (repoSidebar && filter.parentElement !== sidebarHead) {
+        sidebarHead.appendChild(filter);
+        return;
+      }
+      if (!repoSidebar && filter.parentElement === sidebarHead) {
+        sidebarHead.after(filter);
+      }
+    }
+    function applySidebarHidden(hidden = STATE.sidebarHidden) {
+      STATE.sidebarHidden = hidden;
+      document.body.classList.toggle("gdp-sidebar-hidden", hidden);
+      localStorage.setItem("gdp:sidebar-hidden", hidden ? "1" : "0");
+      const button = document.querySelector("#sidebar-toggle");
+      if (button) {
+        button.setAttribute("aria-pressed", hidden ? "true" : "false");
+        button.title = hidden ? "show sidebar" : "hide sidebar";
+        button.setAttribute("aria-label", hidden ? "show sidebar" : "hide sidebar");
+      }
+      setSidebarTreeActionIcons();
+      placeSidebarToggle();
+      syncSidebarHeaderHeight();
+    }
+    function toggleSidebarHidden() {
+      applySidebarHidden(!STATE.sidebarHidden);
+    }
+    function scopeOmitSourceLabel() {
+      return savedScopeOmitDirs() != null || savedScopeExcludeNames() != null ? "Browser override" : "Server default";
+    }
+    function refreshRepositoryTreeAfterSettings() {
+      REPO_FILE_CACHE.clear();
+      invalidateRepoSidebar();
+      if (STATE.route.screen === "repo") {
+        loadRepo();
+        return;
+      }
+      const target = sourceTargetFromRoute();
+      if (target)
+        renderRepoBlobSidebar(target.path, target.ref || "worktree");
+    }
+    async function openScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
+      const sidebarFontSize = document.querySelector("#sidebar-font-size");
+      const codeFontSize = document.querySelector("#code-font-size");
+      const source = document.querySelector("#scope-omit-source");
+      if (!pop || !input || !excludeInput || !sidebarFontSize || !codeFontSize || !source)
+        return;
+      await loadSettings();
+      sidebarFontSize.value = savedSidebarFontSize();
+      codeFontSize.value = savedCodeFontSize();
+      input.value = effectiveScopeOmitDirs().join(`
+`);
+      excludeInput.value = effectiveScopeExcludeNames().join(`
+`);
+      source.textContent = 'Saved for project "' + (PROJECT_NAME || "default") + '" in this browser. Source: ' + scopeOmitSourceLabel() + ". Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.";
+      pop.hidden = false;
+      sidebarFontSize.focus();
+    }
+    function closeScopeSettings() {
+      const pop = document.querySelector("#scope-settings-popover");
+      if (pop)
+        pop.hidden = true;
+    }
+    function saveScopeSettings() {
+      const input = document.querySelector("#scope-omit-dirs");
+      const excludeInput = document.querySelector("#scope-exclude-names");
+      const sidebarFontSize = document.querySelector("#sidebar-font-size");
+      const codeFontSize = document.querySelector("#code-font-size");
+      if (!input || !excludeInput || !sidebarFontSize || !codeFontSize)
+        return;
+      localStorage.setItem(SIDEBAR_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(sidebarFontSize.value));
+      localStorage.setItem(CODE_FONT_SIZE_STORAGE_KEY, normalizeViewerFontSize(codeFontSize.value));
+      applySidebarFontSize();
+      applyCodeFontSize();
+      localStorage.setItem(scopeOmitDirsStorageKey(), JSON.stringify(normalizeScopeOmitDirs(input.value)));
+      localStorage.setItem(scopeExcludeNamesStorageKey(), JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)));
+      closeScopeSettings();
+      refreshRepositoryTreeAfterSettings();
+    }
+    function resetScopeSettings() {
+      localStorage.removeItem(SIDEBAR_FONT_SIZE_STORAGE_KEY);
+      localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
+      applySidebarFontSize("regular");
+      applyCodeFontSize("regular");
+      localStorage.removeItem(scopeOmitDirsStorageKey());
+      localStorage.removeItem(scopeExcludeNamesStorageKey());
+      closeScopeSettings();
+      refreshRepositoryTreeAfterSettings();
+    }
+    function buildTree(files) {
+      const root = {
+        name: "",
+        dirs: {},
+        files: [],
+        path: "",
+        minOrder: Infinity,
+        explicit: true
+      };
+      for (const f2 of files) {
+        const parts = f2.path.split("/");
+        let node = root;
+        let acc = "";
+        const dirPartCount = f2.type === "tree" ? parts.length : parts.length - 1;
+        for (let i2 = 0;i2 < dirPartCount; i2++) {
+          const p2 = parts[i2];
+          acc = acc ? `${acc}/${p2}` : p2;
+          if (!node.dirs[p2]) {
+            node.dirs[p2] = {
+              name: p2,
+              dirs: {},
+              files: [],
+              path: acc,
+              minOrder: Infinity
+            };
+          }
+          node = node.dirs[p2];
+          if (typeof f2.order === "number" && f2.order < node.minOrder)
+            node.minOrder = f2.order;
+        }
+        if (f2.type === "tree") {
+          node.explicit = true;
+          if (f2.children_omitted === true) {
+            node.children_omitted = true;
+            node.children_omitted_reason = f2.children_omitted_reason;
+          }
+          continue;
+        }
+        node.files.push(f2);
+      }
+      function compress(node) {
+        const ks = Object.keys(node.dirs);
+        while (ks.length === 1 && node.files.length === 0 && !node.explicit && node !== root) {
+          const only = node.dirs[ks[0]];
+          node.name = node.name ? `${node.name}/${only.name}` : only.name;
+          node.dirs = only.dirs;
+          node.files = only.files;
+          node.path = only.path;
+          node.minOrder = Math.min(node.minOrder, only.minOrder);
+          ks.length = 0;
+          Object.keys(node.dirs).forEach((k) => {
+            ks.push(k);
+          });
+        }
+        Object.values(node.dirs).forEach(compress);
+      }
+      Object.values(root.dirs).forEach(compress);
+      return root;
+    }
+    function renderTreeNode(node, depth, ul, onFileClick) {
+      const items = [];
+      for (const k of Object.keys(node.dirs)) {
+        const d2 = node.dirs[k];
+        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
+      }
+      for (const f2 of node.files) {
+        items.push({
+          kind: "file",
+          sortKey: f2.order != null ? f2.order : Infinity,
+          file: f2
+        });
+      }
+      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
+      for (const item of items) {
+        if (item.kind === "dir") {
+          const dir = item.dir;
+          const li = document.createElement("li");
+          li.className = "tree-dir";
+          li.tabIndex = -1;
+          li.dataset.dirpath = dir.path;
+          li.dataset.type = "tree";
+          if (dir.children_omitted_reason)
+            li.dataset.childrenOmittedReason = dir.children_omitted_reason;
+          if (dir.explicit)
+            li.dataset.explicit = "true";
+          if (dir.children_omitted) {
+            li.classList.add("children-omitted");
+            li.classList.add(dir.children_omitted_reason === "heavy" ? "children-omitted-heavy" : "children-omitted-internal");
+            li.title = dir.children_omitted_reason === "heavy" ? "Large generated/vendor directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
+          }
+          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+          const chev = document.createElement("span");
+          if (dir.children_omitted) {
+            chev.className = "chev-spacer";
+            chev.setAttribute("aria-hidden", "true");
+          } else {
+            chev.className = "chev";
+            setChevronIcon(chev);
+          }
+          li.appendChild(chev);
+          const dirIcon = document.createElement("span");
+          dirIcon.className = "dir-icon";
+          li.appendChild(dirIcon);
+          const label = document.createElement("span");
+          label.className = "dir-label";
+          const dn = document.createElement("span");
+          dn.className = "dir-name";
+          dn.textContent = dir.name;
+          dn.title = dir.path;
+          label.appendChild(dn);
+          if (dir.children_omitted) {
+            const omitted = document.createElement("span");
+            omitted.className = "dir-omitted " + (dir.children_omitted_reason === "heavy" ? "dir-omitted-heavy" : "dir-omitted-internal");
+            omitted.textContent = dir.children_omitted_reason === "heavy" ? "skipped" : "private";
+            omitted.title = dir.children_omitted_reason === "heavy" ? "Tree expansion is skipped, but the directory detail can be opened" : "This directory cannot be opened from the browser";
+            label.appendChild(omitted);
+          }
+          li.appendChild(label);
+          li.appendChild(createOpenPathButton(dir.path, "directory", "open this folder in OS"));
+          const collapsed = STATE.collapsedDirs.has(dir.path);
+          if (collapsed)
+            li.classList.add("collapsed");
+          const updateIcon = () => {
+            setFolderIcon(dirIcon, li.classList.contains("collapsed"));
+          };
+          updateIcon();
+          const childUl = document.createElement("ul");
+          childUl.className = "tree-children";
+          renderTreeNode(dir, depth + 1, childUl, onFileClick);
+          const toggleDir = (e2) => {
+            e2.stopPropagation();
+            li.classList.toggle("collapsed");
+            updateIcon();
+            if (li.classList.contains("collapsed"))
+              STATE.collapsedDirs.add(dir.path);
+            else
+              STATE.collapsedDirs.delete(dir.path);
+            localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+          };
+          if (!dir.children_omitted) {
+            chev.addEventListener("click", toggleDir);
+            dirIcon.addEventListener("click", toggleDir);
+          }
+          if (onFileClick) {
+            li.addEventListener("click", (e2) => {
+              e2.stopPropagation();
+              if (dir.children_omitted_reason === "internal" || dir.children_omitted_reason === "truncated")
+                return;
+              onFileClick({
+                path: dir.path,
+                display_path: dir.path,
+                type: "tree",
+                children_omitted: dir.children_omitted,
+                children_omitted_reason: dir.children_omitted_reason
+              });
+              scheduleMainSurfaceFocus();
+            });
+          } else {
+            li.addEventListener("click", toggleDir);
+          }
+          ul.appendChild(li);
+          ul.appendChild(childUl);
+        } else {
+          const f2 = item.file;
+          const li = document.createElement("li");
+          li.className = "tree-file";
+          li.tabIndex = -1;
+          li.dataset.path = f2.path;
+          li.dataset.type = "blob";
+          li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
+          li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+          const spacer = document.createElement("span");
+          spacer.className = "chev-spacer";
+          li.appendChild(spacer);
+          if (f2.status) {
+            li.appendChild(fileBadge(f2.status));
+          } else {
+            const icon = document.createElement("span");
+            icon.className = "d2h-icon-wrapper";
+            icon.innerHTML = fileEntryIcon();
+            li.appendChild(icon);
+          }
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = f2.path.split("/").pop();
+          name.title = f2.path;
+          li.appendChild(name);
+          li.addEventListener("click", () => {
+            if (onFileClick)
+              onFileClick(f2);
+            else
+              scrollToFile(f2.path);
+            scheduleMainSurfaceFocus();
+          });
+          if (!onFileClick)
+            li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
+              passive: true
+            });
+          ul.appendChild(li);
+        }
+      }
+    }
+    function treeNodeItems(node) {
+      const cached = SIDEBAR_TREE_ITEMS_CACHE.get(node);
+      if (cached)
+        return cached;
+      const items = [];
+      for (const k of Object.keys(node.dirs)) {
+        const d2 = node.dirs[k];
+        items.push({ kind: "dir", sortKey: d2.minOrder, dir: d2 });
+      }
+      for (const f2 of node.files) {
+        items.push({
+          kind: "file",
+          sortKey: f2.order != null ? f2.order : Infinity,
+          file: f2
+        });
+      }
+      items.sort((a2, b2) => a2.sortKey - b2.sortKey);
+      SIDEBAR_TREE_ITEMS_CACHE.set(node, items);
+      return items;
+    }
+    function sidebarTreeNodeHasChildren(node) {
+      return Object.keys(node.dirs).length > 0 || node.files.length > 0;
+    }
+    function shouldLazyLoadSidebarDir(dir) {
+      return isRepositorySidebarMode() && isVirtualSidebarActive() && !dir.children_omitted && !sidebarTreeNodeHasChildren(dir) && !SIDEBAR_LAZY_LOADED_DIRS.has(dir.path);
+    }
+    function upsertSidebarTreeEntry(entry, order) {
+      if (!SIDEBAR_TREE_ROOT)
+        return;
+      const parts = entry.path.split("/").filter(Boolean);
+      if (!parts.length)
+        return;
+      let node = SIDEBAR_TREE_ROOT;
+      let acc = "";
+      const dirPartCount = entry.type === "tree" ? parts.length : parts.length - 1;
+      for (let i2 = 0;i2 < dirPartCount; i2++) {
+        const part = parts[i2];
+        acc = acc ? `${acc}/${part}` : part;
+        if (!node.dirs[part]) {
+          node.dirs[part] = {
+            name: part,
+            dirs: {},
+            files: [],
+            path: acc,
+            minOrder: order
+          };
+        }
+        node = node.dirs[part];
+        node.minOrder = Math.min(node.minOrder, order);
+      }
+      if (entry.type === "tree") {
+        node.explicit = true;
+        if (entry.children_omitted === true) {
+          node.children_omitted = true;
+          node.children_omitted_reason = entry.children_omitted_reason;
+        }
+        return;
+      }
+      if (!node.files.some((file) => file.path === entry.path))
+        node.files.push({ ...entry, order });
+    }
+    function mergeSidebarTreeEntries(entries) {
+      entries.forEach((entry, index) => {
+        upsertSidebarTreeEntry(entry, entry.order ?? index + 1);
+      });
+      SIDEBAR_TREE_ITEMS_CACHE = new WeakMap;
+      if (SIDEBAR_TREE_ROOT)
+        buildSidebarTreeRows(SIDEBAR_TREE_ROOT);
+    }
+    function ensureVirtualSidebarDirLoaded(dir) {
+      if (!shouldLazyLoadSidebarDir(dir))
+        return Promise.resolve();
+      const existing = SIDEBAR_LAZY_LOADING_DIRS.get(dir.path);
+      if (existing)
+        return existing;
+      const params = new URLSearchParams;
+      params.set("ref", REPO_SIDEBAR_REF || "worktree");
+      params.set("path", dir.path);
+      appendScopeParams(params);
+      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((response) => {
+        if (!response.ok)
+          throw new Error("failed to load repository tree");
+        return response.json();
+      })).then((meta) => {
+        const entries = meta.entries.map((entry, index) => ({
+          order: dir.minOrder + (index + 1) / 1e5,
+          path: entry.path,
+          display_path: entry.path,
+          type: entry.type,
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason
+        }));
+        mergeSidebarTreeEntries(entries);
+        SIDEBAR_LAZY_LOADED_DIRS.add(dir.path);
+      }).finally(() => {
+        SIDEBAR_LAZY_LOADING_DIRS.delete(dir.path);
+      });
+      SIDEBAR_LAZY_LOADING_DIRS.set(dir.path, load2);
+      return load2;
+    }
+    function createTreeDirRow(dir, depth, onFileClick) {
+      const li = document.createElement("li");
+      li.className = "tree-dir";
+      li.tabIndex = -1;
+      li.dataset.dirpath = dir.path;
+      li.dataset.type = "tree";
+      if (dir.children_omitted_reason)
+        li.dataset.childrenOmittedReason = dir.children_omitted_reason;
+      if (dir.explicit)
+        li.dataset.explicit = "true";
+      if (dir.children_omitted) {
+        li.classList.add("children-omitted");
+        li.classList.add(dir.children_omitted_reason === "heavy" ? "children-omitted-heavy" : "children-omitted-internal");
+        li.title = dir.children_omitted_reason === "heavy" ? "Large generated/vendor directory: open the detail pane to browse its contents" : "Internal Git metadata is not browsed";
+      }
+      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+      const chev = document.createElement("span");
+      if (dir.children_omitted) {
+        chev.className = "chev-spacer";
+        chev.setAttribute("aria-hidden", "true");
+      } else {
+        chev.className = "chev";
+        setChevronIcon(chev);
+      }
+      li.appendChild(chev);
+      const dirIcon = document.createElement("span");
+      dirIcon.className = "dir-icon";
+      li.appendChild(dirIcon);
+      const label = document.createElement("span");
+      label.className = "dir-label";
+      const dn = document.createElement("span");
+      dn.className = "dir-name";
+      dn.textContent = dir.name;
+      dn.title = dir.path;
+      label.appendChild(dn);
+      if (dir.children_omitted) {
+        const omitted = document.createElement("span");
+        omitted.className = "dir-omitted " + (dir.children_omitted_reason === "heavy" ? "dir-omitted-heavy" : "dir-omitted-internal");
+        omitted.textContent = dir.children_omitted_reason === "heavy" ? "skipped" : "private";
+        omitted.title = dir.children_omitted_reason === "heavy" ? "Tree expansion is skipped, but the directory detail can be opened" : "This directory cannot be opened from the browser";
+        label.appendChild(omitted);
+      }
+      li.appendChild(label);
+      li.appendChild(createOpenPathButton(dir.path, "directory", "open this folder in OS"));
+      const updateIcon = () => {
+        setFolderIcon(dirIcon, li.classList.contains("collapsed"));
+      };
+      const toggleDir = async (e2) => {
+        e2.stopPropagation();
+        if (li.dataset.toggling === "true")
+          return;
+        const expanding = li.classList.contains("collapsed");
+        li.dataset.toggling = "true";
+        try {
+          if (expanding)
+            await ensureVirtualSidebarDirLoaded(dir);
+          li.classList.toggle("collapsed");
+          updateIcon();
+          if (li.classList.contains("collapsed"))
+            STATE.collapsedDirs.add(dir.path);
+          else
+            STATE.collapsedDirs.delete(dir.path);
+          localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+          rerenderVirtualSidebar();
+        } finally {
+          delete li.dataset.toggling;
+        }
+      };
+      li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
+      updateIcon();
+      if (!dir.children_omitted) {
+        chev.addEventListener("click", toggleDir);
+        dirIcon.addEventListener("click", toggleDir);
+      }
+      if (onFileClick) {
+        li.addEventListener("click", (e2) => {
+          e2.stopPropagation();
+          if (dir.children_omitted_reason === "internal" || dir.children_omitted_reason === "truncated")
+            return;
+          onFileClick({
+            path: dir.path,
+            display_path: dir.path,
+            type: "tree",
+            children_omitted: dir.children_omitted,
+            children_omitted_reason: dir.children_omitted_reason
+          });
+          scheduleMainSurfaceFocus();
+        });
+      } else {
+        li.addEventListener("click", toggleDir);
+      }
+      return li;
+    }
+    function createTreeFileRow(f2, depth, onFileClick) {
+      const li = document.createElement("li");
+      li.className = "tree-file";
+      li.tabIndex = -1;
+      li.dataset.path = f2.path;
+      li.dataset.type = "blob";
+      li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
+      li.classList.toggle("hidden-by-tests", STATE.hideTests && TEST_RE.test(f2.path || ""));
+      li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
+      const spacer = document.createElement("span");
+      spacer.className = "chev-spacer";
+      li.appendChild(spacer);
+      if (f2.status) {
+        li.appendChild(fileBadge(f2.status));
+      } else {
+        const icon = document.createElement("span");
+        icon.className = "d2h-icon-wrapper";
+        icon.innerHTML = fileEntryIcon();
+        li.appendChild(icon);
+      }
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = f2.path.split("/").pop();
+      name.title = f2.path;
+      li.appendChild(name);
+      li.addEventListener("click", () => {
+        if (onFileClick)
+          onFileClick(f2);
+        else
+          scrollToFile(f2.path);
+        scheduleMainSurfaceFocus();
+      });
+      if (!onFileClick)
+        li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
+          passive: true
+        });
+      return li;
+    }
+    function buildSidebarTreeRows(root) {
+      const rows = [];
+      const byPath = new Map;
+      const walk = (node, depth) => {
+        for (const item of treeNodeItems(node)) {
+          if (item.kind === "dir") {
+            const row = {
+              kind: "dir",
+              path: item.dir.path,
+              name: item.dir.name,
+              depth,
+              dir: item.dir
+            };
+            rows.push(row);
+            byPath.set(row.path, row);
+            walk(item.dir, depth + 1);
+          } else {
+            const row = {
+              kind: "file",
+              path: item.file.path,
+              name: item.file.path.split("/").pop() || item.file.path,
+              depth,
+              file: item.file
+            };
+            rows.push(row);
+            byPath.set(row.path, row);
+          }
+        }
+      };
+      walk(root, 0);
+      SIDEBAR_TREE_ROWS = rows;
+      SIDEBAR_ROW_BY_PATH = byPath;
+    }
+    function computeVirtualSidebarVisibleRows() {
+      if (!SIDEBAR_TREE_ROOT) {
+        SIDEBAR_VISIBLE_ROWS = [];
+        return;
+      }
+      const input = $("#sb-filter");
+      const filter = compileFileFilter(input.value);
+      const invalid = filter.kind === "invalid";
+      input.toggleAttribute("aria-invalid", invalid);
+      input.title = invalid ? filter.error || "invalid regular expression" : "";
+      const filterActive = filter.kind !== "empty" && !invalid;
+      const matches = invalid ? () => true : filter.match;
+      const walk = (node, depth) => {
+        let subtreeVisible = false;
+        const rows = [];
+        for (const item of treeNodeItems(node)) {
+          if (item.kind === "dir") {
+            const dirMatches = filterActive && matches(item.dir.path);
+            const expanded = !item.dir.children_omitted && (filterActive || !STATE.collapsedDirs.has(item.dir.path));
+            const child = walk(item.dir, depth + 1);
+            const visible = item.dir.explicit && !filterActive ? true : dirMatches || child.visible;
+            if (visible) {
+              rows.push({
+                kind: "dir",
+                path: item.dir.path,
+                name: item.dir.name,
+                depth,
+                dir: item.dir
+              });
+              if (expanded)
+                rows.push(...child.rows);
+            }
+            subtreeVisible = subtreeVisible || visible;
+          } else {
+            const testHidden = STATE.hideTests && TEST_RE.test(item.file.path || "");
+            const visible = !testHidden && matches(item.file.path || "");
+            if (visible) {
+              rows.push({
+                kind: "file",
+                path: item.file.path,
+                name: item.file.path.split("/").pop() || item.file.path,
+                depth,
+                file: item.file
+              });
+            }
+            subtreeVisible = subtreeVisible || visible;
+          }
+        }
+        return { visible: subtreeVisible, rows };
+      };
+      SIDEBAR_VISIBLE_ROWS = walk(SIDEBAR_TREE_ROOT, 0).rows;
+    }
+    function sidebarVirtualRange() {
+      const sidebar = document.querySelector("#sidebar");
+      const scrollTop = sidebar?.scrollTop || 0;
+      const height = sidebar?.clientHeight || window.innerHeight;
+      const start = Math.max(0, Math.floor(scrollTop / VIRTUAL_SIDEBAR_ROW_HEIGHT) - VIRTUAL_SIDEBAR_OVERSCAN);
+      const end = Math.min(SIDEBAR_VISIBLE_ROWS.length, Math.ceil((scrollTop + height) / VIRTUAL_SIDEBAR_ROW_HEIGHT) + VIRTUAL_SIDEBAR_OVERSCAN);
+      return { start, end };
+    }
+    function renderVirtualSidebarWindow() {
+      const ul = $("#filelist");
+      if (!ul.classList.contains("tree-virtual"))
+        return;
+      const { start, end } = sidebarVirtualRange();
+      const fragment = document.createDocumentFragment();
+      for (let i2 = start;i2 < end; i2++) {
+        const row = SIDEBAR_VISIBLE_ROWS[i2];
+        const li = row.kind === "dir" && row.dir ? createTreeDirRow(row.dir, row.depth, SIDEBAR_ON_FILE_CLICK) : row.file ? createTreeFileRow(row.file, row.depth, SIDEBAR_ON_FILE_CLICK) : null;
+        if (!li)
+          continue;
+        li.classList.toggle("active", row.path === SIDEBAR_VIRTUAL_ACTIVE_PATH);
+        li.style.position = "absolute";
+        li.style.top = `${i2 * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+        li.style.left = "0";
+        li.style.right = "0";
+        fragment.appendChild(li);
+      }
+      ul.replaceChildren(fragment);
+      ul.style.height = `${SIDEBAR_VISIBLE_ROWS.length * VIRTUAL_SIDEBAR_ROW_HEIGHT}px`;
+    }
+    function scrollVirtualSidebarPathIntoView(path) {
+      const index = SIDEBAR_VISIBLE_ROWS.findIndex((row) => row.path === path);
+      if (index < 0)
+        return;
+      const sidebar = document.querySelector("#sidebar");
+      if (!sidebar)
+        return;
+      const ul = $("#filelist");
+      const top = index * VIRTUAL_SIDEBAR_ROW_HEIGHT;
+      const bottom = top + VIRTUAL_SIDEBAR_ROW_HEIGHT;
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const stickyBottom = Math.max(sidebarRect.top, document.querySelector(".sb-head")?.getBoundingClientRect().bottom || sidebarRect.top, document.querySelector(".sb-filter-wrap")?.getBoundingClientRect().bottom || sidebarRect.top);
+      const topPadding = Math.max(8, stickyBottom - sidebarRect.top + 8);
+      const bottomPadding = 14;
+      const listTop = ul.offsetTop;
+      const maxHeight = Number.parseFloat(getComputedStyle(sidebar).maxHeight);
+      const visibleHeight = Number.isFinite(maxHeight) && maxHeight > 0 ? Math.min(sidebar.clientHeight, maxHeight) : sidebar.clientHeight;
+      const visibleTop = sidebar.scrollTop + topPadding - listTop;
+      const visibleBottom = sidebar.scrollTop + visibleHeight - bottomPadding - listTop;
+      if (top < visibleTop)
+        sidebar.scrollTop = Math.max(0, top + listTop - topPadding);
+      else if (bottom > visibleBottom)
+        sidebar.scrollTop = bottom + listTop - visibleHeight + bottomPadding;
+      renderVirtualSidebarWindow();
+    }
+    function rerenderVirtualSidebar() {
+      const ul = document.querySelector("#filelist");
+      if (!ul?.classList.contains("tree-virtual"))
+        return;
+      computeVirtualSidebarVisibleRows();
+      renderVirtualSidebarWindow();
+    }
+    function renderVirtualTreeSidebar(root) {
+      const ul = $("#filelist");
+      SIDEBAR_TREE_ROOT = root;
+      buildSidebarTreeRows(root);
+      ul.classList.add("tree-virtual");
+      ul.style.position = "relative";
+      computeVirtualSidebarVisibleRows();
+      renderVirtualSidebarWindow();
+      document.querySelector("#sidebar")?.addEventListener("scroll", renderVirtualSidebarWindow, {
+        passive: true
+      });
+    }
+    function renderFlat(files, ul, onFileClick) {
+      files.forEach((f2, i2) => {
+        const li = document.createElement("li");
+        li.tabIndex = -1;
+        li.dataset.index = String(i2);
+        li.dataset.path = f2.path;
+        li.classList.toggle("viewed", !onFileClick && STATE.viewedFiles.has(f2.path));
+        if (f2.status) {
+          li.appendChild(fileBadge(f2.status));
+        } else {
+          const icon = document.createElement("span");
+          icon.className = "d2h-icon-wrapper";
+          icon.innerHTML = fileEntryIcon();
+          li.appendChild(icon);
+        }
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = f2.path;
+        name.title = f2.path;
+        li.appendChild(name);
+        li.addEventListener("click", () => {
+          if (onFileClick)
+            onFileClick(f2);
+          else
+            scrollToFile(f2.path);
+          scheduleMainSurfaceFocus();
+        });
+        if (!onFileClick)
+          li.addEventListener("mouseenter", () => prefetchByPath(f2.path), {
+            passive: true
+          });
+        ul.appendChild(li);
+      });
+    }
+    function renderSidebar(files, onFileClick) {
+      const ul = $("#filelist");
+      ul.innerHTML = "";
+      ul.classList.toggle("tree", STATE.sbView === "tree");
+      ul.classList.remove("tree-virtual");
+      ul.style.removeProperty("height");
+      ul.style.removeProperty("position");
+      SIDEBAR_TREE_ROOT = null;
+      SIDEBAR_TREE_ROWS = [];
+      SIDEBAR_VISIBLE_ROWS = [];
+      SIDEBAR_ROW_BY_PATH = new Map;
+      SIDEBAR_LAZY_LOADED_DIRS.clear();
+      SIDEBAR_LAZY_LOADING_DIRS.clear();
+      if (!onFileClick)
+        STATE.files = files;
+      SIDEBAR_FILES = files;
+      SIDEBAR_ON_FILE_CLICK = onFileClick;
+      if (!onFileClick)
+        REPO_SIDEBAR_REF = null;
+      if (STATE.sbView === "tree") {
+        const root = buildTree(files);
+        if (onFileClick && files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
+          renderVirtualTreeSidebar(root);
+        else
+          renderTreeNode(root, 0, ul, onFileClick);
+      } else {
+        renderFlat(files, ul, onFileClick);
+      }
+      $("#totals").textContent = files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "";
+      $$(".sb-view-seg button").forEach((b2) => {
+        b2.classList.toggle("active", b2.dataset.view === STATE.sbView);
+      });
+      $$(".sb-tree-action").forEach((b2) => {
+        b2.disabled = STATE.sbView !== "tree" || !STATE.files.length;
+      });
+      if (STATE.activeFile)
+        markActive(STATE.activeFile);
+      applyFilter();
+    }
+    function setAllSidebarDirsCollapsed(collapsed) {
+      if (!collapsed)
+        STATE.collapsedDirs.clear();
+      if ($("#filelist").classList.contains("tree-virtual")) {
+        if (collapsed) {
+          for (const row of SIDEBAR_TREE_ROWS) {
+            if (row.kind === "dir")
+              STATE.collapsedDirs.add(row.path);
+          }
+        }
+        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        rerenderVirtualSidebar();
+        return;
+      }
+      $$("#filelist .tree-dir[data-dirpath]").forEach((li) => {
+        const path = li.dataset.dirpath || "";
+        if (!path)
+          return;
+        li.classList.toggle("collapsed", collapsed);
+        const dirIcon = li.querySelector(".dir-icon");
+        if (dirIcon)
+          setFolderIcon(dirIcon, collapsed);
+        if (collapsed)
+          STATE.collapsedDirs.add(path);
+      });
+      localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+    }
+    function syncRepoTargetInput(ref) {
+      const input = document.querySelector("#repo-target");
+      const wrap = document.querySelector("#repo-target-wrap");
+      if (!input || !wrap)
+        return;
+      input.value = ref || "worktree";
+      wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
+      syncSidebarHeaderHeight();
+    }
+    function createRefSelectorInput(options) {
+      const wrap = document.createElement("div");
+      wrap.className = `ref-selector${options.extraClass ? ` ${options.extraClass}` : ""}`;
+      wrap.dataset.refSelector = "";
+      if (options.wrapperId)
+        wrap.id = options.wrapperId;
+      if (options.hidden)
+        wrap.hidden = true;
+      const icon = document.createElement("span");
+      icon.className = "ref-selector-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+      const input = document.createElement("input");
+      input.className = "ref-input";
+      input.id = options.id;
+      input.readOnly = true;
+      input.autocomplete = "off";
+      input.placeholder = options.placeholder;
+      if (options.title)
+        input.title = options.title;
+      if (options.value != null)
+        input.value = options.value;
+      const caret = document.createElement("span");
+      caret.className = "ref-selector-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.innerHTML = iconSvg("octicon-triangle-down", TRIANGLE_DOWN_16_PATH);
+      wrap.append(icon, input, caret);
+      return { wrap, input };
+    }
+    function hydrateRefSelectorMounts() {
+      document.querySelectorAll("[data-ref-selector-mount]").forEach((mount) => {
+        const { wrap } = createRefSelectorInput({
+          id: mount.dataset.refId || "",
+          placeholder: mount.dataset.placeholder || "ref...",
+          title: mount.dataset.title,
+          wrapperId: mount.dataset.wrapperId,
+          extraClass: mount.dataset.extraClass,
+          hidden: mount.hidden
+        });
+        mount.replaceWith(wrap);
+      });
+    }
+    function renderMeta(meta) {
+      const el = $("#meta");
+      if (!meta) {
+        el.textContent = "";
+        return;
+      }
+      setProjectName(meta.project || "");
+      el.innerHTML = "";
+      if (meta.branch) {
+        const b2 = document.createElement("span");
+        b2.className = "ref";
+        b2.textContent = `⎇ ${meta.branch}`;
+        el.appendChild(b2);
+      }
+      if (meta.totals) {
+        const t2 = document.createElement("span");
+        t2.className = "num";
+        t2.innerHTML = '<span class="add">+' + meta.totals.additions + "</span> " + '<span class="del">−' + meta.totals.deletions + "</span> " + "<span>" + meta.totals.files + " files</span>";
+        el.appendChild(t2);
+      }
+      const u2 = document.createElement("span");
+      u2.className = "updated-at";
+      u2.title = "last updated";
+      u2.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+      el.appendChild(u2);
+    }
+    let SUPPRESS_SPY_UNTIL = 0;
+    function prefetchByPath(path) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card?.classList.contains("pending"))
+        return;
+      const f2 = STATE.files.find((x) => x.path === path);
+      if (!f2)
+        return;
+      enqueueLoad(f2, card, 5);
+    }
+    function clearDiffLineFocus() {
+      document.querySelectorAll(".gdp-diff-line-target").forEach((row) => {
+        row.classList.remove("gdp-diff-line-target");
+      });
+    }
+    function diffRowLineNumber(row) {
+      const newLine = row.querySelector(".line-num2, td.d2h-code-side-linenumber");
+      const raw = (newLine?.textContent || "").trim();
+      const line = Number(raw);
+      return Number.isInteger(line) && line > 0 ? line : null;
+    }
+    function focusDiffLine(card, line) {
+      const start = lineTargetStart(line);
+      if (!start)
+        return false;
+      const rows = Array.from(card.querySelectorAll("table.d2h-diff-table tr"));
+      const row = rows.find((candidate) => diffRowLineNumber(candidate) === start);
+      if (!row)
+        return false;
+      clearDiffLineFocus();
+      row.classList.add("gdp-diff-line-target");
+      scrollDiffElementIntoView(row, "center");
+      return true;
+    }
+    function scrollDiffElementIntoView(element, block2) {
+      element.scrollIntoView({ behavior: "auto", block: block2 });
+    }
+    function applyDiffRouteFocus(card) {
+      if (STATE.route.screen !== "diff" || !STATE.route.path || !STATE.route.line)
+        return false;
+      if (card && card.dataset.path !== STATE.route.path)
+        return false;
+      const targetCard = card || document.querySelector(diffCardSelector(STATE.route.path));
+      if (!targetCard)
+        return false;
+      return focusDiffLine(targetCard, STATE.route.line);
+    }
+    let REANCHOR_UNTIL = STATE.route.screen === "diff" && STATE.route.line ? performance.now() + 6000 : 0;
+    window.addEventListener("wheel", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    window.addEventListener("touchmove", () => {
+      REANCHOR_UNTIL = 0;
+    }, { passive: true });
+    function scrollToFile(path, line) {
+      const card = document.querySelector(diffCardSelector(path));
+      if (!card)
+        return;
+      if (line)
+        REANCHOR_UNTIL = performance.now() + 4000;
+      markActive(path);
+      SUPPRESS_SPY_UNTIL = performance.now() + 1500;
+      const onEnd = () => {
+        SUPPRESS_SPY_UNTIL = 0;
+        window.removeEventListener("scrollend", onEnd);
+      };
+      window.addEventListener("scrollend", onEnd, { once: true });
+      if (card.classList.contains("pending")) {
+        const f2 = STATE.files.find((x) => x.path === path);
+        if (f2)
+          enqueueLoad(f2, card, 10);
+      }
+      if (!line || !focusDiffLine(card, line)) {
+        scrollDiffElementIntoView(card, "start");
+      }
+    }
+    function sidebarAncestorDirs(path) {
+      const parts = path.split("/").filter(Boolean);
+      const dirs = [];
+      for (let i2 = 1;i2 < parts.length; i2++)
+        dirs.push(parts.slice(0, i2).join("/"));
+      return dirs;
+    }
+    function expandSidebarAncestors(path) {
+      if (STATE.sbView !== "tree")
+        return;
+      let changed = false;
+      for (const dir of sidebarAncestorDirs(path)) {
+        if (STATE.collapsedDirs.delete(dir))
+          changed = true;
+        const row = document.querySelector(`#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`);
+        row?.classList.remove("collapsed");
+        const icon = row?.querySelector(".dir-icon");
+        if (icon)
+          setFolderIcon(icon, false);
+      }
+      if (changed)
+        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+      rerenderVirtualSidebar();
+    }
+    function markActive(path, options = {}) {
+      STATE.activeFile = path;
+      SIDEBAR_VIRTUAL_ACTIVE_PATH = path;
+      if (options.reveal && STATE.sbView === "tree")
+        expandSidebarAncestors(path);
+      setActiveSidebarItem(sidebarItemByPath(path));
+      if ($("#filelist").classList.contains("tree-virtual")) {
+        renderVirtualSidebarWindow();
+        scrollVirtualSidebarPathIntoView(path);
+        return;
+      }
+      if (options.reveal) {
+        const active = activeSidebarItem();
+        if (active)
+          requestAnimationFrame(() => scrollSidebarItemIntoView(active));
+      }
+    }
+    function applyViewedState() {
+      if (isRepositorySidebarMode())
+        return;
+      $$("#filelist li[data-path]").forEach((li) => {
+        const path = li.dataset.path || "";
+        li.classList.toggle("viewed", STATE.viewedFiles.has(path));
+      });
+      $$(".gdp-file-shell[data-path]").forEach((card) => {
+        const path = card.dataset.path || "";
+        const viewed = STATE.viewedFiles.has(path);
+        syncViewedCardDisplay(card, viewed);
+      });
+    }
+    function applyFilter() {
+      const input = $("#sb-filter");
+      if ($("#filelist").classList.contains("tree-virtual")) {
+        rerenderVirtualSidebar();
+        return;
+      }
+      const filter = compileFileFilter(input.value);
+      const invalid = filter.kind === "invalid";
+      input.toggleAttribute("aria-invalid", invalid);
+      input.title = invalid ? filter.error || "invalid regular expression" : "";
+      const matches = invalid ? () => true : filter.match;
+      const filterActive = filter.kind !== "empty" && !invalid;
+      $$("#filelist li[data-path]").forEach((li) => {
+        const match2 = matches(li.dataset.path || "");
+        li.classList.toggle("hidden", !match2);
+      });
+      if (!isRepositorySidebarMode()) {
+        document.querySelectorAll(".gdp-file-shell").forEach((card) => {
+          const match2 = matches(card.dataset.path || "");
+          card.classList.toggle("hidden-by-filter", !match2);
+        });
+      }
+      updateTreeDirVisibility(matches, filterActive);
+      if (!isRepositorySidebarMode() && typeof applyViewedState === "function")
+        applyViewedState();
+    }
+    function updateTreeDirVisibility(dirMatches, filterActive = false) {
+      const dirs = $$("#filelist .tree-dir");
+      for (let i2 = dirs.length - 1;i2 >= 0; i2--) {
+        const dir = dirs[i2];
+        const childUl = dir.nextElementSibling;
+        if (!childUl?.classList.contains("tree-children"))
+          continue;
+        let anyVisible = false;
+        for (const child of childUl.children) {
+          if (!(child instanceof HTMLElement))
+            continue;
+          if (child.classList.contains("tree-file") && !child.classList.contains("hidden") && !child.classList.contains("hidden-by-tests")) {
+            anyVisible = true;
+            break;
+          }
+          if (child.classList.contains("tree-dir") && !child.classList.contains("hidden") && !child.classList.contains("hidden-by-tests")) {
+            anyVisible = true;
+            break;
+          }
+        }
+        const explicitVisible = dir.dataset.explicit === "true" && !filterActive;
+        const selfMatches = filterActive && !!dirMatches && dirMatches(dir.dataset.dirpath || "");
+        dir.classList.toggle("hidden", !anyVisible && !explicitVisible && !selfMatches);
+      }
+    }
+    let SIDEBAR_FILTER_RAF = 0;
+    function scheduleApplyFilter() {
+      if (SIDEBAR_FILTER_RAF)
+        cancelAnimationFrame(SIDEBAR_FILTER_RAF);
+      SIDEBAR_FILTER_RAF = requestAnimationFrame(() => {
+        SIDEBAR_FILTER_RAF = 0;
+        applyFilter();
+      });
+    }
+    function flushSidebarFilter() {
+      if (!SIDEBAR_FILTER_RAF)
+        return;
+      cancelAnimationFrame(SIDEBAR_FILTER_RAF);
+      SIDEBAR_FILTER_RAF = 0;
+      applyFilter();
+    }
+    let SERVER_GENERATION = 0;
+    let CLIENT_REQ_SEQ = 0;
+    const LOAD_QUEUE = [];
+    let ACTIVE_LOADS = 0;
+    const MAX_PARALLEL = 2;
+    let lazyObserver = null;
+    let IN_FLIGHT = 0;
+    function updateLoadBar() {
+      const el = $("#load-bar");
+      if (el)
+        el.classList.toggle("active", IN_FLIGHT > 0);
+    }
+    function trackLoad(promise) {
+      IN_FLIGHT++;
+      updateLoadBar();
+      const done = () => {
+        IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
+        updateLoadBar();
+      };
+      return Promise.resolve(promise).then((v) => {
+        done();
+        return v;
+      }, (e2) => {
+        done();
+        throw e2;
+      });
+    }
+    function escapeHtml2(s2) {
+      return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c2]);
+    }
+    function isAbortError(err) {
+      return err instanceof DOMException ? err.name === "AbortError" : !!err && typeof err === "object" && ("name" in err) && err.name === "AbortError";
+    }
+    function currentRange() {
+      return {
+        from: STATE.from || DEFAULT_RANGE.from,
+        to: STATE.to || DEFAULT_RANGE.to
+      };
+    }
+    function repoFileTargetFromRoute() {
+      return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
+    }
+    let ANNOTATIONS_UI = null;
+    function applyInlineAnnotations() {
+      ANNOTATIONS_UI?.applyInlineAnnotations();
+    }
+    function withAnnotationSessionParam(rawUrl) {
+      return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+    }
+    function setRoute(route, replace2 = false) {
+      const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
+      STATE.route = nextRoute;
+      STATE.from = nextRoute.range.from;
+      STATE.to = nextRoute.range.to;
+      if (nextRoute.screen === "repo" || nextRoute.screen === "file" && nextRoute.view === "blob") {
+        STATE.repoRef = nextRoute.ref || "worktree";
+      }
+      const url = withAnnotationSessionParam(buildRoute(nextRoute));
+      const state = nextRoute.screen === "file" ? {
+        screen: "file",
+        path: nextRoute.path,
+        ref: nextRoute.ref,
+        view: nextRoute.view || "detail"
+      } : { view: nextRoute.screen };
+      if (replace2)
+        history.replaceState(state, "", url);
+      else
+        history.pushState(state, "", url);
+      syncHeaderMenu();
+    }
+    function setPageMode() {
+      document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
+      document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
+      document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
+      document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
+      syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+    }
+    function syncHeaderMenu() {
+      document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
+        const fileRouteOwner = STATE.route.screen === "file" && STATE.route.view === "blob" ? "repo" : "diff";
+        const active = link2.dataset.route === STATE.route.screen || STATE.route.screen === "file" && link2.dataset.route === fileRouteOwner;
+        link2.classList.toggle("active", active);
+        link2.setAttribute("aria-current", active ? "page" : "false");
+        if (link2.dataset.route === "repo") {
+          link2.href = buildRoute({
+            screen: "repo",
+            ref: STATE.repoRef || "worktree",
+            path: "",
+            range: currentRange()
+          });
+        }
+        if (link2.dataset.route === "diff") {
+          link2.href = buildRoute({ screen: "diff", range: currentRange() });
+        }
+        if (link2.dataset.route === "help") {
+          link2.href = buildRoute({
+            screen: "help",
+            lang: helpLanguageFromRoute(STATE.route),
+            section: helpSectionFromRoute(STATE.route),
+            range: currentRange()
+          });
+        }
+      });
+    }
+    function renderShell(meta) {
+      const newFiles = meta.files || [];
+      STATE.files = newFiles;
+      SERVER_GENERATION = meta.generation || 0;
+      window._lastMeta = meta;
+      renderMeta(meta);
+      renderSidebar(newFiles);
+      const target = $("#diff");
+      const empty = $("#empty");
+      if (!newFiles.length) {
+        if (STATE.route.screen === "file") {
+          empty.classList.add("hidden");
+          applySourceRouteToShell();
+        } else {
+          empty.classList.remove("hidden");
+          target.replaceChildren();
+        }
+        LOAD_QUEUE.length = 0;
+        return;
+      }
+      empty.classList.add("hidden");
+      const oldByKey = new Map;
+      document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
+        if (c2.dataset.key)
+          oldByKey.set(c2.dataset.key, c2);
+      });
+      const ordered = [];
+      newFiles.forEach((f2) => {
+        const key = f2.key || f2.path;
+        const old = oldByKey.get(key);
+        if (old) {
+          oldByKey.delete(key);
+          const sizeChanged = old.dataset.sizeClass !== (f2.size_class || "small");
+          const statusChanged = old.dataset.status !== (f2.status || "M");
+          if (sizeChanged || statusChanged) {
+            old.classList.remove("loaded", "error");
+            old.classList.add("pending");
+            old.replaceChildren();
+            const tmp = createPlaceholder(f2);
+            while (tmp.firstChild)
+              old.appendChild(tmp.firstChild);
+            old.dataset.sizeClass = f2.size_class || "small";
+            old.dataset.status = f2.status || "M";
+            delete old.dataset.manualRendered;
+            delete old.dataset.manualLoad;
+            delete old.dataset.manualMode;
+            old.style.minHeight = `${f2.estimated_height_px || 80}px`;
+            old._diffData = null;
+            old._file = null;
+          } else {
+            const stats = old.querySelector(".gdp-shell-header .stats");
+            if (stats) {
+              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
+            }
+            old._file = f2;
+          }
+          ordered.push(old);
+        } else {
+          ordered.push(createPlaceholder(f2));
+        }
+      });
+      oldByKey.forEach((c2) => {
+        c2.remove();
+      });
+      target.replaceChildren(...ordered);
+      for (let i2 = LOAD_QUEUE.length - 1;i2 >= 0; i2--) {
+        if (!LOAD_QUEUE[i2].card.isConnected)
+          LOAD_QUEUE.splice(i2, 1);
+      }
+      setupLazyObserver();
+      enqueueInitialLoads();
+      applySourceRouteToShell();
+      setupScrollSpy();
+      if (typeof applyHideTests === "function")
+        applyHideTests();
+      applyFilter();
+      applyViewedState();
+    }
+    function fileEntryIcon() {
+      return iconSvg("octicon-file", FILE_16_PATH);
+    }
+    async function openPathInOs(path, kind, button) {
+      const oldTitle = button?.title;
+      if (button) {
+        button.disabled = true;
+        button.classList.remove("failed");
+      }
+      try {
+        const res = await fetch("/_open_path", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ path, kind })
+        });
+        if (!res.ok)
+          throw new Error(await res.text());
+        button?.classList.add("opened");
+        setTimeout(() => {
+          button?.classList.remove("opened");
+        }, 1200);
+      } catch {
+        if (button) {
+          button.classList.add("failed");
+          button.title = "failed to open in OS";
+          setTimeout(() => {
+            button.classList.remove("failed");
+            button.title = oldTitle || "open in OS";
+          }, 1600);
+        }
+      } finally {
+        if (button)
+          button.disabled = false;
+      }
+    }
+    function closeRepoContextMenu() {
+      document.querySelector(".gdp-context-menu")?.remove();
+    }
+    function closeTrashDialog() {
+      document.querySelector(".gdp-trash-dialog-backdrop")?.remove();
+    }
+    function createTrashDialog(title, body, actions) {
+      closeTrashDialog();
+      const backdrop = document.createElement("div");
+      backdrop.className = "gdp-trash-dialog-backdrop";
+      const dialog = document.createElement("div");
+      dialog.className = "gdp-trash-dialog";
+      const titleId = "gdp-trash-dialog-title";
+      const bodyId = "gdp-trash-dialog-body";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-labelledby", titleId);
+      dialog.setAttribute("aria-describedby", bodyId);
+      const heading2 = document.createElement("div");
+      heading2.id = titleId;
+      heading2.className = "gdp-trash-dialog-title";
+      heading2.textContent = title;
+      const message = document.createElement("div");
+      message.id = bodyId;
+      message.className = "gdp-trash-dialog-body";
+      message.textContent = body;
+      const actionRow = document.createElement("div");
+      actionRow.className = "gdp-trash-dialog-actions";
+      actionRow.append(...actions);
+      dialog.append(heading2, message, actionRow);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      return backdrop;
+    }
+    function confirmMoveToTrash(path, focusReturnTarget) {
+      return new Promise((resolve) => {
+        const previousFocus = focusReturnTarget || document.activeElement;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "gdp-btn gdp-btn-sm";
+        cancel.textContent = "Cancel";
+        const move = document.createElement("button");
+        move.type = "button";
+        move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
+        move.textContent = "Move to Trash";
+        const done = (ok) => {
+          document.removeEventListener("keydown", onKeydown);
+          closeTrashDialog();
+          previousFocus?.focus?.();
+          resolve(ok);
+        };
+        const onKeydown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            done(false);
+            return;
+          }
+          if (event.key !== "Tab")
+            return;
+          const focusables = [cancel, move];
+          const index = focusables.indexOf(document.activeElement);
+          if (index < 0) {
+            event.preventDefault();
+            focusables[0].focus();
+            return;
+          }
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[focusables.length - 1].focus();
+          } else if (!event.shiftKey && index === focusables.length - 1) {
+            event.preventDefault();
+            focusables[0].focus();
+          }
+        };
+        cancel.addEventListener("click", () => done(false));
+        move.addEventListener("click", () => done(true));
+        const backdrop = createTrashDialog("Move to Trash?", `Move "${path}" to Trash?`, [cancel, move]);
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop)
+            done(false);
+        });
+        document.addEventListener("keydown", onKeydown);
+        cancel.focus();
+      });
+    }
+    function showTrashError(message) {
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "gdp-btn gdp-btn-sm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", closeTrashDialog);
+      createTrashDialog("Trash failed", message, [ok]);
+      ok.focus();
+    }
+    function showCreateDirectoryError(message) {
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "gdp-btn gdp-btn-sm";
+      ok.textContent = "OK";
+      ok.addEventListener("click", closeTrashDialog);
+      createTrashDialog("New folder failed", message, [ok]);
+      ok.focus();
+    }
+    function askNewDirectoryName(path, focusReturnTarget) {
+      return new Promise((resolve) => {
+        const previousFocus = focusReturnTarget || document.activeElement;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "gdp-btn gdp-btn-sm";
+        cancel.textContent = "Cancel";
+        const create = document.createElement("button");
+        create.type = "button";
+        create.className = "gdp-btn gdp-btn-sm";
+        create.textContent = "Create";
+        const input = document.createElement("input");
+        input.className = "gdp-create-dir-input";
+        input.type = "text";
+        input.autocomplete = "off";
+        input.placeholder = "Folder name";
+        input.setAttribute("aria-label", "Folder name");
+        const error2 = document.createElement("div");
+        error2.className = "gdp-create-dir-error";
+        error2.setAttribute("role", "alert");
+        const syncValidity = () => {
+          const valid = !!normalizeNewDirectoryName(input.value);
+          create.disabled = !valid;
+          error2.textContent = input.value && !valid ? "Use a folder name without slashes, control characters, . or .." : "";
+          return valid;
+        };
+        const done = (name) => {
+          document.removeEventListener("keydown", onKeydown);
+          closeTrashDialog();
+          previousFocus?.focus?.();
+          resolve(name);
+        };
+        const submit = () => {
+          const name = normalizeNewDirectoryName(input.value);
+          if (!name) {
+            syncValidity();
+            input.focus();
+            return;
+          }
+          done(name);
+        };
+        const onKeydown = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            done(null);
+            return;
+          }
+          if (event.isComposing || event.keyCode === 229)
+            return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            submit();
+            return;
+          }
+          if (event.key !== "Tab")
+            return;
+          const focusables = [input, cancel, create];
+          const index = focusables.indexOf(document.activeElement);
+          if (index < 0) {
+            event.preventDefault();
+            focusables[0].focus();
+            return;
+          }
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[focusables.length - 1].focus();
+          } else if (!event.shiftKey && index === focusables.length - 1) {
+            event.preventDefault();
+            focusables[0].focus();
+          }
+        };
+        cancel.addEventListener("click", () => done(null));
+        create.addEventListener("click", submit);
+        input.addEventListener("input", syncValidity);
+        create.disabled = true;
+        const backdrop = createTrashDialog("New Folder", `Create a folder in "${path || PROJECT_NAME || "repository"}".`, [cancel, create]);
+        const body = backdrop.querySelector(".gdp-trash-dialog-body");
+        body?.append(input, error2);
+        backdrop.addEventListener("pointerdown", (event) => {
+          if (event.target === backdrop)
+            done(null);
+        });
+        document.addEventListener("keydown", onKeydown);
+        input.focus();
+      });
+    }
+    async function moveRepoPathToTrash(path) {
+      const res = await fetch("/_trash_path", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify({ path })
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to move "${path}" to Trash: ${await res.text()}`);
+        return false;
+      }
+      const body = await res.json();
+      if (body.undo)
+        UNDO_STACK.unshift(body.undo);
+      return true;
+    }
+    async function requestCreateDirectory(path, onCreated, options = {}) {
+      if (creatingDirectory)
+        return;
+      const name = await askNewDirectoryName(path, options.focusReturnTarget);
+      if (!name)
+        return;
+      creatingDirectory = true;
+      try {
+        const res = await fetch("/_create_directory", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ dir: path, name })
+        });
+        if (!res.ok) {
+          showCreateDirectoryError(`Failed to create "${name}": ${await res.text()}`);
+          return;
+        }
+        const body = await res.json();
+        onCreated(body.path || (path ? `${path}/${name}` : name));
+      } finally {
+        creatingDirectory = false;
+      }
+    }
+    async function runUndoAction(action) {
+      if (action.type !== "trash")
+        return false;
+      const res = await fetch("/_restore_trash", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify(action.payload)
+      });
+      if (!res.ok) {
+        showTrashError(`Failed to undo "${action.label}": ${await res.text()}`);
+        return false;
+      }
+      return true;
+    }
+    async function undoLastAction() {
+      const action = UNDO_STACK.shift();
+      if (!action)
+        return false;
+      if (!await runUndoAction(action)) {
+        UNDO_STACK.unshift(action);
+        return true;
+      }
+      invalidateRepoSidebar();
+      await load();
+      return true;
+    }
+    async function requestMoveToTrash(path, onMoved, options = {}) {
+      if (!await confirmMoveToTrash(path, options.focusReturnTarget))
+        return;
+      if (await moveRepoPathToTrash(path))
+        onMoved();
+    }
+    function canTrashWorktreeRef(ref) {
+      return ref === "worktree" || ref === "";
+    }
+    function parentRepoPath(path) {
+      return path.split("/").slice(0, -1).join("/");
+    }
+    async function copyRepoContextText(text2) {
+      if (!text2)
+        return;
+      await navigator.clipboard.writeText(text2);
+    }
+    function createCopyPathButton(path) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-copy-path";
+      button.title = "copy folder path";
+      button.setAttribute("aria-label", "copy folder path");
+      button.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(filePathClipboardText(path));
+          button.classList.add("copied");
+          setTimeout(() => {
+            button.classList.remove("copied");
+          }, 1200);
+        } catch {
+          button.classList.add("failed");
+          setTimeout(() => {
+            button.classList.remove("failed");
+          }, 1200);
+        }
+      });
+      return button;
+    }
+    function showRepoContextMenu(event, entry, ref, onChanged) {
+      if (document.querySelector(".gdp-trash-dialog-backdrop"))
+        return false;
+      if (!canTrashWorktreeRef(ref))
+        return false;
+      if (entry.children_omitted_reason === "internal")
+        return false;
+      if (entry.type !== "tree" && entry.type !== "blob")
+        return false;
+      event.preventDefault();
+      closeRepoContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "gdp-context-menu";
+      const anchor = event.target;
+      const focusReturnTarget = anchor?.closest("li, .gdp-repo-row");
+      const anchorRect = anchor?.closest("li, .gdp-repo-row")?.getBoundingClientRect();
+      const anchorX = event.clientX > 0 ? event.clientX : anchorRect?.left || window.innerWidth / 2;
+      const anchorY = event.clientY > 0 ? event.clientY : anchorRect?.bottom || window.innerHeight / 2;
+      menu.style.left = `${anchorX}px`;
+      menu.style.top = `${anchorY}px`;
+      const copyPath = document.createElement("button");
+      copyPath.type = "button";
+      copyPath.textContent = "Copy Path";
+      copyPath.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await copyRepoContextText(filePathClipboardText(entry.path));
+      });
+      const copyName = document.createElement("button");
+      copyName.type = "button";
+      copyName.textContent = "Copy Name";
+      copyName.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await copyRepoContextText(fileNameClipboardText(entry.path));
+      });
+      const createDir = document.createElement("button");
+      createDir.type = "button";
+      createDir.textContent = "New Folder...";
+      createDir.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        const targetPath = entry.type === "blob" ? parentRepoPath(entry.path) : entry.path;
+        await requestCreateDirectory(targetPath, onChanged, {
+          focusReturnTarget
+        });
+      });
+      const trash = document.createElement("button");
+      trash.type = "button";
+      trash.className = "danger";
+      trash.textContent = "Move to Trash...";
+      trash.addEventListener("click", async () => {
+        closeRepoContextMenu();
+        await requestMoveToTrash(entry.path, onChanged, { focusReturnTarget });
+      });
+      menu.append(copyPath, copyName, createDir, trash);
+      document.body.appendChild(menu);
+      const rect = menu.getBoundingClientRect();
+      const left = Math.min(anchorX, window.innerWidth - rect.width - 8);
+      const top = Math.min(anchorY, window.innerHeight - rect.height - 8);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+      return true;
+    }
+    function sidebarTrashEntryFromEvent(event) {
+      if (!isRepositorySidebarMode())
+        return null;
+      const row = event.target?.closest("#filelist li");
+      if (!row)
+        return null;
+      const path = row.dataset.path || row.dataset.dirpath || "";
+      if (!path)
+        return null;
+      return {
+        path,
+        type: row.dataset.type,
+        children_omitted_reason: row.dataset.childrenOmittedReason
+      };
+    }
+    function handleSidebarContextMenu(event) {
+      const entry = sidebarTrashEntryFromEvent(event);
+      if (!entry)
+        return;
+      if (showRepoContextMenu(event, entry, REPO_SIDEBAR_REF || "worktree", () => loadRepo()))
+        markActive(entry.path);
+    }
+    function createMoveToTrashButton(path, onDeleted) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-trash-path";
+      button.title = "move folder to Trash";
+      button.setAttribute("aria-label", "move folder to Trash");
+      button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await requestMoveToTrash(path, onDeleted, { focusReturnTarget: button });
+      });
+      return button;
+    }
+    function createNewFolderButton(path, onCreated) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-create-dir";
+      button.title = "new folder";
+      button.setAttribute("aria-label", "new folder");
+      button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await requestCreateDirectory(path, onCreated, {
+          focusReturnTarget: button
+        });
+      });
+      return button;
+    }
+    function createOpenPathButton(path, kind, title = "open folder in OS") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-file-header-icon gdp-open-path";
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = iconSvg("octicon-link-external", OPEN_EXTERNAL_16_PATH);
+      button.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        openPathInOs(path, kind, button);
+      });
+      return button;
+    }
+    async function uploadFiles(path, files) {
+      const list2 = Array.from(files);
+      if (!list2.length)
+        return;
+      const label = path || PROJECT_NAME || "repository root";
+      if (!window.confirm("Upload " + list2.length + " file" + (list2.length === 1 ? "" : "s") + " into " + label + "?"))
+        return;
+      const form = new FormData;
+      form.set("dir", path);
+      list2.forEach((file) => {
+        form.append("files", file, file.name);
+      });
+      const res = await fetch("/_upload_files", {
+        method: "POST",
+        headers: { "X-Code-Viewer-Action": "1" },
+        body: form
+      });
+      if (!res.ok)
+        throw new Error(await res.text());
+      invalidateRepoSidebar();
+      await loadRepo();
+    }
+    function createRepoUploadPanel(path) {
+      const dropPanel = document.createElement("div");
+      dropPanel.className = "gdp-upload-panel";
+      const copy = document.createElement("div");
+      copy.className = "gdp-upload-copy";
+      copy.textContent = `Drop files into ${path || PROJECT_NAME || "repository"}`;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.hidden = true;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gdp-btn gdp-btn-sm";
+      button.textContent = "Upload files";
+      button.addEventListener("click", () => input.click());
+      const error2 = document.createElement("div");
+      error2.className = "gdp-upload-error";
+      const fail = (message = "Upload failed") => {
+        error2.textContent = message;
+        dropPanel.classList.add("failed");
+        setTimeout(() => dropPanel.classList.remove("failed"), 1600);
+      };
+      input.addEventListener("change", async () => {
+        try {
+          if (input.files?.length)
+            await uploadFiles(path, input.files);
+          error2.textContent = "";
+        } catch (uploadError) {
+          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
+        } finally {
+          input.value = "";
+        }
+      });
+      dropPanel.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        dropPanel.classList.add("dragging");
+      });
+      dropPanel.addEventListener("dragleave", () => dropPanel.classList.remove("dragging"));
+      dropPanel.addEventListener("drop", async (event) => {
+        event.preventDefault();
+        dropPanel.classList.remove("dragging");
+        try {
+          const files = event.dataTransfer?.files;
+          if (files?.length)
+            await uploadFiles(path, files);
+          error2.textContent = "";
+        } catch (uploadError) {
+          fail(uploadError instanceof Error ? uploadError.message : "Upload failed");
+        }
+      });
+      dropPanel.append(copy, button, input, error2);
+      return dropPanel;
+    }
+    function repoRoute(ref, path) {
+      return {
+        screen: "repo",
+        ref: ref || "worktree",
+        path,
+        range: currentRange()
+      };
+    }
+    function createRepoBreadcrumb(target, path) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb gdp-repo-breadcrumb";
+      const root = document.createElement("button");
+      root.type = "button";
+      root.className = path ? "gdp-file-breadcrumb-part" : "gdp-file-breadcrumb-current";
+      root.textContent = PROJECT_NAME || "repository";
+      root.addEventListener("click", () => {
+        setRoute(repoRoute(target, ""));
+        loadRepo();
+      });
+      nav.appendChild(root);
+      const parts = path ? path.split("/") : [];
+      parts.forEach((part, index) => {
+        const sep = document.createElement("span");
+        sep.className = "gdp-file-breadcrumb-sep";
+        sep.textContent = "/";
+        nav.appendChild(sep);
+        const currentPath = parts.slice(0, index + 1).join("/");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = index === parts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        button.textContent = part;
+        button.disabled = index === parts.length - 1;
+        button.addEventListener("click", () => {
+          setRoute(repoRoute(target, currentPath));
+          loadRepo();
+        });
+        nav.appendChild(button);
+      });
+      return nav;
+    }
+    async function renderRepo(meta) {
+      setProjectName(meta.project || "");
+      setPageMode();
+      removeStandaloneSource();
+      $("#empty").classList.add("hidden");
+      $("#diff").replaceChildren();
+      if (!isRepoSidebarReusable(meta.ref))
+        $("#totals").textContent = "";
+      STATE.files = [];
+      LOAD_QUEUE.length = 0;
+      renderRepoBlobSidebar(meta.path || "", meta.ref);
+      const target = $("#diff");
+      const shell = document.createElement("section");
+      shell.className = "gdp-repo-shell";
+      const toolbar = document.createElement("div");
+      toolbar.className = "gdp-file-detail-header gdp-repo-toolbar";
+      const pathHeader = document.createElement("div");
+      pathHeader.className = "gdp-file-detail-path";
+      pathHeader.appendChild(createRepoBreadcrumb(meta.ref, meta.path || ""));
+      if (meta.path)
+        pathHeader.appendChild(createCopyPathButton(meta.path));
+      pathHeader.appendChild(createOpenPathButton(meta.path || "", "directory", "open this folder in OS"));
+      toolbar.appendChild(pathHeader);
+      if (canTrashWorktreeRef(meta.ref)) {
+        toolbar.appendChild(createNewFolderButton(meta.path || "", () => loadRepo()));
+        if (meta.path) {
+          toolbar.appendChild(createMoveToTrashButton(meta.path, () => {
+            const parent = meta.path.split("/").slice(0, -1).join("/");
+            setRoute(repoRoute(meta.ref, parent));
+            loadRepo();
+          }));
+        }
+      }
+      shell.appendChild(toolbar);
+      const listCard = document.createElement("section");
+      listCard.className = "gdp-file-shell loaded gdp-repo-list-shell";
+      const listWrapper = document.createElement("div");
+      listWrapper.className = "d2h-file-wrapper";
+      if (meta.ref === "worktree" || meta.ref === "") {
+        listWrapper.appendChild(createRepoUploadPanel(meta.path || ""));
+      }
+      const sortHost = document.createElement("div");
+      sortHost.className = "gdp-repo-sort-host";
+      const list2 = document.createElement("div");
+      list2.className = "gdp-source-viewer gdp-repo-file-list";
+      const renderRepoRows = (focusSortKey) => {
+        sortHost.replaceChildren(createRepoSortHeader(renderRepoRows));
+        if (focusSortKey) {
+          sortHost.querySelector(`[data-repo-sort="${focusSortKey}"]`)?.focus();
+        }
+        list2.replaceChildren();
+        if (meta.path) {
+          const parent = meta.path.split("/").slice(0, -1).join("/");
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "gdp-repo-row parent";
+          const parentIcon = document.createElement("span");
+          parentIcon.className = "dir-icon";
+          setFolderIcon(parentIcon, false);
+          const parentName = document.createElement("span");
+          parentName.className = "name";
+          parentName.textContent = "..";
+          const parentKind = document.createElement("span");
+          parentKind.className = "meta";
+          parentKind.textContent = "";
+          const parentSize = document.createElement("span");
+          parentSize.className = "size";
+          row.append(parentIcon, parentName, parentKind, parentSize);
+          row.addEventListener("click", () => {
+            setRoute(repoRoute(meta.ref, parent));
+            loadRepo();
+          });
+          list2.appendChild(row);
+        }
+        sortedRepoEntries(meta.entries).forEach((entry) => {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = `gdp-repo-row ${entry.type}`;
+          const icon = document.createElement("span");
+          icon.className = entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
+          if (entry.type === "tree")
+            setFolderIcon(icon, true);
+          else
+            icon.innerHTML = fileEntryIcon();
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = entry.name;
+          const metaBlock = createRepoEntryMeta(entry);
+          const size = createRepoEntrySize(entry);
+          row.append(icon, name, metaBlock, size);
+          row.addEventListener("click", () => {
+            if (entry.type === "tree") {
+              setRoute(repoRoute(meta.ref, entry.path));
+              loadRepo();
+            } else if (entry.type === "blob") {
+              setRoute({
+                screen: "file",
+                path: entry.path,
+                ref: meta.ref,
+                view: "blob",
+                range: currentRange()
+              });
+              renderStandaloneSource({ path: entry.path, ref: meta.ref });
+            }
+          });
+          row.addEventListener("contextmenu", (event) => showRepoContextMenu(event, entry, meta.ref, () => loadRepo()));
+          list2.appendChild(row);
+        });
+        if (!meta.entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "gdp-repo-empty";
+          empty.textContent = "No files in this directory.";
+          list2.appendChild(empty);
+        }
+      };
+      listWrapper.appendChild(sortHost);
+      renderRepoRows();
+      listWrapper.appendChild(list2);
+      listCard.appendChild(listWrapper);
+      shell.appendChild(listCard);
+      if (meta.readme?.text) {
+        const readme = document.createElement("section");
+        readme.className = "gdp-file-shell loaded gdp-repo-readme";
+        const wrapper = document.createElement("div");
+        wrapper.className = "d2h-file-wrapper";
+        const readmeHeader = document.createElement("div");
+        readmeHeader.className = "d2h-file-header";
+        const nameWrapper = document.createElement("div");
+        nameWrapper.className = "d2h-file-name-wrapper";
+        const icon = document.createElement("span");
+        icon.className = "d2h-icon-wrapper";
+        icon.innerHTML = iconSvg("octicon-file", FILE_16_PATH);
+        const name = document.createElement("span");
+        name.className = "d2h-file-name";
+        name.textContent = meta.readme.path;
+        nameWrapper.append(icon, name);
+        readmeHeader.appendChild(nameWrapper);
+        wrapper.appendChild(readmeHeader);
+        try {
+          wrapper.appendChild(await renderMarkdownPreview(meta.readme.text, { path: meta.readme.path, ref: meta.ref }, {
+            syntaxHighlight: STATE.syntaxHighlight,
+            onNavigateMarkdown: (path, ref) => {
+              setRoute({
+                screen: "file",
+                path,
+                ref,
+                view: "blob",
+                range: currentRange()
+              });
+              renderStandaloneSource({ path, ref });
+            }
+          }));
+        } catch {
+          const fallback = document.createElement("pre");
+          fallback.className = "gdp-markdown-fallback";
+          fallback.textContent = meta.readme.text;
+          wrapper.appendChild(fallback);
+        }
+        readme.appendChild(wrapper);
+        shell.appendChild(readme);
+      }
+      target.appendChild(shell);
+      placeSidebarToggle();
+    }
+    function renderRepoBlobSidebar(currentPath, ref) {
+      syncRepoTargetInput(ref);
+      const normalizedRef = ref || "worktree";
+      if (isRepoSidebarReusable(normalizedRef)) {
+        activateRepoSidebarPath(currentPath);
+        return Promise.resolve();
+      }
+      if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
+        return REPO_SIDEBAR_LOAD.then(() => {
+          activateRepoSidebarPath(currentPath);
+        });
+      }
+      const params = new URLSearchParams;
+      params.set("ref", normalizedRef);
+      params.set("recursive", "1");
+      appendScopeParams(params);
+      REPO_SIDEBAR_LOAD_REF = normalizedRef;
+      const load2 = trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
+        if (!r2.ok)
+          throw new Error("failed to load repository tree");
+        return r2.json();
+      })).then((meta) => {
+        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
+        if ((activeRepoRef || "worktree") !== normalizedRef)
+          return;
+        const files = meta.entries.map((entry, index) => ({
+          order: index + 1,
+          path: entry.path,
+          display_path: entry.path,
+          type: entry.type,
+          children_omitted: entry.children_omitted,
+          children_omitted_reason: entry.children_omitted_reason
+        }));
+        REPO_SIDEBAR_REF = normalizedRef;
+        renderSidebar(files, (file) => {
+          if (file.type === "tree") {
+            setRoute(repoRoute(normalizedRef, file.path));
+            loadRepo();
+            return;
+          }
+          setRoute({
+            screen: "file",
+            path: file.path,
+            ref: normalizedRef,
+            view: "blob",
+            range: currentRange()
+          });
+          renderStandaloneSource({ path: file.path, ref: normalizedRef });
+        });
+        activateRepoSidebarPath(currentPath);
+      }).catch(() => {
+        REPO_SIDEBAR_REF = null;
+        renderSidebar([], undefined);
+        $("#totals").textContent = "Cannot load tree";
+      }).finally(() => {
+        if (REPO_SIDEBAR_LOAD === load2) {
+          REPO_SIDEBAR_LOAD_REF = null;
+          REPO_SIDEBAR_LOAD = null;
+        }
+      });
+      REPO_SIDEBAR_LOAD = load2;
+      return load2;
+    }
+    function activateRepoSidebarPath(currentPath) {
+      markActive(currentPath, { reveal: true });
+      applyFilter();
+      const row = SIDEBAR_ROW_BY_PATH.get(currentPath);
+      if (row?.kind === "dir" && row.dir && shouldLazyLoadSidebarDir(row.dir))
+        ensureVirtualSidebarDirLoaded(row.dir).then(() => {
+          if (SIDEBAR_VIRTUAL_ACTIVE_PATH === currentPath) {
+            rerenderVirtualSidebar();
+            scrollVirtualSidebarPathIntoView(currentPath);
+          }
+        });
+    }
+    function createPlaceholder(f2) {
+      const card = document.createElement("div");
+      card.className = "gdp-file-shell pending";
+      card.dataset.path = f2.path;
+      card.dataset.key = f2.key || f2.path;
+      card.dataset.sizeClass = f2.size_class || "small";
+      card.dataset.status = f2.status || "M";
+      card.classList.toggle("viewed", STATE.viewedFiles.has(f2.path));
+      if (f2.estimated_height_px) {
+        card.style.minHeight = `${f2.estimated_height_px}px`;
+      }
+      const head = document.createElement("div");
+      head.className = "gdp-shell-header";
+      head.innerHTML = '<span class="status-pill ' + escapeHtml2(f2.status || "M") + '">' + escapeHtml2(f2.status || "M") + "</span>" + '<span class="path">' + escapeHtml2(f2.display_path || f2.path) + "</span>" + '<span class="stats">' + '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>" + "</span>" + '<span class="size-tag ' + escapeHtml2(f2.size_class || "") + '">' + escapeHtml2(f2.size_class || "") + "</span>" + '<span class="loading-indicator" hidden>loading…</span>';
+      card.appendChild(head);
+      const body = document.createElement("div");
+      body.className = "gdp-shell-body";
+      card.appendChild(body);
+      return card;
+    }
+    function setupLazyObserver() {
+      if (lazyObserver)
+        lazyObserver.disconnect();
+      lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting)
+            return;
+          const card = entry.target;
+          if (card.classList.contains("loaded") || card.classList.contains("loading"))
+            return;
+          const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+          if (!f2)
+            return;
+          enqueueLoad(f2, card, 0);
+        });
+      }, { rootMargin: "1200px 0px 1600px 0px" });
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((c2) => {
+        lazyObserver.observe(c2);
+      });
+    }
+    window.addEventListener("scroll", () => enqueueInitialLoads(), {
+      passive: true
+    });
+    window.addEventListener("resize", () => {
+      enqueueInitialLoads();
+      syncSidebarHeaderHeight();
+    }, { passive: true });
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden)
+        enqueueInitialLoads();
+    });
+    function enqueueInitialLoads() {
+      const viewportBottom = window.innerHeight + 1600;
+      document.querySelectorAll(".gdp-file-shell.pending").forEach((card) => {
+        const rect = card.getBoundingClientRect();
+        if (rect.top > viewportBottom)
+          return;
+        const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+        if (f2)
+          enqueueLoad(f2, card, 0);
+      });
+    }
+    function enqueueLoad(file, card, priority) {
+      if (manualLoadReason(file) && card.dataset.manualLoad !== "1") {
+        renderManualLoadPlaceholder(card, file);
+        return;
+      }
+      if (LOAD_QUEUE.find((item) => item.card === card))
+        return;
+      LOAD_QUEUE.push({ file, card, priority: priority || 0 });
+      LOAD_QUEUE.sort((a2, b2) => b2.priority - a2.priority);
+      pumpQueue();
+    }
+    function pumpQueue() {
+      while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
+        const item = LOAD_QUEUE.shift();
+        if (item.card.classList.contains("loaded") || item.card.classList.contains("loading"))
+          continue;
+        ACTIVE_LOADS++;
+        loadFile(item.file, item.card).finally(() => {
+          ACTIVE_LOADS--;
+          pumpQueue();
+        });
+      }
+    }
+    function manualLoadReason(file) {
+      const path = file.path || "";
+      if (file.size_class === "huge")
+        return "huge diff";
+      if (/\.(min|bundle)\.(js|mjs|css)$/i.test(path))
+        return "minified or bundled file";
+      if (/\.map$/i.test(path))
+        return "source map";
+      if (/(^|\/)(vendor|node_modules|dist|build|out)\//i.test(path))
+        return "generated or vendored path";
+      return null;
+    }
+    function renderManualLoadPlaceholder(card, file) {
+      if (card.dataset.manualRendered === "1")
+        return;
+      card.dataset.manualRendered = "1";
+      card.classList.remove("loading");
+      card.classList.add("pending", "manual-load");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = true;
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-manual-load";
+      const note = document.createElement("div");
+      note.className = "gdp-manual-note";
+      note.textContent = `${manualLoadReason(file)} - click to load diff`;
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "gdp-show-full";
+      previewBtn.textContent = "Load preview";
+      previewBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "preview";
+        card.classList.remove("manual-load");
+        loadFile(file, card, buildPreviewUrl(file, 3));
+      });
+      const openFileBtn = document.createElement("button");
+      openFileBtn.className = "gdp-show-full";
+      openFileBtn.textContent = "Open as file";
+      openFileBtn.title = "Open this file in the virtualized source viewer";
+      openFileBtn.addEventListener("click", () => {
+        const target = fileSourceTarget(file);
+        setRoute({
+          screen: "file",
+          path: target.path,
+          ref: target.ref,
+          range: currentRange()
+        });
+        applySourceRouteToShell();
+      });
+      const fullBtn = document.createElement("button");
+      fullBtn.className = "gdp-show-full secondary";
+      fullBtn.textContent = "Load full diff";
+      fullBtn.title = "Render the full diff with Diff2Html. This can be slow for large files.";
+      fullBtn.addEventListener("click", () => {
+        body.innerHTML = "";
+        card.dataset.manualLoad = "1";
+        card.dataset.manualMode = "full";
+        card.classList.remove("manual-load");
+        loadFile(file, card, file.load_url);
+      });
+      wrap.appendChild(note);
+      if (file.status === "A")
+        wrap.appendChild(openFileBtn);
+      wrap.appendChild(previewBtn);
+      wrap.appendChild(fullBtn);
+      body.appendChild(wrap);
+    }
+    function nextIdle(timeout = 500) {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done)
+            return;
+          done = true;
+          resolve();
+        };
+        const ric = window.requestIdleCallback;
+        if (typeof ric === "function") {
+          ric(finish, { timeout });
+        } else {
+          requestAnimationFrame(finish);
+          setTimeout(finish, 50);
+        }
+      });
+    }
+    function loadFile(file, card, urlOverride) {
+      card.classList.remove("pending");
+      card.classList.add("loading");
+      if (lazyObserver)
+        lazyObserver.unobserve(card);
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = false;
+      const url = urlOverride || (card.dataset.manualMode === "full" ? file.load_url : file.preview_url || file.load_url);
+      const myGen = SERVER_GENERATION;
+      const myReq = ++CLIENT_REQ_SEQ;
+      card.dataset.reqId = String(myReq);
+      const retryStale = () => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("pending");
+        if (indicator)
+          indicator.hidden = true;
+        const fresh = STATE.files.find((x) => x.path === card.dataset.path);
+        if (fresh && card.isConnected)
+          enqueueLoad(fresh, card, 0);
+      };
+      return trackLoad(fetch(url).then((r2) => r2.json())).then(async (data) => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        if (myGen !== SERVER_GENERATION) {
+          retryStale();
+          return;
+        }
+        if (data.generation && data.generation !== SERVER_GENERATION) {
+          retryStale();
+          return;
+        }
+        await nextIdle();
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        renderFile(file, data, card);
+      }).catch(() => {
+        if (String(myReq) !== card.dataset.reqId)
+          return;
+        card.classList.remove("loading");
+        card.classList.add("error");
+        const body = card.querySelector(".gdp-shell-body");
+        if (!body)
+          return;
+        body.innerHTML = '<div class="gdp-error">failed to load — <button class="retry">retry</button></div>';
+        const btn = body.querySelector(".retry");
+        if (btn)
+          btn.addEventListener("click", () => {
+            card.classList.remove("error");
+            card.classList.add("pending");
+            body.innerHTML = "";
+            enqueueLoad(file, card, 1);
+          });
+      });
+    }
+    function mountDiff(card, file, data) {
+      const head = card.querySelector(".gdp-shell-header");
+      if (head)
+        head.style.display = "none";
+      const body = card.querySelector(".gdp-shell-body");
+      if (!body)
+        return;
+      body.innerHTML = "";
+      if (!data.diff?.trim()) {
+        body.innerHTML = '<div class="gdp-info">No content</div>';
+        return;
+      }
+      const layout = file.force_layout || STATE.layout;
+      const hljsRef = getHljs();
+      const ui = new Diff2HtmlUI(body, data.diff, {
+        drawFileList: false,
+        matching: "lines",
+        outputFormat: layout,
+        synchronisedScroll: true,
+        highlight: !!(STATE.syntaxHighlight && file.highlight && hljsRef),
+        fileListToggle: false,
+        fileContentToggle: false
+      }, hljsRef);
+      ui.draw();
+      if (STATE.ignoreWs)
+        suppressWhitespaceOnlyInlineHighlights(body);
+      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
+        ui.highlightCode();
+      enhanceMediaCard(file, card);
+      syncSideScrollCard(card);
+      appendStatSquaresToHeader(card, file);
+      setupHunkExpand(card, file);
+    }
+    const { renderHelpPage } = createHelpPage({
+      $,
+      getRoute: () => STATE.route,
+      setRoute,
+      setPageMode,
+      cancelActiveSourceLoad,
+      removeStandaloneSource,
+      clearLoadQueue: () => {
+        LOAD_QUEUE.length = 0;
+      },
+      currentRange,
+      syncHeaderMenu
+    });
+    const { setupHunkExpand } = createHunkExpand({
+      trackLoad,
+      getServerGeneration: () => SERVER_GENERATION,
+      getToRef: () => STATE.to && STATE.to !== "worktree" ? STATE.to : "worktree",
+      highlightInsertedSpans
+    });
+    function setFileCollapsed(card, collapsed) {
+      card.classList.toggle("gdp-file-collapsed", collapsed);
+      card.querySelectorAll(".d2h-files-diff, .d2h-file-diff, .gdp-source-viewer, .gdp-media").forEach((body) => {
+        body.classList.toggle("d2h-d-none", collapsed);
+      });
+      const button = card.querySelector(".gdp-file-toggle");
+      if (button) {
+        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        button.title = collapsed ? "Expand file" : "Collapse file";
+      }
+      const unfold = card.querySelector(".gdp-file-unfold");
+      if (unfold)
+        unfold.disabled = collapsed;
+      const viewFile = card.querySelector(".gdp-view-file");
+      if (viewFile)
+        viewFile.disabled = collapsed;
+    }
+    function setViewFileButtonState(button, sourceMode) {
+      if (!button)
+        return;
+      button.classList.add("gdp-btn", "gdp-btn-sm");
+      button.textContent = sourceMode ? "View Diff" : "View File";
+      button.setAttribute("aria-pressed", sourceMode ? "true" : "false");
+      button.title = sourceMode ? "View diff" : "View file";
+    }
+    function createRepoEntryMeta(entry) {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
+      const created = formatFileDate(entry.created_at);
+      if (entry.type === "tree" && updated) {
+        meta.textContent = updated;
+        if (created)
+          meta.title = `Created ${created}`;
+        return meta;
+      }
+      if (entry.type !== "blob") {
+        meta.textContent = "-";
+        return meta;
+      }
+      meta.textContent = updated ? updated : created ? created : "-";
+      if (created)
+        meta.title = `Created ${created}`;
+      return meta;
+    }
+    function createRepoEntrySize(entry) {
+      const size = document.createElement("span");
+      size.className = "size";
+      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
+      return size;
+    }
+    function repoEntryUpdatedTime(entry) {
+      const raw = entry.updated_at || entry.commit_updated_at || entry.created_at;
+      if (!raw)
+        return -1;
+      const time = new Date(raw).getTime();
+      return Number.isNaN(time) ? -1 : time;
+    }
+    function sortedRepoEntries(entries) {
+      const direction = REPO_SORT.direction === "asc" ? 1 : -1;
+      return [...entries].sort((a2, b2) => {
+        if (REPO_SORT.key === "name" && a2.type !== b2.type) {
+          if (a2.type === "tree")
+            return -1;
+          if (b2.type === "tree")
+            return 1;
+        }
+        let result = 0;
+        if (REPO_SORT.key === "updated") {
+          const aTime = repoEntryUpdatedTime(a2);
+          const bTime = repoEntryUpdatedTime(b2);
+          if (aTime < 0 && bTime >= 0)
+            return 1;
+          if (bTime < 0 && aTime >= 0)
+            return -1;
+          result = aTime - bTime;
+        } else if (REPO_SORT.key === "size") {
+          if (a2.size == null && b2.size != null)
+            return 1;
+          if (b2.size == null && a2.size != null)
+            return -1;
+          result = (a2.size ?? 0) - (b2.size ?? 0);
+        } else {
+          result = a2.name.localeCompare(b2.name);
+        }
+        if (result === 0)
+          result = a2.name.localeCompare(b2.name);
+        return result * direction;
+      });
+    }
+    function createRepoSortHeader(onSortChange) {
+      const header = document.createElement("div");
+      header.className = "gdp-repo-sort-header";
+      const spacer = document.createElement("span");
+      spacer.className = "gdp-repo-sort-spacer";
+      header.appendChild(spacer);
+      const columns = [
+        { key: "name", label: "Name" },
+        { key: "updated", label: "Updated" },
+        { key: "size", label: "Size" }
+      ];
+      columns.forEach((column) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.repoSort = column.key;
+        button.textContent = column.label + (REPO_SORT.key === column.key ? REPO_SORT.direction === "asc" ? " ↑" : " ↓" : "");
+        button.className = REPO_SORT.key === column.key ? "active" : "";
+        button.addEventListener("click", () => {
+          if (REPO_SORT.key === column.key) {
+            REPO_SORT.direction = REPO_SORT.direction === "asc" ? "desc" : "asc";
+          } else {
+            REPO_SORT = {
+              key: column.key,
+              direction: column.key === "name" ? "asc" : "desc"
+            };
+          }
+          onSortChange(column.key);
+        });
+        header.appendChild(button);
+      });
+      return header;
+    }
+    async function loadRawFileInfo(target) {
+      try {
+        const res = await fetch(buildRawFileUrl(target), { method: "HEAD" });
+        if (!res.ok)
+          return {};
+        const rawSize = res.headers.get("content-length");
+        const size = rawSize == null ? NaN : Number(rawSize);
+        return {
+          size: rawSize != null && Number.isFinite(size) ? size : undefined,
+          type: res.headers.get("content-type") || undefined,
+          created_at: res.headers.get("x-code-viewer-created-at") || undefined,
+          updated_at: res.headers.get("x-code-viewer-updated-at") || undefined,
+          commit_updated_at: res.headers.get("x-code-viewer-commit-updated-at") || undefined
+        };
+      } catch {
+        return {};
+      }
+    }
+    function createFileDetailMeta(target, meta) {
+      const wrap = document.createElement("div");
+      wrap.className = "gdp-file-detail-meta";
+      const addItem = (label, value) => {
+        if (!value)
+          return;
+        const item = document.createElement("span");
+        item.className = "gdp-file-detail-meta-item";
+        const labelEl = document.createElement("span");
+        labelEl.className = "label";
+        labelEl.textContent = label;
+        const valueEl = document.createElement("span");
+        valueEl.className = "value";
+        valueEl.textContent = value;
+        item.append(labelEl, valueEl);
+        wrap.appendChild(item);
+      };
+      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+      addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
+      addItem("Created", formatFileDate(meta.created_at));
+      if (!wrap.childElementCount) {
+        wrap.hidden = true;
+        wrap.dataset.path = target.path;
+      }
+      return wrap;
+    }
+    function createFileBreadcrumb(path, ref) {
+      const nav = document.createElement("nav");
+      nav.className = "gdp-file-breadcrumb";
+      nav.setAttribute("aria-label", "File path");
+      const parts = path.split("/").filter(Boolean);
+      const allParts = PROJECT_NAME ? [PROJECT_NAME, ...parts] : parts;
+      allParts.forEach((part, index) => {
+        if (index > 0) {
+          const sep = document.createElement("span");
+          sep.className = "gdp-file-breadcrumb-sep";
+          sep.textContent = "/";
+          nav.appendChild(sep);
+        }
+        const isCurrent = index === allParts.length - 1;
+        const crumb = document.createElement(isCurrent ? "span" : "button");
+        crumb.className = index === allParts.length - 1 ? "gdp-file-breadcrumb-current" : "gdp-file-breadcrumb-part";
+        crumb.textContent = part;
+        if (!isCurrent && crumb instanceof HTMLButtonElement) {
+          crumb.type = "button";
+          crumb.addEventListener("click", () => {
+            const projectOffset = PROJECT_NAME ? 1 : 0;
+            const currentPath = parts.slice(0, Math.max(0, index - projectOffset + 1)).join("/");
+            setRoute(repoRoute(ref || "worktree", currentPath));
+            loadRepo();
+          });
+        }
+        nav.appendChild(crumb);
+      });
+      if (!allParts.length) {
+        const crumb = document.createElement("span");
+        crumb.className = "gdp-file-breadcrumb-current";
+        crumb.textContent = path;
+        nav.appendChild(crumb);
+      }
+      return nav;
     }
     async function expandAllFileContext(card, file) {
       if (card.classList.contains("gdp-context-expanded")) {
@@ -13445,20 +13597,6 @@ ${frontmatter.yaml}
           moreBtn.textContent = "Failed — retry";
         });
       }
-    }
-    function inferLang(path) {
-      const name = sourceFileName(path);
-      const fileLang = FILENAME_TO_LANG[name];
-      if (fileLang)
-        return fileLang;
-      if (isDockerfileName(name))
-        return "dockerfile";
-      if (isMakefileName(name))
-        return "makefile";
-      const m = path.match(/\.([^.]+)$/);
-      if (!m)
-        return null;
-      return EXT_TO_LANG[m[1].toLowerCase()] || null;
     }
     function highlightInsertedSpans(card, file) {
       if (file.size_class === "huge")
@@ -14578,39 +14716,6 @@ ${frontmatter.yaml}
         return true;
       }
       return false;
-    }
-    function handleVirtualSourcePagingKey(e2, targetEl) {
-      if (e2.__gdpVirtualSourcePagingHandled)
-        return true;
-      if (e2.defaultPrevented || e2.isComposing || PALETTE || document.querySelector(".mkdp-lightbox"))
-        return false;
-      const editable = isEditableKeyTarget(targetEl);
-      const inVirtualSearch = !!targetEl?.closest(".gdp-source-virtual-search");
-      if (editable && !inVirtualSearch)
-        return false;
-      const key = e2.key.toLowerCase();
-      if (e2.altKey || e2.metaKey)
-        return false;
-      const isPlainPageKey = (key === "pagedown" || key === "pageup") && !e2.ctrlKey && !e2.shiftKey;
-      const isCtrlArrowKey = (key === "arrowdown" || key === "arrowup") && e2.ctrlKey && !e2.shiftKey;
-      if (!isPlainPageKey && !isCtrlArrowKey)
-        return false;
-      const scroller = findMainScrollTarget();
-      if (!scroller?.matches("#content .gdp-source-virtual-scroller"))
-        return false;
-      const pageDown = key === "pagedown" || key === "arrowdown";
-      const pageUp = key === "pageup" || key === "arrowup";
-      if (!pageDown && !pageUp)
-        return false;
-      e2.__gdpVirtualSourcePagingHandled = true;
-      e2.preventDefault();
-      e2.stopPropagation();
-      scrollMainPanel(pageDown ? 1 : -1, e2.repeat, "page");
-      focusMainSurface();
-      return true;
-    }
-    function handleVirtualSourcePagingKeydown(e2) {
-      handleVirtualSourcePagingKey(e2, e2.target);
     }
     document.addEventListener("keydown", handleVirtualSourcePagingKeydown, {
       capture: true
