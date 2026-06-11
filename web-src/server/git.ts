@@ -389,9 +389,50 @@ function parseHistoryLog(stdout: string): GitHistoryCommit[] {
   return commits;
 }
 
+// "author:foo" / "path:foo" switch the search target; anything else matches
+// the commit message (and, for hex-looking terms, a sha prefix).
+function historyQueryArgs(query: string): {
+  filterArgs: string[];
+  pathspec: string[];
+  shaTerm: string;
+} {
+  const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  if (!trimmed) return { filterArgs: [], pathspec: [], shaTerm: "" };
+  const prefixed = /^(author|path):(.*)$/.exec(trimmed);
+  if (prefixed) {
+    const term = prefixed[2].trim();
+    if (!term) return { filterArgs: [], pathspec: [], shaTerm: "" };
+    if (prefixed[1] === "author") {
+      return {
+        filterArgs: [
+          "--regexp-ignore-case",
+          "--fixed-strings",
+          `--author=${term}`,
+        ],
+        pathspec: [],
+        shaTerm: "",
+      };
+    }
+    return {
+      filterArgs: [],
+      pathspec: ["--", `:(icase)*${term}*`],
+      shaTerm: "",
+    };
+  }
+  return {
+    filterArgs: [
+      "--regexp-ignore-case",
+      "--fixed-strings",
+      `--grep=${trimmed}`,
+    ],
+    pathspec: [],
+    shaTerm: /^[0-9a-f]{4,40}$/i.test(trimmed) ? trimmed : "",
+  };
+}
+
 export function commitHistory(
   cwd: string,
-  options: { ref: string; skip: number; limit: number },
+  options: { ref: string; skip: number; limit: number; query?: string },
 ): { commits: GitHistoryCommit[]; hasMore: boolean; error?: string } {
   const ref = (options.ref || "HEAD").trim();
   if (!ref || ref.startsWith("-") || ref.includes("\0"))
@@ -407,6 +448,9 @@ export function commitHistory(
     1,
     Math.min(Math.floor(options.limit) || 1, MAX_HISTORY_LIMIT),
   );
+  const { filterArgs, pathspec, shaTerm } = historyQueryArgs(
+    options.query || "",
+  );
   const res = run(
     [
       "git",
@@ -415,13 +459,34 @@ export function commitHistory(
       `--skip=${skip}`,
       `--max-count=${limit + 1}`,
       `--format=${HISTORY_FORMAT}`,
+      ...filterArgs,
       verified.stdout.trim(),
+      ...pathspec,
     ],
     cwd,
   );
   if (res.code !== 0)
     return { commits: [], hasMore: false, error: "git log failed" };
-  const parsed = parseHistoryLog(res.stdout);
+  let parsed = parseHistoryLog(res.stdout);
+  // A hex-looking term also matches a commit by sha prefix; pin that commit
+  // ahead of message matches on the first page.
+  if (shaTerm && skip === 0) {
+    const bySha = run(
+      ["git", "rev-parse", "--verify", `${shaTerm}^{commit}`],
+      cwd,
+    );
+    const sha = bySha.code === 0 ? bySha.stdout.trim() : "";
+    if (sha) {
+      const single = run(
+        ["git", "log", "-z", "-1", `--format=${HISTORY_FORMAT}`, sha],
+        cwd,
+      );
+      if (single.code === 0) {
+        const hit = parseHistoryLog(single.stdout);
+        parsed = [...hit, ...parsed.filter((c) => c.sha !== sha)];
+      }
+    }
+  }
   const hasMore = parsed.length > limit;
   return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
 }

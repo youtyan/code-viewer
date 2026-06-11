@@ -941,6 +941,21 @@ body.gdp-history-page #sidebar-resizer {
   z-index: 1;
 }
 .history-title { font-weight: 600; font-size: 13px; }
+.history-filter-wrap {
+  padding: 0 12px 8px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+#history-filter {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
 .history-banner {
   margin: 8px 10px 0;
   padding: 6px 10px;
@@ -952,15 +967,27 @@ body.gdp-history-page #sidebar-resizer {
 }
 #history-list { list-style: none; margin: 0; padding: 0 0 24px; }
 .history-group {
-  padding: 10px 14px 4px;
-  background: var(--bg-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 6px;
+  background: var(--bg-mute);
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
+.history-group::before {
+  content: "";
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+#history-list > .history-group:first-child { border-top: 0; }
 .history-item {
   padding: 8px 14px;
   cursor: pointer;

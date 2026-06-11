@@ -96,6 +96,88 @@ describe("commitHistory", () => {
     expect(res.commits.length).toBe(5);
   });
 
+  test("filters by commit message", () => {
+    const res = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: "COMMIT 2",
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.commits.map((c) => c.subject)).toEqual(["commit 2"]);
+    expect(res.hasMore).toBe(false);
+  });
+
+  test("filters by sha prefix", () => {
+    const res = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: shas[1].slice(0, 8),
+    });
+    expect(res.commits[0].sha).toBe(shas[1]);
+  });
+
+  test("filters by author prefix syntax", () => {
+    const hit = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: "author:tester",
+    });
+    expect(hit.commits.length).toBe(5);
+    const miss = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: "author:nobody",
+    });
+    expect(miss.commits.length).toBe(0);
+  });
+
+  test("filters by touched path syntax", () => {
+    writeFileSync(join(repo, "special-name.txt"), "x\n");
+    git(repo, ["add", "special-name.txt"]);
+    git(repo, ["commit", "-m", "touch special file"]);
+    const hit = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: "path:special",
+    });
+    expect(hit.commits.map((c) => c.subject)).toEqual(["touch special file"]);
+    const all = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 10,
+      query: "path:file.txt",
+    });
+    expect(all.commits.length).toBe(5);
+    git(repo, ["reset", "--hard", "HEAD^"]);
+  });
+
+  test("pages filtered results with skip and hasMore", () => {
+    const page1 = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 0,
+      limit: 2,
+      query: "commit",
+    });
+    expect(page1.commits.map((c) => c.subject)).toEqual([
+      "commit 4",
+      "commit 3",
+    ]);
+    expect(page1.hasMore).toBe(true);
+    const page3 = commitHistory(repo, {
+      ref: "HEAD",
+      skip: 4,
+      limit: 2,
+      query: "commit",
+    });
+    expect(page3.commits.map((c) => c.subject)).toEqual(["commit 0"]);
+    expect(page3.hasMore).toBe(false);
+  });
+
   // Mutates the repo (adds commits), so this must stay the last test.
   test("lists both parents for merge commits", () => {
     git(repo, ["checkout", "-b", "topic", shas[3]]);

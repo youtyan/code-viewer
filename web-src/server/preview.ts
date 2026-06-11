@@ -1198,6 +1198,7 @@ function handleLog(url: URL) {
     ref,
     skip: Number.isFinite(skip) ? skip : 0,
     limit: Number.isFinite(limit) ? limit : 50,
+    query: url.searchParams.get("q") || "",
   });
   if (result.error) return text(result.error, 400);
   return json({ commits: result.commits, hasMore: result.hasMore });
