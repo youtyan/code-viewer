@@ -15571,6 +15571,19 @@ ${frontmatter.yaml}
         to: STATE.to || DEFAULT_RANGE.to
       };
     }
+    let preHistoryRange = null;
+    function parkRangeForHistory() {
+      if (preHistoryRange === null)
+        preHistoryRange = { from: STATE.from, to: STATE.to };
+    }
+    function restoreRangeAfterHistory() {
+      if (!preHistoryRange)
+        return;
+      STATE.from = preHistoryRange.from;
+      STATE.to = preHistoryRange.to;
+      preHistoryRange = null;
+      syncRefInputs();
+    }
     function repoFileTargetFromRoute() {
       return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
     }
@@ -15633,7 +15646,10 @@ ${frontmatter.yaml}
           });
         }
         if (link2.dataset.route === "diff") {
-          link2.href = buildRoute({ screen: "diff", range: currentRange() });
+          link2.href = buildRoute({
+            screen: "diff",
+            range: preHistoryRange ?? currentRange()
+          });
         }
         if (link2.dataset.route === "history") {
           link2.href = buildRoute({
@@ -16169,6 +16185,7 @@ ${frontmatter.yaml}
         setStatus("live");
         applySourceRouteToShell();
       } else if (STATE.route.screen === "history") {
+        parkRangeForHistory();
         setStatus("live");
         HISTORY_VIEW.enterHistory();
       } else
@@ -16182,6 +16199,7 @@ ${frontmatter.yaml}
         ti.value = STATE.to;
     }
     function setRange(from, to) {
+      preHistoryRange = null;
       STATE.from = from || "";
       STATE.to = to || "";
       localStorage.setItem("gdp:from", STATE.from);
@@ -16256,6 +16274,9 @@ ${frontmatter.yaml}
     }
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
     function applyRouteFromLocation() {
+      if (STATE.route.screen === "history" && window.location.pathname !== "/history") {
+        restoreRangeAfterHistory();
+      }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       STATE.route = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
       STATE.from = STATE.route.range.from;
@@ -16280,6 +16301,7 @@ ${frontmatter.yaml}
         return;
       }
       if (STATE.route.screen === "history") {
+        parkRangeForHistory();
         cancelActiveSourceLoad("navigation");
         setPageMode();
         removeStandaloneSource();
