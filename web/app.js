@@ -6483,7 +6483,7 @@ ${frontmatter.yaml}
         return;
       activeSessionId = sessionId;
       syncSessionUrl();
-      renderAnnotationPanel();
+      updateActiveHighlights();
       applyInlineAnnotations();
     }
     function restoreSessionFromUrl() {
@@ -6583,6 +6583,7 @@ ${frontmatter.yaml}
       for (const session of [...ANNOTATIONS.sessions].reverse()) {
         const sessionEl = document.createElement("section");
         sessionEl.className = "annotation-session";
+        sessionEl.dataset.sessionId = session.id;
         sessionEl.classList.toggle("active", session.id === activeSessionId);
         const head = document.createElement("div");
         head.className = "annotation-session-head";
@@ -6615,6 +6616,7 @@ ${frontmatter.yaml}
         list2.className = "annotation-entries";
         session.entries.forEach((entry) => {
           const item = document.createElement("li");
+          item.dataset.entryId = entry.id;
           item.classList.toggle("active", entry.id === activeAnnotationId);
           const open = document.createElement("button");
           open.type = "button";
@@ -6647,10 +6649,18 @@ ${frontmatter.yaml}
         annotationSessionsEl.appendChild(sessionEl);
       }
     }
+    function updateActiveHighlights() {
+      annotationSessionsEl.querySelectorAll(".annotation-session").forEach((el) => {
+        el.classList.toggle("active", el.dataset.sessionId === activeSessionId);
+      });
+      annotationSessionsEl.querySelectorAll(".annotation-entries li").forEach((el) => {
+        el.classList.toggle("active", el.dataset.entryId === activeAnnotationId);
+      });
+    }
     function hideAnnotationDetail() {
       activeAnnotationId = null;
       annotationDetail.hidden = true;
-      renderAnnotationPanel();
+      updateActiveHighlights();
       syncInlineAnnotationActive();
     }
     function showAnnotationDetail(session, entry, index) {
@@ -6674,7 +6684,7 @@ ${frontmatter.yaml}
       $("#annotation-detail-next").disabled = index >= session.entries.length - 1;
       annotationDetail.hidden = false;
       setAnnotationPanelOpen(true);
-      renderAnnotationPanel();
+      updateActiveHighlights();
       syncInlineAnnotationActive();
     }
     async function openAnnotationEntry(entryId) {
@@ -6682,6 +6692,7 @@ ${frontmatter.yaml}
       if (!found)
         return;
       const { session, entry, index } = found;
+      const sessionChanged = activeSessionId !== session.id;
       activeSessionId = session.id;
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
@@ -6708,8 +6719,10 @@ ${frontmatter.yaml}
         await deps.renderStandaloneSource({ path: entry.path, ref });
       }
       showAnnotationDetail(session, entry, index);
-      applyInlineAnnotations();
-      const inlineRow = document.querySelector(`.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`);
+      const rowSelector = `.gdp-annotation-row[data-annotation-id="${CSS.escape(entryId)}"]`;
+      if (sessionChanged || !document.querySelector(rowSelector))
+        applyInlineAnnotations();
+      const inlineRow = document.querySelector(rowSelector);
       if (inlineRow)
         deps.scrollDiffElementIntoView(inlineRow, "center");
     }
