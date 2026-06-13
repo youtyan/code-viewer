@@ -1014,7 +1014,7 @@ export function createSidebar(deps: SidebarDeps) {
     });
     $$(".sb-tree-action").forEach((b) => {
       (b as HTMLButtonElement).disabled =
-        STATE.sbView !== "tree" || !STATE.files.length;
+        STATE.sbView !== "tree" || !files.length;
     });
     // Re-apply active highlight if any
     if (STATE.activeFile) markActive(STATE.activeFile);
