@@ -13500,7 +13500,7 @@ ${frontmatter.yaml}
         b2.classList.toggle("active", b2.dataset.view === STATE.sbView);
       });
       $$(".sb-tree-action").forEach((b2) => {
-        b2.disabled = STATE.sbView !== "tree" || !STATE.files.length;
+        b2.disabled = STATE.sbView !== "tree" || !files.length;
       });
       if (STATE.activeFile)
         markActive(STATE.activeFile);
