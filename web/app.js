@@ -15310,6 +15310,7 @@ ${frontmatter.yaml}
       const isStandalone = card.classList.contains("gdp-standalone-source");
       const view = document.createElement("div");
       view.className = "gdp-source-viewer media";
+      view.classList.add(mediaKind);
       if (!isStandalone) {
         const meta = document.createElement("div");
         meta.className = "gdp-source-meta";
