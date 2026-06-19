@@ -2546,6 +2546,11 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 .gdp-source-viewer.media {
   padding: 16px;
 }
+.gdp-source-viewer.media.pdf {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .gdp-source-file-info {
   display: flex;
   flex-wrap: wrap;
@@ -2578,6 +2583,11 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   min-height: min(72vh, 820px);
   border: 0;
   background: var(--bg);
+}
+.gdp-source-viewer.media.pdf iframe {
+  flex: 1 1 auto;
+  height: max(520px, calc(100vh - var(--global-header-h) - 164px));
+  min-height: 0;
 }
 .gdp-source-meta {
   padding: 8px 12px;
