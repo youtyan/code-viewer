@@ -763,8 +763,10 @@ export function createDiffView(deps: DiffViewDeps) {
       file.highlight &&
       hljsRef &&
       typeof ui.highlightCode === "function"
-    )
+    ) {
       ui.highlightCode();
+      highlightPlaintextSpans(card, file);
+    }
 
     enhanceMediaCard(file, card);
     syncSideScrollCard(card);
@@ -1168,29 +1170,48 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function highlightInsertedSpans(card: Element, file: FileMeta) {
-    if (file.size_class === "huge") return;
-    if (!STATE.syntaxHighlight) return;
-    const hljsRef = getHljs();
-    if (!hljsRef?.highlight) return;
-    const lang = inferLang(file.path);
-    if (!lang || !hljsRef.getLanguage?.(lang)) return;
     const spans = card.querySelectorAll<HTMLElement>(
       "tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])",
     );
-    spans.forEach((s) => {
+    highlightDiffSpans(file, spans);
+  }
+
+  function highlightPlaintextSpans(card: Element, file: FileMeta) {
+    const spans = card.querySelectorAll<HTMLElement>(
+      ".d2h-code-line-ctn.hljs.plaintext:not([data-gdp-hl])",
+    );
+    highlightDiffSpans(file, spans);
+  }
+
+  function highlightDiffSpans(
+    file: FileMeta,
+    spans: Iterable<HTMLElement>,
+    deadline?: IdleDeadline,
+  ): boolean {
+    if (file.size_class === "huge") return true;
+    if (!STATE.syntaxHighlight) return true;
+    const hljsRef = getHljs();
+    if (!hljsRef?.highlight) return true;
+    const lang = inferLang(file.path);
+    if (!lang || (hljsRef.getLanguage && !hljsRef.getLanguage(lang)))
+      return true;
+    for (const s of spans) {
+      if (deadline && deadline.timeRemaining() <= 4) return false;
       s.dataset.gdpHl = "1";
       const text = s.textContent || "";
-      if (text.length === 0) return;
+      if (text.length === 0) continue;
       try {
         s.innerHTML = hljsRef.highlight(text, {
           language: lang,
           ignoreIllegals: true,
         }).value;
-        if (!s.classList.contains("hljs")) s.classList.add("hljs");
+        s.classList.add("hljs", `language-${lang}`);
+        s.classList.remove("plaintext");
       } catch (_) {
         /* swallow */
       }
-    });
+    }
+    return true;
   }
 
   function scheduleIdleHighlight(card: DiffCardElement, file: FileMeta) {
@@ -1207,23 +1228,8 @@ export function createDiffView(deps: DiffViewDeps) {
       const spans = card.querySelectorAll<HTMLElement>(
         ".d2h-code-line-ctn:not([data-gdp-hl])",
       );
-      let i = 0;
-      while (i < spans.length && deadline.timeRemaining() > 4) {
-        const s = spans[i++];
-        s.dataset.gdpHl = "1";
-        const text = s.textContent || "";
-        if (text.length === 0) continue;
-        try {
-          s.innerHTML = hljsRef.highlight(text, {
-            language: lang,
-            ignoreIllegals: true,
-          }).value;
-          if (!s.classList.contains("hljs")) s.classList.add("hljs");
-        } catch (_) {
-          /* swallow */
-        }
-      }
-      if (i < spans.length) requestIdleCallback(work, { timeout: 1500 });
+      if (!highlightDiffSpans(file, spans, deadline))
+        requestIdleCallback(work, { timeout: 1500 });
     };
     requestIdleCallback(work, { timeout: 2000 });
   }
