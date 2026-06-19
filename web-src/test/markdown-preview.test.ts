@@ -184,6 +184,28 @@ describe("markdown preview", () => {
     expect(seen).toEqual(["typescript", "javascript"]);
   });
 
+  test("normalizes Terraform fenced language aliases", () => {
+    const seen: string[] = [];
+    const highlighter = {
+      codeToHtml: (_code: string, options: { lang: string }) => {
+        seen.push(options.lang);
+        return '<pre class="shiki"><code><span class="line">resource</span></code></pre>';
+      },
+    };
+    renderMarkdownHtml(
+      '```tf\nresource "null_resource" "example" {}\n```',
+      { path: "README.md", ref: "worktree" },
+      highlighter,
+    );
+    renderMarkdownHtml(
+      '```tfvars\nregion = "ap-northeast-1"\n```',
+      { path: "README.md", ref: "worktree" },
+      highlighter,
+    );
+
+    expect(seen).toEqual(["terraform", "terraform"]);
+  });
+
   test("slugifies Japanese and duplicate-safe heading ids deterministically", () => {
     expect(markdownSlugify("Hello World!")).toBe("hello-world");
     expect(markdownSlugify("日本語 見出し")).toBe("日本語-見出し");
