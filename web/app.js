@@ -175,6 +175,75 @@
     return scrollable || doc.scrollingElement;
   }
 
+  // web-src/core/highlight-languages.ts
+  function lineComment(hljs, begin) {
+    return hljs.COMMENT?.(begin, "$") || {
+      scope: "comment",
+      begin,
+      end: "$"
+    };
+  }
+  function blockComment(hljs) {
+    return hljs.COMMENT?.("/\\*", "\\*/") || {
+      scope: "comment",
+      begin: "/\\*",
+      end: "\\*/"
+    };
+  }
+  function terraformLanguageDefinition(hljs) {
+    const api = hljs;
+    return {
+      name: "Terraform",
+      aliases: ["tf", "tfvars", "hcl"],
+      keywords: {
+        keyword: "resource data variable output locals module provider terraform backend dynamic lifecycle provisioner connection count for_each depends_on source version required_version required_providers",
+        literal: "true false null",
+        built_in: "abspath basename chomp cidrhost cidrnetmask cidrsubnet cidrsubnets compact concat contains csvdecode dirname distinct element file filebase64 fileexists flatten format formatdate index jsondecode jsonencode keys length lookup lower merge nonsensitive regex replace sensitive setproduct sort split substr templatefile tobool tonumber tostring try upper values yamldecode yamlencode zipmap"
+      },
+      contains: [
+        lineComment(api, "#"),
+        lineComment(api, "//"),
+        blockComment(api),
+        api.QUOTE_STRING_MODE || {
+          scope: "string",
+          begin: '"',
+          end: '"',
+          contains: [{ begin: "\\$\\{", end: "\\}" }]
+        },
+        {
+          scope: "string",
+          begin: "<<-?\\s*([A-Za-z_][\\w-]*)",
+          end: "^\\s*\\1\\s*$"
+        },
+        api.NUMBER_MODE || {
+          scope: "number",
+          begin: "\\b\\d+(\\.\\d+)?\\b"
+        },
+        {
+          scope: "attr",
+          begin: "\\b[A-Za-z_][\\w-]*(?=\\s*=)"
+        },
+        {
+          scope: "function",
+          begin: "\\b[A-Za-z_][\\w-]*(?=\\()"
+        },
+        {
+          scope: "variable",
+          begin: "\\b(?:var|local|module|data|resource|provider)\\.[A-Za-z_][\\w-]*(?:\\.[A-Za-z_][\\w-]*)*"
+        }
+      ]
+    };
+  }
+  function ensureTerraformHighlightLanguage(hljsRef) {
+    if (!hljsRef?.registerLanguage)
+      return;
+    if (hljsRef.getLanguage?.("terraform"))
+      return;
+    try {
+      hljsRef.registerLanguage("terraform", terraformLanguageDefinition);
+    } catch {}
+  }
+
   // web-src/core/icons.ts
   var FOLDER_ICON_PATHS = {
     closed: "M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z",
@@ -6403,6 +6472,9 @@
     shellscript: "bash",
     console: "bash",
     "shell-session": "bash",
+    tf: "terraform",
+    tfvars: "terraform",
+    hcl: "terraform",
     yml: "yaml",
     ts: "typescript",
     tsx: "typescript",
@@ -6440,6 +6512,7 @@
     "sql",
     "svelte",
     "swift",
+    "terraform",
     "toml",
     "tsx",
     "typescript",
@@ -8430,8 +8503,10 @@ ${frontmatter.yaml}
       ui.draw();
       if (STATE.ignoreWs)
         suppressWhitespaceOnlyInlineHighlights(body);
-      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function")
+      if (STATE.syntaxHighlight && file.highlight && hljsRef && typeof ui.highlightCode === "function") {
         ui.highlightCode();
+        highlightPlaintextSpans(card, file);
+      }
       enhanceMediaCard(file, card);
       syncSideScrollCard(card);
       appendStatSquaresToHeader(card, file);
@@ -8753,31 +8828,41 @@ ${frontmatter.yaml}
       }
     }
     function highlightInsertedSpans(card, file) {
+      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
+      highlightDiffSpans(file, spans);
+    }
+    function highlightPlaintextSpans(card, file) {
+      const spans = card.querySelectorAll(".d2h-code-line-ctn.hljs.plaintext:not([data-gdp-hl])");
+      highlightDiffSpans(file, spans);
+    }
+    function highlightDiffSpans(file, spans, deadline) {
       if (file.size_class === "huge")
-        return;
+        return true;
       if (!STATE.syntaxHighlight)
-        return;
+        return true;
       const hljsRef = getHljs();
       if (!hljsRef?.highlight)
-        return;
+        return true;
       const lang = inferLang(file.path);
-      if (!lang || !hljsRef.getLanguage?.(lang))
-        return;
-      const spans = card.querySelectorAll("tr.gdp-inserted-ctx .d2h-code-line-ctn:not([data-gdp-hl])");
-      spans.forEach((s2) => {
+      if (!lang || hljsRef.getLanguage && !hljsRef.getLanguage(lang))
+        return true;
+      for (const s2 of spans) {
+        if (deadline && deadline.timeRemaining() <= 4)
+          return false;
         s2.dataset.gdpHl = "1";
         const text2 = s2.textContent || "";
         if (text2.length === 0)
-          return;
+          continue;
         try {
           s2.innerHTML = hljsRef.highlight(text2, {
             language: lang,
             ignoreIllegals: true
           }).value;
-          if (!s2.classList.contains("hljs"))
-            s2.classList.add("hljs");
+          s2.classList.add("hljs", `language-${lang}`);
+          s2.classList.remove("plaintext");
         } catch (_) {}
-      });
+      }
+      return true;
     }
     function scheduleIdleHighlight(card, file) {
       if (file.highlight)
@@ -8796,23 +8881,7 @@ ${frontmatter.yaml}
         return;
       const work = (deadline) => {
         const spans = card.querySelectorAll(".d2h-code-line-ctn:not([data-gdp-hl])");
-        let i2 = 0;
-        while (i2 < spans.length && deadline.timeRemaining() > 4) {
-          const s2 = spans[i2++];
-          s2.dataset.gdpHl = "1";
-          const text2 = s2.textContent || "";
-          if (text2.length === 0)
-            continue;
-          try {
-            s2.innerHTML = hljsRef.highlight(text2, {
-              language: lang,
-              ignoreIllegals: true
-            }).value;
-            if (!s2.classList.contains("hljs"))
-              s2.classList.add("hljs");
-          } catch (_) {}
-        }
-        if (i2 < spans.length)
+        if (!highlightDiffSpans(file, spans, deadline))
           requestIdleCallback(work, { timeout: 1500 });
       };
       requestIdleCallback(work, { timeout: 2000 });
@@ -16331,6 +16400,7 @@ ${frontmatter.yaml}
       const hljsRef = window.hljs || window.Diff2HtmlUI?.hljs;
       if (!hljsRef)
         return null;
+      ensureTerraformHighlightLanguage(hljsRef);
       if (!highlightConfigured && typeof hljsRef.configure === "function") {
         hljsRef.configure({ ignoreUnescapedHTML: true });
         highlightConfigured = true;

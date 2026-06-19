@@ -241,6 +241,12 @@ declare global {
 export type HljsApi = {
   configure?: (options: Record<string, unknown>) => void;
   getLanguage?: (language: string) => unknown;
+  registerLanguage?: (
+    language: string,
+    languageDefinition: (
+      hljs: Record<string, unknown>,
+    ) => Record<string, unknown>,
+  ) => void;
   highlight?: (
     code: string,
     options: { language: string; ignoreIllegals: boolean },

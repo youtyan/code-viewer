@@ -9,6 +9,7 @@ import {
   prepareKeyboardPanels,
   setPanelFocusScope,
 } from "./core/focus-scope";
+import { ensureTerraformHighlightLanguage } from "./core/highlight-languages";
 import {
   CHEVRON_DOWN_12_PATH,
   GIT_BRANCH_16_PATH,
@@ -1106,6 +1107,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       | HljsApi
       | undefined;
     if (!hljsRef) return null;
+    ensureTerraformHighlightLanguage(hljsRef);
     if (!highlightConfigured && typeof hljsRef.configure === "function") {
       hljsRef.configure({ ignoreUnescapedHTML: true });
       highlightConfigured = true;
