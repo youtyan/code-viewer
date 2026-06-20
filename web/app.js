@@ -9383,38 +9383,12 @@ ${frontmatter.yaml}
       btn.textContent = text2;
       return btn;
     }
-    function showDockerNotice(file) {
-      grid.clear();
-      schemaView.clear();
-      erDiagram.clear();
-      grid.el.hidden = true;
-      queryEditor.el.hidden = true;
-      schemaView.el.hidden = true;
-      erDiagram.el.hidden = true;
-      tabBar.hidden = true;
-      let notice = mainContent.querySelector(".db-docker-notice");
-      if (!notice) {
-        notice = document.createElement("div");
-        notice.className = "db-docker-notice";
-        mainContent.appendChild(notice);
-      }
-      notice.innerHTML = "";
-      const icon = document.createElement("div");
-      icon.className = "db-docker-notice-icon";
-      icon.textContent = "\uD83D\uDC33";
-      const title = document.createElement("h3");
-      title.textContent = `${file.kind === "postgresql" ? "PostgreSQL" : "MySQL"} (Docker)`;
-      const desc = document.createElement("p");
-      desc.textContent = `${file.name}`;
-      const hint = document.createElement("p");
-      hint.className = "db-docker-notice-hint";
-      hint.textContent = "Docker database adapters are coming soon. Use the Query CLI to run queries via docker exec:";
-      const code2 = document.createElement("pre");
-      code2.className = "db-docker-notice-code";
-      const svcName = file.id.replace("docker:", "");
-      code2.textContent = `docker exec -i ${svcName} ${file.kind === "postgresql" ? "psql -U postgres" : "mysql -u root"} -c "SELECT ..."`;
-      notice.append(icon, title, desc, hint, code2);
-      notice.hidden = false;
+    function clearDockerNotice() {
+      const notice = mainContent.querySelector(".db-docker-notice");
+      if (notice)
+        notice.remove();
+      tabBar.hidden = false;
+      grid.el.hidden = false;
     }
     function mount() {
       if (mounted)
@@ -9595,18 +9569,15 @@ ${frontmatter.yaml}
       if (!dbId)
         return;
       const file = lastFiles.find((f2) => f2.id === dbId);
-      if (file?.id.startsWith("docker:")) {
-        showDockerNotice(file);
-        return;
-      }
       const option = dbSelect.selectedOptions[0];
       currentDb = {
         id: dbId,
-        path: dbId,
+        path: file?.path || dbId,
         name: option?.textContent || dbId,
-        sizeBytes: 0,
-        kind: "sqlite"
+        sizeBytes: file?.sizeBytes || 0,
+        kind: file?.kind || "sqlite"
       };
+      clearDockerNotice();
       deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
       selectDb(dbId);
     });
@@ -9638,10 +9609,6 @@ ${frontmatter.yaml}
       const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
-      if (currentDb?.id.startsWith("docker:")) {
-        showDockerNotice(currentDb);
-        return;
-      }
       await selectDb(target);
       if (table2) {
         await selectTable(table2);
