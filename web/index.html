@@ -33,6 +33,7 @@
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
       <button id="query-history-toggle" class="global-icon-action" title="query history" aria-label="query history" hidden>📋</button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
       <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
@@ -79,6 +80,14 @@
   </div>
 
   <div id="load-bar" aria-hidden="true"></div>
+  <div id="change-banner" hidden>
+    <span id="change-banner-copy">
+      <span id="change-banner-text"></span>
+      <span id="change-banner-age"></span>
+    </span>
+    <button id="change-banner-reload" type="button"></button>
+    <button id="change-banner-dismiss" type="button" aria-label="dismiss">×</button>
+  </div>
 
   <aside id="history-panel" aria-label="Commit history" hidden>
     <div class="history-head">

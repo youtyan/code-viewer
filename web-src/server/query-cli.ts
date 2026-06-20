@@ -15,7 +15,40 @@ export type QueryCommand =
       maxRows?: number;
     }
   | { kind: "list"; json: boolean; db?: string }
-  | { kind: "clear"; db?: string };
+  | { kind: "clear"; db?: string }
+  | {
+      kind: "search";
+      db: string;
+      term: string;
+      tables?: string[];
+      includeNonText: boolean;
+      maxHitsPerTable?: number;
+    }
+  | {
+      kind: "snapshot-create";
+      db: string;
+      tables?: string[];
+      note: string;
+    }
+  | { kind: "snapshot-list"; db?: string; json: boolean }
+  | { kind: "snapshot-delete"; id: string }
+  | { kind: "snapshot-note"; id: string; note: string }
+  | {
+      kind: "diff-create";
+      beforeId: string;
+      afterId: string;
+      note: string;
+    }
+  | { kind: "diff-list"; db?: string; json: boolean }
+  | { kind: "diff-tables"; id: string }
+  | {
+      kind: "diff-rows";
+      id: string;
+      table: string;
+      type?: string;
+      limit?: number;
+    }
+  | { kind: "diff-delete"; id: string };
 
 export type QueryArgs = {
   command: QueryCommand;
@@ -33,6 +66,16 @@ Usage:
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path>]
   code-viewer query clear [--db <path>]
+  code-viewer query search --db <path> --term <text> [--tables t1,t2,...] [--include-non-text] [--max-hits <n>]
+  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>]
+  code-viewer query snapshot list [--json] [--db <path>]
+  code-viewer query snapshot delete --id <snapshot-id>
+  code-viewer query snapshot note --id <snapshot-id> --note <text>
+  code-viewer query diff create --before <id> --after <id> [--note <text>]
+  code-viewer query diff list [--json] [--db <path>]
+  code-viewer query diff tables --id <diff-id>
+  code-viewer query diff rows --id <diff-id> --table <name> [--type inserted|updated|deleted] [--limit <n>]
+  code-viewer query diff delete --id <diff-id>
   code-viewer query agent-help
 
 Global options:
@@ -41,10 +84,10 @@ Global options:
 
 Examples:
   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
-  code-viewer query exec --db app.db --sql "SELECT COUNT(*) FROM orders" \\
-      --title "Order count" --body "Checking total orders."
-  code-viewer query list --json
-  code-viewer query clear --db data.sqlite3
+  code-viewer query search --db app.db --term "john@example.com"
+  code-viewer query snapshot create --db app.db --tables users,orders --note "Before migration"
+  code-viewer query diff create --before snap-abc123 --after snap-def456
+  code-viewer query diff rows --id diff-xyz789 --table users --type updated
 `;
 
 export const QUERY_AGENT_HELP = `code-viewer query — execute read-only SQL queries against local databases
@@ -59,20 +102,59 @@ History tab, so the human can review what you queried.
 - Answering "what does this data look like?"
 - Checking schema, row counts, sample data
 - Investigating data quality or anomalies
+- Searching for a value across all tables
+- Taking snapshots before/after a test to verify DB changes
 
 ## Requirements
 
 - A code-viewer server must be running for the repository.
-- Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed.
+- Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed (for exec).
 - Results are persisted and visible to the human.
 
-## Workflow
+## Workflow: SQL Query
 
 1. Identify which database file to query (list with: code-viewer query list)
 2. Execute:
    code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
        --title "Sample user data" --body "Checking what user records look like."
 3. The human sees results in the browser's Database > Query History tab.
+
+## Workflow: Global Search
+
+Search for a string across all tables and all text columns:
+  code-viewer query search --db app.db --term "john@example.com"
+
+Options:
+  --tables users,orders    Only search specific tables
+  --include-non-text       Also search numeric/date columns
+  --max-hits 20            Max hits per table (default: 50)
+
+## Workflow: Snapshot & Diff (for testing)
+
+Use this to verify that a feature test correctly modifies the expected DB tables.
+
+1. Take a "before" snapshot:
+   code-viewer query snapshot create --db app.db --tables users,orders \\
+       --note "Before running user registration test"
+
+2. (The human or test runner performs the action)
+
+3. Take an "after" snapshot:
+   code-viewer query snapshot create --db app.db --tables users,orders \\
+       --note "After running user registration test"
+
+4. List snapshots to get IDs:
+   code-viewer query snapshot list --db app.db
+
+5. Create a diff:
+   code-viewer query diff create --before snap-abc123 --after snap-def456 \\
+       --note "User registration test - expected 1 INSERT in users"
+
+6. View the diff:
+   code-viewer query diff tables --id diff-xyz789
+   code-viewer query diff rows --id diff-xyz789 --table users --type inserted
+
+The human can also view all diffs in the browser's Database > Snapshot tab.
 
 ## Guidelines
 
@@ -82,6 +164,8 @@ History tab, so the human can review what you queried.
 - Do not query broad PII or secrets unless explicitly asked.
 - Use --no-save for exploratory queries that should not remain in history.
 - Prefer specific columns over SELECT *.
+- For snapshots, always specify --tables to avoid scanning unnecessary tables.
+- Write meaningful --note values — the human uses them to understand context.
 `;
 
 function takeValue(

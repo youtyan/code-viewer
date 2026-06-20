@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.code-viewer/
 docs/superpowers/
 *.tgz
 .DS_Store

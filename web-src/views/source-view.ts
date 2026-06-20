@@ -618,6 +618,8 @@ export function createSourceView(deps: SourceViewDeps) {
     preview.className = "gdp-html-preview";
     const frame = document.createElement("iframe");
     frame.title = `${target.path} preview`;
+    frame.sandbox.value = "";
+    frame.referrerPolicy = "no-referrer";
     frame.srcdoc = html;
     preview.appendChild(frame);
     return preview;
