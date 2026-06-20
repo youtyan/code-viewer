@@ -51,7 +51,7 @@ async function getSqliteClass(): Promise<SqliteConstructor> {
     // not installed
   }
   throw new Error(
-    "No SQLite driver available. Install better-sqlite3 or run with Bun.",
+    "No SQLite driver available. Install better-sqlite3 or use the bun runtime.",
   );
 }
 

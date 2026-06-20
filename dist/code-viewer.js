@@ -3217,13 +3217,11 @@ function createDockerAdapter(config) {
       if (BLOCKED_RE.test(upper)) {
         throw new Error("Query contains a disallowed statement keyword");
       }
-      const limited = `${trimmed.replace(/;\s*$/, "")} LIMIT ${maxRows}`;
-      let result;
-      try {
-        result = exec(limited);
-      } catch {
-        result = exec(trimmed);
-      }
+      const readOnlyPreamble = config.kind === "postgresql" ? "BEGIN TRANSACTION READ ONLY; " : "SET SESSION TRANSACTION READ ONLY; ";
+      const readOnlyPostamble = config.kind === "postgresql" ? "; COMMIT" : "; SET SESSION TRANSACTION READ WRITE";
+      const stripped = trimmed.replace(/;\s*$/, "");
+      const limited = `${readOnlyPreamble}${stripped} LIMIT ${maxRows}${readOnlyPostamble}`;
+      const result = exec(limited);
       const columnNames = config.kind === "mysql" && result.columns.length > 0 ? result.columns : result.rows.length > 0 ? Array.from({ length: result.rows[0].length }, (_, i) => `col${i + 1}`) : [];
       return {
         columns: columnNames,
@@ -3352,7 +3350,7 @@ async function getSqliteClass() {
     cachedDbClass = mod.default || mod;
     return cachedDbClass;
   } catch {}
-  throw new Error("No SQLite driver available. Install better-sqlite3 or run with Bun.");
+  throw new Error("No SQLite driver available. Install better-sqlite3 or use the bun runtime.");
 }
 function sanitizeIdentifier2(name) {
   return `"${name.replace(/"/g, '""')}"`;
@@ -3487,8 +3485,13 @@ function createSqliteAdapter(db) {
       let rows;
       try {
         rows = db.prepare(wrappedSql).all(...params || []);
-      } catch {
-        rows = db.prepare(trimmed).all(...params || []);
+      } catch (wrapErr) {
+        const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
+        try {
+          rows = db.prepare(fallbackSql).all(...params || []);
+        } catch {
+          throw wrapErr;
+        }
       }
       const truncated = rows.length > maxRows;
       if (truncated)
@@ -3682,7 +3685,13 @@ function discoverSqliteFiles(cwd, omitDirNames) {
     }
   }
   scan(cwd, 0);
-  results.sort((a, b) => a.path.localeCompare(b.path));
+  results.sort((a, b) => {
+    const aInternal = a.path.startsWith(".code-viewer/") ? 1 : 0;
+    const bInternal = b.path.startsWith(".code-viewer/") ? 1 : 0;
+    if (aInternal !== bInternal)
+      return aInternal - bInternal;
+    return a.path.localeCompare(b.path);
+  });
   return results;
 }
 function validateDbPath(cwd, dbPath) {
@@ -3996,7 +4005,7 @@ async function getSqliteClass2() {
     cachedDbClass2 = mod.default || mod;
     return cachedDbClass2;
   } catch {}
-  throw new Error("No SQLite driver available. Install better-sqlite3 or run with Bun.");
+  throw new Error("No SQLite driver available. Install better-sqlite3 or use the bun runtime.");
 }
 async function getStoreDb(cwd) {
   const dbPath = join10(cwd, CODE_VIEWER_DIR3, SNAPSHOT_DB_NAME);
@@ -4091,123 +4100,123 @@ async function deleteSnapshot(cwd, snapshotId) {
     }
   }
 }
-async function createDiff(cwd, beforeId, afterId, note) {
+async function computeDiffTables(cwd, beforeId, afterId) {
   const db = await getStoreDb(cwd);
-  const id = makeId("diff");
-  db.prepare("INSERT INTO snapshot_diffs (id, before_id, after_id, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)").run(id, beforeId, afterId, note, new Date().toISOString(), "running");
-  return id;
-}
-async function computeDiff(cwd, diffId) {
-  const db = await getStoreDb(cwd);
-  const diff = db.prepare("SELECT before_id, after_id FROM snapshot_diffs WHERE id = ?").get(diffId);
-  if (!diff)
-    throw new Error("diff not found");
-  const beforeTables = db.prepare("SELECT table_name, table_hash FROM snapshot_tables WHERE snapshot_id = ?").all(diff.before_id);
-  const afterTables = db.prepare("SELECT table_name, table_hash FROM snapshot_tables WHERE snapshot_id = ?").all(diff.after_id);
-  const beforeMap = new Map(beforeTables.map((t) => [t.table_name, t.table_hash]));
-  const afterMap = new Map(afterTables.map((t) => [t.table_name, t.table_hash]));
+  const beforeTables = db.prepare("SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?").all(beforeId);
+  const afterTables = db.prepare("SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?").all(afterId);
+  const beforeMap = new Map(beforeTables.map((t) => [t.table_name, t]));
+  const afterMap = new Map(afterTables.map((t) => [t.table_name, t]));
   const allTables = new Set([...beforeMap.keys(), ...afterMap.keys()]);
-  const insertDiffTable = db.prepare("INSERT INTO snapshot_diff_tables (diff_id, table_name, inserted_count, updated_count, deleted_count, unchanged_count) VALUES (?, ?, ?, ?, ?, ?)");
-  const insertDiffRow = db.prepare("INSERT INTO snapshot_diff_rows (diff_id, table_name, change_type, row_key_hash, row_key_json, before_payload_hash, after_payload_hash) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const results = [];
   for (const table of allTables) {
-    const bHash = beforeMap.get(table);
-    const aHash = afterMap.get(table);
-    if (bHash && aHash && bHash === aHash) {
-      const rowCount = db.prepare("SELECT row_count FROM snapshot_tables WHERE snapshot_id = ? AND table_name = ?").get(diff.before_id, table).row_count;
-      insertDiffTable.run(diffId, table, 0, 0, 0, rowCount);
+    const b = beforeMap.get(table);
+    const a = afterMap.get(table);
+    if (b && a && b.table_hash === a.table_hash) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: b.row_count
+      });
       continue;
     }
-    if (!bHash) {
-      const afterRows = db.prepare("SELECT row_key_hash, row_key_json, payload_hash FROM snapshot_rows WHERE snapshot_id = ? AND table_name = ?").all(diff.after_id, table);
-      for (const r of afterRows) {
-        insertDiffRow.run(diffId, table, "inserted", r.row_key_hash, r.row_key_json, null, r.payload_hash);
-      }
-      insertDiffTable.run(diffId, table, afterRows.length, 0, 0, 0);
+    if (!b) {
+      results.push({
+        tableName: table,
+        insertedCount: a.row_count,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: 0
+      });
       continue;
     }
-    if (!aHash) {
-      const beforeRows = db.prepare("SELECT row_key_hash, row_key_json, payload_hash FROM snapshot_rows WHERE snapshot_id = ? AND table_name = ?").all(diff.before_id, table);
-      for (const r of beforeRows) {
-        insertDiffRow.run(diffId, table, "deleted", r.row_key_hash, r.row_key_json, r.payload_hash, null);
-      }
-      insertDiffTable.run(diffId, table, 0, 0, beforeRows.length, 0);
+    if (!a) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: b.row_count,
+        unchangedCount: 0
+      });
       continue;
     }
-    const inserted = db.prepare(`SELECT a.row_key_hash, a.row_key_json, a.payload_hash
-         FROM snapshot_rows a
-         LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
-         WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`).all(diff.before_id, table, diff.after_id, table);
-    const deleted = db.prepare(`SELECT b.row_key_hash, b.row_key_json, b.payload_hash
-         FROM snapshot_rows b
-         LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
-         WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`).all(diff.after_id, table, diff.before_id, table);
-    const updated = db.prepare(`SELECT b.row_key_hash, b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
-         FROM snapshot_rows b
-         INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
-         WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`).all(diff.after_id, table, diff.before_id, table);
-    const unchangedCount = db.prepare("SELECT row_count FROM snapshot_tables WHERE snapshot_id = ? AND table_name = ?").get(diff.before_id, table).row_count - deleted.length - updated.length;
-    for (const r of inserted) {
-      insertDiffRow.run(diffId, table, "inserted", r.row_key_hash, r.row_key_json, null, r.payload_hash);
-    }
-    for (const r of deleted) {
-      insertDiffRow.run(diffId, table, "deleted", r.row_key_hash, r.row_key_json, r.payload_hash, null);
-    }
-    for (const r of updated) {
-      insertDiffRow.run(diffId, table, "updated", r.row_key_hash, r.row_key_json, r.before_ph, r.after_ph);
-    }
-    insertDiffTable.run(diffId, table, inserted.length, updated.length, deleted.length, Math.max(0, unchangedCount));
+    const insertedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows a
+           LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+           WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`).get(beforeId, table, afterId, table).cnt;
+    const deletedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`).get(afterId, table, beforeId, table).cnt;
+    const updatedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`).get(afterId, table, beforeId, table).cnt;
+    const unchangedCount = b.row_count - deletedCount - updatedCount;
+    results.push({
+      tableName: table,
+      insertedCount,
+      updatedCount,
+      deletedCount,
+      unchangedCount: Math.max(0, unchangedCount)
+    });
   }
-  db.prepare("UPDATE snapshot_diffs SET status = 'done' WHERE id = ?").run(diffId);
+  results.sort((a, b) => {
+    const aChanges = a.insertedCount + a.updatedCount + a.deletedCount;
+    const bChanges = b.insertedCount + b.updatedCount + b.deletedCount;
+    if (bChanges !== aChanges)
+      return bChanges - aChanges;
+    return a.tableName.localeCompare(b.tableName);
+  });
+  return results;
 }
-async function finalizeDiffError(cwd, diffId, error) {
+async function computeDiffRows(cwd, beforeId, afterId, table, offset = 0, limit = 200) {
   const db = await getStoreDb(cwd);
-  db.prepare("UPDATE snapshot_diffs SET status = 'error', error_message = ? WHERE id = ?").run(error, diffId);
-}
-async function listDiffs(cwd, dbId) {
-  const db = await getStoreDb(cwd);
-  let rows;
-  if (dbId) {
-    rows = db.prepare(`SELECT d.id, d.before_id, d.after_id, d.note, d.created_at, d.status, d.error_message
-         FROM snapshot_diffs d
-         INNER JOIN snapshots s ON s.id = d.before_id
-         WHERE s.db_id = ?
-         ORDER BY d.created_at DESC`).all(dbId);
-  } else {
-    rows = db.prepare("SELECT id, before_id, after_id, note, created_at, status, error_message FROM snapshot_diffs ORDER BY created_at DESC").all();
+  const allDiffRows = [];
+  const inserted = db.prepare(`SELECT a.row_key_json, a.payload_hash
+       FROM snapshot_rows a
+       LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+       WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL
+       ORDER BY a.row_key_json`).all(beforeId, table, afterId, table);
+  for (const r of inserted) {
+    allDiffRows.push({
+      change_type: "inserted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: null,
+      after_payload_hash: r.payload_hash
+    });
   }
-  return rows.map((r) => ({
-    id: r.id,
-    beforeId: r.before_id,
-    afterId: r.after_id,
-    note: r.note,
-    createdAt: r.created_at,
-    status: r.status,
-    errorMessage: r.error_message
-  }));
-}
-async function getDiffTableSummaries(cwd, diffId) {
-  const db = await getStoreDb(cwd);
-  const rows = db.prepare("SELECT table_name, inserted_count, updated_count, deleted_count, unchanged_count FROM snapshot_diff_tables WHERE diff_id = ? ORDER BY (inserted_count + updated_count + deleted_count) DESC, table_name").all(diffId);
-  return rows.map((r) => ({
-    tableName: r.table_name,
-    insertedCount: r.inserted_count,
-    updatedCount: r.updated_count,
-    deletedCount: r.deleted_count,
-    unchangedCount: r.unchanged_count
-  }));
-}
-async function getDiffRows(cwd, diffId, table, changeType, offset = 0, limit = 200) {
-  const db = await getStoreDb(cwd);
-  const typeFilter = changeType ? " AND change_type = ?" : "";
-  const params = changeType ? [diffId, table, changeType] : [diffId, table];
-  const countRow = db.prepare(`SELECT COUNT(*) AS cnt FROM snapshot_diff_rows WHERE diff_id = ? AND table_name = ?${typeFilter}`).get(...params);
-  const total = countRow.cnt;
-  const dataRows = db.prepare(`SELECT change_type, row_key_hash, row_key_json, before_payload_hash, after_payload_hash
-       FROM snapshot_diff_rows
-       WHERE diff_id = ? AND table_name = ?${typeFilter}
-       ORDER BY row_key_json
-       LIMIT ? OFFSET ?`).all(...params, limit, offset);
-  const rows = dataRows.map((r) => {
+  const deleted = db.prepare(`SELECT b.row_key_json, b.payload_hash
+       FROM snapshot_rows b
+       LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL
+       ORDER BY b.row_key_json`).all(afterId, table, beforeId, table);
+  for (const r of deleted) {
+    allDiffRows.push({
+      change_type: "deleted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.payload_hash,
+      after_payload_hash: null
+    });
+  }
+  const updated = db.prepare(`SELECT b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
+       FROM snapshot_rows b
+       INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash
+       ORDER BY b.row_key_json`).all(afterId, table, beforeId, table);
+  for (const r of updated) {
+    allDiffRows.push({
+      change_type: "updated",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.before_ph,
+      after_payload_hash: r.after_ph
+    });
+  }
+  allDiffRows.sort((a, b) => a.row_key_json.localeCompare(b.row_key_json));
+  const total = allDiffRows.length;
+  const page = allDiffRows.slice(offset, offset + limit);
+  const rows = page.map((r) => {
     let beforeValues;
     let afterValues;
     if (r.before_payload_hash) {
@@ -4228,14 +4237,6 @@ async function getDiffRows(cwd, diffId, table, changeType, offset = 0, limit = 2
     };
   });
   return { rows, total };
-}
-async function updateDiffNote(cwd, diffId, note) {
-  const db = await getStoreDb(cwd);
-  db.prepare("UPDATE snapshot_diffs SET note = ? WHERE id = ?").run(note, diffId);
-}
-async function deleteDiff(cwd, diffId) {
-  const db = await getStoreDb(cwd);
-  db.prepare("DELETE FROM snapshot_diffs WHERE id = ?").run(diffId);
 }
 var CODE_VIEWER_DIR3 = ".code-viewer", SNAPSHOT_DB_NAME = "db-snapshots.sqlite", cachedDbClass2 = null, SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -4274,42 +4275,6 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
   payload_json TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS snapshot_diffs (
-  id TEXT PRIMARY KEY,
-  before_id TEXT NOT NULL,
-  after_id TEXT NOT NULL,
-  note TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'running',
-  error_message TEXT,
-  FOREIGN KEY (before_id) REFERENCES snapshots(id) ON DELETE CASCADE,
-  FOREIGN KEY (after_id) REFERENCES snapshots(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_diff_tables (
-  diff_id TEXT NOT NULL,
-  table_name TEXT NOT NULL,
-  inserted_count INTEGER NOT NULL DEFAULT 0,
-  updated_count INTEGER NOT NULL DEFAULT 0,
-  deleted_count INTEGER NOT NULL DEFAULT 0,
-  unchanged_count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (diff_id, table_name),
-  FOREIGN KEY (diff_id) REFERENCES snapshot_diffs(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_diff_rows (
-  diff_id TEXT NOT NULL,
-  table_name TEXT NOT NULL,
-  change_type TEXT NOT NULL,
-  row_key_hash TEXT NOT NULL,
-  row_key_json TEXT NOT NULL,
-  before_payload_hash TEXT,
-  after_payload_hash TEXT,
-  FOREIGN KEY (diff_id) REFERENCES snapshot_diffs(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshot_diff_rows_lookup
-  ON snapshot_diff_rows(diff_id, table_name, change_type);
 `, storeDb = null, storeDbPath = null;
 var init_snapshot_store = () => {};
 
@@ -4432,6 +4397,9 @@ function textError(message, status) {
       "Cache-Control": "no-store"
     }
   });
+}
+function sanitizeFilename(name) {
+  return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
 }
 function getDockerDbs(cwd) {
   if (cachedDockerCwd === cwd && cachedDockerDbs)
@@ -4612,6 +4580,9 @@ async function handleTable(cwd, url) {
     const adapter = await getAdapter(r, cwd);
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
+    if (sortCol && !colNames.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
@@ -4815,6 +4786,9 @@ async function handleExport(cwd, url) {
     const columns = adapter.getColumns(table);
     const colNames = columns.map((c) => c.name);
     const colNameSet = new Set(colNames);
+    if (sortCol && !colNameSet.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
     let rows;
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNameSet.has(f.column));
@@ -4860,7 +4834,7 @@ async function handleExport(cwd, url) {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${table}.csv"`,
+          "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.csv"`,
           "Cache-Control": "no-store"
         }
       });
@@ -4878,7 +4852,7 @@ async function handleExport(cwd, url) {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${table}.json"`,
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.json"`,
         "Cache-Control": "no-store"
       }
     });
@@ -4946,6 +4920,7 @@ async function handleSearchStart(cwd, req) {
     abortController: ac
   };
   searchJobs.set(jobId, job);
+  setTimeout(() => searchJobs.delete(jobId), 5 * 60000);
   const term = body.term;
   const maxHitsPerTable = body.maxHitsPerTable ?? 50;
   const includeNonText = body.includeNonText ?? false;
@@ -5059,6 +5034,7 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
       });
       sendSse?.("db-snapshot", JSON.stringify({ action: "created", id: snapshotId }));
     } catch (err) {
+      console.error("[code-viewer] snapshot error:", err instanceof Error ? err.message : String(err));
       sendSse?.("db-snapshot", JSON.stringify({
         action: "error",
         error: err instanceof Error ? err.message : String(err)
@@ -5095,80 +5071,32 @@ async function handleSnapshotDelete(cwd, req) {
   await deleteSnapshot(cwd, body.id);
   return json({ ok: true });
 }
-async function handleDiffCreate(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.beforeId || !body.afterId)
-    return textError("missing beforeId or afterId", 400);
-  const diffId = await createDiff(cwd, body.beforeId, body.afterId, body.note ?? "");
-  (async () => {
-    try {
-      await computeDiff(cwd, diffId);
-      sendSse?.("db-snapshot-diff", JSON.stringify({ action: "created", id: diffId }));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await finalizeDiffError(cwd, diffId, msg);
-      sendSse?.("db-snapshot-diff", JSON.stringify({ action: "error", id: diffId, error: msg }));
-    }
-  })();
-  return json({ ok: true, diffId });
-}
-async function handleDiffList(cwd, url) {
-  const dbId = url.searchParams.get("db") || undefined;
-  const diffs = await listDiffs(cwd, dbId);
-  return json({ diffs });
-}
 async function handleDiffTables(cwd, url) {
-  const diffId = url.searchParams.get("id");
-  if (!diffId)
-    return textError("missing id", 400);
-  const tables = await getDiffTableSummaries(cwd, diffId);
-  return json({ diffId, tables });
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
+  if (!beforeId || !afterId)
+    return textError("missing before or after parameter", 400);
+  try {
+    const tables = await computeDiffTables(cwd, beforeId, afterId);
+    return json({ beforeId, afterId, tables });
+  } catch (err) {
+    return textError(`failed to compute diff: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
 }
 async function handleDiffRows(cwd, url) {
-  const diffId = url.searchParams.get("id");
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
   const table = url.searchParams.get("table");
-  if (!diffId || !table)
-    return textError("missing id or table", 400);
-  const changeType = url.searchParams.get("type");
+  if (!beforeId || !afterId || !table)
+    return textError("missing before, after, or table parameter", 400);
   const offset = Math.max(0, Number(url.searchParams.get("offset") || "0") || 0);
   const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") || "200") || 200));
-  const result = await getDiffRows(cwd, diffId, table, changeType, offset, limit);
-  return json({ diffId, table, ...result });
-}
-async function handleDiffUpdateNote(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
   try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
+    const result = await computeDiffRows(cwd, beforeId, afterId, table, offset, limit);
+    return json({ beforeId, afterId, table, ...result });
+  } catch (err) {
+    return textError(`failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
-  if (!body.id)
-    return textError("missing id", 400);
-  await updateDiffNote(cwd, body.id, body.note ?? "");
-  return json({ ok: true });
-}
-async function handleDiffDelete(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.id)
-    return textError("missing id", 400);
-  await deleteDiff(cwd, body.id);
-  return json({ ok: true });
 }
 async function handleClose(cwd, req) {
   if (req.method !== "POST")
@@ -5292,33 +5220,10 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     }
     return wrapResponse(handleSnapshotDelete(cwd, req));
   }
-  if (path === "/_db/snapshot/diff/create") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffCreate(cwd, req, sendSse));
-  }
-  if (path === "/_db/snapshot/diff/list")
-    return wrapResponse(handleDiffList(cwd, url));
   if (path === "/_db/snapshot/diff/tables")
     return wrapResponse(handleDiffTables(cwd, url));
   if (path === "/_db/snapshot/diff/rows")
     return wrapResponse(handleDiffRows(cwd, url));
-  if (path === "/_db/snapshot/diff/update-note") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffUpdateNote(cwd, req));
-  }
-  if (path === "/_db/snapshot/diff/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffDelete(cwd, req));
-  }
   return null;
 }
 var initialized = false, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, searchJobs;
