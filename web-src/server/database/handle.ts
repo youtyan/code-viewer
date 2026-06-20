@@ -7,13 +7,16 @@ import type {
   DbTableDataResponse,
   QueryHistoryEntry,
 } from "../../core/database/types";
+import { openDockerAdapter } from "./adapters/docker";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
+import type { DatabaseAdapter } from "./adapters/types";
 import {
   closeConnection,
   getConnection,
   setAdapterFactory,
 } from "./connection-pool";
 import {
+  type DockerDbInfo,
   discoverDockerDatabases,
   discoverSqliteFiles,
   validateDbPath,
@@ -32,6 +35,28 @@ function ensureInit() {
   if (initialized) return;
   setAdapterFactory(sqliteAdapterFactory);
   initialized = true;
+}
+
+const dockerAdapterCache = new Map<string, DatabaseAdapter>();
+
+async function getAdapter(
+  r: ResolvedDb,
+  cwd: string,
+): Promise<DatabaseAdapter> {
+  if (r.docker) {
+    const key = r.dbId;
+    const cached = dockerAdapterCache.get(key);
+    if (cached) return cached;
+    const adapter = openDockerAdapter(
+      r.docker.serviceName,
+      r.docker.kind as "postgresql" | "mysql",
+      r.docker.env,
+      cwd,
+    );
+    dockerAdapterCache.set(key, adapter);
+    return adapter;
+  }
+  return getConnection(r.resolved);
 }
 
 function json(data: unknown, status = 200): Response {
@@ -54,10 +79,27 @@ function textError(message: string, status: number): Response {
   });
 }
 
-type ResolvedDb = { resolved: string; dbId: string };
+type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
+
+let cachedDockerDbs: DockerDbInfo[] | null = null;
+let cachedDockerCwd: string | null = null;
+
+function getDockerDbs(cwd: string): DockerDbInfo[] {
+  if (cachedDockerCwd === cwd && cachedDockerDbs) return cachedDockerDbs;
+  cachedDockerDbs = discoverDockerDatabases(cwd);
+  cachedDockerCwd = cwd;
+  return cachedDockerDbs;
+}
 
 function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
+  if (dbParam.startsWith("docker:")) {
+    const serviceName = dbParam.slice(7);
+    const dockerDbs = getDockerDbs(cwd);
+    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    if (!info) return textError("docker service not found", 404);
+    return { resolved: dbParam, dbId: dbParam, docker: info };
+  }
   const resolved = validateDbPath(cwd, dbParam);
   if (!resolved) return textError("invalid database path", 400);
   return { resolved, dbId: dbParam };
@@ -85,7 +127,7 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
   const r = resolveDb(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
   try {
-    const adapter = await getConnection(r.resolved);
+    const adapter = await getAdapter(r, cwd);
     const tables = adapter.getTables();
     const tablesWithCount = tables.map((t) => ({
       ...t,
@@ -156,7 +198,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
   }
   const filters = parseFilters(url);
   try {
-    const adapter = await getConnection(r.resolved);
+    const adapter = await getAdapter(r, cwd);
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
 
@@ -265,7 +307,7 @@ async function handleQuery(
   const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
   const start = Date.now();
   try {
-    const adapter = await getConnection(r.resolved);
+    const adapter = await getAdapter(r, cwd);
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
     const response: DbQueryResponse = {
@@ -407,7 +449,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
   const filters = parseFilters(url);
 
   try {
-    const adapter = await getConnection(r.resolved);
+    const adapter = await getAdapter(r, cwd);
     const columns = adapter.getColumns(table);
     const colNames = columns.map((c) => c.name);
     const colNameSet = new Set(colNames);
@@ -514,7 +556,7 @@ async function handleDdl(cwd: string, url: URL): Promise<Response> {
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
   try {
-    const adapter = await getConnection(r.resolved);
+    const adapter = await getAdapter(r, cwd);
     const sql = adapter.getCreateStatement(table);
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });

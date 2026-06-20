@@ -165,8 +165,13 @@ function parseComposePorts(serviceBlock: string): string | null {
   return null;
 }
 
-export function discoverDockerDatabases(cwd: string): DbFileInfo[] {
-  const results: DbFileInfo[] = [];
+export type DockerDbInfo = DbFileInfo & {
+  serviceName: string;
+  env: Record<string, string>;
+};
+
+export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
+  const results: DockerDbInfo[] = [];
 
   for (const filename of COMPOSE_FILENAMES) {
     const filepath = join(cwd, filename);
@@ -240,6 +245,8 @@ export function discoverDockerDatabases(cwd: string): DbFileInfo[] {
         name: label,
         sizeBytes: 0,
         kind,
+        serviceName: svc.name,
+        env,
       });
     }
 
