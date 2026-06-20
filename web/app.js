@@ -516,6 +516,16 @@
           range
         };
       }
+      case "/database": {
+        const db = params.get("db") || undefined;
+        const table = params.get("table") || undefined;
+        return {
+          screen: "database",
+          ...db ? { db } : {},
+          ...table ? { table } : {},
+          range
+        };
+      }
       default:
         return {
           screen: "unknown",
@@ -561,6 +571,15 @@
           params.set("commit", route.commit);
         const qs = params.toString();
         return `/history${qs ? `?${qs}` : ""}`;
+      }
+      case "database": {
+        const params = new URLSearchParams;
+        if (route.db)
+          params.set("db", route.db);
+        if (route.table)
+          params.set("table", route.table);
+        const qs = params.toString();
+        return `/database${qs ? `?${qs}` : ""}`;
       }
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
@@ -7771,6 +7790,752 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/database/query-editor.ts
+  function createQueryEditor(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-query-editor";
+    const inputArea = document.createElement("div");
+    inputArea.className = "db-query-input";
+    const textarea = document.createElement("textarea");
+    textarea.className = "db-query-textarea";
+    textarea.placeholder = "SELECT * FROM ...";
+    textarea.spellcheck = false;
+    textarea.rows = 3;
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-query-toolbar";
+    const runBtn = document.createElement("button");
+    runBtn.className = "db-query-run";
+    runBtn.type = "button";
+    runBtn.textContent = "Run";
+    runBtn.title = "Execute query (Ctrl+Enter)";
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "db-query-status";
+    toolbar.append(runBtn, statusSpan);
+    inputArea.append(textarea, toolbar);
+    const resultArea = document.createElement("div");
+    resultArea.className = "db-query-result";
+    resultArea.hidden = true;
+    el.append(inputArea, resultArea);
+    async function run() {
+      const sql = textarea.value.trim();
+      if (!sql)
+        return;
+      runBtn.disabled = true;
+      statusSpan.textContent = "Running…";
+      resultArea.hidden = true;
+      try {
+        const result = await callbacks.executeQuery(sql);
+        if (result.error) {
+          statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+          resultArea.hidden = false;
+          resultArea.innerHTML = "";
+          const errEl = document.createElement("pre");
+          errEl.className = "db-query-error";
+          errEl.textContent = result.error;
+          resultArea.appendChild(errEl);
+          return;
+        }
+        const suffix = result.truncated ? "+" : "";
+        statusSpan.textContent = `${result.rowCount}${suffix} rows (${result.elapsedMs}ms)`;
+        renderResultTable(result);
+      } catch (err) {
+        statusSpan.textContent = "Failed";
+        resultArea.hidden = false;
+        resultArea.innerHTML = "";
+        const errEl = document.createElement("pre");
+        errEl.className = "db-query-error";
+        errEl.textContent = err instanceof Error ? err.message : String(err);
+        resultArea.appendChild(errEl);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+    function renderResultTable(result) {
+      resultArea.hidden = false;
+      resultArea.innerHTML = "";
+      if (result.columns.length === 0) {
+        resultArea.textContent = "Query returned no columns.";
+        return;
+      }
+      const table2 = document.createElement("table");
+      table2.className = "db-query-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thNum = document.createElement("th");
+      thNum.textContent = "#";
+      thNum.className = "db-grid-rownum";
+      headRow.appendChild(thNum);
+      for (const col of result.columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (let i2 = 0;i2 < result.rows.length; i2++) {
+        const row = result.rows[i2];
+        const tr = document.createElement("tr");
+        if (i2 % 2 === 1)
+          tr.classList.add("alt");
+        const tdNum = document.createElement("td");
+        tdNum.className = "db-grid-rownum";
+        tdNum.textContent = String(i2 + 1);
+        tr.appendChild(tdNum);
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.textContent = formatValue(value);
+          if (value === null)
+            td.classList.add("null");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table2.append(thead, tbody);
+      const wrapper = document.createElement("div");
+      wrapper.className = "db-query-table-wrap";
+      wrapper.appendChild(table2);
+      resultArea.appendChild(wrapper);
+    }
+    runBtn.addEventListener("click", run);
+    textarea.addEventListener("keydown", (e2) => {
+      if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
+        e2.preventDefault();
+        run();
+      }
+    });
+    function focus() {
+      textarea.focus();
+    }
+    return { el, focus };
+  }
+  function formatValue(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/schema-view.ts
+  function createSchemaView() {
+    const el = document.createElement("div");
+    el.className = "db-schema-view";
+    el.hidden = true;
+    function render(table2, columns, indexes) {
+      el.hidden = false;
+      el.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "db-schema-header";
+      header.textContent = `Schema: ${table2}`;
+      el.appendChild(header);
+      const colTable = document.createElement("table");
+      colTable.className = "db-schema-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const label of ["Column", "Type", "Nullable", "PK", "Default"]) {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (const col of columns) {
+        const tr = document.createElement("tr");
+        if (col.primaryKey)
+          tr.classList.add("pk-row");
+        const tdName = document.createElement("td");
+        tdName.textContent = col.name;
+        tdName.className = "db-schema-col-name";
+        const tdType = document.createElement("td");
+        tdType.textContent = col.type;
+        tdType.className = "db-schema-col-type";
+        const tdNull = document.createElement("td");
+        tdNull.textContent = col.nullable ? "YES" : "NO";
+        const tdPk = document.createElement("td");
+        tdPk.textContent = col.primaryKey ? "PK" : "";
+        if (col.primaryKey)
+          tdPk.className = "db-schema-pk";
+        const tdDefault = document.createElement("td");
+        tdDefault.textContent = col.defaultValue ?? "";
+        tdDefault.className = "db-schema-default";
+        tr.append(tdName, tdType, tdNull, tdPk, tdDefault);
+        tbody.appendChild(tr);
+      }
+      colTable.append(thead, tbody);
+      el.appendChild(colTable);
+      const tableIndexes = indexes.filter((idx) => idx.table === table2);
+      if (tableIndexes.length > 0) {
+        const idxHeader = document.createElement("div");
+        idxHeader.className = "db-schema-header";
+        idxHeader.textContent = "Indexes";
+        el.appendChild(idxHeader);
+        const idxTable = document.createElement("table");
+        idxTable.className = "db-schema-table";
+        const idxThead = document.createElement("thead");
+        const idxHeadRow = document.createElement("tr");
+        for (const label of ["Name", "Columns", "Unique"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          idxHeadRow.appendChild(th);
+        }
+        idxThead.appendChild(idxHeadRow);
+        const idxTbody = document.createElement("tbody");
+        for (const idx of tableIndexes) {
+          const tr = document.createElement("tr");
+          const tdName = document.createElement("td");
+          tdName.textContent = idx.name;
+          const tdCols = document.createElement("td");
+          tdCols.textContent = idx.columns.join(", ");
+          const tdUnique = document.createElement("td");
+          tdUnique.textContent = idx.unique ? "YES" : "NO";
+          tr.append(tdName, tdCols, tdUnique);
+          idxTbody.appendChild(tr);
+        }
+        idxTable.append(idxThead, idxTbody);
+        el.appendChild(idxTable);
+      }
+    }
+    function clear() {
+      el.hidden = true;
+      el.innerHTML = "";
+    }
+    return { el, render, clear };
+  }
+
+  // web-src/views/database/table-grid.ts
+  var ROW_HEIGHT = 28;
+  var OVERSCAN = 20;
+  var PAGE_SIZE = 200;
+  function createTableGrid(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-grid";
+    const headerWrap = document.createElement("div");
+    headerWrap.className = "db-grid-header-wrap";
+    const headerRow = document.createElement("div");
+    headerRow.className = "db-grid-header";
+    headerWrap.appendChild(headerRow);
+    const viewport = document.createElement("div");
+    viewport.className = "db-grid-viewport";
+    const spacer = document.createElement("div");
+    spacer.className = "db-grid-spacer";
+    const body = document.createElement("div");
+    body.className = "db-grid-body";
+    viewport.append(spacer, body);
+    el.append(headerWrap, viewport);
+    let currentTable = "";
+    let columns = [];
+    let columnNames = [];
+    let totalRows = 0;
+    let sort = null;
+    let pageCache = new Map;
+    let pendingPages = new Set;
+    let loadGeneration = 0;
+    let rafId = 0;
+    let statusEl = null;
+    function clear() {
+      currentTable = "";
+      columns = [];
+      columnNames = [];
+      totalRows = 0;
+      sort = null;
+      pageCache = new Map;
+      pendingPages = new Set;
+      loadGeneration++;
+      cancelAnimationFrame(rafId);
+      headerRow.innerHTML = "";
+      body.innerHTML = "";
+      spacer.style.height = "0px";
+      statusEl?.remove();
+      statusEl = null;
+    }
+    function renderHeader() {
+      headerRow.innerHTML = "";
+      const rowNum = document.createElement("div");
+      rowNum.className = "db-grid-cell db-grid-rownum-header";
+      rowNum.textContent = "#";
+      headerRow.appendChild(rowNum);
+      for (const col of columns) {
+        const cell = document.createElement("div");
+        cell.className = "db-grid-cell db-grid-header-cell";
+        if (sort?.column === col.name) {
+          cell.classList.add("sorted");
+          cell.dataset.dir = sort.direction;
+        }
+        const label = document.createElement("span");
+        label.className = "db-grid-header-label";
+        label.textContent = col.name;
+        const typeTag = document.createElement("span");
+        typeTag.className = "db-grid-header-type";
+        typeTag.textContent = col.type;
+        if (col.primaryKey)
+          typeTag.classList.add("pk");
+        const sortIcon = document.createElement("span");
+        sortIcon.className = "db-grid-sort-icon";
+        sortIcon.textContent = sort?.column === col.name ? sort.direction === "asc" ? "▲" : "▼" : "";
+        cell.append(label, typeTag, sortIcon);
+        cell.addEventListener("click", () => handleSort(col.name));
+        headerRow.appendChild(cell);
+      }
+      syncContentWidth();
+    }
+    function syncContentWidth() {
+      requestAnimationFrame(() => {
+        const w = headerRow.scrollWidth;
+        if (w > 0) {
+          spacer.style.minWidth = `${w}px`;
+          body.style.minWidth = `${w}px`;
+        }
+      });
+    }
+    function handleSort(column) {
+      if (sort?.column === column) {
+        sort = sort.direction === "asc" ? { column, direction: "desc" } : null;
+      } else {
+        sort = { column, direction: "asc" };
+      }
+      pageCache = new Map;
+      pendingPages = new Set;
+      renderHeader();
+      renderViewport();
+    }
+    function ensurePage(pageStart) {
+      if (pageCache.has(pageStart) || pendingPages.has(pageStart))
+        return;
+      pendingPages.add(pageStart);
+      const gen = loadGeneration;
+      callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort).then((data) => {
+        if (gen !== loadGeneration)
+          return;
+        pendingPages.delete(pageStart);
+        pageCache.set(pageStart, data.rows);
+        totalRows = data.totalRows;
+        spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+        updateStatus();
+        renderViewport();
+      }).catch(() => {
+        if (gen === loadGeneration)
+          pendingPages.delete(pageStart);
+      });
+    }
+    function renderViewport() {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const scrollTop = viewport.scrollTop;
+        const viewHeight = viewport.clientHeight;
+        const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+        const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN);
+        const neededPageStart = Math.floor(startRow / PAGE_SIZE) * PAGE_SIZE;
+        const neededPageEnd = Math.floor(endRow / PAGE_SIZE) * PAGE_SIZE;
+        for (let p2 = neededPageStart;p2 <= neededPageEnd; p2 += PAGE_SIZE) {
+          ensurePage(p2);
+        }
+        body.innerHTML = "";
+        body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
+        for (let i2 = startRow;i2 < endRow; i2++) {
+          const pageStart = Math.floor(i2 / PAGE_SIZE) * PAGE_SIZE;
+          const pageRows = pageCache.get(pageStart);
+          const rowData = pageRows ? pageRows[i2 - pageStart] : null;
+          const row = document.createElement("div");
+          row.className = "db-grid-row";
+          if (i2 % 2 === 1)
+            row.classList.add("alt");
+          const rowNum = document.createElement("div");
+          rowNum.className = "db-grid-cell db-grid-rownum";
+          rowNum.textContent = String(i2 + 1);
+          row.appendChild(rowNum);
+          if (rowData) {
+            for (let c2 = 0;c2 < columnNames.length; c2++) {
+              const cell = document.createElement("div");
+              cell.className = "db-grid-cell";
+              cell.textContent = formatValue2(rowData[c2]);
+              if (rowData[c2] === null)
+                cell.classList.add("null");
+              if (rowData[c2] instanceof Uint8Array)
+                cell.classList.add("blob");
+              row.appendChild(cell);
+            }
+          } else {
+            for (let c2 = 0;c2 < columnNames.length; c2++) {
+              const cell = document.createElement("div");
+              cell.className = "db-grid-cell loading";
+              cell.textContent = "…";
+              row.appendChild(cell);
+            }
+          }
+          body.appendChild(row);
+        }
+      });
+    }
+    function updateStatus() {
+      if (!statusEl) {
+        statusEl = document.createElement("div");
+        statusEl.className = "db-grid-status";
+        el.appendChild(statusEl);
+      }
+      const sortLabel = sort ? ` | Sort: ${sort.column} ${sort.direction.toUpperCase()}` : "";
+      statusEl.textContent = `${totalRows.toLocaleString()} rows${sortLabel}`;
+    }
+    function load(table2, initialData) {
+      clear();
+      currentTable = table2;
+      if (initialData) {
+        columns = initialData.columns;
+        columnNames = columns.map((c2) => c2.name);
+        totalRows = initialData.totalRows;
+        pageCache.set(0, initialData.rows);
+      } else {
+        columns = [];
+        columnNames = [];
+        totalRows = 0;
+      }
+      spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+      renderHeader();
+      updateStatus();
+      if (!initialData) {
+        ensurePage(0);
+      } else {
+        renderViewport();
+      }
+    }
+    viewport.addEventListener("scroll", () => {
+      headerWrap.scrollLeft = viewport.scrollLeft;
+      renderViewport();
+    }, { passive: true });
+    function destroy() {
+      clear();
+      viewport.removeEventListener("scroll", renderViewport);
+    }
+    return { el, load, clear, destroy };
+  }
+  function formatValue2(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/table-list.ts
+  function createTableList(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-table-list";
+    let activeTable = null;
+    function render(tables) {
+      el.innerHTML = "";
+      if (tables.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-table-list-empty";
+        empty.textContent = "No tables found";
+        el.appendChild(empty);
+        return;
+      }
+      const groups = { table: [], view: [] };
+      for (const t2 of tables) {
+        (groups[t2.type] || groups.table).push(t2);
+      }
+      for (const [type, items] of Object.entries(groups)) {
+        if (items.length === 0)
+          continue;
+        const header = document.createElement("div");
+        header.className = "db-table-group-header";
+        header.textContent = type === "view" ? "Views" : "Tables";
+        el.appendChild(header);
+        for (const table2 of items) {
+          const row = document.createElement("div");
+          row.className = "db-table-item";
+          if (table2.name === activeTable)
+            row.classList.add("active");
+          row.dataset.table = table2.name;
+          const icon = document.createElement("span");
+          icon.className = "db-table-icon";
+          icon.textContent = table2.type === "view" ? "V" : "T";
+          icon.title = table2.type === "view" ? "View" : "Table";
+          const name = document.createElement("span");
+          name.className = "db-table-name";
+          name.textContent = table2.name;
+          const count = document.createElement("span");
+          count.className = "db-table-count";
+          count.textContent = table2.rowCount != null ? formatRowCount(table2.rowCount) : "";
+          row.append(icon, name, count);
+          row.addEventListener("click", () => callbacks.onSelectTable(table2.name));
+          row.addEventListener("dblclick", () => callbacks.onSelectSchema(table2.name));
+          el.appendChild(row);
+        }
+      }
+    }
+    function setActive(table2) {
+      activeTable = table2;
+      el.querySelectorAll(".db-table-item").forEach((item) => {
+        item.classList.toggle("active", item.dataset.table === table2);
+      });
+    }
+    return { el, render, setActive };
+  }
+  function formatRowCount(n2) {
+    if (n2 >= 1e6)
+      return `${(n2 / 1e6).toFixed(1)}M`;
+    if (n2 >= 1000)
+      return `${(n2 / 1000).toFixed(1)}K`;
+    return String(n2);
+  }
+
+  // web-src/views/database/database-view.ts
+  function createDatabaseView(deps) {
+    let mounted = false;
+    let currentDb = null;
+    let schemaCache = null;
+    let indexesCache = [];
+    const dbSelect = document.createElement("select");
+    dbSelect.className = "db-file-select";
+    dbSelect.title = "Select database file";
+    const dbToolbar = document.createElement("div");
+    dbToolbar.className = "db-toolbar";
+    dbToolbar.appendChild(dbSelect);
+    const tabBar = document.createElement("div");
+    tabBar.className = "db-tab-bar";
+    const tabData = document.createElement("button");
+    tabData.className = "db-tab active";
+    tabData.type = "button";
+    tabData.textContent = "Data";
+    const tabQuery = document.createElement("button");
+    tabQuery.className = "db-tab";
+    tabQuery.type = "button";
+    tabQuery.textContent = "Query";
+    const tabSchema = document.createElement("button");
+    tabSchema.className = "db-tab";
+    tabSchema.type = "button";
+    tabSchema.textContent = "Schema";
+    tabBar.append(tabData, tabQuery, tabSchema);
+    const tableList = createTableList({
+      onSelectTable: (table2) => selectTable(table2),
+      onSelectSchema: (table2) => showSchema(table2)
+    });
+    const sidebar = document.createElement("div");
+    sidebar.className = "db-sidebar";
+    sidebar.append(dbToolbar, tableList.el);
+    const grid = createTableGrid({
+      fetchPage: (table2, offset, limit, sort) => fetchTablePage(table2, offset, limit, sort)
+    });
+    const queryEditor = createQueryEditor({
+      executeQuery: (sql) => executeQuery(sql)
+    });
+    const schemaView = createSchemaView();
+    const mainContent = document.createElement("div");
+    mainContent.className = "db-main-content";
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el);
+    queryEditor.el.hidden = true;
+    const container = document.createElement("div");
+    container.className = "db-container";
+    container.append(sidebar, mainContent);
+    function mount() {
+      if (mounted)
+        return;
+      const content = document.getElementById("content");
+      if (!content)
+        return;
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = true;
+      const empty = document.getElementById("empty");
+      if (empty)
+        empty.classList.add("hidden");
+      content.appendChild(container);
+      mounted = true;
+    }
+    function unmount() {
+      if (!mounted)
+        return;
+      container.remove();
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+      mounted = false;
+      grid.clear();
+      schemaView.clear();
+      currentDb = null;
+      schemaCache = null;
+      indexesCache = [];
+    }
+    function setActiveTab(tab) {
+      tabData.classList.toggle("active", tab === "data");
+      tabQuery.classList.toggle("active", tab === "query");
+      tabSchema.classList.toggle("active", tab === "schema");
+      grid.el.hidden = tab !== "data";
+      queryEditor.el.hidden = tab !== "query";
+      schemaView.el.hidden = tab !== "schema";
+      if (tab === "query")
+        queryEditor.focus();
+    }
+    tabData.addEventListener("click", () => setActiveTab("data"));
+    tabQuery.addEventListener("click", () => {
+      setActiveTab("query");
+    });
+    tabSchema.addEventListener("click", () => {
+      setActiveTab("schema");
+      if (currentDb && tableList.el.querySelector(".db-table-item.active")) {
+        const active = tableList.el.querySelector(".db-table-item.active");
+        if (active?.dataset.table)
+          showSchema(active.dataset.table);
+      }
+    });
+    async function fetchDbFiles() {
+      const res = await deps.trackLoad(fetch("/_db/files"));
+      if (!res.ok)
+        return [];
+      const data = await res.json();
+      return data.files;
+    }
+    async function fetchSchema(dbId) {
+      const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}`));
+      if (!res.ok)
+        return null;
+      return await res.json();
+    }
+    async function fetchTablePage(table2, offset, limit, sort) {
+      if (!currentDb)
+        throw new Error("no database selected");
+      const params = new URLSearchParams({
+        db: currentDb.id,
+        table: table2,
+        offset: String(offset),
+        limit: String(limit)
+      });
+      if (sort) {
+        params.set("sort", sort.column);
+        params.set("dir", sort.direction);
+      }
+      const res = await fetch(`/_db/table?${params}`);
+      if (!res.ok)
+        throw new Error(await res.text());
+      return await res.json();
+    }
+    async function executeQuery(sql) {
+      if (!currentDb)
+        throw new Error("no database selected");
+      const res = await fetch("/_db/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify({ db: currentDb.id, sql })
+      });
+      return await res.json();
+    }
+    async function selectDb(dbId) {
+      const schema = await fetchSchema(dbId);
+      if (!schema)
+        return;
+      schemaCache = schema;
+      indexesCache = schema.indexes;
+      tableList.render(schema.tables);
+      grid.clear();
+      schemaView.clear();
+      setActiveTab("data");
+      if (schema.tables.length > 0) {
+        selectTable(schema.tables[0].name);
+      }
+    }
+    async function selectTable(table2) {
+      tableList.setActive(table2);
+      setActiveTab("data");
+      if (!currentDb)
+        return;
+      deps.setRoute({
+        screen: "database",
+        db: currentDb.id,
+        table: table2,
+        range: deps.currentRange()
+      }, true);
+      try {
+        const data = await deps.trackLoad(fetchTablePage(table2, 0, 200, null));
+        grid.load(table2, data);
+      } catch {
+        grid.load(table2);
+      }
+    }
+    async function showSchema(table2) {
+      setActiveTab("schema");
+      if (!currentDb)
+        return;
+      const columns = schemaCache?.tables ? await fetchSchemaColumns(table2) : [];
+      schemaView.render(table2, columns, indexesCache);
+    }
+    async function fetchSchemaColumns(table2) {
+      if (!currentDb)
+        return [];
+      const data = await fetchTablePage(table2, 0, 0, null);
+      return data.columns;
+    }
+    dbSelect.addEventListener("change", () => {
+      const dbId = dbSelect.value;
+      if (!dbId)
+        return;
+      const option = dbSelect.selectedOptions[0];
+      currentDb = {
+        id: dbId,
+        path: dbId,
+        name: option?.textContent || dbId,
+        sizeBytes: 0,
+        kind: "sqlite"
+      };
+      deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
+      selectDb(dbId);
+    });
+    async function enter(db, table2) {
+      mount();
+      document.body.classList.add("gdp-database-page");
+      deps.setPageMode();
+      deps.syncHeaderMenu();
+      const files = await fetchDbFiles();
+      dbSelect.innerHTML = "";
+      if (files.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No database files found";
+        dbSelect.appendChild(opt);
+        dbSelect.disabled = true;
+        return;
+      }
+      dbSelect.disabled = false;
+      for (const f2 of files) {
+        const opt = document.createElement("option");
+        opt.value = f2.id;
+        opt.textContent = `${f2.path} (${formatSize(f2.sizeBytes)})`;
+        dbSelect.appendChild(opt);
+      }
+      const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
+      dbSelect.value = target;
+      currentDb = files.find((f2) => f2.id === target) || null;
+      await selectDb(target);
+      if (table2) {
+        selectTable(table2);
+      }
+    }
+    function leave() {
+      document.body.classList.remove("gdp-database-page");
+      unmount();
+    }
+    return { enter, leave };
+  }
+  function formatSize(bytes) {
+    if (bytes >= 1024 * 1024 * 1024)
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024)
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024)
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  }
+
   // web-src/views/diff-line-select.ts
   var SELECTED_CLASS = "gdp-diff-line-selected";
   function cardPath(el) {
@@ -7997,6 +8762,7 @@ ${frontmatter.yaml}
       setProjectName,
       getProjectName,
       createOpenPathButton,
+      persistViewedFiles,
       applyHideTests,
       getServerGeneration,
       setServerGeneration
@@ -8022,9 +8788,6 @@ ${frontmatter.yaml}
       span.textContent = ch;
       span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
       return span;
-    }
-    function persistViewedFiles() {
-      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
     }
     function setFileViewed(path, viewed) {
       if (viewed)
@@ -12819,6 +13582,7 @@ ${frontmatter.yaml}
       fileBadge,
       fileEntryIcon,
       applyViewedState,
+      persistCollapsedDirs,
       appendScopeParams,
       createOpenPathButton,
       normalizeViewerFontSize,
@@ -13068,7 +13832,7 @@ ${frontmatter.yaml}
               STATE.collapsedDirs.add(dir.path);
             else
               STATE.collapsedDirs.delete(dir.path);
-            localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+            persistCollapsedDirs();
           };
           if (!dir.children_omitted) {
             chev.addEventListener("click", toggleDir);
@@ -13275,7 +14039,7 @@ ${frontmatter.yaml}
             STATE.collapsedDirs.add(dir.path);
           else
             STATE.collapsedDirs.delete(dir.path);
-          localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+          persistCollapsedDirs();
           rerenderVirtualSidebar();
         } finally {
           delete li.dataset.toggling;
@@ -13585,7 +14349,7 @@ ${frontmatter.yaml}
               STATE.collapsedDirs.add(row.path);
           }
         }
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
         rerenderVirtualSidebar();
         return;
       }
@@ -13600,7 +14364,7 @@ ${frontmatter.yaml}
         if (collapsed)
           STATE.collapsedDirs.add(path);
       });
-      localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+      persistCollapsedDirs();
     }
     function sidebarAncestorDirs(path) {
       const parts = path.split("/").filter(Boolean);
@@ -13623,7 +14387,7 @@ ${frontmatter.yaml}
           setFolderIcon(icon, false);
       }
       if (changed)
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
       rerenderVirtualSidebar();
     }
     function markActive(path, options = {}) {
@@ -13938,7 +14702,7 @@ ${frontmatter.yaml}
           STATE.collapsedDirs.add(row.path);
         else
           STATE.collapsedDirs.delete(row.path);
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
         rerenderVirtualSidebar();
         scrollVirtualSidebarPathIntoView(row.path);
         return;
@@ -15652,10 +16416,25 @@ ${frontmatter.yaml}
     const UNDO_STACK = [];
     let PENDING_G_SCOPE = null;
     let PENDING_G_UNTIL = 0;
+    let PROJECT_NAME = "";
     const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
     const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
     const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+    function scopedKey(base2) {
+      return PROJECT_NAME ? `${base2}:${PROJECT_NAME}` : base2;
+    }
+    function readScopedStorage(base2) {
+      if (PROJECT_NAME) {
+        const v = localStorage.getItem(`${base2}:${PROJECT_NAME}`);
+        if (v !== null)
+          return v;
+      }
+      return localStorage.getItem(base2);
+    }
+    function writeScopedStorage(base2, value) {
+      localStorage.setItem(scopedKey(base2), value);
+    }
     const VIEWER_LANGUAGES = ["en", "ja"];
     const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
       "node_modules",
@@ -15770,6 +16549,29 @@ ${frontmatter.yaml}
         projectTitle.textContent = project;
         projectTitle.title = project;
       }
+      reloadScopedState();
+    }
+    function reloadScopedState() {
+      const collapsed = readScopedStorage("gdp:collapsed-dirs");
+      if (collapsed !== null) {
+        STATE.collapsedDirs = new Set(JSON.parse(collapsed));
+      }
+      const viewed = readScopedStorage("gdp:viewed-files");
+      if (viewed !== null) {
+        STATE.viewedFiles = new Set(JSON.parse(viewed));
+      }
+      const igRaw = readScopedStorage("gdp:ignore-ws");
+      if (igRaw !== null)
+        STATE.ignoreWs = igRaw === "1";
+      const from = readScopedStorage("gdp:from");
+      const to = readScopedStorage("gdp:to");
+      if (from !== null)
+        STATE.from = from;
+      if (to !== null)
+        STATE.to = to;
+      const ht = readScopedStorage("gdp:hide-tests");
+      if (ht !== null)
+        STATE.hideTests = ht === "1";
     }
     function savedScopeOmitDirs() {
       const raw = localStorage.getItem(scopeOmitDirsStorageKey());
@@ -15857,10 +16659,10 @@ ${frontmatter.yaml}
       }
     }
     const STATE = (() => {
-      const igRaw = localStorage.getItem("gdp:ignore-ws");
+      const igRaw = readScopedStorage("gdp:ignore-ws");
       const fallbackRange = {
-        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
+        from: readScopedStorage("gdp:from") || DEFAULT_RANGE.from,
+        to: readScopedStorage("gdp:to") || DEFAULT_RANGE.to
       };
       const savedLanguage = viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
@@ -15873,22 +16675,21 @@ ${frontmatter.yaml}
         sbView: localStorage.getItem("gdp:sbview") || "tree",
         sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
-        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
+        collapsedDirs: new Set(JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]")),
         ignoreWs: igRaw === null ? true : igRaw === "1",
         from: route.range.from,
         to: route.range.to,
         collapsed: false,
         files: [],
         activeFile: null,
-        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+        hideTests: readScopedStorage("gdp:hide-tests") === "1",
         syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
-        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
+        viewedFiles: new Set(JSON.parse(readScopedStorage("gdp:viewed-files") || "[]")),
         route,
         repoRef: route.screen === "repo" ? route.ref : "worktree"
       };
     })();
     let highlightConfigured = false;
-    let PROJECT_NAME = "";
     let REPO_SIDEBAR_REF = null;
     const LINE_REF_PILL = createLineRefPill();
     const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
@@ -15912,6 +16713,7 @@ ${frontmatter.yaml}
       fileBadge: (status) => DIFF_VIEW.fileBadge(status),
       fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
       applyViewedState: () => DIFF_VIEW.applyViewedState(),
+      persistCollapsedDirs: () => writeScopedStorage("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs])),
       appendScopeParams,
       createOpenPathButton,
       normalizeViewerFontSize,
@@ -16074,6 +16876,7 @@ ${frontmatter.yaml}
           repo: "Repository",
           diff: "Diff Viewer",
           history: "History",
+          database: "Database",
           help: "Help"
         },
         global: {
@@ -16150,6 +16953,7 @@ ${frontmatter.yaml}
           repo: "リポジトリ",
           diff: "Diff ビューア",
           history: "履歴",
+          database: "データベース",
           help: "ヘルプ"
         },
         global: {
@@ -16687,6 +17491,7 @@ ${frontmatter.yaml}
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
       document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
       document.body.classList.toggle("gdp-history-page", STATE.route.screen === "history");
+      document.body.classList.toggle("gdp-database-page", STATE.route.screen === "database");
       placeSidebarToggle();
       syncSidebarHeaderHeight();
       const historyPanel = $("#history-panel");
@@ -16723,6 +17528,12 @@ ${frontmatter.yaml}
           link2.href = buildRoute({
             screen: "history",
             ref: "HEAD",
+            range: currentRange()
+          });
+        }
+        if (link2.dataset.route === "database") {
+          link2.href = buildRoute({
+            screen: "database",
             range: currentRange()
           });
         }
@@ -16868,6 +17679,7 @@ ${frontmatter.yaml}
       setProjectName,
       getProjectName: () => PROJECT_NAME,
       createOpenPathButton,
+      persistViewedFiles: () => writeScopedStorage("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles])),
       applyHideTests: () => applyHideTests(),
       getServerGeneration: () => SERVER_GENERATION,
       setServerGeneration: (generation) => {
@@ -17223,6 +18035,11 @@ ${frontmatter.yaml}
         syncHeaderMenu();
         return Promise.resolve();
       }
+      if (STATE.route.screen === "database") {
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+        setStatus("live");
+        return Promise.resolve();
+      }
       if (STATE.route.screen === "repo")
         return loadRepo();
       {
@@ -17266,6 +18083,9 @@ ${frontmatter.yaml}
         parkRangeForHistory();
         setStatus("live");
         HISTORY_VIEW.enterHistory();
+      } else if (STATE.route.screen === "database") {
+        setStatus("live");
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
       } else
         load();
       syncLineRefPill();
@@ -17281,8 +18101,8 @@ ${frontmatter.yaml}
       preHistoryRange = null;
       STATE.from = from || "";
       STATE.to = to || "";
-      localStorage.setItem("gdp:from", STATE.from);
-      localStorage.setItem("gdp:to", STATE.to);
+      writeScopedStorage("gdp:from", STATE.from);
+      writeScopedStorage("gdp:to", STATE.to);
       syncRefInputs();
       const range = currentRange();
       if (STATE.route.screen === "file") {
@@ -17332,6 +18152,13 @@ ${frontmatter.yaml}
       },
       trackLoad
     });
+    const DATABASE_VIEW = createDatabaseView({
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      syncHeaderMenu
+    });
     const REF_PICKER = createRefPicker({
       $,
       escapeHtml: escapeHtml3,
@@ -17355,6 +18182,9 @@ ${frontmatter.yaml}
     function applyRouteFromLocation() {
       if (STATE.route.screen === "history" && window.location.pathname !== "/history") {
         restoreRangeAfterHistory();
+      }
+      if (STATE.route.screen === "database" && window.location.pathname !== "/database") {
+        DATABASE_VIEW.leave();
       }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       const routeLanguage = viewerLanguageFromSearch(window.location.search);
@@ -17392,6 +18222,14 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
         return;
       }
+      if (STATE.route.screen === "database") {
+        cancelActiveSourceLoad("navigation");
+        setPageMode();
+        removeStandaloneSource();
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+        setStatus("live");
+        return;
+      }
       if (STATE.route.screen !== "file") {
         cancelActiveSourceLoad("navigation");
         setPageMode();
@@ -17423,7 +18261,7 @@ ${frontmatter.yaml}
     applyIgnoreWs();
     $("#ignore-ws").addEventListener("click", () => {
       STATE.ignoreWs = !STATE.ignoreWs;
-      localStorage.setItem("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
+      writeScopedStorage("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
       applyIgnoreWs();
       load();
     });
@@ -17480,7 +18318,7 @@ ${frontmatter.yaml}
     applyHideTests();
     $("#hide-tests").addEventListener("click", () => {
       STATE.hideTests = !STATE.hideTests;
-      localStorage.setItem("gdp:hide-tests", STATE.hideTests ? "1" : "0");
+      writeScopedStorage("gdp:hide-tests", STATE.hideTests ? "1" : "0");
       applyHideTests();
     });
     ANNOTATIONS_UI = createAnnotationsUi({
@@ -17504,8 +18342,8 @@ ${frontmatter.yaml}
       setRange: (from, to) => {
         STATE.from = from;
         STATE.to = to;
-        localStorage.setItem("gdp:from", from);
-        localStorage.setItem("gdp:to", to);
+        writeScopedStorage("gdp:from", from);
+        writeScopedStorage("gdp:to", to);
       }
     });
     createAnnotationsPlayer({

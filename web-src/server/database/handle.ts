@@ -1,0 +1,219 @@
+import type {
+  DbFilesResponse,
+  DbOrder,
+  DbQueryResponse,
+  DbSchemaResponse,
+  DbTableDataResponse,
+} from "../../core/database/types";
+import { sqliteAdapterFactory } from "./adapters/sqlite";
+import {
+  closeConnection,
+  getConnection,
+  setAdapterFactory,
+} from "./connection-pool";
+import { discoverSqliteFiles, validateDbPath } from "./discovery";
+
+let initialized = false;
+
+function ensureInit() {
+  if (initialized) return;
+  setAdapterFactory(sqliteAdapterFactory);
+  initialized = true;
+}
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function textError(message: string, status: number): Response {
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+type ResolvedDb = { resolved: string; dbId: string };
+
+function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
+  if (!dbParam) return textError("missing db parameter", 400);
+  const resolved = validateDbPath(cwd, dbParam);
+  if (!resolved) return textError("invalid database path", 400);
+  return { resolved, dbId: dbParam };
+}
+
+function handleFiles(cwd: string, omitDirNames: string[]): Response {
+  const files = discoverSqliteFiles(cwd, omitDirNames);
+  const body: DbFilesResponse = {
+    files: files.map((f) => ({
+      id: f.path,
+      path: f.path,
+      name: f.name,
+      sizeBytes: f.sizeBytes,
+      kind: "sqlite" as const,
+    })),
+  };
+  return json(body);
+}
+
+async function handleSchema(cwd: string, url: URL): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  try {
+    const adapter = await getConnection(r.resolved);
+    const tables = adapter.getTables();
+    const tablesWithCount = tables.map((t) => ({
+      ...t,
+      rowCount: t.type === "table" ? adapter.getTableRowCount(t.name) : null,
+    }));
+    const indexes = adapter.getIndexes();
+    const body: DbSchemaResponse = {
+      dbId: r.dbId,
+      tables: tablesWithCount,
+      indexes,
+    };
+    return json(body);
+  } catch (err) {
+    return textError(
+      `failed to read schema: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
+async function handleTable(cwd: string, url: URL): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const table = url.searchParams.get("table");
+  if (!table) return textError("missing table parameter", 400);
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset") || "0") || 0,
+  );
+  const limit = Math.min(
+    1000,
+    Math.max(1, Number(url.searchParams.get("limit") || "200") || 200),
+  );
+  let orderBy: DbOrder[] | undefined;
+  const sortCol = url.searchParams.get("sort");
+  const sortDir = url.searchParams.get("dir");
+  if (sortCol) {
+    orderBy = [
+      {
+        column: sortCol,
+        direction: sortDir === "desc" ? "desc" : "asc",
+      },
+    ];
+  }
+  try {
+    const adapter = await getConnection(r.resolved);
+    const result = adapter.getTablePage(table, { offset, limit, orderBy });
+    const totalRows = adapter.getTableRowCount(table);
+    const columns = adapter.getColumns(table);
+    const body: DbTableDataResponse = {
+      dbId: r.dbId,
+      table,
+      columns,
+      rows: result.rows,
+      totalRows,
+      offset,
+      limit,
+      hasMore: offset + result.rowCount < totalRows,
+    };
+    return json(body);
+  } catch (err) {
+    return textError(
+      `failed to read table: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
+async function handleQuery(cwd: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string; sql?: string; maxRows?: number };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db || !body.sql) return textError("missing db or sql", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response) return r;
+  const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
+  const start = Date.now();
+  try {
+    const adapter = await getConnection(r.resolved);
+    const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
+    const elapsed = Date.now() - start;
+    const response: DbQueryResponse = {
+      dbId: body.db,
+      columns: result.columns,
+      columnTypes: result.columnTypes,
+      rows: result.rows,
+      rowCount: result.rowCount,
+      truncated: result.rowCount >= maxRows,
+      elapsedMs: elapsed,
+    };
+    return json(response);
+  } catch (err) {
+    const elapsed = Date.now() - start;
+    const response: DbQueryResponse = {
+      dbId: body.db,
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: elapsed,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    return json(response, 400);
+  }
+}
+
+async function handleClose(cwd: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db) return textError("missing db", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response) return r;
+  closeConnection(r.resolved);
+  return json({ ok: true });
+}
+
+export async function handleDatabaseRoute(
+  req: Request,
+  url: URL,
+  cwd: string,
+  omitDirNames: string[],
+  sideEffectAllowed: (req: Request) => boolean,
+): Promise<Response | null> {
+  ensureInit();
+  const path = url.pathname;
+  if (path === "/_db/files") return handleFiles(cwd, omitDirNames);
+  if (path === "/_db/schema") return handleSchema(cwd, url);
+  if (path === "/_db/table") return handleTable(cwd, url);
+  if (path === "/_db/query") {
+    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
+    return handleQuery(cwd, req);
+  }
+  if (path === "/_db/close") {
+    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
+    return handleClose(cwd, req);
+  }
+  return null;
+}
