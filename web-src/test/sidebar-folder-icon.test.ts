@@ -118,7 +118,7 @@ describe("sidebar folder icons", () => {
     ).toBe(true);
     expect(
       style.includes(
-        "#filelist.tree .tree-dir .dir-omitted-heavy {\n  color: var(--fg-subtle);\n  border-color: var(--border-muted);\n  background: var(--bg-soft);",
+        "#filelist.tree .tree-dir .dir-omitted-heavy {\n  color: var(--fg-subtle);\n  border-color: var(--border);\n  background: var(--bg-soft);",
       ),
     ).toBe(true);
     expect(
