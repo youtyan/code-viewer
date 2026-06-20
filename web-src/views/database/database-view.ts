@@ -57,6 +57,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     onSelectSchema: (table) => showSchema(table),
     onViewCreateTable: (table) => showDdl(table),
     onViewDefinition: (table) => showSchema(table),
+    getColumns: (table) => fetchColumns(table),
   });
 
   const sidebar = document.createElement("div");
