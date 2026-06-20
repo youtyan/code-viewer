@@ -7,7 +7,7 @@ import type {
   DbTableDataResponse,
   QueryHistoryEntry,
 } from "../../core/database/types";
-import { openDockerAdapter } from "./adapters/docker";
+import { listDockerDatabases, openDockerAdapter } from "./adapters/docker";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
 import {
@@ -52,6 +52,7 @@ async function getAdapter(
       r.docker.kind as "postgresql" | "mysql",
       r.docker.env,
       cwd,
+      r.docker.database,
     );
     dockerAdapterCache.set(key, adapter);
     return adapter;
@@ -94,11 +95,15 @@ function getDockerDbs(cwd: string): DockerDbInfo[] {
 function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
-    const serviceName = dbParam.slice(7);
+    const rest = dbParam.slice(7);
+    const colonIdx = rest.indexOf(":");
+    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
     const dockerDbs = getDockerDbs(cwd);
     const info = dockerDbs.find((d) => d.serviceName === serviceName);
     if (!info) return textError("docker service not found", 404);
-    return { resolved: dbParam, dbId: dbParam, docker: info };
+    const resolved = dbName ? { ...info, database: dbName } : info;
+    return { resolved: dbParam, dbId: dbParam, docker: resolved };
   }
   const resolved = validateDbPath(cwd, dbParam);
   if (!resolved) return textError("invalid database path", 400);
@@ -107,7 +112,28 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
 
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerDbs = discoverDockerDatabases(cwd);
+  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerEntries: typeof dockerServices = [];
+  for (const svc of dockerServices) {
+    const dbs = listDockerDatabases(
+      svc.serviceName,
+      svc.kind as "postgresql" | "mysql",
+      svc.env,
+      cwd,
+    );
+    if (dbs.length <= 1) {
+      dockerEntries.push(svc);
+    } else {
+      for (const db of dbs) {
+        dockerEntries.push({
+          ...svc,
+          id: `docker:${svc.serviceName}:${db}`,
+          name: svc.name.replace(/\)$/, ` / ${db})`),
+          database: db,
+        });
+      }
+    }
+  }
   const body: DbFilesResponse = {
     files: [
       ...sqliteFiles.map((f) => ({
@@ -117,7 +143,7 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
         sizeBytes: f.sizeBytes,
         kind: "sqlite" as const,
       })),
-      ...dockerDbs,
+      ...dockerEntries,
     ],
   };
   return json(body);

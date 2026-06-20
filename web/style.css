@@ -5067,12 +5067,28 @@ body.query-history-panel-open #content {
 /* ---------- Sidebar ---------- */
 .db-sidebar {
   width: 260px;
-  min-width: 200px;
+  min-width: 120px;
+  max-width: 600px;
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+.db-sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+.db-sidebar-resize:hover,
+.db-sidebar-resize.active {
+  background: var(--accent);
+  opacity: 0.3;
 }
 
 .db-toolbar {
@@ -5082,7 +5098,7 @@ body.query-history-panel-open #content {
 
 .db-file-select {
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px 24px 5px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -5090,12 +5106,39 @@ body.query-history-panel-open #content {
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
+  text-overflow: ellipsis;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
 }
 .db-file-select:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
+.db-table-filter-wrap {
+  padding: 4px 8px;
+}
+.db-table-filter {
+  width: 100%;
+  padding: 4px 8px 4px 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 6px center;
+}
+.db-table-filter:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
 .db-table-list {
   flex: 1;
   overflow-y: auto;
@@ -5418,22 +5461,70 @@ body.query-history-panel-open #content {
   flex-shrink: 0;
 }
 
-.db-query-textarea {
-  width: 100%;
-  padding: 8px;
+.db-query-editor-wrap {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  resize: vertical;
+  overflow: hidden;
   min-height: 60px;
 }
-.db-query-textarea:focus {
+.db-query-editor-wrap:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
   border-color: var(--accent);
+}
+.db-query-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg);
+  color: var(--fg);
+}
+.db-query-highlight code {
+  font-family: inherit;
+  font-size: inherit;
+}
+.db-query-highlight span[style] {
+  color: var(--shiki-light);
+}
+@media (prefers-color-scheme: dark) {
+  .db-query-highlight span[style] {
+    color: var(--shiki-dark);
+  }
+}
+html[data-theme="dark"] .db-query-highlight span[style] {
+  color: var(--shiki-dark);
+}
+.db-query-textarea {
+  position: relative;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 60px;
+  z-index: 1;
+}
+.db-query-textarea::selection {
+  background: var(--accent);
+  color: transparent;
+}
+.db-query-textarea:focus {
+  outline: none;
 }
 
 .db-query-toolbar {

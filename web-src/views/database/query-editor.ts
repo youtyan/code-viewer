@@ -1,5 +1,41 @@
 import type { DbQueryResponse, DbValue } from "../../core/database/types";
 
+type ShikiHighlighter = {
+  codeToHtml: (
+    code: string,
+    options: {
+      lang: string;
+      themes: { light: string; dark: string };
+      defaultColor: false;
+    },
+  ) => string;
+};
+
+type ShikiModule = {
+  bundledLanguages?: Record<string, unknown>;
+  createHighlighter: (options: {
+    themes: string[];
+    langs: string[];
+  }) => Promise<ShikiHighlighter>;
+};
+
+let shikiPromise: Promise<ShikiHighlighter | null> | null = null;
+
+function loadShikiSql(): Promise<ShikiHighlighter | null> {
+  if (!shikiPromise) {
+    shikiPromise = import("/" + "shiki.js")
+      .then((mod: unknown) => {
+        const typed = mod as ShikiModule;
+        return typed.createHighlighter({
+          themes: ["github-light", "github-dark"],
+          langs: ["sql"],
+        });
+      })
+      .catch(() => null);
+  }
+  return shikiPromise;
+}
+
 const HISTORY_KEY = "db:query-history";
 const MAX_HISTORY = 50;
 
@@ -44,11 +80,57 @@ export function createQueryEditor(
   const inputArea = document.createElement("div");
   inputArea.className = "db-query-input";
 
+  const editorWrap = document.createElement("div");
+  editorWrap.className = "db-query-editor-wrap";
+
+  const highlight = document.createElement("pre");
+  highlight.className = "db-query-highlight";
+  highlight.setAttribute("aria-hidden", "true");
+
   const textarea = document.createElement("textarea");
   textarea.className = "db-query-textarea";
   textarea.placeholder = "SELECT * FROM ...";
   textarea.spellcheck = false;
   textarea.rows = 3;
+
+  editorWrap.append(highlight, textarea);
+
+  let shiki: ShikiHighlighter | null = null;
+  loadShikiSql().then((h) => {
+    shiki = h;
+    syncHighlight();
+  });
+
+  function syncHighlight() {
+    const code = textarea.value;
+    if (!code) {
+      highlight.innerHTML = "";
+      return;
+    }
+    if (!shiki) {
+      highlight.textContent = code;
+      return;
+    }
+    const html = shiki.codeToHtml(code, {
+      lang: "sql",
+      themes: { light: "github-light", dark: "github-dark" },
+      defaultColor: false,
+    });
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const pre = template.content.querySelector("pre");
+    if (pre) {
+      highlight.innerHTML = pre.innerHTML;
+    } else {
+      highlight.textContent = code;
+    }
+  }
+
+  textarea.addEventListener("input", syncHighlight);
+  textarea.addEventListener("scroll", () => {
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+  });
 
   const toolbar = document.createElement("div");
   toolbar.className = "db-query-toolbar";
@@ -79,7 +161,7 @@ export function createQueryEditor(
   historyDropdown.hidden = true;
 
   toolbar.append(runBtn, explainBtn, historyBtn, statusSpan);
-  inputArea.append(textarea, toolbar, historyDropdown);
+  inputArea.append(editorWrap, toolbar, historyDropdown);
 
   const resultArea = document.createElement("div");
   resultArea.className = "db-query-result";
@@ -259,6 +341,7 @@ export function createQueryEditor(
 
   function setSql(sql: string) {
     textarea.value = sql;
+    syncHighlight();
   }
 
   return { el, focus, setSql };
