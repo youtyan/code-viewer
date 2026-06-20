@@ -1485,8 +1485,9 @@ body.gdp-resizing * { user-select: none !important; }
   font-size: 11px;
   line-height: 15px;
 }
-#display-settings-source {
-  margin: 8px 0 0;
+#display-settings-source,
+.scope-settings-help {
+  margin: 4px 0 0;
   color: var(--fg-subtle);
   font-size: 11px;
   line-height: 15px;
