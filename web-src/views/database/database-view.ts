@@ -47,10 +47,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const tabBar = document.createElement("div");
   tabBar.className = "db-tab-bar";
   const tabData = createTab("Data", true);
-  const tabQuery = createTab("Query", false);
   const tabSchema = createTab("Schema", false);
-  const tabEr = createTab("ER Diagram", false);
-  tabBar.append(tabData, tabQuery, tabSchema, tabEr);
+  tabBar.append(tabData, tabSchema);
+
+  let currentTab: TabName = "data";
 
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
@@ -63,7 +63,31 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   sidebar.className = "db-sidebar";
   const savedWidth = localStorage.getItem("db:sidebar-width");
   if (savedWidth) sidebar.style.width = savedWidth;
-  sidebar.append(dbToolbar, tableList.el);
+  const toolsSection = document.createElement("div");
+  toolsSection.className = "db-tools-section";
+
+  const queryBtn = document.createElement("button");
+  queryBtn.className = "db-tool-btn";
+  queryBtn.type = "button";
+  queryBtn.textContent = "Query";
+  queryBtn.title = "SQL Query Editor";
+  queryBtn.addEventListener("click", () => {
+    setActiveTab("query");
+  });
+
+  const erBtn = document.createElement("button");
+  erBtn.className = "db-tool-btn";
+  erBtn.type = "button";
+  erBtn.textContent = "ER Diagram";
+  erBtn.title = "Entity Relationship Diagram";
+  erBtn.addEventListener("click", () => {
+    setActiveTab("er");
+    if (schemaCache) renderErDiagram();
+  });
+
+  toolsSection.append(queryBtn, erBtn);
+
+  sidebar.append(dbToolbar, tableList.el, toolsSection);
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "db-sidebar-resize";
@@ -226,10 +250,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   function setActiveTab(tab: TabName, updateUrl = true) {
+    currentTab = tab;
     tabData.classList.toggle("active", tab === "data");
-    tabQuery.classList.toggle("active", tab === "query");
     tabSchema.classList.toggle("active", tab === "schema");
-    tabEr.classList.toggle("active", tab === "er");
+    queryBtn.classList.toggle("active", tab === "query");
+    erBtn.classList.toggle("active", tab === "er");
+    tabBar.hidden = tab === "query" || tab === "er";
     grid.el.hidden = tab !== "data";
     queryEditor.el.hidden = tab !== "query";
     schemaView.el.hidden = tab !== "schema";
@@ -253,17 +279,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   tabData.addEventListener("click", () => setActiveTab("data"));
-  tabQuery.addEventListener("click", () => setActiveTab("query"));
   tabSchema.addEventListener("click", () => {
     setActiveTab("schema");
     const active = tableList.el.querySelector<HTMLElement>(
       ".db-table-item.active",
     );
     if (active?.dataset.table) showSchema(active.dataset.table);
-  });
-  tabEr.addEventListener("click", () => {
-    setActiveTab("er");
-    if (schemaCache) renderErDiagram();
   });
   async function fetchDbFiles(): Promise<DbFileInfo[]> {
     const res = await deps.trackLoad(fetch("/_db/files"));
@@ -341,13 +362,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function selectTable(table: string) {
     tableList.setActive(table);
-    setActiveTab("data");
     if (!currentDb) return;
+    if (currentTab === "query" || currentTab === "er") {
+      setActiveTab("data", false);
+    }
     deps.setRoute(
       {
         screen: "database",
         db: currentDb.id,
         table,
+        tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange(),
       },
       true,
@@ -359,6 +383,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       grid.load(table, data);
     } catch {
       grid.load(table);
+    }
+    if (currentTab === "schema") {
+      const columns = await fetchColumns(table);
+      schemaView.render(table, columns, schemaCache?.indexes || []);
     }
   }
 

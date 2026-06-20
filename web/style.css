@@ -5145,6 +5145,35 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   background: var(--bg);
 }
 .db-history-pane[hidden] { display: none; }
+.db-tools-section {
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.db-tool-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--db-font-base);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.db-tool-btn:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+.db-tool-btn.active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
 .db-history-toggle {
   display: flex;
   align-items: center;
