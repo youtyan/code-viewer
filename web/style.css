@@ -4454,6 +4454,145 @@ body.gdp-help-page #annotation-panel {
 body.annotation-panel-open #content {
   margin-right: min(380px, calc(100vw - 32px));
 }
+
+/* ---- Query History right-panel ---- */
+#query-history-panel {
+  position: fixed;
+  right: 0;
+  top: var(--global-header-h);
+  bottom: 0;
+  width: min(420px, calc(100vw - 32px));
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow-md);
+}
+#query-history-panel[hidden] {
+  display: none !important;
+}
+body.query-history-panel-open #content {
+  margin-right: min(420px, calc(100vw - 32px));
+}
+.query-history-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.query-history-panel-head strong {
+  flex: 1;
+}
+#query-history-content {
+  flex: 1;
+  overflow-y: auto;
+}
+.db-query-history {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.db-query-history-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.db-query-history-action {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.db-query-history-action:hover {
+  background: var(--bg-mute);
+}
+.db-query-history-danger {
+  color: var(--danger, #d32f2f);
+}
+.db-query-history-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.db-query-history-entry {
+  border-bottom: 1px solid var(--border);
+}
+.db-query-history-entry-header {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.db-query-history-entry-header:hover {
+  background: var(--bg-mute);
+}
+.db-query-history-entry-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.db-query-history-by {
+  font-weight: 600;
+  font-size: 10px;
+}
+.db-query-history-time {
+  font-size: 11px;
+}
+.db-query-history-stats {
+  font-size: 11px;
+}
+.db-query-history-entry-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-query-history-detail {
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-mute);
+}
+.db-query-history-detail[hidden] {
+  display: none;
+}
+.db-query-history-sql {
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+}
+.db-query-history-body {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.db-query-history-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.db-query-history-truncated {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
 .annotation-panel-head {
   display: flex;
   align-items: center;
@@ -4907,7 +5046,8 @@ body.annotation-panel-open #content {
 .gdp-database-page #sidebar,
 .gdp-database-page #sidebar-toggle,
 .gdp-database-page #annotation-panel,
-.gdp-database-page #sidebar-resizer {
+.gdp-database-page #sidebar-resizer,
+.gdp-database-page #annotations-toggle {
   display: none !important;
 }
 
@@ -5074,6 +5214,50 @@ body.annotation-panel-open #content {
   display: none !important;
 }
 
+/* ---------- Shared Button Base ---------- */
+.db-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.db-btn:hover {
+  background: var(--bg-mute);
+}
+.db-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.db-btn-primary {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.db-btn-primary:hover {
+  background: var(--accent-emph);
+}
+.db-btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.db-btn-icon {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  line-height: 1;
+}
+.db-btn-icon:hover {
+  color: var(--accent);
+  background: none;
+}
+
 /* ---------- Data Grid ---------- */
 .db-grid {
   flex: 1;
@@ -5186,7 +5370,7 @@ body.annotation-panel-open #content {
   border-right: 1px solid var(--border-muted);
 }
 .db-grid-cell:last-child {
-  border-right: none;
+  border-right: 1px solid var(--border-muted);
 }
 .db-grid-cell.null {
   color: var(--fg-subtle);
@@ -5261,21 +5445,7 @@ body.annotation-panel-open #content {
 
 .db-query-run {
   padding: 4px 16px;
-  border: none;
   border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.db-query-run:hover {
-  background: var(--accent-emph);
-}
-.db-query-run:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .db-query-status {
@@ -5509,17 +5679,7 @@ body.annotation-panel-open #content {
 }
 
 .db-er-zoom-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.db-er-zoom-btn:hover {
-  background: var(--bg-mute);
+  /* uses .db-btn base */
 }
 
 .db-er-container {
@@ -5573,16 +5733,12 @@ body.annotation-panel-open #content {
 }
 
 .db-grid-detail-close {
-  border: none;
-  background: none;
-  color: var(--fg-muted);
   font-size: 14px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
+  color: var(--fg-muted);
 }
 .db-grid-detail-close:hover {
   color: var(--danger);
+  background: none;
 }
 
 .db-grid-detail-content {
@@ -5611,33 +5767,12 @@ body.annotation-panel-open #content {
 
 /* ---------- Export Buttons ---------- */
 .db-grid-export-btn {
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 11px;
-  cursor: pointer;
-  font-family: inherit;
   margin-left: 6px;
-}
-.db-grid-export-btn:hover {
-  background: var(--bg-mute);
 }
 
 /* ---------- Query History ---------- */
 .db-query-history-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.db-query-history-btn:hover {
-  background: var(--bg-mute);
 }
 
 .db-query-history-dropdown[hidden] {
@@ -5696,4 +5831,165 @@ body.annotation-panel-open #content {
 /* ---------- Query Input (relative positioning for history dropdown) ---------- */
 .db-query-input {
   position: relative;
+}
+
+/* ---------- Column Resize Handle ---------- */
+.db-grid-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 1;
+}
+.db-grid-resize-handle:hover,
+body.db-resizing .db-grid-resize-handle {
+  background: var(--accent);
+  opacity: 0.5;
+}
+.db-grid-header-cell {
+  position: relative;
+}
+body.db-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.db-resizing * {
+  user-select: none !important;
+}
+
+/* ---------- Context Menu ---------- */
+.db-context-menu {
+  z-index: 100;
+  min-width: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  padding: 4px 0;
+  font-size: 13px;
+}
+.db-context-menu-item {
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--fg);
+  white-space: nowrap;
+}
+.db-context-menu-item:hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* ---------- Schema Section Headers ---------- */
+.db-schema-section-header {
+  padding: 8px 12px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-muted);
+  margin-top: 16px;
+}
+.db-schema-section-header:first-of-type {
+  margin-top: 8px;
+}
+
+/* ---------- Schema DDL ---------- */
+.db-schema-ddl-wrap {
+  position: relative;
+  margin: 8px 0;
+}
+.db-schema-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+}
+.db-schema-ddl-pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* ---------- Schema Trigger Block ---------- */
+.db-schema-trigger-block {
+  margin: 8px 0;
+}
+.db-schema-trigger-name {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* ---------- Docker Notice ---------- */
+.db-docker-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+.db-docker-notice-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+.db-docker-notice h3 {
+  font-size: 18px;
+  color: var(--fg);
+  margin: 0 0 8px;
+}
+.db-docker-notice p {
+  margin: 4px 0;
+  font-size: 13px;
+  max-width: 500px;
+}
+.db-docker-notice-hint {
+  color: var(--fg-subtle);
+}
+.db-docker-notice-code {
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: left;
+  max-width: 600px;
+  overflow-x: auto;
+}
+
+/* ---------- Query History Panel Resizer ---------- */
+#query-history-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 50;
+}
+#query-history-resizer:hover {
+  background: var(--accent-muted);
+}
+body.db-resizing {
+  cursor: col-resize !important;
+  user-select: none;
 }

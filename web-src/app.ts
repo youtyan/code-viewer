@@ -701,6 +701,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       nav: Record<"repo" | "diff" | "history" | "database" | "help", string>;
       global: {
         annotations: string;
+        queryHistory: string;
         settings: string;
         theme: string;
         product: string;
@@ -779,6 +780,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       global: {
         annotations: "code annotations",
+        queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
         product: "code viewer",
@@ -859,6 +861,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       },
       global: {
         annotations: "コード注釈",
+        queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
         product: "code viewer",
@@ -972,6 +975,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (annotationsToggle) {
       annotationsToggle.title = text.global.annotations;
       annotationsToggle.setAttribute("aria-label", text.global.annotations);
+    }
+    const queryHistoryToggle = document.querySelector<HTMLButtonElement>(
+      "#query-history-toggle",
+    );
+    if (queryHistoryToggle) {
+      queryHistoryToggle.title = text.global.queryHistory;
+      queryHistoryToggle.setAttribute("aria-label", text.global.queryHistory);
     }
     const viewerSettings =
       document.querySelector<HTMLButtonElement>("#viewer-settings");
@@ -1110,6 +1120,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       text.annotations.close,
     );
     setElementText(".annotation-list-head strong", text.annotations.sessions);
+
+    setElementText(
+      ".query-history-panel-head strong",
+      text.global.queryHistory,
+    );
+    setButtonLabel(
+      document.querySelector("#query-history-panel-close"),
+      text.annotations.close,
+    );
   }
 
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
@@ -1565,6 +1584,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncLineRefPill();
   }
 
+  // ---- Query History right-panel open/close ----
+  function setQueryHistoryPanelOpen(open: boolean) {
+    const panel = document.getElementById("query-history-panel");
+    if (!panel) return;
+    panel.hidden = !open;
+    document.body.classList.toggle("query-history-panel-open", open);
+    // Mutual exclusion: close annotation panel when opening query history
+    if (open && ANNOTATIONS_UI) {
+      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+    }
+  }
+
   function setPageMode() {
     document.body.classList.toggle(
       "gdp-file-detail-page",
@@ -1603,6 +1634,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (historyRefInput) historyRefInput.value = STATE.route.ref || "HEAD";
     }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+
+    // Toggle header buttons: annotations vs query-history
+    const isDatabase = STATE.route.screen === "database";
+    const annotationsToggle = document.querySelector<HTMLButtonElement>(
+      "#annotations-toggle",
+    );
+    const qhToggle = document.querySelector<HTMLButtonElement>(
+      "#query-history-toggle",
+    );
+    if (annotationsToggle) annotationsToggle.hidden = isDatabase;
+    if (qhToggle) qhToggle.hidden = !isDatabase;
+
+    // Close query-history panel when leaving database screen
+    if (!isDatabase) {
+      setQueryHistoryPanelOpen(false);
+    }
+    // Close annotation panel when entering database screen
+    if (isDatabase && ANNOTATIONS_UI) {
+      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+    }
   }
 
   function syncHeaderMenu() {
@@ -2648,6 +2699,58 @@ window.GdpExpandLogic = GdpExpandLogic;
     getActiveAnnotationId: () =>
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
+
+  // ---- Query History panel toggle ----
+  const qhToggleBtn = document.getElementById("query-history-toggle");
+  if (qhToggleBtn) {
+    qhToggleBtn.addEventListener("click", () => {
+      const panel = document.getElementById("query-history-panel");
+      const opening = panel ? panel.hidden : true;
+      setQueryHistoryPanelOpen(opening);
+      if (opening) DATABASE_VIEW.handleSse();
+    });
+  }
+  const qhCloseBtn = document.getElementById("query-history-panel-close");
+  if (qhCloseBtn) {
+    qhCloseBtn.addEventListener("click", () => {
+      setQueryHistoryPanelOpen(false);
+    });
+  }
+
+  (function setupQueryHistoryResizer() {
+    const panel = document.getElementById("query-history-panel");
+    const handle = document.getElementById("query-history-resizer");
+    if (!panel || !handle) return;
+    const STORAGE_KEY = "gdp:qh-panel-width";
+    const MIN_W = 280;
+    const MAX_W = 800;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const w = Math.max(MIN_W, Math.min(MAX_W, Number(saved) || 420));
+      panel.style.width = `${w}px`;
+    }
+    let dragging = false;
+    let startX = 0;
+    let startW = 0;
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startW = panel.offsetWidth;
+      document.body.classList.add("db-resizing");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const w = Math.max(MIN_W, Math.min(MAX_W, startW - (e.clientX - startX)));
+      panel.style.width = `${w}px`;
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("db-resizing");
+      localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
+    });
+  })();
 
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSseChangedPaths: Set<string> | null = new Set();

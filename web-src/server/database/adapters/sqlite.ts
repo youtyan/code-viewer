@@ -10,6 +10,7 @@ import type {
   DatabaseAdapter,
   DatabaseAdapterFactory,
   QueryResult,
+  TriggerInfo,
 } from "./types";
 
 type SqliteDb = {
@@ -242,6 +243,22 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
         rows: rows.map((row) => columnNames.map((col) => row[col] as DbValue)),
         rowCount: rows.length,
       };
+    },
+
+    getCreateStatement(table: string): string {
+      const row = db
+        .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+        .get(table) as { sql: string } | undefined;
+      return row?.sql ?? "";
+    },
+
+    getTriggers(table: string): TriggerInfo[] {
+      const rows = db
+        .prepare(
+          "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?",
+        )
+        .all(table) as { name: string; sql: string }[];
+      return rows.map((row) => ({ name: row.name, sql: row.sql ?? "" }));
     },
 
     close(): void {

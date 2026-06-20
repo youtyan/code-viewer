@@ -123,25 +123,25 @@ export function createErDiagram(): ErDiagram {
 
   const zoomIn = document.createElement("button");
   zoomIn.type = "button";
-  zoomIn.className = "db-er-zoom-btn";
+  zoomIn.className = "db-btn db-er-zoom-btn";
   zoomIn.textContent = "+";
   zoomIn.title = "Zoom in";
 
   const zoomOut = document.createElement("button");
   zoomOut.type = "button";
-  zoomOut.className = "db-er-zoom-btn";
+  zoomOut.className = "db-btn db-er-zoom-btn";
   zoomOut.textContent = "−";
   zoomOut.title = "Zoom out";
 
   const zoomReset = document.createElement("button");
   zoomReset.type = "button";
-  zoomReset.className = "db-er-zoom-btn";
+  zoomReset.className = "db-btn db-er-zoom-btn";
   zoomReset.textContent = "1:1";
   zoomReset.title = "Reset zoom";
 
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
-  copyBtn.className = "db-er-zoom-btn";
+  copyBtn.className = "db-btn db-er-zoom-btn";
   copyBtn.textContent = "Copy Mermaid";
   copyBtn.title = "Copy mermaid source to clipboard";
 

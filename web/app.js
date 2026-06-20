@@ -520,7 +520,7 @@
         const db = params.get("db") || undefined;
         const table = params.get("table") || undefined;
         const tabRaw = params.get("tab");
-        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" || tabRaw === "history" ? tabRaw : undefined;
+        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" ? tabRaw : undefined;
         return {
           screen: "database",
           ...db ? { db } : {},
@@ -7162,8 +7162,13 @@ ${frontmatter.yaml}
     function setAnnotationPanelOpen(open) {
       annotationPanel.hidden = !open;
       document.body.classList.toggle("annotation-panel-open", open);
-      if (open)
+      if (open) {
         annotationPanelDismissed = false;
+        const qhPanel = document.getElementById("query-history-panel");
+        if (qhPanel)
+          qhPanel.hidden = true;
+        document.body.classList.remove("query-history-panel-open");
+      }
       localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
     }
     function annotationLineTarget(entry) {
@@ -7886,22 +7891,22 @@ ${frontmatter.yaml}
     toolbar.className = "db-er-toolbar";
     const zoomIn = document.createElement("button");
     zoomIn.type = "button";
-    zoomIn.className = "db-er-zoom-btn";
+    zoomIn.className = "db-btn db-er-zoom-btn";
     zoomIn.textContent = "+";
     zoomIn.title = "Zoom in";
     const zoomOut = document.createElement("button");
     zoomOut.type = "button";
-    zoomOut.className = "db-er-zoom-btn";
+    zoomOut.className = "db-btn db-er-zoom-btn";
     zoomOut.textContent = "−";
     zoomOut.title = "Zoom out";
     const zoomReset = document.createElement("button");
     zoomReset.type = "button";
-    zoomReset.className = "db-er-zoom-btn";
+    zoomReset.className = "db-btn db-er-zoom-btn";
     zoomReset.textContent = "1:1";
     zoomReset.title = "Reset zoom";
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
-    copyBtn.className = "db-er-zoom-btn";
+    copyBtn.className = "db-btn db-er-zoom-btn";
     copyBtn.textContent = "Copy Mermaid";
     copyBtn.title = "Copy mermaid source to clipboard";
     toolbar.append(zoomIn, zoomOut, zoomReset, copyBtn);
@@ -8044,17 +8049,17 @@ ${frontmatter.yaml}
     const toolbar = document.createElement("div");
     toolbar.className = "db-query-toolbar";
     const runBtn = document.createElement("button");
-    runBtn.className = "db-query-run";
+    runBtn.className = "db-btn db-btn-primary db-query-run";
     runBtn.type = "button";
     runBtn.textContent = "Run";
     runBtn.title = "Execute query (Ctrl+Enter)";
     const explainBtn = document.createElement("button");
-    explainBtn.className = "db-query-run db-query-explain";
+    explainBtn.className = "db-btn db-query-explain";
     explainBtn.type = "button";
     explainBtn.textContent = "Explain";
     explainBtn.title = "Show query execution plan";
     const historyBtn = document.createElement("button");
-    historyBtn.className = "db-query-history-btn";
+    historyBtn.className = "db-btn db-query-history-btn";
     historyBtn.type = "button";
     historyBtn.textContent = "History";
     historyBtn.title = "Query history";
@@ -8465,13 +8470,17 @@ ${frontmatter.yaml}
     const el = document.createElement("div");
     el.className = "db-schema-view";
     el.hidden = true;
-    function render(table2, columns, indexes) {
+    function render(table2, columns, indexes, extra) {
       el.hidden = false;
       el.innerHTML = "";
       const header = document.createElement("div");
       header.className = "db-schema-header";
       header.textContent = `Schema: ${table2}`;
       el.appendChild(header);
+      const colSectionHeader = document.createElement("div");
+      colSectionHeader.className = "db-schema-section-header";
+      colSectionHeader.textContent = "Columns";
+      el.appendChild(colSectionHeader);
       const colTable = document.createElement("table");
       colTable.className = "db-schema-table";
       const thead = document.createElement("thead");
@@ -8507,10 +8516,41 @@ ${frontmatter.yaml}
       }
       colTable.append(thead, tbody);
       el.appendChild(colTable);
+      const fks = extra?.foreignKeys?.filter((fk) => fk.fromTable === table2);
+      if (fks && fks.length > 0) {
+        const fkHeader = document.createElement("div");
+        fkHeader.className = "db-schema-section-header";
+        fkHeader.textContent = "Foreign Keys";
+        el.appendChild(fkHeader);
+        const fkTable = document.createElement("table");
+        fkTable.className = "db-schema-table";
+        const fkThead = document.createElement("thead");
+        const fkHeadRow = document.createElement("tr");
+        for (const label of ["Column", "References Table", "References Column"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          fkHeadRow.appendChild(th);
+        }
+        fkThead.appendChild(fkHeadRow);
+        const fkTbody = document.createElement("tbody");
+        for (const fk of fks) {
+          const tr = document.createElement("tr");
+          const tdFrom = document.createElement("td");
+          tdFrom.textContent = fk.fromColumn;
+          const tdToTable = document.createElement("td");
+          tdToTable.textContent = fk.toTable;
+          const tdToCol = document.createElement("td");
+          tdToCol.textContent = fk.toColumn;
+          tr.append(tdFrom, tdToTable, tdToCol);
+          fkTbody.appendChild(tr);
+        }
+        fkTable.append(fkThead, fkTbody);
+        el.appendChild(fkTable);
+      }
       const tableIndexes = indexes.filter((idx) => idx.table === table2);
       if (tableIndexes.length > 0) {
         const idxHeader = document.createElement("div");
-        idxHeader.className = "db-schema-header";
+        idxHeader.className = "db-schema-section-header";
         idxHeader.textContent = "Indexes";
         el.appendChild(idxHeader);
         const idxTable = document.createElement("table");
@@ -8538,6 +8578,51 @@ ${frontmatter.yaml}
         idxTable.append(idxThead, idxTbody);
         el.appendChild(idxTable);
       }
+      const triggers = extra?.triggers;
+      if (triggers && triggers.length > 0) {
+        const trigHeader = document.createElement("div");
+        trigHeader.className = "db-schema-section-header";
+        trigHeader.textContent = "Triggers";
+        el.appendChild(trigHeader);
+        for (const trig of triggers) {
+          const trigBlock = document.createElement("div");
+          trigBlock.className = "db-schema-trigger-block";
+          const trigName = document.createElement("div");
+          trigName.className = "db-schema-trigger-name";
+          trigName.textContent = trig.name;
+          const trigPre = document.createElement("pre");
+          trigPre.className = "db-schema-ddl-pre";
+          trigPre.textContent = trig.sql;
+          trigBlock.append(trigName, trigPre);
+          el.appendChild(trigBlock);
+        }
+      }
+      const ddl = extra?.ddl;
+      if (ddl) {
+        const ddlHeader = document.createElement("div");
+        ddlHeader.className = "db-schema-section-header";
+        ddlHeader.textContent = "DDL";
+        el.appendChild(ddlHeader);
+        const ddlWrap = document.createElement("div");
+        ddlWrap.className = "db-schema-ddl-wrap";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "db-btn db-btn-sm db-schema-copy-btn";
+        copyBtn.textContent = "Copy DDL";
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(ddl).then(() => {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => {
+              copyBtn.textContent = "Copy DDL";
+            }, 1500);
+          }, () => {});
+        });
+        const ddlPre = document.createElement("pre");
+        ddlPre.className = "db-schema-ddl-pre";
+        ddlPre.textContent = ddl;
+        ddlWrap.append(copyBtn, ddlPre);
+        el.appendChild(ddlWrap);
+      }
     }
     function clear() {
       el.hidden = true;
@@ -8551,6 +8636,7 @@ ${frontmatter.yaml}
   var OVERSCAN = 20;
   var PAGE_SIZE = 200;
   var FILTER_DEBOUNCE_MS = 300;
+  var DEFAULT_COL_WIDTH = 180;
   function createTableGrid(callbacks) {
     const el = document.createElement("div");
     el.className = "db-grid";
@@ -8566,7 +8652,7 @@ ${frontmatter.yaml}
     filterInput.autocomplete = "off";
     const filterClear = document.createElement("button");
     filterClear.type = "button";
-    filterClear.className = "db-grid-filter-clear";
+    filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
     filterClear.textContent = "×";
     filterClear.hidden = true;
     filterBar.append(filterIcon, filterInput, filterClear);
@@ -8604,6 +8690,81 @@ ${frontmatter.yaml}
     let rafId = 0;
     let statusEl = null;
     let filterTimer = null;
+    const colWidths = new Map;
+    function storageKey() {
+      const project = callbacks.getProjectName?.() ?? "";
+      if (!currentTable)
+        return null;
+      return `db:col-widths:${project}:${currentTable}`;
+    }
+    function saveColWidths() {
+      const key = storageKey();
+      if (!key)
+        return;
+      const obj = {};
+      for (const [name, w] of colWidths) {
+        obj[name] = w;
+      }
+      try {
+        localStorage.setItem(key, JSON.stringify(obj));
+      } catch {}
+    }
+    function loadColWidths() {
+      colWidths.clear();
+      const key = storageKey();
+      if (!key)
+        return;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          for (const [name, w] of Object.entries(obj)) {
+            if (typeof w === "number" && w > 0) {
+              colWidths.set(name, w);
+            }
+          }
+        }
+      } catch {}
+    }
+    function getColWidth(colName) {
+      return colWidths.get(colName) ?? DEFAULT_COL_WIDTH;
+    }
+    function applyColWidth(colName, index) {
+      const w = getColWidth(colName);
+      const headerCells = headerRow.querySelectorAll(".db-grid-header-cell");
+      if (headerCells[index]) {
+        headerCells[index].style.width = `${w}px`;
+      }
+      const filterCells = filterRow.querySelectorAll(".db-grid-filter-cell");
+      if (filterCells[index]) {
+        filterCells[index].style.width = `${w}px`;
+      }
+    }
+    function autoFitColumn(colName, colIndex) {
+      const measure = document.createElement("span");
+      measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
+      document.body.appendChild(measure);
+      const headerLabel = columns[colIndex]?.name || colName;
+      const typeLabel = columns[colIndex]?.type || "";
+      measure.textContent = `${headerLabel}  ${typeLabel}  ▲`;
+      let maxW = measure.offsetWidth + 16;
+      const rows = body.querySelectorAll(".db-grid-row");
+      for (const row of rows) {
+        const cells = row.querySelectorAll(".db-grid-cell:not(.db-grid-rownum)");
+        const cell = cells[colIndex];
+        if (cell) {
+          measure.textContent = cell.textContent || "";
+          maxW = Math.max(maxW, measure.offsetWidth);
+        }
+      }
+      document.body.removeChild(measure);
+      const fitted = Math.max(60, Math.min(600, maxW));
+      colWidths.set(colName, fitted);
+      applyColWidth(colName, colIndex);
+      saveColWidths();
+      syncContentWidth();
+      renderViewport();
+    }
     function collectFilters() {
       const filters = [];
       for (const [col, val] of columnFilters) {
@@ -8648,6 +8809,7 @@ ${frontmatter.yaml}
       statusEl = null;
       detailPanel.hidden = true;
       detailPanel.innerHTML = "";
+      colWidths.clear();
     }
     function showCellDetail(colIndex, value) {
       const colName = columnNames[colIndex];
@@ -8661,7 +8823,7 @@ ${frontmatter.yaml}
       title.textContent = `${colName} (${colType})`;
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
-      closeBtn.className = "db-grid-detail-close";
+      closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
       closeBtn.textContent = "×";
       closeBtn.addEventListener("click", () => {
         detailPanel.hidden = true;
@@ -8699,9 +8861,11 @@ ${frontmatter.yaml}
       rowNum.className = "db-grid-cell db-grid-rownum-header";
       rowNum.textContent = "#";
       headerRow.appendChild(rowNum);
-      for (const col of columns) {
+      for (let i2 = 0;i2 < columns.length; i2++) {
+        const col = columns[i2];
         const cell = document.createElement("div");
         cell.className = "db-grid-cell db-grid-header-cell";
+        cell.style.width = `${getColWidth(col.name)}px`;
         if (sort?.column === col.name) {
           cell.classList.add("sorted");
           cell.dataset.dir = sort.direction;
@@ -8717,21 +8881,64 @@ ${frontmatter.yaml}
         const sortIcon = document.createElement("span");
         sortIcon.className = "db-grid-sort-icon";
         sortIcon.textContent = sort?.column === col.name ? sort.direction === "asc" ? "▲" : "▼" : "";
-        cell.append(label, typeTag, sortIcon);
-        cell.addEventListener("click", () => handleSort(col.name));
+        const resizeHandle = document.createElement("div");
+        resizeHandle.className = "db-grid-resize-handle";
+        const colIndex = i2;
+        resizeHandle.addEventListener("mousedown", (e2) => {
+          e2.preventDefault();
+          e2.stopPropagation();
+          startResize(colIndex, e2);
+        });
+        cell.append(label, typeTag, sortIcon, resizeHandle);
+        cell.addEventListener("click", (e2) => {
+          if (e2.target.classList.contains("db-grid-resize-handle"))
+            return;
+          handleSort(col.name);
+        });
+        cell.addEventListener("dblclick", (e2) => {
+          if (e2.target.classList.contains("db-grid-resize-handle")) {
+            e2.preventDefault();
+            e2.stopPropagation();
+            autoFitColumn(col.name, colIndex);
+          }
+        });
         headerRow.appendChild(cell);
       }
       renderFilterRow();
       syncContentWidth();
+    }
+    function startResize(colIndex, startEvent) {
+      const colName = columnNames[colIndex];
+      const startX = startEvent.clientX;
+      const startWidth = getColWidth(colName);
+      document.body.classList.add("db-resizing");
+      const onMouseMove = (e2) => {
+        const delta = e2.clientX - startX;
+        const newWidth = Math.max(60, startWidth + delta);
+        colWidths.set(colName, newWidth);
+        applyColWidth(colName, colIndex);
+        syncContentWidth();
+        renderViewport();
+      };
+      const onMouseUp = () => {
+        document.body.classList.remove("db-resizing");
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        saveColWidths();
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
     }
     function renderFilterRow() {
       filterRow.innerHTML = "";
       const rowNumSpacer = document.createElement("div");
       rowNumSpacer.className = "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
       filterRow.appendChild(rowNumSpacer);
-      for (const col of columns) {
+      for (let i2 = 0;i2 < columns.length; i2++) {
+        const col = columns[i2];
         const cell = document.createElement("div");
         cell.className = "db-grid-cell db-grid-filter-cell";
+        cell.style.width = `${getColWidth(col.name)}px`;
         const input = document.createElement("input");
         input.type = "search";
         input.className = "db-grid-col-filter";
@@ -8836,6 +9043,7 @@ ${frontmatter.yaml}
             for (let c2 = 0;c2 < columnNames.length; c2++) {
               const cell = document.createElement("div");
               cell.className = "db-grid-cell";
+              cell.style.width = `${getColWidth(columnNames[c2])}px`;
               cell.textContent = formatValue3(rowData[c2]);
               if (rowData[c2] === null)
                 cell.classList.add("null");
@@ -8851,6 +9059,7 @@ ${frontmatter.yaml}
             for (let c2 = 0;c2 < columnNames.length; c2++) {
               const cell = document.createElement("div");
               cell.className = "db-grid-cell loading";
+              cell.style.width = `${getColWidth(columnNames[c2])}px`;
               cell.textContent = "…";
               row.appendChild(cell);
             }
@@ -8891,12 +9100,12 @@ ${frontmatter.yaml}
         statusEl.className = "db-grid-status";
         exportCsvBtn = document.createElement("button");
         exportCsvBtn.type = "button";
-        exportCsvBtn.className = "db-grid-export-btn";
+        exportCsvBtn.className = "db-btn db-btn-sm db-grid-export-btn";
         exportCsvBtn.textContent = "Export CSV";
         exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
         exportJsonBtn = document.createElement("button");
         exportJsonBtn.type = "button";
-        exportJsonBtn.className = "db-grid-export-btn";
+        exportJsonBtn.className = "db-btn db-btn-sm db-grid-export-btn";
         exportJsonBtn.textContent = "Export JSON";
         exportJsonBtn.addEventListener("click", () => triggerExport("json"));
         statusEl.append(exportCsvBtn, exportJsonBtn);
@@ -8928,6 +9137,7 @@ ${frontmatter.yaml}
         columnNames = [];
         totalRows = 0;
       }
+      loadColWidths();
       spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
       renderHeader();
       updateStatus();
@@ -8984,6 +9194,79 @@ ${frontmatter.yaml}
     const el = document.createElement("div");
     el.className = "db-table-list";
     let activeTable = null;
+    let contextMenu = null;
+    function closeContextMenu() {
+      if (contextMenu) {
+        contextMenu.remove();
+        contextMenu = null;
+      }
+    }
+    function showContextMenu(e2, tableName) {
+      e2.preventDefault();
+      closeContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "db-context-menu";
+      menu.style.position = "absolute";
+      menu.style.left = `${e2.pageX}px`;
+      menu.style.top = `${e2.pageY}px`;
+      const items = [
+        {
+          label: "Copy Table Name",
+          action: () => {
+            navigator.clipboard.writeText(tableName).catch(() => {});
+          }
+        },
+        {
+          label: "Copy SELECT Statement",
+          action: () => {
+            const sql = `SELECT * FROM "${tableName}" LIMIT 100`;
+            navigator.clipboard.writeText(sql).catch(() => {});
+          }
+        },
+        {
+          label: "View CREATE TABLE",
+          action: () => {
+            callbacks.onViewCreateTable?.(tableName);
+          }
+        },
+        {
+          label: "View Table Definition",
+          action: () => {
+            callbacks.onViewDefinition?.(tableName);
+          }
+        }
+      ];
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "db-context-menu-item";
+        row.textContent = item.label;
+        row.addEventListener("click", () => {
+          item.action();
+          closeContextMenu();
+        });
+        menu.appendChild(row);
+      }
+      document.body.appendChild(menu);
+      contextMenu = menu;
+      const onDocClick = (ev) => {
+        if (!menu.contains(ev.target)) {
+          closeContextMenu();
+          document.removeEventListener("click", onDocClick, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+        }
+      };
+      const onKeyDown = (ev) => {
+        if (ev.key === "Escape") {
+          closeContextMenu();
+          document.removeEventListener("click", onDocClick, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+        }
+      };
+      setTimeout(() => {
+        document.addEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKeyDown, true);
+      }, 0);
+    }
     function render(tables) {
       el.innerHTML = "";
       if (tables.length === 0) {
@@ -9023,6 +9306,7 @@ ${frontmatter.yaml}
           row.append(icon, name, count);
           row.addEventListener("click", () => callbacks.onSelectTable(table2.name));
           row.addEventListener("dblclick", () => callbacks.onSelectSchema(table2.name));
+          row.addEventListener("contextmenu", (e2) => showContextMenu(e2, table2.name));
           el.appendChild(row);
         }
       }
@@ -9061,8 +9345,7 @@ ${frontmatter.yaml}
     const tabQuery = createTab("Query", false);
     const tabSchema = createTab("Schema", false);
     const tabEr = createTab("ER Diagram", false);
-    const tabHistory = createTab("History", false);
-    tabBar.append(tabData, tabQuery, tabSchema, tabEr, tabHistory);
+    tabBar.append(tabData, tabQuery, tabSchema, tabEr);
     const tableList = createTableList({
       onSelectTable: (table2) => selectTable(table2),
       onSelectSchema: (table2) => showSchema(table2)
@@ -9088,9 +9371,8 @@ ${frontmatter.yaml}
     });
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, historyView.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el);
     queryEditor.el.hidden = true;
-    historyView.el.hidden = true;
     const container = document.createElement("div");
     container.className = "db-container";
     container.append(sidebar, mainContent);
@@ -9100,6 +9382,39 @@ ${frontmatter.yaml}
       btn.type = "button";
       btn.textContent = text2;
       return btn;
+    }
+    function showDockerNotice(file) {
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      grid.el.hidden = true;
+      queryEditor.el.hidden = true;
+      schemaView.el.hidden = true;
+      erDiagram.el.hidden = true;
+      tabBar.hidden = true;
+      let notice = mainContent.querySelector(".db-docker-notice");
+      if (!notice) {
+        notice = document.createElement("div");
+        notice.className = "db-docker-notice";
+        mainContent.appendChild(notice);
+      }
+      notice.innerHTML = "";
+      const icon = document.createElement("div");
+      icon.className = "db-docker-notice-icon";
+      icon.textContent = "\uD83D\uDC33";
+      const title = document.createElement("h3");
+      title.textContent = `${file.kind === "postgresql" ? "PostgreSQL" : "MySQL"} (Docker)`;
+      const desc = document.createElement("p");
+      desc.textContent = `${file.name}`;
+      const hint = document.createElement("p");
+      hint.className = "db-docker-notice-hint";
+      hint.textContent = "Docker database adapters are coming soon. Use the Query CLI to run queries via docker exec:";
+      const code2 = document.createElement("pre");
+      code2.className = "db-docker-notice-code";
+      const svcName = file.id.replace("docker:", "");
+      code2.textContent = `docker exec -i ${svcName} ${file.kind === "postgresql" ? "psql -U postgres" : "mysql -u root"} -c "SELECT ..."`;
+      notice.append(icon, title, desc, hint, code2);
+      notice.hidden = false;
     }
     function mount() {
       if (mounted)
@@ -9114,12 +9429,16 @@ ${frontmatter.yaml}
       if (empty)
         empty.classList.add("hidden");
       content.appendChild(container);
+      const historyContent = document.getElementById("query-history-content");
+      if (historyContent)
+        historyContent.appendChild(historyView.el);
       mounted = true;
     }
     function unmount() {
       if (!mounted)
         return;
       container.remove();
+      historyView.el.remove();
       const diff = document.getElementById("diff");
       if (diff)
         diff.hidden = false;
@@ -9135,16 +9454,12 @@ ${frontmatter.yaml}
       tabQuery.classList.toggle("active", tab === "query");
       tabSchema.classList.toggle("active", tab === "schema");
       tabEr.classList.toggle("active", tab === "er");
-      tabHistory.classList.toggle("active", tab === "history");
       grid.el.hidden = tab !== "data";
       queryEditor.el.hidden = tab !== "query";
       schemaView.el.hidden = tab !== "schema";
       erDiagram.el.hidden = tab !== "er";
-      historyView.el.hidden = tab !== "history";
       if (tab === "query")
         queryEditor.focus();
-      if (tab === "history")
-        historyView.refresh();
       if (updateUrl) {
         const activeTable = tableList.el.querySelector(".db-table-item.active");
         deps.setRoute({
@@ -9168,9 +9483,6 @@ ${frontmatter.yaml}
       setActiveTab("er");
       if (schemaCache)
         renderErDiagram();
-    });
-    tabHistory.addEventListener("click", () => {
-      setActiveTab("history");
     });
     async function fetchDbFiles() {
       const res = await deps.trackLoad(fetch("/_db/files"));
@@ -9284,9 +9596,7 @@ ${frontmatter.yaml}
         return;
       const file = lastFiles.find((f2) => f2.id === dbId);
       if (file?.id.startsWith("docker:")) {
-        alert("PostgreSQL/MySQL adapter is not yet implemented");
-        if (currentDb)
-          dbSelect.value = currentDb.id;
+        showDockerNotice(file);
         return;
       }
       const option = dbSelect.selectedOptions[0];
@@ -9329,7 +9639,7 @@ ${frontmatter.yaml}
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
       if (currentDb?.id.startsWith("docker:")) {
-        alert("PostgreSQL/MySQL adapter is not yet implemented");
+        showDockerNotice(currentDb);
         return;
       }
       await selectDb(target);
@@ -9353,7 +9663,10 @@ ${frontmatter.yaml}
       unmount();
     }
     function handleSse() {
-      if (mounted && !historyView.el.hidden) {
+      if (!mounted)
+        return;
+      const panel = document.getElementById("query-history-panel");
+      if (panel && !panel.hidden) {
         historyView.refresh();
       }
     }
@@ -17885,6 +18198,7 @@ ${frontmatter.yaml}
         },
         global: {
           annotations: "code annotations",
+          queryHistory: "query history",
           settings: "viewer settings",
           theme: "toggle theme",
           product: "code viewer"
@@ -17962,6 +18276,7 @@ ${frontmatter.yaml}
         },
         global: {
           annotations: "コード注釈",
+          queryHistory: "クエリ履歴",
           settings: "ビューア設定",
           theme: "テーマ切り替え",
           product: "code viewer"
@@ -18063,6 +18378,11 @@ ${frontmatter.yaml}
       if (annotationsToggle) {
         annotationsToggle.title = text2.global.annotations;
         annotationsToggle.setAttribute("aria-label", text2.global.annotations);
+      }
+      const queryHistoryToggle = document.querySelector("#query-history-toggle");
+      if (queryHistoryToggle) {
+        queryHistoryToggle.title = text2.global.queryHistory;
+        queryHistoryToggle.setAttribute("aria-label", text2.global.queryHistory);
       }
       const viewerSettings = document.querySelector("#viewer-settings");
       if (viewerSettings) {
@@ -18172,6 +18492,8 @@ ${frontmatter.yaml}
       setButtonLabel(document.querySelector("#annotation-clear"), text2.annotations.clear);
       setButtonLabel(document.querySelector("#annotation-panel-close"), text2.annotations.close);
       setElementText(".annotation-list-head strong", text2.annotations.sessions);
+      setElementText(".query-history-panel-head strong", text2.global.queryHistory);
+      setButtonLabel(document.querySelector("#query-history-panel-close"), text2.annotations.close);
     }
     function setViewerLanguage(language, persist = true) {
       const next = normalizeViewerLanguage(language);
@@ -18489,6 +18811,16 @@ ${frontmatter.yaml}
       syncHeaderMenu();
       syncLineRefPill();
     }
+    function setQueryHistoryPanelOpen(open) {
+      const panel = document.getElementById("query-history-panel");
+      if (!panel)
+        return;
+      panel.hidden = !open;
+      document.body.classList.toggle("query-history-panel-open", open);
+      if (open && ANNOTATIONS_UI) {
+        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+      }
+    }
     function setPageMode() {
       document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
       document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
@@ -18507,6 +18839,19 @@ ${frontmatter.yaml}
           historyRefInput.value = STATE.route.ref || "HEAD";
       }
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+      const isDatabase = STATE.route.screen === "database";
+      const annotationsToggle = document.querySelector("#annotations-toggle");
+      const qhToggle = document.querySelector("#query-history-toggle");
+      if (annotationsToggle)
+        annotationsToggle.hidden = isDatabase;
+      if (qhToggle)
+        qhToggle.hidden = !isDatabase;
+      if (!isDatabase) {
+        setQueryHistoryPanelOpen(false);
+      }
+      if (isDatabase && ANNOTATIONS_UI) {
+        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+      }
     }
     function syncHeaderMenu() {
       document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
@@ -19363,6 +19708,59 @@ ${frontmatter.yaml}
       onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
       getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
+    const qhToggleBtn = document.getElementById("query-history-toggle");
+    if (qhToggleBtn) {
+      qhToggleBtn.addEventListener("click", () => {
+        const panel = document.getElementById("query-history-panel");
+        const opening = panel ? panel.hidden : true;
+        setQueryHistoryPanelOpen(opening);
+        if (opening)
+          DATABASE_VIEW.handleSse();
+      });
+    }
+    const qhCloseBtn = document.getElementById("query-history-panel-close");
+    if (qhCloseBtn) {
+      qhCloseBtn.addEventListener("click", () => {
+        setQueryHistoryPanelOpen(false);
+      });
+    }
+    (function setupQueryHistoryResizer() {
+      const panel = document.getElementById("query-history-panel");
+      const handle = document.getElementById("query-history-resizer");
+      if (!panel || !handle)
+        return;
+      const STORAGE_KEY = "gdp:qh-panel-width";
+      const MIN_W = 280;
+      const MAX_W = 800;
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const w = Math.max(MIN_W, Math.min(MAX_W, Number(saved) || 420));
+        panel.style.width = `${w}px`;
+      }
+      let dragging = false;
+      let startX = 0;
+      let startW = 0;
+      handle.addEventListener("mousedown", (e2) => {
+        dragging = true;
+        startX = e2.clientX;
+        startW = panel.offsetWidth;
+        document.body.classList.add("db-resizing");
+        e2.preventDefault();
+      });
+      window.addEventListener("mousemove", (e2) => {
+        if (!dragging)
+          return;
+        const w = Math.max(MIN_W, Math.min(MAX_W, startW - (e2.clientX - startX)));
+        panel.style.width = `${w}px`;
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging)
+          return;
+        dragging = false;
+        document.body.classList.remove("db-resizing");
+        localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
+      });
+    })();
     let sseTimer = null;
     let pendingSseChangedPaths = new Set;
     function scheduleSseLoad(changedPaths) {

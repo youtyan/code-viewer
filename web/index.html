@@ -31,6 +31,7 @@
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
+      <button id="query-history-toggle" class="global-icon-action" title="query history" aria-label="query history" hidden>📋</button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
@@ -198,6 +199,15 @@
       <a id="annotation-detail-location" href="#"></a>
       <div id="annotation-detail-body" class="markdown-body"></div>
     </div>
+  </aside>
+
+  <aside id="query-history-panel" hidden>
+    <div id="query-history-resizer" aria-hidden="true"></div>
+    <div class="query-history-panel-head">
+      <strong>Query History</strong>
+      <button id="query-history-panel-close" type="button">close</button>
+    </div>
+    <div id="query-history-content"></div>
   </aside>
 
   <main id="content">

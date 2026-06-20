@@ -9,6 +9,7 @@ const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
 const PAGE_SIZE = 200;
 const FILTER_DEBOUNCE_MS = 300;
+const DEFAULT_COL_WIDTH = 180;
 
 export type GridSort = {
   column: string;
@@ -29,6 +30,7 @@ export type TableGridCallbacks = {
     filters: GridFilter[],
   ) => Promise<DbTableDataResponse>;
   getDbId: () => string | null;
+  getProjectName?: () => string;
 };
 
 export type TableGrid = {
@@ -54,7 +56,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   filterInput.autocomplete = "off";
   const filterClear = document.createElement("button");
   filterClear.type = "button";
-  filterClear.className = "db-grid-filter-clear";
+  filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
   filterClear.textContent = "×";
   filterClear.hidden = true;
   filterBar.append(filterIcon, filterInput, filterClear);
@@ -102,6 +104,99 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* ---- Column width management ---- */
+  const colWidths = new Map<string, number>();
+
+  function storageKey(): string | null {
+    const project = callbacks.getProjectName?.() ?? "";
+    if (!currentTable) return null;
+    return `db:col-widths:${project}:${currentTable}`;
+  }
+
+  function saveColWidths() {
+    const key = storageKey();
+    if (!key) return;
+    const obj: Record<string, number> = {};
+    for (const [name, w] of colWidths) {
+      obj[name] = w;
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(obj));
+    } catch {
+      /* storage full — ignore */
+    }
+  }
+
+  function loadColWidths() {
+    colWidths.clear();
+    const key = storageKey();
+    if (!key) return;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const obj = JSON.parse(raw) as Record<string, number>;
+        for (const [name, w] of Object.entries(obj)) {
+          if (typeof w === "number" && w > 0) {
+            colWidths.set(name, w);
+          }
+        }
+      }
+    } catch {
+      /* corrupted — ignore */
+    }
+  }
+
+  function getColWidth(colName: string): number {
+    return colWidths.get(colName) ?? DEFAULT_COL_WIDTH;
+  }
+
+  function applyColWidth(colName: string, index: number) {
+    const w = getColWidth(colName);
+    // Apply to header cell
+    const headerCells = headerRow.querySelectorAll<HTMLElement>(
+      ".db-grid-header-cell",
+    );
+    if (headerCells[index]) {
+      headerCells[index].style.width = `${w}px`;
+    }
+    // Apply to filter cell
+    const filterCells = filterRow.querySelectorAll<HTMLElement>(
+      ".db-grid-filter-cell",
+    );
+    if (filterCells[index]) {
+      filterCells[index].style.width = `${w}px`;
+    }
+  }
+
+  function autoFitColumn(colName: string, colIndex: number) {
+    const measure = document.createElement("span");
+    measure.style.cssText =
+      "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
+    document.body.appendChild(measure);
+    const headerLabel = columns[colIndex]?.name || colName;
+    const typeLabel = columns[colIndex]?.type || "";
+    measure.textContent = `${headerLabel}  ${typeLabel}  ▲`;
+    let maxW = measure.offsetWidth + 16;
+    const rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    for (const row of rows) {
+      const cells = row.querySelectorAll<HTMLElement>(
+        ".db-grid-cell:not(.db-grid-rownum)",
+      );
+      const cell = cells[colIndex];
+      if (cell) {
+        measure.textContent = cell.textContent || "";
+        maxW = Math.max(maxW, measure.offsetWidth);
+      }
+    }
+    document.body.removeChild(measure);
+    const fitted = Math.max(60, Math.min(600, maxW));
+    colWidths.set(colName, fitted);
+    applyColWidth(colName, colIndex);
+    saveColWidths();
+    syncContentWidth();
+    renderViewport();
+  }
+
   function collectFilters(): GridFilter[] {
     const filters: GridFilter[] = [];
     for (const [col, val] of columnFilters) {
@@ -146,6 +241,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     statusEl = null;
     detailPanel.hidden = true;
     detailPanel.innerHTML = "";
+    colWidths.clear();
   }
 
   function showCellDetail(colIndex: number, value: DbValue) {
@@ -164,7 +260,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
-    closeBtn.className = "db-grid-detail-close";
+    closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
       detailPanel.hidden = true;
@@ -208,9 +304,11 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     rowNum.className = "db-grid-cell db-grid-rownum-header";
     rowNum.textContent = "#";
     headerRow.appendChild(rowNum);
-    for (const col of columns) {
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
       const cell = document.createElement("div");
       cell.className = "db-grid-cell db-grid-header-cell";
+      cell.style.width = `${getColWidth(col.name)}px`;
       if (sort?.column === col.name) {
         cell.classList.add("sorted");
         cell.dataset.dir = sort.direction;
@@ -230,12 +328,65 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       sortIcon.textContent =
         sort?.column === col.name ? (sort.direction === "asc" ? "▲" : "▼") : "";
 
-      cell.append(label, typeTag, sortIcon);
-      cell.addEventListener("click", () => handleSort(col.name));
+      /* ---- Resize handle ---- */
+      const resizeHandle = document.createElement("div");
+      resizeHandle.className = "db-grid-resize-handle";
+      const colIndex = i;
+      resizeHandle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startResize(colIndex, e);
+      });
+
+      cell.append(label, typeTag, sortIcon, resizeHandle);
+      cell.addEventListener("click", (e) => {
+        // Don't sort when clicking on resize handle
+        if (
+          (e.target as HTMLElement).classList.contains("db-grid-resize-handle")
+        )
+          return;
+        handleSort(col.name);
+      });
+      cell.addEventListener("dblclick", (e) => {
+        if (
+          (e.target as HTMLElement).classList.contains("db-grid-resize-handle")
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          autoFitColumn(col.name, colIndex);
+        }
+      });
       headerRow.appendChild(cell);
     }
     renderFilterRow();
     syncContentWidth();
+  }
+
+  function startResize(colIndex: number, startEvent: MouseEvent) {
+    const colName = columnNames[colIndex];
+    const startX = startEvent.clientX;
+    const startWidth = getColWidth(colName);
+    document.body.classList.add("db-resizing");
+
+    const onMouseMove = (e: MouseEvent) => {
+      const delta = e.clientX - startX;
+      const newWidth = Math.max(60, startWidth + delta);
+      colWidths.set(colName, newWidth);
+      applyColWidth(colName, colIndex);
+      syncContentWidth();
+      // Update data cells in viewport
+      renderViewport();
+    };
+
+    const onMouseUp = () => {
+      document.body.classList.remove("db-resizing");
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      saveColWidths();
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   }
 
   function renderFilterRow() {
@@ -244,9 +395,11 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     rowNumSpacer.className =
       "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
     filterRow.appendChild(rowNumSpacer);
-    for (const col of columns) {
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
       const cell = document.createElement("div");
       cell.className = "db-grid-cell db-grid-filter-cell";
+      cell.style.width = `${getColWidth(col.name)}px`;
       const input = document.createElement("input");
       input.type = "search";
       input.className = "db-grid-col-filter";
@@ -366,6 +519,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
           for (let c = 0; c < columnNames.length; c++) {
             const cell = document.createElement("div");
             cell.className = "db-grid-cell";
+            cell.style.width = `${getColWidth(columnNames[c])}px`;
             cell.textContent = formatValue(rowData[c]);
             if (rowData[c] === null) cell.classList.add("null");
             if (rowData[c] instanceof Uint8Array) cell.classList.add("blob");
@@ -381,6 +535,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
           for (let c = 0; c < columnNames.length; c++) {
             const cell = document.createElement("div");
             cell.className = "db-grid-cell loading";
+            cell.style.width = `${getColWidth(columnNames[c])}px`;
             cell.textContent = "…";
             row.appendChild(cell);
           }
@@ -424,13 +579,13 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
       exportCsvBtn = document.createElement("button");
       exportCsvBtn.type = "button";
-      exportCsvBtn.className = "db-grid-export-btn";
+      exportCsvBtn.className = "db-btn db-btn-sm db-grid-export-btn";
       exportCsvBtn.textContent = "Export CSV";
       exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
 
       exportJsonBtn = document.createElement("button");
       exportJsonBtn.type = "button";
-      exportJsonBtn.className = "db-grid-export-btn";
+      exportJsonBtn.className = "db-btn db-btn-sm db-grid-export-btn";
       exportJsonBtn.textContent = "Export JSON";
       exportJsonBtn.addEventListener("click", () => triggerExport("json"));
 
@@ -466,6 +621,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       columnNames = [];
       totalRows = 0;
     }
+    loadColWidths();
     spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
     renderHeader();
     updateStatus();
