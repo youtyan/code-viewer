@@ -18511,7 +18511,8 @@ ${frontmatter.yaml}
           close: "close viewer settings",
           display: "Display",
           language: "Language",
-          fileListFontSize: "File list font size",
+          fileListFontSize: "UI font size",
+          fileListFontSizeHelp: "Applies to the file sidebar and database UI.",
           codeFontSize: "Code font size",
           sizeSmall: "Small",
           sizeRegular: "Regular",
@@ -18589,8 +18590,9 @@ ${frontmatter.yaml}
           close: "ビューア設定を閉じる",
           display: "表示",
           language: "言語",
-          fileListFontSize: "ファイル一覧の文字サイズ",
-          codeFontSize: "コードの文字サイズ",
+          fileListFontSize: "UIの文字サイズ",
+          fileListFontSizeHelp: "ファイル一覧とデータベース画面に適用されます。",
+          codeFontSize: "コード表示の文字サイズ",
           sizeSmall: "小",
           sizeRegular: "標準",
           sizeLarge: "大",
@@ -18747,6 +18749,7 @@ ${frontmatter.yaml}
         large: text2.settings.sizeLarge,
         xlarge: text2.settings.sizeExtraLarge
       });
+      setElementText("#ui-font-size-help", text2.settings.fileListFontSizeHelp);
       setElementText("#display-settings-source", text2.settings.displaySource);
       setButtonLabel(document.querySelector("#scope-omit-reset"), text2.settings.reset);
       setButtonLabel(document.querySelector("#scope-omit-save"), text2.settings.save);
