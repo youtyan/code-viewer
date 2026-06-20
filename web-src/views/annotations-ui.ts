@@ -141,7 +141,13 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function setAnnotationPanelOpen(open: boolean) {
     annotationPanel.hidden = !open;
     document.body.classList.toggle("annotation-panel-open", open);
-    if (open) annotationPanelDismissed = false;
+    if (open) {
+      annotationPanelDismissed = false;
+      // Mutual exclusion: close query-history panel
+      const qhPanel = document.getElementById("query-history-panel");
+      if (qhPanel) qhPanel.hidden = true;
+      document.body.classList.remove("query-history-panel-open");
+    }
     localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
   }
 

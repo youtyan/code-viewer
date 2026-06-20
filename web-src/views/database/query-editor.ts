@@ -54,19 +54,19 @@ export function createQueryEditor(
   toolbar.className = "db-query-toolbar";
 
   const runBtn = document.createElement("button");
-  runBtn.className = "db-query-run";
+  runBtn.className = "db-btn db-btn-primary db-query-run";
   runBtn.type = "button";
   runBtn.textContent = "Run";
   runBtn.title = "Execute query (Ctrl+Enter)";
 
   const explainBtn = document.createElement("button");
-  explainBtn.className = "db-query-run db-query-explain";
+  explainBtn.className = "db-btn db-query-explain";
   explainBtn.type = "button";
   explainBtn.textContent = "Explain";
   explainBtn.title = "Show query execution plan";
 
   const historyBtn = document.createElement("button");
-  historyBtn.className = "db-query-history-btn";
+  historyBtn.className = "db-btn db-query-history-btn";
   historyBtn.type = "button";
   historyBtn.textContent = "History";
   historyBtn.title = "Query history";

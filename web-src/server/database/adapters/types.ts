@@ -15,6 +15,11 @@ export type QueryResult = {
   rowCount: number;
 };
 
+export type TriggerInfo = {
+  name: string;
+  sql: string;
+};
+
 export type DatabaseAdapter = {
   readonly kind: DbKind;
   getTables(): DbTableInfo[];
@@ -31,6 +36,8 @@ export type DatabaseAdapter = {
     params?: DbValue[],
     maxRows?: number,
   ): QueryResult;
+  getCreateStatement(table: string): string;
+  getTriggers(table: string): TriggerInfo[];
   close(): void;
 };
 

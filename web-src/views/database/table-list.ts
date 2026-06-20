@@ -3,6 +3,8 @@ import type { DbTableInfo } from "../../core/database/types";
 export type TableListCallbacks = {
   onSelectTable: (table: string) => void;
   onSelectSchema: (table: string) => void;
+  onViewCreateTable?: (table: string) => void;
+  onViewDefinition?: (table: string) => void;
 };
 
 export type TableList = {
@@ -16,6 +18,94 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   el.className = "db-table-list";
 
   let activeTable: string | null = null;
+
+  /* ---- Context menu ---- */
+  let contextMenu: HTMLDivElement | null = null;
+
+  function closeContextMenu() {
+    if (contextMenu) {
+      contextMenu.remove();
+      contextMenu = null;
+    }
+  }
+
+  function showContextMenu(e: MouseEvent, tableName: string) {
+    e.preventDefault();
+    closeContextMenu();
+
+    const menu = document.createElement("div");
+    menu.className = "db-context-menu";
+    menu.style.position = "absolute";
+    menu.style.left = `${e.pageX}px`;
+    menu.style.top = `${e.pageY}px`;
+
+    const items: { label: string; action: () => void }[] = [
+      {
+        label: "Copy Table Name",
+        action: () => {
+          navigator.clipboard.writeText(tableName).catch(() => {
+            /* ignore */
+          });
+        },
+      },
+      {
+        label: "Copy SELECT Statement",
+        action: () => {
+          const sql = `SELECT * FROM "${tableName}" LIMIT 100`;
+          navigator.clipboard.writeText(sql).catch(() => {
+            /* ignore */
+          });
+        },
+      },
+      {
+        label: "View CREATE TABLE",
+        action: () => {
+          callbacks.onViewCreateTable?.(tableName);
+        },
+      },
+      {
+        label: "View Table Definition",
+        action: () => {
+          callbacks.onViewDefinition?.(tableName);
+        },
+      },
+    ];
+
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "db-context-menu-item";
+      row.textContent = item.label;
+      row.addEventListener("click", () => {
+        item.action();
+        closeContextMenu();
+      });
+      menu.appendChild(row);
+    }
+
+    document.body.appendChild(menu);
+    contextMenu = menu;
+
+    // Close on outside click
+    const onDocClick = (ev: MouseEvent) => {
+      if (!menu.contains(ev.target as Node)) {
+        closeContextMenu();
+        document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+      }
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        closeContextMenu();
+        document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onKeyDown, true);
+      }
+    };
+    // Use setTimeout so the current event cycle doesn't immediately close it
+    setTimeout(() => {
+      document.addEventListener("click", onDocClick, true);
+      document.addEventListener("keydown", onKeyDown, true);
+    }, 0);
+  }
 
   function render(tables: DbTableInfo[]) {
     el.innerHTML = "";
@@ -62,6 +152,9 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         );
         row.addEventListener("dblclick", () =>
           callbacks.onSelectSchema(table.name),
+        );
+        row.addEventListener("contextmenu", (e) =>
+          showContextMenu(e, table.name),
         );
         el.appendChild(row);
       }

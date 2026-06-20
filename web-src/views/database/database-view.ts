@@ -28,7 +28,7 @@ export type DatabaseView = {
   handleSse: () => void;
 };
 
-type TabName = "data" | "query" | "schema" | "er" | "history";
+type TabName = "data" | "query" | "schema" | "er";
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
@@ -50,8 +50,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const tabQuery = createTab("Query", false);
   const tabSchema = createTab("Schema", false);
   const tabEr = createTab("ER Diagram", false);
-  const tabHistory = createTab("History", false);
-  tabBar.append(tabData, tabQuery, tabSchema, tabEr, tabHistory);
+  tabBar.append(tabData, tabQuery, tabSchema, tabEr);
 
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
@@ -90,10 +89,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     queryEditor.el,
     schemaView.el,
     erDiagram.el,
-    historyView.el,
   );
   queryEditor.el.hidden = true;
-  historyView.el.hidden = true;
 
   const container = document.createElement("div");
   container.className = "db-container";
@@ -107,6 +104,41 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return btn;
   }
 
+  function showDockerNotice(file: DbFileInfo) {
+    grid.clear();
+    schemaView.clear();
+    erDiagram.clear();
+    grid.el.hidden = true;
+    queryEditor.el.hidden = true;
+    schemaView.el.hidden = true;
+    erDiagram.el.hidden = true;
+    tabBar.hidden = true;
+    let notice = mainContent.querySelector<HTMLElement>(".db-docker-notice");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.className = "db-docker-notice";
+      mainContent.appendChild(notice);
+    }
+    notice.innerHTML = "";
+    const icon = document.createElement("div");
+    icon.className = "db-docker-notice-icon";
+    icon.textContent = "🐳";
+    const title = document.createElement("h3");
+    title.textContent = `${file.kind === "postgresql" ? "PostgreSQL" : "MySQL"} (Docker)`;
+    const desc = document.createElement("p");
+    desc.textContent = `${file.name}`;
+    const hint = document.createElement("p");
+    hint.className = "db-docker-notice-hint";
+    hint.textContent =
+      "Docker database adapters are coming soon. Use the Query CLI to run queries via docker exec:";
+    const code = document.createElement("pre");
+    code.className = "db-docker-notice-code";
+    const svcName = file.id.replace("docker:", "");
+    code.textContent = `docker exec -i ${svcName} ${file.kind === "postgresql" ? "psql -U postgres" : "mysql -u root"} -c "SELECT ..."`;
+    notice.append(icon, title, desc, hint, code);
+    notice.hidden = false;
+  }
+
   function mount() {
     if (mounted) return;
     const content = document.getElementById("content");
@@ -116,12 +148,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const empty = document.getElementById("empty");
     if (empty) empty.classList.add("hidden");
     content.appendChild(container);
+    const historyContent = document.getElementById("query-history-content");
+    if (historyContent) historyContent.appendChild(historyView.el);
     mounted = true;
   }
 
   function unmount() {
     if (!mounted) return;
     container.remove();
+    historyView.el.remove();
     const diff = document.getElementById("diff");
     if (diff) diff.hidden = false;
     mounted = false;
@@ -137,14 +172,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabQuery.classList.toggle("active", tab === "query");
     tabSchema.classList.toggle("active", tab === "schema");
     tabEr.classList.toggle("active", tab === "er");
-    tabHistory.classList.toggle("active", tab === "history");
     grid.el.hidden = tab !== "data";
     queryEditor.el.hidden = tab !== "query";
     schemaView.el.hidden = tab !== "schema";
     erDiagram.el.hidden = tab !== "er";
-    historyView.el.hidden = tab !== "history";
     if (tab === "query") queryEditor.focus();
-    if (tab === "history") historyView.refresh();
     if (updateUrl) {
       const activeTable = tableList.el.querySelector<HTMLElement>(
         ".db-table-item.active",
@@ -175,10 +207,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     setActiveTab("er");
     if (schemaCache) renderErDiagram();
   });
-  tabHistory.addEventListener("click", () => {
-    setActiveTab("history");
-  });
-
   async function fetchDbFiles(): Promise<DbFileInfo[]> {
     const res = await deps.trackLoad(fetch("/_db/files"));
     if (!res.ok) return [];
@@ -303,8 +331,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!dbId) return;
     const file = lastFiles.find((f) => f.id === dbId);
     if (file?.id.startsWith("docker:")) {
-      alert("PostgreSQL/MySQL adapter is not yet implemented");
-      if (currentDb) dbSelect.value = currentDb.id;
+      showDockerNotice(file);
       return;
     }
     const option = dbSelect.selectedOptions[0];
@@ -356,7 +383,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     currentDb = files.find((f) => f.id === target) || null;
 
     if (currentDb?.id.startsWith("docker:")) {
-      alert("PostgreSQL/MySQL adapter is not yet implemented");
+      showDockerNotice(currentDb);
       return;
     }
 
@@ -383,7 +410,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   function handleSse() {
-    if (mounted && !historyView.el.hidden) {
+    if (!mounted) return;
+    const panel = document.getElementById("query-history-panel");
+    if (panel && !panel.hidden) {
       historyView.refresh();
     }
   }

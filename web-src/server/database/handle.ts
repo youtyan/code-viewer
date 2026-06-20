@@ -508,6 +508,24 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
   }
 }
 
+async function handleDdl(cwd: string, url: URL): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const table = url.searchParams.get("table");
+  if (!table) return textError("missing table parameter", 400);
+  try {
+    const adapter = await getConnection(r.resolved);
+    const sql = adapter.getCreateStatement(table);
+    const triggers = adapter.getTriggers(table);
+    return json({ dbId: r.dbId, table, sql, triggers });
+  } catch (err) {
+    return textError(
+      `failed to get DDL: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
   let body: { db?: string };
@@ -537,6 +555,7 @@ export async function handleDatabaseRoute(
   if (path === "/_db/schema") return handleSchema(cwd, url);
   if (path === "/_db/table") return handleTable(cwd, url);
   if (path === "/_db/export") return handleExport(cwd, url);
+  if (path === "/_db/ddl") return handleDdl(cwd, url);
   if (path === "/_db/query") {
     if (!sideEffectAllowed(req)) return textError("forbidden", 403);
     return handleQuery(cwd, req, sendSse);
