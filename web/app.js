@@ -9591,9 +9591,63 @@ ${frontmatter.yaml}
     mainContent.className = "db-main-content";
     mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el);
     queryEditor.el.hidden = true;
+    const upperArea = document.createElement("div");
+    upperArea.className = "db-upper-area";
+    upperArea.append(sidebar, mainContent);
+    const historyResizer = document.createElement("div");
+    historyResizer.className = "db-history-resizer";
+    const historyPane = document.createElement("div");
+    historyPane.className = "db-history-pane";
+    const savedHistoryHeight = localStorage.getItem("db:history-height");
+    if (savedHistoryHeight)
+      historyPane.style.height = savedHistoryHeight;
+    historyPane.appendChild(historyView.el);
+    let historyResizing = false;
+    historyResizer.addEventListener("mousedown", (e2) => {
+      e2.preventDefault();
+      historyResizing = true;
+      historyResizer.classList.add("active");
+      const startY = e2.clientY;
+      const startH = historyPane.offsetHeight;
+      const onMove = (ev) => {
+        if (!historyResizing)
+          return;
+        const h = Math.max(80, Math.min(600, startH - (ev.clientY - startY)));
+        historyPane.style.height = `${h}px`;
+      };
+      const onUp = () => {
+        historyResizing = false;
+        historyResizer.classList.remove("active");
+        localStorage.setItem("db:history-height", historyPane.style.height);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+    const historyToggle = document.createElement("button");
+    historyToggle.className = "db-history-toggle";
+    historyToggle.type = "button";
+    historyToggle.textContent = "Query History";
+    historyToggle.title = "Toggle query history panel";
+    sidebar.appendChild(historyToggle);
+    let historyOpen = localStorage.getItem("db:history-open") !== "false";
+    function applyHistoryVisibility() {
+      historyResizer.hidden = !historyOpen;
+      historyPane.hidden = !historyOpen;
+      historyToggle.classList.toggle("active", historyOpen);
+      if (historyOpen)
+        historyView.refresh();
+    }
+    applyHistoryVisibility();
+    historyToggle.addEventListener("click", () => {
+      historyOpen = !historyOpen;
+      localStorage.setItem("db:history-open", String(historyOpen));
+      applyHistoryVisibility();
+    });
     const container = document.createElement("div");
     container.className = "db-container";
-    container.append(sidebar, mainContent);
+    container.append(upperArea, historyResizer, historyPane);
     function createTab(text2, active) {
       const btn = document.createElement("button");
       btn.className = `db-tab${active ? " active" : ""}`;
@@ -9621,16 +9675,13 @@ ${frontmatter.yaml}
       if (empty)
         empty.classList.add("hidden");
       content.appendChild(container);
-      const historyContent = document.getElementById("query-history-content");
-      if (historyContent)
-        historyContent.appendChild(historyView.el);
       mounted = true;
+      applyHistoryVisibility();
     }
     function unmount() {
       if (!mounted)
         return;
       container.remove();
-      historyView.el.remove();
       const diff = document.getElementById("diff");
       if (diff)
         diff.hidden = false;
@@ -9866,10 +9917,8 @@ ${frontmatter.yaml}
     function handleSse() {
       if (!mounted)
         return;
-      const panel = document.getElementById("query-history-panel");
-      if (panel && !panel.hidden) {
+      if (historyOpen)
         historyView.refresh();
-      }
     }
     return { enter, leave, handleSse };
   }
