@@ -77,3 +77,25 @@ export type DbOrder = {
   column: string;
   direction: DbOrderDirection;
 };
+
+export type QueryHistoryEntry = {
+  id: string;
+  dbId: string;
+  sql: string;
+  title?: string;
+  body?: string;
+  columns: string[];
+  rowsPreview: DbValue[][];
+  rowCount: number;
+  savedRows: number;
+  truncated: boolean;
+  elapsedMs: number;
+  executedAt: string;
+  executedBy: "user" | "ai";
+  source: "cli" | "browser";
+};
+
+export type QueryHistoryState = {
+  version: 1;
+  entries: QueryHistoryEntry[];
+};

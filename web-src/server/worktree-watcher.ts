@@ -31,7 +31,7 @@ type WorktreeUpdateWatchOptions = {
   readdirSync?: (path: string) => DirectoryEntry[];
   isDirectory?: (path: string) => boolean;
   directorySignature?: (path: string) => string | null;
-  onUpdate: () => void;
+  onUpdate: (changedPaths?: string[]) => void;
   onError?: (error: unknown) => void;
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
@@ -92,6 +92,7 @@ export function startWorktreeUpdateWatch(
   const initialScanQueue: string[] = [];
   let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const pendingChangedPaths = new Set<string>();
 
   const ignored = (path: string) =>
     isSkippableSearchPath(
@@ -100,11 +101,16 @@ export function startWorktreeUpdateWatch(
       options.excludeNames,
     );
 
-  const scheduleUpdate = () => {
+  const scheduleUpdate = (changedPath?: string) => {
+    if (changedPath) pendingChangedPaths.add(changedPath);
     if (timer) clearTimer(timer);
     timer = setTimer(() => {
       timer = null;
-      options.onUpdate();
+      const paths = pendingChangedPaths.size
+        ? [...pendingChangedPaths]
+        : undefined;
+      pendingChangedPaths.clear();
+      options.onUpdate(paths);
     }, debounceMs);
   };
 
@@ -192,14 +198,14 @@ export function startWorktreeUpdateWatch(
                 closeSubtree(fullChangedPath);
                 watchDirectory(fullChangedPath);
               }
-              scheduleUpdate();
+              scheduleUpdate(changed);
               return;
             }
             watchDirectory(fullChangedPath);
           } else if (known) {
             closeSubtree(fullChangedPath);
           }
-          scheduleUpdate();
+          scheduleUpdate(changed);
         }) as WatchHandle | undefined) || {};
       watchers.set(dir, watcher);
       const signature = directorySignature(dir);

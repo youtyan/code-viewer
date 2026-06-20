@@ -9,6 +9,7 @@ import type {
 import type { AppRoute, DiffRange } from "../../core/routes";
 import { createErDiagram } from "./er-diagram";
 import { createQueryEditor } from "./query-editor";
+import { createQueryHistoryView } from "./query-history-view";
 import { createSchemaView } from "./schema-view";
 import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
 import { createTableList } from "./table-list";
@@ -24,9 +25,10 @@ export type DatabaseViewDeps = {
 export type DatabaseView = {
   enter: (db?: string, table?: string, tab?: TabName) => void;
   leave: () => void;
+  handleSse: () => void;
 };
 
-type TabName = "data" | "query" | "schema" | "er";
+type TabName = "data" | "query" | "schema" | "er" | "history";
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
@@ -48,7 +50,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const tabQuery = createTab("Query", false);
   const tabSchema = createTab("Schema", false);
   const tabEr = createTab("ER Diagram", false);
-  tabBar.append(tabData, tabQuery, tabSchema, tabEr);
+  const tabHistory = createTab("History", false);
+  tabBar.append(tabData, tabQuery, tabSchema, tabEr, tabHistory);
 
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
@@ -71,6 +74,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   const schemaView = createSchemaView();
   const erDiagram = createErDiagram();
+  const historyView = createQueryHistoryView({
+    getDbId: () => currentDb?.id || null,
+    copySqlToQuery: (sql) => {
+      queryEditor.setSql(sql);
+      setActiveTab("query");
+    },
+  });
 
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
@@ -80,8 +90,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     queryEditor.el,
     schemaView.el,
     erDiagram.el,
+    historyView.el,
   );
   queryEditor.el.hidden = true;
+  historyView.el.hidden = true;
 
   const container = document.createElement("div");
   container.className = "db-container";
@@ -125,11 +137,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabQuery.classList.toggle("active", tab === "query");
     tabSchema.classList.toggle("active", tab === "schema");
     tabEr.classList.toggle("active", tab === "er");
+    tabHistory.classList.toggle("active", tab === "history");
     grid.el.hidden = tab !== "data";
     queryEditor.el.hidden = tab !== "query";
     schemaView.el.hidden = tab !== "schema";
     erDiagram.el.hidden = tab !== "er";
+    historyView.el.hidden = tab !== "history";
     if (tab === "query") queryEditor.focus();
+    if (tab === "history") historyView.refresh();
     if (updateUrl) {
       const activeTable = tableList.el.querySelector<HTMLElement>(
         ".db-table-item.active",
@@ -159,6 +174,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   tabEr.addEventListener("click", () => {
     setActiveTab("er");
     if (schemaCache) renderErDiagram();
+  });
+  tabHistory.addEventListener("click", () => {
+    setActiveTab("history");
   });
 
   async function fetchDbFiles(): Promise<DbFileInfo[]> {
@@ -210,7 +228,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         "Content-Type": "application/json",
         "X-Code-Viewer-Action": "1",
       },
-      body: JSON.stringify({ db: currentDb.id, sql }),
+      body: JSON.stringify({
+        db: currentDb.id,
+        sql,
+        saveHistory: true,
+        source: "browser",
+        executedBy: "user",
+      }),
     });
     return (await res.json()) as DbQueryResponse;
   }
@@ -358,7 +382,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     unmount();
   }
 
-  return { enter, leave };
+  function handleSse() {
+    if (mounted && !historyView.el.hidden) {
+      historyView.refresh();
+    }
+  }
+
+  return { enter, leave, handleSse };
 }
 
 function formatSize(bytes: number): string {

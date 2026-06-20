@@ -1924,10 +1924,14 @@ function clearMutableCaches() {
   fileListCache.clear();
 }
 
-function triggerUpdate() {
+function triggerUpdate(changedPaths?: string[]) {
   generation++;
   clearMutableCaches();
-  sendSse("update");
+  const data =
+    changedPaths && changedPaths.length && changedPaths.length <= 50
+      ? JSON.stringify({ generation, paths: changedPaths })
+      : "tick";
+  sendSse("update", data);
 }
 
 function moveMacPathIntoTrash(path: string): {
@@ -2382,6 +2386,7 @@ const server = await startServer({
         cwd,
         scopeOmitDirNames,
         sideEffectRequestAllowed,
+        sendSse,
       );
       if (dbResponse) return dbResponse;
     }

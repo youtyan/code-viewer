@@ -32,6 +32,7 @@ export type QueryEditorCallbacks = {
 export type QueryEditor = {
   el: HTMLElement;
   focus: () => void;
+  setSql: (sql: string) => void;
 };
 
 export function createQueryEditor(
@@ -256,7 +257,11 @@ export function createQueryEditor(
     textarea.focus();
   }
 
-  return { el, focus };
+  function setSql(sql: string) {
+    textarea.value = sql;
+  }
+
+  return { el, focus, setSql };
 }
 
 function formatValue(value: DbValue): string {

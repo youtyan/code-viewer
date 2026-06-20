@@ -520,7 +520,7 @@
         const db = params.get("db") || undefined;
         const table = params.get("table") || undefined;
         const tabRaw = params.get("tab");
-        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" ? tabRaw : undefined;
+        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" || tabRaw === "history" ? tabRaw : undefined;
         return {
           screen: "database",
           ...db ? { db } : {},
@@ -8228,9 +8228,227 @@ ${frontmatter.yaml}
     function focus() {
       textarea.focus();
     }
-    return { el, focus };
+    function setSql(sql) {
+      textarea.value = sql;
+    }
+    return { el, focus, setSql };
   }
   function formatValue(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/query-history-view.ts
+  function createQueryHistoryView(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-query-history";
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-query-history-toolbar";
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "db-query-history-action";
+    refreshBtn.type = "button";
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.title = "Refresh history";
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "db-query-history-action db-query-history-danger";
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear All";
+    clearBtn.title = "Delete all query history";
+    toolbar.append(refreshBtn, clearBtn);
+    const listEl = document.createElement("div");
+    listEl.className = "db-query-history-list";
+    el.append(toolbar, listEl);
+    let entries = [];
+    async function refresh() {
+      const dbId = callbacks.getDbId();
+      const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
+      try {
+        const res = await fetch(`/_db/history${params}`);
+        if (!res.ok)
+          return;
+        const state = await res.json();
+        entries = state.entries;
+        render();
+      } catch {}
+    }
+    function render() {
+      listEl.innerHTML = "";
+      if (entries.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-query-history-empty";
+        empty.textContent = "No query history";
+        listEl.appendChild(empty);
+        return;
+      }
+      for (const entry of entries) {
+        listEl.appendChild(renderEntry(entry));
+      }
+    }
+    function renderEntry(entry) {
+      const item = document.createElement("div");
+      item.className = "db-query-history-entry";
+      item.dataset.id = entry.id;
+      const header = document.createElement("div");
+      header.className = "db-query-history-entry-header";
+      const meta = document.createElement("div");
+      meta.className = "db-query-history-entry-meta";
+      const byIcon = document.createElement("span");
+      byIcon.className = "db-query-history-by";
+      byIcon.textContent = entry.executedBy === "ai" ? "[AI]" : "[User]";
+      byIcon.title = entry.executedBy === "ai" ? "Executed by AI agent" : "Executed by user";
+      const time = document.createElement("span");
+      time.className = "db-query-history-time";
+      time.textContent = formatTime(entry.executedAt);
+      time.title = entry.executedAt;
+      const stats = document.createElement("span");
+      stats.className = "db-query-history-stats";
+      const truncMark = entry.truncated ? "+" : "";
+      stats.textContent = `${entry.rowCount}${truncMark} rows, ${entry.elapsedMs}ms`;
+      meta.append(byIcon, time, stats);
+      const title = document.createElement("div");
+      title.className = "db-query-history-entry-title";
+      title.textContent = entry.title || (entry.sql.length > 60 ? `${entry.sql.slice(0, 60)}...` : entry.sql);
+      header.append(meta, title);
+      const detail = document.createElement("div");
+      detail.className = "db-query-history-detail";
+      detail.hidden = true;
+      const sqlBlock = document.createElement("pre");
+      sqlBlock.className = "db-query-history-sql";
+      sqlBlock.textContent = entry.sql;
+      detail.appendChild(sqlBlock);
+      if (entry.body) {
+        const bodyBlock = document.createElement("div");
+        bodyBlock.className = "db-query-history-body";
+        bodyBlock.textContent = entry.body;
+        detail.appendChild(bodyBlock);
+      }
+      if (entry.columns.length > 0 && entry.rowsPreview.length > 0) {
+        detail.appendChild(renderPreviewTable(entry));
+      }
+      const actions = document.createElement("div");
+      actions.className = "db-query-history-actions";
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "db-query-history-action";
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy SQL";
+      copyBtn.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        callbacks.copySqlToQuery(entry.sql);
+      });
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "db-query-history-action db-query-history-danger";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        deleteEntry(entry.id);
+      });
+      actions.append(copyBtn, deleteBtn);
+      detail.appendChild(actions);
+      item.append(header, detail);
+      header.addEventListener("click", () => {
+        detail.hidden = !detail.hidden;
+        item.classList.toggle("expanded", !detail.hidden);
+      });
+      return item;
+    }
+    function renderPreviewTable(entry) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "db-query-table-wrap";
+      const table2 = document.createElement("table");
+      table2.className = "db-query-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thNum = document.createElement("th");
+      thNum.textContent = "#";
+      thNum.className = "db-grid-rownum";
+      headRow.appendChild(thNum);
+      for (const col of entry.columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (let i2 = 0;i2 < entry.rowsPreview.length; i2++) {
+        const row = entry.rowsPreview[i2];
+        const tr = document.createElement("tr");
+        if (i2 % 2 === 1)
+          tr.classList.add("alt");
+        const tdNum = document.createElement("td");
+        tdNum.className = "db-grid-rownum";
+        tdNum.textContent = String(i2 + 1);
+        tr.appendChild(tdNum);
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.textContent = formatValue2(value);
+          if (value === null)
+            td.classList.add("null");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table2.append(thead, tbody);
+      wrapper.appendChild(table2);
+      if (entry.savedRows < entry.rowCount) {
+        const note = document.createElement("div");
+        note.className = "db-query-history-truncated";
+        note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+        wrapper.appendChild(note);
+      }
+      return wrapper;
+    }
+    async function deleteEntry(id) {
+      try {
+        await fetch("/_db/history/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ id })
+        });
+        entries = entries.filter((e2) => e2.id !== id);
+        render();
+      } catch {}
+    }
+    clearBtn.addEventListener("click", async () => {
+      const dbId = callbacks.getDbId();
+      try {
+        await fetch("/_db/history/clear", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify(dbId ? { db: dbId } : {})
+        });
+        entries = [];
+        render();
+      } catch {}
+    });
+    refreshBtn.addEventListener("click", () => {
+      refresh();
+    });
+    return { el, refresh };
+  }
+  function formatTime(iso) {
+    try {
+      const d2 = new Date(iso);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}:${pad(d2.getSeconds())}`;
+    } catch {
+      return iso;
+    }
+  }
+  function formatValue2(value) {
     if (value === null)
       return "NULL";
     if (value instanceof Uint8Array)
@@ -8618,7 +8836,7 @@ ${frontmatter.yaml}
             for (let c2 = 0;c2 < columnNames.length; c2++) {
               const cell = document.createElement("div");
               cell.className = "db-grid-cell";
-              cell.textContent = formatValue2(rowData[c2]);
+              cell.textContent = formatValue3(rowData[c2]);
               if (rowData[c2] === null)
                 cell.classList.add("null");
               if (rowData[c2] instanceof Uint8Array)
@@ -8749,7 +8967,7 @@ ${frontmatter.yaml}
     }
     return { el, load, clear, destroy };
   }
-  function formatValue2(value) {
+  function formatValue3(value) {
     if (value === null)
       return "NULL";
     if (value instanceof Uint8Array)
@@ -8843,7 +9061,8 @@ ${frontmatter.yaml}
     const tabQuery = createTab("Query", false);
     const tabSchema = createTab("Schema", false);
     const tabEr = createTab("ER Diagram", false);
-    tabBar.append(tabData, tabQuery, tabSchema, tabEr);
+    const tabHistory = createTab("History", false);
+    tabBar.append(tabData, tabQuery, tabSchema, tabEr, tabHistory);
     const tableList = createTableList({
       onSelectTable: (table2) => selectTable(table2),
       onSelectSchema: (table2) => showSchema(table2)
@@ -8860,10 +9079,18 @@ ${frontmatter.yaml}
     });
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
+    const historyView = createQueryHistoryView({
+      getDbId: () => currentDb?.id || null,
+      copySqlToQuery: (sql) => {
+        queryEditor.setSql(sql);
+        setActiveTab("query");
+      }
+    });
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, historyView.el);
     queryEditor.el.hidden = true;
+    historyView.el.hidden = true;
     const container = document.createElement("div");
     container.className = "db-container";
     container.append(sidebar, mainContent);
@@ -8908,12 +9135,16 @@ ${frontmatter.yaml}
       tabQuery.classList.toggle("active", tab === "query");
       tabSchema.classList.toggle("active", tab === "schema");
       tabEr.classList.toggle("active", tab === "er");
+      tabHistory.classList.toggle("active", tab === "history");
       grid.el.hidden = tab !== "data";
       queryEditor.el.hidden = tab !== "query";
       schemaView.el.hidden = tab !== "schema";
       erDiagram.el.hidden = tab !== "er";
+      historyView.el.hidden = tab !== "history";
       if (tab === "query")
         queryEditor.focus();
+      if (tab === "history")
+        historyView.refresh();
       if (updateUrl) {
         const activeTable = tableList.el.querySelector(".db-table-item.active");
         deps.setRoute({
@@ -8937,6 +9168,9 @@ ${frontmatter.yaml}
       setActiveTab("er");
       if (schemaCache)
         renderErDiagram();
+    });
+    tabHistory.addEventListener("click", () => {
+      setActiveTab("history");
     });
     async function fetchDbFiles() {
       const res = await deps.trackLoad(fetch("/_db/files"));
@@ -8981,7 +9215,13 @@ ${frontmatter.yaml}
           "Content-Type": "application/json",
           "X-Code-Viewer-Action": "1"
         },
-        body: JSON.stringify({ db: currentDb.id, sql })
+        body: JSON.stringify({
+          db: currentDb.id,
+          sql,
+          saveHistory: true,
+          source: "browser",
+          executedBy: "user"
+        })
       });
       return await res.json();
     }
@@ -9112,7 +9352,12 @@ ${frontmatter.yaml}
       document.body.classList.remove("gdp-database-page");
       unmount();
     }
-    return { enter, leave };
+    function handleSse() {
+      if (mounted && !historyView.el.hidden) {
+        historyView.refresh();
+      }
+    }
+    return { enter, leave, handleSse };
   }
   function formatSize(bytes) {
     if (bytes >= 1024 * 1024 * 1024)
@@ -9527,16 +9772,107 @@ ${frontmatter.yaml}
     let ACTIVE_LOADS = 0;
     const MAX_PARALLEL = 2;
     let lazyObserver = null;
-    function renderShell(meta) {
+    let scrollSpyInstalled = false;
+    let prevListSignature = "";
+    let prevCardSignatures = new Map;
+    function fileKey(f2) {
+      return f2.key || f2.path;
+    }
+    function computeListSignature(files) {
+      return files.map((f2) => `${fileKey(f2)}\x00${f2.path}\x00${f2.old_path || ""}\x00${f2.status || "M"}`).join(`
+`);
+    }
+    function computeCardSignature(f2) {
+      return [
+        fileKey(f2),
+        f2.status || "M",
+        f2.additions || 0,
+        f2.deletions || 0,
+        f2.binary ? 1 : 0,
+        f2.media_kind || "",
+        f2.size_class || "small",
+        f2.force_layout || "",
+        f2.highlight ? 1 : 0,
+        f2.load_url,
+        f2.preview_url || "",
+        f2.estimated_height_px || 0,
+        f2.untracked ? 1 : 0
+      ].join("\x00");
+    }
+    function ensureLazyObserver() {
+      if (!lazyObserver) {
+        lazyObserver = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting)
+              continue;
+            const card = entry.target;
+            if (card.classList.contains("loaded") || card.classList.contains("loading"))
+              continue;
+            const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+            if (f2)
+              enqueueLoad(f2, card, 0);
+          }
+        }, { rootMargin: "1200px 0px 1600px 0px" });
+      }
+      return lazyObserver;
+    }
+    function activatePendingCard(card, file) {
+      ensureLazyObserver().observe(card);
+      const rect = card.getBoundingClientRect();
+      if (rect.top <= window.innerHeight + 1600) {
+        enqueueLoad(file, card, 0);
+      }
+    }
+    function invalidateLoadedCard(card, file, changedPaths) {
+      if (!card.classList.contains("loaded"))
+        return false;
+      if (changedPaths && !changedPaths.has(file.path))
+        return false;
+      card.classList.remove("loaded", "error");
+      card.classList.add("pending");
+      card._diffData = null;
+      const body = card.querySelector(".gdp-shell-body");
+      if (body)
+        body.innerHTML = "";
+      const head = card.querySelector(".gdp-shell-header");
+      if (head)
+        head.style.display = "";
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = false;
+      activatePendingCard(card, file);
+      return true;
+    }
+    function updateSidebarStats(files) {
+      for (const f2 of files) {
+        const li = document.querySelector(`#filelist li[data-path="${CSS.escape(f2.path)}"]`);
+        if (!li)
+          continue;
+        const badge = li.querySelector(".badge");
+        if (badge) {
+          const ch = (f2.status || "M")[0].toUpperCase();
+          if (badge.textContent !== ch) {
+            badge.textContent = ch;
+            badge.className = `badge ${ch}`;
+          }
+        }
+      }
+    }
+    function renderShell(meta, changedPaths) {
       const newFiles = meta.files || [];
+      const newListSig = computeListSignature(newFiles);
+      const listSame = newListSig === prevListSignature && prevListSignature !== "";
       STATE.files = newFiles;
       setServerGeneration(meta.generation || 0);
       window._lastMeta = meta;
       renderMeta(meta);
-      renderSidebar(newFiles);
       const target = $("#diff");
       const empty = $("#empty");
       if (!newFiles.length) {
+        prevListSignature = newListSig;
+        prevCardSignatures.clear();
+        if (!listSame)
+          renderSidebar(newFiles);
         if (STATE.route.screen === "file") {
           empty.classList.add("hidden");
           applySourceRouteToShell();
@@ -9545,17 +9881,91 @@ ${frontmatter.yaml}
           target.replaceChildren();
         }
         LOAD_QUEUE.length = 0;
-        return;
+        return {
+          structureChanged: !listSame,
+          invalidatedCards: 0,
+          preservedDom: listSame
+        };
       }
       empty.classList.add("hidden");
+      const newCardSigs = new Map;
+      for (const f2 of newFiles) {
+        newCardSigs.set(fileKey(f2), computeCardSignature(f2));
+      }
+      let invalidatedCards = 0;
+      if (listSame) {
+        const pathsUnknown = !changedPaths;
+        let sidebarNeedsStatsUpdate = false;
+        for (const f2 of newFiles) {
+          const key = fileKey(f2);
+          const oldSig = prevCardSignatures.get(key);
+          const newSig = newCardSigs.get(key);
+          const sigChanged = oldSig !== newSig;
+          const pathHint = pathsUnknown || changedPaths.has(f2.path);
+          if (!sigChanged && !pathHint) {
+            continue;
+          }
+          const card = document.querySelector(`.gdp-file-shell[data-key="${CSS.escape(key)}"]`);
+          if (!card)
+            continue;
+          const sizeChanged = card.dataset.sizeClass !== (f2.size_class || "small");
+          const statusChanged = card.dataset.status !== (f2.status || "M");
+          if (sizeChanged || statusChanged) {
+            card.classList.remove("loaded", "error");
+            card.classList.add("pending");
+            card.replaceChildren();
+            const tmp = createPlaceholder(f2);
+            while (tmp.firstChild)
+              card.appendChild(tmp.firstChild);
+            card.dataset.sizeClass = f2.size_class || "small";
+            card.dataset.status = f2.status || "M";
+            delete card.dataset.manualRendered;
+            delete card.dataset.manualLoad;
+            delete card.dataset.manualMode;
+            card.style.minHeight = `${f2.estimated_height_px || 80}px`;
+            card._diffData = null;
+            card._file = null;
+            activatePendingCard(card, f2);
+            invalidatedCards++;
+            sidebarNeedsStatsUpdate = true;
+          } else {
+            const stats = card.querySelector(".gdp-shell-header .stats");
+            if (stats) {
+              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
+            }
+            card._file = f2;
+            const didInvalidate = sigChanged ? invalidateLoadedCard(card, f2, null) : invalidateLoadedCard(card, f2, changedPaths);
+            if (didInvalidate)
+              invalidatedCards++;
+            if (sigChanged)
+              sidebarNeedsStatsUpdate = true;
+          }
+        }
+        if (sidebarNeedsStatsUpdate)
+          updateSidebarStats(newFiles);
+        prevCardSignatures = newCardSigs;
+        prevListSignature = newListSig;
+        applySourceRouteToShell();
+        if (!scrollSpyInstalled) {
+          setupScrollSpy();
+          scrollSpyInstalled = true;
+        }
+        return {
+          structureChanged: false,
+          invalidatedCards,
+          preservedDom: invalidatedCards === 0
+        };
+      }
+      if (!listSame)
+        renderSidebar(newFiles);
       const oldByKey = new Map;
       document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
         if (c2.dataset.key)
           oldByKey.set(c2.dataset.key, c2);
       });
       const ordered = [];
-      newFiles.forEach((f2) => {
-        const key = f2.key || f2.path;
+      for (const f2 of newFiles) {
+        const key = fileKey(f2);
         const old = oldByKey.get(key);
         if (old) {
           oldByKey.delete(key);
@@ -9576,6 +9986,7 @@ ${frontmatter.yaml}
             old.style.minHeight = `${f2.estimated_height_px || 80}px`;
             old._diffData = null;
             old._file = null;
+            invalidatedCards++;
           } else {
             const stats = old.querySelector(".gdp-shell-header .stats");
             if (stats) {
@@ -9586,8 +9997,9 @@ ${frontmatter.yaml}
           ordered.push(old);
         } else {
           ordered.push(createPlaceholder(f2));
+          invalidatedCards++;
         }
-      });
+      }
       oldByKey.forEach((c2) => {
         c2.remove();
       });
@@ -9596,14 +10008,18 @@ ${frontmatter.yaml}
         if (!LOAD_QUEUE[i2].card.isConnected)
           LOAD_QUEUE.splice(i2, 1);
       }
+      prevCardSignatures = newCardSigs;
+      prevListSignature = newListSig;
       setupLazyObserver();
       enqueueInitialLoads();
       applySourceRouteToShell();
       setupScrollSpy();
+      scrollSpyInstalled = true;
       if (typeof applyHideTests === "function")
         applyHideTests();
       applyFilter();
       applyViewedState();
+      return { structureChanged: true, invalidatedCards, preservedDom: false };
     }
     function createPlaceholder(f2) {
       const card = document.createElement("div");
@@ -18621,15 +19037,15 @@ ${frontmatter.yaml}
         setStatus("live");
         renderHelpPage();
         syncHeaderMenu();
-        return Promise.resolve();
+        return Promise.resolve(null);
       }
       if (STATE.route.screen === "database") {
         DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
         setStatus("live");
-        return Promise.resolve();
+        return Promise.resolve(null);
       }
       if (STATE.route.screen === "repo")
-        return loadRepo();
+        return loadRepo().then(() => null);
       {
         const empty = $("#empty");
         if (empty) {
@@ -18654,9 +19070,13 @@ ${frontmatter.yaml}
         params.set("nocache", "1");
       const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
       return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-        renderShell(data);
+        const result = renderShell(data, options.changedPaths);
         setStatus("live");
-      }).catch(() => setStatus("error"));
+        return result;
+      }).catch(() => {
+        setStatus("error");
+        return null;
+      });
     }
     loadSettings().finally(() => {
       if (STATE.route.screen === "help") {
@@ -18720,7 +19140,7 @@ ${frontmatter.yaml}
         STATE.from = range.from;
         STATE.to = range.to;
         syncRefInputs();
-        return load();
+        return load().then(() => {});
       },
       showEmptyDiffPane: () => {
         const diff = $("#diff");
@@ -18944,15 +19364,30 @@ ${frontmatter.yaml}
       getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
     let sseTimer = null;
-    function scheduleSseLoad() {
+    let pendingSseChangedPaths = new Set;
+    function scheduleSseLoad(changedPaths) {
+      if (STATE.route.screen === "database" || STATE.route.screen === "help")
+        return;
+      if (changedPaths && pendingSseChangedPaths) {
+        for (const p2 of changedPaths)
+          pendingSseChangedPaths.add(p2);
+      } else {
+        pendingSseChangedPaths = null;
+      }
       if (sseTimer)
         clearTimeout(sseTimer);
       sseTimer = setTimeout(() => {
         sseTimer = null;
-        invalidateRepoSidebar();
+        const paths = pendingSseChangedPaths;
+        pendingSseChangedPaths = new Set;
+        const isRepoScreen = STATE.route.screen === "repo" || STATE.route.screen === "file" && STATE.route.view === "blob";
+        if (isRepoScreen)
+          invalidateRepoSidebar();
         const savedScroll = window.scrollY;
         const savedActive = STATE.activeFile;
-        load().then(() => {
+        load({ changedPaths: paths }).then((result) => {
+          if (result?.preservedDom)
+            return;
           if (savedActive) {
             const card = document.querySelector(diffCardSelector(savedActive));
             if (card) {
@@ -18967,10 +19402,24 @@ ${frontmatter.yaml}
     const es = new EventSource("/events");
     const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
     let openedOnce = false;
-    es.addEventListener("update", () => scheduleSseLoad());
+    es.addEventListener("update", (event) => {
+      const raw = event.data;
+      let paths = null;
+      if (raw && raw !== "tick") {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.paths))
+            paths = parsed.paths;
+        } catch {}
+      }
+      scheduleSseLoad(paths);
+    });
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse(event.data);
+    });
+    es.addEventListener("db-query", () => {
+      DATABASE_VIEW.handleSse();
     });
     es.addEventListener("error", () => setStatus("error"));
     es.addEventListener("open", () => {

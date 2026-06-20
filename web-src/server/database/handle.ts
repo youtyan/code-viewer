@@ -1,9 +1,11 @@
+import { randomBytes } from "node:crypto";
 import type {
   DbFilesResponse,
   DbOrder,
   DbQueryResponse,
   DbSchemaResponse,
   DbTableDataResponse,
+  QueryHistoryEntry,
 } from "../../core/database/types";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import {
@@ -16,6 +18,13 @@ import {
   discoverSqliteFiles,
   validateDbPath,
 } from "./discovery";
+import {
+  addQueryHistoryEntry,
+  clearQueryHistory,
+  deleteQueryHistoryEntry,
+  loadQueryHistory,
+  saveQueryHistory,
+} from "./query-history";
 
 let initialized = false;
 
@@ -225,9 +234,26 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
   }
 }
 
-async function handleQuery(cwd: string, req: Request): Promise<Response> {
+function makeHistoryId(): string {
+  return `qh-${randomBytes(8).toString("hex")}`;
+}
+
+async function handleQuery(
+  cwd: string,
+  req: Request,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string; sql?: string; maxRows?: number };
+  let body: {
+    db?: string;
+    sql?: string;
+    maxRows?: number;
+    saveHistory?: boolean;
+    title?: string;
+    body?: string;
+    executedBy?: "user" | "ai";
+    source?: "cli" | "browser";
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -251,6 +277,28 @@ async function handleQuery(cwd: string, req: Request): Promise<Response> {
       truncated: result.rowCount >= maxRows,
       elapsedMs: elapsed,
     };
+    if (body.saveHistory) {
+      const entry: QueryHistoryEntry = {
+        id: makeHistoryId(),
+        dbId: body.db,
+        sql: body.sql,
+        title: body.title,
+        body: body.body,
+        columns: result.columns,
+        rowsPreview: result.rows,
+        rowCount: result.rowCount,
+        savedRows: result.rows.length,
+        truncated: result.rowCount >= maxRows,
+        elapsedMs: elapsed,
+        executedAt: new Date().toISOString(),
+        executedBy: body.executedBy || "user",
+        source: body.source || "browser",
+      };
+      const state = loadQueryHistory(cwd);
+      const updated = addQueryHistoryEntry(state, entry);
+      saveQueryHistory(cwd, updated);
+      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+    }
     return json(response);
   } catch (err) {
     const elapsed = Date.now() - start;
@@ -266,6 +314,57 @@ async function handleQuery(cwd: string, req: Request): Promise<Response> {
     };
     return json(response, 400);
   }
+}
+
+function handleHistory(cwd: string, url: URL): Response {
+  const dbId = url.searchParams.get("db") || undefined;
+  const state = loadQueryHistory(cwd);
+  if (dbId) {
+    return json({
+      version: 1,
+      entries: state.entries.filter((e) => e.dbId === dbId),
+    });
+  }
+  return json(state);
+}
+
+async function handleHistoryDelete(
+  cwd: string,
+  req: Request,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  const state = loadQueryHistory(cwd);
+  const updated = deleteQueryHistoryEntry(state, body.id);
+  saveQueryHistory(cwd, updated);
+  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  return json({ ok: true });
+}
+
+async function handleHistoryClear(
+  cwd: string,
+  req: Request,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    body = {};
+  }
+  const state = loadQueryHistory(cwd);
+  const updated = clearQueryHistory(state, body.db);
+  saveQueryHistory(cwd, updated);
+  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  return json({ ok: true });
 }
 
 const EXPORT_MAX_ROWS = 100_000;
@@ -430,6 +529,7 @@ export async function handleDatabaseRoute(
   cwd: string,
   omitDirNames: string[],
   sideEffectAllowed: (req: Request) => boolean,
+  sendSse?: (event: string, data?: string) => void,
 ): Promise<Response | null> {
   ensureInit();
   const path = url.pathname;
@@ -439,11 +539,20 @@ export async function handleDatabaseRoute(
   if (path === "/_db/export") return handleExport(cwd, url);
   if (path === "/_db/query") {
     if (!sideEffectAllowed(req)) return textError("forbidden", 403);
-    return handleQuery(cwd, req);
+    return handleQuery(cwd, req, sendSse);
   }
   if (path === "/_db/close") {
     if (!sideEffectAllowed(req)) return textError("forbidden", 403);
     return handleClose(cwd, req);
+  }
+  if (path === "/_db/history") return handleHistory(cwd, url);
+  if (path === "/_db/history/delete") {
+    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
+    return handleHistoryDelete(cwd, req, sendSse);
+  }
+  if (path === "/_db/history/clear") {
+    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
+    return handleHistoryClear(cwd, req, sendSse);
   }
   return null;
 }
