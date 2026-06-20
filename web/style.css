@@ -5090,10 +5090,33 @@ body.query-history-panel-open #content {
 }
 
 .db-container {
+  --db-font-sm: 11px;
+  --db-font-base: 12px;
+  --db-font-md: 13px;
+  --db-font-mono: 13px;
   display: flex;
   flex-direction: column;
   height: calc(100vh - var(--global-header-h));
   overflow: hidden;
+  font-size: var(--db-font-base);
+}
+body[data-sidebar-font-size="compact"] .db-container {
+  --db-font-sm: 10px;
+  --db-font-base: 11px;
+  --db-font-md: 12px;
+  --db-font-mono: 12px;
+}
+body[data-sidebar-font-size="large"] .db-container {
+  --db-font-sm: 12px;
+  --db-font-base: 14px;
+  --db-font-md: 15px;
+  --db-font-mono: 14px;
+}
+body[data-sidebar-font-size="xlarge"] .db-container {
+  --db-font-sm: 13px;
+  --db-font-base: 15px;
+  --db-font-md: 16px;
+  --db-font-mono: 15px;
 }
 .db-upper-area {
   display: flex;
@@ -5131,7 +5154,7 @@ body.query-history-panel-open #content {
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
   text-align: left;
@@ -5185,7 +5208,7 @@ body.query-history-panel-open #content {
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
   text-overflow: ellipsis;
@@ -5210,7 +5233,7 @@ body.query-history-panel-open #content {
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-family: inherit;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -5231,12 +5254,12 @@ body.query-history-panel-open #content {
   padding: 16px;
   color: var(--fg-muted);
   text-align: center;
-  font-size: 13px;
+  font-size: var(--db-font-md);
 }
 
 .db-table-group-header {
   padding: 6px 12px 2px;
-  font-size: 11px;
+  font-size: var(--db-font-sm);
   font-weight: 600;
   color: var(--fg-subtle);
   text-transform: uppercase;
@@ -5249,7 +5272,7 @@ body.query-history-panel-open #content {
   gap: 6px;
   padding: 4px 12px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--db-font-md);
   color: var(--fg);
   border-left: 3px solid transparent;
   transition: background 0.1s;
@@ -5270,7 +5293,7 @@ body.query-history-panel-open #content {
   width: 18px;
   height: 18px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--db-font-sm);
   font-weight: 700;
   color: var(--fg-onemphasis);
   background: var(--accent);
@@ -5288,7 +5311,7 @@ body.query-history-panel-open #content {
 }
 
 .db-table-count {
-  font-size: 11px;
+  font-size: var(--db-font-sm);
   color: var(--fg-subtle);
   flex-shrink: 0;
 }
@@ -5317,7 +5340,7 @@ body.query-history-panel-open #content {
   border: none;
   background: none;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--db-font-md);
   font-weight: 500;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -5346,7 +5369,7 @@ body.query-history-panel-open #content {
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
   transition: background 0.15s;
@@ -5370,7 +5393,7 @@ body.query-history-panel-open #content {
 }
 .db-btn-sm {
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--db-font-sm);
 }
 .db-btn-icon {
   padding: 0 4px;
@@ -5390,7 +5413,7 @@ body.query-history-panel-open #content {
   flex-direction: column;
   overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
 }
 
 .db-grid-header-wrap {
@@ -5430,7 +5453,7 @@ body.query-history-panel-open #content {
 }
 
 .db-grid-header-type {
-  font-size: 10px;
+  font-size: var(--db-font-sm);
   color: var(--fg-subtle);
   padding: 1px 4px;
   border-radius: 3px;
@@ -5444,7 +5467,7 @@ body.query-history-panel-open #content {
 }
 
 .db-grid-sort-icon {
-  font-size: 10px;
+  font-size: var(--db-font-sm);
   color: var(--accent);
   width: 12px;
   flex-shrink: 0;
@@ -5505,18 +5528,18 @@ body.query-history-panel-open #content {
 .db-grid-cell.null {
   color: var(--fg-subtle);
   font-style: italic;
-  font-size: 11px;
+  font-size: var(--db-font-sm);
   background: rgba(128, 128, 128, 0.06);
   border-radius: 3px;
 }
 .db-grid-cell.empty {
   color: var(--fg-subtle);
   font-style: italic;
-  font-size: 11px;
+  font-size: var(--db-font-sm);
 }
 .db-grid-cell.blob {
   color: var(--fg-subtle);
-  font-size: 11px;
+  font-size: var(--db-font-sm);
 }
 .db-grid-cell.loading {
   color: var(--fg-subtle);
@@ -5537,13 +5560,13 @@ body.query-history-panel-open #content {
   text-align: right;
   color: var(--fg-subtle);
   background: var(--bg-soft);
-  font-size: 11px;
+  font-size: var(--db-font-sm);
   border-right: 1px solid var(--border);
 }
 
 .db-grid-status {
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   color: var(--fg-muted);
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
@@ -5582,7 +5605,7 @@ body.query-history-panel-open #content {
   margin: 0;
   padding: 8px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: var(--db-font-md);
   line-height: 1.5;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -5616,7 +5639,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   color: transparent;
   caret-color: var(--fg);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: var(--db-font-md);
   line-height: 1.5;
   resize: vertical;
   min-height: 60px;
@@ -5643,7 +5666,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-query-status {
-  font-size: 12px;
+  font-size: var(--db-font-base);
   color: var(--fg-muted);
 }
 
@@ -5659,7 +5682,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   background: var(--danger-subtle, #ffebe9);
   color: var(--danger);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -5672,7 +5695,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-query-table {
   border-collapse: collapse;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   width: max-content;
   min-width: 100%;
 }
@@ -5725,7 +5748,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 
 .db-schema-table {
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--db-font-md);
   width: 100%;
   margin-bottom: 16px;
 }
@@ -5738,7 +5761,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-schema-table th {
   background: var(--bg-soft);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--db-font-base);
 }
 .db-schema-table tr.pk-row {
   background: var(--attention-subtle, #fff8c5);
@@ -5759,7 +5782,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-schema-default {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   color: var(--fg-subtle);
-  font-size: 12px;
+  font-size: var(--db-font-base);
 }
 
 /* ---------- Data Grid: Filter Bar ---------- */
@@ -5774,7 +5797,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-grid-filter-icon {
-  font-size: 13px;
+  font-size: var(--db-font-md);
   flex-shrink: 0;
 }
 
@@ -5785,7 +5808,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-family: inherit;
   min-width: 0;
 }
@@ -5838,7 +5861,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   border-radius: 3px;
   background: var(--bg);
   color: var(--fg);
-  font-size: 11px;
+  font-size: var(--db-font-sm);
   font-family: inherit;
   box-sizing: border-box;
 }
@@ -5848,7 +5871,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 .db-grid-col-filter::placeholder {
   color: var(--fg-subtle);
-  font-size: 10px;
+  font-size: var(--db-font-sm);
 }
 
 /* ---------- ER Diagram ---------- */
@@ -5918,7 +5941,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   padding: 4px 8px;
   background: var(--bg-mute);
   border-bottom: 1px solid var(--border-muted);
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-weight: 600;
 }
 
@@ -5938,7 +5961,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-grid-detail-content {
   padding: 8px 12px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
@@ -5953,7 +5976,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 
 .db-grid-detail-json {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
@@ -5991,7 +6014,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-query-history-item {
   padding: 6px 12px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -6009,7 +6032,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   padding: 12px;
   color: var(--fg-muted);
   text-align: center;
-  font-size: 12px;
+  font-size: var(--db-font-base);
 }
 
 /* ---------- Explain Button ---------- */
@@ -6063,7 +6086,7 @@ body.db-resizing * {
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   padding: 4px 0;
-  font-size: 13px;
+  font-size: var(--db-font-md);
 }
 .db-context-menu-item {
   padding: 6px 14px;
@@ -6079,7 +6102,7 @@ body.db-resizing * {
 /* ---------- Schema Section Headers ---------- */
 .db-schema-section-header {
   padding: 8px 12px 4px;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-weight: 700;
   color: var(--fg-muted);
   text-transform: uppercase;
@@ -6109,7 +6132,7 @@ body.db-resizing * {
   border: 1px solid var(--border-muted);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -6122,7 +6145,7 @@ body.db-resizing * {
 }
 .db-schema-trigger-name {
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   font-weight: 600;
   color: var(--fg);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -6150,7 +6173,7 @@ body.db-resizing * {
 }
 .db-docker-notice p {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: var(--db-font-md);
   max-width: 500px;
 }
 .db-docker-notice-hint {
@@ -6163,7 +6186,7 @@ body.db-resizing * {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--db-font-base);
   color: var(--fg);
   text-align: left;
   max-width: 600px;
