@@ -23,10 +23,18 @@ export type DbIndexInfo = {
   unique: boolean;
 };
 
+export type DbForeignKey = {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+};
+
 export type DbSchemaResponse = {
   dbId: string;
   tables: DbTableInfo[];
   indexes: DbIndexInfo[];
+  foreignKeys: DbForeignKey[];
 };
 
 export type DbTableDataResponse = {

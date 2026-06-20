@@ -1,15 +1,16 @@
 import type {
+  DbColumn,
   DbFileInfo,
   DbFilesResponse,
-  DbIndexInfo,
   DbQueryResponse,
   DbSchemaResponse,
   DbTableDataResponse,
 } from "../../core/database/types";
 import type { AppRoute, DiffRange } from "../../core/routes";
+import { createErDiagram } from "./er-diagram";
 import { createQueryEditor } from "./query-editor";
 import { createSchemaView } from "./schema-view";
-import { createTableGrid, type GridSort } from "./table-grid";
+import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
 import { createTableList } from "./table-list";
 
 export type DatabaseViewDeps = {
@@ -29,7 +30,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
   let currentDb: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
-  let indexesCache: DbIndexInfo[] = [];
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -41,19 +41,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   const tabBar = document.createElement("div");
   tabBar.className = "db-tab-bar";
-  const tabData = document.createElement("button");
-  tabData.className = "db-tab active";
-  tabData.type = "button";
-  tabData.textContent = "Data";
-  const tabQuery = document.createElement("button");
-  tabQuery.className = "db-tab";
-  tabQuery.type = "button";
-  tabQuery.textContent = "Query";
-  const tabSchema = document.createElement("button");
-  tabSchema.className = "db-tab";
-  tabSchema.type = "button";
-  tabSchema.textContent = "Schema";
-  tabBar.append(tabData, tabQuery, tabSchema);
+  const tabData = createTab("Data", true);
+  const tabQuery = createTab("Query", false);
+  const tabSchema = createTab("Schema", false);
+  const tabEr = createTab("ER Diagram", false);
+  tabBar.append(tabData, tabQuery, tabSchema, tabEr);
 
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
@@ -65,8 +57,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   sidebar.append(dbToolbar, tableList.el);
 
   const grid = createTableGrid({
-    fetchPage: (table, offset, limit, sort) =>
-      fetchTablePage(table, offset, limit, sort),
+    fetchPage: (table, offset, limit, sort, filters) =>
+      fetchTablePage(table, offset, limit, sort, filters),
   });
 
   const queryEditor = createQueryEditor({
@@ -74,15 +66,30 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   });
 
   const schemaView = createSchemaView();
+  const erDiagram = createErDiagram();
 
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
-  mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el);
+  mainContent.append(
+    tabBar,
+    grid.el,
+    queryEditor.el,
+    schemaView.el,
+    erDiagram.el,
+  );
   queryEditor.el.hidden = true;
 
   const container = document.createElement("div");
   container.className = "db-container";
   container.append(sidebar, mainContent);
+
+  function createTab(text: string, active: boolean): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.className = `db-tab${active ? " active" : ""}`;
+    btn.type = "button";
+    btn.textContent = text;
+    return btn;
+  }
 
   function mount() {
     if (mounted) return;
@@ -104,33 +111,37 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     mounted = false;
     grid.clear();
     schemaView.clear();
+    erDiagram.clear();
     currentDb = null;
     schemaCache = null;
-    indexesCache = [];
   }
 
-  function setActiveTab(tab: "data" | "query" | "schema") {
+  type TabName = "data" | "query" | "schema" | "er";
+
+  function setActiveTab(tab: TabName) {
     tabData.classList.toggle("active", tab === "data");
     tabQuery.classList.toggle("active", tab === "query");
     tabSchema.classList.toggle("active", tab === "schema");
+    tabEr.classList.toggle("active", tab === "er");
     grid.el.hidden = tab !== "data";
     queryEditor.el.hidden = tab !== "query";
     schemaView.el.hidden = tab !== "schema";
+    erDiagram.el.hidden = tab !== "er";
     if (tab === "query") queryEditor.focus();
   }
 
   tabData.addEventListener("click", () => setActiveTab("data"));
-  tabQuery.addEventListener("click", () => {
-    setActiveTab("query");
-  });
+  tabQuery.addEventListener("click", () => setActiveTab("query"));
   tabSchema.addEventListener("click", () => {
     setActiveTab("schema");
-    if (currentDb && tableList.el.querySelector(".db-table-item.active")) {
-      const active = tableList.el.querySelector<HTMLElement>(
-        ".db-table-item.active",
-      );
-      if (active?.dataset.table) showSchema(active.dataset.table);
-    }
+    const active = tableList.el.querySelector<HTMLElement>(
+      ".db-table-item.active",
+    );
+    if (active?.dataset.table) showSchema(active.dataset.table);
+  });
+  tabEr.addEventListener("click", () => {
+    setActiveTab("er");
+    if (schemaCache) renderErDiagram();
   });
 
   async function fetchDbFiles(): Promise<DbFileInfo[]> {
@@ -153,6 +164,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     offset: number,
     limit: number,
     sort: GridSort | null,
+    filters: GridFilter[],
   ): Promise<DbTableDataResponse> {
     if (!currentDb) throw new Error("no database selected");
     const params = new URLSearchParams({
@@ -164,6 +176,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (sort) {
       params.set("sort", sort.column);
       params.set("dir", sort.direction);
+    }
+    if (filters.length > 0) {
+      params.set("filters", JSON.stringify(filters));
     }
     const res = await fetch(`/_db/table?${params}`);
     if (!res.ok) throw new Error(await res.text());
@@ -187,10 +202,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const schema = await fetchSchema(dbId);
     if (!schema) return;
     schemaCache = schema;
-    indexesCache = schema.indexes;
     tableList.render(schema.tables);
     grid.clear();
     schemaView.clear();
+    erDiagram.clear();
     setActiveTab("data");
     if (schema.tables.length > 0) {
       selectTable(schema.tables[0].name);
@@ -211,7 +226,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       true,
     );
     try {
-      const data = await deps.trackLoad(fetchTablePage(table, 0, 200, null));
+      const data = await deps.trackLoad(
+        fetchTablePage(table, 0, 200, null, []),
+      );
       grid.load(table, data);
     } catch {
       grid.load(table);
@@ -221,14 +238,23 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   async function showSchema(table: string) {
     setActiveTab("schema");
     if (!currentDb) return;
-    const columns = schemaCache?.tables ? await fetchSchemaColumns(table) : [];
-    schemaView.render(table, columns, indexesCache);
+    const data = await fetchTablePage(table, 0, 0, null, []);
+    schemaView.render(table, data.columns, schemaCache?.indexes || []);
   }
 
-  async function fetchSchemaColumns(table: string) {
-    if (!currentDb) return [];
-    const data = await fetchTablePage(table, 0, 0, null);
-    return data.columns;
+  async function renderErDiagram() {
+    if (!schemaCache || !currentDb) return;
+    const columnsMap = new Map<string, DbColumn[]>();
+    for (const t of schemaCache.tables) {
+      if (t.type === "view") continue;
+      try {
+        const data = await fetchTablePage(t.name, 0, 0, null, []);
+        columnsMap.set(t.name, data.columns);
+      } catch {
+        // skip
+      }
+    }
+    erDiagram.render(schemaCache, columnsMap);
   }
 
   dbSelect.addEventListener("change", () => {

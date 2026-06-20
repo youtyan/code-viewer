@@ -1,5 +1,6 @@
 import type {
   DbColumn,
+  DbForeignKey,
   DbIndexInfo,
   DbOrder,
   DbTableInfo,
@@ -127,6 +128,33 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
           unique: entry ? entry.unique === 1 : false,
         };
       });
+    },
+
+    getForeignKeys(): DbForeignKey[] {
+      const tables = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE '%VIRTUAL%' ORDER BY name",
+        )
+        .all() as { name: string }[];
+      const fks: DbForeignKey[] = [];
+      for (const t of tables) {
+        try {
+          const rows = db
+            .prepare(`PRAGMA foreign_key_list(${sanitizeIdentifier(t.name)})`)
+            .all() as { table: string; from: string; to: string }[];
+          for (const row of rows) {
+            fks.push({
+              fromTable: t.name,
+              fromColumn: row.from,
+              toTable: row.table,
+              toColumn: row.to,
+            });
+          }
+        } catch {
+          // virtual tables (FTS, etc.) may not support this PRAGMA
+        }
+      }
+      return fks;
     },
 
     getTableRowCount(table: string): number {
