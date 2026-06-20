@@ -5077,7 +5077,8 @@ body.query-history-panel-open #content {
 .gdp-database-page #annotation-panel,
 .gdp-database-page #sidebar-resizer,
 .gdp-database-page #annotations-toggle,
-.gdp-database-page #query-history-panel {
+.gdp-database-page #query-history-panel,
+.gdp-database-page #query-history-toggle {
   display: none !important;
 }
 
