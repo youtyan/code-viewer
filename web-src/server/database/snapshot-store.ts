@@ -5,7 +5,6 @@ import type {
   DbKind,
   DbValue,
   SnapshotDiffChangeType,
-  SnapshotDiffMeta,
   SnapshotDiffRow,
   SnapshotDiffTableSummary,
   SnapshotMeta,
@@ -92,42 +91,6 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
   payload_json TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS snapshot_diffs (
-  id TEXT PRIMARY KEY,
-  before_id TEXT NOT NULL,
-  after_id TEXT NOT NULL,
-  note TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'running',
-  error_message TEXT,
-  FOREIGN KEY (before_id) REFERENCES snapshots(id) ON DELETE CASCADE,
-  FOREIGN KEY (after_id) REFERENCES snapshots(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_diff_tables (
-  diff_id TEXT NOT NULL,
-  table_name TEXT NOT NULL,
-  inserted_count INTEGER NOT NULL DEFAULT 0,
-  updated_count INTEGER NOT NULL DEFAULT 0,
-  deleted_count INTEGER NOT NULL DEFAULT 0,
-  unchanged_count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (diff_id, table_name),
-  FOREIGN KEY (diff_id) REFERENCES snapshot_diffs(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_diff_rows (
-  diff_id TEXT NOT NULL,
-  table_name TEXT NOT NULL,
-  change_type TEXT NOT NULL,
-  row_key_hash TEXT NOT NULL,
-  row_key_json TEXT NOT NULL,
-  before_payload_hash TEXT,
-  after_payload_hash TEXT,
-  FOREIGN KEY (diff_id) REFERENCES snapshot_diffs(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshot_diff_rows_lookup
-  ON snapshot_diff_rows(diff_id, table_name, change_type);
 `;
 
 let storeDb: SqliteDb | null = null;
@@ -334,320 +297,221 @@ export async function deleteSnapshot(
   }
 }
 
-export async function createDiff(
+export async function computeDiffTables(
   cwd: string,
   beforeId: string,
   afterId: string,
-  note: string,
-): Promise<string> {
+): Promise<SnapshotDiffTableSummary[]> {
   const db = await getStoreDb(cwd);
-  const id = makeId("diff");
-  db.prepare(
-    "INSERT INTO snapshot_diffs (id, before_id, after_id, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, beforeId, afterId, note, new Date().toISOString(), "running");
-  return id;
-}
-
-export async function computeDiff(cwd: string, diffId: string): Promise<void> {
-  const db = await getStoreDb(cwd);
-  const diff = db
-    .prepare("SELECT before_id, after_id FROM snapshot_diffs WHERE id = ?")
-    .get(diffId) as { before_id: string; after_id: string } | undefined;
-  if (!diff) throw new Error("diff not found");
 
   const beforeTables = db
     .prepare(
-      "SELECT table_name, table_hash FROM snapshot_tables WHERE snapshot_id = ?",
+      "SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?",
     )
-    .all(diff.before_id) as { table_name: string; table_hash: string }[];
+    .all(beforeId) as {
+    table_name: string;
+    table_hash: string;
+    row_count: number;
+  }[];
   const afterTables = db
     .prepare(
-      "SELECT table_name, table_hash FROM snapshot_tables WHERE snapshot_id = ?",
+      "SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?",
     )
-    .all(diff.after_id) as { table_name: string; table_hash: string }[];
+    .all(afterId) as {
+    table_name: string;
+    table_hash: string;
+    row_count: number;
+  }[];
 
-  const beforeMap = new Map(
-    beforeTables.map((t) => [t.table_name, t.table_hash]),
-  );
-  const afterMap = new Map(
-    afterTables.map((t) => [t.table_name, t.table_hash]),
-  );
+  const beforeMap = new Map(beforeTables.map((t) => [t.table_name, t]));
+  const afterMap = new Map(afterTables.map((t) => [t.table_name, t]));
   const allTables = new Set([...beforeMap.keys(), ...afterMap.keys()]);
 
-  const insertDiffTable = db.prepare(
-    "INSERT INTO snapshot_diff_tables (diff_id, table_name, inserted_count, updated_count, deleted_count, unchanged_count) VALUES (?, ?, ?, ?, ?, ?)",
-  );
-  const insertDiffRow = db.prepare(
-    "INSERT INTO snapshot_diff_rows (diff_id, table_name, change_type, row_key_hash, row_key_json, before_payload_hash, after_payload_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
+  const results: SnapshotDiffTableSummary[] = [];
 
   for (const table of allTables) {
-    const bHash = beforeMap.get(table);
-    const aHash = afterMap.get(table);
+    const b = beforeMap.get(table);
+    const a = afterMap.get(table);
 
-    if (bHash && aHash && bHash === aHash) {
-      const rowCount = (
-        db
-          .prepare(
-            "SELECT row_count FROM snapshot_tables WHERE snapshot_id = ? AND table_name = ?",
-          )
-          .get(diff.before_id, table) as { row_count: number }
-      ).row_count;
-      insertDiffTable.run(diffId, table, 0, 0, 0, rowCount);
+    if (b && a && b.table_hash === a.table_hash) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: b.row_count,
+      });
       continue;
     }
 
-    if (!bHash) {
-      const afterRows = db
+    if (!b) {
+      results.push({
+        tableName: table,
+        insertedCount: a!.row_count,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: 0,
+      });
+      continue;
+    }
+
+    if (!a) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: b.row_count,
+        unchangedCount: 0,
+      });
+      continue;
+    }
+
+    const insertedCount = (
+      db
         .prepare(
-          "SELECT row_key_hash, row_key_json, payload_hash FROM snapshot_rows WHERE snapshot_id = ? AND table_name = ?",
+          `SELECT COUNT(*) AS cnt
+           FROM snapshot_rows a
+           LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+           WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`,
         )
-        .all(diff.after_id, table) as {
-        row_key_hash: string;
-        row_key_json: string;
-        payload_hash: string;
-      }[];
-      for (const r of afterRows) {
-        insertDiffRow.run(
-          diffId,
-          table,
-          "inserted",
-          r.row_key_hash,
-          r.row_key_json,
-          null,
-          r.payload_hash,
-        );
-      }
-      insertDiffTable.run(diffId, table, afterRows.length, 0, 0, 0);
-      continue;
-    }
+        .get(beforeId, table, afterId, table) as { cnt: number }
+    ).cnt;
 
-    if (!aHash) {
-      const beforeRows = db
+    const deletedCount = (
+      db
         .prepare(
-          "SELECT row_key_hash, row_key_json, payload_hash FROM snapshot_rows WHERE snapshot_id = ? AND table_name = ?",
+          `SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`,
         )
-        .all(diff.before_id, table) as {
-        row_key_hash: string;
-        row_key_json: string;
-        payload_hash: string;
-      }[];
-      for (const r of beforeRows) {
-        insertDiffRow.run(
-          diffId,
-          table,
-          "deleted",
-          r.row_key_hash,
-          r.row_key_json,
-          r.payload_hash,
-          null,
-        );
-      }
-      insertDiffTable.run(diffId, table, 0, 0, beforeRows.length, 0);
-      continue;
-    }
+        .get(afterId, table, beforeId, table) as { cnt: number }
+    ).cnt;
 
-    const inserted = db
-      .prepare(
-        `SELECT a.row_key_hash, a.row_key_json, a.payload_hash
-         FROM snapshot_rows a
-         LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
-         WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`,
-      )
-      .all(diff.before_id, table, diff.after_id, table) as {
-      row_key_hash: string;
-      row_key_json: string;
-      payload_hash: string;
-    }[];
+    const updatedCount = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`,
+        )
+        .get(afterId, table, beforeId, table) as { cnt: number }
+    ).cnt;
 
-    const deleted = db
-      .prepare(
-        `SELECT b.row_key_hash, b.row_key_json, b.payload_hash
-         FROM snapshot_rows b
-         LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
-         WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`,
-      )
-      .all(diff.after_id, table, diff.before_id, table) as {
-      row_key_hash: string;
-      row_key_json: string;
-      payload_hash: string;
-    }[];
+    const unchangedCount = b.row_count - deletedCount - updatedCount;
 
-    const updated = db
-      .prepare(
-        `SELECT b.row_key_hash, b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
-         FROM snapshot_rows b
-         INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
-         WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`,
-      )
-      .all(diff.after_id, table, diff.before_id, table) as {
-      row_key_hash: string;
-      row_key_json: string;
-      before_ph: string;
-      after_ph: string;
-    }[];
-
-    const unchangedCount =
-      (
-        db
-          .prepare(
-            "SELECT row_count FROM snapshot_tables WHERE snapshot_id = ? AND table_name = ?",
-          )
-          .get(diff.before_id, table) as { row_count: number }
-      ).row_count -
-      deleted.length -
-      updated.length;
-
-    for (const r of inserted) {
-      insertDiffRow.run(
-        diffId,
-        table,
-        "inserted",
-        r.row_key_hash,
-        r.row_key_json,
-        null,
-        r.payload_hash,
-      );
-    }
-    for (const r of deleted) {
-      insertDiffRow.run(
-        diffId,
-        table,
-        "deleted",
-        r.row_key_hash,
-        r.row_key_json,
-        r.payload_hash,
-        null,
-      );
-    }
-    for (const r of updated) {
-      insertDiffRow.run(
-        diffId,
-        table,
-        "updated",
-        r.row_key_hash,
-        r.row_key_json,
-        r.before_ph,
-        r.after_ph,
-      );
-    }
-    insertDiffTable.run(
-      diffId,
-      table,
-      inserted.length,
-      updated.length,
-      deleted.length,
-      Math.max(0, unchangedCount),
-    );
+    results.push({
+      tableName: table,
+      insertedCount,
+      updatedCount,
+      deletedCount,
+      unchangedCount: Math.max(0, unchangedCount),
+    });
   }
 
-  db.prepare("UPDATE snapshot_diffs SET status = 'done' WHERE id = ?").run(
-    diffId,
-  );
+  results.sort((a, b) => {
+    const aChanges = a.insertedCount + a.updatedCount + a.deletedCount;
+    const bChanges = b.insertedCount + b.updatedCount + b.deletedCount;
+    if (bChanges !== aChanges) return bChanges - aChanges;
+    return a.tableName.localeCompare(b.tableName);
+  });
+
+  return results;
 }
 
-export async function finalizeDiffError(
+export async function computeDiffRows(
   cwd: string,
-  diffId: string,
-  error: string,
-): Promise<void> {
-  const db = await getStoreDb(cwd);
-  db.prepare(
-    "UPDATE snapshot_diffs SET status = 'error', error_message = ? WHERE id = ?",
-  ).run(error, diffId);
-}
-
-export async function listDiffs(
-  cwd: string,
-  dbId?: string,
-): Promise<SnapshotDiffMeta[]> {
-  const db = await getStoreDb(cwd);
-  let rows: Record<string, unknown>[];
-  if (dbId) {
-    rows = db
-      .prepare(
-        `SELECT d.id, d.before_id, d.after_id, d.note, d.created_at, d.status, d.error_message
-         FROM snapshot_diffs d
-         INNER JOIN snapshots s ON s.id = d.before_id
-         WHERE s.db_id = ?
-         ORDER BY d.created_at DESC`,
-      )
-      .all(dbId);
-  } else {
-    rows = db
-      .prepare(
-        "SELECT id, before_id, after_id, note, created_at, status, error_message FROM snapshot_diffs ORDER BY created_at DESC",
-      )
-      .all();
-  }
-  return rows.map((r) => ({
-    id: r.id as string,
-    beforeId: r.before_id as string,
-    afterId: r.after_id as string,
-    note: r.note as string,
-    createdAt: r.created_at as string,
-    status: r.status as "running" | "done" | "error",
-    errorMessage: r.error_message as string | undefined,
-  }));
-}
-
-export async function getDiffTableSummaries(
-  cwd: string,
-  diffId: string,
-): Promise<SnapshotDiffTableSummary[]> {
-  const db = await getStoreDb(cwd);
-  const rows = db
-    .prepare(
-      "SELECT table_name, inserted_count, updated_count, deleted_count, unchanged_count FROM snapshot_diff_tables WHERE diff_id = ? ORDER BY (inserted_count + updated_count + deleted_count) DESC, table_name",
-    )
-    .all(diffId);
-  return rows.map((r) => ({
-    tableName: r.table_name as string,
-    insertedCount: r.inserted_count as number,
-    updatedCount: r.updated_count as number,
-    deletedCount: r.deleted_count as number,
-    unchangedCount: r.unchanged_count as number,
-  }));
-}
-
-export async function getDiffRows(
-  cwd: string,
-  diffId: string,
+  beforeId: string,
+  afterId: string,
   table: string,
-  changeType?: SnapshotDiffChangeType,
   offset = 0,
   limit = 200,
 ): Promise<{ rows: SnapshotDiffRow[]; total: number }> {
   const db = await getStoreDb(cwd);
-  const typeFilter = changeType ? " AND change_type = ?" : "";
-  const params: unknown[] = changeType
-    ? [diffId, table, changeType]
-    : [diffId, table];
 
-  const countRow = db
-    .prepare(
-      `SELECT COUNT(*) AS cnt FROM snapshot_diff_rows WHERE diff_id = ? AND table_name = ?${typeFilter}`,
-    )
-    .get(...params) as { cnt: number };
-  const total = countRow.cnt;
-
-  const dataRows = db
-    .prepare(
-      `SELECT change_type, row_key_hash, row_key_json, before_payload_hash, after_payload_hash
-       FROM snapshot_diff_rows
-       WHERE diff_id = ? AND table_name = ?${typeFilter}
-       ORDER BY row_key_json
-       LIMIT ? OFFSET ?`,
-    )
-    .all(...params, limit, offset) as {
-    change_type: string;
-    row_key_hash: string;
+  type RawDiffRow = {
+    change_type: SnapshotDiffChangeType;
     row_key_json: string;
     before_payload_hash: string | null;
     after_payload_hash: string | null;
-  }[];
+  };
 
-  const rows: SnapshotDiffRow[] = dataRows.map((r) => {
+  const allDiffRows: RawDiffRow[] = [];
+
+  // inserted: in after but not in before
+  const inserted = db
+    .prepare(
+      `SELECT a.row_key_json, a.payload_hash
+       FROM snapshot_rows a
+       LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+       WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL
+       ORDER BY a.row_key_json`,
+    )
+    .all(beforeId, table, afterId, table) as {
+    row_key_json: string;
+    payload_hash: string;
+  }[];
+  for (const r of inserted) {
+    allDiffRows.push({
+      change_type: "inserted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: null,
+      after_payload_hash: r.payload_hash,
+    });
+  }
+
+  // deleted: in before but not in after
+  const deleted = db
+    .prepare(
+      `SELECT b.row_key_json, b.payload_hash
+       FROM snapshot_rows b
+       LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL
+       ORDER BY b.row_key_json`,
+    )
+    .all(afterId, table, beforeId, table) as {
+    row_key_json: string;
+    payload_hash: string;
+  }[];
+  for (const r of deleted) {
+    allDiffRows.push({
+      change_type: "deleted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.payload_hash,
+      after_payload_hash: null,
+    });
+  }
+
+  // updated: in both but different hash
+  const updated = db
+    .prepare(
+      `SELECT b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
+       FROM snapshot_rows b
+       INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash
+       ORDER BY b.row_key_json`,
+    )
+    .all(afterId, table, beforeId, table) as {
+    row_key_json: string;
+    before_ph: string;
+    after_ph: string;
+  }[];
+  for (const r of updated) {
+    allDiffRows.push({
+      change_type: "updated",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.before_ph,
+      after_payload_hash: r.after_ph,
+    });
+  }
+
+  allDiffRows.sort((a, b) => a.row_key_json.localeCompare(b.row_key_json));
+
+  const total = allDiffRows.length;
+  const page = allDiffRows.slice(offset, offset + limit);
+
+  const rows: SnapshotDiffRow[] = page.map((r) => {
     let beforeValues: Record<string, DbValue> | undefined;
     let afterValues: Record<string, DbValue> | undefined;
     if (r.before_payload_hash) {
@@ -667,7 +531,7 @@ export async function getDiffRows(
       if (payload) afterValues = JSON.parse(payload.payload_json);
     }
     return {
-      changeType: r.change_type as SnapshotDiffChangeType,
+      changeType: r.change_type,
       rowKeyJson: r.row_key_json,
       beforeValues,
       afterValues,
@@ -675,21 +539,4 @@ export async function getDiffRows(
   });
 
   return { rows, total };
-}
-
-export async function updateDiffNote(
-  cwd: string,
-  diffId: string,
-  note: string,
-): Promise<void> {
-  const db = await getStoreDb(cwd);
-  db.prepare("UPDATE snapshot_diffs SET note = ? WHERE id = ?").run(
-    note,
-    diffId,
-  );
-}
-
-export async function deleteDiff(cwd: string, diffId: string): Promise<void> {
-  const db = await getStoreDb(cwd);
-  db.prepare("DELETE FROM snapshot_diffs WHERE id = ?").run(diffId);
 }

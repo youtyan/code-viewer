@@ -31,16 +31,10 @@ import {
 } from "./query-history";
 import { runSnapshot } from "./snapshot-runner";
 import {
-  computeDiff,
-  createDiff,
-  deleteDiff,
+  computeDiffRows,
+  computeDiffTables,
   deleteSnapshot,
-  finalizeDiffError,
-  getDiffRows,
-  getDiffTableSummaries,
-  listDiffs,
   listSnapshots,
-  updateDiffNote,
   updateSnapshotNote,
 } from "./snapshot-store";
 
@@ -943,72 +937,30 @@ async function handleSnapshotDelete(
   return json({ ok: true });
 }
 
-// --- Snapshot Diff ---
-
-async function handleDiffCreate(
-  cwd: string,
-  req: Request,
-  sendSse?: (event: string, data?: string) => void,
-): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { beforeId?: string; afterId?: string; note?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.beforeId || !body.afterId)
-    return textError("missing beforeId or afterId", 400);
-
-  const diffId = await createDiff(
-    cwd,
-    body.beforeId,
-    body.afterId,
-    body.note ?? "",
-  );
-
-  (async () => {
-    try {
-      await computeDiff(cwd, diffId);
-      sendSse?.(
-        "db-snapshot-diff",
-        JSON.stringify({ action: "created", id: diffId }),
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await finalizeDiffError(cwd, diffId, msg);
-      sendSse?.(
-        "db-snapshot-diff",
-        JSON.stringify({ action: "error", id: diffId, error: msg }),
-      );
-    }
-  })();
-
-  return json({ ok: true, diffId });
-}
-
-async function handleDiffList(cwd: string, url: URL): Promise<Response> {
-  const dbId = url.searchParams.get("db") || undefined;
-  const diffs = await listDiffs(cwd, dbId);
-  return json({ diffs });
-}
+// --- Snapshot Diff (on-demand) ---
 
 async function handleDiffTables(cwd: string, url: URL): Promise<Response> {
-  const diffId = url.searchParams.get("id");
-  if (!diffId) return textError("missing id", 400);
-  const tables = await getDiffTableSummaries(cwd, diffId);
-  return json({ diffId, tables });
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
+  if (!beforeId || !afterId)
+    return textError("missing before or after parameter", 400);
+  try {
+    const tables = await computeDiffTables(cwd, beforeId, afterId);
+    return json({ beforeId, afterId, tables });
+  } catch (err) {
+    return textError(
+      `failed to compute diff: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
 }
 
 async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
-  const diffId = url.searchParams.get("id");
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
   const table = url.searchParams.get("table");
-  if (!diffId || !table) return textError("missing id or table", 400);
-  const changeType = url.searchParams.get("type") as
-    | "inserted"
-    | "updated"
-    | "deleted"
-    | undefined;
+  if (!beforeId || !afterId || !table)
+    return textError("missing before, after, or table parameter", 400);
   const offset = Math.max(
     0,
     Number(url.searchParams.get("offset") || "0") || 0,
@@ -1017,44 +969,22 @@ async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
     1000,
     Math.max(1, Number(url.searchParams.get("limit") || "200") || 200),
   );
-  const result = await getDiffRows(
-    cwd,
-    diffId,
-    table,
-    changeType,
-    offset,
-    limit,
-  );
-  return json({ diffId, table, ...result });
-}
-
-async function handleDiffUpdateNote(
-  cwd: string,
-  req: Request,
-): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string; note?: string };
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
+    const result = await computeDiffRows(
+      cwd,
+      beforeId,
+      afterId,
+      table,
+      offset,
+      limit,
+    );
+    return json({ beforeId, afterId, table, ...result });
+  } catch (err) {
+    return textError(
+      `failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
   }
-  if (!body.id) return textError("missing id", 400);
-  await updateDiffNote(cwd, body.id, body.note ?? "");
-  return json({ ok: true });
-}
-
-async function handleDiffDelete(cwd: string, req: Request): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.id) return textError("missing id", 400);
-  await deleteDiff(cwd, body.id);
-  return json({ ok: true });
 }
 
 async function handleClose(cwd: string, req: Request): Promise<Response> {
@@ -1181,33 +1111,10 @@ export async function handleDatabaseRoute(
     }
     return wrapResponse(handleSnapshotDelete(cwd, req));
   }
-  // --- Snapshot Diff ---
-  if (path === "/_db/snapshot/diff/create") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffCreate(cwd, req, sendSse));
-  }
-  if (path === "/_db/snapshot/diff/list")
-    return wrapResponse(handleDiffList(cwd, url));
+  // --- Snapshot Diff (on-demand) ---
   if (path === "/_db/snapshot/diff/tables")
     return wrapResponse(handleDiffTables(cwd, url));
   if (path === "/_db/snapshot/diff/rows")
     return wrapResponse(handleDiffRows(cwd, url));
-  if (path === "/_db/snapshot/diff/update-note") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffUpdateNote(cwd, req));
-  }
-  if (path === "/_db/snapshot/diff/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleDiffDelete(cwd, req));
-  }
   return null;
 }

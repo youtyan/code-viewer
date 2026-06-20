@@ -2997,9 +2997,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   es.addEventListener("db-snapshot", (event) => {
     DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
   });
-  es.addEventListener("db-snapshot-diff", (event) => {
-    DATABASE_VIEW.handleSse("db-snapshot-diff", (event as MessageEvent).data);
-  });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {
     setStatus("live");

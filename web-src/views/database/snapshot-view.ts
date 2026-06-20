@@ -1,6 +1,5 @@
 import type {
   DbTableInfo,
-  SnapshotDiffMeta,
   SnapshotDiffRow,
   SnapshotDiffTableSummary,
   SnapshotMeta,
@@ -133,7 +132,6 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   el.append(guide, toolbar, tableSelector, mainArea);
 
   let snapshots: SnapshotMeta[] = [];
-  let diffs: SnapshotDiffMeta[] = [];
 
   function showTableSelector() {
     const tables = deps.getTables();
@@ -223,17 +221,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     if (!dbId) return;
 
     try {
-      const [snapRes, diffRes] = await Promise.all([
-        fetch(`/_db/snapshot/list?db=${encodeURIComponent(dbId)}`),
-        fetch(`/_db/snapshot/diff/list?db=${encodeURIComponent(dbId)}`),
-      ]);
+      const snapRes = await fetch(
+        `/_db/snapshot/list?db=${encodeURIComponent(dbId)}`,
+      );
       if (snapRes.ok) {
         const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
         snapshots = data.snapshots;
-      }
-      if (diffRes.ok) {
-        const data = (await diffRes.json()) as { diffs: SnapshotDiffMeta[] };
-        diffs = data.diffs;
       }
       renderMain();
     } catch {
@@ -251,27 +244,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     const prev = done[1];
     if (!arraysEqual(newest.tables, prev.tables)) return;
 
-    const alreadyDiffed = diffs.some(
-      (d) =>
-        (d.beforeId === prev.id && d.afterId === newest.id) ||
-        (d.beforeId === newest.id && d.afterId === prev.id),
-    );
-    if (alreadyDiffed) return;
-
-    try {
-      await postJson("/_db/snapshot/diff/create", {
-        beforeId: prev.id,
-        afterId: newest.id,
-        note: "",
-      });
-      setTimeout(async () => {
-        await refresh();
-        const latestDiff = diffs.find((d) => d.status === "done");
-        if (latestDiff) showDiffInline(latestDiff.id);
-      }, 2000);
-    } catch {
-      // ignore
-    }
+    showDiffInline(prev.id, newest.id);
   }
 
   function renderMain() {
@@ -357,20 +330,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         diffBtn.disabled = true;
         diffBtn.textContent = "比較中...";
         try {
-          const res = await postJson("/_db/snapshot/diff/create", {
-            beforeId: beforeSelect.value,
-            afterId: afterSelect.value,
-            note: "",
-          });
-          if (res.ok) {
-            const data = (await res.json()) as { diffId: string };
-            setTimeout(async () => {
-              await refresh();
-              showDiffInline(data.diffId);
-            }, 2000);
-          }
-        } catch {
-          // ignore
+          showDiffInline(beforeSelect.value, afterSelect.value);
         } finally {
           diffBtn.disabled = false;
           diffBtn.textContent = "手動で差分チェック";
@@ -387,80 +347,41 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     }
 
     mainArea.appendChild(snapshotSection);
-
-    if (diffs.length > 0) {
-      const diffTitle = document.createElement("h3");
-      diffTitle.className = "db-snapshot-section-title";
-      diffTitle.textContent = "差分履歴";
-      mainArea.appendChild(diffTitle);
-
-      for (const diff of diffs) {
-        const item = document.createElement("div");
-        item.className = "db-snapshot-diff-item";
-        item.style.cursor = diff.status === "done" ? "pointer" : "default";
-
-        const info = document.createElement("div");
-        info.className = "db-snapshot-diff-info";
-        const beforeSnap = snapshots.find((s) => s.id === diff.beforeId);
-        const afterSnap = snapshots.find((s) => s.id === diff.afterId);
-        const beforeLabel = beforeSnap
-          ? snapshotLabel(beforeSnap)
-          : diff.beforeId.slice(0, 8);
-        const afterLabel = afterSnap
-          ? snapshotLabel(afterSnap)
-          : diff.afterId.slice(0, 8);
-
-        info.innerHTML =
-          `<span class="db-snapshot-diff-date">${new Date(diff.createdAt).toLocaleString()}</span>` +
-          `<span class="db-snapshot-diff-range">${beforeLabel} → ${afterLabel}</span>` +
-          (diff.note
-            ? `<span class="db-snapshot-diff-note-text">${diff.note}</span>`
-            : "");
-
-        const actions = document.createElement("div");
-        actions.className = "db-snapshot-diff-actions";
-        const deleteBtn = document.createElement("button");
-        deleteBtn.type = "button";
-        deleteBtn.textContent = "削除";
-        deleteBtn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          await postJson("/_db/snapshot/diff/delete", { id: diff.id });
-          refresh();
-        });
-        actions.appendChild(deleteBtn);
-
-        item.append(info, actions);
-        if (diff.status === "done") {
-          item.addEventListener("click", () => showDiffInline(diff.id));
-        }
-        mainArea.appendChild(item);
-      }
-
-      const latestDone = diffs.find((d) => d.status === "done");
-      if (latestDone) showDiffInline(latestDone.id);
-    }
   }
 
-  async function showDiffInline(diffId: string) {
+  async function showDiffInline(beforeId: string, afterId: string) {
     const existing = mainArea.querySelector(".db-snapshot-diff-inline");
     if (existing) existing.remove();
 
+    const loading = document.createElement("div");
+    loading.className = "db-snapshot-diff-inline";
+    loading.innerHTML =
+      '<div class="db-snapshot-loading">差分を計算中...</div>';
+    mainArea.appendChild(loading);
+
     try {
       const res = await fetch(
-        `/_db/snapshot/diff/tables?id=${encodeURIComponent(diffId)}`,
+        `/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        loading.innerHTML =
+          '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+        return;
+      }
       const data = (await res.json()) as {
         tables: SnapshotDiffTableSummary[];
       };
-      renderDiffInline(diffId, data.tables);
+      loading.remove();
+      renderDiffInline(beforeId, afterId, data.tables);
     } catch {
-      // ignore
+      loading.innerHTML =
+        '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
     }
   }
 
   function renderDiffInline(
-    diffId: string,
+    beforeId: string,
+    afterId: string,
     tables: SnapshotDiffTableSummary[],
   ) {
     const existing = mainArea.querySelector(".db-snapshot-diff-inline");
@@ -512,7 +433,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const rowsContainer = document.createElement("div");
       rowsContainer.className = "db-snapshot-diff-rows-container";
 
-      loadDiffRows(diffId, t.tableName, rowsContainer);
+      loadDiffRows(beforeId, afterId, t.tableName, rowsContainer);
 
       tableHeader.addEventListener("click", () => {
         rowsContainer.hidden = !rowsContainer.hidden;
@@ -526,7 +447,8 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   }
 
   async function loadDiffRows(
-    diffId: string,
+    beforeId: string,
+    afterId: string,
     table: string,
     container: HTMLElement,
   ) {
@@ -534,7 +456,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       '<div class="db-snapshot-loading">読み込み中...</div>';
     try {
       const res = await fetch(
-        `/_db/snapshot/diff/rows?id=${encodeURIComponent(diffId)}&table=${encodeURIComponent(table)}&limit=200`,
+        `/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
       );
       if (!res.ok) {
         container.innerHTML =

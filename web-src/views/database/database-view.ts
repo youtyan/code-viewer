@@ -575,9 +575,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (event === "db-snapshot" && data) {
       snapshotView.handleSse(data);
     }
-    if (event === "db-snapshot-diff" && data) {
-      snapshotView.handleSse(data);
-    }
   }
 
   return { enter, leave, handleSse };
