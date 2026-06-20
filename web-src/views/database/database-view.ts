@@ -188,7 +188,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function fetchSchema(dbId: string): Promise<DbSchemaResponse | null> {
     const res = await deps.trackLoad(
-      fetch(`/_db/schema?db=${encodeURIComponent(dbId)}`),
+      fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`),
     );
     if (!res.ok) return null;
     return (await res.json()) as DbSchemaResponse;
@@ -276,23 +276,42 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
+  async function fetchColumns(table: string): Promise<DbColumn[]> {
+    if (schemaCache?.columnsMap?.[table]) {
+      return schemaCache.columnsMap[table];
+    }
+    if (!currentDb) return [];
+    const res = await fetch(
+      `/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table)}`,
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { columns: DbColumn[] };
+    return data.columns;
+  }
+
   async function showSchema(table: string) {
     setActiveTab("schema");
     if (!currentDb) return;
-    const data = await fetchTablePage(table, 0, 0, null, []);
-    schemaView.render(table, data.columns, schemaCache?.indexes || []);
+    const columns = await fetchColumns(table);
+    schemaView.render(table, columns, schemaCache?.indexes || []);
   }
 
   async function renderErDiagram() {
     if (!schemaCache || !currentDb) return;
     const columnsMap = new Map<string, DbColumn[]>();
-    for (const t of schemaCache.tables) {
-      if (t.type === "view") continue;
-      try {
-        const data = await fetchTablePage(t.name, 0, 0, null, []);
-        columnsMap.set(t.name, data.columns);
-      } catch {
-        // skip
+    if (schemaCache.columnsMap) {
+      for (const [name, cols] of Object.entries(schemaCache.columnsMap)) {
+        columnsMap.set(name, cols);
+      }
+    } else {
+      const tables = schemaCache.tables.filter((t) => t.type !== "view");
+      const results = await Promise.all(
+        tables.map((t) =>
+          fetchColumns(t.name).then((cols) => ({ name: t.name, cols })),
+        ),
+      );
+      for (const { name, cols } of results) {
+        if (cols.length > 0) columnsMap.set(name, cols);
       }
     }
     erDiagram.render(schemaCache, columnsMap);

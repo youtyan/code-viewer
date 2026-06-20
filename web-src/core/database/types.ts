@@ -35,6 +35,7 @@ export type DbSchemaResponse = {
   tables: DbTableInfo[];
   indexes: DbIndexInfo[];
   foreignKeys: DbForeignKey[];
+  columnsMap?: Record<string, DbColumn[]>;
 };
 
 export type DbTableDataResponse = {

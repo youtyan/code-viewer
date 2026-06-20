@@ -158,11 +158,43 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
       return fks;
     },
 
+    getColumnsMulti(tables: string[]): Map<string, DbColumn[]> {
+      const result = new Map<string, DbColumn[]>();
+      for (const t of tables) {
+        result.set(t, queryColumns(db, t));
+      }
+      return result;
+    },
+
     getTableRowCount(table: string): number {
       const row = db
         .prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(table)}`)
         .get() as { cnt: number } | undefined;
       return row?.cnt ?? 0;
+    },
+
+    getTableRowCounts(tables: string[]): Map<string, number> {
+      const result = new Map<string, number>();
+      if (tables.length === 0) return result;
+      const parts = tables.map(
+        (t) =>
+          `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${sanitizeIdentifier(t)}`,
+      );
+      const sql = parts.join(" UNION ALL ");
+      try {
+        const rows = db.prepare(sql).all() as { tbl: string; cnt: number }[];
+        for (const row of rows) {
+          result.set(row.tbl, row.cnt);
+        }
+      } catch {
+        for (const t of tables) {
+          const row = db
+            .prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(t)}`)
+            .get() as { cnt: number } | undefined;
+          result.set(t, row?.cnt ?? 0);
+        }
+      }
+      return result;
     },
 
     getTablePage(
