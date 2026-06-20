@@ -5296,11 +5296,26 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   letter-spacing: 0.5px;
 }
 
+.db-table-node {
+  border-bottom: 1px solid var(--border);
+}
+.db-table-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: center;
+  user-select: none;
+}
+.db-table-arrow:hover {
+  color: var(--fg);
+}
 .db-table-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
+  gap: 4px;
+  padding: 4px 8px;
   cursor: pointer;
   font-size: var(--db-font-md);
   color: var(--fg);
@@ -5314,6 +5329,38 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   background: var(--accent-subtle);
   border-left-color: var(--accent);
   font-weight: 500;
+}
+.db-table-children {
+  padding-left: 20px;
+}
+.db-table-children[hidden] { display: none; }
+.db-table-col-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+}
+.db-table-col-item.pk {
+  color: var(--fg);
+  font-weight: 500;
+}
+.db-table-col-item.pk .db-table-col-name::before {
+  content: "🔑 ";
+  font-size: 9px;
+}
+.db-table-col-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-table-col-type {
+  flex-shrink: 0;
+  font-size: var(--db-font-sm);
+  color: var(--fg-subtle);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .db-table-icon {

@@ -1,10 +1,11 @@
-import type { DbTableInfo } from "../../core/database/types";
+import type { DbColumn, DbTableInfo } from "../../core/database/types";
 
 export type TableListCallbacks = {
   onSelectTable: (table: string) => void;
   onSelectSchema: (table: string) => void;
   onViewCreateTable?: (table: string) => void;
   onViewDefinition?: (table: string) => void;
+  getColumns?: (table: string) => Promise<DbColumn[]>;
 };
 
 export type TableList = {
@@ -36,6 +37,8 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
   let activeTable: string | null = null;
   let allTables: DbTableInfo[] = [];
+  const expandedTables = new Set<string>();
+  const columnCache = new Map<string, DbColumn[]>();
 
   /* ---- Context menu ---- */
   let contextMenu: HTMLDivElement | null = null;
@@ -125,6 +128,50 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     }, 0);
   }
 
+  async function renderColumns(container: HTMLElement, tableName: string) {
+    let cols = columnCache.get(tableName);
+    if (!cols && callbacks.getColumns) {
+      cols = await callbacks.getColumns(tableName);
+      columnCache.set(tableName, cols);
+    }
+    if (!cols || cols.length === 0) return;
+    container.innerHTML = "";
+    for (const col of cols) {
+      const colRow = document.createElement("div");
+      colRow.className = "db-table-col-item";
+      if (col.primaryKey) colRow.classList.add("pk");
+      const colName = document.createElement("span");
+      colName.className = "db-table-col-name";
+      colName.textContent = col.name;
+      const colType = document.createElement("span");
+      colType.className = "db-table-col-type";
+      colType.textContent = col.type;
+      colRow.append(colName, colType);
+      container.appendChild(colRow);
+    }
+  }
+
+  function toggleExpand(
+    tableName: string,
+    _node: HTMLElement,
+    arrow: HTMLElement,
+    children: HTMLElement,
+  ) {
+    const expanded = expandedTables.has(tableName);
+    if (expanded) {
+      expandedTables.delete(tableName);
+      children.hidden = true;
+      arrow.textContent = "▸";
+    } else {
+      expandedTables.add(tableName);
+      children.hidden = false;
+      arrow.textContent = "▾";
+      if (children.children.length === 0) {
+        renderColumns(children, tableName);
+      }
+    }
+  }
+
   function renderFiltered(tables: DbTableInfo[], filter: string) {
     el.innerHTML = "";
     const filtered = filter
@@ -150,10 +197,18 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       header.textContent = type === "view" ? "Views" : "Tables";
       el.appendChild(header);
       for (const table of items) {
+        const node = document.createElement("div");
+        node.className = "db-table-node";
+        node.dataset.table = table.name;
+
         const row = document.createElement("div");
         row.className = "db-table-item";
         if (table.name === activeTable) row.classList.add("active");
         row.dataset.table = table.name;
+
+        const arrow = document.createElement("span");
+        arrow.className = "db-table-arrow";
+        arrow.textContent = expandedTables.has(table.name) ? "▾" : "▸";
 
         const icon = document.createElement("span");
         icon.className = "db-table-icon";
@@ -169,7 +224,20 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         count.textContent =
           table.rowCount != null ? formatRowCount(table.rowCount) : "";
 
-        row.append(icon, name, count);
+        row.append(arrow, icon, name, count);
+
+        const children = document.createElement("div");
+        children.className = "db-table-children";
+        children.hidden = !expandedTables.has(table.name);
+
+        if (expandedTables.has(table.name)) {
+          renderColumns(children, table.name);
+        }
+
+        arrow.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleExpand(table.name, node, arrow, children);
+        });
         row.addEventListener("click", () =>
           callbacks.onSelectTable(table.name),
         );
@@ -179,7 +247,9 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         row.addEventListener("contextmenu", (e) =>
           showContextMenu(e, table.name),
         );
-        el.appendChild(row);
+
+        node.append(row, children);
+        el.appendChild(node);
       }
     }
   }

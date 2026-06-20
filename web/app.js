@@ -9376,6 +9376,8 @@ ${frontmatter.yaml}
     wrapper.append(filterWrap, el);
     let activeTable = null;
     let allTables = [];
+    const expandedTables = new Set;
+    const columnCache = new Map;
     let contextMenu = null;
     function closeContextMenu() {
       if (contextMenu) {
@@ -9449,6 +9451,45 @@ ${frontmatter.yaml}
         document.addEventListener("keydown", onKeyDown, true);
       }, 0);
     }
+    async function renderColumns(container, tableName) {
+      let cols = columnCache.get(tableName);
+      if (!cols && callbacks.getColumns) {
+        cols = await callbacks.getColumns(tableName);
+        columnCache.set(tableName, cols);
+      }
+      if (!cols || cols.length === 0)
+        return;
+      container.innerHTML = "";
+      for (const col of cols) {
+        const colRow = document.createElement("div");
+        colRow.className = "db-table-col-item";
+        if (col.primaryKey)
+          colRow.classList.add("pk");
+        const colName = document.createElement("span");
+        colName.className = "db-table-col-name";
+        colName.textContent = col.name;
+        const colType = document.createElement("span");
+        colType.className = "db-table-col-type";
+        colType.textContent = col.type;
+        colRow.append(colName, colType);
+        container.appendChild(colRow);
+      }
+    }
+    function toggleExpand(tableName, _node, arrow, children) {
+      const expanded = expandedTables.has(tableName);
+      if (expanded) {
+        expandedTables.delete(tableName);
+        children.hidden = true;
+        arrow.textContent = "▸";
+      } else {
+        expandedTables.add(tableName);
+        children.hidden = false;
+        arrow.textContent = "▾";
+        if (children.children.length === 0) {
+          renderColumns(children, tableName);
+        }
+      }
+    }
     function renderFiltered(tables, filter) {
       el.innerHTML = "";
       const filtered = filter ? tables.filter((t2) => t2.name.toLowerCase().includes(filter.toLowerCase())) : tables;
@@ -9471,11 +9512,17 @@ ${frontmatter.yaml}
         header.textContent = type === "view" ? "Views" : "Tables";
         el.appendChild(header);
         for (const table2 of items) {
+          const node = document.createElement("div");
+          node.className = "db-table-node";
+          node.dataset.table = table2.name;
           const row = document.createElement("div");
           row.className = "db-table-item";
           if (table2.name === activeTable)
             row.classList.add("active");
           row.dataset.table = table2.name;
+          const arrow = document.createElement("span");
+          arrow.className = "db-table-arrow";
+          arrow.textContent = expandedTables.has(table2.name) ? "▾" : "▸";
           const icon = document.createElement("span");
           icon.className = "db-table-icon";
           icon.textContent = table2.type === "view" ? "V" : "T";
@@ -9486,11 +9533,22 @@ ${frontmatter.yaml}
           const count = document.createElement("span");
           count.className = "db-table-count";
           count.textContent = table2.rowCount != null ? formatRowCount(table2.rowCount) : "";
-          row.append(icon, name, count);
+          row.append(arrow, icon, name, count);
+          const children = document.createElement("div");
+          children.className = "db-table-children";
+          children.hidden = !expandedTables.has(table2.name);
+          if (expandedTables.has(table2.name)) {
+            renderColumns(children, table2.name);
+          }
+          arrow.addEventListener("click", (e2) => {
+            e2.stopPropagation();
+            toggleExpand(table2.name, node, arrow, children);
+          });
           row.addEventListener("click", () => callbacks.onSelectTable(table2.name));
           row.addEventListener("dblclick", () => callbacks.onSelectSchema(table2.name));
           row.addEventListener("contextmenu", (e2) => showContextMenu(e2, table2.name));
-          el.appendChild(row);
+          node.append(row, children);
+          el.appendChild(node);
         }
       }
     }
@@ -9540,7 +9598,8 @@ ${frontmatter.yaml}
       onSelectTable: (table2) => selectTable(table2),
       onSelectSchema: (table2) => showSchema(table2),
       onViewCreateTable: (table2) => showDdl(table2),
-      onViewDefinition: (table2) => showSchema(table2)
+      onViewDefinition: (table2) => showSchema(table2),
+      getColumns: (table2) => fetchColumns(table2)
     });
     const sidebar = document.createElement("div");
     sidebar.className = "db-sidebar";
