@@ -89,6 +89,11 @@ function textError(message: string, status: number): Response {
   });
 }
 
+function sanitizeFilename(name: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char stripping for HTTP header safety
+  return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
+}
+
 type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
 
 let cachedDockerDbs: DockerDbInfo[] | null = null;
@@ -312,6 +317,9 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     const adapter = await getAdapter(r, cwd);
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
+    if (sortCol && !colNames.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
 
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
@@ -566,6 +574,9 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
     const columns = adapter.getColumns(table);
     const colNames = columns.map((c) => c.name);
     const colNameSet = new Set(colNames);
+    if (sortCol && !colNameSet.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
     let rows: import("../../core/database/types").DbValue[][];
 
     if (filters.length > 0) {
@@ -619,7 +630,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${table}.csv"`,
+          "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.csv"`,
           "Cache-Control": "no-store",
         },
       });
@@ -639,7 +650,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${table}.json"`,
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.json"`,
         "Cache-Control": "no-store",
       },
     });
@@ -744,6 +755,7 @@ async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
     abortController: ac,
   };
   searchJobs.set(jobId, job);
+  setTimeout(() => searchJobs.delete(jobId), 5 * 60_000);
 
   const term = body.term;
   const maxHitsPerTable = body.maxHitsPerTable ?? 50;
@@ -892,6 +904,10 @@ async function handleSnapshotCreate(
         JSON.stringify({ action: "created", id: snapshotId }),
       );
     } catch (err) {
+      console.error(
+        "[code-viewer] snapshot error:",
+        err instanceof Error ? err.message : String(err),
+      );
       sendSse?.(
         "db-snapshot",
         JSON.stringify({
