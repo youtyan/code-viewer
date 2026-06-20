@@ -37,10 +37,25 @@ export function createQueryHistoryView(
 
   toolbar.append(refreshBtn, clearBtn);
 
+  const body = document.createElement("div");
+  body.className = "db-query-history-body-split";
+
+  const listCol = document.createElement("div");
+  listCol.className = "db-query-history-list-col";
+
   const listEl = document.createElement("div");
   listEl.className = "db-query-history-list";
+  listCol.appendChild(listEl);
 
-  el.append(toolbar, listEl);
+  const detailCol = document.createElement("div");
+  detailCol.className = "db-query-history-detail-col";
+  const detailPlaceholder = document.createElement("div");
+  detailPlaceholder.className = "db-query-history-detail-placeholder";
+  detailPlaceholder.textContent = "Select a query to view details";
+  detailCol.appendChild(detailPlaceholder);
+
+  body.append(listCol, detailCol);
+  el.append(toolbar, body);
 
   let entries: QueryHistoryEntry[] = [];
   const expandedIds = new Set<string>();
@@ -73,13 +88,86 @@ export function createQueryHistoryView(
     }
   }
 
+  let selectedEntryId: string | null = null;
+
+  function selectEntry(entry: QueryHistoryEntry) {
+    selectedEntryId = entry.id;
+    listEl
+      .querySelectorAll<HTMLElement>(".db-query-history-entry")
+      .forEach((el) => {
+        el.classList.toggle("selected", el.dataset.id === entry.id);
+      });
+    renderDetail(entry);
+  }
+
+  function renderDetail(entry: QueryHistoryEntry) {
+    detailCol.innerHTML = "";
+
+    const actions = document.createElement("div");
+    actions.className = "db-query-history-detail-actions";
+
+    const useBtn = document.createElement("button");
+    useBtn.className = "db-btn db-btn-primary";
+    useBtn.type = "button";
+    useBtn.textContent = "Use in Editor";
+    useBtn.addEventListener("click", () => callbacks.copySqlToQuery(entry.sql));
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "db-btn";
+    copyBtn.type = "button";
+    copyBtn.textContent = "Copy SQL";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(entry.sql).then(
+        () => {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy SQL";
+          }, 1500);
+        },
+        () => {},
+      );
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "db-btn db-query-history-danger";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => {
+      deleteEntry(entry.id);
+    });
+
+    actions.append(useBtn, copyBtn, deleteBtn);
+
+    const sqlBlock = document.createElement("pre");
+    sqlBlock.className = "db-query-history-sql";
+    sqlBlock.textContent = entry.sql;
+
+    detailCol.append(actions, sqlBlock);
+
+    if (entry.body) {
+      const bodyBlock = document.createElement("div");
+      bodyBlock.className = "db-query-history-body";
+      bodyBlock.textContent = entry.body;
+      detailCol.appendChild(bodyBlock);
+    }
+
+    if (entry.columns.length > 0 && entry.rowsPreview.length > 0) {
+      detailCol.appendChild(renderPreviewTable(entry));
+    }
+
+    if (entry.savedRows < entry.rowCount) {
+      const note = document.createElement("div");
+      note.className = "db-query-history-truncated";
+      note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+      detailCol.appendChild(note);
+    }
+  }
+
   function renderEntry(entry: QueryHistoryEntry): HTMLElement {
     const item = document.createElement("div");
     item.className = "db-query-history-entry";
+    if (entry.id === selectedEntryId) item.classList.add("selected");
     item.dataset.id = entry.id;
-
-    const header = document.createElement("div");
-    header.className = "db-query-history-entry-header";
 
     const meta = document.createElement("div");
     meta.className = "db-query-history-entry-meta";
@@ -87,8 +175,6 @@ export function createQueryHistoryView(
     const byIcon = document.createElement("span");
     byIcon.className = "db-query-history-by";
     byIcon.textContent = entry.executedBy === "ai" ? "[AI]" : "[User]";
-    byIcon.title =
-      entry.executedBy === "ai" ? "Executed by AI agent" : "Executed by user";
 
     const time = document.createElement("span");
     time.className = "db-query-history-time";
@@ -106,86 +192,11 @@ export function createQueryHistoryView(
     title.className = "db-query-history-entry-title";
     title.textContent =
       entry.title ||
-      (entry.sql.length > 60 ? `${entry.sql.slice(0, 60)}...` : entry.sql);
+      (entry.sql.length > 80 ? `${entry.sql.slice(0, 80)}...` : entry.sql);
 
-    header.append(meta, title);
+    item.append(meta, title);
 
-    const detail = document.createElement("div");
-    detail.className = "db-query-history-detail";
-    const expanded = expandedIds.has(entry.id);
-    detail.hidden = !expanded;
-    if (expanded) item.classList.add("expanded");
-
-    const sqlBlock = document.createElement("pre");
-    sqlBlock.className = "db-query-history-sql";
-    sqlBlock.textContent = entry.sql;
-
-    detail.appendChild(sqlBlock);
-
-    if (entry.body) {
-      const bodyBlock = document.createElement("div");
-      bodyBlock.className = "db-query-history-body";
-      bodyBlock.textContent = entry.body;
-      detail.appendChild(bodyBlock);
-    }
-
-    if (entry.columns.length > 0 && entry.rowsPreview.length > 0) {
-      detail.appendChild(renderPreviewTable(entry));
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "db-query-history-actions";
-
-    const useBtn = document.createElement("button");
-    useBtn.className = "db-query-history-action";
-    useBtn.type = "button";
-    useBtn.textContent = "Use in Editor";
-    useBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      callbacks.copySqlToQuery(entry.sql);
-    });
-
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "db-query-history-action";
-    copyBtn.type = "button";
-    copyBtn.textContent = "Copy SQL";
-    copyBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(entry.sql).then(
-        () => {
-          copyBtn.textContent = "Copied!";
-          setTimeout(() => {
-            copyBtn.textContent = "Copy SQL";
-          }, 1500);
-        },
-        () => {},
-      );
-    });
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "db-query-history-action db-query-history-danger";
-    deleteBtn.type = "button";
-    deleteBtn.textContent = "Delete";
-    deleteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      deleteEntry(entry.id, item);
-    });
-
-    actions.append(useBtn, copyBtn, deleteBtn);
-    detail.appendChild(actions);
-
-    item.append(header, detail);
-
-    header.addEventListener("click", () => {
-      const willExpand = detail.hidden;
-      detail.hidden = !willExpand;
-      item.classList.toggle("expanded", willExpand);
-      if (willExpand) {
-        expandedIds.add(entry.id);
-      } else {
-        expandedIds.delete(entry.id);
-      }
-    });
+    item.addEventListener("click", () => selectEntry(entry));
 
     return item;
   }
@@ -240,7 +251,13 @@ export function createQueryHistoryView(
     return wrapper;
   }
 
-  async function deleteEntry(id: string, itemEl?: HTMLElement) {
+  function resetDetailCol() {
+    detailCol.innerHTML = "";
+    detailCol.appendChild(detailPlaceholder);
+    selectedEntryId = null;
+  }
+
+  async function deleteEntry(id: string) {
     try {
       await fetch("/_db/history/delete", {
         method: "POST",
@@ -252,6 +269,10 @@ export function createQueryHistoryView(
       });
       entries = entries.filter((e) => e.id !== id);
       expandedIds.delete(id);
+      if (selectedEntryId === id) resetDetailCol();
+      const itemEl = listEl.querySelector<HTMLElement>(
+        `.db-query-history-entry[data-id="${CSS.escape(id)}"]`,
+      );
       if (itemEl) {
         itemEl.remove();
         if (entries.length === 0) render();
