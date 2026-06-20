@@ -9612,7 +9612,8 @@ ${frontmatter.yaml}
       const onMove = (ev) => {
         if (!historyResizing)
           return;
-        const h = Math.max(80, Math.min(600, startH - (ev.clientY - startY)));
+        const maxH = container.offsetHeight - 60;
+        const h = Math.max(60, Math.min(maxH, startH - (ev.clientY - startY)));
         historyPane.style.height = `${h}px`;
       };
       const onUp = () => {
