@@ -8070,14 +8070,22 @@ ${frontmatter.yaml}
       shiki = h;
       syncHighlight();
     });
+    function syncEditorHeight() {
+      textarea.style.height = "auto";
+      const h = Math.max(60, Math.min(textarea.scrollHeight, 300));
+      textarea.style.height = `${h}px`;
+      editorWrap.style.height = `${h}px`;
+    }
     function syncHighlight() {
       const code2 = textarea.value;
       if (!code2) {
         highlight.innerHTML = "";
+        syncEditorHeight();
         return;
       }
       if (!shiki) {
         highlight.textContent = code2;
+        syncEditorHeight();
         return;
       }
       const html = shiki.codeToHtml(code2, {
@@ -8093,6 +8101,7 @@ ${frontmatter.yaml}
       } else {
         highlight.textContent = code2;
       }
+      syncEditorHeight();
     }
     textarea.addEventListener("input", syncHighlight);
     textarea.addEventListener("scroll", () => {
@@ -8264,7 +8273,7 @@ ${frontmatter.yaml}
           item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
           item.title = sql;
           item.addEventListener("click", () => {
-            textarea.value = sql;
+            setSql(sql);
             historyDropdown.hidden = true;
           });
           historyDropdown.appendChild(item);
@@ -8281,6 +8290,25 @@ ${frontmatter.yaml}
       if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
         e2.preventDefault();
         run();
+        return;
+      }
+      if (e2.key === "Tab") {
+        e2.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        if (e2.shiftKey) {
+          const before = textarea.value.slice(0, start);
+          const lineStart = before.lastIndexOf(`
+`) + 1;
+          const linePrefix = textarea.value.slice(lineStart, start);
+          const spaces = linePrefix.match(/^ {1,2}/);
+          if (spaces) {
+            textarea.setRangeText("", lineStart, lineStart + spaces[0].length, "end");
+          }
+        } else {
+          textarea.setRangeText("  ", start, end, "end");
+        }
+        syncHighlight();
       }
     });
     function focus() {
@@ -8325,6 +8353,7 @@ ${frontmatter.yaml}
     listEl.className = "db-query-history-list";
     el.append(toolbar, listEl);
     let entries = [];
+    const expandedIds = new Set;
     async function refresh() {
       const dbId = callbacks.getDbId();
       const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
@@ -8377,7 +8406,10 @@ ${frontmatter.yaml}
       header.append(meta, title);
       const detail = document.createElement("div");
       detail.className = "db-query-history-detail";
-      detail.hidden = true;
+      const expanded = expandedIds.has(entry.id);
+      detail.hidden = !expanded;
+      if (expanded)
+        item.classList.add("expanded");
       const sqlBlock = document.createElement("pre");
       sqlBlock.className = "db-query-history-sql";
       sqlBlock.textContent = entry.sql;
@@ -8393,13 +8425,26 @@ ${frontmatter.yaml}
       }
       const actions = document.createElement("div");
       actions.className = "db-query-history-actions";
+      const useBtn = document.createElement("button");
+      useBtn.className = "db-query-history-action";
+      useBtn.type = "button";
+      useBtn.textContent = "Use in Editor";
+      useBtn.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        callbacks.copySqlToQuery(entry.sql);
+      });
       const copyBtn = document.createElement("button");
       copyBtn.className = "db-query-history-action";
       copyBtn.type = "button";
       copyBtn.textContent = "Copy SQL";
       copyBtn.addEventListener("click", (e2) => {
         e2.stopPropagation();
-        callbacks.copySqlToQuery(entry.sql);
+        navigator.clipboard.writeText(entry.sql).then(() => {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy SQL";
+          }, 1500);
+        }, () => {});
       });
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "db-query-history-action db-query-history-danger";
@@ -8407,14 +8452,20 @@ ${frontmatter.yaml}
       deleteBtn.textContent = "Delete";
       deleteBtn.addEventListener("click", (e2) => {
         e2.stopPropagation();
-        deleteEntry(entry.id);
+        deleteEntry(entry.id, item);
       });
-      actions.append(copyBtn, deleteBtn);
+      actions.append(useBtn, copyBtn, deleteBtn);
       detail.appendChild(actions);
       item.append(header, detail);
       header.addEventListener("click", () => {
-        detail.hidden = !detail.hidden;
-        item.classList.toggle("expanded", !detail.hidden);
+        const willExpand = detail.hidden;
+        detail.hidden = !willExpand;
+        item.classList.toggle("expanded", willExpand);
+        if (willExpand) {
+          expandedIds.add(entry.id);
+        } else {
+          expandedIds.delete(entry.id);
+        }
       });
       return item;
     }
@@ -8464,7 +8515,7 @@ ${frontmatter.yaml}
       }
       return wrapper;
     }
-    async function deleteEntry(id) {
+    async function deleteEntry(id, itemEl) {
       try {
         await fetch("/_db/history/delete", {
           method: "POST",
@@ -8475,7 +8526,14 @@ ${frontmatter.yaml}
           body: JSON.stringify({ id })
         });
         entries = entries.filter((e2) => e2.id !== id);
-        render();
+        expandedIds.delete(id);
+        if (itemEl) {
+          itemEl.remove();
+          if (entries.length === 0)
+            render();
+        } else {
+          render();
+        }
       } catch {}
     }
     clearBtn.addEventListener("click", async () => {
@@ -8744,6 +8802,7 @@ ${frontmatter.yaml}
     let rafId = 0;
     let statusEl = null;
     let filterTimer = null;
+    let selectedRowIndex = -1;
     const colWidths = new Map;
     function storageKey() {
       const project = callbacks.getProjectName?.() ?? "";
@@ -9089,6 +9148,16 @@ ${frontmatter.yaml}
           row.className = "db-grid-row";
           if (i2 % 2 === 1)
             row.classList.add("alt");
+          if (i2 === selectedRowIndex)
+            row.classList.add("selected");
+          const rowIndex = i2;
+          row.addEventListener("click", () => {
+            selectedRowIndex = rowIndex;
+            body.querySelectorAll(".db-grid-row.selected").forEach((r2) => {
+              r2.classList.remove("selected");
+            });
+            row.classList.add("selected");
+          });
           const rowNum = document.createElement("div");
           rowNum.className = "db-grid-cell db-grid-rownum";
           rowNum.textContent = String(i2 + 1);
@@ -9098,15 +9167,31 @@ ${frontmatter.yaml}
               const cell = document.createElement("div");
               cell.className = "db-grid-cell";
               cell.style.width = `${getColWidth(columnNames[c2])}px`;
-              cell.textContent = formatValue3(rowData[c2]);
-              if (rowData[c2] === null)
+              const val = rowData[c2];
+              cell.textContent = formatValue3(val);
+              if (val === null)
                 cell.classList.add("null");
-              if (rowData[c2] instanceof Uint8Array)
+              else if (val instanceof Uint8Array)
                 cell.classList.add("blob");
+              else if (typeof val === "string" && val === "")
+                cell.classList.add("empty");
               cell.style.cursor = "pointer";
-              const cellValue = rowData[c2];
+              const cellValue = val;
               const cellColIndex = c2;
-              cell.addEventListener("click", () => showCellDetail(cellColIndex, cellValue));
+              cell.addEventListener("click", (e2) => {
+                e2.stopPropagation();
+                selectedRowIndex = rowIndex;
+                body.querySelectorAll(".db-grid-row.selected").forEach((r2) => {
+                  r2.classList.remove("selected");
+                });
+                row.classList.add("selected");
+                showCellDetail(cellColIndex, cellValue);
+                const text2 = formatValueForCopy(cellValue);
+                navigator.clipboard.writeText(text2).then(() => {
+                  cell.classList.add("copied");
+                  setTimeout(() => cell.classList.remove("copied"), 600);
+                }, () => {});
+              });
               row.appendChild(cell);
             }
           } else {
@@ -9234,6 +9319,20 @@ ${frontmatter.yaml}
   function formatValue3(value) {
     if (value === null)
       return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    const s2 = String(value);
+    if (s2 === "")
+      return "<empty>";
+    return s2;
+  }
+  function formatValueForCopy(value) {
+    if (value === null)
+      return "";
     if (value instanceof Uint8Array)
       return `<blob ${value.byteLength} bytes>`;
     if (typeof value === "boolean")

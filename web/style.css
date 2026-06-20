@@ -5415,15 +5415,36 @@ body.query-history-panel-open #content {
 .db-grid-cell:last-child {
   border-right: 1px solid var(--border-muted);
 }
+.db-grid-row.selected {
+  background: var(--accent-subtle) !important;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
 .db-grid-cell.null {
   color: var(--fg-subtle);
   font-style: italic;
+  font-size: 11px;
+  background: rgba(128, 128, 128, 0.06);
+  border-radius: 3px;
+}
+.db-grid-cell.empty {
+  color: var(--fg-subtle);
+  font-style: italic;
+  font-size: 11px;
 }
 .db-grid-cell.blob {
   color: var(--fg-subtle);
+  font-size: 11px;
 }
 .db-grid-cell.loading {
   color: var(--fg-subtle);
+}
+.db-grid-cell.copied {
+  background: rgba(46, 160, 67, 0.15);
+  transition: background 0.1s;
+}
+.db-grid-cell:not(.db-grid-rownum):hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .db-grid-rownum-header,

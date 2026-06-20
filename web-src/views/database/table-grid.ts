@@ -103,6 +103,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
+  let selectedRowIndex = -1;
 
   /* ---- Column width management ---- */
   const colWidths = new Map<string, number>();
@@ -509,6 +510,15 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         const row = document.createElement("div");
         row.className = "db-grid-row";
         if (i % 2 === 1) row.classList.add("alt");
+        if (i === selectedRowIndex) row.classList.add("selected");
+        const rowIndex = i;
+        row.addEventListener("click", () => {
+          selectedRowIndex = rowIndex;
+          body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+            r.classList.remove("selected");
+          });
+          row.classList.add("selected");
+        });
 
         const rowNum = document.createElement("div");
         rowNum.className = "db-grid-cell db-grid-rownum";
@@ -520,15 +530,32 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
             const cell = document.createElement("div");
             cell.className = "db-grid-cell";
             cell.style.width = `${getColWidth(columnNames[c])}px`;
-            cell.textContent = formatValue(rowData[c]);
-            if (rowData[c] === null) cell.classList.add("null");
-            if (rowData[c] instanceof Uint8Array) cell.classList.add("blob");
+            const val = rowData[c];
+            cell.textContent = formatValue(val);
+            if (val === null) cell.classList.add("null");
+            else if (val instanceof Uint8Array) cell.classList.add("blob");
+            else if (typeof val === "string" && val === "")
+              cell.classList.add("empty");
             cell.style.cursor = "pointer";
-            const cellValue = rowData[c];
+            const cellValue = val;
             const cellColIndex = c;
-            cell.addEventListener("click", () =>
-              showCellDetail(cellColIndex, cellValue),
-            );
+            cell.addEventListener("click", (e) => {
+              e.stopPropagation();
+              selectedRowIndex = rowIndex;
+              body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+                r.classList.remove("selected");
+              });
+              row.classList.add("selected");
+              showCellDetail(cellColIndex, cellValue);
+              const text = formatValueForCopy(cellValue);
+              navigator.clipboard.writeText(text).then(
+                () => {
+                  cell.classList.add("copied");
+                  setTimeout(() => cell.classList.remove("copied"), 600);
+                },
+                () => {},
+              );
+            });
             row.appendChild(cell);
           }
         } else {
@@ -672,6 +699,16 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
 function formatValue(value: DbValue): string {
   if (value === null) return "NULL";
+  if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "object") return JSON.stringify(value);
+  const s = String(value);
+  if (s === "") return "<empty>";
+  return s;
+}
+
+function formatValueForCopy(value: DbValue): string {
+  if (value === null) return "";
   if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "object") return JSON.stringify(value);
