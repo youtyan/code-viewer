@@ -5397,3 +5397,149 @@ body.annotation-panel-open #content {
   color: var(--fg-subtle);
   font-size: 12px;
 }
+
+/* ---------- Data Grid: Filter Bar ---------- */
+.db-grid-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+
+.db-grid-filter-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.db-grid-filter-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 0;
+}
+.db-grid-filter-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.db-grid-filter-clear {
+  border: none;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.db-grid-filter-clear:hover {
+  color: var(--danger);
+}
+
+/* ---------- Data Grid: Column Filter Row ---------- */
+.db-grid-filter-row-wrap {
+  flex-shrink: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.db-grid-filter-row {
+  display: flex;
+  min-height: 28px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.db-grid-filter-cell {
+  padding: 2px 4px;
+}
+
+.db-grid-filter-spacer {
+  background: var(--bg-soft);
+}
+
+.db-grid-col-filter {
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border-muted);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.db-grid-col-filter:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+.db-grid-col-filter::placeholder {
+  color: var(--fg-subtle);
+  font-size: 10px;
+}
+
+/* ---------- ER Diagram ---------- */
+.db-er-diagram[hidden] {
+  display: none !important;
+}
+
+.db-er-diagram {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.db-er-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+
+.db-er-zoom-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.db-er-zoom-btn:hover {
+  background: var(--bg-mute);
+}
+
+.db-er-container {
+  flex: 1;
+  overflow: auto;
+  cursor: grab;
+  background:
+    radial-gradient(circle, var(--border-muted) 1px, transparent 1px);
+  background-size: 20px 20px;
+  padding: 24px;
+}
+.db-er-container:active {
+  cursor: grabbing;
+}
+
+.db-er-svg-wrap {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.db-er-svg-wrap .mermaid svg {
+  max-width: none !important;
+}

@@ -1,5 +1,6 @@
 import type {
   DbColumn,
+  DbForeignKey,
   DbIndexInfo,
   DbKind,
   DbOrder,
@@ -19,6 +20,7 @@ export type DatabaseAdapter = {
   getTables(): DbTableInfo[];
   getColumns(table: string): DbColumn[];
   getIndexes(): DbIndexInfo[];
+  getForeignKeys(): DbForeignKey[];
   getTableRowCount(table: string): number;
   getTablePage(
     table: string,

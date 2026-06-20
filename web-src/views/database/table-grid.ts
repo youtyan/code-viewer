@@ -8,10 +8,16 @@ import type {
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
 const PAGE_SIZE = 200;
+const FILTER_DEBOUNCE_MS = 300;
 
 export type GridSort = {
   column: string;
   direction: DbOrderDirection;
+};
+
+export type GridFilter = {
+  column: string;
+  value: string;
 };
 
 export type TableGridCallbacks = {
@@ -20,6 +26,7 @@ export type TableGridCallbacks = {
     offset: number,
     limit: number,
     sort: GridSort | null,
+    filters: GridFilter[],
   ) => Promise<DbTableDataResponse>;
 };
 
@@ -34,12 +41,35 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   const el = document.createElement("div");
   el.className = "db-grid";
 
+  const filterBar = document.createElement("div");
+  filterBar.className = "db-grid-filter-bar";
+  const filterIcon = document.createElement("span");
+  filterIcon.className = "db-grid-filter-icon";
+  filterIcon.textContent = "🔍";
+  const filterInput = document.createElement("input");
+  filterInput.type = "search";
+  filterInput.className = "db-grid-filter-input";
+  filterInput.placeholder = "Search all columns…";
+  filterInput.autocomplete = "off";
+  const filterClear = document.createElement("button");
+  filterClear.type = "button";
+  filterClear.className = "db-grid-filter-clear";
+  filterClear.textContent = "×";
+  filterClear.hidden = true;
+  filterBar.append(filterIcon, filterInput, filterClear);
+
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
 
   const headerRow = document.createElement("div");
   headerRow.className = "db-grid-header";
   headerWrap.appendChild(headerRow);
+
+  const filterRowWrap = document.createElement("div");
+  filterRowWrap.className = "db-grid-filter-row-wrap";
+  const filterRow = document.createElement("div");
+  filterRow.className = "db-grid-filter-row";
+  filterRowWrap.appendChild(filterRow);
 
   const viewport = document.createElement("div");
   viewport.className = "db-grid-viewport";
@@ -51,18 +81,42 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   body.className = "db-grid-body";
 
   viewport.append(spacer, body);
-  el.append(headerWrap, viewport);
+  el.append(filterBar, headerWrap, filterRowWrap, viewport);
 
   let currentTable = "";
   let columns: DbColumn[] = [];
   let columnNames: string[] = [];
   let totalRows = 0;
+  const columnFilters = new Map<string, string>();
+  let globalSearchValue = "";
   let sort: GridSort | null = null;
   let pageCache = new Map<number, DbValue[][]>();
   let pendingPages = new Set<number>();
   let loadGeneration = 0;
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
+  let filterTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function collectFilters(): GridFilter[] {
+    const filters: GridFilter[] = [];
+    for (const [col, val] of columnFilters) {
+      if (val) filters.push({ column: col, value: val });
+    }
+    if (globalSearchValue && filters.length === 0) {
+      for (const col of columnNames) {
+        filters.push({ column: col, value: globalSearchValue });
+      }
+    }
+    return filters;
+  }
+
+  function invalidateData() {
+    pageCache = new Map();
+    pendingPages = new Set();
+    loadGeneration++;
+    viewport.scrollTop = 0;
+    ensurePage(0);
+  }
 
   function clear() {
     currentTable = "";
@@ -70,10 +124,16 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     columnNames = [];
     totalRows = 0;
     sort = null;
+    columnFilters.clear();
+    globalSearchValue = "";
+    filterInput.value = "";
+    filterClear.hidden = true;
+    filterRow.innerHTML = "";
     pageCache = new Map();
     pendingPages = new Set();
     loadGeneration++;
     cancelAnimationFrame(rafId);
+    if (filterTimer) clearTimeout(filterTimer);
     headerRow.innerHTML = "";
     body.innerHTML = "";
     spacer.style.height = "0px";
@@ -113,7 +173,51 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       cell.addEventListener("click", () => handleSort(col.name));
       headerRow.appendChild(cell);
     }
+    renderFilterRow();
     syncContentWidth();
+  }
+
+  function renderFilterRow() {
+    filterRow.innerHTML = "";
+    const rowNumSpacer = document.createElement("div");
+    rowNumSpacer.className =
+      "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
+    filterRow.appendChild(rowNumSpacer);
+    for (const col of columns) {
+      const cell = document.createElement("div");
+      cell.className = "db-grid-cell db-grid-filter-cell";
+      const input = document.createElement("input");
+      input.type = "search";
+      input.className = "db-grid-col-filter";
+      input.placeholder = `${col.name}…`;
+      input.autocomplete = "off";
+      input.value = columnFilters.get(col.name) || "";
+      input.addEventListener("input", () => {
+        const val = input.value.trim();
+        if (val) {
+          columnFilters.set(col.name, val);
+        } else {
+          columnFilters.delete(col.name);
+        }
+        scheduleFilter();
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          input.value = "";
+          columnFilters.delete(col.name);
+          scheduleFilter();
+        }
+      });
+      cell.appendChild(input);
+      filterRow.appendChild(cell);
+    }
+  }
+
+  function scheduleFilter() {
+    if (filterTimer) clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      invalidateData();
+    }, FILTER_DEBOUNCE_MS);
   }
 
   function syncContentWidth() {
@@ -122,6 +226,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       if (w > 0) {
         spacer.style.minWidth = `${w}px`;
         body.style.minWidth = `${w}px`;
+        filterRow.style.minWidth = `${w}px`;
       }
     });
   }
@@ -142,8 +247,9 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     if (pageCache.has(pageStart) || pendingPages.has(pageStart)) return;
     pendingPages.add(pageStart);
     const gen = loadGeneration;
+    const filters = collectFilters();
     callbacks
-      .fetchPage(currentTable, pageStart, PAGE_SIZE, sort)
+      .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters)
       .then((data) => {
         if (gen !== loadGeneration) return;
         pendingPages.delete(pageStart);
@@ -223,10 +329,12 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       statusEl.className = "db-grid-status";
       el.appendChild(statusEl);
     }
-    const sortLabel = sort
-      ? ` | Sort: ${sort.column} ${sort.direction.toUpperCase()}`
-      : "";
-    statusEl.textContent = `${totalRows.toLocaleString()} rows${sortLabel}`;
+    const parts: string[] = [`${totalRows.toLocaleString()} rows`];
+    if (sort)
+      parts.push(`Sort: ${sort.column} ${sort.direction.toUpperCase()}`);
+    const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
+    if (activeFilterCount > 0) parts.push(`${activeFilterCount} filter(s)`);
+    statusEl.textContent = parts.join(" | ");
   }
 
   function load(table: string, initialData?: DbTableDataResponse) {
@@ -252,10 +360,31 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
+  filterInput.addEventListener("input", () => {
+    globalSearchValue = filterInput.value.trim();
+    filterClear.hidden = !globalSearchValue;
+    scheduleFilter();
+  });
+  filterInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      filterInput.value = "";
+      globalSearchValue = "";
+      filterClear.hidden = true;
+      scheduleFilter();
+    }
+  });
+  filterClear.addEventListener("click", () => {
+    filterInput.value = "";
+    globalSearchValue = "";
+    filterClear.hidden = true;
+    invalidateData();
+  });
+
   viewport.addEventListener(
     "scroll",
     () => {
       headerWrap.scrollLeft = viewport.scrollLeft;
+      filterRowWrap.scrollLeft = viewport.scrollLeft;
       renderViewport();
     },
     { passive: true },

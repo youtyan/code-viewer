@@ -75,10 +75,12 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
       rowCount: t.type === "table" ? adapter.getTableRowCount(t.name) : null,
     }));
     const indexes = adapter.getIndexes();
+    const foreignKeys = adapter.getForeignKeys();
     const body: DbSchemaResponse = {
       dbId: r.dbId,
       tables: tablesWithCount,
       indexes,
+      foreignKeys,
     };
     return json(body);
   } catch (err) {
@@ -86,6 +88,28 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
       `failed to read schema: ${err instanceof Error ? err.message : String(err)}`,
       500,
     );
+  }
+}
+
+function sanitizeIdentifier(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+function parseFilters(url: URL): { column: string; value: string }[] {
+  const raw = url.searchParams.get("filters");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (f: unknown): f is { column: string; value: string } =>
+        !!f &&
+        typeof f === "object" &&
+        typeof (f as Record<string, unknown>).column === "string" &&
+        typeof (f as Record<string, unknown>).value === "string",
+    );
+  } catch {
+    return [];
   }
 }
 
@@ -113,11 +137,67 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
       },
     ];
   }
+  const filters = parseFilters(url);
   try {
     const adapter = await getConnection(r.resolved);
+    const columns = adapter.getColumns(table);
+    const colNames = new Set(columns.map((c) => c.name));
+
+    if (filters.length > 0) {
+      const validFilters = filters.filter((f) => colNames.has(f.column));
+      if (validFilters.length > 0) {
+        const whereParts: string[] = [];
+        const params: string[] = [];
+        const grouped = new Map<string, string[]>();
+        for (const f of validFilters) {
+          const existing = grouped.get(f.value) || [];
+          existing.push(f.column);
+          grouped.set(f.value, existing);
+        }
+        for (const [value, cols] of grouped) {
+          if (cols.length === 1) {
+            whereParts.push(
+              `CAST(${sanitizeIdentifier(cols[0])} AS TEXT) LIKE ?`,
+            );
+            params.push(`%${value}%`);
+          } else {
+            const orParts = cols.map(
+              (c) => `CAST(${sanitizeIdentifier(c)} AS TEXT) LIKE ?`,
+            );
+            whereParts.push(`(${orParts.join(" OR ")})`);
+            for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
+          }
+        }
+        const where = whereParts.join(" AND ");
+        const order = orderBy
+          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
+          : "";
+        const countSql = `SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(table)} WHERE ${where}`;
+        const dataSql = `SELECT * FROM ${sanitizeIdentifier(table)} WHERE ${where}${order} LIMIT ? OFFSET ?`;
+        const countResult = adapter.executeReadonlyQuery(countSql, params);
+        const totalRows =
+          countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
+        const dataResult = adapter.executeReadonlyQuery(dataSql, [
+          ...params,
+          limit,
+          offset,
+        ]);
+        const body: DbTableDataResponse = {
+          dbId: r.dbId,
+          table,
+          columns,
+          rows: dataResult.rows,
+          totalRows,
+          offset,
+          limit,
+          hasMore: offset + dataResult.rowCount < totalRows,
+        };
+        return json(body);
+      }
+    }
+
     const result = adapter.getTablePage(table, { offset, limit, orderBy });
     const totalRows = adapter.getTableRowCount(table);
-    const columns = adapter.getColumns(table);
     const body: DbTableDataResponse = {
       dbId: r.dbId,
       table,
