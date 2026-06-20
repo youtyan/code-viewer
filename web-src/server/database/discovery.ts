@@ -85,7 +85,12 @@ export function discoverSqliteFiles(
   }
 
   scan(cwd, 0);
-  results.sort((a, b) => a.path.localeCompare(b.path));
+  results.sort((a, b) => {
+    const aInternal = a.path.startsWith(".code-viewer/") ? 1 : 0;
+    const bInternal = b.path.startsWith(".code-viewer/") ? 1 : 0;
+    if (aInternal !== bInternal) return aInternal - bInternal;
+    return a.path.localeCompare(b.path);
+  });
   return results;
 }
 
