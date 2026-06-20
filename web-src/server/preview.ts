@@ -1924,10 +1924,14 @@ function clearMutableCaches() {
   fileListCache.clear();
 }
 
-function triggerUpdate() {
+function triggerUpdate(changedPaths?: string[]) {
   generation++;
   clearMutableCaches();
-  sendSse("update");
+  const data =
+    changedPaths && changedPaths.length && changedPaths.length <= 50
+      ? JSON.stringify({ generation, paths: changedPaths })
+      : "tick";
+  sendSse("update", data);
 }
 
 function moveMacPathIntoTrash(path: string): {
@@ -2374,6 +2378,18 @@ const server = await startServer({
     if (url.pathname === "/_create_directory")
       return handleCreateDirectory(req);
     if (url.pathname === "/_upload_files") return handleUploadFiles(req);
+    if (url.pathname.startsWith("/_db/")) {
+      const { handleDatabaseRoute } = await import("./database/handle");
+      const dbResponse = await handleDatabaseRoute(
+        req,
+        url,
+        cwd,
+        scopeOmitDirNames,
+        sideEffectRequestAllowed,
+        sendSse,
+      );
+      if (dbResponse) return dbResponse;
+    }
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {

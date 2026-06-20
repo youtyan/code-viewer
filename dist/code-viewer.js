@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 var __defProp = Object.defineProperty;
 var __returnValue = (v) => v;
 function __exportSetter(name, newValue) {
@@ -14,6 +15,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // web-src/server/annotations.ts
 import {
@@ -1745,6 +1747,368 @@ var init_annotate_cli = __esm(() => {
   init_server_registry();
 });
 
+// web-src/server/query-cli.ts
+var exports_query_cli = {};
+__export(exports_query_cli, {
+  runQueryCli: () => runQueryCli,
+  parseQueryArgs: () => parseQueryArgs,
+  QUERY_HELP: () => QUERY_HELP,
+  QUERY_AGENT_HELP: () => QUERY_AGENT_HELP
+});
+import { realpathSync as realpathSync2 } from "node:fs";
+function takeValue2(argv, index, flag) {
+  const value = argv[index + 1];
+  if (value === undefined)
+    return { error: `${flag} requires a value` };
+  return { value, next: index + 1 };
+}
+function parseQueryArgs(argv) {
+  const rest = [];
+  let cwd;
+  let server;
+  const options = new Map;
+  const flags = new Set;
+  const valueFlags = new Set([
+    "--db",
+    "--sql",
+    "--title",
+    "--body",
+    "--max-rows"
+  ]);
+  for (let i = 0;i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h")
+      return { ok: true, args: { command: { kind: "help" } } };
+    if (arg === "--cwd" || arg === "--server") {
+      const taken = takeValue2(argv, i, arg);
+      if ("error" in taken)
+        return { ok: false, error: taken.error };
+      if (arg === "--cwd")
+        cwd = taken.value;
+      else
+        server = taken.value;
+      i = taken.next;
+    } else if (valueFlags.has(arg)) {
+      const taken = takeValue2(argv, i, arg);
+      if ("error" in taken)
+        return { ok: false, error: taken.error };
+      options.set(arg, taken.value);
+      i = taken.next;
+    } else if (arg === "--json" || arg === "--no-save") {
+      flags.add(arg);
+    } else if (arg.startsWith("-")) {
+      return { ok: false, error: `unknown option: ${arg}` };
+    } else {
+      rest.push(arg);
+    }
+  }
+  const subcommand = rest[0];
+  if (!subcommand)
+    return { ok: true, args: { command: { kind: "help" } } };
+  if (subcommand === "agent-help") {
+    return { ok: true, args: { command: { kind: "agent-help" } } };
+  }
+  if (subcommand === "exec") {
+    const db = options.get("--db");
+    if (!db)
+      return { ok: false, error: "exec requires --db <path>" };
+    const sql = options.get("--sql");
+    if (!sql)
+      return { ok: false, error: "exec requires --sql <sql>" };
+    const maxRowsRaw = options.get("--max-rows");
+    const maxRows = maxRowsRaw ? Number(maxRowsRaw) || undefined : undefined;
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "exec",
+          db,
+          sql,
+          title: options.get("--title"),
+          body: options.get("--body"),
+          save: !flags.has("--no-save"),
+          maxRows
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "list") {
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "list",
+          json: flags.has("--json"),
+          db: options.get("--db")
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "clear") {
+    return {
+      ok: true,
+      args: {
+        command: { kind: "clear", db: options.get("--db") },
+        cwd,
+        server
+      }
+    };
+  }
+  return { ok: false, error: `unknown query command: ${subcommand}` };
+}
+function resolveRepoRoot2(cwdOption) {
+  const base = cwdOption || process.cwd();
+  try {
+    return repoRoot(base) || realpathSync2(base);
+  } catch {
+    console.error(`--cwd must point to an existing directory: ${base}`);
+    process.exit(1);
+  }
+}
+async function serverReachable2(serverUrl) {
+  try {
+    const res = await fetch(`${serverUrl}/_db/files`, {
+      signal: AbortSignal.timeout(1500)
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+async function ensureServerUrl2(root, override) {
+  if (override) {
+    const url = override.replace(/\/+$/, "");
+    if (await serverReachable2(url))
+      return url;
+    console.error(`could not reach the code-viewer server at ${url}.`);
+    process.exit(1);
+  }
+  const registered = readServerRegistry(root);
+  if (registered) {
+    const url = registered.url.replace(/\/+$/, "");
+    if (await serverReachable2(url))
+      return url;
+  }
+  console.error(`no running code-viewer server for this repository.
+` + `Start one manually (from ${root}):
+` + "  code-viewer");
+  process.exit(1);
+}
+async function request2(serverUrl, path, method, body) {
+  const url = `${serverUrl}${path}`;
+  const origin = new URL(serverUrl).origin;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: method === "POST" ? {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "X-Code-Viewer-Action": "1"
+      } : {},
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  } catch {
+    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
+    process.exit(1);
+  }
+  const data = await res.json();
+  return { ok: res.ok, status: res.status, data };
+}
+async function runQueryCli(argv) {
+  const parsed = parseQueryArgs(argv);
+  if (parsed.ok === false) {
+    console.error(parsed.error);
+    console.error('Run "code-viewer query --help" for usage.');
+    process.exit(1);
+  }
+  const { command, cwd, server } = parsed.args;
+  if (command.kind === "help") {
+    console.log(QUERY_HELP);
+    return;
+  }
+  if (command.kind === "agent-help") {
+    console.log(QUERY_AGENT_HELP);
+    return;
+  }
+  const root = resolveRepoRoot2(cwd);
+  const serverUrl = await ensureServerUrl2(root, server);
+  if (command.kind === "exec") {
+    const reqBody = {
+      db: command.db,
+      sql: command.sql,
+      saveHistory: command.save,
+      executedBy: "ai",
+      source: "cli"
+    };
+    if (command.title)
+      reqBody.title = command.title;
+    if (command.body)
+      reqBody.body = command.body;
+    if (command.maxRows)
+      reqBody.maxRows = command.maxRows;
+    const result = await request2(serverUrl, "/_db/query", "POST", reqBody);
+    const data = result.data;
+    if (!result.ok || data.error) {
+      console.error(`query error: ${typeof data.error === "string" ? data.error : JSON.stringify(data)}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify({
+      columns: data.columns,
+      rows: data.rows,
+      rowCount: data.rowCount,
+      elapsedMs: data.elapsedMs
+    }, null, 2));
+    return;
+  }
+  if (command.kind === "list") {
+    const params = command.db ? `?db=${encodeURIComponent(command.db)}` : "";
+    const result = await request2(serverUrl, `/_db/history${params}`, "GET");
+    if (!result.ok) {
+      console.error("failed to fetch query history");
+      process.exit(1);
+    }
+    const state = result.data;
+    if (command.json) {
+      console.log(JSON.stringify(state, null, 2));
+    } else {
+      if (!state.entries.length) {
+        console.log("no query history");
+        return;
+      }
+      for (const entry of state.entries) {
+        const by = entry.executedBy === "ai" ? "[AI]" : "";
+        const title = entry.title ? ` ${entry.title}` : "";
+        const sql = typeof entry.sql === "string" ? entry.sql.length > 80 ? `${entry.sql.slice(0, 80)}...` : entry.sql : "";
+        console.log(`${entry.executedAt}  ${by}${title}  ${entry.rowCount} rows (${entry.elapsedMs}ms)`);
+        console.log(`  ${sql}`);
+      }
+    }
+    return;
+  }
+  if (command.kind === "clear") {
+    const reqBody = {};
+    if (command.db)
+      reqBody.db = command.db;
+    await request2(serverUrl, "/_db/history/clear", "POST", reqBody);
+    console.log("cleared query history");
+    return;
+  }
+}
+var QUERY_HELP = `code-viewer query — execute read-only SQL queries against local databases
+
+Usage:
+  code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
+  code-viewer query list [--json] [--db <path>]
+  code-viewer query clear [--db <path>]
+  code-viewer query search --db <path> --term <text> [--tables t1,t2,...] [--include-non-text] [--max-hits <n>]
+  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>]
+  code-viewer query snapshot list [--json] [--db <path>]
+  code-viewer query snapshot delete --id <snapshot-id>
+  code-viewer query snapshot note --id <snapshot-id> --note <text>
+  code-viewer query diff create --before <id> --after <id> [--note <text>]
+  code-viewer query diff list [--json] [--db <path>]
+  code-viewer query diff tables --id <diff-id>
+  code-viewer query diff rows --id <diff-id> --table <name> [--type inserted|updated|deleted] [--limit <n>]
+  code-viewer query diff delete --id <diff-id>
+  code-viewer query agent-help
+
+Global options:
+  --cwd <dir>      repository directory (default: current directory)
+  --server <url>   code-viewer server URL (default: auto-discovered)
+
+Examples:
+  code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
+  code-viewer query search --db app.db --term "john@example.com"
+  code-viewer query snapshot create --db app.db --tables users,orders --note "Before migration"
+  code-viewer query diff create --before snap-abc123 --after snap-def456
+  code-viewer query diff rows --id diff-xyz789 --table users --type updated
+`, QUERY_AGENT_HELP = `code-viewer query — execute read-only SQL queries against local databases
+
+You are an AI coding agent. Use this tool to investigate database contents
+when a human asks about their data. Results are saved to the project's
+.code-viewer/query-history.json and appear in the browser's Database > Query
+History tab, so the human can review what you queried.
+
+## When to use
+
+- Answering "what does this data look like?"
+- Checking schema, row counts, sample data
+- Investigating data quality or anomalies
+- Searching for a value across all tables
+- Taking snapshots before/after a test to verify DB changes
+
+## Requirements
+
+- A code-viewer server must be running for the repository.
+- Only SELECT, PRAGMA, EXPLAIN, WITH queries are allowed (for exec).
+- Results are persisted and visible to the human.
+
+## Workflow: SQL Query
+
+1. Identify which database file to query (list with: code-viewer query list)
+2. Execute:
+   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
+       --title "Sample user data" --body "Checking what user records look like."
+3. The human sees results in the browser's Database > Query History tab.
+
+## Workflow: Global Search
+
+Search for a string across all tables and all text columns:
+  code-viewer query search --db app.db --term "john@example.com"
+
+Options:
+  --tables users,orders    Only search specific tables
+  --include-non-text       Also search numeric/date columns
+  --max-hits 20            Max hits per table (default: 50)
+
+## Workflow: Snapshot & Diff (for testing)
+
+Use this to verify that a feature test correctly modifies the expected DB tables.
+
+1. Take a "before" snapshot:
+   code-viewer query snapshot create --db app.db --tables users,orders \\
+       --note "Before running user registration test"
+
+2. (The human or test runner performs the action)
+
+3. Take an "after" snapshot:
+   code-viewer query snapshot create --db app.db --tables users,orders \\
+       --note "After running user registration test"
+
+4. List snapshots to get IDs:
+   code-viewer query snapshot list --db app.db
+
+5. Create a diff:
+   code-viewer query diff create --before snap-abc123 --after snap-def456 \\
+       --note "User registration test - expected 1 INSERT in users"
+
+6. View the diff:
+   code-viewer query diff tables --id diff-xyz789
+   code-viewer query diff rows --id diff-xyz789 --table users --type inserted
+
+The human can also view all diffs in the browser's Database > Snapshot tab.
+
+## Guidelines
+
+- Always use LIMIT. The server caps rows but be explicit.
+- Write --title for the human, not for yourself.
+- Use --body to explain why the query matters.
+- Do not query broad PII or secrets unless explicitly asked.
+- Use --no-save for exploratory queries that should not remain in history.
+- Prefer specific columns over SELECT *.
+- For snapshots, always specify --tables to avoid scanning unnecessary tables.
+- Write meaningful --note values — the human uses them to understand context.
+`;
+var init_query_cli = __esm(() => {
+  init_git();
+  init_server_registry();
+});
+
 // web-src/server/root.ts
 import { existsSync as existsSync4 } from "node:fs";
 import { dirname, join as join4, normalize } from "node:path";
@@ -1940,7 +2304,8 @@ var init_routes = __esm(() => {
     "/todiff",
     "/file",
     "/help",
-    "/history"
+    "/history",
+    "/database"
   ];
   APP_ENTRY_PATHS = ["/", "/index.html"];
 });
@@ -2381,13 +2746,18 @@ function startWorktreeUpdateWatch(options) {
   const initialScanQueue = [];
   let initialScanTimer = null;
   let timer = null;
+  const pendingChangedPaths = new Set;
   const ignored = (path) => isSkippableSearchPath(normalizeRelativePath(path), options.omitDirNames, options.excludeNames);
-  const scheduleUpdate = () => {
+  const scheduleUpdate = (changedPath) => {
+    if (changedPath)
+      pendingChangedPaths.add(changedPath);
     if (timer)
       clearTimer(timer);
     timer = setTimer(() => {
       timer = null;
-      options.onUpdate();
+      const paths = pendingChangedPaths.size ? [...pendingChangedPaths] : undefined;
+      pendingChangedPaths.clear();
+      options.onUpdate(paths);
     }, debounceMs);
   };
   const closeSubtree = (dir) => {
@@ -2470,14 +2840,14 @@ function startWorktreeUpdateWatch(options) {
               closeSubtree(fullChangedPath);
               watchDirectory(fullChangedPath);
             }
-            scheduleUpdate();
+            scheduleUpdate(changed);
             return;
           }
           watchDirectory(fullChangedPath);
         } else if (known) {
           closeSubtree(fullChangedPath);
         }
-        scheduleUpdate();
+        scheduleUpdate(changed);
       }) || {};
       watchers.set(dir, watcher);
       const signature = directorySignature(dir);
@@ -2513,25 +2883,2381 @@ var init_worktree_watcher = __esm(() => {
   init_search();
 });
 
+// web-src/server/database/adapters/docker.ts
+import { spawnSync as spawnSync2 } from "node:child_process";
+function execInContainer(config, sql, timeoutMs = 1e4) {
+  let args;
+  if (config.kind === "postgresql") {
+    args = [
+      "docker",
+      "exec",
+      "-i",
+      "-e",
+      `PGPASSWORD=${config.password}`,
+      config.containerName,
+      "psql",
+      "-U",
+      config.user,
+      "-d",
+      config.database,
+      "-X",
+      "-q",
+      "-t",
+      "-A",
+      "-F",
+      "\t",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      sql
+    ];
+  } else {
+    args = [
+      "docker",
+      "exec",
+      "-i",
+      "-e",
+      `MYSQL_PWD=${config.password}`,
+      config.containerName,
+      "mysql",
+      "-u",
+      config.user,
+      config.database,
+      "--batch",
+      "--raw",
+      "--default-character-set=utf8mb4",
+      "-e",
+      sql
+    ];
+  }
+  const proc = spawnSync2(args[0], args.slice(1), {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || "",
+    code: proc.status ?? 1
+  };
+}
+function parseTsvOutput(stdout, hasHeader) {
+  const lines = stdout.trim().split(`
+`).filter(Boolean);
+  if (lines.length === 0)
+    return { columns: [], rows: [] };
+  if (hasHeader) {
+    const columns = lines[0].split("\t");
+    const rows2 = lines.slice(1).map((line) => line.split("\t"));
+    return { columns, rows: rows2 };
+  }
+  const rows = lines.map((line) => line.split("\t"));
+  return { columns: [], rows };
+}
+function sanitizeIdentifier(name, kind) {
+  if (kind === "mysql")
+    return `\`${name.replace(/`/g, "``")}\``;
+  return `"${name.replace(/"/g, '""')}"`;
+}
+function buildOrderClause(orderBy, kind) {
+  if (!orderBy?.length)
+    return "";
+  const parts = orderBy.map((o) => `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`);
+  return ` ORDER BY ${parts.join(", ")}`;
+}
+function createDockerAdapter(config) {
+  function exec(sql) {
+    const result = execInContainer(config, sql);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "query failed");
+    }
+    return parseTsvOutput(result.stdout, config.kind === "mysql");
+  }
+  function toDbValue(val) {
+    if (val === "NULL" || val === "\\N")
+      return null;
+    return val;
+  }
+  const columnCache = new Map;
+  function fetchColumnsUncached(table) {
+    let sql;
+    if (config.kind === "postgresql") {
+      sql = `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
+    } else {
+      sql = `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
+    }
+    const result = exec(sql);
+    if (config.kind === "postgresql") {
+      const pkSql = `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '${table.replace(/'/g, "''")}'::regclass AND i.indisprimary`;
+      let pkCols;
+      try {
+        const pkResult = exec(pkSql);
+        pkCols = new Set(pkResult.rows.map((r) => r[0]));
+      } catch {
+        pkCols = new Set;
+      }
+      return result.rows.map((row) => ({
+        name: row[0],
+        type: row[1],
+        nullable: row[2] === "YES",
+        primaryKey: pkCols.has(row[0]),
+        defaultValue: row[3] === "" ? null : row[3]
+      }));
+    }
+    return result.rows.map((row) => ({
+      name: row[0],
+      type: row[1],
+      nullable: row[2] === "YES",
+      primaryKey: row[4] === "PRI",
+      defaultValue: row[3] === "NULL" ? null : row[3]
+    }));
+  }
+  return {
+    kind: config.kind,
+    getTables() {
+      let sql;
+      if (config.kind === "postgresql") {
+        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`;
+      } else {
+        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name`;
+      }
+      const result = exec(sql);
+      return result.rows.map((row) => ({
+        name: row[0],
+        type: row[1] === "VIEW" ? "view" : "table",
+        rowCount: null
+      }));
+    },
+    getColumns(table) {
+      const cached = columnCache.get(table);
+      if (cached)
+        return cached;
+      const cols = fetchColumnsUncached(table);
+      columnCache.set(table, cols);
+      return cols;
+    },
+    getIndexes() {
+      let sql;
+      if (config.kind === "postgresql") {
+        sql = `SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public' AND indexname NOT LIKE 'pg_%' ORDER BY indexname`;
+      } else {
+        sql = `SELECT DISTINCT index_name, table_name, non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() ORDER BY index_name`;
+      }
+      const result = exec(sql);
+      if (config.kind === "postgresql") {
+        return result.rows.map((row) => ({
+          name: row[0],
+          table: row[1],
+          columns: [],
+          unique: false
+        }));
+      }
+      return result.rows.map((row) => ({
+        name: row[0],
+        table: row[1],
+        columns: [],
+        unique: row[2] === "0"
+      }));
+    },
+    getForeignKeys() {
+      let sql;
+      if (config.kind === "postgresql") {
+        sql = `SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`;
+      } else {
+        sql = `SELECT table_name, column_name, referenced_table_name, referenced_column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL`;
+      }
+      try {
+        const result = exec(sql);
+        return result.rows.map((row) => ({
+          fromTable: row[0],
+          fromColumn: row[1],
+          toTable: row[2],
+          toColumn: row[3]
+        }));
+      } catch {
+        return [];
+      }
+    },
+    getColumnsMulti(tables) {
+      const result = new Map;
+      const uncached = tables.filter((t) => {
+        const c = columnCache.get(t);
+        if (c)
+          result.set(t, c);
+        return !c;
+      });
+      if (uncached.length === 0)
+        return result;
+      let sql;
+      if (config.kind === "postgresql") {
+        const inList = uncached.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
+        sql = `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+      } else {
+        const inList = uncached.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
+        sql = `SELECT table_name, column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+      }
+      try {
+        const queryResult = exec(sql);
+        const grouped = new Map;
+        for (const row of queryResult.rows) {
+          const tbl = row[0];
+          const existing = grouped.get(tbl) || [];
+          existing.push(row);
+          grouped.set(tbl, existing);
+        }
+        let pkMap = new Map;
+        if (config.kind === "postgresql") {
+          try {
+            const pkInList = uncached.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
+            const pkResult = exec(`SELECT c.relname, a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indisprimary AND c.relname IN (${pkInList})`);
+            for (const row of pkResult.rows) {
+              const existing = pkMap.get(row[0]) || new Set;
+              existing.add(row[1]);
+              pkMap.set(row[0], existing);
+            }
+          } catch {
+            pkMap = new Map;
+          }
+        }
+        for (const [tbl, rows] of grouped) {
+          const pkCols = pkMap.get(tbl) || new Set;
+          let cols;
+          if (config.kind === "postgresql") {
+            cols = rows.map((row) => ({
+              name: row[1],
+              type: row[2],
+              nullable: row[3] === "YES",
+              primaryKey: pkCols.has(row[1]),
+              defaultValue: row[4] === "" ? null : row[4]
+            }));
+          } else {
+            cols = rows.map((row) => ({
+              name: row[1],
+              type: row[2],
+              nullable: row[3] === "YES",
+              primaryKey: row[5] === "PRI",
+              defaultValue: row[4] === "NULL" ? null : row[4]
+            }));
+          }
+          columnCache.set(tbl, cols);
+          result.set(tbl, cols);
+        }
+      } catch {
+        for (const t of uncached) {
+          const cols = fetchColumnsUncached(t);
+          columnCache.set(t, cols);
+          result.set(t, cols);
+        }
+      }
+      return result;
+    },
+    getTableRowCount(table) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const result = exec(`SELECT COUNT(*) FROM ${id}`);
+      return result.rows.length > 0 ? Number(result.rows[0][0]) || 0 : 0;
+    },
+    getTableRowCounts(tables) {
+      const result = new Map;
+      if (tables.length === 0)
+        return result;
+      const parts = tables.map((t) => {
+        const id = sanitizeIdentifier(t, config.kind);
+        return `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${id}`;
+      });
+      const sql = parts.join(" UNION ALL ");
+      try {
+        const queryResult = exec(sql);
+        for (const row of queryResult.rows) {
+          result.set(row[0], Number(row[1]) || 0);
+        }
+      } catch {
+        for (const t of tables) {
+          const id = sanitizeIdentifier(t, config.kind);
+          try {
+            const r = exec(`SELECT COUNT(*) FROM ${id}`);
+            result.set(t, r.rows.length > 0 ? Number(r.rows[0][0]) || 0 : 0);
+          } catch {
+            result.set(t, 0);
+          }
+        }
+      }
+      return result;
+    },
+    getTablePage(table, options) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const sql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const result = exec(sql);
+      const cols = this.getColumns(table);
+      if (result.rows.length === 0) {
+        return {
+          columns: cols.map((c) => c.name),
+          columnTypes: cols.map((c) => c.type),
+          rows: [],
+          rowCount: 0
+        };
+      }
+      const columnNames = config.kind === "mysql" ? result.columns : cols.map((c) => c.name);
+      const typeMap = new Map(cols.map((c) => [c.name, c.type]));
+      return {
+        columns: columnNames,
+        columnTypes: columnNames.map((n) => typeMap.get(n) || "TEXT"),
+        rows: result.rows.map((row) => row.map(toDbValue)),
+        rowCount: result.rows.length
+      };
+    },
+    executeReadonlyQuery(sql, _params, maxRows = 1000) {
+      const trimmed = sql.trim();
+      const upper = trimmed.toUpperCase();
+      const firstWord = upper.split(/\s/)[0];
+      if (firstWord !== "SELECT" && firstWord !== "EXPLAIN" && firstWord !== "WITH" && firstWord !== "SHOW" && firstWord !== "DESCRIBE") {
+        throw new Error("Only SELECT, EXPLAIN, WITH, SHOW, and DESCRIBE queries are allowed");
+      }
+      const BLOCKED_RE = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|REPLACE|VACUUM|TRUNCATE|GRANT|REVOKE)\b/;
+      if (BLOCKED_RE.test(upper)) {
+        throw new Error("Query contains a disallowed statement keyword");
+      }
+      const readOnlyPreamble = config.kind === "postgresql" ? "BEGIN TRANSACTION READ ONLY; " : "SET SESSION TRANSACTION READ ONLY; ";
+      const readOnlyPostamble = config.kind === "postgresql" ? "; COMMIT" : "; SET SESSION TRANSACTION READ WRITE";
+      const stripped = trimmed.replace(/;\s*$/, "");
+      const limited = `${readOnlyPreamble}${stripped} LIMIT ${maxRows}${readOnlyPostamble}`;
+      const result = exec(limited);
+      const columnNames = config.kind === "mysql" && result.columns.length > 0 ? result.columns : result.rows.length > 0 ? Array.from({ length: result.rows[0].length }, (_, i) => `col${i + 1}`) : [];
+      return {
+        columns: columnNames,
+        columnTypes: columnNames.map(() => "TEXT"),
+        rows: result.rows.slice(0, maxRows).map((row) => row.map(toDbValue)),
+        rowCount: Math.min(result.rows.length, maxRows)
+      };
+    },
+    getCreateStatement(table) {
+      if (config.kind === "mysql") {
+        try {
+          const result = exec(`SHOW CREATE TABLE ${sanitizeIdentifier(table, config.kind)}`);
+          return result.rows.length > 0 ? result.rows[0][1] || "" : "";
+        } catch {
+          return "";
+        }
+      }
+      try {
+        const result = exec(`SELECT 'CREATE TABLE ' || '${table.replace(/'/g, "''")}' || ' (...)' AS ddl`);
+        return result.rows.length > 0 ? result.rows[0][0] || "" : "";
+      } catch {
+        return "";
+      }
+    },
+    getTriggers(table) {
+      let sql;
+      if (config.kind === "mysql") {
+        sql = `SELECT trigger_name, action_statement FROM information_schema.triggers WHERE event_object_schema = DATABASE() AND event_object_table = '${table.replace(/'/g, "''")}'`;
+      } else {
+        sql = `SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = '${table.replace(/'/g, "''")}'::regclass AND NOT tgisinternal`;
+      }
+      try {
+        const result = exec(sql);
+        return result.rows.map((row) => ({
+          name: row[0],
+          sql: row[1] || ""
+        }));
+      } catch {
+        return [];
+      }
+    },
+    close() {
+      columnCache.clear();
+    }
+  };
+}
+function resolveContainerName(serviceName, cwd) {
+  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    let containers;
+    if (output.startsWith("[")) {
+      containers = JSON.parse(output);
+    } else {
+      containers = output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    }
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+function listDockerDatabases(serviceName, kind, env, cwd) {
+  const containerName = resolveContainerName(serviceName, cwd);
+  if (!containerName)
+    return [];
+  const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
+  const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MYSQL_ROOT_PASSWORD || env.MARIADB_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
+  const defaultDb = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || (kind === "postgresql" ? "postgres" : "");
+  const config = {
+    kind,
+    containerName,
+    user,
+    password,
+    database: defaultDb || (kind === "postgresql" ? "postgres" : "mysql")
+  };
+  try {
+    let sql;
+    if (kind === "postgresql") {
+      sql = `SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true ORDER BY datname`;
+    } else {
+      sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys') ORDER BY schema_name`;
+    }
+    const result = execInContainer(config, sql);
+    if (result.code !== 0)
+      return defaultDb ? [defaultDb] : [];
+    const parsed = parseTsvOutput(result.stdout, kind === "mysql");
+    const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
+    return dbs.length > 0 ? dbs : defaultDb ? [defaultDb] : [];
+  } catch {
+    return defaultDb ? [defaultDb] : [];
+  }
+}
+function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
+  const containerName = resolveContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
+  const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MYSQL_ROOT_PASSWORD || env.MARIADB_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
+  const database = overrideDatabase || env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || (kind === "postgresql" ? "postgres" : "");
+  return createDockerAdapter({
+    kind,
+    containerName,
+    user,
+    password,
+    database
+  });
+}
+var init_docker = () => {};
+
+// web-src/server/database/adapters/sqlite.ts
+async function getSqliteClass() {
+  if (cachedDbClass)
+    return cachedDbClass;
+  try {
+    const mod = await import("bun:sqlite");
+    cachedDbClass = mod.Database;
+    return cachedDbClass;
+  } catch {}
+  try {
+    const mod = await Function('return import("better-sqlite3")')();
+    cachedDbClass = mod.default || mod;
+    return cachedDbClass;
+  } catch {}
+  throw new Error("No SQLite driver available. Install better-sqlite3 or use the bun runtime.");
+}
+function sanitizeIdentifier2(name) {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+function buildOrderClause2(orderBy) {
+  if (!orderBy?.length)
+    return "";
+  const parts = orderBy.map((o) => `${sanitizeIdentifier2(o.column)} ${o.direction === "desc" ? "DESC" : "ASC"}`);
+  return ` ORDER BY ${parts.join(", ")}`;
+}
+function queryColumns(db, table) {
+  const rows = db.prepare(`PRAGMA table_info(${sanitizeIdentifier2(table)})`).all();
+  return rows.map((row) => ({
+    name: row.name,
+    type: row.type || "TEXT",
+    nullable: row.notnull === 0,
+    primaryKey: row.pk > 0,
+    defaultValue: row.dflt_value
+  }));
+}
+function createSqliteAdapter(db) {
+  return {
+    kind: "sqlite",
+    getTables() {
+      const rows = db.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
+      return rows.map((row) => ({
+        name: row.name,
+        type: row.type,
+        rowCount: null
+      }));
+    },
+    getColumns(table) {
+      return queryColumns(db, table);
+    },
+    getIndexes() {
+      const rows = db.prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
+      return rows.map((row) => {
+        const info = db.prepare(`PRAGMA index_info(${sanitizeIdentifier2(row.name)})`).all();
+        const indexList = db.prepare(`PRAGMA index_list(${sanitizeIdentifier2(row.tbl_name)})`).all();
+        const entry = indexList.find((i) => i.name === row.name);
+        return {
+          name: row.name,
+          table: row.tbl_name,
+          columns: info.map((i) => i.name),
+          unique: entry ? entry.unique === 1 : false
+        };
+      });
+    },
+    getForeignKeys() {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE '%VIRTUAL%' ORDER BY name").all();
+      const fks = [];
+      for (const t of tables) {
+        try {
+          const rows = db.prepare(`PRAGMA foreign_key_list(${sanitizeIdentifier2(t.name)})`).all();
+          for (const row of rows) {
+            fks.push({
+              fromTable: t.name,
+              fromColumn: row.from,
+              toTable: row.table,
+              toColumn: row.to
+            });
+          }
+        } catch {}
+      }
+      return fks;
+    },
+    getColumnsMulti(tables) {
+      const result = new Map;
+      for (const t of tables) {
+        result.set(t, queryColumns(db, t));
+      }
+      return result;
+    },
+    getTableRowCount(table) {
+      const row = db.prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier2(table)}`).get();
+      return row?.cnt ?? 0;
+    },
+    getTableRowCounts(tables) {
+      const result = new Map;
+      if (tables.length === 0)
+        return result;
+      const parts = tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${sanitizeIdentifier2(t)}`);
+      const sql = parts.join(" UNION ALL ");
+      try {
+        const rows = db.prepare(sql).all();
+        for (const row of rows) {
+          result.set(row.tbl, row.cnt);
+        }
+      } catch {
+        for (const t of tables) {
+          const row = db.prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier2(t)}`).get();
+          result.set(t, row?.cnt ?? 0);
+        }
+      }
+      return result;
+    },
+    getTablePage(table, options) {
+      const order = buildOrderClause2(options.orderBy);
+      const sql = `SELECT * FROM ${sanitizeIdentifier2(table)}${order} LIMIT ? OFFSET ?`;
+      const rows = db.prepare(sql).all(options.limit, options.offset);
+      const cols = queryColumns(db, table);
+      if (rows.length === 0) {
+        return {
+          columns: cols.map((c) => c.name),
+          columnTypes: cols.map((c) => c.type),
+          rows: [],
+          rowCount: 0
+        };
+      }
+      const columnNames = Object.keys(rows[0]);
+      const typeMap = new Map(cols.map((c) => [c.name, c.type]));
+      return {
+        columns: columnNames,
+        columnTypes: columnNames.map((n) => typeMap.get(n) || "TEXT"),
+        rows: rows.map((row) => columnNames.map((col) => row[col])),
+        rowCount: rows.length
+      };
+    },
+    executeReadonlyQuery(sql, params, maxRows = 1000) {
+      const trimmed = sql.trim();
+      const upper = trimmed.toUpperCase();
+      const firstWord = upper.split(/\s/)[0];
+      if (firstWord !== "SELECT" && firstWord !== "PRAGMA" && firstWord !== "EXPLAIN" && firstWord !== "WITH") {
+        throw new Error("Only SELECT, PRAGMA, EXPLAIN, and WITH queries are allowed");
+      }
+      const BLOCKED_RE = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|REPLACE|VACUUM|REINDEX|LOAD_EXTENSION)\b/;
+      if (BLOCKED_RE.test(upper)) {
+        throw new Error("Query contains a disallowed statement keyword");
+      }
+      const limited = trimmed.replace(/;\s*$/, "");
+      const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
+      let rows;
+      try {
+        rows = db.prepare(wrappedSql).all(...params || []);
+      } catch (wrapErr) {
+        const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
+        try {
+          rows = db.prepare(fallbackSql).all(...params || []);
+        } catch {
+          throw wrapErr;
+        }
+      }
+      const truncated = rows.length > maxRows;
+      if (truncated)
+        rows = rows.slice(0, maxRows);
+      if (rows.length === 0) {
+        return { columns: [], columnTypes: [], rows: [], rowCount: 0 };
+      }
+      const columnNames = Object.keys(rows[0]);
+      return {
+        columns: columnNames,
+        columnTypes: columnNames.map(() => "TEXT"),
+        rows: rows.map((row) => columnNames.map((col) => row[col])),
+        rowCount: rows.length
+      };
+    },
+    getCreateStatement(table) {
+      const row = db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(table);
+      return row?.sql ?? "";
+    },
+    getTriggers(table) {
+      const rows = db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?").all(table);
+      return rows.map((row) => ({ name: row.name, sql: row.sql ?? "" }));
+    },
+    close() {
+      db.close();
+    }
+  };
+}
+var cachedDbClass = null, sqliteAdapterFactory;
+var init_sqlite = __esm(() => {
+  sqliteAdapterFactory = {
+    async open(path) {
+      const DbClass = await getSqliteClass();
+      const db = new DbClass(path, { readonly: true, create: false });
+      return createSqliteAdapter(db);
+    }
+  };
+});
+
+// web-src/server/database/connection-pool.ts
+function setAdapterFactory(f) {
+  factory = f;
+}
+function evictOldest() {
+  let oldestKey = null;
+  let oldestTime = Infinity;
+  for (const [key, entry] of pool) {
+    if (entry.lastUsed < oldestTime) {
+      oldestTime = entry.lastUsed;
+      oldestKey = key;
+    }
+  }
+  if (oldestKey) {
+    const entry = pool.get(oldestKey);
+    if (entry) {
+      clearTimeout(entry.timer);
+      try {
+        entry.adapter.close();
+      } catch {}
+      pool.delete(oldestKey);
+    }
+  }
+}
+function scheduleEviction(key, entry) {
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    const current = pool.get(key);
+    if (current === entry) {
+      try {
+        current.adapter.close();
+      } catch {}
+      pool.delete(key);
+    }
+  }, IDLE_TIMEOUT_MS);
+}
+async function getConnection(resolvedPath) {
+  if (!factory) {
+    throw new Error("No adapter factory configured");
+  }
+  const existing = pool.get(resolvedPath);
+  if (existing) {
+    existing.lastUsed = Date.now();
+    scheduleEviction(resolvedPath, existing);
+    return existing.adapter;
+  }
+  if (pool.size >= MAX_CONNECTIONS) {
+    evictOldest();
+  }
+  const adapter = await factory.open(resolvedPath);
+  const entry = {
+    adapter,
+    path: resolvedPath,
+    lastUsed: Date.now(),
+    timer: setTimeout(() => {}, 0)
+  };
+  pool.set(resolvedPath, entry);
+  scheduleEviction(resolvedPath, entry);
+  return adapter;
+}
+function closeConnection(resolvedPath) {
+  const entry = pool.get(resolvedPath);
+  if (!entry)
+    return false;
+  clearTimeout(entry.timer);
+  try {
+    entry.adapter.close();
+  } catch {}
+  pool.delete(resolvedPath);
+  return true;
+}
+var MAX_CONNECTIONS = 8, IDLE_TIMEOUT_MS, pool, factory = null;
+var init_connection_pool = __esm(() => {
+  IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+  pool = new Map;
+});
+
+// web-src/server/database/discovery.ts
+import {
+  closeSync,
+  existsSync as existsSync6,
+  lstatSync as lstatSync4,
+  openSync,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync5,
+  readSync,
+  realpathSync as realpathSync3,
+  statSync as statSync2
+} from "node:fs";
+import { basename as basename2, join as join8, relative as relative2 } from "node:path";
+function isSqliteFile(fullPath) {
+  try {
+    const stat = statSync2(fullPath);
+    if (!stat.isFile() || stat.size < 16)
+      return false;
+    const buf = Buffer.alloc(16);
+    const fd = openSync(fullPath, "r");
+    try {
+      readSync(fd, buf, 0, 16, 0);
+    } finally {
+      closeSync(fd);
+    }
+    return buf.toString("utf8", 0, 16) === SQLITE_MAGIC;
+  } catch {
+    return false;
+  }
+}
+function discoverSqliteFiles(cwd, omitDirNames) {
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  const results = [];
+  function scan(dir, depth) {
+    if (depth > MAX_SCAN_DEPTH || results.length >= MAX_ENTRIES)
+      return;
+    let entries;
+    try {
+      entries = readdirSync2(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= MAX_ENTRIES)
+        return;
+      if (omitSet.has(entry.toLowerCase()))
+        continue;
+      const full = join8(dir, entry);
+      let stat;
+      try {
+        stat = lstatSync4(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink())
+        continue;
+      if (stat.isDirectory()) {
+        scan(full, depth + 1);
+      } else if (stat.isFile()) {
+        const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
+        if (!SQLITE_EXTENSIONS.has(ext))
+          continue;
+        if (!isSqliteFile(full))
+          continue;
+        const rel = relative2(cwd, full);
+        if (rel.startsWith("..") || rel.startsWith("/"))
+          continue;
+        results.push({
+          path: rel,
+          name: basename2(rel),
+          sizeBytes: stat.size
+        });
+      }
+    }
+  }
+  scan(cwd, 0);
+  results.sort((a, b) => {
+    const aInternal = a.path.startsWith(".code-viewer/") ? 1 : 0;
+    const bInternal = b.path.startsWith(".code-viewer/") ? 1 : 0;
+    if (aInternal !== bInternal)
+      return aInternal - bInternal;
+    return a.path.localeCompare(b.path);
+  });
+  return results;
+}
+function validateDbPath(cwd, dbPath) {
+  if (!dbPath || dbPath.includes("\x00") || dbPath.startsWith("/") || dbPath.startsWith("\\"))
+    return null;
+  const parts = dbPath.split(/[\\/]+/);
+  if (parts.some((p) => p === ".." || p.toLowerCase() === ".git"))
+    return null;
+  const full = join8(cwd, dbPath);
+  if (!existsSync6(full))
+    return null;
+  let realCwd;
+  let realFull;
+  try {
+    realCwd = realpathSync3(cwd);
+    realFull = realpathSync3(full);
+  } catch {
+    return null;
+  }
+  const rel = relative2(realCwd, realFull);
+  if (rel === "" || rel.startsWith("..") || rel.startsWith("/"))
+    return null;
+  if (!isSqliteFile(realFull))
+    return null;
+  return realFull;
+}
+function detectDbKind(image) {
+  const lower = image.toLowerCase();
+  if (lower.includes("postgres"))
+    return "postgresql";
+  if (lower.includes("mysql") || lower.includes("mariadb"))
+    return "mysql";
+  return null;
+}
+function resolveEnvValue(raw) {
+  return raw.replace(/\$\{([^}]+)\}/g, (_, expr) => {
+    const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
+    if (!defaultMatch)
+      return "";
+    const varName = defaultMatch[1];
+    const fallback = defaultMatch[2] ?? "";
+    return process.env[varName] || fallback;
+  });
+}
+function parseComposeEnv(serviceBlock) {
+  const env = {};
+  const envMatch = serviceBlock.match(/^[ \t]+environment:\s*\n((?:[ \t]+(?:- )?[^\n]+\n?)*)/m);
+  if (!envMatch)
+    return env;
+  const block = envMatch[1];
+  for (const line of block.split(`
+`)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#"))
+      continue;
+    const stripped = trimmed.startsWith("- ") ? trimmed.slice(2) : trimmed;
+    const eqIdx = stripped.indexOf("=");
+    const colonIdx = stripped.indexOf(": ");
+    if (eqIdx > 0) {
+      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(stripped.slice(eqIdx + 1).trim());
+    } else if (colonIdx > 0) {
+      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(stripped.slice(colonIdx + 2).trim());
+    }
+  }
+  return env;
+}
+function parseComposePorts(serviceBlock) {
+  const portsMatch = serviceBlock.match(/^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m);
+  if (!portsMatch)
+    return null;
+  for (const line of portsMatch[1].split(`
+`)) {
+    const m = line.match(/["']?(\d+):(\d+)["']?/);
+    if (m)
+      return m[1];
+  }
+  return null;
+}
+function discoverDockerDatabases(cwd) {
+  const results = [];
+  for (const filename of COMPOSE_FILENAMES) {
+    const filepath = join8(cwd, filename);
+    if (!existsSync6(filepath))
+      continue;
+    let content;
+    try {
+      content = readFileSync5(filepath, "utf-8");
+    } catch {
+      continue;
+    }
+    const servicesMatch = content.match(/^services:\s*\n/m);
+    if (!servicesMatch || servicesMatch.index === undefined)
+      continue;
+    const servicesStart = servicesMatch.index + servicesMatch[0].length;
+    const afterServices = content.slice(servicesStart);
+    const topLevelEnd = afterServices.search(/^\S/m);
+    const servicesBlock = topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
+    const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
+    const servicePositions = [];
+    for (let match = serviceRegex.exec(servicesBlock);match !== null; match = serviceRegex.exec(servicesBlock)) {
+      servicePositions.push({
+        name: match[1],
+        start: match.index
+      });
+    }
+    for (let i = 0;i < servicePositions.length; i++) {
+      const svc = servicePositions[i];
+      const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
+      const svcBlock = servicesBlock.slice(svc.start, nextStart);
+      const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
+      if (!imageMatch)
+        continue;
+      const image = imageMatch[1];
+      const kind = detectDbKind(image);
+      if (!kind)
+        continue;
+      const env = parseComposeEnv(svcBlock);
+      const port = parseComposePorts(svcBlock);
+      const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
+      const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
+      const hostPort = port || (kind === "postgresql" ? "5432" : "3306");
+      const label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+      results.push({
+        id: `docker:${svc.name}`,
+        path: filename,
+        name: label,
+        sizeBytes: 0,
+        kind,
+        serviceName: svc.name,
+        env
+      });
+    }
+    break;
+  }
+  return results;
+}
+var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES;
+var init_discovery = __esm(() => {
+  SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
+  COMPOSE_FILENAMES = [
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml"
+  ];
+});
+
+// web-src/server/database/global-search.ts
+function sanitizeIdentifier3(name, kind) {
+  if (kind === "mysql")
+    return `\`${name.replace(/`/g, "``")}\``;
+  return `"${name.replace(/"/g, '""')}"`;
+}
+function escapeSqlString(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function isTextLikeType(type) {
+  const upper = type.toUpperCase();
+  return upper.includes("CHAR") || upper.includes("TEXT") || upper.includes("VARCHAR") || upper.includes("CLOB") || upper.includes("STRING") || upper === "JSON" || upper === "JSONB" || upper === "XML" || upper === "UUID";
+}
+function escapeLikeTerm(term) {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkColumns) {
+  const kind = adapter.kind;
+  const searchCols = includeNonText ? columns.filter((c) => c.type.toUpperCase() !== "BLOB" && c.type.toUpperCase() !== "BYTEA") : columns.filter((c) => isTextLikeType(c.type));
+  if (searchCols.length === 0)
+    return [];
+  const escapedTerm = escapeLikeTerm(term);
+  const tbl = sanitizeIdentifier3(table, kind);
+  const hits = [];
+  for (const col of searchCols) {
+    if (hits.length >= maxHits)
+      break;
+    const colId = sanitizeIdentifier3(col.name, kind);
+    const castCol = kind === "mysql" ? `CAST(${colId} AS CHAR)` : `CAST(${colId} AS TEXT)`;
+    let sql;
+    const remaining = maxHits - hits.length;
+    if (kind === "sqlite") {
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '\\' LIMIT ${remaining}`;
+    } else {
+      const likeVal = escapeSqlString(`%${escapedTerm}%`);
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '\\' LIMIT ${remaining}`;
+    }
+    try {
+      const result = kind === "sqlite" ? adapter.executeReadonlyQuery(sql, [`%${escapedTerm}%`], remaining) : adapter.executeReadonlyQuery(sql, undefined, remaining);
+      for (const row of result.rows) {
+        const colIdx = result.columns.indexOf(col.name);
+        const valueRaw = colIdx >= 0 ? row[colIdx] : null;
+        const valueStr = valueRaw == null ? "" : String(valueRaw);
+        const preview = valueStr.length > 200 ? `${valueStr.slice(0, 200)}...` : valueStr;
+        let rowKeyJson;
+        if (pkColumns.length > 0) {
+          const keyObj = {};
+          for (const pk of pkColumns) {
+            const pkIdx = result.columns.indexOf(pk);
+            if (pkIdx >= 0)
+              keyObj[pk] = row[pkIdx];
+          }
+          rowKeyJson = JSON.stringify(keyObj);
+        }
+        hits.push({
+          table,
+          column: col.name,
+          rowKeyJson,
+          valuePreview: preview,
+          rowPreview: row
+        });
+      }
+    } catch {}
+  }
+  return hits;
+}
+function getPrimaryKeyColumns(adapter, table) {
+  const columns = adapter.getColumns(table);
+  return columns.filter((c) => c.primaryKey).map((c) => c.name);
+}
+
+// web-src/server/database/query-history.ts
+import {
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync6,
+  renameSync as renameSync2,
+  writeFileSync as writeFileSync3
+} from "node:fs";
+import { join as join9 } from "node:path";
+function historyFilePath(root) {
+  return join9(root, CODE_VIEWER_DIR2, HISTORY_FILE_NAME);
+}
+function emptyState() {
+  return { version: 1, entries: [] };
+}
+function loadQueryHistory(cwd) {
+  const file = historyFilePath(cwd);
+  if (!existsSync7(file))
+    return emptyState();
+  try {
+    const raw = readFileSync6(file, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+      return emptyState();
+    }
+    return parsed;
+  } catch {
+    return emptyState();
+  }
+}
+function saveQueryHistory(cwd, state) {
+  const dir = join9(cwd, CODE_VIEWER_DIR2);
+  mkdirSync4(dir, { recursive: true });
+  const file = historyFilePath(cwd);
+  const tmp = `${file}.tmp-${process.pid}`;
+  let content = `${JSON.stringify(state, null, 2)}
+`;
+  if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
+    while (state.entries.length > 1 && Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
+      state.entries.pop();
+      content = `${JSON.stringify(state, null, 2)}
+`;
+    }
+  }
+  writeFileSync3(tmp, content, "utf8");
+  renameSync2(tmp, file);
+}
+function clampPreviewRows(rows) {
+  return rows.slice(0, MAX_PREVIEW_ROWS);
+}
+function addQueryHistoryEntry(state, entry) {
+  const clamped = {
+    ...entry,
+    rowsPreview: clampPreviewRows(entry.rowsPreview),
+    savedRows: Math.min(entry.rowsPreview.length, MAX_PREVIEW_ROWS)
+  };
+  const entries = [clamped, ...state.entries];
+  if (entries.length > MAX_ENTRIES2)
+    entries.length = MAX_ENTRIES2;
+  return { version: 1, entries };
+}
+function deleteQueryHistoryEntry(state, id) {
+  return {
+    version: 1,
+    entries: state.entries.filter((e) => e.id !== id)
+  };
+}
+function clearQueryHistory(state, dbId) {
+  if (!dbId)
+    return emptyState();
+  return {
+    version: 1,
+    entries: state.entries.filter((e) => e.dbId !== dbId)
+  };
+}
+var CODE_VIEWER_DIR2 = ".code-viewer", HISTORY_FILE_NAME = "query-history.json", MAX_ENTRIES2 = 200, MAX_PREVIEW_ROWS = 100, MAX_JSON_BYTES = 1e6;
+var init_query_history = () => {};
+
+// web-src/server/database/snapshot-store.ts
+import { createHash as createHash2, randomBytes } from "node:crypto";
+import { mkdirSync as mkdirSync5 } from "node:fs";
+import { join as join10 } from "node:path";
+async function getSqliteClass2() {
+  if (cachedDbClass2)
+    return cachedDbClass2;
+  try {
+    const mod = await import("bun:sqlite");
+    cachedDbClass2 = mod.Database;
+    return cachedDbClass2;
+  } catch {}
+  try {
+    const mod = await Function('return import("better-sqlite3")')();
+    cachedDbClass2 = mod.default || mod;
+    return cachedDbClass2;
+  } catch {}
+  throw new Error("No SQLite driver available. Install better-sqlite3 or use the bun runtime.");
+}
+async function getStoreDb(cwd) {
+  const dbPath = join10(cwd, CODE_VIEWER_DIR3, SNAPSHOT_DB_NAME);
+  if (storeDb && storeDbPath === dbPath)
+    return storeDb;
+  if (storeDb) {
+    try {
+      storeDb.close();
+    } catch {}
+  }
+  mkdirSync5(join10(cwd, CODE_VIEWER_DIR3), { recursive: true });
+  const DbClass = await getSqliteClass2();
+  storeDb = new DbClass(dbPath);
+  storeDbPath = dbPath;
+  storeDb.exec("PRAGMA journal_mode=WAL");
+  storeDb.exec("PRAGMA foreign_keys=ON");
+  storeDb.exec(SCHEMA_SQL);
+  return storeDb;
+}
+function makeId(prefix) {
+  return `${prefix}-${randomBytes(8).toString("hex")}`;
+}
+function hashPayload(payloadJson) {
+  return createHash2("sha256").update(payloadJson).digest("hex");
+}
+async function createSnapshot(cwd, dbId, kind, tables, note) {
+  const db = await getStoreDb(cwd);
+  const id = makeId("snap");
+  db.prepare("INSERT INTO snapshots (id, db_id, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)").run(id, dbId, kind, note, new Date().toISOString(), "running");
+  for (const t of tables) {
+    db.prepare("INSERT INTO snapshot_tables (snapshot_id, table_name) VALUES (?, ?)").run(id, t);
+  }
+  return id;
+}
+async function addSnapshotTableData(cwd, snapshotId, tableName, pkColumns, rows) {
+  const db = await getStoreDb(cwd);
+  const tableHasher = createHash2("sha256");
+  const insertRow = db.prepare("INSERT OR IGNORE INTO snapshot_rows (snapshot_id, table_name, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?, ?)");
+  const insertPayload = db.prepare("INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)");
+  for (const row of rows) {
+    const rowKeyHash = createHash2("sha256").update(row.rowKeyJson).digest("hex");
+    const payloadHash = hashPayload(row.payloadJson);
+    tableHasher.update(row.rowHash);
+    insertRow.run(snapshotId, tableName, rowKeyHash, row.rowKeyJson, row.rowHash, payloadHash);
+    insertPayload.run(payloadHash, row.payloadJson);
+  }
+  const tableHash = tableHasher.digest("hex");
+  db.prepare("UPDATE snapshot_tables SET row_count = ?, table_hash = ?, pk_columns_json = ? WHERE snapshot_id = ? AND table_name = ?").run(rows.length, tableHash, JSON.stringify(pkColumns), snapshotId, tableName);
+}
+async function finalizeSnapshot(cwd, snapshotId, error) {
+  const db = await getStoreDb(cwd);
+  if (error) {
+    db.prepare("UPDATE snapshots SET status = 'error', error_message = ? WHERE id = ?").run(error, snapshotId);
+  } else {
+    db.prepare("UPDATE snapshots SET status = 'done' WHERE id = ?").run(snapshotId);
+  }
+}
+async function listSnapshots(cwd, dbId) {
+  const db = await getStoreDb(cwd);
+  let rows;
+  if (dbId) {
+    rows = db.prepare("SELECT id, db_id, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? ORDER BY created_at DESC").all(dbId);
+  } else {
+    rows = db.prepare("SELECT id, db_id, kind, note, created_at, status, error_message FROM snapshots ORDER BY created_at DESC").all();
+  }
+  return rows.map((r) => {
+    const tableRows = db.prepare("SELECT table_name FROM snapshot_tables WHERE snapshot_id = ?").all(r.id);
+    return {
+      id: r.id,
+      dbId: r.db_id,
+      kind: r.kind,
+      note: r.note,
+      createdAt: r.created_at,
+      tables: tableRows.map((t) => t.table_name),
+      status: r.status,
+      errorMessage: r.error_message
+    };
+  });
+}
+async function updateSnapshotNote(cwd, snapshotId, note) {
+  const db = await getStoreDb(cwd);
+  db.prepare("UPDATE snapshots SET note = ? WHERE id = ?").run(note, snapshotId);
+}
+async function deleteSnapshot(cwd, snapshotId) {
+  const db = await getStoreDb(cwd);
+  const payloadHashes = db.prepare("SELECT DISTINCT payload_hash FROM snapshot_rows WHERE snapshot_id = ?").all(snapshotId).map((r) => r.payload_hash);
+  db.prepare("DELETE FROM snapshots WHERE id = ?").run(snapshotId);
+  for (const ph of payloadHashes) {
+    const used = db.prepare("SELECT 1 FROM snapshot_rows WHERE payload_hash = ? LIMIT 1").get(ph);
+    if (!used) {
+      db.prepare("DELETE FROM snapshot_payloads WHERE payload_hash = ?").run(ph);
+    }
+  }
+}
+async function computeDiffTables(cwd, beforeId, afterId) {
+  const db = await getStoreDb(cwd);
+  const beforeTables = db.prepare("SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?").all(beforeId);
+  const afterTables = db.prepare("SELECT table_name, table_hash, row_count FROM snapshot_tables WHERE snapshot_id = ?").all(afterId);
+  const beforeMap = new Map(beforeTables.map((t) => [t.table_name, t]));
+  const afterMap = new Map(afterTables.map((t) => [t.table_name, t]));
+  const allTables = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+  const results = [];
+  for (const table of allTables) {
+    const b = beforeMap.get(table);
+    const a = afterMap.get(table);
+    if (b && a && b.table_hash === a.table_hash) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: b.row_count
+      });
+      continue;
+    }
+    if (!b) {
+      results.push({
+        tableName: table,
+        insertedCount: a.row_count,
+        updatedCount: 0,
+        deletedCount: 0,
+        unchangedCount: 0
+      });
+      continue;
+    }
+    if (!a) {
+      results.push({
+        tableName: table,
+        insertedCount: 0,
+        updatedCount: 0,
+        deletedCount: b.row_count,
+        unchangedCount: 0
+      });
+      continue;
+    }
+    const insertedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows a
+           LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+           WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`).get(beforeId, table, afterId, table).cnt;
+    const deletedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`).get(afterId, table, beforeId, table).cnt;
+    const updatedCount = db.prepare(`SELECT COUNT(*) AS cnt
+           FROM snapshot_rows b
+           INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`).get(afterId, table, beforeId, table).cnt;
+    const unchangedCount = b.row_count - deletedCount - updatedCount;
+    results.push({
+      tableName: table,
+      insertedCount,
+      updatedCount,
+      deletedCount,
+      unchangedCount: Math.max(0, unchangedCount)
+    });
+  }
+  results.sort((a, b) => {
+    const aChanges = a.insertedCount + a.updatedCount + a.deletedCount;
+    const bChanges = b.insertedCount + b.updatedCount + b.deletedCount;
+    if (bChanges !== aChanges)
+      return bChanges - aChanges;
+    return a.tableName.localeCompare(b.tableName);
+  });
+  return results;
+}
+async function computeDiffRows(cwd, beforeId, afterId, table, offset = 0, limit = 200) {
+  const db = await getStoreDb(cwd);
+  const allDiffRows = [];
+  const inserted = db.prepare(`SELECT a.row_key_json, a.payload_hash
+       FROM snapshot_rows a
+       LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+       WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL
+       ORDER BY a.row_key_json`).all(beforeId, table, afterId, table);
+  for (const r of inserted) {
+    allDiffRows.push({
+      change_type: "inserted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: null,
+      after_payload_hash: r.payload_hash
+    });
+  }
+  const deleted = db.prepare(`SELECT b.row_key_json, b.payload_hash
+       FROM snapshot_rows b
+       LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL
+       ORDER BY b.row_key_json`).all(afterId, table, beforeId, table);
+  for (const r of deleted) {
+    allDiffRows.push({
+      change_type: "deleted",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.payload_hash,
+      after_payload_hash: null
+    });
+  }
+  const updated = db.prepare(`SELECT b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
+       FROM snapshot_rows b
+       INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash
+       ORDER BY b.row_key_json`).all(afterId, table, beforeId, table);
+  for (const r of updated) {
+    allDiffRows.push({
+      change_type: "updated",
+      row_key_json: r.row_key_json,
+      before_payload_hash: r.before_ph,
+      after_payload_hash: r.after_ph
+    });
+  }
+  allDiffRows.sort((a, b) => a.row_key_json.localeCompare(b.row_key_json));
+  const total = allDiffRows.length;
+  const page = allDiffRows.slice(offset, offset + limit);
+  const rows = page.map((r) => {
+    let beforeValues;
+    let afterValues;
+    if (r.before_payload_hash) {
+      const payload = db.prepare("SELECT payload_json FROM snapshot_payloads WHERE payload_hash = ?").get(r.before_payload_hash);
+      if (payload)
+        beforeValues = JSON.parse(payload.payload_json);
+    }
+    if (r.after_payload_hash) {
+      const payload = db.prepare("SELECT payload_json FROM snapshot_payloads WHERE payload_hash = ?").get(r.after_payload_hash);
+      if (payload)
+        afterValues = JSON.parse(payload.payload_json);
+    }
+    return {
+      changeType: r.change_type,
+      rowKeyJson: r.row_key_json,
+      beforeValues,
+      afterValues
+    };
+  });
+  return { rows, total };
+}
+var CODE_VIEWER_DIR3 = ".code-viewer", SNAPSHOT_DB_NAME = "db-snapshots.sqlite", cachedDbClass2 = null, SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS snapshots (
+  id TEXT PRIMARY KEY,
+  db_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  error_message TEXT
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_tables (
+  snapshot_id TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_count INTEGER NOT NULL DEFAULT 0,
+  table_hash TEXT NOT NULL DEFAULT '',
+  pk_columns_json TEXT NOT NULL DEFAULT '[]',
+  PRIMARY KEY (snapshot_id, table_name),
+  FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_rows (
+  snapshot_id TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_key_hash TEXT NOT NULL,
+  row_key_json TEXT NOT NULL,
+  row_hash TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  PRIMARY KEY (snapshot_id, table_name, row_key_hash),
+  FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_payloads (
+  payload_hash TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL
+);
+
+`, storeDb = null, storeDbPath = null;
+var init_snapshot_store = () => {};
+
+// web-src/server/database/snapshot-runner.ts
+import { createHash as createHash3 } from "node:crypto";
+function normalizeValue(v) {
+  if (v === null)
+    return "\\N";
+  if (v instanceof Uint8Array) {
+    return `\\x${Buffer.from(v).toString("hex")}`;
+  }
+  return String(v);
+}
+function rowToPayloadJson(columns, row) {
+  const obj = {};
+  for (let i = 0;i < columns.length; i++) {
+    obj[columns[i]] = row[i] instanceof Uint8Array ? `<blob ${row[i].byteLength} bytes>` : row[i];
+  }
+  return JSON.stringify(obj);
+}
+function computeRowHash(columns, row) {
+  const parts = columns.map((_, i) => normalizeValue(row[i]));
+  return createHash3("sha256").update(parts.join("\t")).digest("hex");
+}
+function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
+  if (pkColumns.length === 0) {
+    return JSON.stringify({ __rowIndex: rowIndex });
+  }
+  const keyObj = {};
+  for (const pk of pkColumns) {
+    const idx = allColumns.indexOf(pk);
+    if (idx >= 0)
+      keyObj[pk] = row[idx];
+  }
+  return JSON.stringify(keyObj);
+}
+async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
+  const snapshotId = await createSnapshot(cwd, dbId, adapter.kind, tables, note);
+  try {
+    for (const table of tables) {
+      onProgress?.(table, false);
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      const allRows = [];
+      for (;; ) {
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: BATCH_SIZE
+        });
+        if (result.rows.length === 0)
+          break;
+        for (const row of result.rows) {
+          const rowKeyJson = buildRowKeyJson(pkColumns, colNames, row, rowIndex);
+          const rowHash = computeRowHash(colNames, row);
+          const payloadJson = rowToPayloadJson(colNames, row);
+          allRows.push({ rowKeyJson, rowHash, payloadJson });
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < BATCH_SIZE)
+          break;
+      }
+      await addSnapshotTableData(cwd, snapshotId, table, pkColumns, allRows);
+    }
+    await finalizeSnapshot(cwd, snapshotId);
+    onProgress?.("", true);
+    return snapshotId;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await finalizeSnapshot(cwd, snapshotId, msg);
+    throw err;
+  }
+}
+var BATCH_SIZE = 500;
+var init_snapshot_runner = __esm(() => {
+  init_snapshot_store();
+});
+
+// web-src/server/database/handle.ts
+var exports_handle = {};
+__export(exports_handle, {
+  handleDatabaseRoute: () => handleDatabaseRoute
+});
+import { randomBytes as randomBytes2 } from "node:crypto";
+function ensureInit() {
+  if (initialized)
+    return;
+  setAdapterFactory(sqliteAdapterFactory);
+  initialized = true;
+}
+async function getAdapter(r, cwd) {
+  if (r.docker) {
+    const key = r.dbId;
+    const cached = dockerAdapterCache.get(key);
+    if (cached)
+      return cached;
+    const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, cwd, r.docker.database);
+    dockerAdapterCache.set(key, adapter);
+    return adapter;
+  }
+  return getConnection(r.resolved);
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function textError(message, status) {
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function sanitizeFilename(name) {
+  return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
+}
+function getDockerDbs(cwd) {
+  if (cachedDockerCwd === cwd && cachedDockerDbs)
+    return cachedDockerDbs;
+  cachedDockerDbs = discoverDockerDatabases(cwd);
+  cachedDockerCwd = cwd;
+  return cachedDockerDbs;
+}
+function resolveDb(cwd, dbParam) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (dbParam.startsWith("docker:")) {
+    const rest = dbParam.slice(7);
+    const colonIdx = rest.indexOf(":");
+    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
+    const dockerDbs = getDockerDbs(cwd);
+    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    if (!info)
+      return textError("docker service not found", 404);
+    const resolved2 = dbName ? { ...info, database: dbName } : info;
+    return { resolved: dbParam, dbId: dbParam, docker: resolved2 };
+  }
+  const resolved = validateDbPath(cwd, dbParam);
+  if (!resolved)
+    return textError("invalid database path", 400);
+  return { resolved, dbId: dbParam };
+}
+function handleFiles(cwd, omitDirNames) {
+  const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
+  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerEntries = [];
+  for (const svc of dockerServices) {
+    const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, cwd);
+    if (dbs.length <= 1) {
+      dockerEntries.push(svc);
+    } else {
+      for (const db of dbs) {
+        dockerEntries.push({
+          ...svc,
+          id: `docker:${svc.serviceName}:${db}`,
+          name: svc.name.replace(/\)$/, ` / ${db})`),
+          database: db
+        });
+      }
+    }
+  }
+  const body = {
+    files: [
+      ...sqliteFiles.map((f) => ({
+        id: f.path,
+        path: f.path,
+        name: f.name,
+        sizeBytes: f.sizeBytes,
+        kind: "sqlite"
+      })),
+      ...dockerEntries
+    ]
+  };
+  return json(body);
+}
+async function handleSchema(cwd, url) {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const includeColumns = url.searchParams.get("includeColumns") === "1";
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const tables = adapter.getTables();
+    const tableNames = tables.filter((t) => t.type === "table").map((t) => t.name);
+    let countMap;
+    if (adapter.getTableRowCounts) {
+      countMap = adapter.getTableRowCounts(tableNames);
+    } else {
+      countMap = new Map;
+      for (const name of tableNames) {
+        countMap.set(name, adapter.getTableRowCount(name));
+      }
+    }
+    const tablesWithCount = tables.map((t) => ({
+      ...t,
+      rowCount: t.type === "table" ? countMap.get(t.name) ?? 0 : null
+    }));
+    const indexes = adapter.getIndexes();
+    const foreignKeys = adapter.getForeignKeys();
+    const body = {
+      dbId: r.dbId,
+      tables: tablesWithCount,
+      indexes,
+      foreignKeys
+    };
+    if (includeColumns) {
+      let colsMap;
+      if (adapter.getColumnsMulti) {
+        colsMap = adapter.getColumnsMulti(tableNames);
+      } else {
+        colsMap = new Map;
+        for (const name of tableNames) {
+          colsMap.set(name, adapter.getColumns(name));
+        }
+      }
+      body.columnsMap = Object.fromEntries(colsMap);
+    }
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to read schema: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+function sanitizeIdentifier4(name, kind = "sqlite") {
+  if (kind === "mysql")
+    return `\`${name.replace(/`/g, "``")}\``;
+  return `"${name.replace(/"/g, '""')}"`;
+}
+function escapeSqlString2(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function buildFilterWhere(grouped, kind) {
+  const whereParts = [];
+  const params = [];
+  const useParams = kind === "sqlite";
+  for (const [value, cols] of grouped) {
+    const likeVal = useParams ? "?" : escapeSqlString2(`%${value}%`);
+    if (cols.length === 1) {
+      const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier4(cols[0], kind)} AS CHAR)` : `CAST(${sanitizeIdentifier4(cols[0], kind)} AS TEXT)`;
+      whereParts.push(`${cast} LIKE ${likeVal}`);
+      if (useParams)
+        params.push(`%${value}%`);
+    } else {
+      const orParts = cols.map((c) => {
+        const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier4(c, kind)} AS CHAR)` : `CAST(${sanitizeIdentifier4(c, kind)} AS TEXT)`;
+        return `${cast} LIKE ${likeVal}`;
+      });
+      whereParts.push(`(${orParts.join(" OR ")})`);
+      if (useParams) {
+        for (let i = 0;i < cols.length; i++)
+          params.push(`%${value}%`);
+      }
+    }
+  }
+  return { where: whereParts.join(" AND "), params, useParams };
+}
+function parseFilters(url) {
+  const raw = url.searchParams.get("filters");
+  if (!raw)
+    return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed))
+      return [];
+    return parsed.filter((f) => !!f && typeof f === "object" && typeof f.column === "string" && typeof f.value === "string");
+  } catch {
+    return [];
+  }
+}
+async function handleTable(cwd, url) {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const table = url.searchParams.get("table");
+  if (!table)
+    return textError("missing table parameter", 400);
+  const offset = Math.max(0, Number(url.searchParams.get("offset") || "0") || 0);
+  const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") || "200") || 200));
+  let orderBy;
+  const sortCol = url.searchParams.get("sort");
+  const sortDir = url.searchParams.get("dir");
+  if (sortCol) {
+    orderBy = [
+      {
+        column: sortCol,
+        direction: sortDir === "desc" ? "desc" : "asc"
+      }
+    ];
+  }
+  const filters = parseFilters(url);
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const columns = adapter.getColumns(table);
+    const colNames = new Set(columns.map((c) => c.name));
+    if (sortCol && !colNames.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
+    if (filters.length > 0) {
+      const validFilters = filters.filter((f) => colNames.has(f.column));
+      if (validFilters.length > 0) {
+        const grouped = new Map;
+        for (const f of validFilters) {
+          const existing = grouped.get(f.value) || [];
+          existing.push(f.column);
+          grouped.set(f.value, existing);
+        }
+        const k = adapter.kind;
+        const filter = buildFilterWhere(grouped, k);
+        const order = orderBy ? ` ORDER BY ${sanitizeIdentifier4(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}` : "";
+        const tbl = sanitizeIdentifier4(table, k);
+        const countSql = `SELECT COUNT(*) AS cnt FROM ${tbl} WHERE ${filter.where}`;
+        const limitOffset = filter.useParams ? "LIMIT ? OFFSET ?" : `LIMIT ${limit} OFFSET ${offset}`;
+        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
+        const countResult = adapter.executeReadonlyQuery(countSql, filter.useParams ? filter.params : undefined);
+        const totalRows2 = countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
+        const dataResult = adapter.executeReadonlyQuery(dataSql, filter.useParams ? [...filter.params, limit, offset] : undefined);
+        const body2 = {
+          dbId: r.dbId,
+          table,
+          columns,
+          rows: dataResult.rows,
+          totalRows: totalRows2,
+          offset,
+          limit,
+          hasMore: offset + dataResult.rowCount < totalRows2
+        };
+        return json(body2);
+      }
+    }
+    const result = adapter.getTablePage(table, { offset, limit, orderBy });
+    const totalRows = result.rowCount < limit ? offset + result.rowCount : adapter.getTableRowCount(table);
+    const body = {
+      dbId: r.dbId,
+      table,
+      columns,
+      rows: result.rows,
+      totalRows,
+      offset,
+      limit,
+      hasMore: offset + result.rowCount < totalRows
+    };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to read table: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+function makeHistoryId() {
+  return `qh-${randomBytes2(8).toString("hex")}`;
+}
+async function handleQuery(cwd, req, sendSse) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db || !body.sql)
+    return textError("missing db or sql", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response)
+    return r;
+  const maxRows = Math.min(1e4, Math.max(1, body.maxRows || 1000));
+  const start = Date.now();
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
+    const elapsed = Date.now() - start;
+    const response = {
+      dbId: body.db,
+      columns: result.columns,
+      columnTypes: result.columnTypes,
+      rows: result.rows,
+      rowCount: result.rowCount,
+      truncated: result.rowCount >= maxRows,
+      elapsedMs: elapsed
+    };
+    if (body.saveHistory) {
+      const entry = {
+        id: makeHistoryId(),
+        dbId: body.db,
+        sql: body.sql,
+        title: body.title,
+        body: body.body,
+        columns: result.columns,
+        rowsPreview: result.rows,
+        rowCount: result.rowCount,
+        savedRows: result.rows.length,
+        truncated: result.rowCount >= maxRows,
+        elapsedMs: elapsed,
+        executedAt: new Date().toISOString(),
+        executedBy: body.executedBy || "user",
+        source: body.source || "browser"
+      };
+      const state = loadQueryHistory(cwd);
+      const updated = addQueryHistoryEntry(state, entry);
+      saveQueryHistory(cwd, updated);
+      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+    }
+    return json(response);
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    const elapsed = Date.now() - start;
+    const response = {
+      dbId: body.db,
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: elapsed,
+      error: err instanceof Error ? err.message : String(err)
+    };
+    return json(response, 400);
+  }
+}
+function handleHistory(cwd, url) {
+  const dbId = url.searchParams.get("db") || undefined;
+  const state = loadQueryHistory(cwd);
+  if (dbId) {
+    return json({
+      version: 1,
+      entries: state.entries.filter((e) => e.dbId === dbId)
+    });
+  }
+  return json(state);
+}
+async function handleHistoryDelete(cwd, req, sendSse) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id)
+    return textError("missing id", 400);
+  const state = loadQueryHistory(cwd);
+  const updated = deleteQueryHistoryEntry(state, body.id);
+  saveQueryHistory(cwd, updated);
+  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  return json({ ok: true });
+}
+async function handleHistoryClear(cwd, req, sendSse) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+  const state = loadQueryHistory(cwd);
+  const updated = clearQueryHistory(state, body.db);
+  saveQueryHistory(cwd, updated);
+  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  return json({ ok: true });
+}
+function formatCsvField(value) {
+  if (value === null || value === undefined)
+    return "";
+  if (value instanceof Uint8Array)
+    return `<blob ${value.byteLength} bytes>`;
+  const str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  if (str.includes(",") || str.includes('"') || str.includes(`
+`) || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+async function handleExport(cwd, url) {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const table = url.searchParams.get("table");
+  if (!table)
+    return textError("missing table parameter", 400);
+  const format = url.searchParams.get("format");
+  if (format !== "csv" && format !== "json")
+    return textError("format must be csv or json", 400);
+  let orderBy;
+  const sortCol = url.searchParams.get("sort");
+  const sortDir = url.searchParams.get("dir");
+  if (sortCol) {
+    orderBy = [
+      {
+        column: sortCol,
+        direction: sortDir === "desc" ? "desc" : "asc"
+      }
+    ];
+  }
+  const filters = parseFilters(url);
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const columns = adapter.getColumns(table);
+    const colNames = columns.map((c) => c.name);
+    const colNameSet = new Set(colNames);
+    if (sortCol && !colNameSet.has(sortCol)) {
+      return textError(`invalid sort column: ${sortCol}`, 400);
+    }
+    let rows;
+    if (filters.length > 0) {
+      const validFilters = filters.filter((f) => colNameSet.has(f.column));
+      if (validFilters.length > 0) {
+        const grouped = new Map;
+        for (const f of validFilters) {
+          const existing = grouped.get(f.value) || [];
+          existing.push(f.column);
+          grouped.set(f.value, existing);
+        }
+        const k = adapter.kind;
+        const filter = buildFilterWhere(grouped, k);
+        const order = orderBy ? ` ORDER BY ${sanitizeIdentifier4(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}` : "";
+        const tbl = sanitizeIdentifier4(table, k);
+        const limitOffset = filter.useParams ? "LIMIT ? OFFSET ?" : `LIMIT ${EXPORT_MAX_ROWS} OFFSET 0`;
+        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
+        const result = adapter.executeReadonlyQuery(dataSql, filter.useParams ? [...filter.params, EXPORT_MAX_ROWS, 0] : undefined);
+        rows = result.rows;
+      } else {
+        const result = adapter.getTablePage(table, {
+          offset: 0,
+          limit: EXPORT_MAX_ROWS,
+          orderBy
+        });
+        rows = result.rows;
+      }
+    } else {
+      const result = adapter.getTablePage(table, {
+        offset: 0,
+        limit: EXPORT_MAX_ROWS,
+        orderBy
+      });
+      rows = result.rows;
+    }
+    if (format === "csv") {
+      const lines = [colNames.map(formatCsvField).join(",")];
+      for (const row of rows) {
+        lines.push(row.map(formatCsvField).join(","));
+      }
+      const body2 = lines.join(`
+`);
+      return new Response(body2, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.csv"`,
+          "Cache-Control": "no-store"
+        }
+      });
+    }
+    const objects = rows.map((row) => {
+      const obj = {};
+      for (let i = 0;i < colNames.length; i++) {
+        const val = row[i];
+        obj[colNames[i]] = val instanceof Uint8Array ? `<blob ${val.byteLength} bytes>` : val;
+      }
+      return obj;
+    });
+    const body = JSON.stringify(objects, null, 2);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${sanitizeFilename(table)}.json"`,
+        "Cache-Control": "no-store"
+      }
+    });
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to export table: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleColumns(cwd, url) {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const table = url.searchParams.get("table");
+  if (!table)
+    return textError("missing table parameter", 400);
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const columns = adapter.getColumns(table);
+    return json({ dbId: r.dbId, table, columns });
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to get columns: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleDdl(cwd, url) {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const table = url.searchParams.get("table");
+  if (!table)
+    return textError("missing table parameter", 400);
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const sql = adapter.getCreateStatement(table);
+    const triggers = adapter.getTriggers(table);
+    return json({ dbId: r.dbId, table, sql, triggers });
+  } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to get DDL: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleSearchStart(cwd, req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db || !body.term)
+    return textError("missing db or term", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response)
+    return r;
+  const jobId = `search-${randomBytes2(8).toString("hex")}`;
+  const ac = new AbortController;
+  const job = {
+    id: jobId,
+    dbId: body.db,
+    scannedTables: 0,
+    totalTables: 0,
+    hits: [],
+    done: false,
+    abortController: ac
+  };
+  searchJobs.set(jobId, job);
+  setTimeout(() => searchJobs.delete(jobId), 5 * 60000);
+  const term = body.term;
+  const maxHitsPerTable = body.maxHitsPerTable ?? 50;
+  const includeNonText = body.includeNonText ?? false;
+  const filterTables = body.tables;
+  (async () => {
+    try {
+      const adapter = await getAdapter(r, cwd);
+      let tables = adapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+      if (filterTables && filterTables.length > 0) {
+        const allowed = new Set(filterTables);
+        tables = tables.filter((t) => allowed.has(t));
+      }
+      let countMap;
+      if (adapter.getTableRowCounts) {
+        countMap = adapter.getTableRowCounts(tables);
+      } else {
+        countMap = new Map;
+        for (const t of tables)
+          countMap.set(t, adapter.getTableRowCount(t));
+      }
+      tables.sort((a, b) => (countMap.get(a) ?? 0) - (countMap.get(b) ?? 0));
+      job.totalTables = tables.length;
+      for (const table of tables) {
+        if (ac.signal.aborted)
+          break;
+        job.currentTable = table;
+        const pkCols = getPrimaryKeyColumns(adapter, table);
+        const columns = adapter.getColumns(table);
+        const hits = searchTable(adapter, table, columns, term, maxHitsPerTable, includeNonText, pkCols);
+        job.hits.push(...hits);
+        job.scannedTables++;
+      }
+      job.done = true;
+      job.currentTable = undefined;
+    } catch (err) {
+      job.error = err instanceof Error ? err.message : String(err);
+      job.done = true;
+    }
+  })();
+  return json({ jobId });
+}
+function handleSearchStatus(url) {
+  const jobId = url.searchParams.get("id");
+  if (!jobId)
+    return textError("missing id", 400);
+  const job = searchJobs.get(jobId);
+  if (!job)
+    return textError("job not found", 404);
+  const result = {
+    jobId: job.id,
+    dbId: job.dbId,
+    scannedTables: job.scannedTables,
+    totalTables: job.totalTables,
+    currentTable: job.currentTable,
+    hits: job.hits,
+    done: job.done,
+    error: job.error
+  };
+  if (job.done) {
+    setTimeout(() => searchJobs.delete(jobId), 60000);
+  }
+  return json(result);
+}
+async function handleSearchCancel(req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id)
+    return textError("missing id", 400);
+  const job = searchJobs.get(body.id);
+  if (!job)
+    return textError("job not found", 404);
+  job.abortController.abort();
+  job.done = true;
+  return json({ ok: true });
+}
+async function handleSnapshotList(cwd, url) {
+  const dbId = url.searchParams.get("db") || undefined;
+  const snapshots = await listSnapshots(cwd, dbId);
+  return json({ snapshots });
+}
+async function handleSnapshotCreate(cwd, req, sendSse) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db)
+    return textError("missing db", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response)
+    return r;
+  const adapter = await getAdapter(r, cwd);
+  let tables = body.tables;
+  if (!tables || tables.length === 0) {
+    tables = adapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+  }
+  const note = body.note ?? "";
+  (async () => {
+    try {
+      const snapshotId = await runSnapshot(cwd, adapter, body.db, tables, note, (table, done) => {
+        sendSse?.("db-snapshot", JSON.stringify({ action: "progress", table, done }));
+      });
+      sendSse?.("db-snapshot", JSON.stringify({ action: "created", id: snapshotId }));
+    } catch (err) {
+      console.error("[code-viewer] snapshot error:", err instanceof Error ? err.message : String(err));
+      sendSse?.("db-snapshot", JSON.stringify({
+        action: "error",
+        error: err instanceof Error ? err.message : String(err)
+      }));
+    }
+  })();
+  return json({ ok: true, message: "snapshot started" });
+}
+async function handleSnapshotUpdateNote(cwd, req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id)
+    return textError("missing id", 400);
+  await updateSnapshotNote(cwd, body.id, body.note ?? "");
+  return json({ ok: true });
+}
+async function handleSnapshotDelete(cwd, req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id)
+    return textError("missing id", 400);
+  await deleteSnapshot(cwd, body.id);
+  return json({ ok: true });
+}
+async function handleDiffTables(cwd, url) {
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
+  if (!beforeId || !afterId)
+    return textError("missing before or after parameter", 400);
+  try {
+    const tables = await computeDiffTables(cwd, beforeId, afterId);
+    return json({ beforeId, afterId, tables });
+  } catch (err) {
+    return textError(`failed to compute diff: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleDiffRows(cwd, url) {
+  const beforeId = url.searchParams.get("before");
+  const afterId = url.searchParams.get("after");
+  const table = url.searchParams.get("table");
+  if (!beforeId || !afterId || !table)
+    return textError("missing before, after, or table parameter", 400);
+  const offset = Math.max(0, Number(url.searchParams.get("offset") || "0") || 0);
+  const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get("limit") || "200") || 200));
+  try {
+    const result = await computeDiffRows(cwd, beforeId, afterId, table, offset, limit);
+    return json({ beforeId, afterId, table, ...result });
+  } catch (err) {
+    return textError(`failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleClose(cwd, req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db)
+    return textError("missing db", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response)
+    return r;
+  if (r.docker) {
+    const cached = dockerAdapterCache.get(r.dbId);
+    if (cached) {
+      cached.close();
+      dockerAdapterCache.delete(r.dbId);
+    }
+  } else {
+    closeConnection(r.resolved);
+  }
+  return json({ ok: true });
+}
+async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowed, sendSse) {
+  ensureInit();
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  const qs = url.search ? url.search.slice(0, 120) : "";
+  const log = (status) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
+  };
+  const wrapResponse = async (handler) => {
+    const res = await handler;
+    if (res)
+      log(res.status);
+    return res;
+  };
+  if (path === "/_db/files")
+    return wrapResponse(handleFiles(cwd, omitDirNames));
+  if (path === "/_db/schema")
+    return wrapResponse(handleSchema(cwd, url));
+  if (path === "/_db/table")
+    return wrapResponse(handleTable(cwd, url));
+  if (path === "/_db/columns")
+    return wrapResponse(handleColumns(cwd, url));
+  if (path === "/_db/export")
+    return wrapResponse(handleExport(cwd, url));
+  if (path === "/_db/ddl")
+    return wrapResponse(handleDdl(cwd, url));
+  if (path === "/_db/query") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleQuery(cwd, req, sendSse));
+  }
+  if (path === "/_db/close") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleClose(cwd, req));
+  }
+  if (path === "/_db/history")
+    return wrapResponse(handleHistory(cwd, url));
+  if (path === "/_db/history/delete") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleHistoryDelete(cwd, req, sendSse));
+  }
+  if (path === "/_db/history/clear") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleHistoryClear(cwd, req, sendSse));
+  }
+  if (path === "/_db/search/start") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSearchStart(cwd, req));
+  }
+  if (path === "/_db/search/status")
+    return wrapResponse(handleSearchStatus(url));
+  if (path === "/_db/search/cancel") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSearchCancel(req));
+  }
+  if (path === "/_db/snapshot/list")
+    return wrapResponse(handleSnapshotList(cwd, url));
+  if (path === "/_db/snapshot/create") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
+  }
+  if (path === "/_db/snapshot/update-note") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotUpdateNote(cwd, req));
+  }
+  if (path === "/_db/snapshot/delete") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotDelete(cwd, req));
+  }
+  if (path === "/_db/snapshot/diff/tables")
+    return wrapResponse(handleDiffTables(cwd, url));
+  if (path === "/_db/snapshot/diff/rows")
+    return wrapResponse(handleDiffRows(cwd, url));
+  return null;
+}
+var initialized = false, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, searchJobs;
+var init_handle = __esm(() => {
+  init_docker();
+  init_sqlite();
+  init_connection_pool();
+  init_discovery();
+  init_query_history();
+  init_snapshot_runner();
+  init_snapshot_store();
+  dockerAdapterCache = new Map;
+  searchJobs = new Map;
+});
+
 // web-src/server/preview.ts
 var exports_preview = {};
 import {
-  closeSync,
+  closeSync as closeSync2,
   constants,
-  existsSync as existsSync6,
-  lstatSync as lstatSync4,
-  mkdirSync as mkdirSync4,
-  openSync,
-  readFileSync as readFileSync5,
-  realpathSync as realpathSync2,
-  renameSync as renameSync2,
-  statSync as statSync2,
+  existsSync as existsSync8,
+  lstatSync as lstatSync5,
+  mkdirSync as mkdirSync6,
+  openSync as openSync2,
+  readFileSync as readFileSync7,
+  realpathSync as realpathSync4,
+  renameSync as renameSync3,
+  statSync as statSync3,
   unlinkSync as unlinkSync2,
   watch,
-  writeFileSync as writeFileSync3
+  writeFileSync as writeFileSync4
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename2, dirname as dirname2, extname, join as join8, relative as relative2 } from "node:path";
+import { basename as basename3, dirname as dirname2, extname, join as join11, relative as relative3 } from "node:path";
 function parseCli() {
   const rest = [];
   for (let i = 2;i < process.argv.length; i++) {
@@ -2561,7 +5287,7 @@ Examples:
         process.exit(1);
       }
       try {
-        cwd = repoRoot(next) || realpathSync2(next);
+        cwd = repoRoot(next) || realpathSync4(next);
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);
@@ -2603,7 +5329,7 @@ Examples:
   if (configScopeExcludeNames)
     scopeExcludeNames = configScopeExcludeNames;
 }
-function json(data, init = {}) {
+function json2(data, init = {}) {
   return new Response(JSON.stringify(data), {
     ...init,
     headers: {
@@ -2670,10 +5396,10 @@ function staticFile(pathname) {
   const spec = map[pathname];
   if (!spec)
     return null;
-  const full = join8(WEB_ROOT, spec[0]);
-  if (!existsSync6(full))
+  const full = join11(WEB_ROOT, spec[0]);
+  if (!existsSync8(full))
     return text("not found", 404);
-  return new Response(readFileSync5(full), {
+  return new Response(readFileSync7(full), {
     headers: { "Content-Type": spec[1], "Cache-Control": "no-store" }
   });
 }
@@ -2770,7 +5496,7 @@ function computePayload(extras, range) {
       files: [],
       totals: { files: 0, additions: 0, deletions: 0 },
       range: "worktree .. worktree",
-      project: basename2(cwd),
+      project: basename3(cwd),
       branch: currentBranch(cwd) || undefined,
       generation
     };
@@ -2803,7 +5529,7 @@ function computePayload(extras, range) {
     files: meta,
     totals,
     range: label || "HEAD",
-    project: basename2(cwd),
+    project: basename3(cwd),
     branch: currentBranch(cwd) || undefined,
     generation
   };
@@ -2904,21 +5630,21 @@ function parseScopeExcludeNamesQuery(value) {
   return normalizeScopeExcludeNames(names);
 }
 function loadProjectConfig() {
-  const full = join8(cwd, ".code-viewer.json");
-  if (!existsSync6(full))
+  const full = join11(cwd, ".code-viewer.json");
+  if (!existsSync8(full))
     return null;
   let realCwd;
   let realConfig;
   try {
-    realCwd = realpathSync2(cwd);
-    realConfig = realpathSync2(full);
+    realCwd = realpathSync4(cwd);
+    realConfig = realpathSync4(full);
   } catch {
     return null;
   }
-  if (dirname2(realConfig) !== realCwd || basename2(realConfig) !== ".code-viewer.json")
+  if (dirname2(realConfig) !== realCwd || basename3(realConfig) !== ".code-viewer.json")
     return null;
   try {
-    const parsed = JSON.parse(readFileSync5(realConfig, "utf8"));
+    const parsed = JSON.parse(readFileSync7(realConfig, "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "version" in parsed && parsed.version !== 1)
       return null;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
@@ -2969,18 +5695,18 @@ function safeWorktreePath(path) {
     return null;
   if (isGitInternalPath(path))
     return null;
-  const full = join8(cwd, path);
-  if (!existsSync6(full))
+  const full = join11(cwd, path);
+  if (!existsSync8(full))
     return null;
   let realCwd;
   let realFull;
   try {
-    realCwd = realpathSync2(cwd);
-    realFull = realpathSync2(full);
+    realCwd = realpathSync4(cwd);
+    realFull = realpathSync4(full);
   } catch {
     return null;
   }
-  const rel = relative2(realCwd, realFull);
+  const rel = relative3(realCwd, realFull);
   if (rel === "" || rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\"))
     return null;
   if (isGitInternalPath(rel))
@@ -2988,12 +5714,12 @@ function safeWorktreePath(path) {
   return realFull;
 }
 function worktreePath(path) {
-  return join8(cwd, path);
+  return join11(cwd, path);
 }
 function safeOpenWorktreePath(path) {
   if (path === "") {
     try {
-      const realCwd = realpathSync2(cwd);
+      const realCwd = realpathSync4(cwd);
       if (isGitInternalPath(realCwd))
         return null;
       return realCwd;
@@ -3015,7 +5741,7 @@ function worktreeFileMetadata(path, knownSize) {
   if (!full)
     return {};
   try {
-    const stat = statSync2(full);
+    const stat = statSync3(full);
     return {
       size: knownSize ?? stat.size,
       created_at: isoDate(stat.birthtimeMs),
@@ -3040,7 +5766,7 @@ function directoryMetadata(target, path) {
     if (!full)
       return {};
     try {
-      const stat = statSync2(full);
+      const stat = statSync3(full);
       return {
         created_at: isoDate(stat.birthtimeMs),
         updated_at: isoDate(stat.mtimeMs)
@@ -3081,7 +5807,7 @@ function readReadme(target, dirPath) {
       if (!full)
         continue;
       try {
-        return { path, text: readFileSync5(full, "utf8") };
+        return { path, text: readFileSync7(full, "utf8") };
       } catch {
         continue;
       }
@@ -3112,10 +5838,10 @@ function handleTree(url) {
     omitDirNames: scopeOmitDirNamesFromQuery(url),
     excludeNames
   }).entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
-  return json({
+  return json2({
     ref: target,
     path,
-    project: basename2(cwd),
+    project: basename3(cwd),
     branch: currentBranch(cwd) || undefined,
     entries: recursive ? entries : entries.map((entry) => attachTreeEntryMetadata(target, entry)),
     readme: readReadme(target, path),
@@ -3123,8 +5849,8 @@ function handleTree(url) {
   });
 }
 function handleSettings() {
-  return json({
-    project: basename2(cwd),
+  return json2({
+    project: basename3(cwd),
     repo_web_url: remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -3135,7 +5861,7 @@ function handleSettings() {
     }
   });
 }
-function handleFiles(url) {
+function handleFiles2(url) {
   const target = url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   if (target !== "worktree" && !verifyTreeRef(target, cwd))
     return text("invalid target", 400);
@@ -3148,7 +5874,7 @@ function handleFiles(url) {
   const key = `${target || "worktree"}\x00${omitDirNames.join("\x00")}\x00${excludeNames.join("\x00")}`;
   const cached = fileListCache.get(key);
   if (cached && cached.generation === generation)
-    return json(cached.body);
+    return json2(cached.body);
   const ref = target || "worktree";
   const entries = listTree(ref, "", cwd, {
     recursive: true,
@@ -3157,7 +5883,7 @@ function handleFiles(url) {
   }).entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
   const body = buildFileSearchList(ref, generation, entries);
   fileListCache.set(key, { generation, body });
-  return json(body);
+  return json2(body);
 }
 function parseGrepPaths(url, omitDirNames, excludeNames) {
   return url.searchParams.getAll("path").filter((path) => safePath(path) && !isGitInternalPath(path) && !isSkippableSearchPath(path, omitDirNames, excludeNames));
@@ -3186,7 +5912,7 @@ function grepWorktreeFallback(query, max, paths, omitDirNames, excludeNames) {
       continue;
     let stat;
     try {
-      stat = lstatSync4(full);
+      stat = lstatSync5(full);
     } catch {
       continue;
     }
@@ -3194,7 +5920,7 @@ function grepWorktreeFallback(query, max, paths, omitDirNames, excludeNames) {
       continue;
     let data;
     try {
-      data = readFileSync5(full);
+      data = readFileSync7(full);
     } catch {
       continue;
     }
@@ -3269,23 +5995,23 @@ function handleGrep(url) {
   const paths = parseGrepPaths(url, omitDirNames, excludeNames);
   const regex = url.searchParams.get("regex") === "1";
   if (!query.trim())
-    return json({
+    return json2({
       ref,
       engine: ref === "worktree" ? "fallback" : "git",
       truncated: false,
       matches: []
     });
   if (ref === "worktree" || ref === "")
-    return json(grepWorktree(query, max, paths, regex, omitDirNames, excludeNames));
+    return json2(grepWorktree(query, max, paths, regex, omitDirNames, excludeNames));
   if (!verifyTreeRef(ref, cwd))
     return text("invalid target", 400);
-  return json(grepTreeRef(ref, query, max, paths, regex, omitDirNames, excludeNames));
+  return json2(grepTreeRef(ref, query, max, paths, regex, omitDirNames, excludeNames));
 }
 function handleRefCommits(url) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
   const max = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
-  return json({ commits: refCommits(cwd, query, max) });
+  return json2({ commits: refCommits(cwd, query, max) });
 }
 function handleLog(url) {
   const ref = url.searchParams.get("ref") || "HEAD";
@@ -3299,7 +6025,7 @@ function handleLog(url) {
   });
   if (result.error)
     return text(result.error, 400);
-  return json({ commits: result.commits, hasMore: result.hasMore });
+  return json2({ commits: result.commits, hasMore: result.hasMore });
 }
 function handleFileDiff(url) {
   const path = url.searchParams.get("path") || "";
@@ -3316,7 +6042,7 @@ function handleFileDiff(url) {
     to: url.searchParams.get("to") || ""
   };
   if (isSameWorktreeRange(range)) {
-    return json({
+    return json2({
       path,
       old_path: url.searchParams.get("old_path") || "",
       status: url.searchParams.get("status") || "",
@@ -3378,11 +6104,11 @@ function handleFileDiff(url) {
     error: errText,
     generation
   };
-  return json(body);
+  return json2(body);
 }
 function worktreeLineIndexSignature(full) {
   try {
-    const stat = statSync2(full);
+    const stat = statSync3(full);
     return `size:${stat.size}|mtime:${stat.mtimeMs}|ctime:${stat.ctimeMs}|ino:${stat.ino || 0}`;
   } catch {
     return null;
@@ -3398,7 +6124,7 @@ async function getWorktreeLineIndex(full) {
     lineIndexCache.set(full, cached);
     return cached.index;
   }
-  const stat = statSync2(full);
+  const stat = statSync3(full);
   if (stat.size > LINE_INDEX_MAX_FILE_BYTES)
     return null;
   const index = await buildLineOffsetIndexFromStream(fileReadableStream(full), stat.size);
@@ -3541,7 +6267,7 @@ async function handleFileRange(url) {
       complete: result.complete,
       generation
     };
-    return json(body);
+    return json2(body);
   } else {
     if (!verifyTreeRef(ref, cwd))
       return text("invalid ref", 400);
@@ -3564,7 +6290,7 @@ async function handleFileRange(url) {
       complete: result.complete,
       generation
     };
-    return json(body);
+    return json2(body);
   }
 }
 function handleRawFile(req, url) {
@@ -3643,7 +6369,7 @@ function rawFileSize(path, ref) {
   if (!full)
     return null;
   try {
-    return statSync2(full).size;
+    return statSync3(full).size;
   } catch {
     return null;
   }
@@ -3742,7 +6468,7 @@ async function handleUploadFiles(req) {
   const realDir = safeOpenWorktreePath(dir);
   if (!realDir)
     return text("not found", 404);
-  const stats = statSync2(realDir);
+  const stats = statSync3(realDir);
   if (!stats.isDirectory())
     return text("not a directory", 400);
   const files = form.getAll("files").filter((item) => item instanceof File);
@@ -3766,21 +6492,21 @@ async function handleUploadFiles(req) {
     total += file.size;
     if (total > MAX_UPLOAD_TOTAL_BYTES)
       return text("upload too large", 413);
-    const target = join8(realDir, safeName);
-    if (relative2(realDir, dirname2(target)) !== "")
+    const target = join11(realDir, safeName);
+    if (relative3(realDir, dirname2(target)) !== "")
       return text("invalid filename", 400);
-    if (existsSync6(target))
+    if (existsSync8(target))
       return text("file exists", 409);
     uploads.push({ file, name: safeName, target });
   }
   const written = [];
   try {
     for (const upload of uploads) {
-      const fd = openSync(upload.target, uploadOpenFlags(), 420);
+      const fd = openSync2(upload.target, uploadOpenFlags(), 420);
       try {
-        writeFileSync3(fd, new Uint8Array(await upload.file.arrayBuffer()));
+        writeFileSync4(fd, new Uint8Array(await upload.file.arrayBuffer()));
       } finally {
-        closeSync(fd);
+        closeSync2(fd);
       }
       written.push(upload.target);
     }
@@ -3795,7 +6521,7 @@ async function handleUploadFiles(req) {
     return text("upload failed", 500);
   }
   triggerUpdate();
-  return json({
+  return json2({
     ok: true,
     files: uploads.map((upload) => upload.name),
     generation
@@ -3881,25 +6607,26 @@ function clearMutableCaches() {
   metaCache.clear();
   fileListCache.clear();
 }
-function triggerUpdate() {
+function triggerUpdate(changedPaths) {
   generation++;
   clearMutableCaches();
-  sendSse("update");
+  const data = changedPaths && changedPaths.length && changedPaths.length <= 50 ? JSON.stringify({ generation, paths: changedPaths }) : "tick";
+  sendSse("update", data);
 }
 function moveMacPathIntoTrash(path) {
-  const trashDir = join8(homedir3(), ".Trash");
-  const base = basename2(path) || "code-viewer-trash-item";
-  const target = join8(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+  const trashDir = join11(homedir3(), ".Trash");
+  const base = basename3(path) || "code-viewer-trash-item";
+  const target = join11(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
   try {
-    mkdirSync4(trashDir, { recursive: true });
-    renameSync2(path, target);
+    mkdirSync6(trashDir, { recursive: true });
+    renameSync3(path, target);
     return { ok: true, trashPath: target };
   } catch (error) {
     return { ok: false, error: String(error) };
   }
 }
 function movePathToTrash(path) {
-  lstatSync4(path);
+  lstatSync5(path);
   if (process.platform === "darwin") {
     return moveMacPathIntoTrash(path);
   }
@@ -3923,20 +6650,20 @@ function restoreTrashPath(originalPath, trashPath) {
   if (!parentFullPath)
     return { ok: false, error: "invalid restore target" };
   const original = worktreePath(originalPath);
-  if (existsSync6(original))
+  if (existsSync8(original))
     return { ok: false, error: "restore target exists" };
   if (trashPath) {
     if (process.platform !== "darwin")
       return { ok: false, error: "invalid trash handle" };
-    if (!existsSync6(trashPath))
+    if (!existsSync8(trashPath))
       return { ok: false, error: "trash item not found" };
     try {
-      const trashRoot = join8(homedir3(), ".Trash");
-      const trashRelative = relative2(trashRoot, trashPath);
+      const trashRoot = join11(homedir3(), ".Trash");
+      const trashRelative = relative3(trashRoot, trashPath);
       if (trashRelative === "" || trashRelative.startsWith("..") || trashRelative.startsWith("/") || trashRelative.startsWith("\\"))
         return { ok: false, error: "invalid trash handle" };
-      mkdirSync4(dirname2(original), { recursive: true });
-      renameSync2(trashPath, original);
+      mkdirSync6(dirname2(original), { recursive: true });
+      renameSync3(trashPath, original);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };
@@ -3990,11 +6717,11 @@ async function handleOpenPath(req) {
   const target = safeOpenWorktreePath(targetPath);
   if (!target)
     return text("not found", 404);
-  const stats = statSync2(target);
+  const stats = statSync3(target);
   if (!stats.isDirectory())
     return text("not a directory", 400);
   openOsPath(target);
-  return json({ ok: true });
+  return json2({ ok: true });
 }
 async function handleTrashPath(req) {
   if (req.method !== "POST")
@@ -4039,7 +6766,7 @@ async function handleTrashPath(req) {
     }
   };
   triggerUpdate();
-  return json({ ok: true, generation, undo });
+  return json2({ ok: true, generation, undo });
 }
 async function handleCreateDirectory(req) {
   if (req.method !== "POST")
@@ -4075,24 +6802,24 @@ async function handleCreateDirectory(req) {
   const parent = safeOpenWorktreePath(dir);
   if (!parent)
     return text("not found", 404);
-  const stats = statSync2(parent);
+  const stats = statSync3(parent);
   if (!stats.isDirectory())
     return text("not a directory", 400);
   const targetPath = dir ? `${dir}/${name}` : name;
   if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
     return text("invalid target", 400);
-  const target = join8(parent, name);
-  if (existsSync6(target))
+  const target = join11(parent, name);
+  if (existsSync8(target))
     return text("already exists", 409);
   try {
-    mkdirSync4(target, { recursive: false });
+    mkdirSync6(target, { recursive: false });
   } catch (error) {
     if (error.code === "EEXIST")
       return text("already exists", 409);
     return text("create failed", 500);
   }
   triggerUpdate();
-  return json({ ok: true, path: targetPath, generation });
+  return json2({ ok: true, path: targetPath, generation });
 }
 async function handleRestoreTrash(req) {
   if (req.method !== "POST")
@@ -4124,14 +6851,14 @@ async function handleRestoreTrash(req) {
   if (!restored.ok)
     return text(restored.error || "undo failed", 409);
   triggerUpdate();
-  return json({ ok: true, generation });
+  return json2({ ok: true, generation });
 }
 function annotationSse(kind, sessionId, entryId) {
   sendSse("annotation", JSON.stringify({ kind, session_id: sessionId, entry_id: entryId }));
 }
 async function handleAnnotations(req) {
   if (req.method === "GET")
-    return json(loadAnnotationsState(cwd));
+    return json2(loadAnnotationsState(cwd));
   if (req.method !== "POST")
     return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req))
@@ -4158,7 +6885,7 @@ async function handleAnnotations(req) {
     const started = startAnnotationSession(loadAnnotationsState(cwd), title, new Date().toISOString());
     saveAnnotationsState(cwd, started.state);
     annotationSse("start", started.session.id);
-    return json({ ok: true, session: started.session });
+    return json2({ ok: true, session: started.session });
   }
   if (action === "add") {
     const path = typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
@@ -4179,7 +6906,7 @@ async function handleAnnotations(req) {
       return text(result.error, 400);
     saveAnnotationsState(cwd, result.state);
     annotationSse("add", result.session.id, result.entry.id);
-    return json({
+    return json2({
       ok: true,
       session_id: result.session.id,
       session_title: result.session.title,
@@ -4196,7 +6923,7 @@ async function handleAnnotations(req) {
       saveAnnotationsState(cwd, result.state);
       annotationSse("delete");
     }
-    return json({ ok: true, removed: result.removed });
+    return json2({ ok: true, removed: result.removed });
   }
   if (action === "rename") {
     const id = typeof body.id === "string" ? body.id : "";
@@ -4208,7 +6935,7 @@ async function handleAnnotations(req) {
       return text("session not found", 404);
     saveAnnotationsState(cwd, result.state);
     annotationSse("update", id);
-    return json({ ok: true });
+    return json2({ ok: true });
   }
   if (action === "update") {
     const id = typeof body.id === "string" ? body.id : "";
@@ -4222,12 +6949,12 @@ async function handleAnnotations(req) {
       return text(result.error, 400);
     saveAnnotationsState(cwd, result.state);
     annotationSse("update", undefined, id);
-    return json({ ok: true, entry: result.entry });
+    return json2({ ok: true, entry: result.entry });
   }
   if (action === "clear") {
     saveAnnotationsState(cwd, emptyAnnotationsState());
     annotationSse("clear");
-    return json({ ok: true });
+    return json2({ ok: true });
   }
   return text("invalid action", 400);
 }
@@ -4263,8 +6990,8 @@ var init_preview = __esm(async () => {
   init_search();
   init_server_registry();
   init_worktree_watcher();
-  WEB_ROOT = join8(ROOT, "web");
-  VERSION = JSON.parse(readFileSync5(join8(ROOT, "package.json"), "utf8")).version;
+  WEB_ROOT = join11(ROOT, "web");
+  VERSION = JSON.parse(readFileSync7(join11(ROOT, "package.json"), "utf8")).version;
   DEFAULT_ARGS = ["HEAD"];
   WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
   LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -4338,7 +7065,7 @@ var init_preview = __esm(async () => {
       if (url.pathname === "/_tree")
         return handleTree(url);
       if (url.pathname === "/_files")
-        return handleFiles(url);
+        return handleFiles2(url);
       if (url.pathname === "/_grep")
         return handleGrep(url);
       if (url.pathname === "/_commits")
@@ -4361,15 +7088,21 @@ var init_preview = __esm(async () => {
         return handleCreateDirectory(req);
       if (url.pathname === "/_upload_files")
         return handleUploadFiles(req);
+      if (url.pathname.startsWith("/_db/")) {
+        const { handleDatabaseRoute: handleDatabaseRoute2 } = await Promise.resolve().then(() => (init_handle(), exports_handle));
+        const dbResponse = await handleDatabaseRoute2(req, url, cwd, scopeOmitDirNames, sideEffectRequestAllowed, sendSse);
+        if (dbResponse)
+          return dbResponse;
+      }
       if (url.pathname === "/_annotations")
         return handleAnnotations(req);
       if (url.pathname === "/_refs")
-        return json(refs(cwd));
+        return json2(refs(cwd));
       if (url.pathname === "/refresh" && req.method === "POST") {
         if (!sideEffectRequestAllowed(req))
           return text("forbidden", 403);
         triggerUpdate();
-        return json({ ok: true, generation });
+        return json2({ ok: true, generation });
       }
       if (url.pathname === "/events") {
         let ctrl;
@@ -4464,6 +7197,9 @@ data: ok
 if (process.argv[2] === "annotate") {
   const { runAnnotateCli: runAnnotateCli2 } = await Promise.resolve().then(() => (init_annotate_cli(), exports_annotate_cli));
   await runAnnotateCli2(process.argv.slice(3));
+} else if (process.argv[2] === "query") {
+  const { runQueryCli: runQueryCli2 } = await Promise.resolve().then(() => (init_query_cli(), exports_query_cli));
+  await runQueryCli2(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli: runSkillCli2 } = await Promise.resolve().then(() => (init_skill_cli(), exports_skill_cli));
   runSkillCli2(process.argv.slice(3));

@@ -26,9 +26,9 @@ describe("sticky line number styles", () => {
     const block = cssBlock(".d2h-code-linenumber");
 
     expect(block.includes("border-right: 0 !important")).toBe(true);
-    expect(
-      block.includes("box-shadow: inset -1px 0 0 var(--border-muted)"),
-    ).toBe(true);
+    expect(block.includes("box-shadow: inset -1px 0 0 var(--border)")).toBe(
+      true,
+    );
   });
 
   test("context line numbers match GitHub neutral line colors", () => {

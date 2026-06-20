@@ -39,6 +39,7 @@ export type SidebarDeps = {
   fileBadge(status?: string): HTMLElement;
   fileEntryIcon(): string;
   applyViewedState(): void;
+  persistCollapsedDirs(): void;
   appendScopeParams(params: URLSearchParams): void;
   createOpenPathButton(
     path: string,
@@ -66,6 +67,7 @@ export function createSidebar(deps: SidebarDeps) {
     fileBadge,
     fileEntryIcon,
     applyViewedState,
+    persistCollapsedDirs,
     appendScopeParams,
     createOpenPathButton,
     normalizeViewerFontSize,
@@ -410,10 +412,7 @@ export function createSidebar(deps: SidebarDeps) {
           if (li.classList.contains("collapsed"))
             STATE.collapsedDirs.add(dir.path);
           else STATE.collapsedDirs.delete(dir.path);
-          localStorage.setItem(
-            "gdp:collapsed-dirs",
-            JSON.stringify([...STATE.collapsedDirs]),
-          );
+          persistCollapsedDirs();
         };
         if (!dir.children_omitted) {
           chev.addEventListener("click", toggleDir);
@@ -655,10 +654,7 @@ export function createSidebar(deps: SidebarDeps) {
         if (li.classList.contains("collapsed"))
           STATE.collapsedDirs.add(dir.path);
         else STATE.collapsedDirs.delete(dir.path);
-        localStorage.setItem(
-          "gdp:collapsed-dirs",
-          JSON.stringify([...STATE.collapsedDirs]),
-        );
+        persistCollapsedDirs();
         rerenderVirtualSidebar();
       } finally {
         delete li.dataset.toggling;
@@ -1029,10 +1025,7 @@ export function createSidebar(deps: SidebarDeps) {
           if (row.kind === "dir") STATE.collapsedDirs.add(row.path);
         }
       }
-      localStorage.setItem(
-        "gdp:collapsed-dirs",
-        JSON.stringify([...STATE.collapsedDirs]),
-      );
+      persistCollapsedDirs();
       rerenderVirtualSidebar();
       return;
     }
@@ -1044,10 +1037,7 @@ export function createSidebar(deps: SidebarDeps) {
       if (dirIcon) setFolderIcon(dirIcon, collapsed);
       if (collapsed) STATE.collapsedDirs.add(path);
     });
-    localStorage.setItem(
-      "gdp:collapsed-dirs",
-      JSON.stringify([...STATE.collapsedDirs]),
-    );
+    persistCollapsedDirs();
   }
 
   function sidebarAncestorDirs(path: string): string[] {
@@ -1070,11 +1060,7 @@ export function createSidebar(deps: SidebarDeps) {
       const icon = row?.querySelector<HTMLElement>(".dir-icon");
       if (icon) setFolderIcon(icon, false);
     }
-    if (changed)
-      localStorage.setItem(
-        "gdp:collapsed-dirs",
-        JSON.stringify([...STATE.collapsedDirs]),
-      );
+    if (changed) persistCollapsedDirs();
     rerenderVirtualSidebar();
   }
 
@@ -1469,10 +1455,7 @@ export function createSidebar(deps: SidebarDeps) {
       if (STATE.collapsedDirs.has(row.path) === collapsed) return;
       if (collapsed) STATE.collapsedDirs.add(row.path);
       else STATE.collapsedDirs.delete(row.path);
-      localStorage.setItem(
-        "gdp:collapsed-dirs",
-        JSON.stringify([...STATE.collapsedDirs]),
-      );
+      persistCollapsedDirs();
       rerenderVirtualSidebar();
       scrollVirtualSidebarPathIntoView(row.path);
       return;

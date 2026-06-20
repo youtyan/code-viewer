@@ -42,8 +42,9 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
-import { createDiffView } from "./views/diff-view";
+import { createDiffView, type RenderResult } from "./views/diff-view";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -91,6 +92,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     viewedFiles: Set<string>;
     route: AppRoute;
     repoRef: string;
+    autoUpdate: boolean;
   };
 
   const $ = <T extends Element = HTMLElement>(sel: string): T =>
@@ -112,10 +114,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
 
+  let PROJECT_NAME = "";
+
   const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
   const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
   const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
   const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+
+  function scopedKey(base: string): string {
+    return PROJECT_NAME ? `${base}:${PROJECT_NAME}` : base;
+  }
+
+  function readScopedStorage(base: string): string | null {
+    if (PROJECT_NAME) {
+      const v = localStorage.getItem(`${base}:${PROJECT_NAME}`);
+      if (v !== null) return v;
+    }
+    return localStorage.getItem(base);
+  }
+
+  function writeScopedStorage(base: string, value: string): void {
+    localStorage.setItem(scopedKey(base), value);
+  }
+
   const VIEWER_LANGUAGES: ViewerLanguage[] = ["en", "ja"];
   const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
     "node_modules",
@@ -282,6 +303,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       projectTitle.textContent = project;
       projectTitle.title = project;
     }
+    reloadScopedState();
+  }
+
+  function reloadScopedState() {
+    const collapsed = readScopedStorage("gdp:collapsed-dirs");
+    if (collapsed !== null) {
+      STATE.collapsedDirs = new Set<string>(JSON.parse(collapsed));
+    }
+    const viewed = readScopedStorage("gdp:viewed-files");
+    if (viewed !== null) {
+      STATE.viewedFiles = new Set<string>(JSON.parse(viewed));
+    }
+    const igRaw = readScopedStorage("gdp:ignore-ws");
+    if (igRaw !== null) STATE.ignoreWs = igRaw === "1";
+    const from = readScopedStorage("gdp:from");
+    const to = readScopedStorage("gdp:to");
+    if (from !== null) STATE.from = from;
+    if (to !== null) STATE.to = to;
+    const ht = readScopedStorage("gdp:hide-tests");
+    if (ht !== null) STATE.hideTests = ht === "1";
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -397,10 +438,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   const STATE: AppState = (() => {
-    const igRaw = localStorage.getItem("gdp:ignore-ws");
+    const igRaw = readScopedStorage("gdp:ignore-ws");
     const fallbackRange = {
-      from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-      to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to,
+      from: readScopedStorage("gdp:from") || DEFAULT_RANGE.from,
+      to: readScopedStorage("gdp:to") || DEFAULT_RANGE.to,
     };
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
@@ -429,7 +470,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
       collapsedDirs: new Set<string>(
-        JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]"),
+        JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]"),
       ),
       ignoreWs: igRaw === null ? true : igRaw === "1",
       from: route.range.from,
@@ -437,19 +478,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       collapsed: false,
       files: [],
       activeFile: null,
-      hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+      hideTests: readScopedStorage("gdp:hide-tests") === "1",
       syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
       viewedFiles: new Set<string>(
-        JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]"),
+        JSON.parse(readScopedStorage("gdp:viewed-files") || "[]"),
       ),
       route,
       repoRef: route.screen === "repo" ? route.ref : "worktree",
+      autoUpdate: localStorage.getItem("gdp:auto-update") !== "0",
     };
   })();
 
   // (declarations recovered during the source-view extraction)
   let highlightConfigured = false;
-  let PROJECT_NAME = "";
   let REPO_SIDEBAR_REF: string | null = null;
 
   // ---------- Line reference copy (@path#start-end) ----------
@@ -481,6 +522,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
     fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
     applyViewedState: () => DIFF_VIEW.applyViewedState(),
+    persistCollapsedDirs: () =>
+      writeScopedStorage(
+        "gdp:collapsed-dirs",
+        JSON.stringify([...STATE.collapsedDirs]),
+      ),
     appendScopeParams,
     createOpenPathButton,
     normalizeViewerFontSize,
@@ -654,9 +700,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   const UI_TEXT: Record<
     ViewerLanguage,
     {
-      nav: Record<"repo" | "diff" | "history" | "help", string>;
+      nav: Record<"repo" | "diff" | "history" | "database" | "help", string>;
       global: {
         annotations: string;
+        queryHistory: string;
         settings: string;
         theme: string;
         product: string;
@@ -676,6 +723,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: string;
         syntaxOffTitle: string;
         hideTests: string;
+        autoUpdate: string;
+        autoUpdateOnTitle: string;
+        autoUpdateOffTitle: string;
+      };
+      changeBanner: {
+        text: string;
+        reload: string;
+        justNow: string;
+        secondsAgo: (seconds: number) => string;
+        minutesAgo: (minutes: number) => string;
+        hoursAgo: (hours: number) => string;
       };
       sidebar: {
         files: string;
@@ -700,6 +758,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         display: string;
         language: string;
         fileListFontSize: string;
+        fileListFontSizeHelp: string;
         codeFontSize: string;
         sizeSmall: string;
         sizeRegular: string;
@@ -730,10 +789,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "Repository",
         diff: "Diff Viewer",
         history: "History",
+        database: "Database",
         help: "Help",
       },
       global: {
         annotations: "code annotations",
+        queryHistory: "query history",
         settings: "viewer settings",
         theme: "toggle theme",
         product: "code viewer",
@@ -753,6 +814,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "failed to load syntax highlighter",
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
+        autoUpdate: "auto",
+        autoUpdateOnTitle: "auto update on file change",
+        autoUpdateOffTitle: "auto update off — manual reload",
+      },
+      changeBanner: {
+        text: "Files changed",
+        reload: "Reload",
+        justNow: "just now",
+        secondsAgo: (seconds) => `${seconds}s ago`,
+        minutesAgo: (minutes) => `${minutes}m ago`,
+        hoursAgo: (hours) => `${hours}h ago`,
       },
       sidebar: {
         files: "Files",
@@ -778,7 +850,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         close: "close viewer settings",
         display: "Display",
         language: "Language",
-        fileListFontSize: "File list font size",
+        fileListFontSize: "UI font size",
+        fileListFontSizeHelp: "Applies to the file sidebar and database UI.",
         codeFontSize: "Code font size",
         sizeSmall: "Small",
         sizeRegular: "Regular",
@@ -809,10 +882,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "リポジトリ",
         diff: "Diff ビューア",
         history: "履歴",
+        database: "データベース",
         help: "ヘルプ",
       },
       global: {
         annotations: "コード注釈",
+        queryHistory: "クエリ履歴",
         settings: "ビューア設定",
         theme: "テーマ切り替え",
         product: "code viewer",
@@ -832,6 +907,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
+        autoUpdate: "自動",
+        autoUpdateOnTitle: "ファイル変更時に自動更新",
+        autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
+      },
+      changeBanner: {
+        text: "ファイルに変更がありました",
+        reload: "再読み込みする",
+        justNow: "たった今",
+        secondsAgo: (seconds) => `${seconds}秒前`,
+        minutesAgo: (minutes) => `${minutes}分前`,
+        hoursAgo: (hours) => `${hours}時間前`,
       },
       sidebar: {
         files: "ファイル",
@@ -857,8 +943,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         close: "ビューア設定を閉じる",
         display: "表示",
         language: "言語",
-        fileListFontSize: "ファイル一覧の文字サイズ",
-        codeFontSize: "コードの文字サイズ",
+        fileListFontSize: "UIの文字サイズ",
+        fileListFontSizeHelp: "ファイル一覧とデータベース画面に適用されます。",
+        codeFontSize: "コード表示の文字サイズ",
         sizeSmall: "小",
         sizeRegular: "標準",
         sizeLarge: "大",
@@ -927,6 +1014,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       annotationsToggle.title = text.global.annotations;
       annotationsToggle.setAttribute("aria-label", text.global.annotations);
     }
+    const queryHistoryToggle = document.querySelector<HTMLButtonElement>(
+      "#query-history-toggle",
+    );
+    if (queryHistoryToggle) {
+      queryHistoryToggle.title = text.global.queryHistory;
+      queryHistoryToggle.setAttribute("aria-label", text.global.queryHistory);
+    }
     const viewerSettings =
       document.querySelector<HTMLButtonElement>("#viewer-settings");
     if (viewerSettings) {
@@ -954,6 +1048,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (ignoreWs) ignoreWs.title = text.topbar.ignoreWs;
     const hideTests = document.querySelector<HTMLButtonElement>("#hide-tests");
     if (hideTests) hideTests.title = text.topbar.hideTests;
+    applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
     setElementText(".sb-title", text.sidebar.files);
@@ -1035,6 +1130,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       large: text.settings.sizeLarge,
       xlarge: text.settings.sizeExtraLarge,
     });
+    setElementText("#ui-font-size-help", text.settings.fileListFontSizeHelp);
     setElementText("#display-settings-source", text.settings.displaySource);
     setButtonLabel(
       document.querySelector("#scope-omit-reset"),
@@ -1064,6 +1160,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       text.annotations.close,
     );
     setElementText(".annotation-list-head strong", text.annotations.sessions);
+
+    setElementText(
+      ".query-history-panel-head strong",
+      text.global.queryHistory,
+    );
+    setButtonLabel(
+      document.querySelector("#query-history-panel-close"),
+      text.annotations.close,
+    );
   }
 
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
@@ -1476,6 +1581,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       : null;
   }
 
+  function isRepoBlobRoute(
+    route: AppRoute,
+  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blob" } {
+    return route.screen === "file" && route.view === "blob";
+  }
+
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
   // file once its dependencies exist; the few call sites that can run before
   // that (setRoute, lazy diff renders) go through this late-bound handle.
@@ -1519,6 +1630,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncLineRefPill();
   }
 
+  // ---- Query History right-panel open/close ----
+  function setQueryHistoryPanelOpen(open: boolean) {
+    const panel = document.getElementById("query-history-panel");
+    if (!panel) return;
+    panel.hidden = !open;
+    document.body.classList.toggle("query-history-panel-open", open);
+    // Mutual exclusion: close annotation panel when opening query history
+    if (open && ANNOTATIONS_UI) {
+      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+    }
+  }
+
   function setPageMode() {
     document.body.classList.toggle(
       "gdp-file-detail-page",
@@ -1540,6 +1663,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-history-page",
       STATE.route.screen === "history",
     );
+    document.body.classList.toggle(
+      "gdp-database-page",
+      STATE.route.screen === "database",
+    );
     // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
     // pages expect it back outside as the sticky sibling. Re-place it every
     // time the page classes flip, or SPA navigation away from the repo view
@@ -1553,6 +1680,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (historyRefInput) historyRefInput.value = STATE.route.ref || "HEAD";
     }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+
+    // Toggle header buttons: annotations vs query-history
+    const isDatabase = STATE.route.screen === "database";
+    const annotationsToggle = document.querySelector<HTMLButtonElement>(
+      "#annotations-toggle",
+    );
+    const qhToggle = document.querySelector<HTMLButtonElement>(
+      "#query-history-toggle",
+    );
+    if (annotationsToggle) annotationsToggle.hidden = isDatabase;
+    if (qhToggle) qhToggle.hidden = !isDatabase;
+
+    // Close query-history panel when leaving database screen
+    if (!isDatabase) {
+      setQueryHistoryPanelOpen(false);
+    }
+    // Close annotation panel when entering database screen
+    if (isDatabase && ANNOTATIONS_UI) {
+      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+    }
   }
 
   function syncHeaderMenu() {
@@ -1589,6 +1736,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           link.href = buildRoute({
             screen: "history",
             ref: "HEAD",
+            range: currentRange(),
+          });
+        }
+        if (link.dataset.route === "database") {
+          link.href = buildRoute({
+            screen: "database",
             range: currentRange(),
           });
         }
@@ -1758,6 +1911,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName,
     getProjectName: () => PROJECT_NAME,
     createOpenPathButton,
+    persistViewedFiles: () =>
+      writeScopedStorage(
+        "gdp:viewed-files",
+        JSON.stringify([...STATE.viewedFiles]),
+      ),
     applyHideTests: () => applyHideTests(),
     getServerGeneration: () => SERVER_GENERATION,
     setServerGeneration: (generation: number) => {
@@ -2197,17 +2355,30 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRoute(STATE.route, true);
   }
 
-  function load(options: { force?: boolean } = {}): Promise<void> {
+  function load(
+    options: { force?: boolean; changedPaths?: Set<string> | null } = {},
+  ): Promise<RenderResult | null> {
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
       syncHeaderMenu();
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
-    if (STATE.route.screen === "repo") return loadRepo();
-    // The history screen rewrites the #empty heading/body for its
-    // no-commit-selected state; restore copy that matches the current screen
-    // so a clean worktree or an empty commit does not show stale text.
+    if (STATE.route.screen === "database") {
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      setStatus("live");
+      return Promise.resolve(null);
+    }
+    if (isRepoBlobRoute(STATE.route)) {
+      setStatus("live");
+      applySourceRouteToShell();
+      return Promise.resolve({
+        structureChanged: false,
+        invalidatedCards: 0,
+        preservedDom: true,
+      });
+    }
+    if (STATE.route.screen === "repo") return loadRepo().then(() => null);
     {
       const empty = $("#empty");
       if (empty) {
@@ -2230,10 +2401,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
-        renderShell(data);
+        const result = renderShell(data, options.changedPaths);
         setStatus("live");
+        return result;
       })
-      .catch(() => setStatus("error"));
+      .catch(() => {
+        setStatus("error");
+        return null;
+      });
   }
   loadSettings().finally(() => {
     if (STATE.route.screen === "help") {
@@ -2247,6 +2422,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       parkRangeForHistory();
       setStatus("live");
       HISTORY_VIEW.enterHistory();
+    } else if (STATE.route.screen === "database") {
+      setStatus("live");
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -2265,8 +2443,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     preHistoryRange = null;
     STATE.from = from || "";
     STATE.to = to || "";
-    localStorage.setItem("gdp:from", STATE.from);
-    localStorage.setItem("gdp:to", STATE.to);
+    writeScopedStorage("gdp:from", STATE.from);
+    writeScopedStorage("gdp:to", STATE.to);
     syncRefInputs();
     const range = currentRange();
     if (STATE.route.screen === "file") {
@@ -2304,7 +2482,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.from = range.from;
       STATE.to = range.to;
       syncRefInputs();
-      return load();
+      return load().then(() => {});
     },
     showEmptyDiffPane: () => {
       const diff = $("#diff");
@@ -2321,6 +2499,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
     },
     trackLoad,
+  });
+
+  const DATABASE_VIEW = createDatabaseView({
+    setRoute,
+    setPageMode,
+    currentRange,
+    trackLoad,
+    syncHeaderMenu,
   });
 
   const REF_PICKER = createRefPicker({
@@ -2355,6 +2541,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       window.location.pathname !== "/history"
     ) {
       restoreRangeAfterHistory();
+    }
+    if (
+      STATE.route.screen === "database" &&
+      window.location.pathname !== "/database"
+    ) {
+      DATABASE_VIEW.leave();
     }
     const parsedRoute = parseRoute(
       window.location.pathname,
@@ -2403,6 +2595,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       HISTORY_VIEW.enterHistory();
       return;
     }
+    if (STATE.route.screen === "database") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      setStatus("live");
+      return;
+    }
     if (STATE.route.screen !== "file") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
@@ -2444,7 +2644,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyIgnoreWs();
   $("#ignore-ws").addEventListener("click", () => {
     STATE.ignoreWs = !STATE.ignoreWs;
-    localStorage.setItem("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
+    writeScopedStorage("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
     applyIgnoreWs();
     load();
   });
@@ -2507,7 +2707,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {
     STATE.hideTests = !STATE.hideTests;
-    localStorage.setItem("gdp:hide-tests", STATE.hideTests ? "1" : "0");
+    writeScopedStorage("gdp:hide-tests", STATE.hideTests ? "1" : "0");
     applyHideTests();
   });
 
@@ -2534,8 +2734,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
-      localStorage.setItem("gdp:from", from);
-      localStorage.setItem("gdp:to", to);
+      writeScopedStorage("gdp:from", from);
+      writeScopedStorage("gdp:to", to);
     },
   });
 
@@ -2555,38 +2755,247 @@ window.GdpExpandLogic = GdpExpandLogic;
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
 
-  // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession
-  // collapse into one fetch. Scroll + active file are preserved across reload.
+  // ---- Query History panel toggle ----
+  const qhToggleBtn = document.getElementById("query-history-toggle");
+  if (qhToggleBtn) {
+    qhToggleBtn.addEventListener("click", () => {
+      const panel = document.getElementById("query-history-panel");
+      const opening = panel ? panel.hidden : true;
+      setQueryHistoryPanelOpen(opening);
+      if (opening) DATABASE_VIEW.handleSse();
+    });
+  }
+  const qhCloseBtn = document.getElementById("query-history-panel-close");
+  if (qhCloseBtn) {
+    qhCloseBtn.addEventListener("click", () => {
+      setQueryHistoryPanelOpen(false);
+    });
+  }
+
+  (function setupQueryHistoryResizer() {
+    const panel = document.getElementById("query-history-panel");
+    const handle = document.getElementById("query-history-resizer");
+    if (!panel || !handle) return;
+    const STORAGE_KEY = "gdp:qh-panel-width";
+    const MIN_W = 280;
+    const MAX_W = 800;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const w = Math.max(MIN_W, Math.min(MAX_W, Number(saved) || 420));
+      panel.style.width = `${w}px`;
+    }
+    let dragging = false;
+    let startX = 0;
+    let startW = 0;
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startW = panel.offsetWidth;
+      document.body.classList.add("db-resizing");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const w = Math.max(MIN_W, Math.min(MAX_W, startW - (e.clientX - startX)));
+      panel.style.width = `${w}px`;
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("db-resizing");
+      localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
+    });
+  })();
+
+  // ---- Auto-update toggle + change notification banner ----
+  function applyAutoUpdateButton() {
+    const btn = document.querySelector<HTMLButtonElement>("#auto-update");
+    if (!btn) return;
+    const text = uiText();
+    btn.classList.toggle("active", STATE.autoUpdate);
+    btn.textContent = text.topbar.autoUpdate;
+    btn.title = STATE.autoUpdate
+      ? text.topbar.autoUpdateOnTitle
+      : text.topbar.autoUpdateOffTitle;
+    btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+  }
+
+  function setAutoUpdate(on: boolean) {
+    STATE.autoUpdate = on;
+    localStorage.setItem("gdp:auto-update", on ? "1" : "0");
+    applyAutoUpdateButton();
+    if (on) {
+      if (bannerPendingPaths) {
+        const paths = bannerPendingPaths;
+        hideChangeBanner();
+        doSseLoad(paths);
+        return;
+      }
+      hideChangeBanner();
+    }
+  }
+
+  let bannerPendingPaths: Set<string> | null = null;
+  let changeBannerShownAt = 0;
+  let changeBannerAgeTimer: ReturnType<typeof setInterval> | null = null;
+
+  function formatChangeBannerAge(now: number): string {
+    const text = uiText().changeBanner;
+    const elapsedSeconds = Math.max(
+      0,
+      Math.floor((now - changeBannerShownAt) / 1000),
+    );
+    if (elapsedSeconds < 5) return text.justNow;
+    if (elapsedSeconds < 60) return text.secondsAgo(elapsedSeconds);
+    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+    if (elapsedMinutes < 60) return text.minutesAgo(elapsedMinutes);
+    return text.hoursAgo(Math.floor(elapsedMinutes / 60));
+  }
+
+  function updateChangeBannerAge() {
+    const ageEl = document.getElementById("change-banner-age");
+    if (ageEl) ageEl.textContent = formatChangeBannerAge(Date.now());
+  }
+
+  function showChangeBanner(paths: Set<string> | null) {
+    bannerPendingPaths = paths;
+    changeBannerShownAt = Date.now();
+    const banner = document.getElementById("change-banner");
+    if (!banner) return;
+    const text = uiText();
+    const textEl = document.getElementById("change-banner-text");
+    if (textEl) textEl.textContent = text.changeBanner.text;
+    updateChangeBannerAge();
+    if (!changeBannerAgeTimer) {
+      changeBannerAgeTimer = setInterval(updateChangeBannerAge, 1000);
+    }
+    const reloadBtn = document.getElementById("change-banner-reload");
+    if (reloadBtn) reloadBtn.textContent = text.changeBanner.reload;
+    banner.hidden = false;
+  }
+
+  function hideChangeBanner() {
+    const banner = document.getElementById("change-banner");
+    if (banner) banner.hidden = true;
+    bannerPendingPaths = null;
+    changeBannerShownAt = 0;
+    if (changeBannerAgeTimer) {
+      clearInterval(changeBannerAgeTimer);
+      changeBannerAgeTimer = null;
+    }
+  }
+
+  document
+    .getElementById("change-banner-reload")
+    ?.addEventListener("click", () => {
+      const paths = bannerPendingPaths;
+      hideChangeBanner();
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree",
+        });
+        return;
+      }
+      doSseLoad(paths);
+    });
+  document
+    .getElementById("change-banner-dismiss")
+    ?.addEventListener("click", () => {
+      hideChangeBanner();
+    });
+  document.getElementById("auto-update")?.addEventListener("click", () => {
+    setAutoUpdate(!STATE.autoUpdate);
+  });
+  applyAutoUpdateButton();
+
+  function doSseLoad(paths: Set<string> | null) {
+    const route = STATE.route;
+    if (isRepoBlobRoute(route)) {
+      const viewingPath = route.path;
+      if (paths && viewingPath && !paths.has(viewingPath)) return;
+      void renderStandaloneSource({
+        path: route.path,
+        ref: route.ref || "worktree",
+      });
+      return;
+    }
+    if (route.screen === "repo") {
+      invalidateRepoSidebar();
+      void loadRepo();
+      return;
+    }
+    const savedScroll = window.scrollY;
+    const savedActive = STATE.activeFile;
+    load({ changedPaths: paths }).then((result) => {
+      if (result?.preservedDom) return;
+      if (savedActive) {
+        const card = document.querySelector<DiffCardElement>(
+          diffCardSelector(savedActive),
+        );
+        if (card) {
+          card.scrollIntoView({ block: "start" });
+          return;
+        }
+      }
+      window.scrollTo(0, savedScroll);
+    });
+  }
+
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
-  function scheduleSseLoad() {
+  let pendingSseChangedPaths: Set<string> | null = new Set();
+  function scheduleSseLoad(changedPaths?: string[] | null) {
+    if (STATE.route.screen === "database" || STATE.route.screen === "help")
+      return;
+    if (changedPaths && pendingSseChangedPaths) {
+      for (const p of changedPaths) pendingSseChangedPaths.add(p);
+    } else {
+      pendingSseChangedPaths = null;
+    }
     if (sseTimer) clearTimeout(sseTimer);
     sseTimer = setTimeout(() => {
       sseTimer = null;
-      invalidateRepoSidebar();
-      const savedScroll = window.scrollY;
-      const savedActive = STATE.activeFile;
-      load().then(() => {
-        if (savedActive) {
-          const card = document.querySelector<DiffCardElement>(
-            diffCardSelector(savedActive),
-          );
-          if (card) {
-            card.scrollIntoView({ block: "start" });
-            return;
-          }
-        }
-        window.scrollTo(0, savedScroll);
-      });
+      const paths = pendingSseChangedPaths;
+      pendingSseChangedPaths = new Set();
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        const viewingPath = route.path;
+        if (paths && viewingPath && !paths.has(viewingPath)) return;
+      }
+      if (STATE.autoUpdate) {
+        doSseLoad(paths);
+      } else {
+        showChangeBanner(paths);
+      }
     }, 350);
   }
 
   const es = new EventSource("/events");
   const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
   let openedOnce = false;
-  es.addEventListener("update", () => scheduleSseLoad());
+  es.addEventListener("update", (event) => {
+    const raw = (event as MessageEvent).data;
+    let paths: string[] | null = null;
+    if (raw && raw !== "tick") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.paths)) paths = parsed.paths;
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+    scheduleSseLoad(paths);
+  });
   es.addEventListener("reload", () => location.reload());
   es.addEventListener("annotation", (event) => {
     ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+  });
+  es.addEventListener("db-query", () => {
+    DATABASE_VIEW.handleSse("db-query");
+  });
+  es.addEventListener("db-snapshot", (event) => {
+    DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
   });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {
@@ -2601,6 +3010,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function catchUpDiff() {
     if (!shouldCatchUpDiff(STATE.route)) return;
     if (!catchUpGate()) return;
+    if (!STATE.autoUpdate) {
+      showChangeBanner(null);
+      return;
+    }
     void load({ force: true });
   }
 
