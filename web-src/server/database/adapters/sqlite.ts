@@ -257,11 +257,16 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
           string,
           DbValue
         >[];
-      } catch {
-        rows = db.prepare(trimmed).all(...(params || [])) as Record<
-          string,
-          DbValue
-        >[];
+      } catch (wrapErr) {
+        const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
+        try {
+          rows = db.prepare(fallbackSql).all(...(params || [])) as Record<
+            string,
+            DbValue
+          >[];
+        } catch {
+          throw wrapErr;
+        }
       }
       const truncated = rows.length > maxRows;
       if (truncated) rows = rows.slice(0, maxRows);

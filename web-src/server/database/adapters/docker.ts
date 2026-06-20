@@ -402,13 +402,17 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
       if (BLOCKED_RE.test(upper)) {
         throw new Error("Query contains a disallowed statement keyword");
       }
-      const limited = `${trimmed.replace(/;\s*$/, "")} LIMIT ${maxRows}`;
-      let result: { columns: string[]; rows: string[][] };
-      try {
-        result = exec(limited);
-      } catch {
-        result = exec(trimmed);
-      }
+      const readOnlyPreamble =
+        config.kind === "postgresql"
+          ? "BEGIN TRANSACTION READ ONLY; "
+          : "SET SESSION TRANSACTION READ ONLY; ";
+      const readOnlyPostamble =
+        config.kind === "postgresql"
+          ? "; COMMIT"
+          : "; SET SESSION TRANSACTION READ WRITE";
+      const stripped = trimmed.replace(/;\s*$/, "");
+      const limited = `${readOnlyPreamble}${stripped} LIMIT ${maxRows}${readOnlyPostamble}`;
+      const result = exec(limited);
       const columnNames =
         config.kind === "mysql" && result.columns.length > 0
           ? result.columns
