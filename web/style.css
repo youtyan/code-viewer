@@ -5114,8 +5114,7 @@ body.query-history-panel-open #content {
 .db-history-resizer[hidden] { display: none; }
 .db-history-pane {
   height: 220px;
-  min-height: 80px;
-  max-height: 600px;
+  min-height: 60px;
   flex-shrink: 0;
   overflow: hidden;
   border-top: 1px solid var(--border);
