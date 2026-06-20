@@ -9466,7 +9466,7 @@ ${frontmatter.yaml}
       return data.files;
     }
     async function fetchSchema(dbId) {
-      const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}`));
+      const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`));
       if (!res.ok)
         return null;
       return await res.json();
@@ -9543,24 +9543,40 @@ ${frontmatter.yaml}
         grid.load(table2);
       }
     }
+    async function fetchColumns(table2) {
+      if (schemaCache?.columnsMap?.[table2]) {
+        return schemaCache.columnsMap[table2];
+      }
+      if (!currentDb)
+        return [];
+      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+      if (!res.ok)
+        return [];
+      const data = await res.json();
+      return data.columns;
+    }
     async function showSchema(table2) {
       setActiveTab("schema");
       if (!currentDb)
         return;
-      const data = await fetchTablePage(table2, 0, 0, null, []);
-      schemaView.render(table2, data.columns, schemaCache?.indexes || []);
+      const columns = await fetchColumns(table2);
+      schemaView.render(table2, columns, schemaCache?.indexes || []);
     }
     async function renderErDiagram() {
       if (!schemaCache || !currentDb)
         return;
       const columnsMap = new Map;
-      for (const t2 of schemaCache.tables) {
-        if (t2.type === "view")
-          continue;
-        try {
-          const data = await fetchTablePage(t2.name, 0, 0, null, []);
-          columnsMap.set(t2.name, data.columns);
-        } catch {}
+      if (schemaCache.columnsMap) {
+        for (const [name, cols] of Object.entries(schemaCache.columnsMap)) {
+          columnsMap.set(name, cols);
+        }
+      } else {
+        const tables = schemaCache.tables.filter((t2) => t2.type !== "view");
+        const results = await Promise.all(tables.map((t2) => fetchColumns(t2.name).then((cols) => ({ name: t2.name, cols }))));
+        for (const { name, cols } of results) {
+          if (cols.length > 0)
+            columnsMap.set(name, cols);
+        }
       }
       erDiagram.render(schemaCache, columnsMap);
     }

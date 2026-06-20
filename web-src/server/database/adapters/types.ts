@@ -24,9 +24,11 @@ export type DatabaseAdapter = {
   readonly kind: DbKind;
   getTables(): DbTableInfo[];
   getColumns(table: string): DbColumn[];
+  getColumnsMulti?(tables: string[]): Map<string, DbColumn[]>;
   getIndexes(): DbIndexInfo[];
   getForeignKeys(): DbForeignKey[];
   getTableRowCount(table: string): number;
+  getTableRowCounts?(tables: string[]): Map<string, number>;
   getTablePage(
     table: string,
     options: { offset: number; limit: number; orderBy?: DbOrder[] },

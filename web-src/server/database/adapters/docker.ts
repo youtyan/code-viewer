@@ -127,6 +127,42 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     return val;
   }
 
+  const columnCache = new Map<string, DbColumn[]>();
+
+  function fetchColumnsUncached(table: string): DbColumn[] {
+    let sql: string;
+    if (config.kind === "postgresql") {
+      sql = `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
+    } else {
+      sql = `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
+    }
+    const result = exec(sql);
+    if (config.kind === "postgresql") {
+      const pkSql = `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '${table.replace(/'/g, "''")}'::regclass AND i.indisprimary`;
+      let pkCols: Set<string>;
+      try {
+        const pkResult = exec(pkSql);
+        pkCols = new Set(pkResult.rows.map((r: string[]) => r[0]));
+      } catch {
+        pkCols = new Set();
+      }
+      return result.rows.map((row: string[]) => ({
+        name: row[0],
+        type: row[1],
+        nullable: row[2] === "YES",
+        primaryKey: pkCols.has(row[0]),
+        defaultValue: row[3] === "" ? null : row[3],
+      }));
+    }
+    return result.rows.map((row: string[]) => ({
+      name: row[0],
+      type: row[1],
+      nullable: row[2] === "YES",
+      primaryKey: row[4] === "PRI",
+      defaultValue: row[3] === "NULL" ? null : row[3],
+    }));
+  }
+
   return {
     kind: config.kind,
 
@@ -146,37 +182,11 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     },
 
     getColumns(table: string): DbColumn[] {
-      let sql: string;
-      if (config.kind === "postgresql") {
-        sql = `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
-      } else {
-        sql = `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
-      }
-      const result = exec(sql);
-      if (config.kind === "postgresql") {
-        const pkSql = `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '${table.replace(/'/g, "''")}'::regclass AND i.indisprimary`;
-        let pkCols: Set<string>;
-        try {
-          const pkResult = exec(pkSql);
-          pkCols = new Set(pkResult.rows.map((r) => r[0]));
-        } catch {
-          pkCols = new Set();
-        }
-        return result.rows.map((row) => ({
-          name: row[0],
-          type: row[1],
-          nullable: row[2] === "YES",
-          primaryKey: pkCols.has(row[0]),
-          defaultValue: row[3] === "" ? null : row[3],
-        }));
-      }
-      return result.rows.map((row) => ({
-        name: row[0],
-        type: row[1],
-        nullable: row[2] === "YES",
-        primaryKey: row[4] === "PRI",
-        defaultValue: row[3] === "NULL" ? null : row[3],
-      }));
+      const cached = columnCache.get(table);
+      if (cached) return cached;
+      const cols = fetchColumnsUncached(table);
+      columnCache.set(table, cols);
+      return cols;
     },
 
     getIndexes(): DbIndexInfo[] {
@@ -223,10 +233,117 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
       }
     },
 
+    getColumnsMulti(tables: string[]): Map<string, DbColumn[]> {
+      const result = new Map<string, DbColumn[]>();
+      const uncached = tables.filter((t) => {
+        const c = columnCache.get(t);
+        if (c) result.set(t, c);
+        return !c;
+      });
+      if (uncached.length === 0) return result;
+      let sql: string;
+      if (config.kind === "postgresql") {
+        const inList = uncached
+          .map((t) => `'${t.replace(/'/g, "''")}'`)
+          .join(",");
+        sql = `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+      } else {
+        const inList = uncached
+          .map((t) => `'${t.replace(/'/g, "''")}'`)
+          .join(",");
+        sql = `SELECT table_name, column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+      }
+      try {
+        const queryResult = exec(sql);
+        const grouped = new Map<string, string[][]>();
+        for (const row of queryResult.rows) {
+          const tbl = row[0];
+          const existing = grouped.get(tbl) || [];
+          existing.push(row);
+          grouped.set(tbl, existing);
+        }
+        let pkMap = new Map<string, Set<string>>();
+        if (config.kind === "postgresql") {
+          try {
+            const pkInList = uncached
+              .map((t) => `'${t.replace(/'/g, "''")}'`)
+              .join(",");
+            const pkResult = exec(
+              `SELECT c.relname, a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indisprimary AND c.relname IN (${pkInList})`,
+            );
+            for (const row of pkResult.rows) {
+              const existing = pkMap.get(row[0]) || new Set<string>();
+              existing.add(row[1]);
+              pkMap.set(row[0], existing);
+            }
+          } catch {
+            pkMap = new Map();
+          }
+        }
+        for (const [tbl, rows] of grouped) {
+          const pkCols = pkMap.get(tbl) || new Set<string>();
+          let cols: DbColumn[];
+          if (config.kind === "postgresql") {
+            cols = rows.map((row: string[]) => ({
+              name: row[1],
+              type: row[2],
+              nullable: row[3] === "YES",
+              primaryKey: pkCols.has(row[1]),
+              defaultValue: row[4] === "" ? null : row[4],
+            }));
+          } else {
+            cols = rows.map((row: string[]) => ({
+              name: row[1],
+              type: row[2],
+              nullable: row[3] === "YES",
+              primaryKey: row[5] === "PRI",
+              defaultValue: row[4] === "NULL" ? null : row[4],
+            }));
+          }
+          columnCache.set(tbl, cols);
+          result.set(tbl, cols);
+        }
+      } catch {
+        for (const t of uncached) {
+          const cols = fetchColumnsUncached(t);
+          columnCache.set(t, cols);
+          result.set(t, cols);
+        }
+      }
+      return result;
+    },
+
     getTableRowCount(table: string): number {
       const id = sanitizeIdentifier(table, config.kind);
       const result = exec(`SELECT COUNT(*) FROM ${id}`);
       return result.rows.length > 0 ? Number(result.rows[0][0]) || 0 : 0;
+    },
+
+    getTableRowCounts(tables: string[]): Map<string, number> {
+      const result = new Map<string, number>();
+      if (tables.length === 0) return result;
+      const parts = tables.map((t) => {
+        const id = sanitizeIdentifier(t, config.kind);
+        return `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${id}`;
+      });
+      const sql = parts.join(" UNION ALL ");
+      try {
+        const queryResult = exec(sql);
+        for (const row of queryResult.rows) {
+          result.set(row[0], Number(row[1]) || 0);
+        }
+      } catch {
+        for (const t of tables) {
+          const id = sanitizeIdentifier(t, config.kind);
+          try {
+            const r = exec(`SELECT COUNT(*) FROM ${id}`);
+            result.set(t, r.rows.length > 0 ? Number(r.rows[0][0]) || 0 : 0);
+          } catch {
+            result.set(t, 0);
+          }
+        }
+      }
+      return result;
     },
 
     getTablePage(
@@ -240,18 +357,22 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
       const cols = this.getColumns(table);
       if (result.rows.length === 0) {
         return {
-          columns: cols.map((c) => c.name),
-          columnTypes: cols.map((c) => c.type),
+          columns: cols.map((c: DbColumn) => c.name),
+          columnTypes: cols.map((c: DbColumn) => c.type),
           rows: [],
           rowCount: 0,
         };
       }
       const columnNames =
-        config.kind === "mysql" ? result.columns : cols.map((c) => c.name);
-      const typeMap = new Map(cols.map((c) => [c.name, c.type]));
+        config.kind === "mysql"
+          ? result.columns
+          : cols.map((c: DbColumn) => c.name);
+      const typeMap = new Map(
+        cols.map((c: DbColumn) => [c.name, c.type] as const),
+      );
       return {
         columns: columnNames,
-        columnTypes: columnNames.map((n) => typeMap.get(n) || "TEXT"),
+        columnTypes: columnNames.map((n: string) => typeMap.get(n) || "TEXT"),
         rows: result.rows.map((row) => row.map(toDbValue)),
         rowCount: result.rows.length,
       };
@@ -345,7 +466,7 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     },
 
     close(): void {
-      // no persistent connection
+      columnCache.clear();
     },
   };
 }

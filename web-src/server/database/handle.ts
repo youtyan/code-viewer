@@ -126,12 +126,25 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
 async function handleSchema(cwd: string, url: URL): Promise<Response> {
   const r = resolveDb(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
+  const includeColumns = url.searchParams.get("includeColumns") === "1";
   try {
     const adapter = await getAdapter(r, cwd);
     const tables = adapter.getTables();
+    const tableNames = tables
+      .filter((t) => t.type === "table")
+      .map((t) => t.name);
+    let countMap: Map<string, number>;
+    if (adapter.getTableRowCounts) {
+      countMap = adapter.getTableRowCounts(tableNames);
+    } else {
+      countMap = new Map();
+      for (const name of tableNames) {
+        countMap.set(name, adapter.getTableRowCount(name));
+      }
+    }
     const tablesWithCount = tables.map((t) => ({
       ...t,
-      rowCount: t.type === "table" ? adapter.getTableRowCount(t.name) : null,
+      rowCount: t.type === "table" ? (countMap.get(t.name) ?? 0) : null,
     }));
     const indexes = adapter.getIndexes();
     const foreignKeys = adapter.getForeignKeys();
@@ -141,6 +154,18 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
       indexes,
       foreignKeys,
     };
+    if (includeColumns) {
+      let colsMap: Map<string, import("../../core/database/types").DbColumn[]>;
+      if (adapter.getColumnsMulti) {
+        colsMap = adapter.getColumnsMulti(tableNames);
+      } else {
+        colsMap = new Map();
+        for (const name of tableNames) {
+          colsMap.set(name, adapter.getColumns(name));
+        }
+      }
+      body.columnsMap = Object.fromEntries(colsMap);
+    }
     return json(body);
   } catch (err) {
     console.error(
@@ -260,7 +285,10 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     }
 
     const result = adapter.getTablePage(table, { offset, limit, orderBy });
-    const totalRows = adapter.getTableRowCount(table);
+    const totalRows =
+      result.rowCount < limit
+        ? offset + result.rowCount
+        : adapter.getTableRowCount(table);
     const body: DbTableDataResponse = {
       dbId: r.dbId,
       table,
@@ -566,6 +594,27 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
   }
 }
 
+async function handleColumns(cwd: string, url: URL): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const table = url.searchParams.get("table");
+  if (!table) return textError("missing table parameter", 400);
+  try {
+    const adapter = await getAdapter(r, cwd);
+    const columns = adapter.getColumns(table);
+    return json({ dbId: r.dbId, table, columns });
+  } catch (err) {
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to get columns: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 async function handleDdl(cwd: string, url: URL): Promise<Response> {
   const r = resolveDb(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -599,7 +648,15 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (!body.db) return textError("missing db", 400);
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response) return r;
-  closeConnection(r.resolved);
+  if (r.docker) {
+    const cached = dockerAdapterCache.get(r.dbId);
+    if (cached) {
+      cached.close();
+      dockerAdapterCache.delete(r.dbId);
+    }
+  } else {
+    closeConnection(r.resolved);
+  }
   return json({ ok: true });
 }
 
@@ -631,6 +688,7 @@ export async function handleDatabaseRoute(
     return wrapResponse(handleFiles(cwd, omitDirNames));
   if (path === "/_db/schema") return wrapResponse(handleSchema(cwd, url));
   if (path === "/_db/table") return wrapResponse(handleTable(cwd, url));
+  if (path === "/_db/columns") return wrapResponse(handleColumns(cwd, url));
   if (path === "/_db/export") return wrapResponse(handleExport(cwd, url));
   if (path === "/_db/ddl") return wrapResponse(handleDdl(cwd, url));
   if (path === "/_db/query") {
