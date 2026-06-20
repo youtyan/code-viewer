@@ -143,7 +143,10 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
     return textError(
       `failed to read schema: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -270,7 +273,10 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
     return textError(
       `failed to read table: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -345,7 +351,10 @@ async function handleQuery(
     }
     return json(response);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
     const elapsed = Date.now() - start;
     const response: DbQueryResponse = {
       dbId: body.db,
@@ -546,7 +555,10 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
       },
     });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
     return textError(
       `failed to export table: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -565,7 +577,10 @@ async function handleDdl(cwd: string, url: URL): Promise<Response> {
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
     return textError(
       `failed to get DDL: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -598,27 +613,54 @@ export async function handleDatabaseRoute(
 ): Promise<Response | null> {
   ensureInit();
   const path = url.pathname;
-  if (path === "/_db/files") return handleFiles(cwd, omitDirNames);
-  if (path === "/_db/schema") return handleSchema(cwd, url);
-  if (path === "/_db/table") return handleTable(cwd, url);
-  if (path === "/_db/export") return handleExport(cwd, url);
-  if (path === "/_db/ddl") return handleDdl(cwd, url);
+  const start = Date.now();
+  const method = req.method;
+  const qs = url.search ? url.search.slice(0, 120) : "";
+  const log = (status: number) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
+  };
+  const wrapResponse = async (
+    handler: Response | Promise<Response | null>,
+  ): Promise<Response | null> => {
+    const res = await handler;
+    if (res) log(res.status);
+    return res;
+  };
+  if (path === "/_db/files")
+    return wrapResponse(handleFiles(cwd, omitDirNames));
+  if (path === "/_db/schema") return wrapResponse(handleSchema(cwd, url));
+  if (path === "/_db/table") return wrapResponse(handleTable(cwd, url));
+  if (path === "/_db/export") return wrapResponse(handleExport(cwd, url));
+  if (path === "/_db/ddl") return wrapResponse(handleDdl(cwd, url));
   if (path === "/_db/query") {
-    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
-    return handleQuery(cwd, req, sendSse);
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleQuery(cwd, req, sendSse));
   }
   if (path === "/_db/close") {
-    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
-    return handleClose(cwd, req);
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleClose(cwd, req));
   }
-  if (path === "/_db/history") return handleHistory(cwd, url);
+  if (path === "/_db/history") return wrapResponse(handleHistory(cwd, url));
   if (path === "/_db/history/delete") {
-    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
-    return handleHistoryDelete(cwd, req, sendSse);
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleHistoryDelete(cwd, req, sendSse));
   }
   if (path === "/_db/history/clear") {
-    if (!sideEffectAllowed(req)) return textError("forbidden", 403);
-    return handleHistoryClear(cwd, req, sendSse);
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleHistoryClear(cwd, req, sendSse));
   }
   return null;
 }
