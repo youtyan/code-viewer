@@ -42,6 +42,7 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView } from "./views/diff-view";
 import {
@@ -112,10 +113,29 @@ window.GdpExpandLogic = GdpExpandLogic;
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
 
+  let PROJECT_NAME = "";
+
   const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
   const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
   const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
   const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+
+  function scopedKey(base: string): string {
+    return PROJECT_NAME ? `${base}:${PROJECT_NAME}` : base;
+  }
+
+  function readScopedStorage(base: string): string | null {
+    if (PROJECT_NAME) {
+      const v = localStorage.getItem(`${base}:${PROJECT_NAME}`);
+      if (v !== null) return v;
+    }
+    return localStorage.getItem(base);
+  }
+
+  function writeScopedStorage(base: string, value: string): void {
+    localStorage.setItem(scopedKey(base), value);
+  }
+
   const VIEWER_LANGUAGES: ViewerLanguage[] = ["en", "ja"];
   const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
     "node_modules",
@@ -282,6 +302,26 @@ window.GdpExpandLogic = GdpExpandLogic;
       projectTitle.textContent = project;
       projectTitle.title = project;
     }
+    reloadScopedState();
+  }
+
+  function reloadScopedState() {
+    const collapsed = readScopedStorage("gdp:collapsed-dirs");
+    if (collapsed !== null) {
+      STATE.collapsedDirs = new Set<string>(JSON.parse(collapsed));
+    }
+    const viewed = readScopedStorage("gdp:viewed-files");
+    if (viewed !== null) {
+      STATE.viewedFiles = new Set<string>(JSON.parse(viewed));
+    }
+    const igRaw = readScopedStorage("gdp:ignore-ws");
+    if (igRaw !== null) STATE.ignoreWs = igRaw === "1";
+    const from = readScopedStorage("gdp:from");
+    const to = readScopedStorage("gdp:to");
+    if (from !== null) STATE.from = from;
+    if (to !== null) STATE.to = to;
+    const ht = readScopedStorage("gdp:hide-tests");
+    if (ht !== null) STATE.hideTests = ht === "1";
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -397,10 +437,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   const STATE: AppState = (() => {
-    const igRaw = localStorage.getItem("gdp:ignore-ws");
+    const igRaw = readScopedStorage("gdp:ignore-ws");
     const fallbackRange = {
-      from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-      to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to,
+      from: readScopedStorage("gdp:from") || DEFAULT_RANGE.from,
+      to: readScopedStorage("gdp:to") || DEFAULT_RANGE.to,
     };
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
@@ -429,7 +469,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
       collapsedDirs: new Set<string>(
-        JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]"),
+        JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]"),
       ),
       ignoreWs: igRaw === null ? true : igRaw === "1",
       from: route.range.from,
@@ -437,10 +477,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       collapsed: false,
       files: [],
       activeFile: null,
-      hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+      hideTests: readScopedStorage("gdp:hide-tests") === "1",
       syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
       viewedFiles: new Set<string>(
-        JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]"),
+        JSON.parse(readScopedStorage("gdp:viewed-files") || "[]"),
       ),
       route,
       repoRef: route.screen === "repo" ? route.ref : "worktree",
@@ -449,7 +489,6 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // (declarations recovered during the source-view extraction)
   let highlightConfigured = false;
-  let PROJECT_NAME = "";
   let REPO_SIDEBAR_REF: string | null = null;
 
   // ---------- Line reference copy (@path#start-end) ----------
@@ -481,6 +520,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
     fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
     applyViewedState: () => DIFF_VIEW.applyViewedState(),
+    persistCollapsedDirs: () =>
+      writeScopedStorage(
+        "gdp:collapsed-dirs",
+        JSON.stringify([...STATE.collapsedDirs]),
+      ),
     appendScopeParams,
     createOpenPathButton,
     normalizeViewerFontSize,
@@ -654,7 +698,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   const UI_TEXT: Record<
     ViewerLanguage,
     {
-      nav: Record<"repo" | "diff" | "history" | "help", string>;
+      nav: Record<"repo" | "diff" | "history" | "database" | "help", string>;
       global: {
         annotations: string;
         settings: string;
@@ -730,6 +774,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "Repository",
         diff: "Diff Viewer",
         history: "History",
+        database: "Database",
         help: "Help",
       },
       global: {
@@ -809,6 +854,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         repo: "リポジトリ",
         diff: "Diff ビューア",
         history: "履歴",
+        database: "データベース",
         help: "ヘルプ",
       },
       global: {
@@ -1540,6 +1586,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-history-page",
       STATE.route.screen === "history",
     );
+    document.body.classList.toggle(
+      "gdp-database-page",
+      STATE.route.screen === "database",
+    );
     // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
     // pages expect it back outside as the sticky sibling. Re-place it every
     // time the page classes flip, or SPA navigation away from the repo view
@@ -1589,6 +1639,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           link.href = buildRoute({
             screen: "history",
             ref: "HEAD",
+            range: currentRange(),
+          });
+        }
+        if (link.dataset.route === "database") {
+          link.href = buildRoute({
+            screen: "database",
             range: currentRange(),
           });
         }
@@ -1758,6 +1814,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName,
     getProjectName: () => PROJECT_NAME,
     createOpenPathButton,
+    persistViewedFiles: () =>
+      writeScopedStorage(
+        "gdp:viewed-files",
+        JSON.stringify([...STATE.viewedFiles]),
+      ),
     applyHideTests: () => applyHideTests(),
     getServerGeneration: () => SERVER_GENERATION,
     setServerGeneration: (generation: number) => {
@@ -2204,6 +2265,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       syncHeaderMenu();
       return Promise.resolve();
     }
+    if (STATE.route.screen === "database") {
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+      setStatus("live");
+      return Promise.resolve();
+    }
     if (STATE.route.screen === "repo") return loadRepo();
     // The history screen rewrites the #empty heading/body for its
     // no-commit-selected state; restore copy that matches the current screen
@@ -2247,6 +2313,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       parkRangeForHistory();
       setStatus("live");
       HISTORY_VIEW.enterHistory();
+    } else if (STATE.route.screen === "database") {
+      setStatus("live");
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -2265,8 +2334,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     preHistoryRange = null;
     STATE.from = from || "";
     STATE.to = to || "";
-    localStorage.setItem("gdp:from", STATE.from);
-    localStorage.setItem("gdp:to", STATE.to);
+    writeScopedStorage("gdp:from", STATE.from);
+    writeScopedStorage("gdp:to", STATE.to);
     syncRefInputs();
     const range = currentRange();
     if (STATE.route.screen === "file") {
@@ -2323,6 +2392,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     trackLoad,
   });
 
+  const DATABASE_VIEW = createDatabaseView({
+    setRoute,
+    setPageMode,
+    currentRange,
+    trackLoad,
+    syncHeaderMenu,
+  });
+
   const REF_PICKER = createRefPicker({
     $,
     escapeHtml,
@@ -2355,6 +2432,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       window.location.pathname !== "/history"
     ) {
       restoreRangeAfterHistory();
+    }
+    if (
+      STATE.route.screen === "database" &&
+      window.location.pathname !== "/database"
+    ) {
+      DATABASE_VIEW.leave();
     }
     const parsedRoute = parseRoute(
       window.location.pathname,
@@ -2403,6 +2486,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       HISTORY_VIEW.enterHistory();
       return;
     }
+    if (STATE.route.screen === "database") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      removeStandaloneSource();
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+      setStatus("live");
+      return;
+    }
     if (STATE.route.screen !== "file") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
@@ -2444,7 +2535,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyIgnoreWs();
   $("#ignore-ws").addEventListener("click", () => {
     STATE.ignoreWs = !STATE.ignoreWs;
-    localStorage.setItem("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
+    writeScopedStorage("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
     applyIgnoreWs();
     load();
   });
@@ -2507,7 +2598,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {
     STATE.hideTests = !STATE.hideTests;
-    localStorage.setItem("gdp:hide-tests", STATE.hideTests ? "1" : "0");
+    writeScopedStorage("gdp:hide-tests", STATE.hideTests ? "1" : "0");
     applyHideTests();
   });
 
@@ -2534,8 +2625,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
-      localStorage.setItem("gdp:from", from);
-      localStorage.setItem("gdp:to", to);
+      writeScopedStorage("gdp:from", from);
+      writeScopedStorage("gdp:to", to);
     },
   });
 

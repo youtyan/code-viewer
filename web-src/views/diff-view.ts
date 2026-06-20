@@ -59,6 +59,7 @@ export type DiffViewDeps = {
     kind: "directory" | "file-parent",
     title?: string,
   ): HTMLElement;
+  persistViewedFiles(): void;
   applyHideTests(): void;
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
@@ -100,6 +101,7 @@ export function createDiffView(deps: DiffViewDeps) {
     setProjectName,
     getProjectName,
     createOpenPathButton,
+    persistViewedFiles,
     applyHideTests,
     getServerGeneration,
     setServerGeneration,
@@ -129,13 +131,6 @@ export function createDiffView(deps: DiffViewDeps) {
     span.title =
       { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
     return span;
-  }
-
-  function persistViewedFiles() {
-    localStorage.setItem(
-      "gdp:viewed-files",
-      JSON.stringify([...STATE.viewedFiles]),
-    );
   }
 
   function setFileViewed(path: string, viewed: boolean) {

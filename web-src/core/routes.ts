@@ -28,6 +28,7 @@ export type AppRoute =
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
   | { screen: "history"; ref: string; commit?: string; range: DiffRange }
+  | { screen: "database"; db?: string; table?: string; range: DiffRange }
   | {
       screen: "unknown";
       reason: "unknown-pathname" | "missing-path";
@@ -42,6 +43,7 @@ export const SPA_PATHS = [
   "/file",
   "/help",
   "/history",
+  "/database",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
 
@@ -151,6 +153,16 @@ export function parseRoute(
         range,
       };
     }
+    case "/database": {
+      const db = params.get("db") || undefined;
+      const table = params.get("table") || undefined;
+      return {
+        screen: "database",
+        ...(db ? { db } : {}),
+        ...(table ? { table } : {}),
+        range,
+      };
+    }
     default:
       return {
         screen: "unknown",
@@ -221,6 +233,13 @@ export function buildRoute(route: AppRoute): string {
       if (route.commit) params.set("commit", route.commit);
       const qs = params.toString();
       return `/history${qs ? `?${qs}` : ""}`;
+    }
+    case "database": {
+      const params = new URLSearchParams();
+      if (route.db) params.set("db", route.db);
+      if (route.table) params.set("table", route.table);
+      const qs = params.toString();
+      return `/database${qs ? `?${qs}` : ""}`;
     }
     case "unknown":
       return (

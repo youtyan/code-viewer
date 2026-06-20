@@ -1,0 +1,71 @@
+export type DbKind = "sqlite" | "postgresql" | "mysql";
+
+export type DbValue = string | number | boolean | null | Uint8Array;
+
+export type DbColumn = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  primaryKey: boolean;
+  defaultValue: string | null;
+};
+
+export type DbTableInfo = {
+  name: string;
+  type: "table" | "view";
+  rowCount: number | null;
+};
+
+export type DbIndexInfo = {
+  name: string;
+  table: string;
+  columns: string[];
+  unique: boolean;
+};
+
+export type DbSchemaResponse = {
+  dbId: string;
+  tables: DbTableInfo[];
+  indexes: DbIndexInfo[];
+};
+
+export type DbTableDataResponse = {
+  dbId: string;
+  table: string;
+  columns: DbColumn[];
+  rows: DbValue[][];
+  totalRows: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+};
+
+export type DbQueryResponse = {
+  dbId: string;
+  columns: string[];
+  columnTypes: string[];
+  rows: DbValue[][];
+  rowCount: number;
+  truncated: boolean;
+  elapsedMs: number;
+  error?: string;
+};
+
+export type DbFileInfo = {
+  id: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  kind: DbKind;
+};
+
+export type DbFilesResponse = {
+  files: DbFileInfo[];
+};
+
+export type DbOrderDirection = "asc" | "desc";
+
+export type DbOrder = {
+  column: string;
+  direction: DbOrderDirection;
+};
