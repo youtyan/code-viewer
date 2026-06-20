@@ -9539,7 +9539,9 @@ ${frontmatter.yaml}
     tabBar.append(tabData, tabQuery, tabSchema, tabEr);
     const tableList = createTableList({
       onSelectTable: (table2) => selectTable(table2),
-      onSelectSchema: (table2) => showSchema(table2)
+      onSelectSchema: (table2) => showSchema(table2),
+      onViewCreateTable: (table2) => showDdl(table2),
+      onViewDefinition: (table2) => showSchema(table2)
     });
     const sidebar = document.createElement("div");
     sidebar.className = "db-sidebar";
@@ -9831,6 +9833,23 @@ ${frontmatter.yaml}
         return;
       const columns = await fetchColumns(table2);
       schemaView.render(table2, columns, schemaCache?.indexes || []);
+    }
+    async function showDdl(table2) {
+      if (!currentDb)
+        return;
+      setActiveTab("schema");
+      try {
+        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+        if (!res.ok)
+          return;
+        const data = await res.json();
+        const columns = await fetchColumns(table2);
+        schemaView.render(table2, columns, schemaCache?.indexes || [], {
+          foreignKeys: schemaCache?.foreignKeys,
+          triggers: data.triggers,
+          ddl: data.sql
+        });
+      } catch {}
     }
     async function renderErDiagram() {
       if (!schemaCache || !currentDb)

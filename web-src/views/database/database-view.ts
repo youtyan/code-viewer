@@ -55,6 +55,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
     onSelectSchema: (table) => showSchema(table),
+    onViewCreateTable: (table) => showDdl(table),
+    onViewDefinition: (table) => showSchema(table),
   });
 
   const sidebar = document.createElement("div");
@@ -378,6 +380,29 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!currentDb) return;
     const columns = await fetchColumns(table);
     schemaView.render(table, columns, schemaCache?.indexes || []);
+  }
+
+  async function showDdl(table: string) {
+    if (!currentDb) return;
+    setActiveTab("schema");
+    try {
+      const res = await fetch(
+        `/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table)}`,
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        sql: string;
+        triggers: { name: string; sql: string }[];
+      };
+      const columns = await fetchColumns(table);
+      schemaView.render(table, columns, schemaCache?.indexes || [], {
+        foreignKeys: schemaCache?.foreignKeys,
+        triggers: data.triggers,
+        ddl: data.sql,
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   async function renderErDiagram() {
