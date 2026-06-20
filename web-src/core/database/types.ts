@@ -150,16 +150,6 @@ export type SnapshotTableSummary = {
   pkColumns: string[];
 };
 
-export type SnapshotDiffMeta = {
-  id: string;
-  beforeId: string;
-  afterId: string;
-  note: string;
-  createdAt: string;
-  status: "running" | "done" | "error";
-  errorMessage?: string;
-};
-
 export type SnapshotDiffTableSummary = {
   tableName: string;
   insertedCount: number;
