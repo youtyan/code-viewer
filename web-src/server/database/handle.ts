@@ -205,8 +205,55 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
   }
 }
 
-function sanitizeIdentifier(name: string): string {
+function sanitizeIdentifier(
+  name: string,
+  kind: "sqlite" | "postgresql" | "mysql" = "sqlite",
+): string {
+  if (kind === "mysql") return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+function escapeSqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+type FilterSql = {
+  where: string;
+  params: string[];
+  useParams: boolean;
+};
+
+function buildFilterWhere(
+  grouped: Map<string, string[]>,
+  kind: "sqlite" | "postgresql" | "mysql",
+): FilterSql {
+  const whereParts: string[] = [];
+  const params: string[] = [];
+  const useParams = kind === "sqlite";
+  for (const [value, cols] of grouped) {
+    const likeVal = useParams ? "?" : escapeSqlString(`%${value}%`);
+    if (cols.length === 1) {
+      const cast =
+        kind === "mysql"
+          ? `CAST(${sanitizeIdentifier(cols[0], kind)} AS CHAR)`
+          : `CAST(${sanitizeIdentifier(cols[0], kind)} AS TEXT)`;
+      whereParts.push(`${cast} LIKE ${likeVal}`);
+      if (useParams) params.push(`%${value}%`);
+    } else {
+      const orParts = cols.map((c) => {
+        const cast =
+          kind === "mysql"
+            ? `CAST(${sanitizeIdentifier(c, kind)} AS CHAR)`
+            : `CAST(${sanitizeIdentifier(c, kind)} AS TEXT)`;
+        return `${cast} LIKE ${likeVal}`;
+      });
+      whereParts.push(`(${orParts.join(" OR ")})`);
+      if (useParams) {
+        for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
+      }
+    }
+  }
+  return { where: whereParts.join(" AND "), params, useParams };
 }
 
 function parseFilters(url: URL): { column: string; value: string }[] {
@@ -260,42 +307,33 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
-        const whereParts: string[] = [];
-        const params: string[] = [];
         const grouped = new Map<string, string[]>();
         for (const f of validFilters) {
           const existing = grouped.get(f.value) || [];
           existing.push(f.column);
           grouped.set(f.value, existing);
         }
-        for (const [value, cols] of grouped) {
-          if (cols.length === 1) {
-            whereParts.push(
-              `CAST(${sanitizeIdentifier(cols[0])} AS TEXT) LIKE ?`,
-            );
-            params.push(`%${value}%`);
-          } else {
-            const orParts = cols.map(
-              (c) => `CAST(${sanitizeIdentifier(c)} AS TEXT) LIKE ?`,
-            );
-            whereParts.push(`(${orParts.join(" OR ")})`);
-            for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
-          }
-        }
-        const where = whereParts.join(" AND ");
+        const k = adapter.kind;
+        const filter = buildFilterWhere(grouped, k);
         const order = orderBy
-          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
+          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
           : "";
-        const countSql = `SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(table)} WHERE ${where}`;
-        const dataSql = `SELECT * FROM ${sanitizeIdentifier(table)} WHERE ${where}${order} LIMIT ? OFFSET ?`;
-        const countResult = adapter.executeReadonlyQuery(countSql, params);
+        const tbl = sanitizeIdentifier(table, k);
+        const countSql = `SELECT COUNT(*) AS cnt FROM ${tbl} WHERE ${filter.where}`;
+        const limitOffset = filter.useParams
+          ? "LIMIT ? OFFSET ?"
+          : `LIMIT ${limit} OFFSET ${offset}`;
+        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
+        const countResult = adapter.executeReadonlyQuery(
+          countSql,
+          filter.useParams ? filter.params : undefined,
+        );
         const totalRows =
           countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
-        const dataResult = adapter.executeReadonlyQuery(dataSql, [
-          ...params,
-          limit,
-          offset,
-        ]);
+        const dataResult = adapter.executeReadonlyQuery(
+          dataSql,
+          filter.useParams ? [...filter.params, limit, offset] : undefined,
+        );
         const body: DbTableDataResponse = {
           dbId: r.dbId,
           table,
@@ -524,38 +562,26 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNameSet.has(f.column));
       if (validFilters.length > 0) {
-        const whereParts: string[] = [];
-        const params: string[] = [];
         const grouped = new Map<string, string[]>();
         for (const f of validFilters) {
           const existing = grouped.get(f.value) || [];
           existing.push(f.column);
           grouped.set(f.value, existing);
         }
-        for (const [value, cols] of grouped) {
-          if (cols.length === 1) {
-            whereParts.push(
-              `CAST(${sanitizeIdentifier(cols[0])} AS TEXT) LIKE ?`,
-            );
-            params.push(`%${value}%`);
-          } else {
-            const orParts = cols.map(
-              (c) => `CAST(${sanitizeIdentifier(c)} AS TEXT) LIKE ?`,
-            );
-            whereParts.push(`(${orParts.join(" OR ")})`);
-            for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
-          }
-        }
-        const where = whereParts.join(" AND ");
+        const k = adapter.kind;
+        const filter = buildFilterWhere(grouped, k);
         const order = orderBy
-          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
+          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
           : "";
-        const dataSql = `SELECT * FROM ${sanitizeIdentifier(table)} WHERE ${where}${order} LIMIT ? OFFSET ?`;
-        const result = adapter.executeReadonlyQuery(dataSql, [
-          ...params,
-          EXPORT_MAX_ROWS,
-          0,
-        ]);
+        const tbl = sanitizeIdentifier(table, k);
+        const limitOffset = filter.useParams
+          ? "LIMIT ? OFFSET ?"
+          : `LIMIT ${EXPORT_MAX_ROWS} OFFSET 0`;
+        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
+        const result = adapter.executeReadonlyQuery(
+          dataSql,
+          filter.useParams ? [...filter.params, EXPORT_MAX_ROWS, 0] : undefined,
+        );
         rows = result.rows;
       } else {
         const result = adapter.getTablePage(table, {
