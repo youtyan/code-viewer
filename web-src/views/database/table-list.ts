@@ -161,11 +161,11 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     if (expanded) {
       expandedTables.delete(tableName);
       children.hidden = true;
-      arrow.textContent = "▸";
+      arrow.classList.remove("expanded");
     } else {
       expandedTables.add(tableName);
       children.hidden = false;
-      arrow.textContent = "▾";
+      arrow.classList.add("expanded");
       if (children.children.length === 0) {
         renderColumns(children, tableName);
       }
@@ -208,7 +208,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
         const arrow = document.createElement("span");
         arrow.className = "db-table-arrow";
-        arrow.textContent = expandedTables.has(table.name) ? "▾" : "▸";
+        if (expandedTables.has(table.name)) arrow.classList.add("expanded");
 
         const icon = document.createElement("span");
         icon.className = "db-table-icon";
