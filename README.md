@@ -14,6 +14,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot be rendered.
 - Switch the viewer UI between English and Japanese from Viewer Settings.
+- Browse SQLite, PostgreSQL, and MySQL databases with a built-in database viewer.
 - Read the built-in Help page for repository browsing, diffs, annotations, agent skills, and shortcuts.
 - Open repository folders in the OS file manager from localhost-only actions.
 - Upload files into worktree folders when upload is explicitly enabled.
@@ -111,6 +112,75 @@ Use `scope.omitDirs` for directories that should stay visible as skipped, and
 `scope.excludeNames` for file or directory names that should be hidden entirely.
 `.DS_Store` is hidden by default.
 
+## Database Viewer
+
+code-viewer auto-discovers databases in your repository and provides a
+browser-based viewer for exploring their contents.
+
+**SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
+automatically by scanning the repository tree. **PostgreSQL** and **MySQL**
+databases are detected from `docker-compose.yml` and connected through
+Docker.
+
+### Browser UI
+
+Open the database icon in the sidebar to access:
+
+- **Table browser** — paginated data grid with column sorting, text
+  filtering, and CSV/JSON export.
+- **Query editor** — execute read-only SQL with syntax highlighting.
+  Results and history are saved and shared across tabs.
+- **ER diagram** — auto-generated entity-relationship diagram showing
+  foreign key relationships between tables.
+- **Global search** — full-text search across all tables and text columns.
+- **Snapshots & diffs** — take point-in-time snapshots of selected tables
+  and compare any two snapshots to see inserted, updated, and deleted rows
+  with full before/after values.
+
+### CLI
+
+AI agents can query databases and manage snapshots from the command line:
+
+```sh
+code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
+    --title "Sample users" --body "Checking user data shape."
+
+code-viewer query search --db app.db --term "john@example.com"
+
+code-viewer query snapshot create --db app.db --tables users,orders \
+    --note "Before migration"
+```
+
+`code-viewer query --help` shows all commands. `code-viewer query agent-help`
+prints a detailed guide for AI agents covering queries, search, snapshots,
+and diffs.
+
+### Snapshot & Diff Workflow
+
+Snapshots capture the state of selected tables at a point in time. Diff any
+two snapshots to verify that a migration, test, or operation changed exactly
+what you expected:
+
+```sh
+# 1. Snapshot before the operation
+code-viewer query snapshot create --db app.db --tables users --note "Before"
+
+# 2. (run the migration / test / script)
+
+# 3. Snapshot after
+code-viewer query snapshot create --db app.db --tables users --note "After"
+
+# 4. List snapshots to get IDs
+code-viewer query snapshot list --db app.db
+
+# 5. Compare
+code-viewer query diff tables --before snap-abc123 --after snap-def456
+code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users
+```
+
+Diffs are computed on demand — no pre-computation needed. The browser's
+Snapshot tab provides a visual interface for the same workflow.
+
 ## AI Code Annotations
 
 AI coding agents (Claude Code, Codex, and similar CLI agents) can walk you
@@ -163,9 +233,9 @@ write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
-The package bundles an [Agent Skill](https://agentskills.io) (the SKILL.md
-open standard) that teaches AI coding agents when and how to use
-`annotate`. Install it into the current project:
+The package bundles [Agent Skills](https://agentskills.io) (the SKILL.md
+open standard) that teach AI coding agents when and how to use
+`annotate`, `query`, and `snapshot`. Install them into the current project:
 
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
