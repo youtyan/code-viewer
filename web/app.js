@@ -9480,11 +9480,11 @@ ${frontmatter.yaml}
       if (expanded) {
         expandedTables.delete(tableName);
         children.hidden = true;
-        arrow.textContent = "▸";
+        arrow.classList.remove("expanded");
       } else {
         expandedTables.add(tableName);
         children.hidden = false;
-        arrow.textContent = "▾";
+        arrow.classList.add("expanded");
         if (children.children.length === 0) {
           renderColumns(children, tableName);
         }
@@ -9522,7 +9522,8 @@ ${frontmatter.yaml}
           row.dataset.table = table2.name;
           const arrow = document.createElement("span");
           arrow.className = "db-table-arrow";
-          arrow.textContent = expandedTables.has(table2.name) ? "▾" : "▸";
+          if (expandedTables.has(table2.name))
+            arrow.classList.add("expanded");
           const icon = document.createElement("span");
           icon.className = "db-table-icon";
           icon.textContent = table2.type === "view" ? "V" : "T";
