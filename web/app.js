@@ -519,10 +519,13 @@
       case "/database": {
         const db = params.get("db") || undefined;
         const table = params.get("table") || undefined;
+        const tabRaw = params.get("tab");
+        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" ? tabRaw : undefined;
         return {
           screen: "database",
           ...db ? { db } : {},
           ...table ? { table } : {},
+          ...tab ? { tab } : {},
           range
         };
       }
@@ -578,6 +581,8 @@
           params.set("db", route.db);
         if (route.table)
           params.set("table", route.table);
+        if (route.tab)
+          params.set("tab", route.tab);
         const qs = params.toString();
         return `/database${qs ? `?${qs}` : ""}`;
       }
@@ -7838,6 +7843,8 @@ ${frontmatter.yaml}
     for (const table2 of schema.tables) {
       if (table2.type === "view")
         continue;
+      if (!columnsMap.has(table2.name))
+        continue;
       const id = sanitizeMermaidId(table2.name);
       const cols = columnsMap.get(table2.name) || [];
       lines.push(`  ${id} {`);
@@ -7861,6 +7868,8 @@ ${frontmatter.yaml}
       if (seen.has(key))
         continue;
       seen.add(key);
+      if (!columnsMap.has(fk.fromTable) || !columnsMap.has(fk.toTable))
+        continue;
       const toTable = schema.tables.find((t2) => t2.name === fk.toTable);
       if (!toTable || toTable.type === "view")
         continue;
@@ -7999,6 +8008,29 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/query-editor.ts
+  var HISTORY_KEY = "db:query-history";
+  var MAX_HISTORY = 50;
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (!raw)
+        return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((s2) => typeof s2 === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveToHistory(sql) {
+    const history2 = loadHistory();
+    const idx = history2.indexOf(sql);
+    if (idx >= 0)
+      history2.splice(idx, 1);
+    history2.unshift(sql);
+    if (history2.length > MAX_HISTORY)
+      history2.length = MAX_HISTORY;
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history2));
+  }
   function createQueryEditor(callbacks) {
     const el = document.createElement("div");
     el.className = "db-query-editor";
@@ -8016,10 +8048,23 @@ ${frontmatter.yaml}
     runBtn.type = "button";
     runBtn.textContent = "Run";
     runBtn.title = "Execute query (Ctrl+Enter)";
+    const explainBtn = document.createElement("button");
+    explainBtn.className = "db-query-run db-query-explain";
+    explainBtn.type = "button";
+    explainBtn.textContent = "Explain";
+    explainBtn.title = "Show query execution plan";
+    const historyBtn = document.createElement("button");
+    historyBtn.className = "db-query-history-btn";
+    historyBtn.type = "button";
+    historyBtn.textContent = "History";
+    historyBtn.title = "Query history";
     const statusSpan = document.createElement("span");
     statusSpan.className = "db-query-status";
-    toolbar.append(runBtn, statusSpan);
-    inputArea.append(textarea, toolbar);
+    const historyDropdown = document.createElement("div");
+    historyDropdown.className = "db-query-history-dropdown";
+    historyDropdown.hidden = true;
+    toolbar.append(runBtn, explainBtn, historyBtn, statusSpan);
+    inputArea.append(textarea, toolbar, historyDropdown);
     const resultArea = document.createElement("div");
     resultArea.className = "db-query-result";
     resultArea.hidden = true;
@@ -8043,6 +8088,7 @@ ${frontmatter.yaml}
           resultArea.appendChild(errEl);
           return;
         }
+        saveToHistory(sql);
         const suffix = result.truncated ? "+" : "";
         statusSpan.textContent = `${result.rowCount}${suffix} rows (${result.elapsedMs}ms)`;
         renderResultTable(result);
@@ -8104,7 +8150,75 @@ ${frontmatter.yaml}
       wrapper.appendChild(table2);
       resultArea.appendChild(wrapper);
     }
+    async function runExplain() {
+      const sql = textarea.value.trim();
+      if (!sql)
+        return;
+      explainBtn.disabled = true;
+      runBtn.disabled = true;
+      statusSpan.textContent = "Explaining…";
+      resultArea.hidden = true;
+      try {
+        const result = await callbacks.executeQuery(`EXPLAIN QUERY PLAN ${sql}`);
+        if (result.error) {
+          statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+          resultArea.hidden = false;
+          resultArea.innerHTML = "";
+          const errEl = document.createElement("pre");
+          errEl.className = "db-query-error";
+          errEl.textContent = result.error;
+          resultArea.appendChild(errEl);
+          return;
+        }
+        statusSpan.textContent = `Explain (${result.elapsedMs}ms)`;
+        renderResultTable(result);
+      } catch (err) {
+        statusSpan.textContent = "Failed";
+        resultArea.hidden = false;
+        resultArea.innerHTML = "";
+        const errEl = document.createElement("pre");
+        errEl.className = "db-query-error";
+        errEl.textContent = err instanceof Error ? err.message : String(err);
+        resultArea.appendChild(errEl);
+      } finally {
+        explainBtn.disabled = false;
+        runBtn.disabled = false;
+      }
+    }
     runBtn.addEventListener("click", run);
+    explainBtn.addEventListener("click", runExplain);
+    historyBtn.addEventListener("click", () => {
+      if (!historyDropdown.hidden) {
+        historyDropdown.hidden = true;
+        return;
+      }
+      const history2 = loadHistory();
+      historyDropdown.innerHTML = "";
+      if (history2.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-query-history-empty";
+        empty.textContent = "No history";
+        historyDropdown.appendChild(empty);
+      } else {
+        for (const sql of history2) {
+          const item = document.createElement("div");
+          item.className = "db-query-history-item";
+          item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
+          item.title = sql;
+          item.addEventListener("click", () => {
+            textarea.value = sql;
+            historyDropdown.hidden = true;
+          });
+          historyDropdown.appendChild(item);
+        }
+      }
+      historyDropdown.hidden = false;
+    });
+    document.addEventListener("click", (e2) => {
+      if (!historyDropdown.hidden && !historyBtn.contains(e2.target) && !historyDropdown.contains(e2.target)) {
+        historyDropdown.hidden = true;
+      }
+    });
     textarea.addEventListener("keydown", (e2) => {
       if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
         e2.preventDefault();
@@ -8254,8 +8368,11 @@ ${frontmatter.yaml}
     spacer.className = "db-grid-spacer";
     const body = document.createElement("div");
     body.className = "db-grid-body";
+    const detailPanel = document.createElement("div");
+    detailPanel.className = "db-grid-detail-panel";
+    detailPanel.hidden = true;
     viewport.append(spacer, body);
-    el.append(filterBar, headerWrap, filterRowWrap, viewport);
+    el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
     let currentTable = "";
     let columns = [];
     let columnNames = [];
@@ -8311,6 +8428,52 @@ ${frontmatter.yaml}
       spacer.style.height = "0px";
       statusEl?.remove();
       statusEl = null;
+      detailPanel.hidden = true;
+      detailPanel.innerHTML = "";
+    }
+    function showCellDetail(colIndex, value) {
+      const colName = columnNames[colIndex];
+      const colType = columns[colIndex]?.type || "";
+      detailPanel.hidden = false;
+      detailPanel.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "db-grid-detail-header";
+      const title = document.createElement("span");
+      title.className = "db-grid-detail-title";
+      title.textContent = `${colName} (${colType})`;
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "db-grid-detail-close";
+      closeBtn.textContent = "×";
+      closeBtn.addEventListener("click", () => {
+        detailPanel.hidden = true;
+      });
+      header.append(title, closeBtn);
+      const content = document.createElement("div");
+      content.className = "db-grid-detail-content";
+      if (value === null) {
+        content.textContent = "NULL";
+        content.classList.add("null");
+      } else if (value instanceof Uint8Array) {
+        content.textContent = `BLOB (${value.byteLength} bytes)`;
+        content.classList.add("blob");
+      } else {
+        const str = typeof value === "object" ? JSON.stringify(value) : String(value);
+        if (str.length > 0 && (str[0] === "{" || str[0] === "[")) {
+          try {
+            const parsed = JSON.parse(str);
+            const pre = document.createElement("pre");
+            pre.className = "db-grid-detail-json";
+            pre.textContent = JSON.stringify(parsed, null, 2);
+            content.appendChild(pre);
+          } catch {
+            content.textContent = str;
+          }
+        } else {
+          content.textContent = str;
+        }
+      }
+      detailPanel.append(header, content);
     }
     function renderHeader() {
       headerRow.innerHTML = "";
@@ -8460,6 +8623,10 @@ ${frontmatter.yaml}
                 cell.classList.add("null");
               if (rowData[c2] instanceof Uint8Array)
                 cell.classList.add("blob");
+              cell.style.cursor = "pointer";
+              const cellValue = rowData[c2];
+              const cellColIndex = c2;
+              cell.addEventListener("click", () => showCellDetail(cellColIndex, cellValue));
               row.appendChild(cell);
             }
           } else {
@@ -8474,10 +8641,47 @@ ${frontmatter.yaml}
         }
       });
     }
+    function triggerExport(format2) {
+      const dbId = callbacks.getDbId();
+      if (!dbId || !currentTable)
+        return;
+      const params = new URLSearchParams({
+        db: dbId,
+        table: currentTable,
+        format: format2
+      });
+      if (sort) {
+        params.set("sort", sort.column);
+        params.set("dir", sort.direction);
+      }
+      const filters = collectFilters();
+      if (filters.length > 0) {
+        params.set("filters", JSON.stringify(filters));
+      }
+      const a2 = document.createElement("a");
+      a2.href = `/_db/export?${params}`;
+      a2.download = `${currentTable}.${format2}`;
+      document.body.appendChild(a2);
+      a2.click();
+      a2.remove();
+    }
+    let exportCsvBtn = null;
+    let exportJsonBtn = null;
     function updateStatus() {
       if (!statusEl) {
         statusEl = document.createElement("div");
         statusEl.className = "db-grid-status";
+        exportCsvBtn = document.createElement("button");
+        exportCsvBtn.type = "button";
+        exportCsvBtn.className = "db-grid-export-btn";
+        exportCsvBtn.textContent = "Export CSV";
+        exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
+        exportJsonBtn = document.createElement("button");
+        exportJsonBtn.type = "button";
+        exportJsonBtn.className = "db-grid-export-btn";
+        exportJsonBtn.textContent = "Export JSON";
+        exportJsonBtn.addEventListener("click", () => triggerExport("json"));
+        statusEl.append(exportCsvBtn, exportJsonBtn);
         el.appendChild(statusEl);
       }
       const parts = [`${totalRows.toLocaleString()} rows`];
@@ -8486,7 +8690,12 @@ ${frontmatter.yaml}
       const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
       if (activeFilterCount > 0)
         parts.push(`${activeFilterCount} filter(s)`);
-      statusEl.textContent = parts.join(" | ");
+      const textNode = statusEl.firstChild;
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        textNode.textContent = `${parts.join(" | ")} `;
+      } else {
+        statusEl.insertBefore(document.createTextNode(`${parts.join(" | ")} `), statusEl.firstChild);
+      }
     }
     function load(table2, initialData) {
       clear();
@@ -8621,6 +8830,7 @@ ${frontmatter.yaml}
     let mounted = false;
     let currentDb = null;
     let schemaCache = null;
+    let lastFiles = [];
     const dbSelect = document.createElement("select");
     dbSelect.className = "db-file-select";
     dbSelect.title = "Select database file";
@@ -8642,7 +8852,8 @@ ${frontmatter.yaml}
     sidebar.className = "db-sidebar";
     sidebar.append(dbToolbar, tableList.el);
     const grid = createTableGrid({
-      fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters)
+      fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters),
+      getDbId: () => currentDb?.id || null
     });
     const queryEditor = createQueryEditor({
       executeQuery: (sql) => executeQuery(sql)
@@ -8692,7 +8903,7 @@ ${frontmatter.yaml}
       currentDb = null;
       schemaCache = null;
     }
-    function setActiveTab(tab) {
+    function setActiveTab(tab, updateUrl = true) {
       tabData.classList.toggle("active", tab === "data");
       tabQuery.classList.toggle("active", tab === "query");
       tabSchema.classList.toggle("active", tab === "schema");
@@ -8703,6 +8914,16 @@ ${frontmatter.yaml}
       erDiagram.el.hidden = tab !== "er";
       if (tab === "query")
         queryEditor.focus();
+      if (updateUrl) {
+        const activeTable = tableList.el.querySelector(".db-table-item.active");
+        deps.setRoute({
+          screen: "database",
+          db: currentDb?.id,
+          table: activeTable?.dataset.table,
+          tab: tab === "data" ? undefined : tab,
+          range: deps.currentRange()
+        }, true);
+      }
     }
     tabData.addEventListener("click", () => setActiveTab("data"));
     tabQuery.addEventListener("click", () => setActiveTab("query"));
@@ -8821,6 +9042,13 @@ ${frontmatter.yaml}
       const dbId = dbSelect.value;
       if (!dbId)
         return;
+      const file = lastFiles.find((f2) => f2.id === dbId);
+      if (file?.id.startsWith("docker:")) {
+        alert("PostgreSQL/MySQL adapter is not yet implemented");
+        if (currentDb)
+          dbSelect.value = currentDb.id;
+        return;
+      }
       const option = dbSelect.selectedOptions[0];
       currentDb = {
         id: dbId,
@@ -8832,12 +9060,13 @@ ${frontmatter.yaml}
       deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
       selectDb(dbId);
     });
-    async function enter(db, table2) {
+    async function enter(db, table2, tab) {
       mount();
       document.body.classList.add("gdp-database-page");
       deps.setPageMode();
       deps.syncHeaderMenu();
       const files = await fetchDbFiles();
+      lastFiles = files;
       dbSelect.innerHTML = "";
       if (files.length === 0) {
         const opt = document.createElement("option");
@@ -8851,15 +9080,32 @@ ${frontmatter.yaml}
       for (const f2 of files) {
         const opt = document.createElement("option");
         opt.value = f2.id;
-        opt.textContent = `${f2.path} (${formatSize(f2.sizeBytes)})`;
+        const isDocker = f2.id.startsWith("docker:");
+        const label = isDocker ? `${f2.name} (Docker)` : `${f2.path} (${formatSize(f2.sizeBytes)})`;
+        opt.textContent = label;
         dbSelect.appendChild(opt);
       }
       const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
+      if (currentDb?.id.startsWith("docker:")) {
+        alert("PostgreSQL/MySQL adapter is not yet implemented");
+        return;
+      }
       await selectDb(target);
       if (table2) {
-        selectTable(table2);
+        await selectTable(table2);
+      }
+      if (tab && tab !== "data") {
+        setActiveTab(tab);
+        if (tab === "schema") {
+          const activeTable = tableList.el.querySelector(".db-table-item.active");
+          if (activeTable?.dataset.table)
+            showSchema(activeTable.dataset.table);
+        } else if (tab === "er") {
+          if (schemaCache)
+            renderErDiagram();
+        }
       }
     }
     function leave() {
@@ -18378,7 +18624,7 @@ ${frontmatter.yaml}
         return Promise.resolve();
       }
       if (STATE.route.screen === "database") {
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
         setStatus("live");
         return Promise.resolve();
       }
@@ -18427,7 +18673,7 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
       } else if (STATE.route.screen === "database") {
         setStatus("live");
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
       } else
         load();
       syncLineRefPill();
@@ -18568,7 +18814,7 @@ ${frontmatter.yaml}
         cancelActiveSourceLoad("navigation");
         setPageMode();
         removeStandaloneSource();
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
         setStatus("live");
         return;
       }

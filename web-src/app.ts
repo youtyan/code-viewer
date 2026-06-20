@@ -2266,7 +2266,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return Promise.resolve();
     }
     if (STATE.route.screen === "database") {
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
       setStatus("live");
       return Promise.resolve();
     }
@@ -2315,7 +2315,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       HISTORY_VIEW.enterHistory();
     } else if (STATE.route.screen === "database") {
       setStatus("live");
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -2490,7 +2490,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       cancelActiveSourceLoad("navigation");
       setPageMode();
       removeStandaloneSource();
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table);
+      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
       setStatus("live");
       return;
     }

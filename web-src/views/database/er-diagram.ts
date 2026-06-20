@@ -78,6 +78,7 @@ function buildErMarkup(
 
   for (const table of schema.tables) {
     if (table.type === "view") continue;
+    if (!columnsMap.has(table.name)) continue;
     const id = sanitizeMermaidId(table.name);
     const cols = columnsMap.get(table.name) || [];
     lines.push(`  ${id} {`);
@@ -103,6 +104,7 @@ function buildErMarkup(
     const key = `${fromId}--${toId}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    if (!columnsMap.has(fk.fromTable) || !columnsMap.has(fk.toTable)) continue;
     const toTable = schema.tables.find((t) => t.name === fk.toTable);
     if (!toTable || toTable.type === "view") continue;
     lines.push(`  ${toId} ||--o{ ${fromId} : "${fk.fromColumn}"`);

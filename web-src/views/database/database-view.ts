@@ -22,14 +22,17 @@ export type DatabaseViewDeps = {
 };
 
 export type DatabaseView = {
-  enter: (db?: string, table?: string) => void;
+  enter: (db?: string, table?: string, tab?: TabName) => void;
   leave: () => void;
 };
+
+type TabName = "data" | "query" | "schema" | "er";
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
   let currentDb: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
+  let lastFiles: DbFileInfo[] = [];
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -59,6 +62,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const grid = createTableGrid({
     fetchPage: (table, offset, limit, sort, filters) =>
       fetchTablePage(table, offset, limit, sort, filters),
+    getDbId: () => currentDb?.id || null,
   });
 
   const queryEditor = createQueryEditor({
@@ -116,9 +120,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     schemaCache = null;
   }
 
-  type TabName = "data" | "query" | "schema" | "er";
-
-  function setActiveTab(tab: TabName) {
+  function setActiveTab(tab: TabName, updateUrl = true) {
     tabData.classList.toggle("active", tab === "data");
     tabQuery.classList.toggle("active", tab === "query");
     tabSchema.classList.toggle("active", tab === "schema");
@@ -128,6 +130,21 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     schemaView.el.hidden = tab !== "schema";
     erDiagram.el.hidden = tab !== "er";
     if (tab === "query") queryEditor.focus();
+    if (updateUrl) {
+      const activeTable = tableList.el.querySelector<HTMLElement>(
+        ".db-table-item.active",
+      );
+      deps.setRoute(
+        {
+          screen: "database",
+          db: currentDb?.id,
+          table: activeTable?.dataset.table,
+          tab: tab === "data" ? undefined : tab,
+          range: deps.currentRange(),
+        },
+        true,
+      );
+    }
   }
 
   tabData.addEventListener("click", () => setActiveTab("data"));
@@ -260,6 +277,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   dbSelect.addEventListener("change", () => {
     const dbId = dbSelect.value;
     if (!dbId) return;
+    const file = lastFiles.find((f) => f.id === dbId);
+    if (file?.id.startsWith("docker:")) {
+      alert("PostgreSQL/MySQL adapter is not yet implemented");
+      if (currentDb) dbSelect.value = currentDb.id;
+      return;
+    }
     const option = dbSelect.selectedOptions[0];
     currentDb = {
       id: dbId,
@@ -275,13 +298,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     selectDb(dbId);
   });
 
-  async function enter(db?: string, table?: string) {
+  async function enter(db?: string, table?: string, tab?: TabName) {
     mount();
     document.body.classList.add("gdp-database-page");
     deps.setPageMode();
     deps.syncHeaderMenu();
 
     const files = await fetchDbFiles();
+    lastFiles = files;
     dbSelect.innerHTML = "";
     if (files.length === 0) {
       const opt = document.createElement("option");
@@ -295,7 +319,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     for (const f of files) {
       const opt = document.createElement("option");
       opt.value = f.id;
-      opt.textContent = `${f.path} (${formatSize(f.sizeBytes)})`;
+      const isDocker = f.id.startsWith("docker:");
+      const label = isDocker
+        ? `${f.name} (Docker)`
+        : `${f.path} (${formatSize(f.sizeBytes)})`;
+      opt.textContent = label;
       dbSelect.appendChild(opt);
     }
 
@@ -303,9 +331,25 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     dbSelect.value = target;
     currentDb = files.find((f) => f.id === target) || null;
 
+    if (currentDb?.id.startsWith("docker:")) {
+      alert("PostgreSQL/MySQL adapter is not yet implemented");
+      return;
+    }
+
     await selectDb(target);
     if (table) {
-      selectTable(table);
+      await selectTable(table);
+    }
+    if (tab && tab !== "data") {
+      setActiveTab(tab);
+      if (tab === "schema") {
+        const activeTable = tableList.el.querySelector<HTMLElement>(
+          ".db-table-item.active",
+        );
+        if (activeTable?.dataset.table) showSchema(activeTable.dataset.table);
+      } else if (tab === "er") {
+        if (schemaCache) renderErDiagram();
+      }
     }
   }
 

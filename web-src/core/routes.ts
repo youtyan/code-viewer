@@ -28,7 +28,13 @@ export type AppRoute =
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
   | { screen: "history"; ref: string; commit?: string; range: DiffRange }
-  | { screen: "database"; db?: string; table?: string; range: DiffRange }
+  | {
+      screen: "database";
+      db?: string;
+      table?: string;
+      tab?: "data" | "query" | "schema" | "er";
+      range: DiffRange;
+    }
   | {
       screen: "unknown";
       reason: "unknown-pathname" | "missing-path";
@@ -156,10 +162,19 @@ export function parseRoute(
     case "/database": {
       const db = params.get("db") || undefined;
       const table = params.get("table") || undefined;
+      const tabRaw = params.get("tab");
+      const tab =
+        tabRaw === "data" ||
+        tabRaw === "query" ||
+        tabRaw === "schema" ||
+        tabRaw === "er"
+          ? tabRaw
+          : undefined;
       return {
         screen: "database",
         ...(db ? { db } : {}),
         ...(table ? { table } : {}),
+        ...(tab ? { tab } : {}),
         range,
       };
     }
@@ -238,6 +253,7 @@ export function buildRoute(route: AppRoute): string {
       const params = new URLSearchParams();
       if (route.db) params.set("db", route.db);
       if (route.table) params.set("table", route.table);
+      if (route.tab) params.set("tab", route.tab);
       const qs = params.toString();
       return `/database${qs ? `?${qs}` : ""}`;
     }
