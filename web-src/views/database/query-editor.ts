@@ -101,14 +101,23 @@ export function createQueryEditor(
     syncHighlight();
   });
 
+  function syncEditorHeight() {
+    textarea.style.height = "auto";
+    const h = Math.max(60, Math.min(textarea.scrollHeight, 300));
+    textarea.style.height = `${h}px`;
+    editorWrap.style.height = `${h}px`;
+  }
+
   function syncHighlight() {
     const code = textarea.value;
     if (!code) {
       highlight.innerHTML = "";
+      syncEditorHeight();
       return;
     }
     if (!shiki) {
       highlight.textContent = code;
+      syncEditorHeight();
       return;
     }
     const html = shiki.codeToHtml(code, {
@@ -124,6 +133,7 @@ export function createQueryEditor(
     } else {
       highlight.textContent = code;
     }
+    syncEditorHeight();
   }
 
   textarea.addEventListener("input", syncHighlight);
@@ -309,7 +319,7 @@ export function createQueryEditor(
         item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
         item.title = sql;
         item.addEventListener("click", () => {
-          textarea.value = sql;
+          setSql(sql);
           historyDropdown.hidden = true;
         });
         historyDropdown.appendChild(item);
@@ -332,6 +342,29 @@ export function createQueryEditor(
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       run();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      if (e.shiftKey) {
+        const before = textarea.value.slice(0, start);
+        const lineStart = before.lastIndexOf("\n") + 1;
+        const linePrefix = textarea.value.slice(lineStart, start);
+        const spaces = linePrefix.match(/^ {1,2}/);
+        if (spaces) {
+          textarea.setRangeText(
+            "",
+            lineStart,
+            lineStart + spaces[0].length,
+            "end",
+          );
+        }
+      } else {
+        textarea.setRangeText("  ", start, end, "end");
+      }
+      syncHighlight();
     }
   });
 

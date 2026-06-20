@@ -43,6 +43,7 @@ export function createQueryHistoryView(
   el.append(toolbar, listEl);
 
   let entries: QueryHistoryEntry[] = [];
+  const expandedIds = new Set<string>();
 
   async function refresh() {
     const dbId = callbacks.getDbId();
@@ -111,7 +112,9 @@ export function createQueryHistoryView(
 
     const detail = document.createElement("div");
     detail.className = "db-query-history-detail";
-    detail.hidden = true;
+    const expanded = expandedIds.has(entry.id);
+    detail.hidden = !expanded;
+    if (expanded) item.classList.add("expanded");
 
     const sqlBlock = document.createElement("pre");
     sqlBlock.className = "db-query-history-sql";
@@ -133,13 +136,30 @@ export function createQueryHistoryView(
     const actions = document.createElement("div");
     actions.className = "db-query-history-actions";
 
+    const useBtn = document.createElement("button");
+    useBtn.className = "db-query-history-action";
+    useBtn.type = "button";
+    useBtn.textContent = "Use in Editor";
+    useBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      callbacks.copySqlToQuery(entry.sql);
+    });
+
     const copyBtn = document.createElement("button");
     copyBtn.className = "db-query-history-action";
     copyBtn.type = "button";
     copyBtn.textContent = "Copy SQL";
     copyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      callbacks.copySqlToQuery(entry.sql);
+      navigator.clipboard.writeText(entry.sql).then(
+        () => {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy SQL";
+          }, 1500);
+        },
+        () => {},
+      );
     });
 
     const deleteBtn = document.createElement("button");
@@ -148,17 +168,23 @@ export function createQueryHistoryView(
     deleteBtn.textContent = "Delete";
     deleteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      deleteEntry(entry.id);
+      deleteEntry(entry.id, item);
     });
 
-    actions.append(copyBtn, deleteBtn);
+    actions.append(useBtn, copyBtn, deleteBtn);
     detail.appendChild(actions);
 
     item.append(header, detail);
 
     header.addEventListener("click", () => {
-      detail.hidden = !detail.hidden;
-      item.classList.toggle("expanded", !detail.hidden);
+      const willExpand = detail.hidden;
+      detail.hidden = !willExpand;
+      item.classList.toggle("expanded", willExpand);
+      if (willExpand) {
+        expandedIds.add(entry.id);
+      } else {
+        expandedIds.delete(entry.id);
+      }
     });
 
     return item;
@@ -214,7 +240,7 @@ export function createQueryHistoryView(
     return wrapper;
   }
 
-  async function deleteEntry(id: string) {
+  async function deleteEntry(id: string, itemEl?: HTMLElement) {
     try {
       await fetch("/_db/history/delete", {
         method: "POST",
@@ -225,7 +251,13 @@ export function createQueryHistoryView(
         body: JSON.stringify({ id }),
       });
       entries = entries.filter((e) => e.id !== id);
-      render();
+      expandedIds.delete(id);
+      if (itemEl) {
+        itemEl.remove();
+        if (entries.length === 0) render();
+      } else {
+        render();
+      }
     } catch {
       /* ignore */
     }
