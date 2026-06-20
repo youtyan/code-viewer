@@ -11,7 +11,11 @@ import {
   getConnection,
   setAdapterFactory,
 } from "./connection-pool";
-import { discoverSqliteFiles, validateDbPath } from "./discovery";
+import {
+  discoverDockerDatabases,
+  discoverSqliteFiles,
+  validateDbPath,
+} from "./discovery";
 
 let initialized = false;
 
@@ -51,15 +55,19 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
 }
 
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
-  const files = discoverSqliteFiles(cwd, omitDirNames);
+  const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
+  const dockerDbs = discoverDockerDatabases(cwd);
   const body: DbFilesResponse = {
-    files: files.map((f) => ({
-      id: f.path,
-      path: f.path,
-      name: f.name,
-      sizeBytes: f.sizeBytes,
-      kind: "sqlite" as const,
-    })),
+    files: [
+      ...sqliteFiles.map((f) => ({
+        id: f.path,
+        path: f.path,
+        name: f.name,
+        sizeBytes: f.sizeBytes,
+        kind: "sqlite" as const,
+      })),
+      ...dockerDbs,
+    ],
   };
   return json(body);
 }
@@ -260,6 +268,147 @@ async function handleQuery(cwd: string, req: Request): Promise<Response> {
   }
 }
 
+const EXPORT_MAX_ROWS = 100_000;
+
+function formatCsvField(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
+  const str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  if (
+    str.includes(",") ||
+    str.includes('"') ||
+    str.includes("\n") ||
+    str.includes("\r")
+  ) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+async function handleExport(cwd: string, url: URL): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const table = url.searchParams.get("table");
+  if (!table) return textError("missing table parameter", 400);
+  const format = url.searchParams.get("format");
+  if (format !== "csv" && format !== "json")
+    return textError("format must be csv or json", 400);
+
+  let orderBy: DbOrder[] | undefined;
+  const sortCol = url.searchParams.get("sort");
+  const sortDir = url.searchParams.get("dir");
+  if (sortCol) {
+    orderBy = [
+      {
+        column: sortCol,
+        direction: sortDir === "desc" ? "desc" : "asc",
+      },
+    ];
+  }
+  const filters = parseFilters(url);
+
+  try {
+    const adapter = await getConnection(r.resolved);
+    const columns = adapter.getColumns(table);
+    const colNames = columns.map((c) => c.name);
+    const colNameSet = new Set(colNames);
+    let rows: import("../../core/database/types").DbValue[][];
+
+    if (filters.length > 0) {
+      const validFilters = filters.filter((f) => colNameSet.has(f.column));
+      if (validFilters.length > 0) {
+        const whereParts: string[] = [];
+        const params: string[] = [];
+        const grouped = new Map<string, string[]>();
+        for (const f of validFilters) {
+          const existing = grouped.get(f.value) || [];
+          existing.push(f.column);
+          grouped.set(f.value, existing);
+        }
+        for (const [value, cols] of grouped) {
+          if (cols.length === 1) {
+            whereParts.push(
+              `CAST(${sanitizeIdentifier(cols[0])} AS TEXT) LIKE ?`,
+            );
+            params.push(`%${value}%`);
+          } else {
+            const orParts = cols.map(
+              (c) => `CAST(${sanitizeIdentifier(c)} AS TEXT) LIKE ?`,
+            );
+            whereParts.push(`(${orParts.join(" OR ")})`);
+            for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
+          }
+        }
+        const where = whereParts.join(" AND ");
+        const order = orderBy
+          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
+          : "";
+        const dataSql = `SELECT * FROM ${sanitizeIdentifier(table)} WHERE ${where}${order} LIMIT ? OFFSET ?`;
+        const result = adapter.executeReadonlyQuery(dataSql, [
+          ...params,
+          EXPORT_MAX_ROWS,
+          0,
+        ]);
+        rows = result.rows;
+      } else {
+        const result = adapter.getTablePage(table, {
+          offset: 0,
+          limit: EXPORT_MAX_ROWS,
+          orderBy,
+        });
+        rows = result.rows;
+      }
+    } else {
+      const result = adapter.getTablePage(table, {
+        offset: 0,
+        limit: EXPORT_MAX_ROWS,
+        orderBy,
+      });
+      rows = result.rows;
+    }
+
+    if (format === "csv") {
+      const lines: string[] = [colNames.map(formatCsvField).join(",")];
+      for (const row of rows) {
+        lines.push(row.map(formatCsvField).join(","));
+      }
+      const body = lines.join("\n");
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${table}.csv"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const objects = rows.map((row) => {
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < colNames.length; i++) {
+        const val = row[i];
+        obj[colNames[i]] =
+          val instanceof Uint8Array ? `<blob ${val.byteLength} bytes>` : val;
+      }
+      return obj;
+    });
+    const body = JSON.stringify(objects, null, 2);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${table}.json"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (err) {
+    return textError(
+      `failed to export table: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
   let body: { db?: string };
@@ -287,6 +436,7 @@ export async function handleDatabaseRoute(
   if (path === "/_db/files") return handleFiles(cwd, omitDirNames);
   if (path === "/_db/schema") return handleSchema(cwd, url);
   if (path === "/_db/table") return handleTable(cwd, url);
+  if (path === "/_db/export") return handleExport(cwd, url);
   if (path === "/_db/query") {
     if (!sideEffectAllowed(req)) return textError("forbidden", 403);
     return handleQuery(cwd, req);

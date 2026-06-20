@@ -5543,3 +5543,157 @@ body.annotation-panel-open #content {
 .db-er-svg-wrap .mermaid svg {
   max-width: none !important;
 }
+
+/* ---------- Cell Detail Panel ---------- */
+.db-grid-detail-panel[hidden] {
+  display: none !important;
+}
+
+.db-grid-detail-panel {
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  max-height: 200px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+
+.db-grid-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--bg-mute);
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.db-grid-detail-title {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.db-grid-detail-close {
+  border: none;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.db-grid-detail-close:hover {
+  color: var(--danger);
+}
+
+.db-grid-detail-content {
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.db-grid-detail-content.null {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+.db-grid-detail-content.blob {
+  color: var(--fg-subtle);
+}
+
+.db-grid-detail-json {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- Export Buttons ---------- */
+.db-grid-export-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: 6px;
+}
+.db-grid-export-btn:hover {
+  background: var(--bg-mute);
+}
+
+/* ---------- Query History ---------- */
+.db-query-history-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.db-query-history-btn:hover {
+  background: var(--bg-mute);
+}
+
+.db-query-history-dropdown[hidden] {
+  display: none !important;
+}
+
+.db-query-history-dropdown {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 250px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  margin-top: 4px;
+}
+
+.db-query-history-item {
+  padding: 6px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid var(--border-muted);
+}
+.db-query-history-item:last-child {
+  border-bottom: none;
+}
+.db-query-history-item:hover {
+  background: var(--accent-subtle);
+}
+
+.db-query-history-empty {
+  padding: 12px;
+  color: var(--fg-muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+/* ---------- Explain Button ---------- */
+.db-query-explain {
+  background: var(--bg-mute);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+.db-query-explain:hover {
+  background: var(--bg-soft);
+}
+
+/* ---------- Query Input (relative positioning for history dropdown) ---------- */
+.db-query-input {
+  position: relative;
+}

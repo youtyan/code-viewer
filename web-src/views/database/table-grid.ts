@@ -28,6 +28,7 @@ export type TableGridCallbacks = {
     sort: GridSort | null,
     filters: GridFilter[],
   ) => Promise<DbTableDataResponse>;
+  getDbId: () => string | null;
 };
 
 export type TableGrid = {
@@ -80,8 +81,12 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   const body = document.createElement("div");
   body.className = "db-grid-body";
 
+  const detailPanel = document.createElement("div");
+  detailPanel.className = "db-grid-detail-panel";
+  detailPanel.hidden = true;
+
   viewport.append(spacer, body);
-  el.append(filterBar, headerWrap, filterRowWrap, viewport);
+  el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
 
   let currentTable = "";
   let columns: DbColumn[] = [];
@@ -139,6 +144,62 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
+    detailPanel.hidden = true;
+    detailPanel.innerHTML = "";
+  }
+
+  function showCellDetail(colIndex: number, value: DbValue) {
+    const colName = columnNames[colIndex];
+    const colType = columns[colIndex]?.type || "";
+
+    detailPanel.hidden = false;
+    detailPanel.innerHTML = "";
+
+    const header = document.createElement("div");
+    header.className = "db-grid-detail-header";
+
+    const title = document.createElement("span");
+    title.className = "db-grid-detail-title";
+    title.textContent = `${colName} (${colType})`;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "db-grid-detail-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => {
+      detailPanel.hidden = true;
+    });
+
+    header.append(title, closeBtn);
+
+    const content = document.createElement("div");
+    content.className = "db-grid-detail-content";
+
+    if (value === null) {
+      content.textContent = "NULL";
+      content.classList.add("null");
+    } else if (value instanceof Uint8Array) {
+      content.textContent = `BLOB (${value.byteLength} bytes)`;
+      content.classList.add("blob");
+    } else {
+      const str =
+        typeof value === "object" ? JSON.stringify(value) : String(value);
+      if (str.length > 0 && (str[0] === "{" || str[0] === "[")) {
+        try {
+          const parsed = JSON.parse(str);
+          const pre = document.createElement("pre");
+          pre.className = "db-grid-detail-json";
+          pre.textContent = JSON.stringify(parsed, null, 2);
+          content.appendChild(pre);
+        } catch {
+          content.textContent = str;
+        }
+      } else {
+        content.textContent = str;
+      }
+    }
+
+    detailPanel.append(header, content);
   }
 
   function renderHeader() {
@@ -308,6 +369,12 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
             cell.textContent = formatValue(rowData[c]);
             if (rowData[c] === null) cell.classList.add("null");
             if (rowData[c] instanceof Uint8Array) cell.classList.add("blob");
+            cell.style.cursor = "pointer";
+            const cellValue = rowData[c];
+            const cellColIndex = c;
+            cell.addEventListener("click", () =>
+              showCellDetail(cellColIndex, cellValue),
+            );
             row.appendChild(cell);
           }
         } else {
@@ -323,10 +390,51 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     });
   }
 
+  function triggerExport(format: "csv" | "json") {
+    const dbId = callbacks.getDbId();
+    if (!dbId || !currentTable) return;
+    const params = new URLSearchParams({
+      db: dbId,
+      table: currentTable,
+      format,
+    });
+    if (sort) {
+      params.set("sort", sort.column);
+      params.set("dir", sort.direction);
+    }
+    const filters = collectFilters();
+    if (filters.length > 0) {
+      params.set("filters", JSON.stringify(filters));
+    }
+    const a = document.createElement("a");
+    a.href = `/_db/export?${params}`;
+    a.download = `${currentTable}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  let exportCsvBtn: HTMLButtonElement | null = null;
+  let exportJsonBtn: HTMLButtonElement | null = null;
+
   function updateStatus() {
     if (!statusEl) {
       statusEl = document.createElement("div");
       statusEl.className = "db-grid-status";
+
+      exportCsvBtn = document.createElement("button");
+      exportCsvBtn.type = "button";
+      exportCsvBtn.className = "db-grid-export-btn";
+      exportCsvBtn.textContent = "Export CSV";
+      exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
+
+      exportJsonBtn = document.createElement("button");
+      exportJsonBtn.type = "button";
+      exportJsonBtn.className = "db-grid-export-btn";
+      exportJsonBtn.textContent = "Export JSON";
+      exportJsonBtn.addEventListener("click", () => triggerExport("json"));
+
+      statusEl.append(exportCsvBtn, exportJsonBtn);
       el.appendChild(statusEl);
     }
     const parts: string[] = [`${totalRows.toLocaleString()} rows`];
@@ -334,7 +442,15 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       parts.push(`Sort: ${sort.column} ${sort.direction.toUpperCase()}`);
     const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
     if (activeFilterCount > 0) parts.push(`${activeFilterCount} filter(s)`);
-    statusEl.textContent = parts.join(" | ");
+    const textNode = statusEl.firstChild;
+    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+      textNode.textContent = `${parts.join(" | ")} `;
+    } else {
+      statusEl.insertBefore(
+        document.createTextNode(`${parts.join(" | ")} `),
+        statusEl.firstChild,
+      );
+    }
   }
 
   function load(table: string, initialData?: DbTableDataResponse) {
