@@ -45,6 +45,14 @@ readiness. Normal releases publish through GitHub Releases and Trusted
 Publisher/OIDC. Use local npm auth commands only for first-publish recovery,
 Trusted Publisher setup verification, or npm-specific troubleshooting.
 
+## UI Component Reuse
+
+- 新しいボタンやUI要素を追加するとき、独自のCSSスタイルを一から書くな。既存のパターンを探して使い回せ。
+- グローバルヘッダー内のボタン → `global-icon-action` クラスを使う。テキスト付きなら `width: auto; padding: 0 8px;` を上書きする程度に留める。
+- topbar内のトグルボタン → `.controls > button` の既存パターン（`#ignore-ws`, `#hide-tests` 参照）を踏襲する。
+- セグメントボタン → `.seg` パターンを使う。
+- 新規パターンが本当に必要な場合のみ、最小限の差分CSSを書く。既存クラスの組み合わせで解決できないか必ず先に検討すること。
+
 ## UI/Test Discipline
 
 - Useless tests waste both time and tokens. Never write tests that only prove an implementation contains a string, selector, function name, class name, or other incidental detail without verifying the user-visible behavior or the real contract.

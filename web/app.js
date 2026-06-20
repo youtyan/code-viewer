@@ -516,6 +516,19 @@
           range
         };
       }
+      case "/database": {
+        const db = params.get("db") || undefined;
+        const table = params.get("table") || undefined;
+        const tabRaw = params.get("tab");
+        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" || tabRaw === "search" || tabRaw === "snapshot" ? tabRaw : undefined;
+        return {
+          screen: "database",
+          ...db ? { db } : {},
+          ...table ? { table } : {},
+          ...tab ? { tab } : {},
+          range
+        };
+      }
       default:
         return {
           screen: "unknown",
@@ -561,6 +574,17 @@
           params.set("commit", route.commit);
         const qs = params.toString();
         return `/history${qs ? `?${qs}` : ""}`;
+      }
+      case "database": {
+        const params = new URLSearchParams;
+        if (route.db)
+          params.set("db", route.db);
+        if (route.table)
+          params.set("table", route.table);
+        if (route.tab)
+          params.set("tab", route.tab);
+        const qs = params.toString();
+        return `/database${qs ? `?${qs}` : ""}`;
       }
       case "unknown":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree");
@@ -7138,8 +7162,13 @@ ${frontmatter.yaml}
     function setAnnotationPanelOpen(open) {
       annotationPanel.hidden = !open;
       document.body.classList.toggle("annotation-panel-open", open);
-      if (open)
+      if (open) {
         annotationPanelDismissed = false;
+        const qhPanel = document.getElementById("query-history-panel");
+        if (qhPanel)
+          qhPanel.hidden = true;
+        document.body.classList.remove("query-history-panel-open");
+      }
       localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
     }
     function annotationLineTarget(entry) {
@@ -7771,6 +7800,2928 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/database/er-diagram.ts
+  var mermaidPromise2 = null;
+  var mermaidInitialized2 = false;
+  async function loadMermaid2() {
+    if (!mermaidPromise2) {
+      mermaidPromise2 = import("/mermaid.js").then((mod) => {
+        const typed = mod;
+        const mermaid = typed.default;
+        if (!mermaidInitialized2) {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme: "default",
+            er: { useMaxWidth: false }
+          });
+          mermaidInitialized2 = true;
+        }
+        return mermaid;
+      }).catch(() => null);
+    }
+    return mermaidPromise2;
+  }
+  function mermaidType(sqlType) {
+    const upper = sqlType.toUpperCase();
+    if (upper.includes("INT"))
+      return "int";
+    if (upper.includes("TEXT") || upper.includes("VARCHAR") || upper.includes("CHAR"))
+      return "string";
+    if (upper.includes("REAL") || upper.includes("FLOAT") || upper.includes("DOUBLE"))
+      return "float";
+    if (upper.includes("BLOB"))
+      return "blob";
+    if (upper.includes("BOOL"))
+      return "bool";
+    if (upper.includes("DATE") || upper.includes("TIME"))
+      return "datetime";
+    if (upper.includes("NUMERIC") || upper.includes("DECIMAL"))
+      return "decimal";
+    return sqlType.replace(/[^a-zA-Z0-9]/g, "_") || "text";
+  }
+  function sanitizeMermaidId(name) {
+    return name.replace(/[^a-zA-Z0-9_]/g, "_");
+  }
+  function buildErMarkup(schema, columnsMap) {
+    const lines = ["erDiagram"];
+    for (const table2 of schema.tables) {
+      if (table2.type === "view")
+        continue;
+      if (!columnsMap.has(table2.name))
+        continue;
+      const id = sanitizeMermaidId(table2.name);
+      const cols = columnsMap.get(table2.name) || [];
+      lines.push(`  ${id} {`);
+      for (const col of cols) {
+        const markers = [];
+        if (col.primaryKey)
+          markers.push("PK");
+        const fk = schema.foreignKeys.find((f2) => f2.fromTable === table2.name && f2.fromColumn === col.name);
+        if (fk)
+          markers.push("FK");
+        const comment2 = markers.length ? `"${markers.join(",")}"` : "";
+        lines.push(`    ${mermaidType(col.type)} ${sanitizeMermaidId(col.name)}${comment2 ? ` ${comment2}` : ""}`);
+      }
+      lines.push("  }");
+    }
+    const seen = new Set;
+    for (const fk of schema.foreignKeys) {
+      const fromId = sanitizeMermaidId(fk.fromTable);
+      const toId = sanitizeMermaidId(fk.toTable);
+      const key = `${fromId}--${toId}`;
+      if (seen.has(key))
+        continue;
+      seen.add(key);
+      if (!columnsMap.has(fk.fromTable) || !columnsMap.has(fk.toTable))
+        continue;
+      const toTable = schema.tables.find((t2) => t2.name === fk.toTable);
+      if (!toTable || toTable.type === "view")
+        continue;
+      lines.push(`  ${toId} ||--o{ ${fromId} : "${fk.fromColumn}"`);
+    }
+    return lines.join(`
+`);
+  }
+  function createErDiagram() {
+    const el = document.createElement("div");
+    el.className = "db-er-diagram";
+    el.hidden = true;
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-er-toolbar";
+    const zoomIn = document.createElement("button");
+    zoomIn.type = "button";
+    zoomIn.className = "db-btn db-er-zoom-btn";
+    zoomIn.textContent = "+";
+    zoomIn.title = "Zoom in";
+    const zoomOut = document.createElement("button");
+    zoomOut.type = "button";
+    zoomOut.className = "db-btn db-er-zoom-btn";
+    zoomOut.textContent = "−";
+    zoomOut.title = "Zoom out";
+    const zoomReset = document.createElement("button");
+    zoomReset.type = "button";
+    zoomReset.className = "db-btn db-er-zoom-btn";
+    zoomReset.textContent = "1:1";
+    zoomReset.title = "Reset zoom";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "db-btn db-er-zoom-btn";
+    copyBtn.textContent = "Copy Mermaid";
+    copyBtn.title = "Copy mermaid source to clipboard";
+    toolbar.append(zoomIn, zoomOut, zoomReset, copyBtn);
+    const container = document.createElement("div");
+    container.className = "db-er-container";
+    const svgWrap = document.createElement("div");
+    svgWrap.className = "db-er-svg-wrap";
+    container.appendChild(svgWrap);
+    el.append(toolbar, container);
+    let scale = 1;
+    let lastMarkup = "";
+    function applyZoom() {
+      svgWrap.style.transform = `scale(${scale})`;
+      svgWrap.style.transformOrigin = "top left";
+    }
+    zoomIn.addEventListener("click", () => {
+      scale = Math.min(3, scale + 0.2);
+      applyZoom();
+    });
+    zoomOut.addEventListener("click", () => {
+      scale = Math.max(0.2, scale - 0.2);
+      applyZoom();
+    });
+    zoomReset.addEventListener("click", () => {
+      scale = 1;
+      applyZoom();
+    });
+    copyBtn.addEventListener("click", () => {
+      if (lastMarkup) {
+        navigator.clipboard.writeText(lastMarkup).then(() => {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy Mermaid";
+          }, 1500);
+        }, () => {});
+      }
+    });
+    let dragState = null;
+    container.addEventListener("mousedown", (e2) => {
+      if (e2.button !== 0)
+        return;
+      dragState = {
+        x: e2.clientX,
+        y: e2.clientY,
+        sl: container.scrollLeft,
+        st: container.scrollTop
+      };
+      container.style.cursor = "grabbing";
+      e2.preventDefault();
+    });
+    window.addEventListener("mousemove", (e2) => {
+      if (!dragState)
+        return;
+      container.scrollLeft = dragState.sl - (e2.clientX - dragState.x);
+      container.scrollTop = dragState.st - (e2.clientY - dragState.y);
+    });
+    window.addEventListener("mouseup", () => {
+      if (dragState) {
+        dragState = null;
+        container.style.cursor = "";
+      }
+    });
+    container.addEventListener("wheel", (e2) => {
+      if (e2.ctrlKey || e2.metaKey) {
+        e2.preventDefault();
+        const delta = e2.deltaY > 0 ? -0.1 : 0.1;
+        scale = Math.max(0.2, Math.min(3, scale + delta));
+        applyZoom();
+      }
+    }, { passive: false });
+    async function render(schema, columnsMap) {
+      el.hidden = false;
+      svgWrap.innerHTML = "";
+      scale = 1;
+      applyZoom();
+      const tables = schema.tables.filter((t2) => t2.type === "table");
+      if (tables.length === 0) {
+        svgWrap.textContent = "No tables to display.";
+        return;
+      }
+      const markup = buildErMarkup(schema, columnsMap);
+      lastMarkup = markup;
+      const mermaid = await loadMermaid2();
+      if (!mermaid) {
+        svgWrap.textContent = "Failed to load mermaid.js";
+        return;
+      }
+      const node = document.createElement("div");
+      node.className = "mermaid";
+      node.textContent = markup;
+      svgWrap.appendChild(node);
+      try {
+        await mermaid.run({ nodes: [node], suppressErrors: true });
+      } catch {
+        svgWrap.textContent = "Failed to render ER diagram.";
+      }
+    }
+    function clear() {
+      el.hidden = true;
+      svgWrap.innerHTML = "";
+      lastMarkup = "";
+    }
+    return { el, render, clear };
+  }
+
+  // web-src/views/database/global-search-view.ts
+  function createGlobalSearchView(deps) {
+    const el = document.createElement("div");
+    el.className = "db-global-search";
+    const header = document.createElement("div");
+    header.className = "db-global-search-header";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "db-global-search-input";
+    input.placeholder = "全テーブルを横断検索...";
+    const searchBtn = document.createElement("button");
+    searchBtn.type = "button";
+    searchBtn.className = "db-global-search-btn";
+    searchBtn.textContent = "検索";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "db-global-search-cancel";
+    cancelBtn.textContent = "キャンセル";
+    cancelBtn.hidden = true;
+    const optionsRow = document.createElement("div");
+    optionsRow.className = "db-global-search-options";
+    const nonTextLabel = document.createElement("label");
+    const nonTextCheck = document.createElement("input");
+    nonTextCheck.type = "checkbox";
+    nonTextLabel.append(nonTextCheck, " 数値・日付カラムも検索する");
+    optionsRow.appendChild(nonTextLabel);
+    header.append(input, searchBtn, cancelBtn);
+    const progress = document.createElement("div");
+    progress.className = "db-global-search-progress";
+    progress.hidden = true;
+    const results = document.createElement("div");
+    results.className = "db-global-search-results";
+    el.append(header, optionsRow, progress, results);
+    let currentJobId = null;
+    let pollTimer = null;
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      cancelBtn.hidden = true;
+      searchBtn.disabled = false;
+      input.disabled = false;
+    }
+    async function startSearch() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      const term = input.value.trim();
+      if (!term)
+        return;
+      results.innerHTML = "";
+      progress.hidden = false;
+      progress.textContent = "検索を開始しています...";
+      searchBtn.disabled = true;
+      input.disabled = true;
+      cancelBtn.hidden = false;
+      try {
+        const res = await fetch("/_db/search/start", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({
+            db: dbId,
+            term,
+            includeNonText: nonTextCheck.checked
+          })
+        });
+        if (!res.ok) {
+          progress.textContent = `エラー: ${await res.text()}`;
+          stopPolling();
+          return;
+        }
+        const data = await res.json();
+        currentJobId = data.jobId;
+        pollTimer = setInterval(() => pollStatus(), 500);
+      } catch (err) {
+        progress.textContent = `エラー: ${err instanceof Error ? err.message : String(err)}`;
+        stopPolling();
+      }
+    }
+    async function pollStatus() {
+      if (!currentJobId)
+        return;
+      try {
+        const res = await fetch(`/_db/search/status?id=${encodeURIComponent(currentJobId)}`);
+        if (!res.ok) {
+          stopPolling();
+          return;
+        }
+        const data = await res.json();
+        if (data.error) {
+          progress.textContent = `エラー: ${data.error}`;
+          stopPolling();
+          return;
+        }
+        const pct = data.totalTables > 0 ? Math.round(data.scannedTables / data.totalTables * 100) : 0;
+        progress.textContent = data.done ? `完了。${data.scannedTables}テーブルから ${data.hits.length}件見つかりました。` : `検索中... ${data.currentTable || "対象テーブルを確認中"} (${pct}% - ${data.scannedTables}/${data.totalTables}テーブル、${data.hits.length}件)`;
+        renderHits(data.hits);
+        if (data.done) {
+          stopPolling();
+          progress.hidden = false;
+        }
+      } catch {}
+    }
+    async function cancelSearch() {
+      if (!currentJobId)
+        return;
+      try {
+        await fetch("/_db/search/cancel", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ id: currentJobId })
+        });
+      } catch {}
+      stopPolling();
+      progress.textContent = "検索をキャンセルしました。";
+    }
+    function renderHits(hits) {
+      results.innerHTML = "";
+      if (hits.length === 0)
+        return;
+      const grouped = new Map;
+      for (const h of hits) {
+        const existing = grouped.get(h.table) || [];
+        existing.push(h);
+        grouped.set(h.table, existing);
+      }
+      for (const [table2, tableHits] of grouped) {
+        const section = document.createElement("div");
+        section.className = "db-search-table-section";
+        const tableHeader = document.createElement("div");
+        tableHeader.className = "db-search-table-header";
+        tableHeader.textContent = `${table2} (${tableHits.length}件)`;
+        section.appendChild(tableHeader);
+        const hitsList = document.createElement("div");
+        hitsList.className = "db-search-hits-list";
+        for (const hit of tableHits.slice(0, 100)) {
+          const row = document.createElement("div");
+          row.className = "db-search-hit-row";
+          const colSpan = document.createElement("span");
+          colSpan.className = "db-search-hit-col";
+          colSpan.textContent = hit.column;
+          const valSpan = document.createElement("span");
+          valSpan.className = "db-search-hit-val";
+          valSpan.textContent = hit.valuePreview;
+          row.append(colSpan, valSpan);
+          hitsList.appendChild(row);
+        }
+        if (tableHits.length > 100) {
+          const more = document.createElement("div");
+          more.className = "db-search-more";
+          more.textContent = `ほか ${tableHits.length - 100}件`;
+          hitsList.appendChild(more);
+        }
+        section.appendChild(hitsList);
+        results.appendChild(section);
+      }
+    }
+    searchBtn.addEventListener("click", startSearch);
+    input.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter")
+        startSearch();
+    });
+    cancelBtn.addEventListener("click", cancelSearch);
+    return { el };
+  }
+
+  // web-src/views/database/query-editor.ts
+  var shikiPromise2 = null;
+  function loadShikiSql() {
+    if (!shikiPromise2) {
+      shikiPromise2 = import("/shiki.js").then((mod) => {
+        const typed = mod;
+        return typed.createHighlighter({
+          themes: ["github-light", "github-dark"],
+          langs: ["sql"]
+        });
+      }).catch(() => null);
+    }
+    return shikiPromise2;
+  }
+  var HISTORY_KEY = "db:query-history";
+  var MAX_HISTORY = 50;
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (!raw)
+        return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((s2) => typeof s2 === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveToHistory(sql) {
+    const history2 = loadHistory();
+    const idx = history2.indexOf(sql);
+    if (idx >= 0)
+      history2.splice(idx, 1);
+    history2.unshift(sql);
+    if (history2.length > MAX_HISTORY)
+      history2.length = MAX_HISTORY;
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history2));
+  }
+  function createQueryEditor(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-query-editor";
+    const inputArea = document.createElement("div");
+    inputArea.className = "db-query-input";
+    const editorWrap = document.createElement("div");
+    editorWrap.className = "db-query-editor-wrap";
+    const highlight = document.createElement("pre");
+    highlight.className = "db-query-highlight";
+    highlight.setAttribute("aria-hidden", "true");
+    const textarea = document.createElement("textarea");
+    textarea.className = "db-query-textarea";
+    textarea.placeholder = "SELECT * FROM ...";
+    textarea.spellcheck = false;
+    textarea.rows = 3;
+    editorWrap.append(highlight, textarea);
+    let shiki = null;
+    loadShikiSql().then((h) => {
+      shiki = h;
+      syncHighlight();
+    });
+    function syncEditorHeight() {
+      textarea.style.height = "auto";
+      const h = Math.max(60, Math.min(textarea.scrollHeight, 300));
+      textarea.style.height = `${h}px`;
+      editorWrap.style.height = `${h}px`;
+    }
+    function syncHighlight() {
+      const code2 = textarea.value;
+      if (!code2) {
+        highlight.innerHTML = "";
+        syncEditorHeight();
+        return;
+      }
+      if (!shiki) {
+        highlight.textContent = code2;
+        syncEditorHeight();
+        return;
+      }
+      const html = shiki.codeToHtml(code2, {
+        lang: "sql",
+        themes: { light: "github-light", dark: "github-dark" },
+        defaultColor: false
+      });
+      const template = document.createElement("template");
+      template.innerHTML = html;
+      const pre = template.content.querySelector("pre");
+      if (pre) {
+        highlight.innerHTML = pre.innerHTML;
+      } else {
+        highlight.textContent = code2;
+      }
+      syncEditorHeight();
+    }
+    textarea.addEventListener("input", syncHighlight);
+    textarea.addEventListener("scroll", () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    });
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-query-toolbar";
+    const runBtn = document.createElement("button");
+    runBtn.className = "db-btn db-btn-primary db-query-run";
+    runBtn.type = "button";
+    runBtn.textContent = "Run";
+    runBtn.title = "Execute query (Ctrl+Enter)";
+    const explainBtn = document.createElement("button");
+    explainBtn.className = "db-btn db-query-explain";
+    explainBtn.type = "button";
+    explainBtn.textContent = "Explain";
+    explainBtn.title = "Show query execution plan";
+    const historyBtn = document.createElement("button");
+    historyBtn.className = "db-btn db-query-history-btn";
+    historyBtn.type = "button";
+    historyBtn.textContent = "History";
+    historyBtn.title = "Query history";
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "db-query-status";
+    const historyDropdown = document.createElement("div");
+    historyDropdown.className = "db-query-history-dropdown";
+    historyDropdown.hidden = true;
+    toolbar.append(runBtn, explainBtn, historyBtn, statusSpan);
+    inputArea.append(editorWrap, toolbar, historyDropdown);
+    const resultArea = document.createElement("div");
+    resultArea.className = "db-query-result";
+    resultArea.hidden = true;
+    el.append(inputArea, resultArea);
+    async function run() {
+      const sql = textarea.value.trim();
+      if (!sql)
+        return;
+      runBtn.disabled = true;
+      statusSpan.textContent = "Running…";
+      resultArea.hidden = true;
+      try {
+        const result = await callbacks.executeQuery(sql);
+        if (result.error) {
+          statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+          resultArea.hidden = false;
+          resultArea.innerHTML = "";
+          const errEl = document.createElement("pre");
+          errEl.className = "db-query-error";
+          errEl.textContent = result.error;
+          resultArea.appendChild(errEl);
+          return;
+        }
+        saveToHistory(sql);
+        const suffix = result.truncated ? "+" : "";
+        statusSpan.textContent = `${result.rowCount}${suffix} rows (${result.elapsedMs}ms)`;
+        renderResultTable(result);
+      } catch (err) {
+        statusSpan.textContent = "Failed";
+        resultArea.hidden = false;
+        resultArea.innerHTML = "";
+        const errEl = document.createElement("pre");
+        errEl.className = "db-query-error";
+        errEl.textContent = err instanceof Error ? err.message : String(err);
+        resultArea.appendChild(errEl);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+    function renderResultTable(result) {
+      resultArea.hidden = false;
+      resultArea.innerHTML = "";
+      if (result.columns.length === 0) {
+        resultArea.textContent = "Query returned no columns.";
+        return;
+      }
+      const table2 = document.createElement("table");
+      table2.className = "db-query-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thNum = document.createElement("th");
+      thNum.textContent = "#";
+      thNum.className = "db-grid-rownum";
+      headRow.appendChild(thNum);
+      for (const col of result.columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (let i2 = 0;i2 < result.rows.length; i2++) {
+        const row = result.rows[i2];
+        const tr = document.createElement("tr");
+        if (i2 % 2 === 1)
+          tr.classList.add("alt");
+        const tdNum = document.createElement("td");
+        tdNum.className = "db-grid-rownum";
+        tdNum.textContent = String(i2 + 1);
+        tr.appendChild(tdNum);
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.textContent = formatValue(value);
+          if (value === null)
+            td.classList.add("null");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table2.append(thead, tbody);
+      const wrapper = document.createElement("div");
+      wrapper.className = "db-query-table-wrap";
+      wrapper.appendChild(table2);
+      resultArea.appendChild(wrapper);
+    }
+    async function runExplain() {
+      const sql = textarea.value.trim();
+      if (!sql)
+        return;
+      explainBtn.disabled = true;
+      runBtn.disabled = true;
+      statusSpan.textContent = "Explaining…";
+      resultArea.hidden = true;
+      try {
+        const result = await callbacks.executeQuery(`EXPLAIN QUERY PLAN ${sql}`);
+        if (result.error) {
+          statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+          resultArea.hidden = false;
+          resultArea.innerHTML = "";
+          const errEl = document.createElement("pre");
+          errEl.className = "db-query-error";
+          errEl.textContent = result.error;
+          resultArea.appendChild(errEl);
+          return;
+        }
+        statusSpan.textContent = `Explain (${result.elapsedMs}ms)`;
+        renderResultTable(result);
+      } catch (err) {
+        statusSpan.textContent = "Failed";
+        resultArea.hidden = false;
+        resultArea.innerHTML = "";
+        const errEl = document.createElement("pre");
+        errEl.className = "db-query-error";
+        errEl.textContent = err instanceof Error ? err.message : String(err);
+        resultArea.appendChild(errEl);
+      } finally {
+        explainBtn.disabled = false;
+        runBtn.disabled = false;
+      }
+    }
+    runBtn.addEventListener("click", run);
+    explainBtn.addEventListener("click", runExplain);
+    historyBtn.addEventListener("click", () => {
+      if (!historyDropdown.hidden) {
+        historyDropdown.hidden = true;
+        return;
+      }
+      const history2 = loadHistory();
+      historyDropdown.innerHTML = "";
+      if (history2.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-query-history-empty";
+        empty.textContent = "No history";
+        historyDropdown.appendChild(empty);
+      } else {
+        for (const sql of history2) {
+          const item = document.createElement("div");
+          item.className = "db-query-history-item";
+          item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
+          item.title = sql;
+          item.addEventListener("click", () => {
+            setSql(sql);
+            historyDropdown.hidden = true;
+          });
+          historyDropdown.appendChild(item);
+        }
+      }
+      historyDropdown.hidden = false;
+    });
+    document.addEventListener("click", (e2) => {
+      if (!historyDropdown.hidden && !historyBtn.contains(e2.target) && !historyDropdown.contains(e2.target)) {
+        historyDropdown.hidden = true;
+      }
+    });
+    textarea.addEventListener("keydown", (e2) => {
+      if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
+        e2.preventDefault();
+        run();
+        return;
+      }
+      if (e2.key === "Tab") {
+        e2.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        if (e2.shiftKey) {
+          const before = textarea.value.slice(0, start);
+          const lineStart = before.lastIndexOf(`
+`) + 1;
+          const linePrefix = textarea.value.slice(lineStart, start);
+          const spaces = linePrefix.match(/^ {1,2}/);
+          if (spaces) {
+            textarea.setRangeText("", lineStart, lineStart + spaces[0].length, "end");
+          }
+        } else {
+          textarea.setRangeText("  ", start, end, "end");
+        }
+        syncHighlight();
+      }
+    });
+    function focus() {
+      textarea.focus();
+    }
+    function setSql(sql) {
+      textarea.value = sql;
+      syncHighlight();
+    }
+    return { el, focus, setSql };
+  }
+  function formatValue(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/query-history-view.ts
+  function createQueryHistoryView(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-query-history";
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-query-history-toolbar";
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "db-query-history-action";
+    refreshBtn.type = "button";
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.title = "Refresh history";
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "db-query-history-action db-query-history-danger";
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear All";
+    clearBtn.title = "Delete all query history";
+    toolbar.append(refreshBtn, clearBtn);
+    const body = document.createElement("div");
+    body.className = "db-query-history-body-split";
+    const listCol = document.createElement("div");
+    listCol.className = "db-query-history-list-col";
+    const listEl = document.createElement("div");
+    listEl.className = "db-query-history-list";
+    listCol.appendChild(listEl);
+    const detailCol = document.createElement("div");
+    detailCol.className = "db-query-history-detail-col";
+    const detailPlaceholder = document.createElement("div");
+    detailPlaceholder.className = "db-query-history-detail-placeholder";
+    detailPlaceholder.textContent = "Select a query to view details";
+    detailCol.appendChild(detailPlaceholder);
+    body.append(listCol, detailCol);
+    el.append(toolbar, body);
+    let entries = [];
+    const expandedIds = new Set;
+    async function refresh() {
+      const dbId = callbacks.getDbId();
+      const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
+      try {
+        const res = await fetch(`/_db/history${params}`);
+        if (!res.ok)
+          return;
+        const state = await res.json();
+        entries = state.entries;
+        render();
+      } catch {}
+    }
+    function render() {
+      listEl.innerHTML = "";
+      if (entries.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-query-history-empty";
+        empty.textContent = "No query history";
+        listEl.appendChild(empty);
+        return;
+      }
+      for (const entry of entries) {
+        listEl.appendChild(renderEntry(entry));
+      }
+    }
+    let selectedEntryId = null;
+    function selectEntry(entry) {
+      selectedEntryId = entry.id;
+      listEl.querySelectorAll(".db-query-history-entry").forEach((el2) => {
+        el2.classList.toggle("selected", el2.dataset.id === entry.id);
+      });
+      renderDetail(entry);
+    }
+    function renderDetail(entry) {
+      detailCol.innerHTML = "";
+      const actions = document.createElement("div");
+      actions.className = "db-query-history-detail-actions";
+      const useBtn = document.createElement("button");
+      useBtn.className = "db-btn db-btn-primary";
+      useBtn.type = "button";
+      useBtn.textContent = "Use in Editor";
+      useBtn.addEventListener("click", () => callbacks.copySqlToQuery(entry.sql));
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "db-btn";
+      copyBtn.type = "button";
+      copyBtn.textContent = "Copy SQL";
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(entry.sql).then(() => {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy SQL";
+          }, 1500);
+        }, () => {});
+      });
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "db-btn db-query-history-danger";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => {
+        deleteEntry(entry.id);
+      });
+      actions.append(useBtn, copyBtn, deleteBtn);
+      const sqlBlock = document.createElement("pre");
+      sqlBlock.className = "db-query-history-sql";
+      sqlBlock.textContent = entry.sql;
+      detailCol.append(actions, sqlBlock);
+      if (entry.body) {
+        const bodyBlock = document.createElement("div");
+        bodyBlock.className = "db-query-history-body";
+        bodyBlock.textContent = entry.body;
+        detailCol.appendChild(bodyBlock);
+      }
+      if (entry.columns.length > 0 && entry.rowsPreview.length > 0) {
+        detailCol.appendChild(renderPreviewTable(entry));
+      }
+      if (entry.savedRows < entry.rowCount) {
+        const note = document.createElement("div");
+        note.className = "db-query-history-truncated";
+        note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+        detailCol.appendChild(note);
+      }
+    }
+    function renderEntry(entry) {
+      const item = document.createElement("div");
+      item.className = "db-query-history-entry";
+      if (entry.id === selectedEntryId)
+        item.classList.add("selected");
+      item.dataset.id = entry.id;
+      const meta = document.createElement("div");
+      meta.className = "db-query-history-entry-meta";
+      const byIcon = document.createElement("span");
+      byIcon.className = "db-query-history-by";
+      byIcon.textContent = entry.executedBy === "ai" ? "[AI]" : "[User]";
+      const time = document.createElement("span");
+      time.className = "db-query-history-time";
+      time.textContent = formatTime(entry.executedAt);
+      time.title = entry.executedAt;
+      const stats = document.createElement("span");
+      stats.className = "db-query-history-stats";
+      const truncMark = entry.truncated ? "+" : "";
+      stats.textContent = `${entry.rowCount}${truncMark} rows, ${entry.elapsedMs}ms`;
+      meta.append(byIcon, time, stats);
+      const title = document.createElement("div");
+      title.className = "db-query-history-entry-title";
+      title.textContent = entry.title || (entry.sql.length > 80 ? `${entry.sql.slice(0, 80)}...` : entry.sql);
+      item.append(meta, title);
+      item.addEventListener("click", () => selectEntry(entry));
+      return item;
+    }
+    function renderPreviewTable(entry) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "db-query-table-wrap";
+      const table2 = document.createElement("table");
+      table2.className = "db-query-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thNum = document.createElement("th");
+      thNum.textContent = "#";
+      thNum.className = "db-grid-rownum";
+      headRow.appendChild(thNum);
+      for (const col of entry.columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (let i2 = 0;i2 < entry.rowsPreview.length; i2++) {
+        const row = entry.rowsPreview[i2];
+        const tr = document.createElement("tr");
+        if (i2 % 2 === 1)
+          tr.classList.add("alt");
+        const tdNum = document.createElement("td");
+        tdNum.className = "db-grid-rownum";
+        tdNum.textContent = String(i2 + 1);
+        tr.appendChild(tdNum);
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.textContent = formatValue2(value);
+          if (value === null)
+            td.classList.add("null");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table2.append(thead, tbody);
+      wrapper.appendChild(table2);
+      if (entry.savedRows < entry.rowCount) {
+        const note = document.createElement("div");
+        note.className = "db-query-history-truncated";
+        note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+        wrapper.appendChild(note);
+      }
+      return wrapper;
+    }
+    function resetDetailCol() {
+      detailCol.innerHTML = "";
+      detailCol.appendChild(detailPlaceholder);
+      selectedEntryId = null;
+    }
+    async function deleteEntry(id) {
+      try {
+        await fetch("/_db/history/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ id })
+        });
+        entries = entries.filter((e2) => e2.id !== id);
+        expandedIds.delete(id);
+        if (selectedEntryId === id)
+          resetDetailCol();
+        const itemEl = listEl.querySelector(`.db-query-history-entry[data-id="${CSS.escape(id)}"]`);
+        if (itemEl) {
+          itemEl.remove();
+          if (entries.length === 0)
+            render();
+        } else {
+          render();
+        }
+      } catch {}
+    }
+    clearBtn.addEventListener("click", async () => {
+      const dbId = callbacks.getDbId();
+      try {
+        await fetch("/_db/history/clear", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify(dbId ? { db: dbId } : {})
+        });
+        entries = [];
+        render();
+      } catch {}
+    });
+    refreshBtn.addEventListener("click", () => {
+      refresh();
+    });
+    return { el, refresh };
+  }
+  function formatTime(iso) {
+    try {
+      const d2 = new Date(iso);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}:${pad(d2.getSeconds())}`;
+    } catch {
+      return iso;
+    }
+  }
+  function formatValue2(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/schema-view.ts
+  function createSchemaView() {
+    const el = document.createElement("div");
+    el.className = "db-schema-view";
+    el.hidden = true;
+    function render(table2, columns, indexes, extra) {
+      el.hidden = false;
+      el.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "db-schema-header";
+      header.textContent = `Schema: ${table2}`;
+      el.appendChild(header);
+      const colSectionHeader = document.createElement("div");
+      colSectionHeader.className = "db-schema-section-header";
+      colSectionHeader.textContent = "Columns";
+      el.appendChild(colSectionHeader);
+      const colTable = document.createElement("table");
+      colTable.className = "db-schema-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const label of ["Column", "Type", "Nullable", "PK", "Default"]) {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      const tbody = document.createElement("tbody");
+      for (const col of columns) {
+        const tr = document.createElement("tr");
+        if (col.primaryKey)
+          tr.classList.add("pk-row");
+        const tdName = document.createElement("td");
+        tdName.textContent = col.name;
+        tdName.className = "db-schema-col-name";
+        const tdType = document.createElement("td");
+        tdType.textContent = col.type;
+        tdType.className = "db-schema-col-type";
+        const tdNull = document.createElement("td");
+        tdNull.textContent = col.nullable ? "YES" : "NO";
+        const tdPk = document.createElement("td");
+        tdPk.textContent = col.primaryKey ? "PK" : "";
+        if (col.primaryKey)
+          tdPk.className = "db-schema-pk";
+        const tdDefault = document.createElement("td");
+        tdDefault.textContent = col.defaultValue ?? "";
+        tdDefault.className = "db-schema-default";
+        tr.append(tdName, tdType, tdNull, tdPk, tdDefault);
+        tbody.appendChild(tr);
+      }
+      colTable.append(thead, tbody);
+      el.appendChild(colTable);
+      const fks = extra?.foreignKeys?.filter((fk) => fk.fromTable === table2);
+      if (fks && fks.length > 0) {
+        const fkHeader = document.createElement("div");
+        fkHeader.className = "db-schema-section-header";
+        fkHeader.textContent = "Foreign Keys";
+        el.appendChild(fkHeader);
+        const fkTable = document.createElement("table");
+        fkTable.className = "db-schema-table";
+        const fkThead = document.createElement("thead");
+        const fkHeadRow = document.createElement("tr");
+        for (const label of ["Column", "References Table", "References Column"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          fkHeadRow.appendChild(th);
+        }
+        fkThead.appendChild(fkHeadRow);
+        const fkTbody = document.createElement("tbody");
+        for (const fk of fks) {
+          const tr = document.createElement("tr");
+          const tdFrom = document.createElement("td");
+          tdFrom.textContent = fk.fromColumn;
+          const tdToTable = document.createElement("td");
+          tdToTable.textContent = fk.toTable;
+          const tdToCol = document.createElement("td");
+          tdToCol.textContent = fk.toColumn;
+          tr.append(tdFrom, tdToTable, tdToCol);
+          fkTbody.appendChild(tr);
+        }
+        fkTable.append(fkThead, fkTbody);
+        el.appendChild(fkTable);
+      }
+      const tableIndexes = indexes.filter((idx) => idx.table === table2);
+      if (tableIndexes.length > 0) {
+        const idxHeader = document.createElement("div");
+        idxHeader.className = "db-schema-section-header";
+        idxHeader.textContent = "Indexes";
+        el.appendChild(idxHeader);
+        const idxTable = document.createElement("table");
+        idxTable.className = "db-schema-table";
+        const idxThead = document.createElement("thead");
+        const idxHeadRow = document.createElement("tr");
+        for (const label of ["Name", "Columns", "Unique"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          idxHeadRow.appendChild(th);
+        }
+        idxThead.appendChild(idxHeadRow);
+        const idxTbody = document.createElement("tbody");
+        for (const idx of tableIndexes) {
+          const tr = document.createElement("tr");
+          const tdName = document.createElement("td");
+          tdName.textContent = idx.name;
+          const tdCols = document.createElement("td");
+          tdCols.textContent = idx.columns.join(", ");
+          const tdUnique = document.createElement("td");
+          tdUnique.textContent = idx.unique ? "YES" : "NO";
+          tr.append(tdName, tdCols, tdUnique);
+          idxTbody.appendChild(tr);
+        }
+        idxTable.append(idxThead, idxTbody);
+        el.appendChild(idxTable);
+      }
+      const triggers = extra?.triggers;
+      if (triggers && triggers.length > 0) {
+        const trigHeader = document.createElement("div");
+        trigHeader.className = "db-schema-section-header";
+        trigHeader.textContent = "Triggers";
+        el.appendChild(trigHeader);
+        for (const trig of triggers) {
+          const trigBlock = document.createElement("div");
+          trigBlock.className = "db-schema-trigger-block";
+          const trigName = document.createElement("div");
+          trigName.className = "db-schema-trigger-name";
+          trigName.textContent = trig.name;
+          const trigPre = document.createElement("pre");
+          trigPre.className = "db-schema-ddl-pre";
+          trigPre.textContent = trig.sql;
+          trigBlock.append(trigName, trigPre);
+          el.appendChild(trigBlock);
+        }
+      }
+      const ddl = extra?.ddl;
+      if (ddl) {
+        const ddlHeader = document.createElement("div");
+        ddlHeader.className = "db-schema-section-header";
+        ddlHeader.textContent = "DDL";
+        el.appendChild(ddlHeader);
+        const ddlWrap = document.createElement("div");
+        ddlWrap.className = "db-schema-ddl-wrap";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "db-btn db-btn-sm db-schema-copy-btn";
+        copyBtn.textContent = "Copy DDL";
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(ddl).then(() => {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => {
+              copyBtn.textContent = "Copy DDL";
+            }, 1500);
+          }, () => {});
+        });
+        const ddlPre = document.createElement("pre");
+        ddlPre.className = "db-schema-ddl-pre";
+        ddlPre.textContent = ddl;
+        ddlWrap.append(copyBtn, ddlPre);
+        el.appendChild(ddlWrap);
+      }
+    }
+    function clear() {
+      el.hidden = true;
+      el.innerHTML = "";
+    }
+    return { el, render, clear };
+  }
+
+  // web-src/views/database/snapshot-view.ts
+  function changeTypeLabel(type) {
+    if (type === "inserted")
+      return "追加";
+    if (type === "updated")
+      return "更新";
+    return "削除";
+  }
+  function snapshotLabel(s2) {
+    const date = new Date(s2.createdAt).toLocaleString();
+    const note = s2.note ? ` — ${s2.note}` : "";
+    return `${date} (${s2.tables.length}テーブル)${note}`;
+  }
+  function arraysEqual(a2, b2) {
+    if (a2.length !== b2.length)
+      return false;
+    const sa = [...a2].sort();
+    const sb = [...b2].sort();
+    return sa.every((v, i2) => v === sb[i2]);
+  }
+  function postJson(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1"
+      },
+      body: JSON.stringify(body)
+    });
+  }
+  function createSnapshotView(deps) {
+    const el = document.createElement("div");
+    el.className = "db-snapshot-view";
+    const guide = document.createElement("div");
+    guide.className = "db-snapshot-guide";
+    guide.innerHTML = '<div class="db-snapshot-guide-title">スナップショット差分</div>' + '<div class="db-snapshot-guide-body">' + "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます" + "</div>";
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-snapshot-toolbar";
+    const createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.className = "db-snapshot-create-btn";
+    createBtn.textContent = "スナップショット取得";
+    const refreshBtn = document.createElement("button");
+    refreshBtn.type = "button";
+    refreshBtn.className = "db-snapshot-refresh-btn";
+    refreshBtn.textContent = "更新";
+    toolbar.append(createBtn, refreshBtn);
+    const tableSelector = document.createElement("div");
+    tableSelector.className = "db-snapshot-table-selector";
+    tableSelector.hidden = true;
+    const tableSelectorHeader = document.createElement("div");
+    tableSelectorHeader.className = "db-snapshot-table-selector-header";
+    tableSelectorHeader.textContent = "対象テーブルを選択";
+    const tableCheckboxes = document.createElement("div");
+    tableCheckboxes.className = "db-snapshot-table-checkboxes";
+    const selectActions = document.createElement("div");
+    selectActions.className = "db-snapshot-select-actions";
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.type = "button";
+    selectAllBtn.textContent = "すべて選択";
+    const deselectAllBtn = document.createElement("button");
+    deselectAllBtn.type = "button";
+    deselectAllBtn.textContent = "選択解除";
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.className = "db-snapshot-note-input";
+    noteInput.placeholder = "例: ユーザー登録テスト前";
+    const noteField = document.createElement("label");
+    noteField.className = "db-snapshot-note-field";
+    const noteLabel = document.createElement("span");
+    noteLabel.className = "db-snapshot-note-label";
+    noteLabel.textContent = "メモ";
+    noteField.append(noteLabel, noteInput);
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "db-snapshot-confirm-btn";
+    confirmBtn.textContent = "取得開始";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "db-snapshot-cancel-btn";
+    cancelBtn.textContent = "キャンセル";
+    selectActions.append(selectAllBtn, deselectAllBtn, noteField, confirmBtn, cancelBtn);
+    tableSelector.append(tableSelectorHeader, tableCheckboxes, selectActions);
+    const mainArea = document.createElement("div");
+    mainArea.className = "db-snapshot-main-area";
+    el.append(guide, toolbar, tableSelector, mainArea);
+    let snapshots = [];
+    function showTableSelector() {
+      const tables = deps.getTables();
+      const lastTables = getLastTables();
+      tableCheckboxes.innerHTML = "";
+      for (const t2 of tables) {
+        if (t2.type !== "table")
+          continue;
+        const label = document.createElement("label");
+        label.className = "db-snapshot-table-label";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = lastTables.length === 0 || lastTables.includes(t2.name);
+        cb.value = t2.name;
+        const rowInfo = t2.rowCount != null ? ` (${t2.rowCount}件)` : "";
+        label.append(cb, ` ${t2.name}${rowInfo}`);
+        tableCheckboxes.appendChild(label);
+      }
+      tableSelector.hidden = false;
+      noteInput.value = "";
+    }
+    function getLastTables() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return [];
+      const done = snapshots.filter((s2) => s2.status === "done");
+      return done.length > 0 ? done[0].tables : [];
+    }
+    function getSelectedTables() {
+      return Array.from(tableCheckboxes.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.value);
+    }
+    selectAllBtn.addEventListener("click", () => {
+      tableCheckboxes.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = true;
+      });
+    });
+    deselectAllBtn.addEventListener("click", () => {
+      tableCheckboxes.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = false;
+      });
+    });
+    createBtn.addEventListener("click", showTableSelector);
+    cancelBtn.addEventListener("click", () => {
+      tableSelector.hidden = true;
+    });
+    confirmBtn.addEventListener("click", async () => {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      const tables = getSelectedTables();
+      if (tables.length === 0)
+        return;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "取得中...";
+      try {
+        await postJson("/_db/snapshot/create", {
+          db: dbId,
+          tables,
+          note: noteInput.value.trim()
+        });
+        tableSelector.hidden = true;
+        setTimeout(() => refreshAndAutoDiff(), 3000);
+      } catch {} finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "取得開始";
+      }
+    });
+    refreshBtn.addEventListener("click", refresh);
+    async function refresh() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      try {
+        const snapRes = await fetch(`/_db/snapshot/list?db=${encodeURIComponent(dbId)}`);
+        if (snapRes.ok) {
+          const data = await snapRes.json();
+          snapshots = data.snapshots;
+        }
+        renderMain();
+      } catch {}
+    }
+    async function refreshAndAutoDiff() {
+      await refresh();
+      const done = snapshots.filter((s2) => s2.status === "done");
+      if (done.length < 2)
+        return;
+      const newest = done[0];
+      const prev = done[1];
+      if (!arraysEqual(newest.tables, prev.tables))
+        return;
+      showDiffInline(prev.id, newest.id);
+    }
+    function renderMain() {
+      mainArea.innerHTML = "";
+      const done = snapshots.filter((s2) => s2.status === "done");
+      if (snapshots.length === 0) {
+        mainArea.innerHTML = '<div class="db-snapshot-empty">まだスナップショットがありません。「スナップショット取得」で開始します。</div>';
+        return;
+      }
+      const snapshotSection = document.createElement("div");
+      snapshotSection.className = "db-snapshot-list-section";
+      const snapTitle = document.createElement("h3");
+      snapTitle.className = "db-snapshot-section-title";
+      snapTitle.textContent = `スナップショット (${done.length}件)`;
+      snapshotSection.appendChild(snapTitle);
+      for (const snap of snapshots) {
+        const item = document.createElement("div");
+        item.className = "db-snapshot-item";
+        const info = document.createElement("div");
+        info.className = "db-snapshot-info";
+        info.innerHTML = `<span class="db-snapshot-date">${new Date(snap.createdAt).toLocaleString()}</span>` + `<span class="db-snapshot-tables-count" title="${snap.tables.join(", ")}">${snap.tables.length}テーブル</span>` + (snap.note ? `<span class="db-snapshot-note">${snap.note}</span>` : "");
+        const actions = document.createElement("div");
+        actions.className = "db-snapshot-actions";
+        const noteBtn = document.createElement("button");
+        noteBtn.type = "button";
+        noteBtn.textContent = "メモ";
+        noteBtn.addEventListener("click", () => editNote(snap.id, snap.note));
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "削除";
+        deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+        actions.append(noteBtn, deleteBtn);
+        item.append(info, actions);
+        snapshotSection.appendChild(item);
+      }
+      if (done.length >= 2) {
+        const diffCreate = document.createElement("div");
+        diffCreate.className = "db-snapshot-diff-create";
+        const beforeSelect = document.createElement("select");
+        beforeSelect.className = "db-snapshot-diff-select";
+        const afterSelect = document.createElement("select");
+        afterSelect.className = "db-snapshot-diff-select";
+        const sorted = [...done].sort((a2, b2) => new Date(a2.createdAt).getTime() - new Date(b2.createdAt).getTime());
+        for (const s2 of sorted) {
+          const optB = document.createElement("option");
+          optB.value = s2.id;
+          optB.textContent = snapshotLabel(s2);
+          beforeSelect.appendChild(optB);
+          const optA = document.createElement("option");
+          optA.value = s2.id;
+          optA.textContent = snapshotLabel(s2);
+          afterSelect.appendChild(optA);
+        }
+        if (sorted.length >= 2) {
+          beforeSelect.selectedIndex = sorted.length - 2;
+          afterSelect.selectedIndex = sorted.length - 1;
+        }
+        const diffBtn = document.createElement("button");
+        diffBtn.type = "button";
+        diffBtn.className = "db-snapshot-diff-btn";
+        diffBtn.textContent = "手動で差分チェック";
+        diffBtn.addEventListener("click", async () => {
+          diffBtn.disabled = true;
+          diffBtn.textContent = "比較中...";
+          try {
+            showDiffInline(beforeSelect.value, afterSelect.value);
+          } finally {
+            diffBtn.disabled = false;
+            diffBtn.textContent = "手動で差分チェック";
+          }
+        });
+        diffCreate.append(beforeSelect, document.createTextNode(" → "), afterSelect, diffBtn);
+        snapshotSection.appendChild(diffCreate);
+      }
+      mainArea.appendChild(snapshotSection);
+    }
+    async function showDiffInline(beforeId, afterId) {
+      const existing = mainArea.querySelector(".db-snapshot-diff-inline");
+      if (existing)
+        existing.remove();
+      const loading = document.createElement("div");
+      loading.className = "db-snapshot-diff-inline";
+      loading.innerHTML = '<div class="db-snapshot-loading">差分を計算中...</div>';
+      mainArea.appendChild(loading);
+      try {
+        const res = await fetch(`/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`);
+        if (!res.ok) {
+          loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+          return;
+        }
+        const data = await res.json();
+        loading.remove();
+        renderDiffInline(beforeId, afterId, data.tables);
+      } catch {
+        loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+      }
+    }
+    function renderDiffInline(beforeId, afterId, tables) {
+      const existing = mainArea.querySelector(".db-snapshot-diff-inline");
+      if (existing)
+        existing.remove();
+      const section = document.createElement("div");
+      section.className = "db-snapshot-diff-inline";
+      const changedTables = tables.filter((t2) => t2.insertedCount + t2.updatedCount + t2.deletedCount > 0);
+      const unchangedCount = tables.length - changedTables.length;
+      const summary = document.createElement("div");
+      summary.className = "db-snapshot-diff-summary";
+      if (changedTables.length === 0) {
+        summary.textContent = "変更は検出されませんでした。";
+        section.appendChild(summary);
+        mainArea.appendChild(section);
+        return;
+      }
+      summary.textContent = `${changedTables.length}テーブルに変更あり` + (unchangedCount > 0 ? `、${unchangedCount}テーブルは変更なし` : "");
+      section.appendChild(summary);
+      for (const t2 of changedTables) {
+        const tableEl = document.createElement("div");
+        tableEl.className = "db-snapshot-diff-table";
+        const tableHeader = document.createElement("div");
+        tableHeader.className = "db-snapshot-diff-table-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "db-snapshot-diff-table-name";
+        nameSpan.textContent = t2.tableName;
+        const statsSpan = document.createElement("span");
+        statsSpan.className = "db-snapshot-diff-table-stats";
+        const parts = [];
+        if (t2.insertedCount > 0)
+          parts.push(`+${t2.insertedCount}`);
+        if (t2.updatedCount > 0)
+          parts.push(`~${t2.updatedCount}`);
+        if (t2.deletedCount > 0)
+          parts.push(`-${t2.deletedCount}`);
+        statsSpan.textContent = parts.join(" ");
+        tableHeader.append(nameSpan, statsSpan);
+        tableHeader.style.cursor = "pointer";
+        const rowsContainer = document.createElement("div");
+        rowsContainer.className = "db-snapshot-diff-rows-container";
+        loadDiffRows(beforeId, afterId, t2.tableName, rowsContainer);
+        tableHeader.addEventListener("click", () => {
+          rowsContainer.hidden = !rowsContainer.hidden;
+        });
+        tableEl.append(tableHeader, rowsContainer);
+        section.appendChild(tableEl);
+      }
+      mainArea.appendChild(section);
+    }
+    async function loadDiffRows(beforeId, afterId, table2, container) {
+      container.innerHTML = '<div class="db-snapshot-loading">読み込み中...</div>';
+      try {
+        const res = await fetch(`/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table2)}&limit=200`);
+        if (!res.ok) {
+          container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+          return;
+        }
+        const data = await res.json();
+        renderDiffRows(container, data.rows, data.total);
+      } catch {
+        container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+      }
+    }
+    function renderDiffRows(container, rows, total) {
+      container.innerHTML = "";
+      if (rows.length === 0)
+        return;
+      const allCols = new Set;
+      for (const row of rows) {
+        if (row.beforeValues)
+          for (const k of Object.keys(row.beforeValues))
+            allCols.add(k);
+        if (row.afterValues)
+          for (const k of Object.keys(row.afterValues))
+            allCols.add(k);
+      }
+      const columns = [...allCols];
+      const table2 = document.createElement("table");
+      table2.className = "db-snap-diff-grid";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thType = document.createElement("th");
+      thType.textContent = "";
+      headRow.appendChild(thType);
+      for (const col of columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table2.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const row of rows) {
+        if (row.changeType === "updated" && row.beforeValues && row.afterValues) {
+          const trBefore = document.createElement("tr");
+          trBefore.className = "snap-diff-del";
+          const tdTypeBefore = document.createElement("td");
+          tdTypeBefore.className = "snap-diff-type-cell";
+          tdTypeBefore.textContent = "更新前";
+          tdTypeBefore.rowSpan = 2;
+          trBefore.appendChild(tdTypeBefore);
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const bs = row.beforeValues[col] == null ? "NULL" : String(row.beforeValues[col]);
+            const as_ = row.afterValues[col] == null ? "NULL" : String(row.afterValues[col]);
+            td.textContent = bs;
+            if (bs !== as_)
+              td.classList.add("snap-diff-changed-cell");
+            trBefore.appendChild(td);
+          }
+          tbody.appendChild(trBefore);
+          const trAfter = document.createElement("tr");
+          trAfter.className = "snap-diff-add";
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const bs = row.beforeValues[col] == null ? "NULL" : String(row.beforeValues[col]);
+            const as_ = row.afterValues[col] == null ? "NULL" : String(row.afterValues[col]);
+            td.textContent = as_;
+            if (bs !== as_)
+              td.classList.add("snap-diff-changed-cell");
+            trAfter.appendChild(td);
+          }
+          tbody.appendChild(trAfter);
+        } else {
+          const tr = document.createElement("tr");
+          tr.className = row.changeType === "inserted" ? "snap-diff-add" : "snap-diff-del";
+          const tdType = document.createElement("td");
+          tdType.className = "snap-diff-type-cell";
+          tdType.textContent = changeTypeLabel(row.changeType);
+          tr.appendChild(tdType);
+          const values = row.changeType === "inserted" ? row.afterValues : row.beforeValues;
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const v = values?.[col];
+            td.textContent = v == null ? "NULL" : String(v);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+      }
+      table2.appendChild(tbody);
+      container.appendChild(table2);
+      if (total > rows.length) {
+        const more = document.createElement("div");
+        more.className = "db-snapshot-diff-more";
+        more.textContent = `全${total}件中 ${rows.length}件を表示中`;
+        container.appendChild(more);
+      }
+    }
+    async function editNote(snapshotId, currentNote) {
+      const existing = el.querySelector(".db-snapshot-inline-dialog");
+      if (existing)
+        existing.remove();
+      const dialog = document.createElement("div");
+      dialog.className = "db-snapshot-inline-dialog";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "db-snapshot-note-input";
+      input.value = currentNote || "";
+      input.placeholder = "メモを入力";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.textContent = "保存";
+      saveBtn.className = "db-snapshot-confirm-btn";
+      const cancelDlgBtn = document.createElement("button");
+      cancelDlgBtn.type = "button";
+      cancelDlgBtn.textContent = "キャンセル";
+      cancelDlgBtn.addEventListener("click", () => dialog.remove());
+      saveBtn.addEventListener("click", async () => {
+        await postJson("/_db/snapshot/update-note", {
+          id: snapshotId,
+          note: input.value
+        });
+        dialog.remove();
+        refresh();
+      });
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter")
+          saveBtn.click();
+        if (e2.key === "Escape")
+          dialog.remove();
+      });
+      dialog.append(input, saveBtn, cancelDlgBtn);
+      const item = el.querySelector(`.db-snapshot-item [title="${snapshotId}"]`)?.closest(".db-snapshot-item");
+      if (item) {
+        item.after(dialog);
+      } else {
+        mainArea.prepend(dialog);
+      }
+      input.focus();
+    }
+    async function deleteSnap(snapshotId) {
+      await postJson("/_db/snapshot/delete", { id: snapshotId });
+      refresh();
+    }
+    function handleSse(data) {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.action === "created" || parsed.action === "error") {
+          refreshAndAutoDiff();
+        }
+      } catch {}
+    }
+    return { el, refresh, handleSse };
+  }
+
+  // web-src/views/database/table-grid.ts
+  var ROW_HEIGHT = 28;
+  var OVERSCAN = 20;
+  var PAGE_SIZE = 200;
+  var FILTER_DEBOUNCE_MS = 300;
+  var DEFAULT_COL_WIDTH = 180;
+  function createTableGrid(callbacks) {
+    const el = document.createElement("div");
+    el.className = "db-grid";
+    const filterBar = document.createElement("div");
+    filterBar.className = "db-grid-filter-bar";
+    const filterIcon = document.createElement("span");
+    filterIcon.className = "db-grid-filter-icon";
+    filterIcon.textContent = "\uD83D\uDD0D";
+    const filterInput = document.createElement("input");
+    filterInput.type = "search";
+    filterInput.className = "db-grid-filter-input";
+    filterInput.placeholder = "Search all columns…";
+    filterInput.autocomplete = "off";
+    const filterClear = document.createElement("button");
+    filterClear.type = "button";
+    filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
+    filterClear.textContent = "×";
+    filterClear.hidden = true;
+    filterBar.append(filterIcon, filterInput, filterClear);
+    const headerWrap = document.createElement("div");
+    headerWrap.className = "db-grid-header-wrap";
+    const headerRow = document.createElement("div");
+    headerRow.className = "db-grid-header";
+    headerWrap.appendChild(headerRow);
+    const filterRowWrap = document.createElement("div");
+    filterRowWrap.className = "db-grid-filter-row-wrap";
+    const filterRow = document.createElement("div");
+    filterRow.className = "db-grid-filter-row";
+    filterRowWrap.appendChild(filterRow);
+    const viewport = document.createElement("div");
+    viewport.className = "db-grid-viewport";
+    const spacer = document.createElement("div");
+    spacer.className = "db-grid-spacer";
+    const body = document.createElement("div");
+    body.className = "db-grid-body";
+    const detailPanel = document.createElement("div");
+    detailPanel.className = "db-grid-detail-panel";
+    detailPanel.hidden = true;
+    viewport.append(spacer, body);
+    el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
+    let currentTable = "";
+    let columns = [];
+    let columnNames = [];
+    let totalRows = 0;
+    const columnFilters = new Map;
+    let globalSearchValue = "";
+    let sort = null;
+    let pageCache = new Map;
+    let pendingPages = new Set;
+    let loadGeneration = 0;
+    let rafId = 0;
+    let statusEl = null;
+    let filterTimer = null;
+    let selectedRowIndex = -1;
+    const colWidths = new Map;
+    function storageKey() {
+      const project = callbacks.getProjectName?.() ?? "";
+      if (!currentTable)
+        return null;
+      return `db:col-widths:${project}:${currentTable}`;
+    }
+    function saveColWidths() {
+      const key = storageKey();
+      if (!key)
+        return;
+      const obj = {};
+      for (const [name, w] of colWidths) {
+        obj[name] = w;
+      }
+      try {
+        localStorage.setItem(key, JSON.stringify(obj));
+      } catch {}
+    }
+    function loadColWidths() {
+      colWidths.clear();
+      const key = storageKey();
+      if (!key)
+        return;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          for (const [name, w] of Object.entries(obj)) {
+            if (typeof w === "number" && w > 0) {
+              colWidths.set(name, w);
+            }
+          }
+        }
+      } catch {}
+    }
+    function getColWidth(colName) {
+      return colWidths.get(colName) ?? DEFAULT_COL_WIDTH;
+    }
+    function applyColWidth(colName, index) {
+      const w = getColWidth(colName);
+      const headerCells = headerRow.querySelectorAll(".db-grid-header-cell");
+      if (headerCells[index]) {
+        headerCells[index].style.width = `${w}px`;
+      }
+      const filterCells = filterRow.querySelectorAll(".db-grid-filter-cell");
+      if (filterCells[index]) {
+        filterCells[index].style.width = `${w}px`;
+      }
+    }
+    function autoFitColumn(colName, colIndex) {
+      const measure = document.createElement("span");
+      measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
+      document.body.appendChild(measure);
+      const headerLabel = columns[colIndex]?.name || colName;
+      const typeLabel = columns[colIndex]?.type || "";
+      measure.textContent = `${headerLabel}  ${typeLabel}  ▲`;
+      let maxW = measure.offsetWidth + 16;
+      const rows = body.querySelectorAll(".db-grid-row");
+      for (const row of rows) {
+        const cells = row.querySelectorAll(".db-grid-cell:not(.db-grid-rownum)");
+        const cell = cells[colIndex];
+        if (cell) {
+          measure.textContent = cell.textContent || "";
+          maxW = Math.max(maxW, measure.offsetWidth);
+        }
+      }
+      document.body.removeChild(measure);
+      const fitted = Math.max(60, Math.min(600, maxW));
+      colWidths.set(colName, fitted);
+      applyColWidth(colName, colIndex);
+      saveColWidths();
+      syncContentWidth();
+      renderViewport();
+    }
+    function collectFilters() {
+      const filters = [];
+      for (const [col, val] of columnFilters) {
+        if (val)
+          filters.push({ column: col, value: val });
+      }
+      if (globalSearchValue && filters.length === 0) {
+        for (const col of columnNames) {
+          filters.push({ column: col, value: globalSearchValue });
+        }
+      }
+      return filters;
+    }
+    function invalidateData() {
+      pageCache = new Map;
+      pendingPages = new Set;
+      loadGeneration++;
+      viewport.scrollTop = 0;
+      ensurePage(0);
+    }
+    function clear() {
+      currentTable = "";
+      columns = [];
+      columnNames = [];
+      totalRows = 0;
+      sort = null;
+      columnFilters.clear();
+      globalSearchValue = "";
+      filterInput.value = "";
+      filterClear.hidden = true;
+      filterRow.innerHTML = "";
+      pageCache = new Map;
+      pendingPages = new Set;
+      loadGeneration++;
+      cancelAnimationFrame(rafId);
+      if (filterTimer)
+        clearTimeout(filterTimer);
+      headerRow.innerHTML = "";
+      body.innerHTML = "";
+      spacer.style.height = "0px";
+      statusEl?.remove();
+      statusEl = null;
+      detailPanel.hidden = true;
+      detailPanel.innerHTML = "";
+      colWidths.clear();
+    }
+    function showCellDetail(colIndex, value) {
+      const colName = columnNames[colIndex];
+      const colType = columns[colIndex]?.type || "";
+      detailPanel.hidden = false;
+      detailPanel.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "db-grid-detail-header";
+      const title = document.createElement("span");
+      title.className = "db-grid-detail-title";
+      title.textContent = `${colName} (${colType})`;
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
+      closeBtn.textContent = "×";
+      closeBtn.addEventListener("click", () => {
+        detailPanel.hidden = true;
+      });
+      header.append(title, closeBtn);
+      const content = document.createElement("div");
+      content.className = "db-grid-detail-content";
+      if (value === null) {
+        content.textContent = "NULL";
+        content.classList.add("null");
+      } else if (value instanceof Uint8Array) {
+        content.textContent = `BLOB (${value.byteLength} bytes)`;
+        content.classList.add("blob");
+      } else {
+        const str = typeof value === "object" ? JSON.stringify(value) : String(value);
+        if (str.length > 0 && (str[0] === "{" || str[0] === "[")) {
+          try {
+            const parsed = JSON.parse(str);
+            const pre = document.createElement("pre");
+            pre.className = "db-grid-detail-json";
+            pre.textContent = JSON.stringify(parsed, null, 2);
+            content.appendChild(pre);
+          } catch {
+            content.textContent = str;
+          }
+        } else {
+          content.textContent = str;
+        }
+      }
+      detailPanel.append(header, content);
+    }
+    function renderHeader() {
+      headerRow.innerHTML = "";
+      const rowNum = document.createElement("div");
+      rowNum.className = "db-grid-cell db-grid-rownum-header";
+      rowNum.textContent = "#";
+      headerRow.appendChild(rowNum);
+      for (let i2 = 0;i2 < columns.length; i2++) {
+        const col = columns[i2];
+        const cell = document.createElement("div");
+        cell.className = "db-grid-cell db-grid-header-cell";
+        cell.style.width = `${getColWidth(col.name)}px`;
+        if (sort?.column === col.name) {
+          cell.classList.add("sorted");
+          cell.dataset.dir = sort.direction;
+        }
+        const label = document.createElement("span");
+        label.className = "db-grid-header-label";
+        label.textContent = col.name;
+        const typeTag = document.createElement("span");
+        typeTag.className = "db-grid-header-type";
+        typeTag.textContent = col.type;
+        if (col.primaryKey)
+          typeTag.classList.add("pk");
+        const sortIcon = document.createElement("span");
+        sortIcon.className = "db-grid-sort-icon";
+        sortIcon.textContent = sort?.column === col.name ? sort.direction === "asc" ? "▲" : "▼" : "";
+        const resizeHandle = document.createElement("div");
+        resizeHandle.className = "db-grid-resize-handle";
+        const colIndex = i2;
+        resizeHandle.addEventListener("mousedown", (e2) => {
+          e2.preventDefault();
+          e2.stopPropagation();
+          startResize(colIndex, e2);
+        });
+        cell.append(label, typeTag, sortIcon, resizeHandle);
+        cell.addEventListener("click", (e2) => {
+          if (e2.target.classList.contains("db-grid-resize-handle"))
+            return;
+          handleSort(col.name);
+        });
+        cell.addEventListener("dblclick", (e2) => {
+          if (e2.target.classList.contains("db-grid-resize-handle")) {
+            e2.preventDefault();
+            e2.stopPropagation();
+            autoFitColumn(col.name, colIndex);
+          }
+        });
+        headerRow.appendChild(cell);
+      }
+      renderFilterRow();
+      syncContentWidth();
+    }
+    function startResize(colIndex, startEvent) {
+      const colName = columnNames[colIndex];
+      const startX = startEvent.clientX;
+      const startWidth = getColWidth(colName);
+      document.body.classList.add("db-resizing");
+      const onMouseMove = (e2) => {
+        const delta = e2.clientX - startX;
+        const newWidth = Math.max(60, startWidth + delta);
+        colWidths.set(colName, newWidth);
+        applyColWidth(colName, colIndex);
+        syncContentWidth();
+        renderViewport();
+      };
+      const onMouseUp = () => {
+        document.body.classList.remove("db-resizing");
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        saveColWidths();
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    }
+    function renderFilterRow() {
+      filterRow.innerHTML = "";
+      const rowNumSpacer = document.createElement("div");
+      rowNumSpacer.className = "db-grid-cell db-grid-rownum-header db-grid-filter-spacer";
+      filterRow.appendChild(rowNumSpacer);
+      for (let i2 = 0;i2 < columns.length; i2++) {
+        const col = columns[i2];
+        const cell = document.createElement("div");
+        cell.className = "db-grid-cell db-grid-filter-cell";
+        cell.style.width = `${getColWidth(col.name)}px`;
+        const input = document.createElement("input");
+        input.type = "search";
+        input.className = "db-grid-col-filter";
+        input.placeholder = `${col.name}…`;
+        input.autocomplete = "off";
+        input.value = columnFilters.get(col.name) || "";
+        input.addEventListener("input", () => {
+          const val = input.value.trim();
+          if (val) {
+            columnFilters.set(col.name, val);
+          } else {
+            columnFilters.delete(col.name);
+          }
+          scheduleFilter();
+        });
+        input.addEventListener("keydown", (e2) => {
+          if (e2.key === "Escape") {
+            input.value = "";
+            columnFilters.delete(col.name);
+            scheduleFilter();
+          }
+        });
+        cell.appendChild(input);
+        filterRow.appendChild(cell);
+      }
+    }
+    function scheduleFilter() {
+      if (filterTimer)
+        clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        invalidateData();
+      }, FILTER_DEBOUNCE_MS);
+    }
+    function syncContentWidth() {
+      requestAnimationFrame(() => {
+        const w = headerRow.scrollWidth;
+        if (w > 0) {
+          spacer.style.minWidth = `${w}px`;
+          body.style.minWidth = `${w}px`;
+          filterRow.style.minWidth = `${w}px`;
+        }
+      });
+    }
+    function handleSort(column) {
+      if (sort?.column === column) {
+        sort = sort.direction === "asc" ? { column, direction: "desc" } : null;
+      } else {
+        sort = { column, direction: "asc" };
+      }
+      pageCache = new Map;
+      pendingPages = new Set;
+      renderHeader();
+      renderViewport();
+    }
+    function ensurePage(pageStart) {
+      if (pageCache.has(pageStart) || pendingPages.has(pageStart))
+        return;
+      pendingPages.add(pageStart);
+      const gen = loadGeneration;
+      const filters = collectFilters();
+      callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters).then((data) => {
+        if (gen !== loadGeneration)
+          return;
+        pendingPages.delete(pageStart);
+        pageCache.set(pageStart, data.rows);
+        totalRows = data.totalRows;
+        spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+        updateStatus();
+        renderViewport();
+      }).catch(() => {
+        if (gen === loadGeneration)
+          pendingPages.delete(pageStart);
+      });
+    }
+    function renderViewport() {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const scrollTop = viewport.scrollTop;
+        const viewHeight = viewport.clientHeight;
+        const startRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+        const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN);
+        const neededPageStart = Math.floor(startRow / PAGE_SIZE) * PAGE_SIZE;
+        const neededPageEnd = Math.floor(endRow / PAGE_SIZE) * PAGE_SIZE;
+        for (let p2 = neededPageStart;p2 <= neededPageEnd; p2 += PAGE_SIZE) {
+          ensurePage(p2);
+        }
+        body.innerHTML = "";
+        body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
+        for (let i2 = startRow;i2 < endRow; i2++) {
+          const pageStart = Math.floor(i2 / PAGE_SIZE) * PAGE_SIZE;
+          const pageRows = pageCache.get(pageStart);
+          const rowData = pageRows ? pageRows[i2 - pageStart] : null;
+          const row = document.createElement("div");
+          row.className = "db-grid-row";
+          if (i2 % 2 === 1)
+            row.classList.add("alt");
+          if (i2 === selectedRowIndex)
+            row.classList.add("selected");
+          const rowIndex = i2;
+          row.addEventListener("click", () => {
+            selectedRowIndex = rowIndex;
+            body.querySelectorAll(".db-grid-row.selected").forEach((r2) => {
+              r2.classList.remove("selected");
+            });
+            row.classList.add("selected");
+          });
+          const rowNum = document.createElement("div");
+          rowNum.className = "db-grid-cell db-grid-rownum";
+          rowNum.textContent = String(i2 + 1);
+          row.appendChild(rowNum);
+          if (rowData) {
+            for (let c2 = 0;c2 < columnNames.length; c2++) {
+              const cell = document.createElement("div");
+              cell.className = "db-grid-cell";
+              cell.style.width = `${getColWidth(columnNames[c2])}px`;
+              const val = rowData[c2];
+              cell.textContent = formatValue3(val);
+              if (val === null)
+                cell.classList.add("null");
+              else if (val instanceof Uint8Array)
+                cell.classList.add("blob");
+              else if (typeof val === "string" && val === "")
+                cell.classList.add("empty");
+              cell.style.cursor = "pointer";
+              const cellValue = val;
+              const cellColIndex = c2;
+              cell.addEventListener("click", (e2) => {
+                e2.stopPropagation();
+                selectedRowIndex = rowIndex;
+                body.querySelectorAll(".db-grid-row.selected").forEach((r2) => {
+                  r2.classList.remove("selected");
+                });
+                row.classList.add("selected");
+                showCellDetail(cellColIndex, cellValue);
+                const text2 = formatValueForCopy(cellValue);
+                navigator.clipboard.writeText(text2).then(() => {
+                  cell.classList.add("copied");
+                  setTimeout(() => cell.classList.remove("copied"), 600);
+                }, () => {});
+              });
+              row.appendChild(cell);
+            }
+          } else {
+            for (let c2 = 0;c2 < columnNames.length; c2++) {
+              const cell = document.createElement("div");
+              cell.className = "db-grid-cell loading";
+              cell.style.width = `${getColWidth(columnNames[c2])}px`;
+              cell.textContent = "…";
+              row.appendChild(cell);
+            }
+          }
+          body.appendChild(row);
+        }
+      });
+    }
+    function triggerExport(format2) {
+      const dbId = callbacks.getDbId();
+      if (!dbId || !currentTable)
+        return;
+      const params = new URLSearchParams({
+        db: dbId,
+        table: currentTable,
+        format: format2
+      });
+      if (sort) {
+        params.set("sort", sort.column);
+        params.set("dir", sort.direction);
+      }
+      const filters = collectFilters();
+      if (filters.length > 0) {
+        params.set("filters", JSON.stringify(filters));
+      }
+      const a2 = document.createElement("a");
+      a2.href = `/_db/export?${params}`;
+      a2.download = `${currentTable}.${format2}`;
+      document.body.appendChild(a2);
+      a2.click();
+      a2.remove();
+    }
+    let exportCsvBtn = null;
+    let exportJsonBtn = null;
+    function updateStatus() {
+      if (!statusEl) {
+        statusEl = document.createElement("div");
+        statusEl.className = "db-grid-status";
+        exportCsvBtn = document.createElement("button");
+        exportCsvBtn.type = "button";
+        exportCsvBtn.className = "db-btn db-btn-sm db-grid-export-btn";
+        exportCsvBtn.textContent = "Export CSV";
+        exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
+        exportJsonBtn = document.createElement("button");
+        exportJsonBtn.type = "button";
+        exportJsonBtn.className = "db-btn db-btn-sm db-grid-export-btn";
+        exportJsonBtn.textContent = "Export JSON";
+        exportJsonBtn.addEventListener("click", () => triggerExport("json"));
+        statusEl.append(exportCsvBtn, exportJsonBtn);
+        el.appendChild(statusEl);
+      }
+      const parts = [`${totalRows.toLocaleString()} rows`];
+      if (sort)
+        parts.push(`Sort: ${sort.column} ${sort.direction.toUpperCase()}`);
+      const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
+      if (activeFilterCount > 0)
+        parts.push(`${activeFilterCount} filter(s)`);
+      const textNode = statusEl.firstChild;
+      if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+        textNode.textContent = `${parts.join(" | ")} `;
+      } else {
+        statusEl.insertBefore(document.createTextNode(`${parts.join(" | ")} `), statusEl.firstChild);
+      }
+    }
+    function load(table2, initialData) {
+      clear();
+      currentTable = table2;
+      if (initialData) {
+        columns = initialData.columns;
+        columnNames = columns.map((c2) => c2.name);
+        totalRows = initialData.totalRows;
+        pageCache.set(0, initialData.rows);
+      } else {
+        columns = [];
+        columnNames = [];
+        totalRows = 0;
+      }
+      loadColWidths();
+      spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+      renderHeader();
+      updateStatus();
+      if (!initialData) {
+        ensurePage(0);
+      } else {
+        renderViewport();
+      }
+    }
+    filterInput.addEventListener("input", () => {
+      globalSearchValue = filterInput.value.trim();
+      filterClear.hidden = !globalSearchValue;
+      scheduleFilter();
+    });
+    filterInput.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape") {
+        filterInput.value = "";
+        globalSearchValue = "";
+        filterClear.hidden = true;
+        scheduleFilter();
+      }
+    });
+    filterClear.addEventListener("click", () => {
+      filterInput.value = "";
+      globalSearchValue = "";
+      filterClear.hidden = true;
+      invalidateData();
+    });
+    viewport.addEventListener("scroll", () => {
+      headerWrap.scrollLeft = viewport.scrollLeft;
+      filterRowWrap.scrollLeft = viewport.scrollLeft;
+      renderViewport();
+    }, { passive: true });
+    function destroy() {
+      clear();
+      viewport.removeEventListener("scroll", renderViewport);
+    }
+    return { el, load, clear, destroy };
+  }
+  function formatValue3(value) {
+    if (value === null)
+      return "NULL";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    const s2 = String(value);
+    if (s2 === "")
+      return "<empty>";
+    return s2;
+  }
+  function formatValueForCopy(value) {
+    if (value === null)
+      return "";
+    if (value instanceof Uint8Array)
+      return `<blob ${value.byteLength} bytes>`;
+    if (typeof value === "boolean")
+      return value ? "true" : "false";
+    if (typeof value === "object")
+      return JSON.stringify(value);
+    return String(value);
+  }
+
+  // web-src/views/database/table-list.ts
+  function createTableList(callbacks) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "db-table-list-wrapper";
+    wrapper.style.display = "flex";
+    wrapper.style.flexDirection = "column";
+    wrapper.style.flex = "1";
+    wrapper.style.overflow = "hidden";
+    const filterWrap = document.createElement("div");
+    filterWrap.className = "db-table-filter-wrap";
+    const filterInput = document.createElement("input");
+    filterInput.className = "db-table-filter";
+    filterInput.type = "text";
+    filterInput.placeholder = "Filter tables...";
+    filterWrap.appendChild(filterInput);
+    const el = document.createElement("div");
+    el.className = "db-table-list";
+    wrapper.append(filterWrap, el);
+    let activeTable = null;
+    let allTables = [];
+    const expandedTables = new Set;
+    const columnCache = new Map;
+    let contextMenu = null;
+    function closeContextMenu() {
+      if (contextMenu) {
+        contextMenu.remove();
+        contextMenu = null;
+      }
+    }
+    function showContextMenu(e2, tableName) {
+      e2.preventDefault();
+      closeContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "db-context-menu";
+      menu.style.position = "absolute";
+      menu.style.left = `${e2.pageX}px`;
+      menu.style.top = `${e2.pageY}px`;
+      const items = [
+        {
+          label: "Copy Table Name",
+          action: () => {
+            navigator.clipboard.writeText(tableName).catch(() => {});
+          }
+        },
+        {
+          label: "Copy SELECT Statement",
+          action: () => {
+            const sql = `SELECT * FROM "${tableName}" LIMIT 100`;
+            navigator.clipboard.writeText(sql).catch(() => {});
+          }
+        },
+        {
+          label: "View CREATE TABLE",
+          action: () => {
+            callbacks.onViewCreateTable?.(tableName);
+          }
+        },
+        {
+          label: "View Table Definition",
+          action: () => {
+            callbacks.onViewDefinition?.(tableName);
+          }
+        }
+      ];
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "db-context-menu-item";
+        row.textContent = item.label;
+        row.addEventListener("click", () => {
+          item.action();
+          closeContextMenu();
+        });
+        menu.appendChild(row);
+      }
+      document.body.appendChild(menu);
+      contextMenu = menu;
+      const onDocClick = (ev) => {
+        if (!menu.contains(ev.target)) {
+          closeContextMenu();
+          document.removeEventListener("click", onDocClick, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+        }
+      };
+      const onKeyDown = (ev) => {
+        if (ev.key === "Escape") {
+          closeContextMenu();
+          document.removeEventListener("click", onDocClick, true);
+          document.removeEventListener("keydown", onKeyDown, true);
+        }
+      };
+      setTimeout(() => {
+        document.addEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKeyDown, true);
+      }, 0);
+    }
+    async function renderColumns(container, tableName) {
+      let cols = columnCache.get(tableName);
+      if (!cols && callbacks.getColumns) {
+        cols = await callbacks.getColumns(tableName);
+        columnCache.set(tableName, cols);
+      }
+      if (!cols || cols.length === 0)
+        return;
+      container.innerHTML = "";
+      for (const col of cols) {
+        const colRow = document.createElement("div");
+        colRow.className = "db-table-col-item";
+        if (col.primaryKey)
+          colRow.classList.add("pk");
+        const colName = document.createElement("span");
+        colName.className = "db-table-col-name";
+        colName.textContent = col.name;
+        const colType = document.createElement("span");
+        colType.className = "db-table-col-type";
+        colType.textContent = col.type;
+        colRow.append(colName, colType);
+        container.appendChild(colRow);
+      }
+    }
+    function toggleExpand(tableName, _node, arrow, children) {
+      const expanded = expandedTables.has(tableName);
+      if (expanded) {
+        expandedTables.delete(tableName);
+        children.hidden = true;
+        arrow.classList.remove("expanded");
+      } else {
+        expandedTables.add(tableName);
+        children.hidden = false;
+        arrow.classList.add("expanded");
+        if (children.children.length === 0) {
+          renderColumns(children, tableName);
+        }
+      }
+    }
+    function renderFiltered(tables, filter) {
+      el.innerHTML = "";
+      const filtered = filter ? tables.filter((t2) => t2.name.toLowerCase().includes(filter.toLowerCase())) : tables;
+      if (filtered.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "db-table-list-empty";
+        empty.textContent = filter ? "No matching tables" : "No tables found";
+        el.appendChild(empty);
+        return;
+      }
+      const groups = { table: [], view: [] };
+      for (const t2 of filtered) {
+        (groups[t2.type] || groups.table).push(t2);
+      }
+      for (const [type, items] of Object.entries(groups)) {
+        if (items.length === 0)
+          continue;
+        const header = document.createElement("div");
+        header.className = "db-table-group-header";
+        header.textContent = type === "view" ? "Views" : "Tables";
+        el.appendChild(header);
+        for (const table2 of items) {
+          const node = document.createElement("div");
+          node.className = "db-table-node";
+          node.dataset.table = table2.name;
+          const row = document.createElement("div");
+          row.className = "db-table-item";
+          if (table2.name === activeTable)
+            row.classList.add("active");
+          row.dataset.table = table2.name;
+          const arrow = document.createElement("span");
+          arrow.className = "db-table-arrow";
+          if (expandedTables.has(table2.name))
+            arrow.classList.add("expanded");
+          const icon = document.createElement("span");
+          icon.className = "db-table-icon";
+          icon.textContent = table2.type === "view" ? "V" : "T";
+          icon.title = table2.type === "view" ? "View" : "Table";
+          const name = document.createElement("span");
+          name.className = "db-table-name";
+          name.textContent = table2.name;
+          const count = document.createElement("span");
+          count.className = "db-table-count";
+          count.textContent = table2.rowCount != null ? formatRowCount(table2.rowCount) : "";
+          row.append(arrow, icon, name, count);
+          const children = document.createElement("div");
+          children.className = "db-table-children";
+          children.hidden = !expandedTables.has(table2.name);
+          if (expandedTables.has(table2.name)) {
+            renderColumns(children, table2.name);
+          }
+          arrow.addEventListener("click", (e2) => {
+            e2.stopPropagation();
+            toggleExpand(table2.name, node, arrow, children);
+          });
+          row.addEventListener("click", () => callbacks.onSelectTable(table2.name));
+          row.addEventListener("dblclick", () => callbacks.onSelectSchema(table2.name));
+          row.addEventListener("contextmenu", (e2) => showContextMenu(e2, table2.name));
+          node.append(row, children);
+          el.appendChild(node);
+        }
+      }
+    }
+    function render(tables) {
+      allTables = tables;
+      filterInput.value = "";
+      renderFiltered(tables, "");
+    }
+    filterInput.addEventListener("input", () => {
+      renderFiltered(allTables, filterInput.value);
+    });
+    function setActive(table2) {
+      activeTable = table2;
+      el.querySelectorAll(".db-table-item").forEach((item) => {
+        item.classList.toggle("active", item.dataset.table === table2);
+      });
+    }
+    return { el: wrapper, render, setActive };
+  }
+  function formatRowCount(n2) {
+    if (n2 >= 1e6)
+      return `${(n2 / 1e6).toFixed(1)}M`;
+    if (n2 >= 1000)
+      return `${(n2 / 1000).toFixed(1)}K`;
+    return String(n2);
+  }
+
+  // web-src/views/database/database-view.ts
+  function createDatabaseView(deps) {
+    let mounted = false;
+    let currentDb = null;
+    let schemaCache = null;
+    let lastFiles = [];
+    const dbSelect = document.createElement("select");
+    dbSelect.className = "db-file-select";
+    dbSelect.title = "Select database file";
+    const dbToolbar = document.createElement("div");
+    dbToolbar.className = "db-toolbar";
+    dbToolbar.appendChild(dbSelect);
+    const tabBar = document.createElement("div");
+    tabBar.className = "db-tab-bar";
+    const tabData = createTab("Data", true);
+    const tabSchema = createTab("Schema", false);
+    tabBar.append(tabData, tabSchema);
+    let currentTab = "data";
+    const tableList = createTableList({
+      onSelectTable: (table2) => selectTable(table2),
+      onSelectSchema: (table2) => showSchema(table2),
+      onViewCreateTable: (table2) => showDdl(table2),
+      onViewDefinition: (table2) => showSchema(table2),
+      getColumns: (table2) => fetchColumns(table2)
+    });
+    const sidebar = document.createElement("div");
+    sidebar.className = "db-sidebar";
+    const savedWidth = localStorage.getItem("db:sidebar-width");
+    if (savedWidth)
+      sidebar.style.width = savedWidth;
+    const toolsSection = document.createElement("div");
+    toolsSection.className = "db-tools-section";
+    const queryBtn = document.createElement("button");
+    queryBtn.className = "db-tool-btn";
+    queryBtn.type = "button";
+    queryBtn.textContent = "Query";
+    queryBtn.title = "SQL Query Editor";
+    queryBtn.addEventListener("click", () => {
+      setActiveTab("query");
+    });
+    const erBtn = document.createElement("button");
+    erBtn.className = "db-tool-btn";
+    erBtn.type = "button";
+    erBtn.textContent = "ER Diagram";
+    erBtn.title = "Entity Relationship Diagram";
+    erBtn.addEventListener("click", () => {
+      setActiveTab("er");
+      if (schemaCache)
+        renderErDiagram();
+    });
+    const searchBtn = document.createElement("button");
+    searchBtn.className = "db-tool-btn";
+    searchBtn.type = "button";
+    searchBtn.textContent = "Search";
+    searchBtn.title = "Search all tables";
+    searchBtn.addEventListener("click", () => {
+      setActiveTab("search");
+    });
+    const snapshotBtn = document.createElement("button");
+    snapshotBtn.className = "db-tool-btn";
+    snapshotBtn.type = "button";
+    snapshotBtn.textContent = "Snapshot";
+    snapshotBtn.title = "Snapshot & Diff";
+    snapshotBtn.addEventListener("click", () => {
+      setActiveTab("snapshot");
+      snapshotView.refresh();
+    });
+    toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
+    sidebar.append(dbToolbar, tableList.el, toolsSection);
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "db-sidebar-resize";
+    sidebar.appendChild(resizeHandle);
+    let resizing = false;
+    resizeHandle.addEventListener("mousedown", (e2) => {
+      e2.preventDefault();
+      resizing = true;
+      resizeHandle.classList.add("active");
+      const onMove = (ev) => {
+        if (!resizing)
+          return;
+        const w = Math.max(120, Math.min(600, ev.clientX));
+        sidebar.style.width = `${w}px`;
+      };
+      const onUp = () => {
+        resizing = false;
+        resizeHandle.classList.remove("active");
+        localStorage.setItem("db:sidebar-width", sidebar.style.width);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+    const grid = createTableGrid({
+      fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters),
+      getDbId: () => currentDb?.id || null
+    });
+    const queryEditor = createQueryEditor({
+      executeQuery: (sql) => executeQuery(sql)
+    });
+    const schemaView = createSchemaView();
+    const erDiagram = createErDiagram();
+    const globalSearchView = createGlobalSearchView({
+      getDbId: () => currentDb?.id || null
+    });
+    const snapshotView = createSnapshotView({
+      getDbId: () => currentDb?.id || null,
+      getTables: () => schemaCache?.tables || []
+    });
+    const historyView = createQueryHistoryView({
+      getDbId: () => currentDb?.id || null,
+      copySqlToQuery: (sql) => {
+        queryEditor.setSql(sql);
+        setActiveTab("query");
+      }
+    });
+    const mainContent = document.createElement("div");
+    mainContent.className = "db-main-content";
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el);
+    queryEditor.el.hidden = true;
+    globalSearchView.el.hidden = true;
+    snapshotView.el.hidden = true;
+    const upperArea = document.createElement("div");
+    upperArea.className = "db-upper-area";
+    upperArea.append(sidebar, mainContent);
+    const historyResizer = document.createElement("div");
+    historyResizer.className = "db-history-resizer";
+    const historyPane = document.createElement("div");
+    historyPane.className = "db-history-pane";
+    const savedHistoryHeight = localStorage.getItem("db:history-height");
+    if (savedHistoryHeight)
+      historyPane.style.height = savedHistoryHeight;
+    historyPane.appendChild(historyView.el);
+    let historyResizing = false;
+    historyResizer.addEventListener("mousedown", (e2) => {
+      e2.preventDefault();
+      historyResizing = true;
+      historyResizer.classList.add("active");
+      const startY = e2.clientY;
+      const startH = historyPane.offsetHeight;
+      const onMove = (ev) => {
+        if (!historyResizing)
+          return;
+        const maxH = container.offsetHeight - 60;
+        const h = Math.max(60, Math.min(maxH, startH - (ev.clientY - startY)));
+        historyPane.style.height = `${h}px`;
+      };
+      const onUp = () => {
+        historyResizing = false;
+        historyResizer.classList.remove("active");
+        localStorage.setItem("db:history-height", historyPane.style.height);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+    const historyToggle = document.createElement("button");
+    historyToggle.className = "db-history-toggle";
+    historyToggle.type = "button";
+    historyToggle.textContent = "Query History";
+    historyToggle.title = "Toggle query history panel";
+    sidebar.appendChild(historyToggle);
+    let historyOpen = localStorage.getItem("db:history-open") !== "false";
+    function applyHistoryVisibility() {
+      historyResizer.hidden = !historyOpen;
+      historyPane.hidden = !historyOpen;
+      historyToggle.classList.toggle("active", historyOpen);
+      if (historyOpen)
+        historyView.refresh();
+    }
+    applyHistoryVisibility();
+    historyToggle.addEventListener("click", () => {
+      historyOpen = !historyOpen;
+      localStorage.setItem("db:history-open", String(historyOpen));
+      applyHistoryVisibility();
+    });
+    const container = document.createElement("div");
+    container.className = "db-container";
+    container.append(upperArea, historyResizer, historyPane);
+    function createTab(text2, active) {
+      const btn = document.createElement("button");
+      btn.className = `db-tab${active ? " active" : ""}`;
+      btn.type = "button";
+      btn.textContent = text2;
+      return btn;
+    }
+    function clearDockerNotice() {
+      const notice = mainContent.querySelector(".db-docker-notice");
+      if (notice)
+        notice.remove();
+      tabBar.hidden = false;
+      grid.el.hidden = false;
+    }
+    function mount() {
+      if (mounted)
+        return;
+      const content = document.getElementById("content");
+      if (!content)
+        return;
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = true;
+      const empty = document.getElementById("empty");
+      if (empty)
+        empty.classList.add("hidden");
+      content.appendChild(container);
+      mounted = true;
+      applyHistoryVisibility();
+    }
+    function unmount() {
+      if (!mounted)
+        return;
+      container.remove();
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+      mounted = false;
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      currentDb = null;
+      schemaCache = null;
+    }
+    function setActiveTab(tab, updateUrl = true) {
+      currentTab = tab;
+      tabData.classList.toggle("active", tab === "data");
+      tabSchema.classList.toggle("active", tab === "schema");
+      queryBtn.classList.toggle("active", tab === "query");
+      erBtn.classList.toggle("active", tab === "er");
+      searchBtn.classList.toggle("active", tab === "search");
+      snapshotBtn.classList.toggle("active", tab === "snapshot");
+      tabBar.hidden = tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
+      grid.el.hidden = tab !== "data";
+      queryEditor.el.hidden = tab !== "query";
+      schemaView.el.hidden = tab !== "schema";
+      erDiagram.el.hidden = tab !== "er";
+      globalSearchView.el.hidden = tab !== "search";
+      snapshotView.el.hidden = tab !== "snapshot";
+      if (tab === "query")
+        queryEditor.focus();
+      if (updateUrl) {
+        const activeTable = tableList.el.querySelector(".db-table-item.active");
+        deps.setRoute({
+          screen: "database",
+          db: currentDb?.id,
+          table: activeTable?.dataset.table,
+          tab: tab === "data" ? undefined : tab,
+          range: deps.currentRange()
+        }, true);
+      }
+    }
+    tabData.addEventListener("click", () => setActiveTab("data"));
+    tabSchema.addEventListener("click", () => {
+      setActiveTab("schema");
+      const active = tableList.el.querySelector(".db-table-item.active");
+      if (active?.dataset.table)
+        showSchema(active.dataset.table);
+    });
+    async function fetchDbFiles() {
+      const res = await deps.trackLoad(fetch("/_db/files"));
+      if (!res.ok)
+        return [];
+      const data = await res.json();
+      return data.files;
+    }
+    async function fetchSchema(dbId) {
+      const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`));
+      if (!res.ok)
+        return null;
+      return await res.json();
+    }
+    async function fetchTablePage(table2, offset, limit, sort, filters) {
+      if (!currentDb)
+        throw new Error("no database selected");
+      const params = new URLSearchParams({
+        db: currentDb.id,
+        table: table2,
+        offset: String(offset),
+        limit: String(limit)
+      });
+      if (sort) {
+        params.set("sort", sort.column);
+        params.set("dir", sort.direction);
+      }
+      if (filters.length > 0) {
+        params.set("filters", JSON.stringify(filters));
+      }
+      const res = await fetch(`/_db/table?${params}`);
+      if (!res.ok)
+        throw new Error(await res.text());
+      return await res.json();
+    }
+    async function executeQuery(sql) {
+      if (!currentDb)
+        throw new Error("no database selected");
+      const res = await fetch("/_db/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1"
+        },
+        body: JSON.stringify({
+          db: currentDb.id,
+          sql,
+          saveHistory: true,
+          source: "browser",
+          executedBy: "user"
+        })
+      });
+      return await res.json();
+    }
+    async function selectDb(dbId) {
+      const schema = await fetchSchema(dbId);
+      if (!schema)
+        return;
+      schemaCache = schema;
+      tableList.render(schema.tables);
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      setActiveTab("data");
+      if (schema.tables.length > 0) {
+        selectTable(schema.tables[0].name);
+      }
+    }
+    async function selectTable(table2) {
+      tableList.setActive(table2);
+      if (!currentDb)
+        return;
+      if (currentTab === "query" || currentTab === "er") {
+        setActiveTab("data", false);
+      }
+      deps.setRoute({
+        screen: "database",
+        db: currentDb.id,
+        table: table2,
+        tab: currentTab === "data" ? undefined : currentTab,
+        range: deps.currentRange()
+      }, true);
+      try {
+        const data = await deps.trackLoad(fetchTablePage(table2, 0, 200, null, []));
+        grid.load(table2, data);
+      } catch {
+        grid.load(table2);
+      }
+      if (currentTab === "schema") {
+        const columns = await fetchColumns(table2);
+        schemaView.render(table2, columns, schemaCache?.indexes || []);
+      }
+    }
+    async function fetchColumns(table2) {
+      if (schemaCache?.columnsMap?.[table2]) {
+        return schemaCache.columnsMap[table2];
+      }
+      if (!currentDb)
+        return [];
+      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+      if (!res.ok)
+        return [];
+      const data = await res.json();
+      return data.columns;
+    }
+    async function showSchema(table2) {
+      setActiveTab("schema");
+      if (!currentDb)
+        return;
+      const columns = await fetchColumns(table2);
+      schemaView.render(table2, columns, schemaCache?.indexes || []);
+    }
+    async function showDdl(table2) {
+      if (!currentDb)
+        return;
+      setActiveTab("schema");
+      try {
+        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+        if (!res.ok)
+          return;
+        const data = await res.json();
+        const columns = await fetchColumns(table2);
+        schemaView.render(table2, columns, schemaCache?.indexes || [], {
+          foreignKeys: schemaCache?.foreignKeys,
+          triggers: data.triggers,
+          ddl: data.sql
+        });
+      } catch {}
+    }
+    async function renderErDiagram() {
+      if (!schemaCache || !currentDb)
+        return;
+      const columnsMap = new Map;
+      if (schemaCache.columnsMap) {
+        for (const [name, cols] of Object.entries(schemaCache.columnsMap)) {
+          columnsMap.set(name, cols);
+        }
+      } else {
+        const tables = schemaCache.tables.filter((t2) => t2.type !== "view");
+        const results = await Promise.all(tables.map((t2) => fetchColumns(t2.name).then((cols) => ({ name: t2.name, cols }))));
+        for (const { name, cols } of results) {
+          if (cols.length > 0)
+            columnsMap.set(name, cols);
+        }
+      }
+      erDiagram.render(schemaCache, columnsMap);
+    }
+    dbSelect.addEventListener("change", () => {
+      const dbId = dbSelect.value;
+      if (!dbId)
+        return;
+      const file = lastFiles.find((f2) => f2.id === dbId);
+      const option = dbSelect.selectedOptions[0];
+      currentDb = {
+        id: dbId,
+        path: file?.path || dbId,
+        name: option?.textContent || dbId,
+        sizeBytes: file?.sizeBytes || 0,
+        kind: file?.kind || "sqlite"
+      };
+      clearDockerNotice();
+      deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
+      selectDb(dbId);
+    });
+    async function enter(db, table2, tab) {
+      mount();
+      document.body.classList.add("gdp-database-page");
+      deps.setPageMode();
+      deps.syncHeaderMenu();
+      const files = await fetchDbFiles();
+      lastFiles = files;
+      dbSelect.innerHTML = "";
+      if (files.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No database files found";
+        dbSelect.appendChild(opt);
+        dbSelect.disabled = true;
+        return;
+      }
+      dbSelect.disabled = false;
+      for (const f2 of files) {
+        const opt = document.createElement("option");
+        opt.value = f2.id;
+        const isDocker = f2.id.startsWith("docker:");
+        const label = isDocker ? `${f2.name} (Docker)` : `${f2.path} (${formatSize(f2.sizeBytes)})`;
+        opt.textContent = label;
+        dbSelect.appendChild(opt);
+      }
+      const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
+      dbSelect.value = target;
+      currentDb = files.find((f2) => f2.id === target) || null;
+      await selectDb(target);
+      if (table2) {
+        await selectTable(table2);
+      }
+      if (tab && tab !== "data") {
+        setActiveTab(tab);
+        if (tab === "schema") {
+          const activeTable = tableList.el.querySelector(".db-table-item.active");
+          if (activeTable?.dataset.table)
+            showSchema(activeTable.dataset.table);
+        } else if (tab === "er") {
+          if (schemaCache)
+            renderErDiagram();
+        } else if (tab === "snapshot") {
+          snapshotView.refresh();
+        }
+      }
+    }
+    function leave() {
+      document.body.classList.remove("gdp-database-page");
+      unmount();
+    }
+    function handleSse(event, data) {
+      if (!mounted)
+        return;
+      if (historyOpen)
+        historyView.refresh();
+      if (event === "db-snapshot" && data) {
+        snapshotView.handleSse(data);
+      }
+    }
+    return { enter, leave, handleSse };
+  }
+  function formatSize(bytes) {
+    if (bytes >= 1024 * 1024 * 1024)
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024)
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024)
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  }
+
   // web-src/views/diff-line-select.ts
   var SELECTED_CLASS = "gdp-diff-line-selected";
   function cardPath(el) {
@@ -7997,6 +10948,7 @@ ${frontmatter.yaml}
       setProjectName,
       getProjectName,
       createOpenPathButton,
+      persistViewedFiles,
       applyHideTests,
       getServerGeneration,
       setServerGeneration
@@ -8022,9 +10974,6 @@ ${frontmatter.yaml}
       span.textContent = ch;
       span.title = { M: "modified", A: "added", D: "deleted", R: "renamed" }[ch] || ch;
       return span;
-    }
-    function persistViewedFiles() {
-      localStorage.setItem("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles]));
     }
     function setFileViewed(path, viewed) {
       if (viewed)
@@ -8176,16 +11125,107 @@ ${frontmatter.yaml}
     let ACTIVE_LOADS = 0;
     const MAX_PARALLEL = 2;
     let lazyObserver = null;
-    function renderShell(meta) {
+    let scrollSpyInstalled = false;
+    let prevListSignature = "";
+    let prevCardSignatures = new Map;
+    function fileKey(f2) {
+      return f2.key || f2.path;
+    }
+    function computeListSignature(files) {
+      return files.map((f2) => `${fileKey(f2)}\x00${f2.path}\x00${f2.old_path || ""}\x00${f2.status || "M"}`).join(`
+`);
+    }
+    function computeCardSignature(f2) {
+      return [
+        fileKey(f2),
+        f2.status || "M",
+        f2.additions || 0,
+        f2.deletions || 0,
+        f2.binary ? 1 : 0,
+        f2.media_kind || "",
+        f2.size_class || "small",
+        f2.force_layout || "",
+        f2.highlight ? 1 : 0,
+        f2.load_url,
+        f2.preview_url || "",
+        f2.estimated_height_px || 0,
+        f2.untracked ? 1 : 0
+      ].join("\x00");
+    }
+    function ensureLazyObserver() {
+      if (!lazyObserver) {
+        lazyObserver = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting)
+              continue;
+            const card = entry.target;
+            if (card.classList.contains("loaded") || card.classList.contains("loading"))
+              continue;
+            const f2 = STATE.files.find((x) => x.path === card.dataset.path);
+            if (f2)
+              enqueueLoad(f2, card, 0);
+          }
+        }, { rootMargin: "1200px 0px 1600px 0px" });
+      }
+      return lazyObserver;
+    }
+    function activatePendingCard(card, file) {
+      ensureLazyObserver().observe(card);
+      const rect = card.getBoundingClientRect();
+      if (rect.top <= window.innerHeight + 1600) {
+        enqueueLoad(file, card, 0);
+      }
+    }
+    function invalidateLoadedCard(card, file, changedPaths) {
+      if (!card.classList.contains("loaded"))
+        return false;
+      if (changedPaths && !changedPaths.has(file.path))
+        return false;
+      card.classList.remove("loaded", "error");
+      card.classList.add("pending");
+      card._diffData = null;
+      const body = card.querySelector(".gdp-shell-body");
+      if (body)
+        body.innerHTML = "";
+      const head = card.querySelector(".gdp-shell-header");
+      if (head)
+        head.style.display = "";
+      const indicator = card.querySelector(".loading-indicator");
+      if (indicator)
+        indicator.hidden = false;
+      activatePendingCard(card, file);
+      return true;
+    }
+    function updateSidebarStats(files) {
+      for (const f2 of files) {
+        const li = document.querySelector(`#filelist li[data-path="${CSS.escape(f2.path)}"]`);
+        if (!li)
+          continue;
+        const badge = li.querySelector(".badge");
+        if (badge) {
+          const ch = (f2.status || "M")[0].toUpperCase();
+          if (badge.textContent !== ch) {
+            badge.textContent = ch;
+            badge.className = `badge ${ch}`;
+          }
+        }
+      }
+    }
+    function renderShell(meta, changedPaths) {
       const newFiles = meta.files || [];
+      const newListSig = computeListSignature(newFiles);
+      const listSame = newListSig === prevListSignature && prevListSignature !== "";
       STATE.files = newFiles;
       setServerGeneration(meta.generation || 0);
       window._lastMeta = meta;
       renderMeta(meta);
-      renderSidebar(newFiles);
       const target = $("#diff");
       const empty = $("#empty");
       if (!newFiles.length) {
+        prevListSignature = newListSig;
+        prevCardSignatures.clear();
+        if (!listSame)
+          renderSidebar(newFiles);
         if (STATE.route.screen === "file") {
           empty.classList.add("hidden");
           applySourceRouteToShell();
@@ -8194,17 +11234,91 @@ ${frontmatter.yaml}
           target.replaceChildren();
         }
         LOAD_QUEUE.length = 0;
-        return;
+        return {
+          structureChanged: !listSame,
+          invalidatedCards: 0,
+          preservedDom: listSame
+        };
       }
       empty.classList.add("hidden");
+      const newCardSigs = new Map;
+      for (const f2 of newFiles) {
+        newCardSigs.set(fileKey(f2), computeCardSignature(f2));
+      }
+      let invalidatedCards = 0;
+      if (listSame) {
+        const pathsUnknown = !changedPaths;
+        let sidebarNeedsStatsUpdate = false;
+        for (const f2 of newFiles) {
+          const key = fileKey(f2);
+          const oldSig = prevCardSignatures.get(key);
+          const newSig = newCardSigs.get(key);
+          const sigChanged = oldSig !== newSig;
+          const pathHint = pathsUnknown || changedPaths.has(f2.path);
+          if (!sigChanged && !pathHint) {
+            continue;
+          }
+          const card = document.querySelector(`.gdp-file-shell[data-key="${CSS.escape(key)}"]`);
+          if (!card)
+            continue;
+          const sizeChanged = card.dataset.sizeClass !== (f2.size_class || "small");
+          const statusChanged = card.dataset.status !== (f2.status || "M");
+          if (sizeChanged || statusChanged) {
+            card.classList.remove("loaded", "error");
+            card.classList.add("pending");
+            card.replaceChildren();
+            const tmp = createPlaceholder(f2);
+            while (tmp.firstChild)
+              card.appendChild(tmp.firstChild);
+            card.dataset.sizeClass = f2.size_class || "small";
+            card.dataset.status = f2.status || "M";
+            delete card.dataset.manualRendered;
+            delete card.dataset.manualLoad;
+            delete card.dataset.manualMode;
+            card.style.minHeight = `${f2.estimated_height_px || 80}px`;
+            card._diffData = null;
+            card._file = null;
+            activatePendingCard(card, f2);
+            invalidatedCards++;
+            sidebarNeedsStatsUpdate = true;
+          } else {
+            const stats = card.querySelector(".gdp-shell-header .stats");
+            if (stats) {
+              stats.innerHTML = '<span class="a">+' + (f2.additions || 0) + "</span>" + '<span class="d">−' + (f2.deletions || 0) + "</span>";
+            }
+            card._file = f2;
+            const didInvalidate = sigChanged ? invalidateLoadedCard(card, f2, null) : invalidateLoadedCard(card, f2, changedPaths);
+            if (didInvalidate)
+              invalidatedCards++;
+            if (sigChanged)
+              sidebarNeedsStatsUpdate = true;
+          }
+        }
+        if (sidebarNeedsStatsUpdate)
+          updateSidebarStats(newFiles);
+        prevCardSignatures = newCardSigs;
+        prevListSignature = newListSig;
+        applySourceRouteToShell();
+        if (!scrollSpyInstalled) {
+          setupScrollSpy();
+          scrollSpyInstalled = true;
+        }
+        return {
+          structureChanged: false,
+          invalidatedCards,
+          preservedDom: invalidatedCards === 0
+        };
+      }
+      if (!listSame)
+        renderSidebar(newFiles);
       const oldByKey = new Map;
       document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
         if (c2.dataset.key)
           oldByKey.set(c2.dataset.key, c2);
       });
       const ordered = [];
-      newFiles.forEach((f2) => {
-        const key = f2.key || f2.path;
+      for (const f2 of newFiles) {
+        const key = fileKey(f2);
         const old = oldByKey.get(key);
         if (old) {
           oldByKey.delete(key);
@@ -8225,6 +11339,7 @@ ${frontmatter.yaml}
             old.style.minHeight = `${f2.estimated_height_px || 80}px`;
             old._diffData = null;
             old._file = null;
+            invalidatedCards++;
           } else {
             const stats = old.querySelector(".gdp-shell-header .stats");
             if (stats) {
@@ -8235,8 +11350,9 @@ ${frontmatter.yaml}
           ordered.push(old);
         } else {
           ordered.push(createPlaceholder(f2));
+          invalidatedCards++;
         }
-      });
+      }
       oldByKey.forEach((c2) => {
         c2.remove();
       });
@@ -8245,14 +11361,18 @@ ${frontmatter.yaml}
         if (!LOAD_QUEUE[i2].card.isConnected)
           LOAD_QUEUE.splice(i2, 1);
       }
+      prevCardSignatures = newCardSigs;
+      prevListSignature = newListSig;
       setupLazyObserver();
       enqueueInitialLoads();
       applySourceRouteToShell();
       setupScrollSpy();
+      scrollSpyInstalled = true;
       if (typeof applyHideTests === "function")
         applyHideTests();
       applyFilter();
       applyViewedState();
+      return { structureChanged: true, invalidatedCards, preservedDom: false };
     }
     function createPlaceholder(f2) {
       const card = document.createElement("div");
@@ -9008,6 +12128,7 @@ ${frontmatter.yaml}
   var HELP_SECTIONS = [
     "overview",
     "annotations",
+    "database",
     "skills",
     "keybindings"
   ];
@@ -9135,6 +12256,93 @@ ${frontmatter.yaml}
                       "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable."
                     ]
                   ]
+                }
+              ]
+            }
+          ]
+        },
+        database: {
+          nav: "Database",
+          title: "Database Viewer",
+          intro: "Browse SQLite files and Docker-hosted MySQL/PostgreSQL databases. Run queries with syntax highlighting and explore table schemas and ER diagrams.",
+          groups: [
+            {
+              title: "Supported databases",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "SQLite",
+                      "Automatically discovered from .db, .sqlite, .sqlite3 files in the repository."
+                    ],
+                    [
+                      "MySQL / MariaDB",
+                      "Detected from docker-compose.yml services. Multiple databases per server are listed."
+                    ],
+                    [
+                      "PostgreSQL",
+                      "Detected from docker-compose.yml services. Multiple databases per server are listed."
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "UI layout",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "Sidebar",
+                      "DB selector, table tree (expand to see columns), filter, Query/ER buttons."
+                    ],
+                    [
+                      "Data tab",
+                      "Paginated table grid with sort, filter, cell copy, and CSV/JSON export."
+                    ],
+                    [
+                      "Schema tab",
+                      "Column definitions, indexes, foreign keys, triggers, and DDL."
+                    ],
+                    [
+                      "Query editor",
+                      "SQL syntax highlighting, Tab indent, auto-resize, Ctrl+Enter to run."
+                    ],
+                    [
+                      "ER Diagram",
+                      "Mermaid-based entity-relationship diagram with zoom and pan."
+                    ],
+                    [
+                      "Query History",
+                      "Bottom panel with master-detail layout. Left: history list, Right: result preview."
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "CLI query (for AI agents)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AI agents can execute read-only queries from the CLI. Results are saved to query history and visible in the browser."
+                },
+                {
+                  kind: "command",
+                  title: "Run a query",
+                  command: 'code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" --title "Sample data"'
+                },
+                {
+                  kind: "command",
+                  title: "List databases",
+                  command: "code-viewer query list"
+                },
+                {
+                  kind: "command",
+                  title: "Agent reference",
+                  command: "code-viewer query agent-help"
                 }
               ]
             }
@@ -9391,6 +12599,93 @@ ${frontmatter.yaml}
                       "削除して追加し直すより、注釈IDと順番を保ったまま修正します。"
                     ]
                   ]
+                }
+              ]
+            }
+          ]
+        },
+        database: {
+          nav: "データベース",
+          title: "データベースビューア",
+          intro: "SQLite ファイルや Docker 上の MySQL/PostgreSQL を閲覧できます。シンタックスハイライト付きクエリ実行、スキーマ表示、ER 図を提供します。",
+          groups: [
+            {
+              title: "対応データベース",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "SQLite",
+                      "リポジトリ内の .db, .sqlite, .sqlite3 ファイルを自動検出します。"
+                    ],
+                    [
+                      "MySQL / MariaDB",
+                      "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。"
+                    ],
+                    [
+                      "PostgreSQL",
+                      "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "UI構成",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "サイドバー",
+                      "DB選択、テーブルツリー（展開でカラム表示）、フィルター、Query/ERボタン。"
+                    ],
+                    [
+                      "Data タブ",
+                      "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSONエクスポート。"
+                    ],
+                    [
+                      "Schema タブ",
+                      "カラム定義、インデックス、外部キー、トリガー、DDL。"
+                    ],
+                    [
+                      "クエリエディター",
+                      "SQLシンタックスハイライト、Tabインデント、自動リサイズ、Ctrl+Enterで実行。"
+                    ],
+                    [
+                      "ER図",
+                      "Mermaidベースのエンティティ関係図。ズーム・パン対応。"
+                    ],
+                    [
+                      "クエリ履歴",
+                      "下部パネルにマスター/ディテール表示。左に履歴一覧、右に結果プレビュー。"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "CLI クエリ（AIエージェント用）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AIエージェントはCLIから読み取り専用クエリを実行できます。結果はクエリ履歴に保存され、ブラウザで確認できます。"
+                },
+                {
+                  kind: "command",
+                  title: "クエリを実行",
+                  command: 'code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" --title "サンプルデータ"'
+                },
+                {
+                  kind: "command",
+                  title: "データベース一覧",
+                  command: "code-viewer query list"
+                },
+                {
+                  kind: "command",
+                  title: "エージェント向けリファレンス",
+                  command: "code-viewer query agent-help"
                 }
               ]
             }
@@ -12819,6 +16114,7 @@ ${frontmatter.yaml}
       fileBadge,
       fileEntryIcon,
       applyViewedState,
+      persistCollapsedDirs,
       appendScopeParams,
       createOpenPathButton,
       normalizeViewerFontSize,
@@ -13068,7 +16364,7 @@ ${frontmatter.yaml}
               STATE.collapsedDirs.add(dir.path);
             else
               STATE.collapsedDirs.delete(dir.path);
-            localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+            persistCollapsedDirs();
           };
           if (!dir.children_omitted) {
             chev.addEventListener("click", toggleDir);
@@ -13275,7 +16571,7 @@ ${frontmatter.yaml}
             STATE.collapsedDirs.add(dir.path);
           else
             STATE.collapsedDirs.delete(dir.path);
-          localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+          persistCollapsedDirs();
           rerenderVirtualSidebar();
         } finally {
           delete li.dataset.toggling;
@@ -13585,7 +16881,7 @@ ${frontmatter.yaml}
               STATE.collapsedDirs.add(row.path);
           }
         }
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
         rerenderVirtualSidebar();
         return;
       }
@@ -13600,7 +16896,7 @@ ${frontmatter.yaml}
         if (collapsed)
           STATE.collapsedDirs.add(path);
       });
-      localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+      persistCollapsedDirs();
     }
     function sidebarAncestorDirs(path) {
       const parts = path.split("/").filter(Boolean);
@@ -13623,7 +16919,7 @@ ${frontmatter.yaml}
           setFolderIcon(icon, false);
       }
       if (changed)
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
       rerenderVirtualSidebar();
     }
     function markActive(path, options = {}) {
@@ -13938,7 +17234,7 @@ ${frontmatter.yaml}
           STATE.collapsedDirs.add(row.path);
         else
           STATE.collapsedDirs.delete(row.path);
-        localStorage.setItem("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs]));
+        persistCollapsedDirs();
         rerenderVirtualSidebar();
         scrollVirtualSidebarPathIntoView(row.path);
         return;
@@ -14427,6 +17723,8 @@ ${frontmatter.yaml}
       preview.className = "gdp-html-preview";
       const frame = document.createElement("iframe");
       frame.title = `${target.path} preview`;
+      frame.sandbox.value = "";
+      frame.referrerPolicy = "no-referrer";
       frame.srcdoc = html;
       preview.appendChild(frame);
       return preview;
@@ -15652,10 +18950,25 @@ ${frontmatter.yaml}
     const UNDO_STACK = [];
     let PENDING_G_SCOPE = null;
     let PENDING_G_UNTIL = 0;
+    let PROJECT_NAME = "";
     const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
     const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
     const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+    function scopedKey(base2) {
+      return PROJECT_NAME ? `${base2}:${PROJECT_NAME}` : base2;
+    }
+    function readScopedStorage(base2) {
+      if (PROJECT_NAME) {
+        const v = localStorage.getItem(`${base2}:${PROJECT_NAME}`);
+        if (v !== null)
+          return v;
+      }
+      return localStorage.getItem(base2);
+    }
+    function writeScopedStorage(base2, value) {
+      localStorage.setItem(scopedKey(base2), value);
+    }
     const VIEWER_LANGUAGES = ["en", "ja"];
     const CLIENT_SCOPE_OMIT_DIRS_DEFAULT = [
       "node_modules",
@@ -15770,6 +19083,29 @@ ${frontmatter.yaml}
         projectTitle.textContent = project;
         projectTitle.title = project;
       }
+      reloadScopedState();
+    }
+    function reloadScopedState() {
+      const collapsed = readScopedStorage("gdp:collapsed-dirs");
+      if (collapsed !== null) {
+        STATE.collapsedDirs = new Set(JSON.parse(collapsed));
+      }
+      const viewed = readScopedStorage("gdp:viewed-files");
+      if (viewed !== null) {
+        STATE.viewedFiles = new Set(JSON.parse(viewed));
+      }
+      const igRaw = readScopedStorage("gdp:ignore-ws");
+      if (igRaw !== null)
+        STATE.ignoreWs = igRaw === "1";
+      const from = readScopedStorage("gdp:from");
+      const to = readScopedStorage("gdp:to");
+      if (from !== null)
+        STATE.from = from;
+      if (to !== null)
+        STATE.to = to;
+      const ht = readScopedStorage("gdp:hide-tests");
+      if (ht !== null)
+        STATE.hideTests = ht === "1";
     }
     function savedScopeOmitDirs() {
       const raw = localStorage.getItem(scopeOmitDirsStorageKey());
@@ -15857,10 +19193,10 @@ ${frontmatter.yaml}
       }
     }
     const STATE = (() => {
-      const igRaw = localStorage.getItem("gdp:ignore-ws");
+      const igRaw = readScopedStorage("gdp:ignore-ws");
       const fallbackRange = {
-        from: localStorage.getItem("gdp:from") || DEFAULT_RANGE.from,
-        to: localStorage.getItem("gdp:to") || DEFAULT_RANGE.to
+        from: readScopedStorage("gdp:from") || DEFAULT_RANGE.from,
+        to: readScopedStorage("gdp:to") || DEFAULT_RANGE.to
       };
       const savedLanguage = viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, fallbackRange);
@@ -15873,22 +19209,22 @@ ${frontmatter.yaml}
         sbView: localStorage.getItem("gdp:sbview") || "tree",
         sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
-        collapsedDirs: new Set(JSON.parse(localStorage.getItem("gdp:collapsed-dirs") || "[]")),
+        collapsedDirs: new Set(JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]")),
         ignoreWs: igRaw === null ? true : igRaw === "1",
         from: route.range.from,
         to: route.range.to,
         collapsed: false,
         files: [],
         activeFile: null,
-        hideTests: localStorage.getItem("gdp:hide-tests") === "1",
+        hideTests: readScopedStorage("gdp:hide-tests") === "1",
         syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
-        viewedFiles: new Set(JSON.parse(localStorage.getItem("gdp:viewed-files") || "[]")),
+        viewedFiles: new Set(JSON.parse(readScopedStorage("gdp:viewed-files") || "[]")),
         route,
-        repoRef: route.screen === "repo" ? route.ref : "worktree"
+        repoRef: route.screen === "repo" ? route.ref : "worktree",
+        autoUpdate: localStorage.getItem("gdp:auto-update") !== "0"
       };
     })();
     let highlightConfigured = false;
-    let PROJECT_NAME = "";
     let REPO_SIDEBAR_REF = null;
     const LINE_REF_PILL = createLineRefPill();
     const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
@@ -15912,6 +19248,7 @@ ${frontmatter.yaml}
       fileBadge: (status) => DIFF_VIEW.fileBadge(status),
       fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
       applyViewedState: () => DIFF_VIEW.applyViewedState(),
+      persistCollapsedDirs: () => writeScopedStorage("gdp:collapsed-dirs", JSON.stringify([...STATE.collapsedDirs])),
       appendScopeParams,
       createOpenPathButton,
       normalizeViewerFontSize,
@@ -16074,10 +19411,12 @@ ${frontmatter.yaml}
           repo: "Repository",
           diff: "Diff Viewer",
           history: "History",
+          database: "Database",
           help: "Help"
         },
         global: {
           annotations: "code annotations",
+          queryHistory: "query history",
           settings: "viewer settings",
           theme: "toggle theme",
           product: "code viewer"
@@ -16096,7 +19435,18 @@ ${frontmatter.yaml}
           syntaxLoadingTitle: "loading syntax highlighter",
           syntaxErrorTitle: "failed to load syntax highlighter",
           syntaxOffTitle: "syntax highlighting off",
-          hideTests: "hide test files (test|spec)"
+          hideTests: "hide test files (test|spec)",
+          autoUpdate: "auto",
+          autoUpdateOnTitle: "auto update on file change",
+          autoUpdateOffTitle: "auto update off — manual reload"
+        },
+        changeBanner: {
+          text: "Files changed",
+          reload: "Reload",
+          justNow: "just now",
+          secondsAgo: (seconds) => `${seconds}s ago`,
+          minutesAgo: (minutes) => `${minutes}m ago`,
+          hoursAgo: (hours) => `${hours}h ago`
         },
         sidebar: {
           files: "Files",
@@ -16120,7 +19470,8 @@ ${frontmatter.yaml}
           close: "close viewer settings",
           display: "Display",
           language: "Language",
-          fileListFontSize: "File list font size",
+          fileListFontSize: "UI font size",
+          fileListFontSizeHelp: "Applies to the file sidebar and database UI.",
           codeFontSize: "Code font size",
           sizeSmall: "Small",
           sizeRegular: "Regular",
@@ -16150,10 +19501,12 @@ ${frontmatter.yaml}
           repo: "リポジトリ",
           diff: "Diff ビューア",
           history: "履歴",
+          database: "データベース",
           help: "ヘルプ"
         },
         global: {
           annotations: "コード注釈",
+          queryHistory: "クエリ履歴",
           settings: "ビューア設定",
           theme: "テーマ切り替え",
           product: "code viewer"
@@ -16172,7 +19525,18 @@ ${frontmatter.yaml}
           syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
           syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
           syntaxOffTitle: "シンタックスハイライト無効",
-          hideTests: "test/spec ファイルを隠す"
+          hideTests: "test/spec ファイルを隠す",
+          autoUpdate: "自動",
+          autoUpdateOnTitle: "ファイル変更時に自動更新",
+          autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み"
+        },
+        changeBanner: {
+          text: "ファイルに変更がありました",
+          reload: "再読み込みする",
+          justNow: "たった今",
+          secondsAgo: (seconds) => `${seconds}秒前`,
+          minutesAgo: (minutes) => `${minutes}分前`,
+          hoursAgo: (hours) => `${hours}時間前`
         },
         sidebar: {
           files: "ファイル",
@@ -16196,8 +19560,9 @@ ${frontmatter.yaml}
           close: "ビューア設定を閉じる",
           display: "表示",
           language: "言語",
-          fileListFontSize: "ファイル一覧の文字サイズ",
-          codeFontSize: "コードの文字サイズ",
+          fileListFontSize: "UIの文字サイズ",
+          fileListFontSizeHelp: "ファイル一覧とデータベース画面に適用されます。",
+          codeFontSize: "コード表示の文字サイズ",
           sizeSmall: "小",
           sizeRegular: "標準",
           sizeLarge: "大",
@@ -16256,6 +19621,11 @@ ${frontmatter.yaml}
         annotationsToggle.title = text2.global.annotations;
         annotationsToggle.setAttribute("aria-label", text2.global.annotations);
       }
+      const queryHistoryToggle = document.querySelector("#query-history-toggle");
+      if (queryHistoryToggle) {
+        queryHistoryToggle.title = text2.global.queryHistory;
+        queryHistoryToggle.setAttribute("aria-label", text2.global.queryHistory);
+      }
       const viewerSettings = document.querySelector("#viewer-settings");
       if (viewerSettings) {
         viewerSettings.title = text2.global.settings;
@@ -16280,6 +19650,7 @@ ${frontmatter.yaml}
       const hideTests = document.querySelector("#hide-tests");
       if (hideTests)
         hideTests.title = text2.topbar.hideTests;
+      applyAutoUpdateButton();
       setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
       setElementText(".sb-title", text2.sidebar.files);
       const sidebarActions = document.querySelector(".sb-actions");
@@ -16349,6 +19720,7 @@ ${frontmatter.yaml}
         large: text2.settings.sizeLarge,
         xlarge: text2.settings.sizeExtraLarge
       });
+      setElementText("#ui-font-size-help", text2.settings.fileListFontSizeHelp);
       setElementText("#display-settings-source", text2.settings.displaySource);
       setButtonLabel(document.querySelector("#scope-omit-reset"), text2.settings.reset);
       setButtonLabel(document.querySelector("#scope-omit-save"), text2.settings.save);
@@ -16364,6 +19736,8 @@ ${frontmatter.yaml}
       setButtonLabel(document.querySelector("#annotation-clear"), text2.annotations.clear);
       setButtonLabel(document.querySelector("#annotation-panel-close"), text2.annotations.close);
       setElementText(".annotation-list-head strong", text2.annotations.sessions);
+      setElementText(".query-history-panel-head strong", text2.global.queryHistory);
+      setButtonLabel(document.querySelector("#query-history-panel-close"), text2.annotations.close);
     }
     function setViewerLanguage(language, persist = true) {
       const next = normalizeViewerLanguage(language);
@@ -16652,6 +20026,9 @@ ${frontmatter.yaml}
     function repoFileTargetFromRoute() {
       return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
     }
+    function isRepoBlobRoute(route) {
+      return route.screen === "file" && route.view === "blob";
+    }
     let ANNOTATIONS_UI = null;
     function applyInlineAnnotations() {
       ANNOTATIONS_UI?.applyInlineAnnotations();
@@ -16681,12 +20058,23 @@ ${frontmatter.yaml}
       syncHeaderMenu();
       syncLineRefPill();
     }
+    function setQueryHistoryPanelOpen(open) {
+      const panel = document.getElementById("query-history-panel");
+      if (!panel)
+        return;
+      panel.hidden = !open;
+      document.body.classList.toggle("query-history-panel-open", open);
+      if (open && ANNOTATIONS_UI) {
+        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+      }
+    }
     function setPageMode() {
       document.body.classList.toggle("gdp-file-detail-page", STATE.route.screen === "file");
       document.body.classList.toggle("gdp-repo-blob-page", STATE.route.screen === "file" && STATE.route.view === "blob");
       document.body.classList.toggle("gdp-repo-page", STATE.route.screen === "repo");
       document.body.classList.toggle("gdp-help-page", STATE.route.screen === "help");
       document.body.classList.toggle("gdp-history-page", STATE.route.screen === "history");
+      document.body.classList.toggle("gdp-database-page", STATE.route.screen === "database");
       placeSidebarToggle();
       syncSidebarHeaderHeight();
       const historyPanel = $("#history-panel");
@@ -16698,6 +20086,19 @@ ${frontmatter.yaml}
           historyRefInput.value = STATE.route.ref || "HEAD";
       }
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+      const isDatabase = STATE.route.screen === "database";
+      const annotationsToggle = document.querySelector("#annotations-toggle");
+      const qhToggle = document.querySelector("#query-history-toggle");
+      if (annotationsToggle)
+        annotationsToggle.hidden = isDatabase;
+      if (qhToggle)
+        qhToggle.hidden = !isDatabase;
+      if (!isDatabase) {
+        setQueryHistoryPanelOpen(false);
+      }
+      if (isDatabase && ANNOTATIONS_UI) {
+        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
+      }
     }
     function syncHeaderMenu() {
       document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
@@ -16723,6 +20124,12 @@ ${frontmatter.yaml}
           link2.href = buildRoute({
             screen: "history",
             ref: "HEAD",
+            range: currentRange()
+          });
+        }
+        if (link2.dataset.route === "database") {
+          link2.href = buildRoute({
+            screen: "database",
             range: currentRange()
           });
         }
@@ -16868,6 +20275,7 @@ ${frontmatter.yaml}
       setProjectName,
       getProjectName: () => PROJECT_NAME,
       createOpenPathButton,
+      persistViewedFiles: () => writeScopedStorage("gdp:viewed-files", JSON.stringify([...STATE.viewedFiles])),
       applyHideTests: () => applyHideTests(),
       getServerGeneration: () => SERVER_GENERATION,
       setServerGeneration: (generation) => {
@@ -17221,10 +20629,24 @@ ${frontmatter.yaml}
         setStatus("live");
         renderHelpPage();
         syncHeaderMenu();
-        return Promise.resolve();
+        return Promise.resolve(null);
+      }
+      if (STATE.route.screen === "database") {
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        setStatus("live");
+        return Promise.resolve(null);
+      }
+      if (isRepoBlobRoute(STATE.route)) {
+        setStatus("live");
+        applySourceRouteToShell();
+        return Promise.resolve({
+          structureChanged: false,
+          invalidatedCards: 0,
+          preservedDom: true
+        });
       }
       if (STATE.route.screen === "repo")
-        return loadRepo();
+        return loadRepo().then(() => null);
       {
         const empty = $("#empty");
         if (empty) {
@@ -17249,9 +20671,13 @@ ${frontmatter.yaml}
         params.set("nocache", "1");
       const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
       return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
-        renderShell(data);
+        const result = renderShell(data, options.changedPaths);
         setStatus("live");
-      }).catch(() => setStatus("error"));
+        return result;
+      }).catch(() => {
+        setStatus("error");
+        return null;
+      });
     }
     loadSettings().finally(() => {
       if (STATE.route.screen === "help") {
@@ -17266,6 +20692,9 @@ ${frontmatter.yaml}
         parkRangeForHistory();
         setStatus("live");
         HISTORY_VIEW.enterHistory();
+      } else if (STATE.route.screen === "database") {
+        setStatus("live");
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
       } else
         load();
       syncLineRefPill();
@@ -17281,8 +20710,8 @@ ${frontmatter.yaml}
       preHistoryRange = null;
       STATE.from = from || "";
       STATE.to = to || "";
-      localStorage.setItem("gdp:from", STATE.from);
-      localStorage.setItem("gdp:to", STATE.to);
+      writeScopedStorage("gdp:from", STATE.from);
+      writeScopedStorage("gdp:to", STATE.to);
       syncRefInputs();
       const range = currentRange();
       if (STATE.route.screen === "file") {
@@ -17312,7 +20741,7 @@ ${frontmatter.yaml}
         STATE.from = range.from;
         STATE.to = range.to;
         syncRefInputs();
-        return load();
+        return load().then(() => {});
       },
       showEmptyDiffPane: () => {
         const diff = $("#diff");
@@ -17331,6 +20760,13 @@ ${frontmatter.yaml}
         setStatus("live");
       },
       trackLoad
+    });
+    const DATABASE_VIEW = createDatabaseView({
+      setRoute,
+      setPageMode,
+      currentRange,
+      trackLoad,
+      syncHeaderMenu
     });
     const REF_PICKER = createRefPicker({
       $,
@@ -17355,6 +20791,9 @@ ${frontmatter.yaml}
     function applyRouteFromLocation() {
       if (STATE.route.screen === "history" && window.location.pathname !== "/history") {
         restoreRangeAfterHistory();
+      }
+      if (STATE.route.screen === "database" && window.location.pathname !== "/database") {
+        DATABASE_VIEW.leave();
       }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       const routeLanguage = viewerLanguageFromSearch(window.location.search);
@@ -17392,6 +20831,14 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
         return;
       }
+      if (STATE.route.screen === "database") {
+        cancelActiveSourceLoad("navigation");
+        setPageMode();
+        removeStandaloneSource();
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        setStatus("live");
+        return;
+      }
       if (STATE.route.screen !== "file") {
         cancelActiveSourceLoad("navigation");
         setPageMode();
@@ -17423,7 +20870,7 @@ ${frontmatter.yaml}
     applyIgnoreWs();
     $("#ignore-ws").addEventListener("click", () => {
       STATE.ignoreWs = !STATE.ignoreWs;
-      localStorage.setItem("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
+      writeScopedStorage("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
       applyIgnoreWs();
       load();
     });
@@ -17480,7 +20927,7 @@ ${frontmatter.yaml}
     applyHideTests();
     $("#hide-tests").addEventListener("click", () => {
       STATE.hideTests = !STATE.hideTests;
-      localStorage.setItem("gdp:hide-tests", STATE.hideTests ? "1" : "0");
+      writeScopedStorage("gdp:hide-tests", STATE.hideTests ? "1" : "0");
       applyHideTests();
     });
     ANNOTATIONS_UI = createAnnotationsUi({
@@ -17504,8 +20951,8 @@ ${frontmatter.yaml}
       setRange: (from, to) => {
         STATE.from = from;
         STATE.to = to;
-        localStorage.setItem("gdp:from", from);
-        localStorage.setItem("gdp:to", to);
+        writeScopedStorage("gdp:from", from);
+        writeScopedStorage("gdp:to", to);
       }
     });
     createAnnotationsPlayer({
@@ -17517,34 +20964,239 @@ ${frontmatter.yaml}
       onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
       getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
+    const qhToggleBtn = document.getElementById("query-history-toggle");
+    if (qhToggleBtn) {
+      qhToggleBtn.addEventListener("click", () => {
+        const panel = document.getElementById("query-history-panel");
+        const opening = panel ? panel.hidden : true;
+        setQueryHistoryPanelOpen(opening);
+        if (opening)
+          DATABASE_VIEW.handleSse();
+      });
+    }
+    const qhCloseBtn = document.getElementById("query-history-panel-close");
+    if (qhCloseBtn) {
+      qhCloseBtn.addEventListener("click", () => {
+        setQueryHistoryPanelOpen(false);
+      });
+    }
+    (function setupQueryHistoryResizer() {
+      const panel = document.getElementById("query-history-panel");
+      const handle = document.getElementById("query-history-resizer");
+      if (!panel || !handle)
+        return;
+      const STORAGE_KEY = "gdp:qh-panel-width";
+      const MIN_W = 280;
+      const MAX_W = 800;
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const w = Math.max(MIN_W, Math.min(MAX_W, Number(saved) || 420));
+        panel.style.width = `${w}px`;
+      }
+      let dragging = false;
+      let startX = 0;
+      let startW = 0;
+      handle.addEventListener("mousedown", (e2) => {
+        dragging = true;
+        startX = e2.clientX;
+        startW = panel.offsetWidth;
+        document.body.classList.add("db-resizing");
+        e2.preventDefault();
+      });
+      window.addEventListener("mousemove", (e2) => {
+        if (!dragging)
+          return;
+        const w = Math.max(MIN_W, Math.min(MAX_W, startW - (e2.clientX - startX)));
+        panel.style.width = `${w}px`;
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging)
+          return;
+        dragging = false;
+        document.body.classList.remove("db-resizing");
+        localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
+      });
+    })();
+    function applyAutoUpdateButton() {
+      const btn = document.querySelector("#auto-update");
+      if (!btn)
+        return;
+      const text2 = uiText();
+      btn.classList.toggle("active", STATE.autoUpdate);
+      btn.textContent = text2.topbar.autoUpdate;
+      btn.title = STATE.autoUpdate ? text2.topbar.autoUpdateOnTitle : text2.topbar.autoUpdateOffTitle;
+      btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+    }
+    function setAutoUpdate(on) {
+      STATE.autoUpdate = on;
+      localStorage.setItem("gdp:auto-update", on ? "1" : "0");
+      applyAutoUpdateButton();
+      if (on) {
+        if (bannerPendingPaths) {
+          const paths = bannerPendingPaths;
+          hideChangeBanner();
+          doSseLoad(paths);
+          return;
+        }
+        hideChangeBanner();
+      }
+    }
+    let bannerPendingPaths = null;
+    let changeBannerShownAt = 0;
+    let changeBannerAgeTimer = null;
+    function formatChangeBannerAge(now) {
+      const text2 = uiText().changeBanner;
+      const elapsedSeconds = Math.max(0, Math.floor((now - changeBannerShownAt) / 1000));
+      if (elapsedSeconds < 5)
+        return text2.justNow;
+      if (elapsedSeconds < 60)
+        return text2.secondsAgo(elapsedSeconds);
+      const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+      if (elapsedMinutes < 60)
+        return text2.minutesAgo(elapsedMinutes);
+      return text2.hoursAgo(Math.floor(elapsedMinutes / 60));
+    }
+    function updateChangeBannerAge() {
+      const ageEl = document.getElementById("change-banner-age");
+      if (ageEl)
+        ageEl.textContent = formatChangeBannerAge(Date.now());
+    }
+    function showChangeBanner(paths) {
+      bannerPendingPaths = paths;
+      changeBannerShownAt = Date.now();
+      const banner = document.getElementById("change-banner");
+      if (!banner)
+        return;
+      const text2 = uiText();
+      const textEl = document.getElementById("change-banner-text");
+      if (textEl)
+        textEl.textContent = text2.changeBanner.text;
+      updateChangeBannerAge();
+      if (!changeBannerAgeTimer) {
+        changeBannerAgeTimer = setInterval(updateChangeBannerAge, 1000);
+      }
+      const reloadBtn = document.getElementById("change-banner-reload");
+      if (reloadBtn)
+        reloadBtn.textContent = text2.changeBanner.reload;
+      banner.hidden = false;
+    }
+    function hideChangeBanner() {
+      const banner = document.getElementById("change-banner");
+      if (banner)
+        banner.hidden = true;
+      bannerPendingPaths = null;
+      changeBannerShownAt = 0;
+      if (changeBannerAgeTimer) {
+        clearInterval(changeBannerAgeTimer);
+        changeBannerAgeTimer = null;
+      }
+    }
+    document.getElementById("change-banner-reload")?.addEventListener("click", () => {
+      const paths = bannerPendingPaths;
+      hideChangeBanner();
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree"
+        });
+        return;
+      }
+      doSseLoad(paths);
+    });
+    document.getElementById("change-banner-dismiss")?.addEventListener("click", () => {
+      hideChangeBanner();
+    });
+    document.getElementById("auto-update")?.addEventListener("click", () => {
+      setAutoUpdate(!STATE.autoUpdate);
+    });
+    applyAutoUpdateButton();
+    function doSseLoad(paths) {
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        const viewingPath = route.path;
+        if (paths && viewingPath && !paths.has(viewingPath))
+          return;
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree"
+        });
+        return;
+      }
+      if (route.screen === "repo") {
+        invalidateRepoSidebar();
+        loadRepo();
+        return;
+      }
+      const savedScroll = window.scrollY;
+      const savedActive = STATE.activeFile;
+      load({ changedPaths: paths }).then((result) => {
+        if (result?.preservedDom)
+          return;
+        if (savedActive) {
+          const card = document.querySelector(diffCardSelector(savedActive));
+          if (card) {
+            card.scrollIntoView({ block: "start" });
+            return;
+          }
+        }
+        window.scrollTo(0, savedScroll);
+      });
+    }
     let sseTimer = null;
-    function scheduleSseLoad() {
+    let pendingSseChangedPaths = new Set;
+    function scheduleSseLoad(changedPaths) {
+      if (STATE.route.screen === "database" || STATE.route.screen === "help")
+        return;
+      if (changedPaths && pendingSseChangedPaths) {
+        for (const p2 of changedPaths)
+          pendingSseChangedPaths.add(p2);
+      } else {
+        pendingSseChangedPaths = null;
+      }
       if (sseTimer)
         clearTimeout(sseTimer);
       sseTimer = setTimeout(() => {
         sseTimer = null;
-        invalidateRepoSidebar();
-        const savedScroll = window.scrollY;
-        const savedActive = STATE.activeFile;
-        load().then(() => {
-          if (savedActive) {
-            const card = document.querySelector(diffCardSelector(savedActive));
-            if (card) {
-              card.scrollIntoView({ block: "start" });
-              return;
-            }
-          }
-          window.scrollTo(0, savedScroll);
-        });
+        const paths = pendingSseChangedPaths;
+        pendingSseChangedPaths = new Set;
+        const route = STATE.route;
+        if (isRepoBlobRoute(route)) {
+          const viewingPath = route.path;
+          if (paths && viewingPath && !paths.has(viewingPath))
+            return;
+        }
+        if (STATE.autoUpdate) {
+          doSseLoad(paths);
+        } else {
+          showChangeBanner(paths);
+        }
       }, 350);
     }
     const es = new EventSource("/events");
     const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
     let openedOnce = false;
-    es.addEventListener("update", () => scheduleSseLoad());
+    es.addEventListener("update", (event) => {
+      const raw = event.data;
+      let paths = null;
+      if (raw && raw !== "tick") {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.paths))
+            paths = parsed.paths;
+        } catch {}
+      }
+      scheduleSseLoad(paths);
+    });
     es.addEventListener("reload", () => location.reload());
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse(event.data);
+    });
+    es.addEventListener("db-query", () => {
+      DATABASE_VIEW.handleSse("db-query");
+    });
+    es.addEventListener("db-snapshot", (event) => {
+      DATABASE_VIEW.handleSse("db-snapshot", event.data);
     });
     es.addEventListener("error", () => setStatus("error"));
     es.addEventListener("open", () => {
@@ -17560,6 +21212,10 @@ ${frontmatter.yaml}
         return;
       if (!catchUpGate())
         return;
+      if (!STATE.autoUpdate) {
+        showChangeBanner(null);
+        return;
+      }
       load({ force: true });
     }
     document.addEventListener("visibilitychange", () => {

@@ -27,10 +27,13 @@
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
       <a class="app-menu-item" data-route="diff" href="/todif?from=HEAD&to=worktree">Diff Viewer</a>
       <a class="app-menu-item" data-route="history" href="/history">History</a>
+      <a class="app-menu-item" data-route="database" href="/database">Database</a>
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
+      <button id="query-history-toggle" class="global-icon-action" title="query history" aria-label="query history" hidden>📋</button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
       <button id="theme" title="toggle theme">🌗</button>
       <span id="status" class="status"></span>
       <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
@@ -77,6 +80,14 @@
   </div>
 
   <div id="load-bar" aria-hidden="true"></div>
+  <div id="change-banner" hidden>
+    <span id="change-banner-copy">
+      <span id="change-banner-text"></span>
+      <span id="change-banner-age"></span>
+    </span>
+    <button id="change-banner-reload" type="button"></button>
+    <button id="change-banner-dismiss" type="button" aria-label="dismiss">×</button>
+  </div>
 
   <aside id="history-panel" aria-label="Commit history" hidden>
     <div class="history-head">
@@ -134,6 +145,7 @@
         <option value="large">Large</option>
         <option value="xlarge">Extra Large</option>
       </select>
+      <p id="ui-font-size-help" class="scope-settings-help"></p>
       <label for="code-font-size">Code font size</label>
       <select id="code-font-size">
         <option value="compact">Small</option>
@@ -197,6 +209,15 @@
       <a id="annotation-detail-location" href="#"></a>
       <div id="annotation-detail-body" class="markdown-body"></div>
     </div>
+  </aside>
+
+  <aside id="query-history-panel" hidden>
+    <div id="query-history-resizer" aria-hidden="true"></div>
+    <div class="query-history-panel-head">
+      <strong>Query History</strong>
+      <button id="query-history-panel-close" type="button">close</button>
+    </div>
+    <div id="query-history-content"></div>
   </aside>
 
   <main id="content">

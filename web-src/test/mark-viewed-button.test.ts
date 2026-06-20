@@ -29,9 +29,7 @@ describe("mark viewed toolbar button", () => {
   });
 
   test("persists per-file viewed paths without dimming diff bodies", () => {
-    expect(appSource.includes("localStorage.setItem('gdp:viewed-files'")).toBe(
-      true,
-    );
+    expect(appSource.includes('"gdp:viewed-files"')).toBe(true);
     expect(appSource.includes("STATE.viewedFiles.add(path)")).toBe(true);
     expect(appSource.includes("STATE.viewedFiles.delete(path)")).toBe(true);
     expect(
