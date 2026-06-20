@@ -498,11 +498,61 @@ function resolveContainerName(serviceName: string, cwd: string): string | null {
   }
 }
 
+export function listDockerDatabases(
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  env: Record<string, string>,
+  cwd: string,
+): string[] {
+  const containerName = resolveContainerName(serviceName, cwd);
+  if (!containerName) return [];
+  const user =
+    env.POSTGRES_USER ||
+    env.MYSQL_USER ||
+    env.MARIADB_USER ||
+    (kind === "postgresql" ? "postgres" : "root");
+  const password =
+    env.POSTGRES_PASSWORD ||
+    env.MYSQL_PASSWORD ||
+    env.MYSQL_ROOT_PASSWORD ||
+    env.MARIADB_PASSWORD ||
+    env.MARIADB_ROOT_PASSWORD ||
+    "";
+  const defaultDb =
+    env.POSTGRES_DB ||
+    env.MYSQL_DATABASE ||
+    env.MARIADB_DATABASE ||
+    (kind === "postgresql" ? "postgres" : "");
+  const config: DockerDbConfig = {
+    kind,
+    containerName,
+    user,
+    password,
+    database: defaultDb || (kind === "postgresql" ? "postgres" : "mysql"),
+  };
+  try {
+    let sql: string;
+    if (kind === "postgresql") {
+      sql = `SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true ORDER BY datname`;
+    } else {
+      sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys') ORDER BY schema_name`;
+    }
+    const result = execInContainer(config, sql);
+    if (result.code !== 0) return defaultDb ? [defaultDb] : [];
+    const parsed = parseTsvOutput(result.stdout, kind === "mysql");
+    const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
+    return dbs.length > 0 ? dbs : defaultDb ? [defaultDb] : [];
+  } catch {
+    return defaultDb ? [defaultDb] : [];
+  }
+}
+
 export function openDockerAdapter(
   serviceName: string,
   kind: "postgresql" | "mysql",
   env: Record<string, string>,
   cwd: string,
+  overrideDatabase?: string,
 ): DatabaseAdapter {
   const containerName = resolveContainerName(serviceName, cwd);
   if (!containerName) {
@@ -523,6 +573,7 @@ export function openDockerAdapter(
     env.MARIADB_ROOT_PASSWORD ||
     "";
   const database =
+    overrideDatabase ||
     env.POSTGRES_DB ||
     env.MYSQL_DATABASE ||
     env.MARIADB_DATABASE ||

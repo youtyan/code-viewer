@@ -180,6 +180,7 @@ function parseComposePorts(serviceBlock: string): string | null {
 export type DockerDbInfo = DbFileInfo & {
   serviceName: string;
   env: Record<string, string>;
+  database?: string;
 };
 
 export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {

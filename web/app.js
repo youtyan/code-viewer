@@ -8013,6 +8013,19 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/query-editor.ts
+  var shikiPromise2 = null;
+  function loadShikiSql() {
+    if (!shikiPromise2) {
+      shikiPromise2 = import("/shiki.js").then((mod) => {
+        const typed = mod;
+        return typed.createHighlighter({
+          themes: ["github-light", "github-dark"],
+          langs: ["sql"]
+        });
+      }).catch(() => null);
+    }
+    return shikiPromise2;
+  }
   var HISTORY_KEY = "db:query-history";
   var MAX_HISTORY = 50;
   function loadHistory() {
@@ -8041,11 +8054,51 @@ ${frontmatter.yaml}
     el.className = "db-query-editor";
     const inputArea = document.createElement("div");
     inputArea.className = "db-query-input";
+    const editorWrap = document.createElement("div");
+    editorWrap.className = "db-query-editor-wrap";
+    const highlight = document.createElement("pre");
+    highlight.className = "db-query-highlight";
+    highlight.setAttribute("aria-hidden", "true");
     const textarea = document.createElement("textarea");
     textarea.className = "db-query-textarea";
     textarea.placeholder = "SELECT * FROM ...";
     textarea.spellcheck = false;
     textarea.rows = 3;
+    editorWrap.append(highlight, textarea);
+    let shiki = null;
+    loadShikiSql().then((h) => {
+      shiki = h;
+      syncHighlight();
+    });
+    function syncHighlight() {
+      const code2 = textarea.value;
+      if (!code2) {
+        highlight.innerHTML = "";
+        return;
+      }
+      if (!shiki) {
+        highlight.textContent = code2;
+        return;
+      }
+      const html = shiki.codeToHtml(code2, {
+        lang: "sql",
+        themes: { light: "github-light", dark: "github-dark" },
+        defaultColor: false
+      });
+      const template = document.createElement("template");
+      template.innerHTML = html;
+      const pre = template.content.querySelector("pre");
+      if (pre) {
+        highlight.innerHTML = pre.innerHTML;
+      } else {
+        highlight.textContent = code2;
+      }
+    }
+    textarea.addEventListener("input", syncHighlight);
+    textarea.addEventListener("scroll", () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    });
     const toolbar = document.createElement("div");
     toolbar.className = "db-query-toolbar";
     const runBtn = document.createElement("button");
@@ -8069,7 +8122,7 @@ ${frontmatter.yaml}
     historyDropdown.className = "db-query-history-dropdown";
     historyDropdown.hidden = true;
     toolbar.append(runBtn, explainBtn, historyBtn, statusSpan);
-    inputArea.append(textarea, toolbar, historyDropdown);
+    inputArea.append(editorWrap, toolbar, historyDropdown);
     const resultArea = document.createElement("div");
     resultArea.className = "db-query-result";
     resultArea.hidden = true;
@@ -8235,6 +8288,7 @@ ${frontmatter.yaml}
     }
     function setSql(sql) {
       textarea.value = sql;
+      syncHighlight();
     }
     return { el, focus, setSql };
   }
@@ -9191,9 +9245,24 @@ ${frontmatter.yaml}
 
   // web-src/views/database/table-list.ts
   function createTableList(callbacks) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "db-table-list-wrapper";
+    wrapper.style.display = "flex";
+    wrapper.style.flexDirection = "column";
+    wrapper.style.flex = "1";
+    wrapper.style.overflow = "hidden";
+    const filterWrap = document.createElement("div");
+    filterWrap.className = "db-table-filter-wrap";
+    const filterInput = document.createElement("input");
+    filterInput.className = "db-table-filter";
+    filterInput.type = "text";
+    filterInput.placeholder = "Filter tables...";
+    filterWrap.appendChild(filterInput);
     const el = document.createElement("div");
     el.className = "db-table-list";
+    wrapper.append(filterWrap, el);
     let activeTable = null;
+    let allTables = [];
     let contextMenu = null;
     function closeContextMenu() {
       if (contextMenu) {
@@ -9267,17 +9336,18 @@ ${frontmatter.yaml}
         document.addEventListener("keydown", onKeyDown, true);
       }, 0);
     }
-    function render(tables) {
+    function renderFiltered(tables, filter) {
       el.innerHTML = "";
-      if (tables.length === 0) {
+      const filtered = filter ? tables.filter((t2) => t2.name.toLowerCase().includes(filter.toLowerCase())) : tables;
+      if (filtered.length === 0) {
         const empty = document.createElement("div");
         empty.className = "db-table-list-empty";
-        empty.textContent = "No tables found";
+        empty.textContent = filter ? "No matching tables" : "No tables found";
         el.appendChild(empty);
         return;
       }
       const groups = { table: [], view: [] };
-      for (const t2 of tables) {
+      for (const t2 of filtered) {
         (groups[t2.type] || groups.table).push(t2);
       }
       for (const [type, items] of Object.entries(groups)) {
@@ -9311,13 +9381,21 @@ ${frontmatter.yaml}
         }
       }
     }
+    function render(tables) {
+      allTables = tables;
+      filterInput.value = "";
+      renderFiltered(tables, "");
+    }
+    filterInput.addEventListener("input", () => {
+      renderFiltered(allTables, filterInput.value);
+    });
     function setActive(table2) {
       activeTable = table2;
       el.querySelectorAll(".db-table-item").forEach((item) => {
         item.classList.toggle("active", item.dataset.table === table2);
       });
     }
-    return { el, render, setActive };
+    return { el: wrapper, render, setActive };
   }
   function formatRowCount(n2) {
     if (n2 >= 1e6)
@@ -9352,7 +9430,34 @@ ${frontmatter.yaml}
     });
     const sidebar = document.createElement("div");
     sidebar.className = "db-sidebar";
+    const savedWidth = localStorage.getItem("db:sidebar-width");
+    if (savedWidth)
+      sidebar.style.width = savedWidth;
     sidebar.append(dbToolbar, tableList.el);
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "db-sidebar-resize";
+    sidebar.appendChild(resizeHandle);
+    let resizing = false;
+    resizeHandle.addEventListener("mousedown", (e2) => {
+      e2.preventDefault();
+      resizing = true;
+      resizeHandle.classList.add("active");
+      const onMove = (ev) => {
+        if (!resizing)
+          return;
+        const w = Math.max(120, Math.min(600, ev.clientX));
+        sidebar.style.width = `${w}px`;
+      };
+      const onUp = () => {
+        resizing = false;
+        resizeHandle.classList.remove("active");
+        localStorage.setItem("db:sidebar-width", sidebar.style.width);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
     const grid = createTableGrid({
       fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters),
       getDbId: () => currentDb?.id || null

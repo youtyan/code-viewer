@@ -14,10 +14,28 @@ export type TableList = {
 };
 
 export function createTableList(callbacks: TableListCallbacks): TableList {
+  const wrapper = document.createElement("div");
+  wrapper.className = "db-table-list-wrapper";
+  wrapper.style.display = "flex";
+  wrapper.style.flexDirection = "column";
+  wrapper.style.flex = "1";
+  wrapper.style.overflow = "hidden";
+
+  const filterWrap = document.createElement("div");
+  filterWrap.className = "db-table-filter-wrap";
+  const filterInput = document.createElement("input");
+  filterInput.className = "db-table-filter";
+  filterInput.type = "text";
+  filterInput.placeholder = "Filter tables...";
+  filterWrap.appendChild(filterInput);
+
   const el = document.createElement("div");
   el.className = "db-table-list";
 
+  wrapper.append(filterWrap, el);
+
   let activeTable: string | null = null;
+  let allTables: DbTableInfo[] = [];
 
   /* ---- Context menu ---- */
   let contextMenu: HTMLDivElement | null = null;
@@ -107,17 +125,22 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     }, 0);
   }
 
-  function render(tables: DbTableInfo[]) {
+  function renderFiltered(tables: DbTableInfo[], filter: string) {
     el.innerHTML = "";
-    if (tables.length === 0) {
+    const filtered = filter
+      ? tables.filter((t) =>
+          t.name.toLowerCase().includes(filter.toLowerCase()),
+        )
+      : tables;
+    if (filtered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-table-list-empty";
-      empty.textContent = "No tables found";
+      empty.textContent = filter ? "No matching tables" : "No tables found";
       el.appendChild(empty);
       return;
     }
     const groups: Record<string, DbTableInfo[]> = { table: [], view: [] };
-    for (const t of tables) {
+    for (const t of filtered) {
       (groups[t.type] || groups.table).push(t);
     }
     for (const [type, items] of Object.entries(groups)) {
@@ -161,6 +184,16 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     }
   }
 
+  function render(tables: DbTableInfo[]) {
+    allTables = tables;
+    filterInput.value = "";
+    renderFiltered(tables, "");
+  }
+
+  filterInput.addEventListener("input", () => {
+    renderFiltered(allTables, filterInput.value);
+  });
+
   function setActive(table: string | null) {
     activeTable = table;
     el.querySelectorAll<HTMLElement>(".db-table-item").forEach((item) => {
@@ -168,7 +201,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     });
   }
 
-  return { el, render, setActive };
+  return { el: wrapper, render, setActive };
 }
 
 function formatRowCount(n: number): string {

@@ -59,7 +59,34 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   const sidebar = document.createElement("div");
   sidebar.className = "db-sidebar";
+  const savedWidth = localStorage.getItem("db:sidebar-width");
+  if (savedWidth) sidebar.style.width = savedWidth;
   sidebar.append(dbToolbar, tableList.el);
+
+  const resizeHandle = document.createElement("div");
+  resizeHandle.className = "db-sidebar-resize";
+  sidebar.appendChild(resizeHandle);
+
+  let resizing = false;
+  resizeHandle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    resizing = true;
+    resizeHandle.classList.add("active");
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing) return;
+      const w = Math.max(120, Math.min(600, ev.clientX));
+      sidebar.style.width = `${w}px`;
+    };
+    const onUp = () => {
+      resizing = false;
+      resizeHandle.classList.remove("active");
+      localStorage.setItem("db:sidebar-width", sidebar.style.width);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
 
   const grid = createTableGrid({
     fetchPage: (table, offset, limit, sort, filters) =>
