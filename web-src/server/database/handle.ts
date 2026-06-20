@@ -143,6 +143,7 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
     };
     return json(body);
   } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     return textError(
       `failed to read schema: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -269,6 +270,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     };
     return json(body);
   } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     return textError(
       `failed to read table: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -343,6 +345,7 @@ async function handleQuery(
     }
     return json(response);
   } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     const elapsed = Date.now() - start;
     const response: DbQueryResponse = {
       dbId: body.db,
@@ -543,6 +546,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
       },
     });
   } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     return textError(
       `failed to export table: ${err instanceof Error ? err.message : String(err)}`,
       500,
@@ -561,6 +565,7 @@ async function handleDdl(cwd: string, url: URL): Promise<Response> {
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });
   } catch (err) {
+    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     return textError(
       `failed to get DDL: ${err instanceof Error ? err.message : String(err)}`,
       500,

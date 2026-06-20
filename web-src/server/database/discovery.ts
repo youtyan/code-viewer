@@ -129,6 +129,16 @@ function detectDbKind(image: string): DbKind | null {
   return null;
 }
 
+function resolveEnvValue(raw: string): string {
+  return raw.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
+    const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
+    if (!defaultMatch) return "";
+    const varName = defaultMatch[1];
+    const fallback = defaultMatch[2] ?? "";
+    return process.env[varName] || fallback;
+  });
+}
+
 function parseComposeEnv(serviceBlock: string): Record<string, string> {
   const env: Record<string, string> = {};
   const envMatch = serviceBlock.match(
@@ -143,11 +153,13 @@ function parseComposeEnv(serviceBlock: string): Record<string, string> {
     const eqIdx = stripped.indexOf("=");
     const colonIdx = stripped.indexOf(": ");
     if (eqIdx > 0) {
-      env[stripped.slice(0, eqIdx).trim()] = stripped.slice(eqIdx + 1).trim();
+      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(
+        stripped.slice(eqIdx + 1).trim(),
+      );
     } else if (colonIdx > 0) {
-      env[stripped.slice(0, colonIdx).trim()] = stripped
-        .slice(colonIdx + 2)
-        .trim();
+      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(
+        stripped.slice(colonIdx + 2).trim(),
+      );
     }
   }
   return env;
