@@ -520,7 +520,7 @@
         const db = params.get("db") || undefined;
         const table = params.get("table") || undefined;
         const tabRaw = params.get("tab");
-        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" ? tabRaw : undefined;
+        const tab = tabRaw === "data" || tabRaw === "query" || tabRaw === "schema" || tabRaw === "er" || tabRaw === "search" || tabRaw === "snapshot" ? tabRaw : undefined;
         return {
           screen: "database",
           ...db ? { db } : {},
@@ -8012,6 +8012,179 @@ ${frontmatter.yaml}
     return { el, render, clear };
   }
 
+  // web-src/views/database/global-search-view.ts
+  function createGlobalSearchView(deps) {
+    const el = document.createElement("div");
+    el.className = "db-global-search";
+    const header = document.createElement("div");
+    header.className = "db-global-search-header";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "db-global-search-input";
+    input.placeholder = "全テーブルを横断検索...";
+    const searchBtn = document.createElement("button");
+    searchBtn.type = "button";
+    searchBtn.className = "db-global-search-btn";
+    searchBtn.textContent = "検索";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "db-global-search-cancel";
+    cancelBtn.textContent = "キャンセル";
+    cancelBtn.hidden = true;
+    const optionsRow = document.createElement("div");
+    optionsRow.className = "db-global-search-options";
+    const nonTextLabel = document.createElement("label");
+    const nonTextCheck = document.createElement("input");
+    nonTextCheck.type = "checkbox";
+    nonTextLabel.append(nonTextCheck, " 数値・日付カラムも検索する");
+    optionsRow.appendChild(nonTextLabel);
+    header.append(input, searchBtn, cancelBtn);
+    const progress = document.createElement("div");
+    progress.className = "db-global-search-progress";
+    progress.hidden = true;
+    const results = document.createElement("div");
+    results.className = "db-global-search-results";
+    el.append(header, optionsRow, progress, results);
+    let currentJobId = null;
+    let pollTimer = null;
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      cancelBtn.hidden = true;
+      searchBtn.disabled = false;
+      input.disabled = false;
+    }
+    async function startSearch() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      const term = input.value.trim();
+      if (!term)
+        return;
+      results.innerHTML = "";
+      progress.hidden = false;
+      progress.textContent = "検索を開始しています...";
+      searchBtn.disabled = true;
+      input.disabled = true;
+      cancelBtn.hidden = false;
+      try {
+        const res = await fetch("/_db/search/start", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({
+            db: dbId,
+            term,
+            includeNonText: nonTextCheck.checked
+          })
+        });
+        if (!res.ok) {
+          progress.textContent = `エラー: ${await res.text()}`;
+          stopPolling();
+          return;
+        }
+        const data = await res.json();
+        currentJobId = data.jobId;
+        pollTimer = setInterval(() => pollStatus(), 500);
+      } catch (err) {
+        progress.textContent = `エラー: ${err instanceof Error ? err.message : String(err)}`;
+        stopPolling();
+      }
+    }
+    async function pollStatus() {
+      if (!currentJobId)
+        return;
+      try {
+        const res = await fetch(`/_db/search/status?id=${encodeURIComponent(currentJobId)}`);
+        if (!res.ok) {
+          stopPolling();
+          return;
+        }
+        const data = await res.json();
+        if (data.error) {
+          progress.textContent = `エラー: ${data.error}`;
+          stopPolling();
+          return;
+        }
+        const pct = data.totalTables > 0 ? Math.round(data.scannedTables / data.totalTables * 100) : 0;
+        progress.textContent = data.done ? `完了。${data.scannedTables}テーブルから ${data.hits.length}件見つかりました。` : `検索中... ${data.currentTable || "対象テーブルを確認中"} (${pct}% - ${data.scannedTables}/${data.totalTables}テーブル、${data.hits.length}件)`;
+        renderHits(data.hits);
+        if (data.done) {
+          stopPolling();
+          progress.hidden = false;
+        }
+      } catch {}
+    }
+    async function cancelSearch() {
+      if (!currentJobId)
+        return;
+      try {
+        await fetch("/_db/search/cancel", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify({ id: currentJobId })
+        });
+      } catch {}
+      stopPolling();
+      progress.textContent = "検索をキャンセルしました。";
+    }
+    function renderHits(hits) {
+      results.innerHTML = "";
+      if (hits.length === 0)
+        return;
+      const grouped = new Map;
+      for (const h of hits) {
+        const existing = grouped.get(h.table) || [];
+        existing.push(h);
+        grouped.set(h.table, existing);
+      }
+      for (const [table2, tableHits] of grouped) {
+        const section = document.createElement("div");
+        section.className = "db-search-table-section";
+        const tableHeader = document.createElement("div");
+        tableHeader.className = "db-search-table-header";
+        tableHeader.textContent = `${table2} (${tableHits.length}件)`;
+        section.appendChild(tableHeader);
+        const hitsList = document.createElement("div");
+        hitsList.className = "db-search-hits-list";
+        for (const hit of tableHits.slice(0, 100)) {
+          const row = document.createElement("div");
+          row.className = "db-search-hit-row";
+          const colSpan = document.createElement("span");
+          colSpan.className = "db-search-hit-col";
+          colSpan.textContent = hit.column;
+          const valSpan = document.createElement("span");
+          valSpan.className = "db-search-hit-val";
+          valSpan.textContent = hit.valuePreview;
+          row.append(colSpan, valSpan);
+          hitsList.appendChild(row);
+        }
+        if (tableHits.length > 100) {
+          const more = document.createElement("div");
+          more.className = "db-search-more";
+          more.textContent = `ほか ${tableHits.length - 100}件`;
+          hitsList.appendChild(more);
+        }
+        section.appendChild(hitsList);
+        results.appendChild(section);
+      }
+    }
+    searchBtn.addEventListener("click", startSearch);
+    input.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter")
+        startSearch();
+    });
+    cancelBtn.addEventListener("click", cancelSearch);
+    return { el };
+  }
+
   // web-src/views/database/query-editor.ts
   var shikiPromise2 = null;
   function loadShikiSql() {
@@ -8755,6 +8928,547 @@ ${frontmatter.yaml}
       el.innerHTML = "";
     }
     return { el, render, clear };
+  }
+
+  // web-src/views/database/snapshot-view.ts
+  function changeTypeLabel(type) {
+    if (type === "inserted")
+      return "追加";
+    if (type === "updated")
+      return "更新";
+    return "削除";
+  }
+  function snapshotLabel(s2) {
+    const date = new Date(s2.createdAt).toLocaleString();
+    const note = s2.note ? ` — ${s2.note}` : "";
+    return `${date} (${s2.tables.length}テーブル)${note}`;
+  }
+  function arraysEqual(a2, b2) {
+    if (a2.length !== b2.length)
+      return false;
+    const sa = [...a2].sort();
+    const sb = [...b2].sort();
+    return sa.every((v, i2) => v === sb[i2]);
+  }
+  function postJson(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1"
+      },
+      body: JSON.stringify(body)
+    });
+  }
+  function createSnapshotView(deps) {
+    const el = document.createElement("div");
+    el.className = "db-snapshot-view";
+    const guide = document.createElement("div");
+    guide.className = "db-snapshot-guide";
+    guide.innerHTML = '<div class="db-snapshot-guide-title">スナップショット差分</div>' + '<div class="db-snapshot-guide-body">' + "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます" + "</div>";
+    const toolbar = document.createElement("div");
+    toolbar.className = "db-snapshot-toolbar";
+    const createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.className = "db-snapshot-create-btn";
+    createBtn.textContent = "スナップショット取得";
+    const refreshBtn = document.createElement("button");
+    refreshBtn.type = "button";
+    refreshBtn.className = "db-snapshot-refresh-btn";
+    refreshBtn.textContent = "更新";
+    toolbar.append(createBtn, refreshBtn);
+    const tableSelector = document.createElement("div");
+    tableSelector.className = "db-snapshot-table-selector";
+    tableSelector.hidden = true;
+    const tableSelectorHeader = document.createElement("div");
+    tableSelectorHeader.className = "db-snapshot-table-selector-header";
+    tableSelectorHeader.textContent = "対象テーブルを選択";
+    const tableCheckboxes = document.createElement("div");
+    tableCheckboxes.className = "db-snapshot-table-checkboxes";
+    const selectActions = document.createElement("div");
+    selectActions.className = "db-snapshot-select-actions";
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.type = "button";
+    selectAllBtn.textContent = "すべて選択";
+    const deselectAllBtn = document.createElement("button");
+    deselectAllBtn.type = "button";
+    deselectAllBtn.textContent = "選択解除";
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.className = "db-snapshot-note-input";
+    noteInput.placeholder = "例: ユーザー登録テスト前";
+    const noteField = document.createElement("label");
+    noteField.className = "db-snapshot-note-field";
+    const noteLabel = document.createElement("span");
+    noteLabel.className = "db-snapshot-note-label";
+    noteLabel.textContent = "メモ";
+    noteField.append(noteLabel, noteInput);
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "db-snapshot-confirm-btn";
+    confirmBtn.textContent = "取得開始";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "db-snapshot-cancel-btn";
+    cancelBtn.textContent = "キャンセル";
+    selectActions.append(selectAllBtn, deselectAllBtn, noteField, confirmBtn, cancelBtn);
+    tableSelector.append(tableSelectorHeader, tableCheckboxes, selectActions);
+    const mainArea = document.createElement("div");
+    mainArea.className = "db-snapshot-main-area";
+    el.append(guide, toolbar, tableSelector, mainArea);
+    let snapshots = [];
+    let diffs = [];
+    function showTableSelector() {
+      const tables = deps.getTables();
+      const lastTables = getLastTables();
+      tableCheckboxes.innerHTML = "";
+      for (const t2 of tables) {
+        if (t2.type !== "table")
+          continue;
+        const label = document.createElement("label");
+        label.className = "db-snapshot-table-label";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = lastTables.length === 0 || lastTables.includes(t2.name);
+        cb.value = t2.name;
+        const rowInfo = t2.rowCount != null ? ` (${t2.rowCount}件)` : "";
+        label.append(cb, ` ${t2.name}${rowInfo}`);
+        tableCheckboxes.appendChild(label);
+      }
+      tableSelector.hidden = false;
+      noteInput.value = "";
+    }
+    function getLastTables() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return [];
+      const done = snapshots.filter((s2) => s2.status === "done");
+      return done.length > 0 ? done[0].tables : [];
+    }
+    function getSelectedTables() {
+      return Array.from(tableCheckboxes.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.value);
+    }
+    selectAllBtn.addEventListener("click", () => {
+      tableCheckboxes.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = true;
+      });
+    });
+    deselectAllBtn.addEventListener("click", () => {
+      tableCheckboxes.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = false;
+      });
+    });
+    createBtn.addEventListener("click", showTableSelector);
+    cancelBtn.addEventListener("click", () => {
+      tableSelector.hidden = true;
+    });
+    confirmBtn.addEventListener("click", async () => {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      const tables = getSelectedTables();
+      if (tables.length === 0)
+        return;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "取得中...";
+      try {
+        await postJson("/_db/snapshot/create", {
+          db: dbId,
+          tables,
+          note: noteInput.value.trim()
+        });
+        tableSelector.hidden = true;
+        setTimeout(() => refreshAndAutoDiff(), 3000);
+      } catch {} finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "取得開始";
+      }
+    });
+    refreshBtn.addEventListener("click", refresh);
+    async function refresh() {
+      const dbId = deps.getDbId();
+      if (!dbId)
+        return;
+      try {
+        const [snapRes, diffRes] = await Promise.all([
+          fetch(`/_db/snapshot/list?db=${encodeURIComponent(dbId)}`),
+          fetch(`/_db/snapshot/diff/list?db=${encodeURIComponent(dbId)}`)
+        ]);
+        if (snapRes.ok) {
+          const data = await snapRes.json();
+          snapshots = data.snapshots;
+        }
+        if (diffRes.ok) {
+          const data = await diffRes.json();
+          diffs = data.diffs;
+        }
+        renderMain();
+      } catch {}
+    }
+    async function refreshAndAutoDiff() {
+      await refresh();
+      const done = snapshots.filter((s2) => s2.status === "done");
+      if (done.length < 2)
+        return;
+      const newest = done[0];
+      const prev = done[1];
+      if (!arraysEqual(newest.tables, prev.tables))
+        return;
+      const alreadyDiffed = diffs.some((d2) => d2.beforeId === prev.id && d2.afterId === newest.id || d2.beforeId === newest.id && d2.afterId === prev.id);
+      if (alreadyDiffed)
+        return;
+      try {
+        await postJson("/_db/snapshot/diff/create", {
+          beforeId: prev.id,
+          afterId: newest.id,
+          note: ""
+        });
+        setTimeout(async () => {
+          await refresh();
+          const latestDiff = diffs.find((d2) => d2.status === "done");
+          if (latestDiff)
+            showDiffInline(latestDiff.id);
+        }, 2000);
+      } catch {}
+    }
+    function renderMain() {
+      mainArea.innerHTML = "";
+      const done = snapshots.filter((s2) => s2.status === "done");
+      if (snapshots.length === 0) {
+        mainArea.innerHTML = '<div class="db-snapshot-empty">まだスナップショットがありません。「スナップショット取得」で開始します。</div>';
+        return;
+      }
+      const snapshotSection = document.createElement("div");
+      snapshotSection.className = "db-snapshot-list-section";
+      const snapTitle = document.createElement("h3");
+      snapTitle.className = "db-snapshot-section-title";
+      snapTitle.textContent = `スナップショット (${done.length}件)`;
+      snapshotSection.appendChild(snapTitle);
+      for (const snap of snapshots) {
+        const item = document.createElement("div");
+        item.className = "db-snapshot-item";
+        const info = document.createElement("div");
+        info.className = "db-snapshot-info";
+        info.innerHTML = `<span class="db-snapshot-date">${new Date(snap.createdAt).toLocaleString()}</span>` + `<span class="db-snapshot-tables-count" title="${snap.tables.join(", ")}">${snap.tables.length}テーブル</span>` + (snap.note ? `<span class="db-snapshot-note">${snap.note}</span>` : "");
+        const actions = document.createElement("div");
+        actions.className = "db-snapshot-actions";
+        const noteBtn = document.createElement("button");
+        noteBtn.type = "button";
+        noteBtn.textContent = "メモ";
+        noteBtn.addEventListener("click", () => editNote(snap.id, snap.note));
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "削除";
+        deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+        actions.append(noteBtn, deleteBtn);
+        item.append(info, actions);
+        snapshotSection.appendChild(item);
+      }
+      if (done.length >= 2) {
+        const diffCreate = document.createElement("div");
+        diffCreate.className = "db-snapshot-diff-create";
+        const beforeSelect = document.createElement("select");
+        beforeSelect.className = "db-snapshot-diff-select";
+        const afterSelect = document.createElement("select");
+        afterSelect.className = "db-snapshot-diff-select";
+        const sorted = [...done].sort((a2, b2) => new Date(a2.createdAt).getTime() - new Date(b2.createdAt).getTime());
+        for (const s2 of sorted) {
+          const optB = document.createElement("option");
+          optB.value = s2.id;
+          optB.textContent = snapshotLabel(s2);
+          beforeSelect.appendChild(optB);
+          const optA = document.createElement("option");
+          optA.value = s2.id;
+          optA.textContent = snapshotLabel(s2);
+          afterSelect.appendChild(optA);
+        }
+        if (sorted.length >= 2) {
+          beforeSelect.selectedIndex = sorted.length - 2;
+          afterSelect.selectedIndex = sorted.length - 1;
+        }
+        const diffBtn = document.createElement("button");
+        diffBtn.type = "button";
+        diffBtn.className = "db-snapshot-diff-btn";
+        diffBtn.textContent = "手動で差分チェック";
+        diffBtn.addEventListener("click", async () => {
+          diffBtn.disabled = true;
+          diffBtn.textContent = "比較中...";
+          try {
+            const res = await postJson("/_db/snapshot/diff/create", {
+              beforeId: beforeSelect.value,
+              afterId: afterSelect.value,
+              note: ""
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setTimeout(async () => {
+                await refresh();
+                showDiffInline(data.diffId);
+              }, 2000);
+            }
+          } catch {} finally {
+            diffBtn.disabled = false;
+            diffBtn.textContent = "手動で差分チェック";
+          }
+        });
+        diffCreate.append(beforeSelect, document.createTextNode(" → "), afterSelect, diffBtn);
+        snapshotSection.appendChild(diffCreate);
+      }
+      mainArea.appendChild(snapshotSection);
+      if (diffs.length > 0) {
+        const diffTitle = document.createElement("h3");
+        diffTitle.className = "db-snapshot-section-title";
+        diffTitle.textContent = "差分履歴";
+        mainArea.appendChild(diffTitle);
+        for (const diff of diffs) {
+          const item = document.createElement("div");
+          item.className = "db-snapshot-diff-item";
+          item.style.cursor = diff.status === "done" ? "pointer" : "default";
+          const info = document.createElement("div");
+          info.className = "db-snapshot-diff-info";
+          const beforeSnap = snapshots.find((s2) => s2.id === diff.beforeId);
+          const afterSnap = snapshots.find((s2) => s2.id === diff.afterId);
+          const beforeLabel = beforeSnap ? snapshotLabel(beforeSnap) : diff.beforeId.slice(0, 8);
+          const afterLabel = afterSnap ? snapshotLabel(afterSnap) : diff.afterId.slice(0, 8);
+          info.innerHTML = `<span class="db-snapshot-diff-date">${new Date(diff.createdAt).toLocaleString()}</span>` + `<span class="db-snapshot-diff-range">${beforeLabel} → ${afterLabel}</span>` + (diff.note ? `<span class="db-snapshot-diff-note-text">${diff.note}</span>` : "");
+          const actions = document.createElement("div");
+          actions.className = "db-snapshot-diff-actions";
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.textContent = "削除";
+          deleteBtn.addEventListener("click", async (e2) => {
+            e2.stopPropagation();
+            await postJson("/_db/snapshot/diff/delete", { id: diff.id });
+            refresh();
+          });
+          actions.appendChild(deleteBtn);
+          item.append(info, actions);
+          if (diff.status === "done") {
+            item.addEventListener("click", () => showDiffInline(diff.id));
+          }
+          mainArea.appendChild(item);
+        }
+        const latestDone = diffs.find((d2) => d2.status === "done");
+        if (latestDone)
+          showDiffInline(latestDone.id);
+      }
+    }
+    async function showDiffInline(diffId) {
+      const existing = mainArea.querySelector(".db-snapshot-diff-inline");
+      if (existing)
+        existing.remove();
+      try {
+        const res = await fetch(`/_db/snapshot/diff/tables?id=${encodeURIComponent(diffId)}`);
+        if (!res.ok)
+          return;
+        const data = await res.json();
+        renderDiffInline(diffId, data.tables);
+      } catch {}
+    }
+    function renderDiffInline(diffId, tables) {
+      const existing = mainArea.querySelector(".db-snapshot-diff-inline");
+      if (existing)
+        existing.remove();
+      const section = document.createElement("div");
+      section.className = "db-snapshot-diff-inline";
+      const changedTables = tables.filter((t2) => t2.insertedCount + t2.updatedCount + t2.deletedCount > 0);
+      const unchangedCount = tables.length - changedTables.length;
+      const summary = document.createElement("div");
+      summary.className = "db-snapshot-diff-summary";
+      if (changedTables.length === 0) {
+        summary.textContent = "変更は検出されませんでした。";
+        section.appendChild(summary);
+        mainArea.appendChild(section);
+        return;
+      }
+      summary.textContent = `${changedTables.length}テーブルに変更あり` + (unchangedCount > 0 ? `、${unchangedCount}テーブルは変更なし` : "");
+      section.appendChild(summary);
+      for (const t2 of changedTables) {
+        const tableEl = document.createElement("div");
+        tableEl.className = "db-snapshot-diff-table";
+        const tableHeader = document.createElement("div");
+        tableHeader.className = "db-snapshot-diff-table-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "db-snapshot-diff-table-name";
+        nameSpan.textContent = t2.tableName;
+        const statsSpan = document.createElement("span");
+        statsSpan.className = "db-snapshot-diff-table-stats";
+        const parts = [];
+        if (t2.insertedCount > 0)
+          parts.push(`+${t2.insertedCount}`);
+        if (t2.updatedCount > 0)
+          parts.push(`~${t2.updatedCount}`);
+        if (t2.deletedCount > 0)
+          parts.push(`-${t2.deletedCount}`);
+        statsSpan.textContent = parts.join(" ");
+        tableHeader.append(nameSpan, statsSpan);
+        tableHeader.style.cursor = "pointer";
+        const rowsContainer = document.createElement("div");
+        rowsContainer.className = "db-snapshot-diff-rows-container";
+        loadDiffRows(diffId, t2.tableName, rowsContainer);
+        tableHeader.addEventListener("click", () => {
+          rowsContainer.hidden = !rowsContainer.hidden;
+        });
+        tableEl.append(tableHeader, rowsContainer);
+        section.appendChild(tableEl);
+      }
+      mainArea.appendChild(section);
+    }
+    async function loadDiffRows(diffId, table2, container) {
+      container.innerHTML = '<div class="db-snapshot-loading">読み込み中...</div>';
+      try {
+        const res = await fetch(`/_db/snapshot/diff/rows?id=${encodeURIComponent(diffId)}&table=${encodeURIComponent(table2)}&limit=200`);
+        if (!res.ok) {
+          container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+          return;
+        }
+        const data = await res.json();
+        renderDiffRows(container, data.rows, data.total);
+      } catch {
+        container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+      }
+    }
+    function renderDiffRows(container, rows, total) {
+      container.innerHTML = "";
+      if (rows.length === 0)
+        return;
+      const allCols = new Set;
+      for (const row of rows) {
+        if (row.beforeValues)
+          for (const k of Object.keys(row.beforeValues))
+            allCols.add(k);
+        if (row.afterValues)
+          for (const k of Object.keys(row.afterValues))
+            allCols.add(k);
+      }
+      const columns = [...allCols];
+      const table2 = document.createElement("table");
+      table2.className = "db-snap-diff-grid";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const thType = document.createElement("th");
+      thType.textContent = "";
+      headRow.appendChild(thType);
+      for (const col of columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table2.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const row of rows) {
+        if (row.changeType === "updated" && row.beforeValues && row.afterValues) {
+          const trBefore = document.createElement("tr");
+          trBefore.className = "snap-diff-del";
+          const tdTypeBefore = document.createElement("td");
+          tdTypeBefore.className = "snap-diff-type-cell";
+          tdTypeBefore.textContent = "更新前";
+          tdTypeBefore.rowSpan = 2;
+          trBefore.appendChild(tdTypeBefore);
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const bs = row.beforeValues[col] == null ? "NULL" : String(row.beforeValues[col]);
+            const as_ = row.afterValues[col] == null ? "NULL" : String(row.afterValues[col]);
+            td.textContent = bs;
+            if (bs !== as_)
+              td.classList.add("snap-diff-changed-cell");
+            trBefore.appendChild(td);
+          }
+          tbody.appendChild(trBefore);
+          const trAfter = document.createElement("tr");
+          trAfter.className = "snap-diff-add";
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const bs = row.beforeValues[col] == null ? "NULL" : String(row.beforeValues[col]);
+            const as_ = row.afterValues[col] == null ? "NULL" : String(row.afterValues[col]);
+            td.textContent = as_;
+            if (bs !== as_)
+              td.classList.add("snap-diff-changed-cell");
+            trAfter.appendChild(td);
+          }
+          tbody.appendChild(trAfter);
+        } else {
+          const tr = document.createElement("tr");
+          tr.className = row.changeType === "inserted" ? "snap-diff-add" : "snap-diff-del";
+          const tdType = document.createElement("td");
+          tdType.className = "snap-diff-type-cell";
+          tdType.textContent = changeTypeLabel(row.changeType);
+          tr.appendChild(tdType);
+          const values = row.changeType === "inserted" ? row.afterValues : row.beforeValues;
+          for (const col of columns) {
+            const td = document.createElement("td");
+            const v = values?.[col];
+            td.textContent = v == null ? "NULL" : String(v);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+      }
+      table2.appendChild(tbody);
+      container.appendChild(table2);
+      if (total > rows.length) {
+        const more = document.createElement("div");
+        more.className = "db-snapshot-diff-more";
+        more.textContent = `全${total}件中 ${rows.length}件を表示中`;
+        container.appendChild(more);
+      }
+    }
+    async function editNote(snapshotId, currentNote) {
+      const existing = el.querySelector(".db-snapshot-inline-dialog");
+      if (existing)
+        existing.remove();
+      const dialog = document.createElement("div");
+      dialog.className = "db-snapshot-inline-dialog";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "db-snapshot-note-input";
+      input.value = currentNote || "";
+      input.placeholder = "メモを入力";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.textContent = "保存";
+      saveBtn.className = "db-snapshot-confirm-btn";
+      const cancelDlgBtn = document.createElement("button");
+      cancelDlgBtn.type = "button";
+      cancelDlgBtn.textContent = "キャンセル";
+      cancelDlgBtn.addEventListener("click", () => dialog.remove());
+      saveBtn.addEventListener("click", async () => {
+        await postJson("/_db/snapshot/update-note", {
+          id: snapshotId,
+          note: input.value
+        });
+        dialog.remove();
+        refresh();
+      });
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter")
+          saveBtn.click();
+        if (e2.key === "Escape")
+          dialog.remove();
+      });
+      dialog.append(input, saveBtn, cancelDlgBtn);
+      const item = el.querySelector(`.db-snapshot-item [title="${snapshotId}"]`)?.closest(".db-snapshot-item");
+      if (item) {
+        item.after(dialog);
+      } else {
+        mainArea.prepend(dialog);
+      }
+      input.focus();
+    }
+    async function deleteSnap(snapshotId) {
+      await postJson("/_db/snapshot/delete", { id: snapshotId });
+      refresh();
+    }
+    function handleSse(data) {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.action === "created" || parsed.action === "error") {
+          refreshAndAutoDiff();
+        }
+      } catch {}
+    }
+    return { el, refresh, handleSse };
   }
 
   // web-src/views/database/table-grid.ts
@@ -9627,7 +10341,24 @@ ${frontmatter.yaml}
       if (schemaCache)
         renderErDiagram();
     });
-    toolsSection.append(queryBtn, erBtn);
+    const searchBtn = document.createElement("button");
+    searchBtn.className = "db-tool-btn";
+    searchBtn.type = "button";
+    searchBtn.textContent = "Search";
+    searchBtn.title = "Search all tables";
+    searchBtn.addEventListener("click", () => {
+      setActiveTab("search");
+    });
+    const snapshotBtn = document.createElement("button");
+    snapshotBtn.className = "db-tool-btn";
+    snapshotBtn.type = "button";
+    snapshotBtn.textContent = "Snapshot";
+    snapshotBtn.title = "Snapshot & Diff";
+    snapshotBtn.addEventListener("click", () => {
+      setActiveTab("snapshot");
+      snapshotView.refresh();
+    });
+    toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
     sidebar.append(dbToolbar, tableList.el, toolsSection);
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "db-sidebar-resize";
@@ -9662,6 +10393,13 @@ ${frontmatter.yaml}
     });
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
+    const globalSearchView = createGlobalSearchView({
+      getDbId: () => currentDb?.id || null
+    });
+    const snapshotView = createSnapshotView({
+      getDbId: () => currentDb?.id || null,
+      getTables: () => schemaCache?.tables || []
+    });
     const historyView = createQueryHistoryView({
       getDbId: () => currentDb?.id || null,
       copySqlToQuery: (sql) => {
@@ -9671,8 +10409,10 @@ ${frontmatter.yaml}
     });
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el);
     queryEditor.el.hidden = true;
+    globalSearchView.el.hidden = true;
+    snapshotView.el.hidden = true;
     const upperArea = document.createElement("div");
     upperArea.className = "db-upper-area";
     upperArea.append(sidebar, mainContent);
@@ -9781,11 +10521,15 @@ ${frontmatter.yaml}
       tabSchema.classList.toggle("active", tab === "schema");
       queryBtn.classList.toggle("active", tab === "query");
       erBtn.classList.toggle("active", tab === "er");
-      tabBar.hidden = tab === "query" || tab === "er";
+      searchBtn.classList.toggle("active", tab === "search");
+      snapshotBtn.classList.toggle("active", tab === "snapshot");
+      tabBar.hidden = tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
       grid.el.hidden = tab !== "data";
       queryEditor.el.hidden = tab !== "query";
       schemaView.el.hidden = tab !== "schema";
       erDiagram.el.hidden = tab !== "er";
+      globalSearchView.el.hidden = tab !== "search";
+      snapshotView.el.hidden = tab !== "snapshot";
       if (tab === "query")
         queryEditor.focus();
       if (updateUrl) {
@@ -10010,6 +10754,8 @@ ${frontmatter.yaml}
         } else if (tab === "er") {
           if (schemaCache)
             renderErDiagram();
+        } else if (tab === "snapshot") {
+          snapshotView.refresh();
         }
       }
     }
@@ -10017,11 +10763,17 @@ ${frontmatter.yaml}
       document.body.classList.remove("gdp-database-page");
       unmount();
     }
-    function handleSse() {
+    function handleSse(event, data) {
       if (!mounted)
         return;
       if (historyOpen)
         historyView.refresh();
+      if (event === "db-snapshot" && data) {
+        snapshotView.handleSse(data);
+      }
+      if (event === "db-snapshot-diff" && data) {
+        snapshotView.handleSse(data);
+      }
     }
     return { enter, leave, handleSse };
   }
@@ -17036,6 +17788,8 @@ ${frontmatter.yaml}
       preview.className = "gdp-html-preview";
       const frame = document.createElement("iframe");
       frame.title = `${target.path} preview`;
+      frame.sandbox.value = "";
+      frame.referrerPolicy = "no-referrer";
       frame.srcdoc = html;
       preview.appendChild(frame);
       return preview;
@@ -18531,7 +19285,8 @@ ${frontmatter.yaml}
         syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
         viewedFiles: new Set(JSON.parse(readScopedStorage("gdp:viewed-files") || "[]")),
         route,
-        repoRef: route.screen === "repo" ? route.ref : "worktree"
+        repoRef: route.screen === "repo" ? route.ref : "worktree",
+        autoUpdate: localStorage.getItem("gdp:auto-update") !== "0"
       };
     })();
     let highlightConfigured = false;
@@ -18745,7 +19500,18 @@ ${frontmatter.yaml}
           syntaxLoadingTitle: "loading syntax highlighter",
           syntaxErrorTitle: "failed to load syntax highlighter",
           syntaxOffTitle: "syntax highlighting off",
-          hideTests: "hide test files (test|spec)"
+          hideTests: "hide test files (test|spec)",
+          autoUpdate: "auto",
+          autoUpdateOnTitle: "auto update on file change",
+          autoUpdateOffTitle: "auto update off — manual reload"
+        },
+        changeBanner: {
+          text: "Files changed",
+          reload: "Reload",
+          justNow: "just now",
+          secondsAgo: (seconds) => `${seconds}s ago`,
+          minutesAgo: (minutes) => `${minutes}m ago`,
+          hoursAgo: (hours) => `${hours}h ago`
         },
         sidebar: {
           files: "Files",
@@ -18824,7 +19590,18 @@ ${frontmatter.yaml}
           syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
           syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
           syntaxOffTitle: "シンタックスハイライト無効",
-          hideTests: "test/spec ファイルを隠す"
+          hideTests: "test/spec ファイルを隠す",
+          autoUpdate: "自動",
+          autoUpdateOnTitle: "ファイル変更時に自動更新",
+          autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み"
+        },
+        changeBanner: {
+          text: "ファイルに変更がありました",
+          reload: "再読み込みする",
+          justNow: "たった今",
+          secondsAgo: (seconds) => `${seconds}秒前`,
+          minutesAgo: (minutes) => `${minutes}分前`,
+          hoursAgo: (hours) => `${hours}時間前`
         },
         sidebar: {
           files: "ファイル",
@@ -18938,6 +19715,7 @@ ${frontmatter.yaml}
       const hideTests = document.querySelector("#hide-tests");
       if (hideTests)
         hideTests.title = text2.topbar.hideTests;
+      applyAutoUpdateButton();
       setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
       setElementText(".sb-title", text2.sidebar.files);
       const sidebarActions = document.querySelector(".sb-actions");
@@ -19312,6 +20090,9 @@ ${frontmatter.yaml}
     }
     function repoFileTargetFromRoute() {
       return STATE.route.screen === "file" && STATE.route.view === "blob" ? STATE.route.ref : null;
+    }
+    function isRepoBlobRoute(route) {
+      return route.screen === "file" && route.view === "blob";
     }
     let ANNOTATIONS_UI = null;
     function applyInlineAnnotations() {
@@ -19920,6 +20701,15 @@ ${frontmatter.yaml}
         setStatus("live");
         return Promise.resolve(null);
       }
+      if (isRepoBlobRoute(STATE.route)) {
+        setStatus("live");
+        applySourceRouteToShell();
+        return Promise.resolve({
+          structureChanged: false,
+          invalidatedCards: 0,
+          preservedDom: true
+        });
+      }
       if (STATE.route.screen === "repo")
         return loadRepo().then(() => null);
       {
@@ -20292,6 +21082,132 @@ ${frontmatter.yaml}
         localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
       });
     })();
+    function applyAutoUpdateButton() {
+      const btn = document.querySelector("#auto-update");
+      if (!btn)
+        return;
+      const text2 = uiText();
+      btn.classList.toggle("active", STATE.autoUpdate);
+      btn.textContent = text2.topbar.autoUpdate;
+      btn.title = STATE.autoUpdate ? text2.topbar.autoUpdateOnTitle : text2.topbar.autoUpdateOffTitle;
+      btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+    }
+    function setAutoUpdate(on) {
+      STATE.autoUpdate = on;
+      localStorage.setItem("gdp:auto-update", on ? "1" : "0");
+      applyAutoUpdateButton();
+      if (on) {
+        if (bannerPendingPaths) {
+          const paths = bannerPendingPaths;
+          hideChangeBanner();
+          doSseLoad(paths);
+          return;
+        }
+        hideChangeBanner();
+      }
+    }
+    let bannerPendingPaths = null;
+    let changeBannerShownAt = 0;
+    let changeBannerAgeTimer = null;
+    function formatChangeBannerAge(now) {
+      const text2 = uiText().changeBanner;
+      const elapsedSeconds = Math.max(0, Math.floor((now - changeBannerShownAt) / 1000));
+      if (elapsedSeconds < 5)
+        return text2.justNow;
+      if (elapsedSeconds < 60)
+        return text2.secondsAgo(elapsedSeconds);
+      const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+      if (elapsedMinutes < 60)
+        return text2.minutesAgo(elapsedMinutes);
+      return text2.hoursAgo(Math.floor(elapsedMinutes / 60));
+    }
+    function updateChangeBannerAge() {
+      const ageEl = document.getElementById("change-banner-age");
+      if (ageEl)
+        ageEl.textContent = formatChangeBannerAge(Date.now());
+    }
+    function showChangeBanner(paths) {
+      bannerPendingPaths = paths;
+      changeBannerShownAt = Date.now();
+      const banner = document.getElementById("change-banner");
+      if (!banner)
+        return;
+      const text2 = uiText();
+      const textEl = document.getElementById("change-banner-text");
+      if (textEl)
+        textEl.textContent = text2.changeBanner.text;
+      updateChangeBannerAge();
+      if (!changeBannerAgeTimer) {
+        changeBannerAgeTimer = setInterval(updateChangeBannerAge, 1000);
+      }
+      const reloadBtn = document.getElementById("change-banner-reload");
+      if (reloadBtn)
+        reloadBtn.textContent = text2.changeBanner.reload;
+      banner.hidden = false;
+    }
+    function hideChangeBanner() {
+      const banner = document.getElementById("change-banner");
+      if (banner)
+        banner.hidden = true;
+      bannerPendingPaths = null;
+      changeBannerShownAt = 0;
+      if (changeBannerAgeTimer) {
+        clearInterval(changeBannerAgeTimer);
+        changeBannerAgeTimer = null;
+      }
+    }
+    document.getElementById("change-banner-reload")?.addEventListener("click", () => {
+      const paths = bannerPendingPaths;
+      hideChangeBanner();
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree"
+        });
+        return;
+      }
+      doSseLoad(paths);
+    });
+    document.getElementById("change-banner-dismiss")?.addEventListener("click", () => {
+      hideChangeBanner();
+    });
+    document.getElementById("auto-update")?.addEventListener("click", () => {
+      setAutoUpdate(!STATE.autoUpdate);
+    });
+    applyAutoUpdateButton();
+    function doSseLoad(paths) {
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        const viewingPath = route.path;
+        if (paths && viewingPath && !paths.has(viewingPath))
+          return;
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree"
+        });
+        return;
+      }
+      if (route.screen === "repo") {
+        invalidateRepoSidebar();
+        loadRepo();
+        return;
+      }
+      const savedScroll = window.scrollY;
+      const savedActive = STATE.activeFile;
+      load({ changedPaths: paths }).then((result) => {
+        if (result?.preservedDom)
+          return;
+        if (savedActive) {
+          const card = document.querySelector(diffCardSelector(savedActive));
+          if (card) {
+            card.scrollIntoView({ block: "start" });
+            return;
+          }
+        }
+        window.scrollTo(0, savedScroll);
+      });
+    }
     let sseTimer = null;
     let pendingSseChangedPaths = new Set;
     function scheduleSseLoad(changedPaths) {
@@ -20309,23 +21225,17 @@ ${frontmatter.yaml}
         sseTimer = null;
         const paths = pendingSseChangedPaths;
         pendingSseChangedPaths = new Set;
-        const isRepoScreen = STATE.route.screen === "repo" || STATE.route.screen === "file" && STATE.route.view === "blob";
-        if (isRepoScreen)
-          invalidateRepoSidebar();
-        const savedScroll = window.scrollY;
-        const savedActive = STATE.activeFile;
-        load({ changedPaths: paths }).then((result) => {
-          if (result?.preservedDom)
+        const route = STATE.route;
+        if (isRepoBlobRoute(route)) {
+          const viewingPath = route.path;
+          if (paths && viewingPath && !paths.has(viewingPath))
             return;
-          if (savedActive) {
-            const card = document.querySelector(diffCardSelector(savedActive));
-            if (card) {
-              card.scrollIntoView({ block: "start" });
-              return;
-            }
-          }
-          window.scrollTo(0, savedScroll);
-        });
+        }
+        if (STATE.autoUpdate) {
+          doSseLoad(paths);
+        } else {
+          showChangeBanner(paths);
+        }
       }, 350);
     }
     const es = new EventSource("/events");
@@ -20348,7 +21258,13 @@ ${frontmatter.yaml}
       ANNOTATIONS_UI?.handleSse(event.data);
     });
     es.addEventListener("db-query", () => {
-      DATABASE_VIEW.handleSse();
+      DATABASE_VIEW.handleSse("db-query");
+    });
+    es.addEventListener("db-snapshot", (event) => {
+      DATABASE_VIEW.handleSse("db-snapshot", event.data);
+    });
+    es.addEventListener("db-snapshot-diff", (event) => {
+      DATABASE_VIEW.handleSse("db-snapshot-diff", event.data);
     });
     es.addEventListener("error", () => setStatus("error"));
     es.addEventListener("open", () => {
@@ -20364,6 +21280,10 @@ ${frontmatter.yaml}
         return;
       if (!catchUpGate())
         return;
+      if (!STATE.autoUpdate) {
+        showChangeBanner(null);
+        return;
+      }
       load({ force: true });
     }
     document.addEventListener("visibilitychange", () => {

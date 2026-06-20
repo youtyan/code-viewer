@@ -92,6 +92,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     viewedFiles: Set<string>;
     route: AppRoute;
     repoRef: string;
+    autoUpdate: boolean;
   };
 
   const $ = <T extends Element = HTMLElement>(sel: string): T =>
@@ -484,6 +485,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       ),
       route,
       repoRef: route.screen === "repo" ? route.ref : "worktree",
+      autoUpdate: localStorage.getItem("gdp:auto-update") !== "0",
     };
   })();
 
@@ -721,6 +723,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: string;
         syntaxOffTitle: string;
         hideTests: string;
+        autoUpdate: string;
+        autoUpdateOnTitle: string;
+        autoUpdateOffTitle: string;
+      };
+      changeBanner: {
+        text: string;
+        reload: string;
+        justNow: string;
+        secondsAgo: (seconds: number) => string;
+        minutesAgo: (minutes: number) => string;
+        hoursAgo: (hours: number) => string;
       };
       sidebar: {
         files: string;
@@ -801,6 +814,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "failed to load syntax highlighter",
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
+        autoUpdate: "auto",
+        autoUpdateOnTitle: "auto update on file change",
+        autoUpdateOffTitle: "auto update off — manual reload",
+      },
+      changeBanner: {
+        text: "Files changed",
+        reload: "Reload",
+        justNow: "just now",
+        secondsAgo: (seconds) => `${seconds}s ago`,
+        minutesAgo: (minutes) => `${minutes}m ago`,
+        hoursAgo: (hours) => `${hours}h ago`,
       },
       sidebar: {
         files: "Files",
@@ -883,6 +907,17 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
+        autoUpdate: "自動",
+        autoUpdateOnTitle: "ファイル変更時に自動更新",
+        autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
+      },
+      changeBanner: {
+        text: "ファイルに変更がありました",
+        reload: "再読み込みする",
+        justNow: "たった今",
+        secondsAgo: (seconds) => `${seconds}秒前`,
+        minutesAgo: (minutes) => `${minutes}分前`,
+        hoursAgo: (hours) => `${hours}時間前`,
       },
       sidebar: {
         files: "ファイル",
@@ -1013,6 +1048,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (ignoreWs) ignoreWs.title = text.topbar.ignoreWs;
     const hideTests = document.querySelector<HTMLButtonElement>("#hide-tests");
     if (hideTests) hideTests.title = text.topbar.hideTests;
+    applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
     setElementText(".sb-title", text.sidebar.files);
@@ -1543,6 +1579,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     return STATE.route.screen === "file" && STATE.route.view === "blob"
       ? STATE.route.ref
       : null;
+  }
+
+  function isRepoBlobRoute(
+    route: AppRoute,
+  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blob" } {
+    return route.screen === "file" && route.view === "blob";
   }
 
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
@@ -2327,6 +2369,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return Promise.resolve(null);
     }
+    if (isRepoBlobRoute(STATE.route)) {
+      setStatus("live");
+      applySourceRouteToShell();
+      return Promise.resolve({
+        structureChanged: false,
+        invalidatedCards: 0,
+        preservedDom: true,
+      });
+    }
     if (STATE.route.screen === "repo") return loadRepo().then(() => null);
     {
       const empty = $("#empty");
@@ -2756,10 +2807,145 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
   })();
 
+  // ---- Auto-update toggle + change notification banner ----
+  function applyAutoUpdateButton() {
+    const btn = document.querySelector<HTMLButtonElement>("#auto-update");
+    if (!btn) return;
+    const text = uiText();
+    btn.classList.toggle("active", STATE.autoUpdate);
+    btn.textContent = text.topbar.autoUpdate;
+    btn.title = STATE.autoUpdate
+      ? text.topbar.autoUpdateOnTitle
+      : text.topbar.autoUpdateOffTitle;
+    btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+  }
+
+  function setAutoUpdate(on: boolean) {
+    STATE.autoUpdate = on;
+    localStorage.setItem("gdp:auto-update", on ? "1" : "0");
+    applyAutoUpdateButton();
+    if (on) {
+      if (bannerPendingPaths) {
+        const paths = bannerPendingPaths;
+        hideChangeBanner();
+        doSseLoad(paths);
+        return;
+      }
+      hideChangeBanner();
+    }
+  }
+
+  let bannerPendingPaths: Set<string> | null = null;
+  let changeBannerShownAt = 0;
+  let changeBannerAgeTimer: ReturnType<typeof setInterval> | null = null;
+
+  function formatChangeBannerAge(now: number): string {
+    const text = uiText().changeBanner;
+    const elapsedSeconds = Math.max(
+      0,
+      Math.floor((now - changeBannerShownAt) / 1000),
+    );
+    if (elapsedSeconds < 5) return text.justNow;
+    if (elapsedSeconds < 60) return text.secondsAgo(elapsedSeconds);
+    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+    if (elapsedMinutes < 60) return text.minutesAgo(elapsedMinutes);
+    return text.hoursAgo(Math.floor(elapsedMinutes / 60));
+  }
+
+  function updateChangeBannerAge() {
+    const ageEl = document.getElementById("change-banner-age");
+    if (ageEl) ageEl.textContent = formatChangeBannerAge(Date.now());
+  }
+
+  function showChangeBanner(paths: Set<string> | null) {
+    bannerPendingPaths = paths;
+    changeBannerShownAt = Date.now();
+    const banner = document.getElementById("change-banner");
+    if (!banner) return;
+    const text = uiText();
+    const textEl = document.getElementById("change-banner-text");
+    if (textEl) textEl.textContent = text.changeBanner.text;
+    updateChangeBannerAge();
+    if (!changeBannerAgeTimer) {
+      changeBannerAgeTimer = setInterval(updateChangeBannerAge, 1000);
+    }
+    const reloadBtn = document.getElementById("change-banner-reload");
+    if (reloadBtn) reloadBtn.textContent = text.changeBanner.reload;
+    banner.hidden = false;
+  }
+
+  function hideChangeBanner() {
+    const banner = document.getElementById("change-banner");
+    if (banner) banner.hidden = true;
+    bannerPendingPaths = null;
+    changeBannerShownAt = 0;
+    if (changeBannerAgeTimer) {
+      clearInterval(changeBannerAgeTimer);
+      changeBannerAgeTimer = null;
+    }
+  }
+
+  document
+    .getElementById("change-banner-reload")
+    ?.addEventListener("click", () => {
+      const paths = bannerPendingPaths;
+      hideChangeBanner();
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        renderStandaloneSource({
+          path: route.path,
+          ref: route.ref || "worktree",
+        });
+        return;
+      }
+      doSseLoad(paths);
+    });
+  document
+    .getElementById("change-banner-dismiss")
+    ?.addEventListener("click", () => {
+      hideChangeBanner();
+    });
+  document.getElementById("auto-update")?.addEventListener("click", () => {
+    setAutoUpdate(!STATE.autoUpdate);
+  });
+  applyAutoUpdateButton();
+
+  function doSseLoad(paths: Set<string> | null) {
+    const route = STATE.route;
+    if (isRepoBlobRoute(route)) {
+      const viewingPath = route.path;
+      if (paths && viewingPath && !paths.has(viewingPath)) return;
+      void renderStandaloneSource({
+        path: route.path,
+        ref: route.ref || "worktree",
+      });
+      return;
+    }
+    if (route.screen === "repo") {
+      invalidateRepoSidebar();
+      void loadRepo();
+      return;
+    }
+    const savedScroll = window.scrollY;
+    const savedActive = STATE.activeFile;
+    load({ changedPaths: paths }).then((result) => {
+      if (result?.preservedDom) return;
+      if (savedActive) {
+        const card = document.querySelector<DiffCardElement>(
+          diffCardSelector(savedActive),
+        );
+        if (card) {
+          card.scrollIntoView({ block: "start" });
+          return;
+        }
+      }
+      window.scrollTo(0, savedScroll);
+    });
+  }
+
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSseChangedPaths: Set<string> | null = new Set();
   function scheduleSseLoad(changedPaths?: string[] | null) {
-    // Database and help screens are not affected by worktree file changes
     if (STATE.route.screen === "database" || STATE.route.screen === "help")
       return;
     if (changedPaths && pendingSseChangedPaths) {
@@ -2772,25 +2958,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       sseTimer = null;
       const paths = pendingSseChangedPaths;
       pendingSseChangedPaths = new Set();
-      const isRepoScreen =
-        STATE.route.screen === "repo" ||
-        (STATE.route.screen === "file" && STATE.route.view === "blob");
-      if (isRepoScreen) invalidateRepoSidebar();
-      const savedScroll = window.scrollY;
-      const savedActive = STATE.activeFile;
-      load({ changedPaths: paths }).then((result) => {
-        if (result?.preservedDom) return;
-        if (savedActive) {
-          const card = document.querySelector<DiffCardElement>(
-            diffCardSelector(savedActive),
-          );
-          if (card) {
-            card.scrollIntoView({ block: "start" });
-            return;
-          }
-        }
-        window.scrollTo(0, savedScroll);
-      });
+      const route = STATE.route;
+      if (isRepoBlobRoute(route)) {
+        const viewingPath = route.path;
+        if (paths && viewingPath && !paths.has(viewingPath)) return;
+      }
+      if (STATE.autoUpdate) {
+        doSseLoad(paths);
+      } else {
+        showChangeBanner(paths);
+      }
     }, 350);
   }
 
@@ -2815,7 +2992,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
   });
   es.addEventListener("db-query", () => {
-    DATABASE_VIEW.handleSse();
+    DATABASE_VIEW.handleSse("db-query");
+  });
+  es.addEventListener("db-snapshot", (event) => {
+    DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
+  });
+  es.addEventListener("db-snapshot-diff", (event) => {
+    DATABASE_VIEW.handleSse("db-snapshot-diff", (event as MessageEvent).data);
   });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {
@@ -2830,6 +3013,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function catchUpDiff() {
     if (!shouldCatchUpDiff(STATE.route)) return;
     if (!catchUpGate()) return;
+    if (!STATE.autoUpdate) {
+      showChangeBanner(null);
+      return;
+    }
     void load({ force: true });
   }
 

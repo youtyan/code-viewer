@@ -21,7 +21,10 @@
           "level": "error",
           "options": {
             "deniedGlobals": {
-              "Bun": "Use web-src/server/runtime.ts for production runtime APIs instead of the Bun global."
+              "Bun": "Use web-src/server/runtime.ts for production runtime APIs instead of the Bun global.",
+              "alert": "alert() はブラウザ自動操作を阻害します。代替UIを使用してください。",
+              "confirm": "confirm() はブラウザ自動操作を阻害します。カスタムダイアログを使用してください。",
+              "prompt": "prompt() はブラウザ自動操作を阻害します。インライン入力UIを使用してください。"
             }
           }
         }

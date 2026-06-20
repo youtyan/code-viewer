@@ -100,3 +100,79 @@ export type QueryHistoryState = {
   version: 1;
   entries: QueryHistoryEntry[];
 };
+
+// --- Global Search ---
+
+export type GlobalSearchHit = {
+  table: string;
+  column: string;
+  rowKeyJson?: string;
+  valuePreview: string;
+  rowPreview: DbValue[];
+};
+
+export type GlobalSearchOptions = {
+  dbId: string;
+  term: string;
+  tables?: string[];
+  maxHitsPerTable?: number;
+  includeNonText?: boolean;
+};
+
+export type GlobalSearchProgress = {
+  jobId: string;
+  dbId: string;
+  scannedTables: number;
+  totalTables: number;
+  currentTable?: string;
+  hits: GlobalSearchHit[];
+  done: boolean;
+  error?: string;
+};
+
+// --- Snapshot Diff ---
+
+export type SnapshotMeta = {
+  id: string;
+  dbId: string;
+  kind: DbKind;
+  note: string;
+  createdAt: string;
+  tables: string[];
+  status: "running" | "done" | "error";
+  errorMessage?: string;
+};
+
+export type SnapshotTableSummary = {
+  tableName: string;
+  rowCount: number;
+  tableHash: string;
+  pkColumns: string[];
+};
+
+export type SnapshotDiffMeta = {
+  id: string;
+  beforeId: string;
+  afterId: string;
+  note: string;
+  createdAt: string;
+  status: "running" | "done" | "error";
+  errorMessage?: string;
+};
+
+export type SnapshotDiffTableSummary = {
+  tableName: string;
+  insertedCount: number;
+  updatedCount: number;
+  deletedCount: number;
+  unchangedCount: number;
+};
+
+export type SnapshotDiffChangeType = "inserted" | "updated" | "deleted";
+
+export type SnapshotDiffRow = {
+  changeType: SnapshotDiffChangeType;
+  rowKeyJson: string;
+  beforeValues?: Record<string, DbValue>;
+  afterValues?: Record<string, DbValue>;
+};

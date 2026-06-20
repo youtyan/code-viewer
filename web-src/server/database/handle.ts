@@ -21,6 +21,7 @@ import {
   discoverSqliteFiles,
   validateDbPath,
 } from "./discovery";
+import { getPrimaryKeyColumns, searchTable } from "./global-search";
 import {
   addQueryHistoryEntry,
   clearQueryHistory,
@@ -28,6 +29,20 @@ import {
   loadQueryHistory,
   saveQueryHistory,
 } from "./query-history";
+import { runSnapshot } from "./snapshot-runner";
+import {
+  computeDiff,
+  createDiff,
+  deleteDiff,
+  deleteSnapshot,
+  finalizeDiffError,
+  getDiffRows,
+  getDiffTableSummaries,
+  listDiffs,
+  listSnapshots,
+  updateDiffNote,
+  updateSnapshotNote,
+} from "./snapshot-store";
 
 let initialized = false;
 
@@ -689,6 +704,359 @@ async function handleDdl(cwd: string, url: URL): Promise<Response> {
   }
 }
 
+// --- Global Search ---
+
+type SearchJob = {
+  id: string;
+  dbId: string;
+  scannedTables: number;
+  totalTables: number;
+  currentTable?: string;
+  hits: import("./global-search").SearchHit[];
+  done: boolean;
+  error?: string;
+  abortController: AbortController;
+};
+
+const searchJobs = new Map<string, SearchJob>();
+
+async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: {
+    db?: string;
+    term?: string;
+    tables?: string[];
+    maxHitsPerTable?: number;
+    includeNonText?: boolean;
+  };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db || !body.term) return textError("missing db or term", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response) return r;
+
+  const jobId = `search-${randomBytes(8).toString("hex")}`;
+  const ac = new AbortController();
+  const job: SearchJob = {
+    id: jobId,
+    dbId: body.db,
+    scannedTables: 0,
+    totalTables: 0,
+    hits: [],
+    done: false,
+    abortController: ac,
+  };
+  searchJobs.set(jobId, job);
+
+  const term = body.term;
+  const maxHitsPerTable = body.maxHitsPerTable ?? 50;
+  const includeNonText = body.includeNonText ?? false;
+  const filterTables = body.tables;
+
+  (async () => {
+    try {
+      const adapter = await getAdapter(r, cwd);
+      let tables = adapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => t.name);
+      if (filterTables && filterTables.length > 0) {
+        const allowed = new Set(filterTables);
+        tables = tables.filter((t) => allowed.has(t));
+      }
+
+      let countMap: Map<string, number>;
+      if (adapter.getTableRowCounts) {
+        countMap = adapter.getTableRowCounts(tables);
+      } else {
+        countMap = new Map();
+        for (const t of tables) countMap.set(t, adapter.getTableRowCount(t));
+      }
+      tables.sort((a, b) => (countMap.get(a) ?? 0) - (countMap.get(b) ?? 0));
+      job.totalTables = tables.length;
+
+      for (const table of tables) {
+        if (ac.signal.aborted) break;
+        job.currentTable = table;
+        const pkCols = getPrimaryKeyColumns(adapter, table);
+        const columns = adapter.getColumns(table);
+        const hits = searchTable(
+          adapter,
+          table,
+          columns,
+          term,
+          maxHitsPerTable,
+          includeNonText,
+          pkCols,
+        );
+        job.hits.push(...hits);
+        job.scannedTables++;
+      }
+      job.done = true;
+      job.currentTable = undefined;
+    } catch (err) {
+      job.error = err instanceof Error ? err.message : String(err);
+      job.done = true;
+    }
+  })();
+
+  return json({ jobId });
+}
+
+function handleSearchStatus(url: URL): Response {
+  const jobId = url.searchParams.get("id");
+  if (!jobId) return textError("missing id", 400);
+  const job = searchJobs.get(jobId);
+  if (!job) return textError("job not found", 404);
+  const result = {
+    jobId: job.id,
+    dbId: job.dbId,
+    scannedTables: job.scannedTables,
+    totalTables: job.totalTables,
+    currentTable: job.currentTable,
+    hits: job.hits,
+    done: job.done,
+    error: job.error,
+  };
+  if (job.done) {
+    setTimeout(() => searchJobs.delete(jobId), 60_000);
+  }
+  return json(result);
+}
+
+async function handleSearchCancel(req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  const job = searchJobs.get(body.id);
+  if (!job) return textError("job not found", 404);
+  job.abortController.abort();
+  job.done = true;
+  return json({ ok: true });
+}
+
+// --- Snapshot ---
+
+async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
+  const dbId = url.searchParams.get("db") || undefined;
+  const snapshots = await listSnapshots(cwd, dbId);
+  return json({ snapshots });
+}
+
+async function handleSnapshotCreate(
+  cwd: string,
+  req: Request,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string; tables?: string[]; note?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db) return textError("missing db", 400);
+  const r = resolveDb(cwd, body.db);
+  if (r instanceof Response) return r;
+
+  const adapter = await getAdapter(r, cwd);
+  let tables = body.tables;
+  if (!tables || tables.length === 0) {
+    tables = adapter
+      .getTables()
+      .filter((t) => t.type === "table")
+      .map((t) => t.name);
+  }
+
+  const note = body.note ?? "";
+
+  (async () => {
+    try {
+      const snapshotId = await runSnapshot(
+        cwd,
+        adapter,
+        body.db!,
+        tables!,
+        note,
+        (table, done) => {
+          sendSse?.(
+            "db-snapshot",
+            JSON.stringify({ action: "progress", table, done }),
+          );
+        },
+      );
+      sendSse?.(
+        "db-snapshot",
+        JSON.stringify({ action: "created", id: snapshotId }),
+      );
+    } catch (err) {
+      sendSse?.(
+        "db-snapshot",
+        JSON.stringify({
+          action: "error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  })();
+
+  return json({ ok: true, message: "snapshot started" });
+}
+
+async function handleSnapshotUpdateNote(
+  cwd: string,
+  req: Request,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string; note?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  await updateSnapshotNote(cwd, body.id, body.note ?? "");
+  return json({ ok: true });
+}
+
+async function handleSnapshotDelete(
+  cwd: string,
+  req: Request,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  await deleteSnapshot(cwd, body.id);
+  return json({ ok: true });
+}
+
+// --- Snapshot Diff ---
+
+async function handleDiffCreate(
+  cwd: string,
+  req: Request,
+  sendSse?: (event: string, data?: string) => void,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { beforeId?: string; afterId?: string; note?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.beforeId || !body.afterId)
+    return textError("missing beforeId or afterId", 400);
+
+  const diffId = await createDiff(
+    cwd,
+    body.beforeId,
+    body.afterId,
+    body.note ?? "",
+  );
+
+  (async () => {
+    try {
+      await computeDiff(cwd, diffId);
+      sendSse?.(
+        "db-snapshot-diff",
+        JSON.stringify({ action: "created", id: diffId }),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await finalizeDiffError(cwd, diffId, msg);
+      sendSse?.(
+        "db-snapshot-diff",
+        JSON.stringify({ action: "error", id: diffId, error: msg }),
+      );
+    }
+  })();
+
+  return json({ ok: true, diffId });
+}
+
+async function handleDiffList(cwd: string, url: URL): Promise<Response> {
+  const dbId = url.searchParams.get("db") || undefined;
+  const diffs = await listDiffs(cwd, dbId);
+  return json({ diffs });
+}
+
+async function handleDiffTables(cwd: string, url: URL): Promise<Response> {
+  const diffId = url.searchParams.get("id");
+  if (!diffId) return textError("missing id", 400);
+  const tables = await getDiffTableSummaries(cwd, diffId);
+  return json({ diffId, tables });
+}
+
+async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
+  const diffId = url.searchParams.get("id");
+  const table = url.searchParams.get("table");
+  if (!diffId || !table) return textError("missing id or table", 400);
+  const changeType = url.searchParams.get("type") as
+    | "inserted"
+    | "updated"
+    | "deleted"
+    | undefined;
+  const offset = Math.max(
+    0,
+    Number(url.searchParams.get("offset") || "0") || 0,
+  );
+  const limit = Math.min(
+    1000,
+    Math.max(1, Number(url.searchParams.get("limit") || "200") || 200),
+  );
+  const result = await getDiffRows(
+    cwd,
+    diffId,
+    table,
+    changeType,
+    offset,
+    limit,
+  );
+  return json({ diffId, table, ...result });
+}
+
+async function handleDiffUpdateNote(
+  cwd: string,
+  req: Request,
+): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string; note?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  await updateDiffNote(cwd, body.id, body.note ?? "");
+  return json({ ok: true });
+}
+
+async function handleDiffDelete(cwd: string, req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { id?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.id) return textError("missing id", 400);
+  await deleteDiff(cwd, body.id);
+  return json({ ok: true });
+}
+
 async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
   let body: { db?: string };
@@ -771,6 +1139,75 @@ export async function handleDatabaseRoute(
       return textError("forbidden", 403);
     }
     return wrapResponse(handleHistoryClear(cwd, req, sendSse));
+  }
+  // --- Global Search ---
+  if (path === "/_db/search/start") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSearchStart(cwd, req));
+  }
+  if (path === "/_db/search/status")
+    return wrapResponse(handleSearchStatus(url));
+  if (path === "/_db/search/cancel") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSearchCancel(req));
+  }
+  // --- Snapshot ---
+  if (path === "/_db/snapshot/list")
+    return wrapResponse(handleSnapshotList(cwd, url));
+  if (path === "/_db/snapshot/create") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
+  }
+  if (path === "/_db/snapshot/update-note") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotUpdateNote(cwd, req));
+  }
+  if (path === "/_db/snapshot/delete") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotDelete(cwd, req));
+  }
+  // --- Snapshot Diff ---
+  if (path === "/_db/snapshot/diff/create") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleDiffCreate(cwd, req, sendSse));
+  }
+  if (path === "/_db/snapshot/diff/list")
+    return wrapResponse(handleDiffList(cwd, url));
+  if (path === "/_db/snapshot/diff/tables")
+    return wrapResponse(handleDiffTables(cwd, url));
+  if (path === "/_db/snapshot/diff/rows")
+    return wrapResponse(handleDiffRows(cwd, url));
+  if (path === "/_db/snapshot/diff/update-note") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleDiffUpdateNote(cwd, req));
+  }
+  if (path === "/_db/snapshot/diff/delete") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleDiffDelete(cwd, req));
   }
   return null;
 }

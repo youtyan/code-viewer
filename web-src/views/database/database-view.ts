@@ -8,9 +8,11 @@ import type {
 } from "../../core/database/types";
 import type { AppRoute, DiffRange } from "../../core/routes";
 import { createErDiagram } from "./er-diagram";
+import { createGlobalSearchView } from "./global-search-view";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createSchemaView } from "./schema-view";
+import { createSnapshotView } from "./snapshot-view";
 import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
 import { createTableList } from "./table-list";
 
@@ -25,10 +27,10 @@ export type DatabaseViewDeps = {
 export type DatabaseView = {
   enter: (db?: string, table?: string, tab?: TabName) => void;
   leave: () => void;
-  handleSse: () => void;
+  handleSse: (event?: string, data?: string) => void;
 };
 
-type TabName = "data" | "query" | "schema" | "er";
+type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
@@ -86,7 +88,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (schemaCache) renderErDiagram();
   });
 
-  toolsSection.append(queryBtn, erBtn);
+  const searchBtn = document.createElement("button");
+  searchBtn.className = "db-tool-btn";
+  searchBtn.type = "button";
+  searchBtn.textContent = "Search";
+  searchBtn.title = "Search all tables";
+  searchBtn.addEventListener("click", () => {
+    setActiveTab("search");
+  });
+
+  const snapshotBtn = document.createElement("button");
+  snapshotBtn.className = "db-tool-btn";
+  snapshotBtn.type = "button";
+  snapshotBtn.textContent = "Snapshot";
+  snapshotBtn.title = "Snapshot & Diff";
+  snapshotBtn.addEventListener("click", () => {
+    setActiveTab("snapshot");
+    snapshotView.refresh();
+  });
+
+  toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
   sidebar.append(dbToolbar, tableList.el, toolsSection);
 
@@ -127,6 +148,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   const schemaView = createSchemaView();
   const erDiagram = createErDiagram();
+  const globalSearchView = createGlobalSearchView({
+    getDbId: () => currentDb?.id || null,
+  });
+  const snapshotView = createSnapshotView({
+    getDbId: () => currentDb?.id || null,
+    getTables: () => schemaCache?.tables || [],
+  });
   const historyView = createQueryHistoryView({
     getDbId: () => currentDb?.id || null,
     copySqlToQuery: (sql) => {
@@ -143,8 +171,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     queryEditor.el,
     schemaView.el,
     erDiagram.el,
+    globalSearchView.el,
+    snapshotView.el,
   );
   queryEditor.el.hidden = true;
+  globalSearchView.el.hidden = true;
+  snapshotView.el.hidden = true;
 
   const upperArea = document.createElement("div");
   upperArea.className = "db-upper-area";
@@ -256,11 +288,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabSchema.classList.toggle("active", tab === "schema");
     queryBtn.classList.toggle("active", tab === "query");
     erBtn.classList.toggle("active", tab === "er");
-    tabBar.hidden = tab === "query" || tab === "er";
+    searchBtn.classList.toggle("active", tab === "search");
+    snapshotBtn.classList.toggle("active", tab === "snapshot");
+    tabBar.hidden =
+      tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
     grid.el.hidden = tab !== "data";
     queryEditor.el.hidden = tab !== "query";
     schemaView.el.hidden = tab !== "schema";
     erDiagram.el.hidden = tab !== "er";
+    globalSearchView.el.hidden = tab !== "search";
+    snapshotView.el.hidden = tab !== "snapshot";
     if (tab === "query") queryEditor.focus();
     if (updateUrl) {
       const activeTable = tableList.el.querySelector<HTMLElement>(
@@ -521,6 +558,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         if (activeTable?.dataset.table) showSchema(activeTable.dataset.table);
       } else if (tab === "er") {
         if (schemaCache) renderErDiagram();
+      } else if (tab === "snapshot") {
+        snapshotView.refresh();
       }
     }
   }
@@ -530,9 +569,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     unmount();
   }
 
-  function handleSse() {
+  function handleSse(event?: string, data?: string) {
     if (!mounted) return;
     if (historyOpen) historyView.refresh();
+    if (event === "db-snapshot" && data) {
+      snapshotView.handleSse(data);
+    }
+    if (event === "db-snapshot-diff" && data) {
+      snapshotView.handleSse(data);
+    }
   }
 
   return { enter, leave, handleSse };

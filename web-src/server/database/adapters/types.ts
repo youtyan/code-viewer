@@ -43,6 +43,24 @@ export type DatabaseAdapter = {
   close(): void;
 };
 
+export type SnapshotRowData = {
+  rowKeyJson: string;
+  rowHash: string;
+  payloadJson: string;
+};
+
+export type SnapshotRowBatch = {
+  table: string;
+  rows: SnapshotRowData[];
+};
+
+export type AdapterSearchHit = {
+  table: string;
+  column: string;
+  rowPreview: import("../../../core/database/types").DbValue[];
+  valuePreview: string;
+};
+
 export type DatabaseAdapterFactory = {
   open(path: string): Promise<DatabaseAdapter>;
 };
