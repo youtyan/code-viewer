@@ -11441,6 +11441,7 @@ ${frontmatter.yaml}
   var HELP_SECTIONS = [
     "overview",
     "annotations",
+    "database",
     "skills",
     "keybindings"
   ];
@@ -11568,6 +11569,93 @@ ${frontmatter.yaml}
                       "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable."
                     ]
                   ]
+                }
+              ]
+            }
+          ]
+        },
+        database: {
+          nav: "Database",
+          title: "Database Viewer",
+          intro: "Browse SQLite files and Docker-hosted MySQL/PostgreSQL databases. Run queries with syntax highlighting and explore table schemas and ER diagrams.",
+          groups: [
+            {
+              title: "Supported databases",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "SQLite",
+                      "Automatically discovered from .db, .sqlite, .sqlite3 files in the repository."
+                    ],
+                    [
+                      "MySQL / MariaDB",
+                      "Detected from docker-compose.yml services. Multiple databases per server are listed."
+                    ],
+                    [
+                      "PostgreSQL",
+                      "Detected from docker-compose.yml services. Multiple databases per server are listed."
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "UI layout",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "Sidebar",
+                      "DB selector, table tree (expand to see columns), filter, Query/ER buttons."
+                    ],
+                    [
+                      "Data tab",
+                      "Paginated table grid with sort, filter, cell copy, and CSV/JSON export."
+                    ],
+                    [
+                      "Schema tab",
+                      "Column definitions, indexes, foreign keys, triggers, and DDL."
+                    ],
+                    [
+                      "Query editor",
+                      "SQL syntax highlighting, Tab indent, auto-resize, Ctrl+Enter to run."
+                    ],
+                    [
+                      "ER Diagram",
+                      "Mermaid-based entity-relationship diagram with zoom and pan."
+                    ],
+                    [
+                      "Query History",
+                      "Bottom panel with master-detail layout. Left: history list, Right: result preview."
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "CLI query (for AI agents)",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AI agents can execute read-only queries from the CLI. Results are saved to query history and visible in the browser."
+                },
+                {
+                  kind: "command",
+                  title: "Run a query",
+                  command: 'code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" --title "Sample data"'
+                },
+                {
+                  kind: "command",
+                  title: "List databases",
+                  command: "code-viewer query list"
+                },
+                {
+                  kind: "command",
+                  title: "Agent reference",
+                  command: "code-viewer query agent-help"
                 }
               ]
             }
@@ -11824,6 +11912,93 @@ ${frontmatter.yaml}
                       "削除して追加し直すより、注釈IDと順番を保ったまま修正します。"
                     ]
                   ]
+                }
+              ]
+            }
+          ]
+        },
+        database: {
+          nav: "データベース",
+          title: "データベースビューア",
+          intro: "SQLite ファイルや Docker 上の MySQL/PostgreSQL を閲覧できます。シンタックスハイライト付きクエリ実行、スキーマ表示、ER 図を提供します。",
+          groups: [
+            {
+              title: "対応データベース",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "SQLite",
+                      "リポジトリ内の .db, .sqlite, .sqlite3 ファイルを自動検出します。"
+                    ],
+                    [
+                      "MySQL / MariaDB",
+                      "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。"
+                    ],
+                    [
+                      "PostgreSQL",
+                      "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "UI構成",
+              blocks: [
+                {
+                  kind: "table",
+                  rows: [
+                    [
+                      "サイドバー",
+                      "DB選択、テーブルツリー（展開でカラム表示）、フィルター、Query/ERボタン。"
+                    ],
+                    [
+                      "Data タブ",
+                      "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSONエクスポート。"
+                    ],
+                    [
+                      "Schema タブ",
+                      "カラム定義、インデックス、外部キー、トリガー、DDL。"
+                    ],
+                    [
+                      "クエリエディター",
+                      "SQLシンタックスハイライト、Tabインデント、自動リサイズ、Ctrl+Enterで実行。"
+                    ],
+                    [
+                      "ER図",
+                      "Mermaidベースのエンティティ関係図。ズーム・パン対応。"
+                    ],
+                    [
+                      "クエリ履歴",
+                      "下部パネルにマスター/ディテール表示。左に履歴一覧、右に結果プレビュー。"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              title: "CLI クエリ（AIエージェント用）",
+              blocks: [
+                {
+                  kind: "paragraph",
+                  text: "AIエージェントはCLIから読み取り専用クエリを実行できます。結果はクエリ履歴に保存され、ブラウザで確認できます。"
+                },
+                {
+                  kind: "command",
+                  title: "クエリを実行",
+                  command: 'code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" --title "サンプルデータ"'
+                },
+                {
+                  kind: "command",
+                  title: "データベース一覧",
+                  command: "code-viewer query list"
+                },
+                {
+                  kind: "command",
+                  title: "エージェント向けリファレンス",
+                  command: "code-viewer query agent-help"
                 }
               ]
             }
