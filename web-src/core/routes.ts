@@ -32,7 +32,7 @@ export type AppRoute =
       screen: "database";
       db?: string;
       table?: string;
-      tab?: "data" | "query" | "schema" | "er";
+      tab?: "data" | "query" | "schema" | "er" | "history";
       range: DiffRange;
     }
   | {
@@ -167,7 +167,8 @@ export function parseRoute(
         tabRaw === "data" ||
         tabRaw === "query" ||
         tabRaw === "schema" ||
-        tabRaw === "er"
+        tabRaw === "er" ||
+        tabRaw === "history"
           ? tabRaw
           : undefined;
       return {

@@ -44,7 +44,7 @@ import {
 } from "./views/annotations-ui";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
-import { createDiffView } from "./views/diff-view";
+import { createDiffView, type RenderResult } from "./views/diff-view";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -2258,22 +2258,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRoute(STATE.route, true);
   }
 
-  function load(options: { force?: boolean } = {}): Promise<void> {
+  function load(
+    options: { force?: boolean; changedPaths?: Set<string> | null } = {},
+  ): Promise<RenderResult | null> {
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
       syncHeaderMenu();
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
     if (STATE.route.screen === "database") {
       DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
       setStatus("live");
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
-    if (STATE.route.screen === "repo") return loadRepo();
-    // The history screen rewrites the #empty heading/body for its
-    // no-commit-selected state; restore copy that matches the current screen
-    // so a clean worktree or an empty commit does not show stale text.
+    if (STATE.route.screen === "repo") return loadRepo().then(() => null);
     {
       const empty = $("#empty");
       if (empty) {
@@ -2296,10 +2295,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
-        renderShell(data);
+        const result = renderShell(data, options.changedPaths);
         setStatus("live");
+        return result;
       })
-      .catch(() => setStatus("error"));
+      .catch(() => {
+        setStatus("error");
+        return null;
+      });
   }
   loadSettings().finally(() => {
     if (STATE.route.screen === "help") {
@@ -2373,7 +2376,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.from = range.from;
       STATE.to = range.to;
       syncRefInputs();
-      return load();
+      return load().then(() => {});
     },
     showEmptyDiffPane: () => {
       const diff = $("#diff");
@@ -2646,17 +2649,30 @@ window.GdpExpandLogic = GdpExpandLogic;
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
 
-  // Debounce SSE-driven reloads. Multiple BufWritePost in quick succession
-  // collapse into one fetch. Scroll + active file are preserved across reload.
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
-  function scheduleSseLoad() {
+  let pendingSseChangedPaths: Set<string> | null = new Set();
+  function scheduleSseLoad(changedPaths?: string[] | null) {
+    // Database and help screens are not affected by worktree file changes
+    if (STATE.route.screen === "database" || STATE.route.screen === "help")
+      return;
+    if (changedPaths && pendingSseChangedPaths) {
+      for (const p of changedPaths) pendingSseChangedPaths.add(p);
+    } else {
+      pendingSseChangedPaths = null;
+    }
     if (sseTimer) clearTimeout(sseTimer);
     sseTimer = setTimeout(() => {
       sseTimer = null;
-      invalidateRepoSidebar();
+      const paths = pendingSseChangedPaths;
+      pendingSseChangedPaths = new Set();
+      const isRepoScreen =
+        STATE.route.screen === "repo" ||
+        (STATE.route.screen === "file" && STATE.route.view === "blob");
+      if (isRepoScreen) invalidateRepoSidebar();
       const savedScroll = window.scrollY;
       const savedActive = STATE.activeFile;
-      load().then(() => {
+      load({ changedPaths: paths }).then((result) => {
+        if (result?.preservedDom) return;
         if (savedActive) {
           const card = document.querySelector<DiffCardElement>(
             diffCardSelector(savedActive),
@@ -2674,10 +2690,25 @@ window.GdpExpandLogic = GdpExpandLogic;
   const es = new EventSource("/events");
   const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
   let openedOnce = false;
-  es.addEventListener("update", () => scheduleSseLoad());
+  es.addEventListener("update", (event) => {
+    const raw = (event as MessageEvent).data;
+    let paths: string[] | null = null;
+    if (raw && raw !== "tick") {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.paths)) paths = parsed.paths;
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+    scheduleSseLoad(paths);
+  });
   es.addEventListener("reload", () => location.reload());
   es.addEventListener("annotation", (event) => {
     ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+  });
+  es.addEventListener("db-query", () => {
+    DATABASE_VIEW.handleSse();
   });
   es.addEventListener("error", () => setStatus("error"));
   es.addEventListener("open", () => {

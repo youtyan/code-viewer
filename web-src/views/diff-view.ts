@@ -73,6 +73,12 @@ type LoadQueueItem = {
   priority: number;
 };
 
+export type RenderResult = {
+  structureChanged: boolean;
+  invalidatedCards: number;
+  preservedDom: boolean;
+};
+
 type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
 export function createDiffView(deps: DiffViewDeps) {
@@ -345,18 +351,128 @@ export function createDiffView(deps: DiffViewDeps) {
   const MAX_PARALLEL = 2;
 
   let lazyObserver: IntersectionObserver | null = null;
+  let scrollSpyInstalled = false;
+  let prevListSignature = "";
+  let prevCardSignatures = new Map<string, string>();
 
-  function renderShell(meta: DiffMeta) {
+  function fileKey(f: FileMeta): string {
+    return f.key || f.path;
+  }
+
+  function computeListSignature(files: FileMeta[]): string {
+    return files
+      .map(
+        (f) =>
+          `${fileKey(f)}\0${f.path}\0${f.old_path || ""}\0${f.status || "M"}`,
+      )
+      .join("\n");
+  }
+
+  function computeCardSignature(f: FileMeta): string {
+    return [
+      fileKey(f),
+      f.status || "M",
+      f.additions || 0,
+      f.deletions || 0,
+      f.binary ? 1 : 0,
+      f.media_kind || "",
+      f.size_class || "small",
+      f.force_layout || "",
+      f.highlight ? 1 : 0,
+      f.load_url,
+      f.preview_url || "",
+      f.estimated_height_px || 0,
+      f.untracked ? 1 : 0,
+    ].join("\0");
+  }
+
+  function ensureLazyObserver(): IntersectionObserver {
+    if (!lazyObserver) {
+      lazyObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const card = entry.target as DiffCardElement;
+            if (
+              card.classList.contains("loaded") ||
+              card.classList.contains("loading")
+            )
+              continue;
+            const f = STATE.files.find((x) => x.path === card.dataset.path);
+            if (f) enqueueLoad(f, card, 0);
+          }
+        },
+        { rootMargin: "1200px 0px 1600px 0px" },
+      );
+    }
+    return lazyObserver;
+  }
+
+  function activatePendingCard(card: DiffCardElement, file: FileMeta) {
+    ensureLazyObserver().observe(card);
+    const rect = card.getBoundingClientRect();
+    if (rect.top <= window.innerHeight + 1600) {
+      enqueueLoad(file, card, 0);
+    }
+  }
+
+  function invalidateLoadedCard(
+    card: DiffCardElement,
+    file: FileMeta,
+    changedPaths: Set<string> | null,
+  ): boolean {
+    if (!card.classList.contains("loaded")) return false;
+    if (changedPaths && !changedPaths.has(file.path)) return false;
+    card.classList.remove("loaded", "error");
+    card.classList.add("pending");
+    card._diffData = null;
+    const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+    if (body) body.innerHTML = "";
+    const head = card.querySelector<HTMLElement>(".gdp-shell-header");
+    if (head) head.style.display = "";
+    const indicator = card.querySelector<HTMLElement>(".loading-indicator");
+    if (indicator) indicator.hidden = false;
+    activatePendingCard(card, file);
+    return true;
+  }
+
+  function updateSidebarStats(files: FileMeta[]) {
+    for (const f of files) {
+      const li = document.querySelector<HTMLElement>(
+        `#filelist li[data-path="${CSS.escape(f.path)}"]`,
+      );
+      if (!li) continue;
+      const badge = li.querySelector<HTMLElement>(".badge");
+      if (badge) {
+        const ch = (f.status || "M")[0].toUpperCase();
+        if (badge.textContent !== ch) {
+          badge.textContent = ch;
+          badge.className = `badge ${ch}`;
+        }
+      }
+    }
+  }
+
+  function renderShell(
+    meta: DiffMeta,
+    changedPaths?: Set<string> | null,
+  ): RenderResult {
     const newFiles = meta.files || [];
+    const newListSig = computeListSignature(newFiles);
+    const listSame =
+      newListSig === prevListSignature && prevListSignature !== "";
+
     STATE.files = newFiles;
     setServerGeneration(meta.generation || 0);
     window._lastMeta = meta;
     renderMeta(meta);
-    renderSidebar(newFiles);
 
     const target = $("#diff");
     const empty = $("#empty");
     if (!newFiles.length) {
+      prevListSignature = newListSig;
+      prevCardSignatures.clear();
+      if (!listSame) renderSidebar(newFiles);
       if (STATE.route.screen === "file") {
         empty.classList.add("hidden");
         applySourceRouteToShell();
@@ -365,31 +481,113 @@ export function createDiffView(deps: DiffViewDeps) {
         target.replaceChildren();
       }
       LOAD_QUEUE.length = 0;
-      return;
+      return {
+        structureChanged: !listSame,
+        invalidatedCards: 0,
+        preservedDom: listSame,
+      };
     }
     empty.classList.add("hidden");
 
-    // Reuse existing cards by stable key when possible. This keeps scroll
-    // position stable, avoids re-fetching unchanged files, and preserves any
-    // expanded hunk state. Cards whose meta changed (size_class, status) are
-    // reset to placeholder so they reload.
-    const oldByKey = new Map();
+    const newCardSigs = new Map<string, string>();
+    for (const f of newFiles) {
+      newCardSigs.set(fileKey(f), computeCardSignature(f));
+    }
+
+    let invalidatedCards = 0;
+
+    if (listSame) {
+      // Fast path: file list structure unchanged — skip replaceChildren and renderSidebar.
+      // changedPaths === null means unknown (e.g. tick, parse failure, truncated paths)
+      // so treat all loaded cards as potentially stale.
+      const pathsUnknown = !changedPaths;
+      let sidebarNeedsStatsUpdate = false;
+      for (const f of newFiles) {
+        const key = fileKey(f);
+        const oldSig = prevCardSignatures.get(key);
+        const newSig = newCardSigs.get(key)!;
+        const sigChanged = oldSig !== newSig;
+        const pathHint = pathsUnknown || changedPaths.has(f.path);
+        if (!sigChanged && !pathHint) {
+          continue;
+        }
+        const card = document.querySelector<DiffCardElement>(
+          `.gdp-file-shell[data-key="${CSS.escape(key)}"]`,
+        );
+        if (!card) continue;
+        const sizeChanged =
+          card.dataset.sizeClass !== (f.size_class || "small");
+        const statusChanged = card.dataset.status !== (f.status || "M");
+        if (sizeChanged || statusChanged) {
+          card.classList.remove("loaded", "error");
+          card.classList.add("pending");
+          card.replaceChildren();
+          const tmp = createPlaceholder(f);
+          while (tmp.firstChild) card.appendChild(tmp.firstChild);
+          card.dataset.sizeClass = f.size_class || "small";
+          card.dataset.status = f.status || "M";
+          delete card.dataset.manualRendered;
+          delete card.dataset.manualLoad;
+          delete card.dataset.manualMode;
+          card.style.minHeight = `${f.estimated_height_px || 80}px`;
+          card._diffData = null;
+          card._file = null;
+          activatePendingCard(card, f);
+          invalidatedCards++;
+          sidebarNeedsStatsUpdate = true;
+        } else {
+          const stats = card.querySelector(".gdp-shell-header .stats");
+          if (stats) {
+            stats.innerHTML =
+              '<span class="a">+' +
+              (f.additions || 0) +
+              "</span>" +
+              '<span class="d">−' +
+              (f.deletions || 0) +
+              "</span>";
+          }
+          card._file = f;
+          const didInvalidate = sigChanged
+            ? invalidateLoadedCard(card, f, null)
+            : invalidateLoadedCard(card, f, changedPaths);
+          if (didInvalidate) invalidatedCards++;
+          if (sigChanged) sidebarNeedsStatsUpdate = true;
+        }
+      }
+      if (sidebarNeedsStatsUpdate) updateSidebarStats(newFiles);
+      prevCardSignatures = newCardSigs;
+      prevListSignature = newListSig;
+      applySourceRouteToShell();
+      if (!scrollSpyInstalled) {
+        setupScrollSpy();
+        scrollSpyInstalled = true;
+      }
+      return {
+        structureChanged: false,
+        invalidatedCards,
+        preservedDom: invalidatedCards === 0,
+      };
+    }
+
+    // Full path: file list structure changed
+    if (!listSame) renderSidebar(newFiles);
+
+    const oldByKey = new Map<string, DiffCardElement>();
     document
       .querySelectorAll<DiffCardElement>(".gdp-file-shell")
       .forEach((c) => {
         if (c.dataset.key) oldByKey.set(c.dataset.key, c);
       });
 
-    const ordered = [];
-    newFiles.forEach((f) => {
-      const key = f.key || f.path;
+    const ordered: DiffCardElement[] = [];
+    for (const f of newFiles) {
+      const key = fileKey(f);
       const old = oldByKey.get(key);
       if (old) {
         oldByKey.delete(key);
         const sizeChanged = old.dataset.sizeClass !== (f.size_class || "small");
         const statusChanged = old.dataset.status !== (f.status || "M");
         if (sizeChanged || statusChanged) {
-          // Meta drifted — drop content and re-queue
           old.classList.remove("loaded", "error");
           old.classList.add("pending");
           old.replaceChildren();
@@ -397,17 +595,14 @@ export function createDiffView(deps: DiffViewDeps) {
           while (tmp.firstChild) old.appendChild(tmp.firstChild);
           old.dataset.sizeClass = f.size_class || "small";
           old.dataset.status = f.status || "M";
-          // Manual-load is the user's "show this heavy file" intent. Keep it
-          // across live refreshes, but reset it when the file's basic meta
-          // changes enough that the old intent may no longer match.
           delete old.dataset.manualRendered;
           delete old.dataset.manualLoad;
           delete old.dataset.manualMode;
           old.style.minHeight = `${f.estimated_height_px || 80}px`;
           old._diffData = null;
           old._file = null;
+          invalidatedCards++;
         } else {
-          // Refresh the lightweight header counts in place
           const stats = old.querySelector(".gdp-shell-header .stats");
           if (stats) {
             stats.innerHTML =
@@ -423,28 +618,32 @@ export function createDiffView(deps: DiffViewDeps) {
         ordered.push(old);
       } else {
         ordered.push(createPlaceholder(f));
+        invalidatedCards++;
       }
-    });
+    }
 
-    // Cards no longer present
     oldByKey.forEach((c) => {
       c.remove();
     });
 
     target.replaceChildren(...ordered);
 
-    // Drop pending queue entries whose card is gone
     for (let i = LOAD_QUEUE.length - 1; i >= 0; i--) {
       if (!LOAD_QUEUE[i].card.isConnected) LOAD_QUEUE.splice(i, 1);
     }
+
+    prevCardSignatures = newCardSigs;
+    prevListSignature = newListSig;
 
     setupLazyObserver();
     enqueueInitialLoads();
     applySourceRouteToShell();
     setupScrollSpy();
+    scrollSpyInstalled = true;
     if (typeof applyHideTests === "function") applyHideTests();
     applyFilter();
     applyViewedState();
+    return { structureChanged: true, invalidatedCards, preservedDom: false };
   }
 
   function createPlaceholder(f: FileMeta): DiffCardElement {
