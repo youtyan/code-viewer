@@ -1,0 +1,281 @@
+import { spawnSync } from "node:child_process";
+import type {
+  EsIndexInfo,
+  EsMapping,
+  EsSearchResult,
+} from "../../../core/database/types";
+
+type EsConfig = {
+  containerName: string;
+  // 認証あり ES の場合 elastic ユーザーのパスワード。spawnSync の env 経由で
+  // 渡すので argv には現れない (Round 1 C2 と同パターン)。
+  password: string;
+};
+
+export type ElasticsearchExplorer = {
+  readonly kind: "elasticsearch";
+  readonly model: "document";
+  readonly capabilities: { snapshot: true; query: true };
+  listIndices(): EsIndexInfo[];
+  getMapping(index: string): EsMapping;
+  searchDocs(opts: {
+    index: string;
+    query?: string;
+    size?: number;
+    searchAfter?: unknown[];
+  }): EsSearchResult;
+  getDoc(opts: { index: string; id: string }): {
+    found: boolean;
+    source: unknown;
+    seqNo?: number;
+    primaryTerm?: number;
+  };
+  close(): void;
+};
+
+const ES_DEFAULT_SIZE = 200;
+
+function execEsRequest(
+  config: EsConfig,
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  timeoutMs = 15000,
+): { code: number; stdout: string; stderr: string } {
+  const hasPassword = !!config.password;
+  // curl --user elastic:$PASSWORD は argv 露出するため、認証ありの場合は
+  // -K - で stdin から config を流す。host の `ps -ef` には -K - だけが
+  // 見え、credential 値は spawnSync の stdin 経由で渡る。
+  // PoC では認証なしを default で動かす想定。認証ありは password が
+  // 与えられた場合に有効化する。
+  // curl の write-out で HTTP status と body を区切るために以下の trick を使う。
+  //   --write-out '\n__ES_STATUS__:%{http_code}\n'
+  // tail で status を取り、それより上を body とする。
+  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const args = [
+    "exec",
+    "-i",
+    ...(hasPassword ? ["-e", "ES_HTTP_PASSWORD"] : []),
+    config.containerName,
+    "curl",
+    "-s",
+    "-S",
+    "-X",
+    method,
+    url,
+    "-w",
+    "\n__ES_STATUS__:%{http_code}\n",
+    "-H",
+    "Content-Type: application/json",
+    ...(hasPassword ? ["-K", "-"] : []),
+    ...(body !== undefined ? ["--data-binary", JSON.stringify(body)] : []),
+  ];
+  const proc = spawnSync("docker", args, {
+    encoding: "utf8",
+    env: hasPassword
+      ? { ...process.env, ES_HTTP_PASSWORD: config.password }
+      : process.env,
+    timeout: timeoutMs,
+    input: hasPassword ? `user = "elastic:${config.password}"\n` : undefined,
+    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
+  });
+  return {
+    code: proc.status ?? 1,
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || "",
+  };
+}
+
+// curl の write-out で末尾に `\n__ES_STATUS__:NNN\n` を付けている。
+// それを切り離して body と http status を返す。
+function parseEsResponse(stdout: string): { status: number; body: string } {
+  const marker = "__ES_STATUS__:";
+  const idx = stdout.lastIndexOf(marker);
+  if (idx < 0) return { status: 0, body: stdout };
+  const statusPart = stdout.slice(idx + marker.length).trim();
+  const status = Number(statusPart) || 0;
+  // marker の前にある改行も剥がす。
+  let body = stdout.slice(0, idx);
+  if (body.endsWith("\n")) body = body.slice(0, -1);
+  return { status, body };
+}
+
+function safeJsonParse<T>(stdout: string, label: string): T {
+  try {
+    return JSON.parse(stdout) as T;
+  } catch (err) {
+    throw new Error(
+      `${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`,
+    );
+  }
+}
+
+function resolveContainerName(serviceName: string, cwd: string): string | null {
+  const proc = spawnSync(
+    "docker",
+    ["compose", "ps", "--format", "json", "--status", "running"],
+    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd },
+  );
+  if (proc.status !== 0) return null;
+  try {
+    const output = proc.stdout.trim();
+    let containers: { Service?: string; Name?: string; State?: string }[];
+    if (output.startsWith("[")) {
+      containers = JSON.parse(output);
+    } else {
+      containers = output
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+    }
+    const match = containers.find(
+      (c) => c.Service === serviceName && c.State === "running",
+    );
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+
+function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
+  function callJson<T>(
+    method: "GET" | "POST",
+    path: string,
+    body: unknown,
+    label: string,
+  ): T {
+    const r = execEsRequest(config, method, path, body);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status < 200 || status >= 300) {
+      throw new Error(`${label}: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    if (!text.trim()) return {} as T;
+    return safeJsonParse<T>(text, label);
+  }
+
+  function listIndices(): EsIndexInfo[] {
+    // _cat/indices の出力: [{ "index": "name", "docs.count": "10", "store.size": "1kb", ... }, ...]
+    // expand_wildcards=open でクローズド index は除く。
+    const raw = callJson<
+      Array<{
+        index?: string;
+        "docs.count"?: string;
+        "store.size"?: string;
+        health?: string;
+        status?: string;
+      }>
+    >(
+      "GET",
+      "/_cat/indices?format=json&expand_wildcards=open",
+      undefined,
+      "_cat/indices",
+    );
+    const result: EsIndexInfo[] = [];
+    for (const row of raw) {
+      const name = row.index;
+      if (!name || name.startsWith(".")) continue; // システム index は除外
+      result.push({
+        name,
+        docCount: Number(row["docs.count"]) || 0,
+        sizeBytes: parseEsSize(row["store.size"]),
+        health: row.health,
+        status: row.status,
+      });
+    }
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    return result;
+  }
+
+  // 仮実装。次コミット以降で getMapping / searchDocs / getDoc を埋める。
+  function getMapping(_index: string): EsMapping {
+    throw new Error("not implemented yet");
+  }
+  function searchDocs(_opts: {
+    index: string;
+    query?: string;
+    size?: number;
+    searchAfter?: unknown[];
+  }): EsSearchResult {
+    throw new Error("not implemented yet");
+  }
+  function getDoc(_opts: { index: string; id: string }): {
+    found: boolean;
+    source: unknown;
+    seqNo?: number;
+    primaryTerm?: number;
+  } {
+    throw new Error("not implemented yet");
+  }
+
+  return {
+    kind: "elasticsearch",
+    model: "document",
+    capabilities: { snapshot: true, query: true },
+    listIndices,
+    getMapping,
+    searchDocs,
+    getDoc,
+    close() {
+      // nothing to close (docker exec is one-shot per call)
+    },
+  };
+}
+
+// "1kb" / "2.3mb" / "10gb" / "500b" のような表記を bytes に変換する。
+// _cat/indices の human=true output (デフォルト) に対応するため。
+function parseEsSize(raw: string | undefined): number {
+  if (!raw) return 0;
+  const m = raw
+    .trim()
+    .toLowerCase()
+    .match(/^([\d.]+)\s*(b|kb|mb|gb|tb|pb)?$/);
+  if (!m) return 0;
+  const n = Number.parseFloat(m[1]);
+  if (!Number.isFinite(n)) return 0;
+  const unit = m[2] || "b";
+  const mult: Record<string, number> = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+    tb: 1024 ** 4,
+    pb: 1024 ** 5,
+  };
+  return Math.round(n * (mult[unit] || 1));
+}
+
+// snapshot 用 container の正規化。`"my-index"` 単独でも JSON でも
+// `{"index":"my-index"}` に揃える。R2-m1 redis canonicalize と同パターン。
+export function canonicalizeEsSnapshotContainer(container: string): string {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container) as { index?: string; query?: string };
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" ? obj.query : undefined;
+      const out: { index: string; query?: string } = { index };
+      if (query !== undefined) out.query = query;
+      return JSON.stringify(out);
+    } catch {
+      // fall through
+    }
+  }
+  return JSON.stringify({ index: container || "*" });
+}
+
+export function openElasticsearchAdapter(
+  serviceName: string,
+  env: Record<string, string>,
+  cwd: string,
+): ElasticsearchExplorer {
+  const containerName = resolveContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(
+      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
+    );
+  }
+  const password = env.ELASTIC_PASSWORD || "";
+  return createElasticsearchAdapter({ containerName, password });
+}
