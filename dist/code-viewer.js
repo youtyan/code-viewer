@@ -4451,71 +4451,39 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
 `, storeDb = null, storeDbPath = null;
 var init_snapshot_store = () => {};
 
+// web-src/server/database/sources/types.ts
+function hasSnapshotCapability(source) {
+  const caps = source.capabilities;
+  return !!caps?.snapshot;
+}
+
 // web-src/server/database/snapshot-runner.ts
-import { createHash as createHash4 } from "node:crypto";
-function normalizeValue(v) {
-  if (v === null)
-    return "\\N";
-  if (typeof v === "bigint")
-    return v.toString();
-  if (v instanceof Uint8Array) {
-    return `\\x${Buffer.from(v).toString("hex")}`;
+async function runSnapshot(cwd, source, dbId, containers, note, onProgress) {
+  if (!hasSnapshotCapability(source)) {
+    throw new Error("data source does not support snapshot (missing SnapshotIterable capability)");
   }
-  return String(v);
-}
-function rowToPayloadJson2(columns, row) {
-  const obj = {};
-  for (let i = 0;i < columns.length; i++) {
-    obj[columns[i]] = serializeDbValue(row[i]);
-  }
-  return JSON.stringify(obj);
-}
-function computeRowHash2(columns, row) {
-  const parts = columns.map((_, i) => normalizeValue(row[i]));
-  return createHash4("sha256").update(parts.join("\t")).digest("hex");
-}
-function buildRowKeyJson2(pkColumns, allColumns, row, rowIndex) {
-  if (pkColumns.length === 0) {
-    return JSON.stringify({ __rowIndex: rowIndex });
-  }
-  const keyObj = {};
-  for (const pk of pkColumns) {
-    const idx = allColumns.indexOf(pk);
-    if (idx >= 0)
-      keyObj[pk] = serializeDbValue(row[idx]);
-  }
-  return JSON.stringify(keyObj);
-}
-async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
-  const snapshotId = await createSnapshot(cwd, dbId, adapter.kind, tables, note);
+  const snapshotSource = source;
+  const snapshotId = await createSnapshot(cwd, dbId, snapshotSource.kind, containers, note);
   try {
-    for (const table of tables) {
-      onProgress?.(table, false);
-      const columns = adapter.getColumns(table);
-      const colNames = columns.map((c) => c.name);
-      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
-      let offset = 0;
-      let rowIndex = 0;
-      const allRows = [];
-      for (;; ) {
-        const result = adapter.getTablePage(table, {
-          offset,
-          limit: BATCH_SIZE
-        });
-        if (result.rows.length === 0)
-          break;
-        for (const row of result.rows) {
-          const rowKeyJson = buildRowKeyJson2(pkColumns, colNames, row, rowIndex);
-          const rowHash = computeRowHash2(colNames, row);
-          const payloadJson = rowToPayloadJson2(colNames, row);
-          allRows.push({ rowKeyJson, rowHash, payloadJson });
-          rowIndex++;
+    for (const container of containers) {
+      onProgress?.(container, false);
+      const collected = [];
+      let pkColumns = [];
+      try {
+        const adapterAny = snapshotSource;
+        if (typeof adapterAny.getColumns === "function") {
+          const cols = adapterAny.getColumns(container);
+          pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
         }
-        offset += result.rows.length;
-        if (result.rows.length < BATCH_SIZE)
-          break;
+      } catch {}
+      for await (const item of snapshotSource.iterateForSnapshot(container)) {
+        collected.push({
+          rowKeyJson: item.keyJson,
+          rowHash: item.rowHash,
+          payloadJson: item.payloadJson
+        });
       }
-      await addSnapshotTableData(cwd, snapshotId, table, pkColumns, allRows);
+      await addSnapshotTableData(cwd, snapshotId, container, pkColumns, collected);
     }
     await finalizeSnapshot(cwd, snapshotId);
     onProgress?.("", true);
@@ -4526,15 +4494,14 @@ async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
     throw err;
   }
 }
-var BATCH_SIZE = 500;
+var SNAPSHOT_FLUSH_THRESHOLD = 500;
 var init_snapshot_runner = __esm(() => {
-  init_serialize();
   init_snapshot_store();
 });
 
 // web-src/server/database/adapters/redis.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 function parseSnapshotContainer(container) {
   if (container.startsWith("{")) {
     try {
@@ -4931,7 +4898,7 @@ function createRedisAdapter(config) {
         const value = getValue({ db, key: k.name });
         const keyJson = JSON.stringify({ db, key: k.name });
         const payloadJson = JSON.stringify({ type: k.type, value });
-        const rowHash = createHash5("sha256").update(payloadJson).digest("hex");
+        const rowHash = createHash4("sha256").update(payloadJson).digest("hex");
         yield { keyJson, payloadJson, rowHash };
       }
       cursor = page.nextCursor;
