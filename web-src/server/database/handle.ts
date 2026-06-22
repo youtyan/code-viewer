@@ -897,16 +897,52 @@ async function handleSnapshotCreate(
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
-  if (r instanceof Response) return r;
 
-  const adapter = await getAdapter(r, cwd);
-  let tables = body.tables;
-  if (!tables || tables.length === 0) {
-    tables = adapter
-      .getTables()
-      .filter((t) => t.type === "table")
-      .map((t) => t.name);
+  // Redis (KV) も snapshot を生成できるよう、resolveDb の SQL-only 制限を
+  // 迂回して直接 source を引き出す。redis service なら RedisExplorer を、
+  // それ以外 (sqlite / pg / mysql) は既存 getAdapter を使う。
+  let source: Parameters<typeof runSnapshot>[1];
+  let containers = body.tables;
+  if (body.db.startsWith("docker:")) {
+    const serviceName = body.db.slice(7).split(":")[0];
+    const dockerDbs = getDockerDbs(cwd);
+    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    if (!info) return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      const { openRedisExplorer } = await import("./adapters/redis");
+      source = openRedisExplorer(info.serviceName, info.env, cwd);
+      // Redis では UI が key pattern を渡す想定。未指定なら全 key を対象とする。
+      if (!containers || containers.length === 0) {
+        containers = ["*"];
+      }
+    } else {
+      const r = resolveDb(cwd, body.db);
+      if (r instanceof Response) return r;
+      source = await getAdapter(r, cwd);
+    }
+  } else {
+    const r = resolveDb(cwd, body.db);
+    if (r instanceof Response) return r;
+    source = await getAdapter(r, cwd);
+  }
+
+  if (!containers || containers.length === 0) {
+    // SQL pass: getTables() で table 一覧を default にする。
+    const sqlAdapter = source as {
+      getTables?: () => Array<{ name: string; type: string }>;
+    };
+    if (typeof sqlAdapter.getTables === "function") {
+      containers = sqlAdapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => t.name);
+    }
+  }
+  if (!containers || containers.length === 0) {
+    return textError(
+      "missing tables/containers (Redis requires explicit key patterns)",
+      400,
+    );
   }
 
   const note = body.note ?? "";
@@ -915,9 +951,9 @@ async function handleSnapshotCreate(
     try {
       const snapshotId = await runSnapshot(
         cwd,
-        adapter,
+        source,
         body.db!,
-        tables!,
+        containers!,
         note,
         (table, done) => {
           sendSse?.(
