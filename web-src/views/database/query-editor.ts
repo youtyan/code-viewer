@@ -63,12 +63,16 @@ function saveToHistory(sql: string) {
 
 export type QueryEditorCallbacks = {
   executeQuery: (sql: string) => Promise<DbQueryResponse>;
+  // textarea の内容が変わった (input または setSql 経由) ことを外側に
+  // 通知する。タブごとに SQL draft を persist するために使う。
+  onSqlChange?: (sql: string) => void;
 };
 
 export type QueryEditor = {
   el: HTMLElement;
   focus: () => void;
   setSql: (sql: string) => void;
+  getSql: () => string;
 };
 
 export function createQueryEditor(
@@ -136,7 +140,10 @@ export function createQueryEditor(
     syncEditorHeight();
   }
 
-  textarea.addEventListener("input", syncHighlight);
+  textarea.addEventListener("input", () => {
+    syncHighlight();
+    callbacks.onSqlChange?.(textarea.value);
+  });
   textarea.addEventListener("scroll", () => {
     highlight.scrollTop = textarea.scrollTop;
     highlight.scrollLeft = textarea.scrollLeft;
@@ -375,9 +382,14 @@ export function createQueryEditor(
   function setSql(sql: string) {
     textarea.value = sql;
     syncHighlight();
+    callbacks.onSqlChange?.(textarea.value);
   }
 
-  return { el, focus, setSql };
+  function getSql(): string {
+    return textarea.value;
+  }
+
+  return { el, focus, setSql, getSql };
 }
 
 function formatValue(value: DbValue): string {
