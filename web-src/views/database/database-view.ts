@@ -402,6 +402,16 @@ function createTabPane(
 
   function setActiveTab(tab: TabName, updateUrl = true) {
     currentTab = normalizeViewForDb(tab, currentDb);
+    // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
+    // 操作なので、これらを active にしたときは table list の active 表示を
+    // 外す (= アイコン中はテーブル選択を持たない)。
+    // 逆にテーブルクリックで Data / Schema に戻したときは tableList.setActive
+    // が selectTable / showSchema から呼ばれるのでそちらで反映される。
+    const tableScopedTab = currentTab === "data" || currentTab === "schema";
+    if (!tableScopedTab) {
+      currentTable = null;
+      tableList.setActive(null);
+    }
     tabData.classList.toggle("active", currentTab === "data");
     tabSchema.classList.toggle("active", currentTab === "schema");
     queryBtn.classList.toggle("active", currentTab === "query");
@@ -564,7 +574,16 @@ function createTabPane(
     tableList.setActive(table);
     if (!currentDb) return;
     const requestDbId = currentDb.id;
-    if (currentTab === "query" || currentTab === "er") {
+    // テーブル選択は「テーブル中身の表示」なので、Query / ER / Search /
+    // Snapshot のような「テーブルに紐づかない」ビュー中だった場合は
+    // Data に戻す。これによりアイコンの active も自動で外れる
+    // (setActiveTab 内のクラス操作)。
+    if (
+      currentTab === "query" ||
+      currentTab === "er" ||
+      currentTab === "search" ||
+      currentTab === "snapshot"
+    ) {
       setActiveTab("data", false);
     }
     deps.setRoute(

@@ -11671,6 +11671,11 @@ ${frontmatter.yaml}
     }
     function setActiveTab(tab, updateUrl = true) {
       currentTab = normalizeViewForDb(tab, currentDb);
+      const tableScopedTab = currentTab === "data" || currentTab === "schema";
+      if (!tableScopedTab) {
+        currentTable = null;
+        tableList.setActive(null);
+      }
       tabData.classList.toggle("active", currentTab === "data");
       tabSchema.classList.toggle("active", currentTab === "schema");
       queryBtn.classList.toggle("active", currentTab === "query");
@@ -11817,7 +11822,7 @@ ${frontmatter.yaml}
       if (!currentDb)
         return;
       const requestDbId = currentDb.id;
-      if (currentTab === "query" || currentTab === "er") {
+      if (currentTab === "query" || currentTab === "er" || currentTab === "search" || currentTab === "snapshot") {
         setActiveTab("data", false);
       }
       deps.setRoute({
