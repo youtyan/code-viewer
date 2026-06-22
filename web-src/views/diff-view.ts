@@ -81,6 +81,22 @@ export type RenderResult = {
 
 type ScrollSpyHandler = EventListener & { _raf?: number | null };
 
+export function isDiffShellDomIntact(
+  target: Element,
+  expectedKeys: string[],
+): boolean {
+  const children = Array.from(target.children);
+  if (children.length !== expectedKeys.length) return false;
+  return children.every((child, index) => {
+    if (!child.classList.contains("gdp-file-shell")) return false;
+    return (child as HTMLElement).dataset.key === expectedKeys[index];
+  });
+}
+
+export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
+  return !listSame || !domIntact;
+}
+
 export function createDiffView(deps: DiffViewDeps) {
   const {
     $,
@@ -469,10 +485,13 @@ export function createDiffView(deps: DiffViewDeps) {
 
     const target = $("#diff");
     const empty = $("#empty");
+    const expectedKeys = newFiles.map(fileKey);
+    const domIntact = isDiffShellDomIntact(target, expectedKeys);
+    const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
     if (!newFiles.length) {
       prevListSignature = newListSig;
       prevCardSignatures.clear();
-      if (!listSame) renderSidebar(newFiles);
+      if (sidebarNeedsRender) renderSidebar(newFiles);
       if (STATE.route.screen === "file") {
         empty.classList.add("hidden");
         applySourceRouteToShell();
@@ -482,9 +501,9 @@ export function createDiffView(deps: DiffViewDeps) {
       }
       LOAD_QUEUE.length = 0;
       return {
-        structureChanged: !listSame,
+        structureChanged: sidebarNeedsRender,
         invalidatedCards: 0,
-        preservedDom: listSame,
+        preservedDom: listSame && domIntact,
       };
     }
     empty.classList.add("hidden");
@@ -496,7 +515,7 @@ export function createDiffView(deps: DiffViewDeps) {
 
     let invalidatedCards = 0;
 
-    if (listSame) {
+    if (listSame && domIntact) {
       // Fast path: file list structure unchanged — skip replaceChildren and renderSidebar.
       // changedPaths === null means unknown (e.g. tick, parse failure, truncated paths)
       // so treat all loaded cards as potentially stale.
@@ -570,7 +589,7 @@ export function createDiffView(deps: DiffViewDeps) {
     }
 
     // Full path: file list structure changed
-    if (!listSame) renderSidebar(newFiles);
+    if (sidebarNeedsRender) renderSidebar(newFiles);
 
     const oldByKey = new Map<string, DiffCardElement>();
     document
