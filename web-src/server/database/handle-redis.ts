@@ -1,4 +1,7 @@
-import type { RedisDatabasesResponse } from "../../core/database/types";
+import type {
+  RedisDatabasesResponse,
+  RedisKeysResponse,
+} from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
 import { discoverDockerDatabases } from "./discovery";
 import { json, textError } from "./handle";
@@ -63,6 +66,47 @@ function handleDatabases(cwd: string, url: URL): Response {
   }
 }
 
+function handleKeys(cwd: string, url: URL): Response {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null) return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const pattern = url.searchParams.get("pattern") || "*";
+  const cursor = url.searchParams.get("cursor") || "0";
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw
+    ? Math.min(10000, Math.max(1, Number(countRaw) || 200))
+    : 200;
+  try {
+    const { keys, nextCursor } = r.explorer.listKeys({
+      db: dbIndex,
+      pattern,
+      cursor,
+      count,
+    });
+    const body: RedisKeysResponse = {
+      dbId: r.dbId,
+      dbIndex,
+      keys,
+      nextCursor,
+    };
+    return json(body);
+  } catch (err) {
+    console.error(
+      "[code-viewer] redis error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 export async function handleRedisRoute(
   req: Request,
   url: URL,
@@ -81,5 +125,6 @@ export async function handleRedisRoute(
     return res;
   };
   if (path === "/_db/redis/databases") return wrap(handleDatabases(cwd, url));
+  if (path === "/_db/redis/keys") return wrap(handleKeys(cwd, url));
   return null;
 }

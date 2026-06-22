@@ -83,6 +83,20 @@ function parseInfoKeyspace(stdout: string): Map<number, number> {
   return counts;
 }
 
+const SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`;
+
+function isValidRedisType(t: string): t is RedisType {
+  return (
+    t === "string" ||
+    t === "list" ||
+    t === "set" ||
+    t === "zset" ||
+    t === "hash" ||
+    t === "stream" ||
+    t === "none"
+  );
+}
+
 function createRedisAdapter(config: RedisConfig): RedisExplorer {
   function listDatabases(): Array<{ index: number; keyCount: number }> {
     const result = execRedisCli(config, ["INFO", "keyspace"]);
@@ -97,12 +111,49 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return dbs;
   }
 
+  function listKeys(opts: {
+    db: number;
+    pattern?: string;
+    cursor?: string;
+    count?: number;
+  }): { keys: Array<{ name: string; type: RedisType }>; nextCursor: string } {
+    const pattern = opts.pattern || "*";
+    const cursor = opts.cursor || "0";
+    const count = String(opts.count ?? 200);
+    const result = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "EVAL",
+      SCAN_WITH_TYPES_LUA,
+      "0",
+      cursor,
+      pattern,
+      count,
+    ]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "SCAN failed");
+    }
+    const stdout = result.stdout.trim();
+    if (!stdout) return { keys: [], nextCursor: "0" };
+    let parsed: { cursor: string; keys: string[]; types: string[] };
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      throw new Error(`failed to parse SCAN result: ${stdout.slice(0, 200)}`);
+    }
+    const keys: Array<{ name: string; type: RedisType }> = [];
+    for (let i = 0; i < parsed.keys.length; i++) {
+      const rawType = parsed.types[i] || "none";
+      const type: RedisType = isValidRedisType(rawType) ? rawType : "none";
+      keys.push({ name: parsed.keys[i], type });
+    }
+    return { keys, nextCursor: parsed.cursor };
+  }
+
   return {
     kind: "redis",
     listDatabases,
-    listKeys() {
-      throw new Error("not implemented yet");
-    },
+    listKeys,
     getValue() {
       throw new Error("not implemented yet");
     },

@@ -4472,6 +4472,9 @@ function parseInfoKeyspace(stdout) {
   }
   return counts;
 }
+function isValidRedisType(t) {
+  return t === "string" || t === "list" || t === "set" || t === "zset" || t === "hash" || t === "stream" || t === "none";
+}
 function createRedisAdapter(config) {
   function listDatabases() {
     const result = execRedisCli(config, ["INFO", "keyspace"]);
@@ -4485,12 +4488,44 @@ function createRedisAdapter(config) {
     }
     return dbs;
   }
+  function listKeys(opts) {
+    const pattern = opts.pattern || "*";
+    const cursor = opts.cursor || "0";
+    const count = String(opts.count ?? 200);
+    const result = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "EVAL",
+      SCAN_WITH_TYPES_LUA,
+      "0",
+      cursor,
+      pattern,
+      count
+    ]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "SCAN failed");
+    }
+    const stdout = result.stdout.trim();
+    if (!stdout)
+      return { keys: [], nextCursor: "0" };
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      throw new Error(`failed to parse SCAN result: ${stdout.slice(0, 200)}`);
+    }
+    const keys = [];
+    for (let i = 0;i < parsed.keys.length; i++) {
+      const rawType = parsed.types[i] || "none";
+      const type = isValidRedisType(rawType) ? rawType : "none";
+      keys.push({ name: parsed.keys[i], type });
+    }
+    return { keys, nextCursor: parsed.cursor };
+  }
   return {
     kind: "redis",
     listDatabases,
-    listKeys() {
-      throw new Error("not implemented yet");
-    },
+    listKeys,
     getValue() {
       throw new Error("not implemented yet");
     },
@@ -4505,7 +4540,7 @@ function openRedisExplorer(serviceName, env, cwd) {
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }
-var DEFAULT_DATABASES = 16;
+var DEFAULT_DATABASES = 16, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`;
 var init_redis = () => {};
 
 // web-src/server/database/handle-redis.ts
@@ -4552,6 +4587,40 @@ function handleDatabases(cwd, url) {
     return textError(`failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+function handleKeys(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const pattern = url.searchParams.get("pattern") || "*";
+  const cursor = url.searchParams.get("cursor") || "0";
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
+  try {
+    const { keys, nextCursor } = r.explorer.listKeys({
+      db: dbIndex,
+      pattern,
+      cursor,
+      count
+    });
+    const body = {
+      dbId: r.dbId,
+      dbIndex,
+      keys,
+      nextCursor
+    };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
 async function handleRedisRoute(req, url, cwd) {
   const path = url.pathname;
   const start = Date.now();
@@ -4567,6 +4636,8 @@ async function handleRedisRoute(req, url, cwd) {
   };
   if (path === "/_db/redis/databases")
     return wrap(handleDatabases(cwd, url));
+  if (path === "/_db/redis/keys")
+    return wrap(handleKeys(cwd, url));
   return null;
 }
 var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
