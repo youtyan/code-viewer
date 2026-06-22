@@ -14,7 +14,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot be rendered.
 - Switch the viewer UI between English and Japanese from Viewer Settings.
-- Browse SQLite, PostgreSQL, MySQL, and Redis with a built-in database viewer.
+- Browse SQLite, PostgreSQL, MySQL, Redis, and Elasticsearch with a built-in database viewer.
 - Read the built-in Help page for repository browsing, diffs, annotations, agent skills, and shortcuts.
 - Open repository folders in the OS file manager from localhost-only actions.
 - Upload files into worktree folders when upload is explicitly enabled.
@@ -118,11 +118,14 @@ code-viewer auto-discovers databases in your repository and provides a
 browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
-automatically by scanning the repository tree. **PostgreSQL**, **MySQL**, and
-**Redis** services are detected from `docker-compose.yml` and connected
-through Docker. Redis support is read-only: browse DB 0–15, SCAN keys, and
-view values per type (string/hash/list as dedicated panes, set/zset/stream
-as raw JSON).
+automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
+**Redis**, and **Elasticsearch** services are detected from
+`docker-compose.yml` and connected through Docker. Redis support is
+read-only: browse DB 0–15, SCAN keys, and view values per type
+(string/hash/list as dedicated panes, set/zset/stream as raw JSON).
+Elasticsearch support is read-only too: list indices, view mappings,
+paginate docs with `search_after`, run lucene `q=` searches, and take
+snapshots / diffs over `_search` iteration.
 
 ### Browser UI
 
