@@ -1,10 +1,11 @@
+import { relative } from "node:path";
 import type {
   RedisDatabasesResponse,
   RedisKeysResponse,
   RedisValueResponse,
 } from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
-import { discoverDockerDatabases } from "./discovery";
+import { discoverDockerDatabases, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
 
 const redisAdapterCache = new Map<string, RedisExplorer>();
@@ -12,6 +13,7 @@ const redisAdapterCache = new Map<string, RedisExplorer>();
 type DockerRedisInfo = {
   serviceName: string;
   env: Record<string, string>;
+  composeDir: string;
 };
 
 let cachedRedisDbs: DockerRedisInfo[] | null = null;
@@ -22,7 +24,11 @@ function getRedisServices(cwd: string): DockerRedisInfo[] {
   const all = discoverDockerDatabases(cwd);
   cachedRedisDbs = all
     .filter((d) => d.kind === "redis")
-    .map((d) => ({ serviceName: d.serviceName, env: d.env }));
+    .map((d) => ({
+      serviceName: d.serviceName,
+      env: d.env,
+      composeDir: d.composeDir,
+    }));
   cachedRedisCwd = cwd;
   return cachedRedisDbs;
 }
@@ -35,15 +41,26 @@ function resolveRedis(
   if (!dbParam.startsWith("docker:")) {
     return textError("redis requires docker: prefix", 400);
   }
-  const serviceName = dbParam.slice(7).split(":")[0];
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed) return textError("invalid docker db id", 400);
   const services = getRedisServices(cwd);
-  const info = services.find((s) => s.serviceName === serviceName);
+  const info = services.find(
+    (s) =>
+      s.serviceName === parsed.serviceName &&
+      relative(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir,
+  );
   if (!info) return textError("redis service not found", 404);
 
   const cached = redisAdapterCache.get(dbParam);
   if (cached) return { dbId: dbParam, explorer: cached };
 
-  const explorer = openRedisExplorer(info.serviceName, info.env, cwd);
+  // openRedisExplorer の cwd 引数は `docker compose ps` の実行 dir。
+  // recursive discovery 後は compose のあるディレクトリを渡す必要がある。
+  const explorer = openRedisExplorer(
+    info.serviceName,
+    info.env,
+    info.composeDir,
+  );
   redisAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }

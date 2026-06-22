@@ -200,98 +200,205 @@ function parseComposePorts(serviceBlock: string): string | null {
   return null;
 }
 
+// DockerDbInfo:
+//   composeDir: 拾った compose ファイルが置いてあるディレクトリの絶対 path。
+//     adapter 経路で `docker compose ps` を実行する cwd として使う。
+//     `/_db/files` レスポンスには漏らさない (handle.ts の toFileInfo で
+//     射影しない、Round 1 C1 思想)。
 export type DockerDbInfo = DbFileInfo & {
   serviceName: string;
   env: Record<string, string>;
   database?: string;
+  composeDir: string;
 };
 
-export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
-  const results: DockerDbInfo[] = [];
+// 1 ファイルから service 群を parse して結果配列に積む。
+// dbId は cwd 直下なら従来の `docker:<svc>`、サブディレクトリなら
+// `docker:<svc>@<encodedRelDir>` で衝突回避する。
+function parseComposeFile(
+  filepath: string,
+  composeDir: string,
+  cwd: string,
+  results: DockerDbInfo[],
+): void {
+  let content: string;
+  try {
+    content = readFileSync(filepath, "utf-8");
+  } catch {
+    return;
+  }
+  const servicesMatch = content.match(/^services:\s*\n/m);
+  if (!servicesMatch || servicesMatch.index === undefined) return;
 
-  for (const filename of COMPOSE_FILENAMES) {
-    const filepath = join(cwd, filename);
-    if (!existsSync(filepath)) continue;
+  const servicesStart = servicesMatch.index + servicesMatch[0].length;
+  const afterServices = content.slice(servicesStart);
+  const topLevelEnd = afterServices.search(/^\S/m);
+  const servicesBlock =
+    topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
 
-    let content: string;
-    try {
-      content = readFileSync(filepath, "utf-8");
-    } catch {
-      continue;
-    }
-
-    const servicesMatch = content.match(/^services:\s*\n/m);
-    if (!servicesMatch || servicesMatch.index === undefined) continue;
-
-    const servicesStart = servicesMatch.index + servicesMatch[0].length;
-    const afterServices = content.slice(servicesStart);
-
-    const topLevelEnd = afterServices.search(/^\S/m);
-    const servicesBlock =
-      topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
-
-    const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
-    const servicePositions: { name: string; start: number }[] = [];
-    for (
-      let match = serviceRegex.exec(servicesBlock);
-      match !== null;
-      match = serviceRegex.exec(servicesBlock)
-    ) {
-      servicePositions.push({
-        name: match[1],
-        start: match.index,
-      });
-    }
-
-    for (let i = 0; i < servicePositions.length; i++) {
-      const svc = servicePositions[i];
-      const nextStart =
-        i + 1 < servicePositions.length
-          ? servicePositions[i + 1].start
-          : servicesBlock.length;
-      const svcBlock = servicesBlock.slice(svc.start, nextStart);
-
-      const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
-      if (!imageMatch) continue;
-
-      const image = imageMatch[1];
-      const kind = detectDbKind(image);
-      if (!kind) continue;
-
-      const env = parseComposeEnv(svcBlock);
-      const port = parseComposePorts(svcBlock);
-      const hostPort = port || defaultPortFor(kind);
-
-      let label: string;
-      if (kind === "redis" || kind === "elasticsearch") {
-        label = `${svc.name} (${image}, localhost:${hostPort})`;
-      } else {
-        const dbName =
-          env.POSTGRES_DB ||
-          env.MYSQL_DATABASE ||
-          env.MARIADB_DATABASE ||
-          svc.name;
-        const user =
-          env.POSTGRES_USER ||
-          env.MYSQL_USER ||
-          env.MARIADB_USER ||
-          (kind === "postgresql" ? "postgres" : "root");
-        label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
-      }
-
-      results.push({
-        id: `docker:${svc.name}`,
-        path: filename,
-        name: label,
-        sizeBytes: 0,
-        kind,
-        serviceName: svc.name,
-        env,
-      });
-    }
-
-    break;
+  const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
+  const servicePositions: { name: string; start: number }[] = [];
+  for (
+    let match = serviceRegex.exec(servicesBlock);
+    match !== null;
+    match = serviceRegex.exec(servicesBlock)
+  ) {
+    servicePositions.push({ name: match[1], start: match.index });
   }
 
+  const relDir = relative(cwd, composeDir);
+  // cwd 直下と一致する場合は relDir === "" になる。
+  const isRoot = relDir === "" || relDir === ".";
+  // path / id / label に乗せる relDir 表現。Windows パス区切りは `/` に揃える。
+  const relDirSlash = relDir.replace(/\\/g, "/");
+  const filename = basename(filepath);
+
+  for (let i = 0; i < servicePositions.length; i++) {
+    const svc = servicePositions[i];
+    const nextStart =
+      i + 1 < servicePositions.length
+        ? servicePositions[i + 1].start
+        : servicesBlock.length;
+    const svcBlock = servicesBlock.slice(svc.start, nextStart);
+
+    const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
+    if (!imageMatch) continue;
+
+    const image = imageMatch[1];
+    const kind = detectDbKind(image);
+    if (!kind) continue;
+
+    const env = parseComposeEnv(svcBlock);
+    const port = parseComposePorts(svcBlock);
+    const hostPort = port || defaultPortFor(kind);
+
+    const id = isRoot
+      ? `docker:${svc.name}`
+      : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
+    const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+
+    let label: string;
+    if (kind === "redis" || kind === "elasticsearch") {
+      label = `${svc.name} (${image}, localhost:${hostPort}${labelPath})`;
+    } else {
+      const dbName =
+        env.POSTGRES_DB ||
+        env.MYSQL_DATABASE ||
+        env.MARIADB_DATABASE ||
+        svc.name;
+      const user =
+        env.POSTGRES_USER ||
+        env.MYSQL_USER ||
+        env.MARIADB_USER ||
+        (kind === "postgresql" ? "postgres" : "root");
+      label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
+    }
+
+    results.push({
+      id,
+      path: isRoot ? filename : `${relDirSlash}/${filename}`,
+      name: label,
+      sizeBytes: 0,
+      kind,
+      serviceName: svc.name,
+      env,
+      composeDir,
+    });
+  }
+}
+
+// SQLite と同じ規約で MAX_SCAN_DEPTH まで再帰 walk し、各ディレクトリで
+// compose ファイル 1 つ (COMPOSE_FILENAMES の優先順) を parse する。
+// 全 service が `MAX_DOCKER_SERVICES` を超えたら truncate して warn する。
+const MAX_DOCKER_SERVICES = 30;
+
+export function discoverDockerDatabases(
+  cwd: string,
+  omitDirNames: string[] = [],
+): DockerDbInfo[] {
+  const results: DockerDbInfo[] = [];
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+
+  function scan(dir: string, depth: number): void {
+    if (results.length >= MAX_DOCKER_SERVICES) return;
+    if (depth > MAX_SCAN_DEPTH) return;
+    // 1. このディレクトリ直下の compose を 1 つ parse する。
+    for (const filename of COMPOSE_FILENAMES) {
+      const filepath = join(dir, filename);
+      if (existsSync(filepath)) {
+        parseComposeFile(filepath, dir, cwd, results);
+        break;
+      }
+    }
+    if (results.length >= MAX_DOCKER_SERVICES) return;
+    // 2. サブディレクトリへ recurse (symlink 除外 / omitDirNames 除外)。
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= MAX_DOCKER_SERVICES) return;
+      if (omitSet.has(entry.toLowerCase())) continue;
+      const full = join(dir, entry);
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink()) continue;
+      if (stat.isDirectory()) scan(full, depth + 1);
+    }
+  }
+
+  scan(cwd, 0);
+  if (results.length >= MAX_DOCKER_SERVICES) {
+    console.warn(
+      `[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`,
+    );
+  }
   return results;
+}
+
+// `docker:<svc>` または `docker:<svc>@<encodedRelDir>` (+ optional `:<db>`) を
+// parse して `{serviceName, relDir, database}` を返す。
+// `relDir` は encodeURIComponent された slash 区切り。cwd 直下は空文字。
+// 解析失敗時は null。
+export function parseDockerDbId(
+  dbId: string,
+): { serviceName: string; relDir: string; database?: string } | null {
+  if (!dbId.startsWith("docker:")) return null;
+  let rest = dbId.slice(7);
+  if (!rest) return null;
+  // `:<db>` は最後にあるので、`@` の後に出る `:` のみ DB セパレータ。
+  // つまり @ より前の最初の `:` は DB セパレータ、@ より後の最初の `:` も DB セパレータ。
+  let database: string | undefined;
+  // 末尾の `:db` を切る前に `@` 位置を探す。`@<encoded>` の encoded には
+  // `:` は出ない (URL encode 済み = `%3A`)。
+  const atIdx = rest.indexOf("@");
+  if (atIdx >= 0) {
+    const afterAt = rest.slice(atIdx + 1);
+    const colonIdx = afterAt.indexOf(":");
+    if (colonIdx >= 0) {
+      database = afterAt.slice(colonIdx + 1);
+      rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx)}`;
+    }
+    const [serviceName, encodedRel] = rest.split("@");
+    return {
+      serviceName,
+      relDir: decodeURIComponent(encodedRel || ""),
+      database,
+    };
+  }
+  // `docker:<svc>:<db>` 形式 (cwd 直下、従来形式)。
+  const colonIdx = rest.indexOf(":");
+  if (colonIdx >= 0) {
+    database = rest.slice(colonIdx + 1);
+    rest = rest.slice(0, colonIdx);
+  }
+  return { serviceName: rest, relDir: "", database };
 }

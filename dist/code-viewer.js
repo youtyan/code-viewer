@@ -3939,70 +3939,144 @@ function parseComposePorts(serviceBlock) {
   }
   return null;
 }
-function discoverDockerDatabases(cwd) {
+function parseComposeFile(filepath, composeDir, cwd, results) {
+  let content;
+  try {
+    content = readFileSync5(filepath, "utf-8");
+  } catch {
+    return;
+  }
+  const servicesMatch = content.match(/^services:\s*\n/m);
+  if (!servicesMatch || servicesMatch.index === undefined)
+    return;
+  const servicesStart = servicesMatch.index + servicesMatch[0].length;
+  const afterServices = content.slice(servicesStart);
+  const topLevelEnd = afterServices.search(/^\S/m);
+  const servicesBlock = topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
+  const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
+  const servicePositions = [];
+  for (let match = serviceRegex.exec(servicesBlock);match !== null; match = serviceRegex.exec(servicesBlock)) {
+    servicePositions.push({ name: match[1], start: match.index });
+  }
+  const relDir = relative2(cwd, composeDir);
+  const isRoot = relDir === "" || relDir === ".";
+  const relDirSlash = relDir.replace(/\\/g, "/");
+  const filename = basename2(filepath);
+  for (let i = 0;i < servicePositions.length; i++) {
+    const svc = servicePositions[i];
+    const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
+    const svcBlock = servicesBlock.slice(svc.start, nextStart);
+    const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
+    if (!imageMatch)
+      continue;
+    const image = imageMatch[1];
+    const kind = detectDbKind(image);
+    if (!kind)
+      continue;
+    const env = parseComposeEnv(svcBlock);
+    const port = parseComposePorts(svcBlock);
+    const hostPort = port || defaultPortFor(kind);
+    const id = isRoot ? `docker:${svc.name}` : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
+    const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+    let label;
+    if (kind === "redis" || kind === "elasticsearch") {
+      label = `${svc.name} (${image}, localhost:${hostPort}${labelPath})`;
+    } else {
+      const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
+      const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
+      label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
+    }
+    results.push({
+      id,
+      path: isRoot ? filename : `${relDirSlash}/${filename}`,
+      name: label,
+      sizeBytes: 0,
+      kind,
+      serviceName: svc.name,
+      env,
+      composeDir
+    });
+  }
+}
+function discoverDockerDatabases(cwd, omitDirNames = []) {
   const results = [];
-  for (const filename of COMPOSE_FILENAMES) {
-    const filepath = join8(cwd, filename);
-    if (!existsSync6(filepath))
-      continue;
-    let content;
-    try {
-      content = readFileSync5(filepath, "utf-8");
-    } catch {
-      continue;
-    }
-    const servicesMatch = content.match(/^services:\s*\n/m);
-    if (!servicesMatch || servicesMatch.index === undefined)
-      continue;
-    const servicesStart = servicesMatch.index + servicesMatch[0].length;
-    const afterServices = content.slice(servicesStart);
-    const topLevelEnd = afterServices.search(/^\S/m);
-    const servicesBlock = topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
-    const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
-    const servicePositions = [];
-    for (let match = serviceRegex.exec(servicesBlock);match !== null; match = serviceRegex.exec(servicesBlock)) {
-      servicePositions.push({
-        name: match[1],
-        start: match.index
-      });
-    }
-    for (let i = 0;i < servicePositions.length; i++) {
-      const svc = servicePositions[i];
-      const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
-      const svcBlock = servicesBlock.slice(svc.start, nextStart);
-      const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
-      if (!imageMatch)
-        continue;
-      const image = imageMatch[1];
-      const kind = detectDbKind(image);
-      if (!kind)
-        continue;
-      const env = parseComposeEnv(svcBlock);
-      const port = parseComposePorts(svcBlock);
-      const hostPort = port || defaultPortFor(kind);
-      let label;
-      if (kind === "redis" || kind === "elasticsearch") {
-        label = `${svc.name} (${image}, localhost:${hostPort})`;
-      } else {
-        const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
-        const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
-        label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+  function scan(dir, depth) {
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
+    if (depth > MAX_SCAN_DEPTH)
+      return;
+    for (const filename of COMPOSE_FILENAMES) {
+      const filepath = join8(dir, filename);
+      if (existsSync6(filepath)) {
+        parseComposeFile(filepath, dir, cwd, results);
+        break;
       }
-      results.push({
-        id: `docker:${svc.name}`,
-        path: filename,
-        name: label,
-        sizeBytes: 0,
-        kind,
-        serviceName: svc.name,
-        env
-      });
     }
-    break;
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
+    let entries;
+    try {
+      entries = readdirSync2(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= MAX_DOCKER_SERVICES)
+        return;
+      if (omitSet.has(entry.toLowerCase()))
+        continue;
+      const full = join8(dir, entry);
+      let stat;
+      try {
+        stat = lstatSync4(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink())
+        continue;
+      if (stat.isDirectory())
+        scan(full, depth + 1);
+    }
+  }
+  scan(cwd, 0);
+  if (results.length >= MAX_DOCKER_SERVICES) {
+    console.warn(`[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`);
   }
   return results;
 }
-var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES;
+function parseDockerDbId(dbId) {
+  if (!dbId.startsWith("docker:"))
+    return null;
+  let rest = dbId.slice(7);
+  if (!rest)
+    return null;
+  let database;
+  const atIdx = rest.indexOf("@");
+  if (atIdx >= 0) {
+    const afterAt = rest.slice(atIdx + 1);
+    const colonIdx2 = afterAt.indexOf(":");
+    if (colonIdx2 >= 0) {
+      database = afterAt.slice(colonIdx2 + 1);
+      rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx2)}`;
+    }
+    const [serviceName, encodedRel] = rest.split("@");
+    return {
+      serviceName,
+      relDir: decodeURIComponent(encodedRel || ""),
+      database
+    };
+  }
+  const colonIdx = rest.indexOf(":");
+  if (colonIdx >= 0) {
+    database = rest.slice(colonIdx + 1);
+    rest = rest.slice(0, colonIdx);
+  }
+  return { serviceName: rest, relDir: "", database };
+}
+var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES, MAX_DOCKER_SERVICES = 30;
 var init_discovery = __esm(() => {
   SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
   COMPOSE_FILENAMES = [
@@ -5525,11 +5599,16 @@ var exports_handle_redis = {};
 __export(exports_handle_redis, {
   handleRedisRoute: () => handleRedisRoute
 });
+import { relative as relative3 } from "node:path";
 function getRedisServices(cwd) {
   if (cachedRedisCwd === cwd && cachedRedisDbs)
     return cachedRedisDbs;
   const all = discoverDockerDatabases(cwd);
-  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({ serviceName: d.serviceName, env: d.env }));
+  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({
+    serviceName: d.serviceName,
+    env: d.env,
+    composeDir: d.composeDir
+  }));
   cachedRedisCwd = cwd;
   return cachedRedisDbs;
 }
@@ -5539,15 +5618,17 @@ function resolveRedis(cwd, dbParam) {
   if (!dbParam.startsWith("docker:")) {
     return textError("redis requires docker: prefix", 400);
   }
-  const serviceName = dbParam.slice(7).split(":")[0];
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed)
+    return textError("invalid docker db id", 400);
   const services = getRedisServices(cwd);
-  const info = services.find((s) => s.serviceName === serviceName);
+  const info = services.find((s) => s.serviceName === parsed.serviceName && relative3(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir);
   if (!info)
     return textError("redis service not found", 404);
   const cached = redisAdapterCache.get(dbParam);
   if (cached)
     return { dbId: dbParam, explorer: cached };
-  const explorer = openRedisExplorer(info.serviceName, info.env, cwd);
+  const explorer = openRedisExplorer(info.serviceName, info.env, info.composeDir);
   redisAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }
@@ -5658,11 +5739,16 @@ var exports_handle_elasticsearch = {};
 __export(exports_handle_elasticsearch, {
   handleElasticsearchRoute: () => handleElasticsearchRoute
 });
+import { relative as relative4 } from "node:path";
 function getEsServices(cwd) {
   if (cachedEsCwd === cwd && cachedEsServices)
     return cachedEsServices;
   const all = discoverDockerDatabases(cwd);
-  cachedEsServices = all.filter((d) => d.kind === "elasticsearch").map((d) => ({ serviceName: d.serviceName, env: d.env }));
+  cachedEsServices = all.filter((d) => d.kind === "elasticsearch").map((d) => ({
+    serviceName: d.serviceName,
+    env: d.env,
+    composeDir: d.composeDir
+  }));
   cachedEsCwd = cwd;
   return cachedEsServices;
 }
@@ -5672,15 +5758,17 @@ function resolveEs(cwd, dbParam) {
   if (!dbParam.startsWith("docker:")) {
     return textError("elasticsearch requires docker: prefix", 400);
   }
-  const serviceName = dbParam.slice(7).split(":")[0];
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed)
+    return textError("invalid docker db id", 400);
   const services = getEsServices(cwd);
-  const info = services.find((s) => s.serviceName === serviceName);
+  const info = services.find((s) => s.serviceName === parsed.serviceName && relative4(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir);
   if (!info)
     return textError("elasticsearch service not found", 404);
   const cached = esAdapterCache.get(dbParam);
   if (cached)
     return { dbId: dbParam, explorer: cached };
-  const explorer = openElasticsearchAdapter(info.serviceName, info.env, cwd);
+  const explorer = openElasticsearchAdapter(info.serviceName, info.env, info.composeDir);
   esAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }
@@ -5893,19 +5981,20 @@ __export(exports_handle, {
   handleDatabaseRoute: () => handleDatabaseRoute
 });
 import { randomBytes as randomBytes2 } from "node:crypto";
+import { relative as relative5 } from "node:path";
 function ensureInit() {
   if (initialized)
     return;
   setAdapterFactory(sqliteAdapterFactory);
   initialized = true;
 }
-async function getAdapter(r, cwd) {
+async function getAdapter(r, _cwd) {
   if (r.docker) {
     const key = r.dbId;
     const cached = dockerAdapterCache.get(key);
     if (cached)
       return cached;
-    const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, cwd, r.docker.database);
+    const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, r.docker.composeDir, r.docker.database);
     dockerAdapterCache.set(key, adapter);
     return adapter;
   }
@@ -5943,12 +6032,11 @@ function resolveDb(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
-    const rest = dbParam.slice(7);
-    const colonIdx = rest.indexOf(":");
-    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
-    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
+    const parsed = parseDockerDbId(dbParam);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
     const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    const info = dockerDbs.find((d) => d.serviceName === parsed.serviceName && relative5(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir);
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
@@ -5957,7 +6045,7 @@ function resolveDb(cwd, dbParam) {
     if (info.kind === "elasticsearch") {
       return textError("elasticsearch services must use the /_db/elasticsearch/* routes", 400);
     }
-    const resolved2 = dbName ? { ...info, database: dbName } : info;
+    const resolved2 = parsed.database ? { ...info, database: parsed.database } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved2 };
   }
   const resolved = validateDbPath(cwd, dbParam);
@@ -5976,21 +6064,21 @@ function toFileInfo(entry) {
 }
 function handleFiles(cwd, omitDirNames) {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
   const dockerEntries = [];
   for (const svc of dockerServices) {
     if (svc.kind === "redis" || svc.kind === "elasticsearch") {
       dockerEntries.push(svc);
       continue;
     }
-    const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, cwd);
+    const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, svc.composeDir);
     if (dbs.length <= 1) {
       dockerEntries.push(svc);
     } else {
       for (const db of dbs) {
         dockerEntries.push({
           ...svc,
-          id: `docker:${svc.serviceName}:${db}`,
+          id: `${svc.id}:${db}`,
           name: svc.name.replace(/\)$/, ` / ${db})`),
           database: db
         });
@@ -6574,21 +6662,23 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   let source;
   let containers = body.tables;
   if (body.db.startsWith("docker:")) {
-    const serviceName = body.db.slice(7).split(":")[0];
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
     const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    const info = dockerDbs.find((d) => d.serviceName === parsed.serviceName && relative5(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir);
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
       const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
-      source = openRedisExplorer2(info.serviceName, info.env, cwd);
+      source = openRedisExplorer2(info.serviceName, info.env, info.composeDir);
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
       containers = containers.map(canonicalizeRedisSnapshotContainer2);
     } else if (info.kind === "elasticsearch") {
       const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
-      source = openElasticsearchAdapter2(info.serviceName, info.env, cwd);
+      source = openElasticsearchAdapter2(info.serviceName, info.env, info.composeDir);
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
@@ -6855,7 +6945,7 @@ import {
   writeFileSync as writeFileSync4
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname2, extname, join as join11, relative as relative3 } from "node:path";
+import { basename as basename3, dirname as dirname2, extname, join as join11, relative as relative6 } from "node:path";
 function parseCli() {
   const rest = [];
   for (let i = 2;i < process.argv.length; i++) {
@@ -7306,7 +7396,7 @@ function safeWorktreePath(path) {
   } catch {
     return null;
   }
-  const rel = relative3(realCwd, realFull);
+  const rel = relative6(realCwd, realFull);
   if (rel === "" || rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\"))
     return null;
   if (isGitInternalPath(rel))
@@ -8093,7 +8183,7 @@ async function handleUploadFiles(req) {
     if (total > MAX_UPLOAD_TOTAL_BYTES)
       return text("upload too large", 413);
     const target = join11(realDir, safeName);
-    if (relative3(realDir, dirname2(target)) !== "")
+    if (relative6(realDir, dirname2(target)) !== "")
       return text("invalid filename", 400);
     if (existsSync8(target))
       return text("file exists", 409);
@@ -8259,7 +8349,7 @@ function restoreTrashPath(originalPath, trashPath) {
       return { ok: false, error: "trash item not found" };
     try {
       const trashRoot = join11(homedir3(), ".Trash");
-      const trashRelative = relative3(trashRoot, trashPath);
+      const trashRelative = relative6(trashRoot, trashPath);
       if (trashRelative === "" || trashRelative.startsWith("..") || trashRelative.startsWith("/") || trashRelative.startsWith("\\"))
         return { ok: false, error: "invalid trash handle" };
       mkdirSync6(dirname2(original), { recursive: true });
