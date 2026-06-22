@@ -8777,17 +8777,43 @@ ${frontmatter.yaml}
     const dbList = document.createElement("div");
     dbList.className = "redis-db-list";
     dbListPane.appendChild(dbList);
+    const keyListPane = document.createElement("div");
+    keyListPane.className = "redis-key-list-pane";
+    const keyListHeader = document.createElement("div");
+    keyListHeader.className = "redis-pane-header";
+    keyListHeader.textContent = "Keys";
+    keyListPane.appendChild(keyListHeader);
+    const keyList = document.createElement("div");
+    keyList.className = "redis-key-list";
+    keyListPane.appendChild(keyList);
+    const keyMoreBtn = document.createElement("button");
+    keyMoreBtn.type = "button";
+    keyMoreBtn.className = "redis-key-more-btn";
+    keyMoreBtn.textContent = "Load more";
+    keyMoreBtn.hidden = true;
+    keyListPane.appendChild(keyMoreBtn);
     const mainPane = document.createElement("div");
     mainPane.className = "redis-main-pane";
-    mainPane.textContent = "Select a database to view keys.";
-    container.append(dbListPane, mainPane);
+    mainPane.textContent = "Select a key to view its value.";
+    container.append(dbListPane, keyListPane, mainPane);
     let currentDbId = null;
-    function setStatus(message, isError = false) {
+    let currentDbIndex = null;
+    let currentCursor = "0";
+    let loadingKeys = false;
+    function setDbStatus(message, isError = false) {
       dbList.innerHTML = "";
       const note = document.createElement("div");
       note.className = isError ? "redis-error" : "redis-note";
       note.textContent = message;
       dbList.appendChild(note);
+    }
+    function setKeyStatus(message, isError = false) {
+      keyList.innerHTML = "";
+      const note = document.createElement("div");
+      note.className = isError ? "redis-error" : "redis-note";
+      note.textContent = message;
+      keyList.appendChild(note);
+      keyMoreBtn.hidden = true;
     }
     function renderDatabases(databases) {
       dbList.innerHTML = "";
@@ -8802,17 +8828,95 @@ ${frontmatter.yaml}
         count.className = "redis-db-count";
         count.textContent = `${db.keyCount.toLocaleString()} keys`;
         item.append(name, count);
+        item.addEventListener("click", () => selectDatabase(db.index));
         dbList.appendChild(item);
       }
     }
+    function highlightActiveDb(index) {
+      for (const item of dbList.querySelectorAll(".redis-db-item")) {
+        item.classList.toggle("active", item.dataset.dbIndex === String(index));
+      }
+    }
+    function appendKeys(keys) {
+      for (const k of keys) {
+        const row = document.createElement("div");
+        row.className = "redis-key-item";
+        row.dataset.keyName = k.name;
+        const typeBadge = document.createElement("span");
+        typeBadge.className = `redis-type-badge redis-type-${k.type}`;
+        typeBadge.textContent = k.type;
+        const nameEl = document.createElement("span");
+        nameEl.className = "redis-key-name";
+        nameEl.textContent = k.name;
+        nameEl.title = k.name;
+        row.append(typeBadge, nameEl);
+        keyList.appendChild(row);
+      }
+    }
+    async function selectDatabase(dbIndex) {
+      currentDbIndex = dbIndex;
+      currentCursor = "0";
+      highlightActiveDb(dbIndex);
+      keyList.innerHTML = "";
+      mainPane.textContent = "Select a key to view its value.";
+      await loadKeys(false);
+    }
+    async function loadKeys(append) {
+      if (currentDbId === null || currentDbIndex === null)
+        return;
+      if (loadingKeys)
+        return;
+      loadingKeys = true;
+      keyMoreBtn.disabled = true;
+      if (!append)
+        setKeyStatus("Loading keys...");
+      try {
+        const params = new URLSearchParams({
+          db: currentDbId,
+          dbIndex: String(currentDbIndex),
+          pattern: "*",
+          cursor: currentCursor,
+          count: "200"
+        });
+        const res = await fetch(`/_db/redis/keys?${params}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          setKeyStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (currentDbIndex !== data.dbIndex)
+          return;
+        if (!append)
+          keyList.innerHTML = "";
+        if (data.keys.length === 0 && !append) {
+          setKeyStatus("(no keys)");
+        } else {
+          appendKeys(data.keys);
+        }
+        currentCursor = data.nextCursor;
+        keyMoreBtn.hidden = currentCursor === "0";
+      } catch (err) {
+        setKeyStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        loadingKeys = false;
+        keyMoreBtn.disabled = false;
+      }
+    }
+    keyMoreBtn.addEventListener("click", () => loadKeys(true));
     async function load(dbId) {
       currentDbId = dbId;
-      setStatus("Loading databases...");
+      currentDbIndex = null;
+      currentCursor = "0";
+      keyList.innerHTML = "";
+      keyMoreBtn.hidden = true;
+      mainPane.textContent = "Select a key to view its value.";
+      setDbStatus("Loading databases...");
       try {
         const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`);
         if (!res.ok) {
           const text2 = await res.text();
-          setStatus(`Error: ${text2 || res.statusText}`, true);
+          setDbStatus(`Error: ${text2 || res.statusText}`, true);
           return;
         }
         const data = await res.json();
@@ -8820,12 +8924,16 @@ ${frontmatter.yaml}
           return;
         renderDatabases(data.databases);
       } catch (err) {
-        setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+        setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       }
     }
     function clear() {
       currentDbId = null;
+      currentDbIndex = null;
+      currentCursor = "0";
       dbList.innerHTML = "";
+      keyList.innerHTML = "";
+      keyMoreBtn.hidden = true;
       mainPane.textContent = "Select a database to view keys.";
     }
     return { el: container, load, clear };
