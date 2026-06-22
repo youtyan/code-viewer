@@ -178,6 +178,13 @@ export type RedisType =
   | "stream"
   | "none";
 
+// Redis 内の任意 byte 列を表現する。utf8 として round-trip 可能なら
+// 素のままの string、不可なら base64 化したラッパーを返す。
+// list/set/zset/hash/stream の要素・field/value 名に binary が混じる可能性がある。
+export type RedisItem = string | { binaryBase64: string };
+
+export type RedisHashField = { field: RedisItem; value: RedisItem };
+
 export type RedisValue =
   | {
       type: "string";
@@ -188,31 +195,32 @@ export type RedisValue =
     }
   | {
       type: "list";
-      items: string[];
+      items: RedisItem[];
       truncated: boolean;
       total: number;
     }
   | {
       type: "hash";
-      fields: Record<string, string>;
+      // field 名も binary 可能なので Record ではなく array of {field, value}。
+      fields: RedisHashField[];
       truncated: boolean;
       total: number;
     }
   | {
       type: "set";
-      members: string[];
+      members: RedisItem[];
       truncated: boolean;
       total: number;
     }
   | {
       type: "zset";
-      members: Array<{ member: string; score: number }>;
+      members: Array<{ member: RedisItem; score: number }>;
       truncated: boolean;
       total: number;
     }
   | {
       type: "stream";
-      entries: Array<{ id: string; fields: Record<string, string> }>;
+      entries: Array<{ id: string; fields: RedisHashField[] }>;
       truncated: boolean;
       total: number;
     }

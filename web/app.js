@@ -8765,6 +8765,21 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/redis-explorer.ts
+  function isBinaryItem(item) {
+    return typeof item === "object" && item !== null && "binaryBase64" in item;
+  }
+  function renderItemInto(el, item) {
+    el.textContent = "";
+    if (isBinaryItem(item)) {
+      const badge = document.createElement("span");
+      badge.className = "redis-binary-badge";
+      badge.textContent = "binary, base64";
+      el.appendChild(badge);
+      el.appendChild(document.createTextNode(item.binaryBase64));
+      return;
+    }
+    el.textContent = item;
+  }
   function createRedisExplorer() {
     const container = document.createElement("div");
     container.className = "redis-explorer";
@@ -8921,8 +8936,7 @@ ${frontmatter.yaml}
         thead.appendChild(headRow);
         table2.appendChild(thead);
         const tbody = document.createElement("tbody");
-        const entries = Object.entries(value.fields);
-        if (entries.length === 0) {
+        if (value.fields.length === 0) {
           const row = document.createElement("tr");
           const td = document.createElement("td");
           td.colSpan = 2;
@@ -8931,14 +8945,14 @@ ${frontmatter.yaml}
           row.appendChild(td);
           tbody.appendChild(row);
         }
-        for (const [field, val] of entries) {
+        for (const pair of value.fields) {
           const row = document.createElement("tr");
           const fieldTd = document.createElement("td");
           fieldTd.className = "redis-value-hash-field";
-          fieldTd.textContent = field;
+          renderItemInto(fieldTd, pair.field);
           const valTd = document.createElement("td");
           valTd.className = "redis-value-hash-val";
-          valTd.textContent = val;
+          renderItemInto(valTd, pair.value);
           row.append(fieldTd, valTd);
           tbody.appendChild(row);
         }
@@ -8958,7 +8972,7 @@ ${frontmatter.yaml}
         }
         for (const item of value.items) {
           const li = document.createElement("li");
-          li.textContent = item;
+          renderItemInto(li, item);
           ol.appendChild(li);
         }
         body.appendChild(ol);

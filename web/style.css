@@ -7161,6 +7161,19 @@ body.db-resizing {
   color: #8a5a22;
   border: 1px solid #f0d8a0;
 }
+.redis-binary-badge {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 6px;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-family: var(--mono, monospace);
+  text-transform: uppercase;
+  background: #f0e8f8;
+  color: #5a228a;
+  border: 1px solid #d0c0e0;
+  vertical-align: middle;
+}
 .redis-value-string,
 .redis-value-raw-json {
   font-family: var(--mono, monospace);

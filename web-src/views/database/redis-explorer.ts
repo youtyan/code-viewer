@@ -1,9 +1,29 @@
 import type {
   RedisDatabasesResponse,
+  RedisItem,
   RedisKeysResponse,
   RedisValue,
   RedisValueResponse,
 } from "../../core/database/types";
+
+function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
+  return typeof item === "object" && item !== null && "binaryBase64" in item;
+}
+
+// item を element に書き込む。binary なら base64 badge を頭に付ける。
+// innerHTML 経由を避けて textContent + 要素生成で組み立てる。
+function renderItemInto(el: HTMLElement, item: RedisItem): void {
+  el.textContent = "";
+  if (isBinaryItem(item)) {
+    const badge = document.createElement("span");
+    badge.className = "redis-binary-badge";
+    badge.textContent = "binary, base64";
+    el.appendChild(badge);
+    el.appendChild(document.createTextNode(item.binaryBase64));
+    return;
+  }
+  el.textContent = item;
+}
 
 export type RedisExplorerView = {
   el: HTMLElement;
@@ -205,8 +225,7 @@ export function createRedisExplorer(): RedisExplorerView {
       thead.appendChild(headRow);
       table.appendChild(thead);
       const tbody = document.createElement("tbody");
-      const entries = Object.entries(value.fields);
-      if (entries.length === 0) {
+      if (value.fields.length === 0) {
         const row = document.createElement("tr");
         const td = document.createElement("td");
         td.colSpan = 2;
@@ -215,14 +234,14 @@ export function createRedisExplorer(): RedisExplorerView {
         row.appendChild(td);
         tbody.appendChild(row);
       }
-      for (const [field, val] of entries) {
+      for (const pair of value.fields) {
         const row = document.createElement("tr");
         const fieldTd = document.createElement("td");
         fieldTd.className = "redis-value-hash-field";
-        fieldTd.textContent = field;
+        renderItemInto(fieldTd, pair.field);
         const valTd = document.createElement("td");
         valTd.className = "redis-value-hash-val";
-        valTd.textContent = val;
+        renderItemInto(valTd, pair.value);
         row.append(fieldTd, valTd);
         tbody.appendChild(row);
       }
@@ -247,7 +266,7 @@ export function createRedisExplorer(): RedisExplorerView {
       }
       for (const item of value.items) {
         const li = document.createElement("li");
-        li.textContent = item;
+        renderItemInto(li, item);
         ol.appendChild(li);
       }
       body.appendChild(ol);

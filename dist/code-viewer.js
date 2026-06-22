@@ -4565,6 +4565,12 @@ function isValidUtf8(buf) {
     return false;
   }
 }
+function decodeHexItem(hex) {
+  const buf = Buffer.from(hex, "hex");
+  if (isValidUtf8(buf))
+    return buf.toString("utf8");
+  return { binaryBase64: buf.toString("base64") };
+}
 function createRedisAdapter(config) {
   function listDatabases() {
     const result = execRedisCli(config, ["INFO", "keyspace"]);
@@ -4654,7 +4660,7 @@ function createRedisAdapter(config) {
       };
     }
     if (rawType === "list") {
-      const lua = `local total = redis.call('LLEN', KEYS[1]); local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1); return cjson.encode({total = total, items = items})`;
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('LLEN', KEYS[1]) local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1) local hex_items = {} for i, v in ipairs(items) do hex_items[i] = tohex(v) end return cjson.encode({total = total, items = hex_items})`;
       const r = execRedisCli(config, [
         ...dbArg,
         "EVAL",
@@ -4668,15 +4674,16 @@ function createRedisAdapter(config) {
       }
       const stdout = r.stdout.trim();
       const parsed = stdout ? safeJsonParse(stdout, "LRANGE") : { total: 0, items: [] };
+      const items = parsed.items.map(decodeHexItem);
       return {
         type: "list",
-        items: parsed.items,
+        items,
         total: parsed.total,
-        truncated: parsed.items.length < parsed.total
+        truncated: items.length < parsed.total
       };
     }
     if (rawType === "hash") {
-      const lua = `local total = redis.call('HLEN', KEYS[1]); local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])); local fields = result[2]; local obj = {}; local count = 0; for i = 1, #fields, 2 do if count >= tonumber(ARGV[1]) then break end; obj[fields[i]] = fields[i+1]; count = count + 1 end; return cjson.encode({total = total, fields = obj, count = count, cursor = result[1]})`;
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('HLEN', KEYS[1]) local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local raw = result[2] local pairs_arr = {} local limit = tonumber(ARGV[1]) local count = 0 for i = 1, #raw, 2 do if count >= limit then break end table.insert(pairs_arr, {field = tohex(raw[i]), value = tohex(raw[i+1])}) count = count + 1 end return cjson.encode({total = total, fields = pairs_arr, count = count, cursor = result[1]})`;
       const r = execRedisCli(config, [
         ...dbArg,
         "EVAL",
@@ -4689,17 +4696,21 @@ function createRedisAdapter(config) {
         throw new Error(r.stderr.trim() || "HSCAN failed");
       }
       const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "HSCAN") : { total: 0, fields: {}, count: 0, cursor: "0" };
+      const parsed = stdout ? safeJsonParse(stdout, "HSCAN") : { total: 0, fields: [], count: 0, cursor: "0" };
+      const fields = parsed.fields.map((p) => ({
+        field: decodeHexItem(p.field),
+        value: decodeHexItem(p.value)
+      }));
       const truncated = parsed.count < parsed.total || parsed.cursor !== "0";
       return {
         type: "hash",
-        fields: parsed.fields,
+        fields,
         total: parsed.total,
         truncated
       };
     }
     if (rawType === "set") {
-      const lua = `local total = redis.call('SCARD', KEYS[1]); local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])); local members = {}; local limit = tonumber(ARGV[1]); for i = 1, math.min(#result[2], limit) do members[i] = result[2][i] end; return cjson.encode({total = total, members = members, cursor = result[1]})`;
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('SCARD', KEYS[1]) local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local members = {} local limit = tonumber(ARGV[1]) for i = 1, math.min(#result[2], limit) do members[i] = tohex(result[2][i]) end return cjson.encode({total = total, members = members, cursor = result[1]})`;
       const r = execRedisCli(config, [
         ...dbArg,
         "EVAL",
@@ -4713,16 +4724,17 @@ function createRedisAdapter(config) {
       }
       const stdout = r.stdout.trim();
       const parsed = stdout ? safeJsonParse(stdout, "SSCAN") : { total: 0, members: [], cursor: "0" };
-      const truncated = parsed.members.length < parsed.total || parsed.cursor !== "0";
+      const members = parsed.members.map(decodeHexItem);
+      const truncated = members.length < parsed.total || parsed.cursor !== "0";
       return {
         type: "set",
-        members: parsed.members,
+        members,
         total: parsed.total,
         truncated
       };
     }
     if (rawType === "zset") {
-      const lua = `local total = redis.call('ZCARD', KEYS[1]); local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES'); local arr = {}; for i = 1, #r, 2 do table.insert(arr, {member = r[i], score = tonumber(r[i+1])}) end; return cjson.encode({total = total, members = arr})`;
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('ZCARD', KEYS[1]) local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {member = tohex(r[i]), score = tonumber(r[i+1])}) end return cjson.encode({total = total, members = arr})`;
       const r = execRedisCli(config, [
         ...dbArg,
         "EVAL",
@@ -4736,15 +4748,19 @@ function createRedisAdapter(config) {
       }
       const stdout = r.stdout.trim();
       const parsed = stdout ? safeJsonParse(stdout, "ZRANGE") : { total: 0, members: [] };
+      const members = parsed.members.map((m) => ({
+        member: decodeHexItem(m.member),
+        score: m.score
+      }));
       return {
         type: "zset",
-        members: parsed.members,
+        members,
         total: parsed.total,
-        truncated: parsed.members.length < parsed.total
+        truncated: members.length < parsed.total
       };
     }
     if (rawType === "stream") {
-      const lua = `local total = redis.call('XLEN', KEYS[1]); local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])); local arr = {}; for _, entry in ipairs(r) do local fields = {}; for i = 1, #entry[2], 2 do fields[entry[2][i]] = entry[2][i+1] end; table.insert(arr, {id = entry[1], fields = fields}) end; return cjson.encode({total = total, entries = arr})`;
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('XLEN', KEYS[1]) local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])) local arr = {} for _, entry in ipairs(r) do local pairs_arr = {} for i = 1, #entry[2], 2 do table.insert(pairs_arr, {field = tohex(entry[2][i]), value = tohex(entry[2][i+1])}) end table.insert(arr, {id = entry[1], fields = pairs_arr}) end return cjson.encode({total = total, entries = arr})`;
       const r = execRedisCli(config, [
         ...dbArg,
         "EVAL",
@@ -4758,11 +4774,18 @@ function createRedisAdapter(config) {
       }
       const stdout = r.stdout.trim();
       const parsed = stdout ? safeJsonParse(stdout, "XRANGE") : { total: 0, entries: [] };
+      const entries = parsed.entries.map((e) => ({
+        id: e.id,
+        fields: e.fields.map((p) => ({
+          field: decodeHexItem(p.field),
+          value: decodeHexItem(p.value)
+        }))
+      }));
       return {
         type: "stream",
-        entries: parsed.entries,
+        entries,
         total: parsed.total,
-        truncated: parsed.entries.length < parsed.total
+        truncated: entries.length < parsed.total
       };
     }
     return { type: "none" };
@@ -4783,7 +4806,7 @@ function openRedisExplorer(serviceName, env, cwd) {
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }
-var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`;
+var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`;
 var init_redis = () => {};
 
 // web-src/server/database/handle-redis.ts
