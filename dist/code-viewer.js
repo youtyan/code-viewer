@@ -4578,6 +4578,57 @@ function createRedisAdapter(config) {
       const fields = stdout ? JSON.parse(stdout) : {};
       return { type: "hash", fields };
     }
+    if (rawType === "set") {
+      const lua = `return cjson.encode(redis.call('SMEMBERS', KEYS[1]))`;
+      const r = execRedisCli(config, [
+        "-n",
+        String(opts.db),
+        "EVAL",
+        lua,
+        "1",
+        opts.key
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "SMEMBERS failed");
+      }
+      const stdout = r.stdout.trim();
+      const members = stdout ? JSON.parse(stdout) : [];
+      return { type: "set", members };
+    }
+    if (rawType === "zset") {
+      const lua = `local r = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES'); local arr = {}; for i = 1, #r, 2 do table.insert(arr, {member = r[i], score = tonumber(r[i+1])}) end; return cjson.encode(arr)`;
+      const r = execRedisCli(config, [
+        "-n",
+        String(opts.db),
+        "EVAL",
+        lua,
+        "1",
+        opts.key
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "ZRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const members = stdout ? JSON.parse(stdout) : [];
+      return { type: "zset", members };
+    }
+    if (rawType === "stream") {
+      const lua = `local r = redis.call('XRANGE', KEYS[1], '-', '+'); local arr = {}; for _, entry in ipairs(r) do local fields = {}; for i = 1, #entry[2], 2 do fields[entry[2][i]] = entry[2][i+1] end; table.insert(arr, {id = entry[1], fields = fields}) end; return cjson.encode(arr)`;
+      const r = execRedisCli(config, [
+        "-n",
+        String(opts.db),
+        "EVAL",
+        lua,
+        "1",
+        opts.key
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "XRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const entries = stdout ? JSON.parse(stdout) : [];
+      return { type: "stream", entries };
+    }
     return { type: "none" };
   }
   return {
