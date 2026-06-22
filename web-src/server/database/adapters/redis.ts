@@ -29,20 +29,26 @@ function execRedisCli(
   args: string[],
   timeoutMs = 10000,
 ): { stdout: string; stderr: string; code: number } {
-  // Pass the password via REDISCLI_AUTH env var (docker exec -e) so it does
-  // not appear in the host process argv. Mirrors how docker.ts uses
-  // PGPASSWORD for psql and MYSQL_PWD for mysql.
+  // パスワードは docker の argv 露出を避けるため、`docker exec -e REDISCLI_AUTH`
+  // (キー名のみ。値なし) で渡し、値は spawnSync の env で REDISCLI_AUTH に詰める。
+  // docker は `-e KEY` (値なし) のとき、host 環境変数の同名値を container 内に継承する。
+  // host の `ps -ef` には KEY 名しか現れない。
+  const hasPassword = !!config.password;
   const dockerArgs = [
     "exec",
     "-i",
-    ...(config.password ? ["-e", `REDISCLI_AUTH=${config.password}`] : []),
+    ...(hasPassword ? ["-e", "REDISCLI_AUTH"] : []),
     config.containerName,
     "redis-cli",
     "-3",
     ...args,
   ];
+  const spawnEnv = hasPassword
+    ? { ...process.env, REDISCLI_AUTH: config.password }
+    : process.env;
   const proc = spawnSync("docker", dockerArgs, {
     encoding: "utf8",
+    env: spawnEnv,
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"],
   });

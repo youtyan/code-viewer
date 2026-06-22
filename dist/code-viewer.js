@@ -4424,17 +4424,20 @@ var init_snapshot_runner = __esm(() => {
 // web-src/server/database/adapters/redis.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
 function execRedisCli(config, args, timeoutMs = 1e4) {
+  const hasPassword = !!config.password;
   const dockerArgs = [
     "exec",
     "-i",
-    ...config.password ? ["-e", `REDISCLI_AUTH=${config.password}`] : [],
+    ...hasPassword ? ["-e", "REDISCLI_AUTH"] : [],
     config.containerName,
     "redis-cli",
     "-3",
     ...args
   ];
+  const spawnEnv = hasPassword ? { ...process.env, REDISCLI_AUTH: config.password } : process.env;
   const proc = spawnSync3("docker", dockerArgs, {
     encoding: "utf8",
+    env: spawnEnv,
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"]
   });
