@@ -56,9 +56,25 @@ type TabPaneInternal = {
   dispose: () => void;
 };
 
+// TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
+// localStorage から取るのではなく、外側 (tabs.json から復元した TabState)
+// から渡してもらう形にして、タブごとの独立性を担保する。
+type TabPaneInitial = {
+  dbId?: string | null;
+  table?: string | null;
+  view?: TabName;
+  sqlDraft?: string;
+  historyOpen?: boolean;
+  historyHeight?: string;
+  sidebarWidth?: string;
+  redis?: { dbIndex?: number; key?: string };
+  es?: { index?: string; query?: string };
+};
+
 function createTabPane(
   outerDeps: DatabaseViewDeps,
   cb: TabPaneCallbacks,
+  initial: TabPaneInitial = {},
 ): TabPaneInternal {
   // 内部で deps.setRoute を呼ぶたびに active かどうかで実体呼び出しを抑制、
   // 同時に onStateChange を発火させて外側 (タブバーの label 更新 / persist) を
@@ -101,8 +117,9 @@ function createTabPane(
 
   const sidebar = document.createElement("div");
   sidebar.className = "db-sidebar";
-  const savedWidth = localStorage.getItem("db:sidebar-width");
-  if (savedWidth) sidebar.style.width = savedWidth;
+  // sidebar 幅はタブごとに独立 (タブ A で狭めてもタブ B には反映しない)。
+  // initial 値があれば復元し、なければ CSS の default を使う。
+  if (initial.sidebarWidth) sidebar.style.width = initial.sidebarWidth;
   const toolsSection = document.createElement("div");
   toolsSection.className = "db-tools-section";
 
@@ -165,7 +182,8 @@ function createTabPane(
     const onUp = () => {
       resizing = false;
       resizeHandle.classList.remove("active");
-      localStorage.setItem("db:sidebar-width", sidebar.style.width);
+      // タブごとに persist (localStorage ではなく tabs.json 経由)。
+      cb.onStateChange();
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -181,7 +199,11 @@ function createTabPane(
 
   const queryEditor = createQueryEditor({
     executeQuery: (sql) => executeQuery(sql),
+    onSqlChange: () => cb.onStateChange(),
   });
+  // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
+  // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
+  if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft);
 
   const schemaView = createSchemaView();
   const erDiagram = createErDiagram();
@@ -200,10 +222,14 @@ function createTabPane(
     },
   });
 
-  const redisExplorer = createRedisExplorer();
+  const redisExplorer = createRedisExplorer({
+    onSelectionChange: () => cb.onStateChange(),
+  });
   redisExplorer.el.hidden = true;
 
-  const esExplorer = createElasticsearchExplorer();
+  const esExplorer = createElasticsearchExplorer({
+    onSelectionChange: () => cb.onStateChange(),
+  });
   esExplorer.el.hidden = true;
 
   const mainContent = document.createElement("div");
@@ -232,8 +258,8 @@ function createTabPane(
 
   const historyPane = document.createElement("div");
   historyPane.className = "db-history-pane";
-  const savedHistoryHeight = localStorage.getItem("db:history-height");
-  if (savedHistoryHeight) historyPane.style.height = savedHistoryHeight;
+  // history pane の高さもタブごとに独立。initial が無ければ CSS の default。
+  if (initial.historyHeight) historyPane.style.height = initial.historyHeight;
   historyPane.appendChild(historyView.el);
 
   let historyResizing = false;
@@ -252,7 +278,8 @@ function createTabPane(
     const onUp = () => {
       historyResizing = false;
       historyResizer.classList.remove("active");
-      localStorage.setItem("db:history-height", historyPane.style.height);
+      // タブごとに persist (localStorage ではなく tabs.json 経由)。
+      cb.onStateChange();
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
@@ -267,7 +294,9 @@ function createTabPane(
   historyToggle.title = "Toggle query history panel";
   sidebar.appendChild(historyToggle);
 
-  let historyOpen = localStorage.getItem("db:history-open") !== "false";
+  // history pane の開閉はタブごとに独立。initial が無ければ default は
+  // 「開いている」状態 (= 旧 localStorage default と同じ)。
+  let historyOpen = initial.historyOpen ?? true;
   function applyHistoryVisibility() {
     historyResizer.hidden = !historyOpen;
     historyPane.hidden = !historyOpen;
@@ -278,8 +307,9 @@ function createTabPane(
 
   historyToggle.addEventListener("click", () => {
     historyOpen = !historyOpen;
-    localStorage.setItem("db:history-open", String(historyOpen));
     applyHistoryVisibility();
+    // タブごとに persist (localStorage ではなく tabs.json 経由)。
+    cb.onStateChange();
   });
 
   const container = document.createElement("div");
@@ -404,7 +434,13 @@ function createTabPane(
     return (await res.json()) as DbQueryResponse;
   }
 
-  async function selectDb(dbId: string) {
+  async function selectDb(
+    dbId: string,
+    explorerInitial?: {
+      redis?: { dbIndex?: number; key?: string };
+      es?: { index?: string; query?: string };
+    },
+  ) {
     if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
       tableList.render([]);
       grid.clear();
@@ -422,12 +458,12 @@ function createTabPane(
         esExplorer.el.hidden = true;
         esExplorer.clear();
         redisExplorer.el.hidden = false;
-        await redisExplorer.load(dbId);
+        await redisExplorer.load(dbId, explorerInitial?.redis);
       } else {
         redisExplorer.el.hidden = true;
         redisExplorer.clear();
         esExplorer.el.hidden = false;
-        await esExplorer.load(dbId);
+        await esExplorer.load(dbId, explorerInitial?.es);
       }
       cb.onStateChange();
       return;
@@ -564,6 +600,12 @@ function createTabPane(
     selectDb(dbId);
   });
 
+  // 初回 enter のみ initial.redis / initial.es を消費する。手動で DB を
+  // 切り替えたあとは undefined にして二度と適用しない (= 古い state を
+  // 別 DB に流し込まないため)。
+  let pendingRedisInitial = initial.redis;
+  let pendingEsInitial = initial.es;
+
   async function enter(db?: string, table?: string, view?: TabName) {
     const files = await fetchDbFiles();
     lastFiles = files;
@@ -597,7 +639,14 @@ function createTabPane(
     dbSelect.value = target;
     currentDb = files.find((f) => f.id === target) || null;
 
-    await selectDb(target);
+    // 復元時は initial の redis/es selection を 1 度だけ流し込む。
+    const explorerInitial = {
+      redis: pendingRedisInitial,
+      es: pendingEsInitial,
+    };
+    pendingRedisInitial = undefined;
+    pendingEsInitial = undefined;
+    await selectDb(target, explorerInitial);
     if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
       cb.onStateChange();
       return;
@@ -632,12 +681,37 @@ function createTabPane(
     const activeTable = tableList.el.querySelector<HTMLElement>(
       ".db-table-item.active",
     );
-    return {
+    const state: TabState = {
       id: cb.tabId,
       dbId: currentDb?.id ?? null,
       table: activeTable?.dataset.table ?? null,
       view: currentTab,
     };
+
+    // 永続化対象の per-tab UI state を載せる。空値は載せない (= tabs.json の
+    // 体積を最小化、旧形式と区別しやすくする)。
+    const sqlDraft = queryEditor.getSql();
+    if (sqlDraft) state.sqlDraft = sqlDraft;
+    // historyOpen は default = true なので、true のときは載せない (= 既定値)。
+    // false のときだけ load 時に「閉じる」と判定できればよい。
+    if (!historyOpen) state.historyOpen = false;
+    if (historyPane.style.height)
+      state.historyHeight = historyPane.style.height;
+    if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
+
+    if (currentDb?.kind === "redis") {
+      const sel = redisExplorer.getSelection();
+      if (sel.dbIndex !== undefined || sel.key !== undefined) {
+        state.redis = sel;
+      }
+    } else if (currentDb?.kind === "elasticsearch") {
+      const sel = esExplorer.getSelection();
+      if (sel.index !== undefined || sel.query !== undefined) {
+        state.es = sel;
+      }
+    }
+
+    return state;
   }
 
   function getLabel(): string {
@@ -821,15 +895,31 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       }
     });
 
-    const pane = createTabPane(deps, {
-      tabId: id,
-      isActive: () => activeTabId === id,
-      onStateChange: () => {
-        refreshChipLabel(id);
-        if (activeTabId === id) syncActiveRoute();
-        scheduleSave();
+    const pane = createTabPane(
+      deps,
+      {
+        tabId: id,
+        isActive: () => activeTabId === id,
+        onStateChange: () => {
+          refreshChipLabel(id);
+          if (activeTabId === id) syncActiveRoute();
+          scheduleSave();
+        },
       },
-    });
+      {
+        // タブ独立の永続化対象 state を全部渡す。pane 内で localStorage を
+        // 読まず、tabs.json から復元した値をここから取る。
+        dbId: initial?.dbId ?? null,
+        table: initial?.table ?? null,
+        view: (initial?.view as TabName | undefined) ?? undefined,
+        sqlDraft: initial?.sqlDraft,
+        historyOpen: initial?.historyOpen,
+        historyHeight: initial?.historyHeight,
+        sidebarWidth: initial?.sidebarWidth,
+        redis: initial?.redis,
+        es: initial?.es,
+      },
+    );
     pane.el.hidden = true;
 
     tabsList.appendChild(chip);
@@ -837,7 +927,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabsById.set(id, { pane, chip, label: labelEl });
 
     setActive(id);
-    // initial state を反映 (DB を選んで読み込む)
+    // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
+    // 引数で渡し、それ以外の per-tab UI state は createTabPane の initial で
+    // すでに復元済み。
     pane
       .enter(
         initial?.dbId || undefined,

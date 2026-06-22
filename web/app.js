@@ -7810,7 +7810,7 @@ ${frontmatter.yaml}
       return `${(n2 / 1024).toFixed(1)} KB`;
     return `${n2} B`;
   }
-  function createElasticsearchExplorer() {
+  function createElasticsearchExplorer(callbacks = {}) {
     const container = document.createElement("div");
     container.className = "es-explorer";
     const indexListPane = document.createElement("div");
@@ -7878,6 +7878,12 @@ ${frontmatter.yaml}
     let lastSort;
     let loadingDocs = false;
     let detailTab = "mapping";
+    function notifySelectionChange() {
+      callbacks.onSelectionChange?.({
+        index: currentIndex ?? undefined,
+        query: currentQuery || undefined
+      });
+    }
     function setIndexStatus(message, isError = false) {
       indexList.innerHTML = "";
       const note = document.createElement("div");
@@ -8113,6 +8119,7 @@ ${frontmatter.yaml}
     }
     async function selectIndex(name) {
       currentIndex = name;
+      notifySelectionChange();
       highlightActiveIndex(name);
       docBody.innerHTML = "";
       docBody.textContent = "Select a doc to view its _source.";
@@ -8160,6 +8167,7 @@ ${frontmatter.yaml}
     }
     function runSearch() {
       currentQuery = searchInput.value.trim();
+      notifySelectionChange();
       if (!currentIndex)
         return;
       loadDocs(false);
@@ -8171,13 +8179,18 @@ ${frontmatter.yaml}
         runSearch();
       }
     });
+    searchInput.addEventListener("input", () => {
+      currentQuery = searchInput.value.trim();
+      notifySelectionChange();
+    });
     docMoreBtn.addEventListener("click", () => loadDocs(true));
-    async function load(dbId) {
+    async function load(dbId, initial) {
       currentDbId = dbId;
       currentIndex = null;
       currentQuery = "";
       lastSort = undefined;
-      searchInput.value = "";
+      searchInput.value = initial?.query ?? "";
+      currentQuery = searchInput.value.trim();
       docList.innerHTML = "";
       docMoreBtn.hidden = true;
       mappingBody.innerHTML = "";
@@ -8197,6 +8210,9 @@ ${frontmatter.yaml}
         if (currentDbId !== dbId)
           return;
         renderIndices(data.indices);
+        if (initial?.index && data.indices.some((ix) => ix.name === initial.index)) {
+          await selectIndex(initial.index);
+        }
       } catch (err) {
         setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       }
@@ -8217,7 +8233,13 @@ ${frontmatter.yaml}
       docBody.textContent = "Select a doc to view its _source.";
       setDetailTab("mapping");
     }
-    return { el: container, load, clear };
+    function getSelection() {
+      return {
+        index: currentIndex ?? undefined,
+        query: currentQuery || undefined
+      };
+    }
+    return { el: container, load, clear, getSelection };
   }
 
   // web-src/views/database/er-diagram.ts
@@ -8696,7 +8718,10 @@ ${frontmatter.yaml}
       }
       syncEditorHeight();
     }
-    textarea.addEventListener("input", syncHighlight);
+    textarea.addEventListener("input", () => {
+      syncHighlight();
+      callbacks.onSqlChange?.(textarea.value);
+    });
     textarea.addEventListener("scroll", () => {
       highlight.scrollTop = textarea.scrollTop;
       highlight.scrollLeft = textarea.scrollLeft;
@@ -8910,8 +8935,12 @@ ${frontmatter.yaml}
     function setSql(sql) {
       textarea.value = sql;
       syncHighlight();
+      callbacks.onSqlChange?.(textarea.value);
     }
-    return { el, focus, setSql };
+    function getSql() {
+      return textarea.value;
+    }
+    return { el, focus, setSql, getSql };
   }
   function formatValue(value) {
     if (value === null)
@@ -9200,7 +9229,7 @@ ${frontmatter.yaml}
     }
     el.textContent = item;
   }
-  function createRedisExplorer() {
+  function createRedisExplorer(callbacks = {}) {
     const container = document.createElement("div");
     container.className = "redis-explorer";
     const dbListPane = document.createElement("div");
@@ -9233,8 +9262,15 @@ ${frontmatter.yaml}
     container.append(dbListPane, keyListPane, mainPane);
     let currentDbId = null;
     let currentDbIndex = null;
+    let currentKey = null;
     let currentCursor = "0";
     let loadingKeys = false;
+    function notifySelectionChange() {
+      callbacks.onSelectionChange?.({
+        dbIndex: currentDbIndex ?? undefined,
+        key: currentKey ?? undefined
+      });
+    }
     function setDbStatus(message, isError = false) {
       dbList.innerHTML = "";
       const note = document.createElement("div");
@@ -9411,6 +9447,8 @@ ${frontmatter.yaml}
     async function selectKey(name) {
       if (currentDbId === null || currentDbIndex === null)
         return;
+      currentKey = name;
+      notifySelectionChange();
       highlightActiveKey(name);
       mainPane.innerHTML = "";
       const loading = document.createElement("div");
@@ -9448,7 +9486,9 @@ ${frontmatter.yaml}
     }
     async function selectDatabase(dbIndex) {
       currentDbIndex = dbIndex;
+      currentKey = null;
       currentCursor = "0";
+      notifySelectionChange();
       highlightActiveDb(dbIndex);
       keyList.innerHTML = "";
       mainPane.textContent = "Select a key to view its value.";
@@ -9497,9 +9537,10 @@ ${frontmatter.yaml}
       }
     }
     keyMoreBtn.addEventListener("click", () => loadKeys(true));
-    async function load(dbId) {
+    async function load(dbId, initial) {
       currentDbId = dbId;
       currentDbIndex = null;
+      currentKey = null;
       currentCursor = "0";
       keyList.innerHTML = "";
       keyMoreBtn.hidden = true;
@@ -9516,6 +9557,14 @@ ${frontmatter.yaml}
         if (currentDbId !== dbId)
           return;
         renderDatabases(data.databases);
+        if (initial?.dbIndex !== undefined && data.databases.some((d2) => d2.index === initial.dbIndex)) {
+          await selectDatabase(initial.dbIndex);
+          if (currentDbId !== dbId)
+            return;
+          if (initial.key) {
+            await selectKey(initial.key);
+          }
+        }
       } catch (err) {
         setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       }
@@ -9523,13 +9572,20 @@ ${frontmatter.yaml}
     function clear() {
       currentDbId = null;
       currentDbIndex = null;
+      currentKey = null;
       currentCursor = "0";
       dbList.innerHTML = "";
       keyList.innerHTML = "";
       keyMoreBtn.hidden = true;
       mainPane.textContent = "Select a database to view keys.";
     }
-    return { el: container, load, clear };
+    function getSelection() {
+      return {
+        dbIndex: currentDbIndex ?? undefined,
+        key: currentKey ?? undefined
+      };
+    }
+    return { el: container, load, clear, getSelection };
   }
 
   // web-src/views/database/schema-view.ts
@@ -11021,7 +11077,7 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/database-view.ts
-  function createTabPane(outerDeps, cb) {
+  function createTabPane(outerDeps, cb, initial = {}) {
     const deps = {
       ...outerDeps,
       setRoute: (route, replace2) => {
@@ -11054,9 +11110,8 @@ ${frontmatter.yaml}
     });
     const sidebar = document.createElement("div");
     sidebar.className = "db-sidebar";
-    const savedWidth = localStorage.getItem("db:sidebar-width");
-    if (savedWidth)
-      sidebar.style.width = savedWidth;
+    if (initial.sidebarWidth)
+      sidebar.style.width = initial.sidebarWidth;
     const toolsSection = document.createElement("div");
     toolsSection.className = "db-tools-section";
     const queryBtn = document.createElement("button");
@@ -11113,7 +11168,7 @@ ${frontmatter.yaml}
       const onUp = () => {
         resizing = false;
         resizeHandle.classList.remove("active");
-        localStorage.setItem("db:sidebar-width", sidebar.style.width);
+        cb.onStateChange();
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };
@@ -11125,8 +11180,11 @@ ${frontmatter.yaml}
       getDbId: () => currentDb?.id || null
     });
     const queryEditor = createQueryEditor({
-      executeQuery: (sql) => executeQuery(sql)
+      executeQuery: (sql) => executeQuery(sql),
+      onSqlChange: () => cb.onStateChange()
     });
+    if (initial.sqlDraft)
+      queryEditor.setSql(initial.sqlDraft);
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
     const globalSearchView = createGlobalSearchView({
@@ -11143,9 +11201,13 @@ ${frontmatter.yaml}
         setActiveTab("query");
       }
     });
-    const redisExplorer = createRedisExplorer();
+    const redisExplorer = createRedisExplorer({
+      onSelectionChange: () => cb.onStateChange()
+    });
     redisExplorer.el.hidden = true;
-    const esExplorer = createElasticsearchExplorer();
+    const esExplorer = createElasticsearchExplorer({
+      onSelectionChange: () => cb.onStateChange()
+    });
     esExplorer.el.hidden = true;
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
@@ -11160,9 +11222,8 @@ ${frontmatter.yaml}
     historyResizer.className = "db-history-resizer";
     const historyPane = document.createElement("div");
     historyPane.className = "db-history-pane";
-    const savedHistoryHeight = localStorage.getItem("db:history-height");
-    if (savedHistoryHeight)
-      historyPane.style.height = savedHistoryHeight;
+    if (initial.historyHeight)
+      historyPane.style.height = initial.historyHeight;
     historyPane.appendChild(historyView.el);
     let historyResizing = false;
     historyResizer.addEventListener("mousedown", (e2) => {
@@ -11181,7 +11242,7 @@ ${frontmatter.yaml}
       const onUp = () => {
         historyResizing = false;
         historyResizer.classList.remove("active");
-        localStorage.setItem("db:history-height", historyPane.style.height);
+        cb.onStateChange();
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };
@@ -11194,7 +11255,7 @@ ${frontmatter.yaml}
     historyToggle.textContent = "Query History";
     historyToggle.title = "Toggle query history panel";
     sidebar.appendChild(historyToggle);
-    let historyOpen = localStorage.getItem("db:history-open") !== "false";
+    let historyOpen = initial.historyOpen ?? true;
     function applyHistoryVisibility() {
       historyResizer.hidden = !historyOpen;
       historyPane.hidden = !historyOpen;
@@ -11205,8 +11266,8 @@ ${frontmatter.yaml}
     applyHistoryVisibility();
     historyToggle.addEventListener("click", () => {
       historyOpen = !historyOpen;
-      localStorage.setItem("db:history-open", String(historyOpen));
       applyHistoryVisibility();
+      cb.onStateChange();
     });
     const container = document.createElement("div");
     container.className = "db-container";
@@ -11313,7 +11374,7 @@ ${frontmatter.yaml}
       });
       return await res.json();
     }
-    async function selectDb(dbId) {
+    async function selectDb(dbId, explorerInitial) {
       if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
         tableList.render([]);
         grid.clear();
@@ -11331,12 +11392,12 @@ ${frontmatter.yaml}
           esExplorer.el.hidden = true;
           esExplorer.clear();
           redisExplorer.el.hidden = false;
-          await redisExplorer.load(dbId);
+          await redisExplorer.load(dbId, explorerInitial?.redis);
         } else {
           redisExplorer.el.hidden = true;
           redisExplorer.clear();
           esExplorer.el.hidden = false;
-          await esExplorer.load(dbId);
+          await esExplorer.load(dbId, explorerInitial?.es);
         }
         cb.onStateChange();
         return;
@@ -11455,6 +11516,8 @@ ${frontmatter.yaml}
       deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
       selectDb(dbId);
     });
+    let pendingRedisInitial = initial.redis;
+    let pendingEsInitial = initial.es;
     async function enter(db, table2, view) {
       const files = await fetchDbFiles();
       lastFiles = files;
@@ -11483,7 +11546,13 @@ ${frontmatter.yaml}
       const target = db || files[0].id;
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
-      await selectDb(target);
+      const explorerInitial = {
+        redis: pendingRedisInitial,
+        es: pendingEsInitial
+      };
+      pendingRedisInitial = undefined;
+      pendingEsInitial = undefined;
+      await selectDb(target, explorerInitial);
       if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
         cb.onStateChange();
         return;
@@ -11515,12 +11584,33 @@ ${frontmatter.yaml}
     }
     function getState() {
       const activeTable = tableList.el.querySelector(".db-table-item.active");
-      return {
+      const state = {
         id: cb.tabId,
         dbId: currentDb?.id ?? null,
         table: activeTable?.dataset.table ?? null,
         view: currentTab
       };
+      const sqlDraft = queryEditor.getSql();
+      if (sqlDraft)
+        state.sqlDraft = sqlDraft;
+      if (!historyOpen)
+        state.historyOpen = false;
+      if (historyPane.style.height)
+        state.historyHeight = historyPane.style.height;
+      if (sidebar.style.width)
+        state.sidebarWidth = sidebar.style.width;
+      if (currentDb?.kind === "redis") {
+        const sel = redisExplorer.getSelection();
+        if (sel.dbIndex !== undefined || sel.key !== undefined) {
+          state.redis = sel;
+        }
+      } else if (currentDb?.kind === "elasticsearch") {
+        const sel = esExplorer.getSelection();
+        if (sel.index !== undefined || sel.query !== undefined) {
+          state.es = sel;
+        }
+      }
+      return state;
     }
     function getLabel() {
       if (!currentDb)
@@ -11678,6 +11768,16 @@ ${frontmatter.yaml}
             syncActiveRoute();
           scheduleSave();
         }
+      }, {
+        dbId: initial?.dbId ?? null,
+        table: initial?.table ?? null,
+        view: initial?.view ?? undefined,
+        sqlDraft: initial?.sqlDraft,
+        historyOpen: initial?.historyOpen,
+        historyHeight: initial?.historyHeight,
+        sidebarWidth: initial?.sidebarWidth,
+        redis: initial?.redis,
+        es: initial?.es
       });
       pane.el.hidden = true;
       tabsList.appendChild(chip);
