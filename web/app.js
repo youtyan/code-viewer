@@ -11637,8 +11637,14 @@ ${frontmatter.yaml}
       const notice = mainContent.querySelector(".db-docker-notice");
       if (notice)
         notice.remove();
-      tabBar.hidden = false;
-      grid.el.hidden = false;
+      applyInnerTabBarVisibility();
+      grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
+    }
+    function isTableViewTab() {
+      return currentTab === "data" || currentTab === "schema";
+    }
+    function applyInnerTabBarVisibility() {
+      tabBar.hidden = !isSqlKind(currentDb?.kind) || !isTableViewTab();
     }
     function applyKindVisibility() {
       const sqlMode = isSqlKind(currentDb?.kind);
@@ -11647,7 +11653,7 @@ ${frontmatter.yaml}
       historyResizer.hidden = !sqlMode || !historyOpen;
       historyPane.hidden = !sqlMode || !historyOpen;
       tableList.el.hidden = !sqlMode;
-      tabBar.hidden = !sqlMode;
+      applyInnerTabBarVisibility();
       if (!sqlMode) {
         queryBtn.classList.remove("active");
         erBtn.classList.remove("active");
@@ -11672,8 +11678,7 @@ ${frontmatter.yaml}
       searchBtn.classList.toggle("active", currentTab === "search");
       snapshotBtn.classList.toggle("active", currentTab === "snapshot");
       const sqlMode = isSqlKind(currentDb?.kind);
-      const onTableView = currentTab === "data" || currentTab === "schema";
-      tabBar.hidden = !sqlMode || !onTableView;
+      applyInnerTabBarVisibility();
       grid.el.hidden = !sqlMode || currentTab !== "data";
       queryEditor.el.hidden = !sqlMode || currentTab !== "query";
       schemaView.el.hidden = !sqlMode || currentTab !== "schema";
@@ -12114,8 +12119,12 @@ ${frontmatter.yaml}
   function createDatabaseView(deps) {
     let mounted = false;
     const tabsById = new Map;
+    const tabOrder = [];
     const paneReadyById = new Map;
     let activeTabId = null;
+    let draggingTabId = null;
+    let dropTargetId = null;
+    let dropAfterTarget = false;
     let restoring = false;
     let savePending = null;
     let saveChain = Promise.resolve();
@@ -12134,8 +12143,11 @@ ${frontmatter.yaml}
       if (!mounted || restoring)
         return;
       const tabs = [];
-      for (const [, entry] of tabsById)
-        tabs.push(entry.pane.getState());
+      for (const id of tabOrder) {
+        const entry = tabsById.get(id);
+        if (entry)
+          tabs.push(entry.pane.getState());
+      }
       if (tabs.length === 0)
         return;
       const body = { version: 1, tabs, activeTabId };
@@ -12275,6 +12287,138 @@ ${frontmatter.yaml}
         fetch(path, { method: "POST", headers, body }).catch(() => {});
       }
     }
+    function clearDropTarget() {
+      if (!dropTargetId)
+        return;
+      const entry = tabsById.get(dropTargetId);
+      if (entry) {
+        entry.chip.classList.remove("drop-target", "drop-after");
+      }
+      dropTargetId = null;
+      dropAfterTarget = false;
+    }
+    function clearDragState() {
+      for (const [, entry] of tabsById) {
+        entry.chip.classList.remove("dragging", "drop-target", "drop-after");
+      }
+      draggingTabId = null;
+      dropTargetId = null;
+      dropAfterTarget = false;
+    }
+    function isDropAfter(chip, ev) {
+      const rect = chip.getBoundingClientRect();
+      return ev.clientX > rect.left + rect.width / 2;
+    }
+    function markDropTarget(id, after) {
+      if (dropTargetId !== id || dropAfterTarget !== after)
+        clearDropTarget();
+      dropTargetId = id;
+      dropAfterTarget = after;
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      entry.chip.classList.add("drop-target");
+      entry.chip.classList.toggle("drop-after", after);
+    }
+    function moveTabBeforeOrAfter(dragId, targetId, after) {
+      if (dragId === targetId)
+        return;
+      const dragEntry = tabsById.get(dragId);
+      const targetEntry = tabsById.get(targetId);
+      if (!dragEntry || !targetEntry)
+        return;
+      const dragIndex = tabOrder.indexOf(dragId);
+      if (dragIndex < 0)
+        return;
+      tabOrder.splice(dragIndex, 1);
+      const targetIndex = tabOrder.indexOf(targetId);
+      if (targetIndex < 0) {
+        tabOrder.splice(dragIndex, 0, dragId);
+        return;
+      }
+      const insertIndex = targetIndex + (after ? 1 : 0);
+      tabOrder.splice(insertIndex, 0, dragId);
+      tabsList.insertBefore(dragEntry.chip, after ? targetEntry.chip.nextSibling : targetEntry.chip);
+      scheduleSave();
+    }
+    function moveTabToEnd(dragId) {
+      const dragEntry = tabsById.get(dragId);
+      if (!dragEntry)
+        return;
+      const dragIndex = tabOrder.indexOf(dragId);
+      if (dragIndex < 0 || dragIndex === tabOrder.length - 1)
+        return;
+      tabOrder.splice(dragIndex, 1);
+      tabOrder.push(dragId);
+      tabsList.appendChild(dragEntry.chip);
+      scheduleSave();
+    }
+    function attachTabDragHandlers(chip, closeBtn, id) {
+      chip.draggable = true;
+      closeBtn.draggable = false;
+      chip.addEventListener("dragstart", (e2) => {
+        if (e2.target?.closest(".db-tabs-chip-close")) {
+          e2.preventDefault();
+          return;
+        }
+        draggingTabId = id;
+        chip.classList.add("dragging");
+        if (e2.dataTransfer) {
+          e2.dataTransfer.effectAllowed = "move";
+          e2.dataTransfer.setData("text/plain", id);
+        }
+      });
+      chip.addEventListener("dragenter", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        markDropTarget(id, isDropAfter(chip, e2));
+      });
+      chip.addEventListener("dragover", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        if (e2.dataTransfer)
+          e2.dataTransfer.dropEffect = "move";
+        markDropTarget(id, isDropAfter(chip, e2));
+      });
+      chip.addEventListener("dragleave", (e2) => {
+        const related = e2.relatedTarget;
+        if (related && chip.contains(related))
+          return;
+        if (dropTargetId === id)
+          clearDropTarget();
+      });
+      chip.addEventListener("drop", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        moveTabBeforeOrAfter(draggingTabId, id, isDropAfter(chip, e2));
+        clearDragState();
+      });
+      chip.addEventListener("dragend", () => clearDragState());
+    }
+    tabsList.addEventListener("dragover", (e2) => {
+      if (!draggingTabId)
+        return;
+      const target = e2.target?.closest(".db-tabs-chip");
+      if (target && tabsList.contains(target))
+        return;
+      e2.preventDefault();
+      if (e2.dataTransfer)
+        e2.dataTransfer.dropEffect = "move";
+      clearDropTarget();
+    });
+    tabsList.addEventListener("drop", (e2) => {
+      if (!draggingTabId)
+        return;
+      const target = e2.target?.closest(".db-tabs-chip");
+      if (target && tabsList.contains(target))
+        return;
+      e2.preventDefault();
+      moveTabToEnd(draggingTabId);
+      clearDragState();
+    });
     function openTab(initial, options = {}) {
       const id = initial?.id || makeTabId();
       const chip = document.createElement("div");
@@ -12297,6 +12441,7 @@ ${frontmatter.yaml}
         closeTab(id);
       });
       chip.append(labelEl, closeBtn);
+      attachTabDragHandlers(chip, closeBtn, id);
       chip.addEventListener("click", () => setActive(id));
       chip.addEventListener("keydown", (e2) => {
         if (e2.key === "Enter" || e2.key === " ") {
@@ -12334,6 +12479,7 @@ ${frontmatter.yaml}
       tabsList.appendChild(chip);
       tabHost.appendChild(pane.el);
       tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
+      tabOrder.push(id);
       setActive(id);
       const ready = pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined, options).then(() => refreshChipLabel(id)).finally(() => {
         paneReadyById.delete(id);
@@ -12350,6 +12496,9 @@ ${frontmatter.yaml}
       entry.pane.el.remove();
       entry.chip.remove();
       tabsById.delete(id);
+      const orderIndex = tabOrder.indexOf(id);
+      if (orderIndex >= 0)
+        tabOrder.splice(orderIndex, 1);
       paneReadyById.delete(id);
       closeDbIfUnused(closedDbId);
       if (activeTabId !== id) {
@@ -12360,7 +12509,7 @@ ${frontmatter.yaml}
         openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
         return;
       }
-      const firstId = tabsById.keys().next().value;
+      const firstId = tabOrder[0];
       if (firstId)
         setActive(firstId);
     }
@@ -12442,7 +12591,7 @@ ${frontmatter.yaml}
                 return;
               restoredIds.push(openTab(t2, { autoSelectFirst: false }));
             }
-            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
+            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabOrder[0];
             if (targetId)
               setActive(targetId);
             await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
@@ -12491,6 +12640,7 @@ ${frontmatter.yaml}
         entry.pane.dispose();
       }
       tabsById.clear();
+      tabOrder.length = 0;
       tabsList.innerHTML = "";
       tabHost.innerHTML = "";
       activeTabId = null;
