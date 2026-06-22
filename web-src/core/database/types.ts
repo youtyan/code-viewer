@@ -333,3 +333,23 @@ export type EsQueryResponse = {
   elapsedMs: number;
   error?: string;
 };
+
+// ---------- Tabs ----------
+
+// 1 つの database タブ。画面全体 (サイドバー + メイン pane + 履歴 pane) の
+// 独立 instance に対応する。dbId が null のときは「未選択タブ」(まだ DB を
+// 選んでいない状態)。
+export type TabState = {
+  id: string;
+  dbId: string | null;
+  table: string | null;
+  view: "data" | "query" | "schema" | "er" | "search" | "snapshot";
+};
+
+export type TabsState = {
+  version: 1;
+  tabs: TabState[];
+  activeTabId: string | null;
+};
+
+export type TabsResponse = TabsState;
