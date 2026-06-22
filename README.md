@@ -119,13 +119,18 @@ browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
 automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
-**Redis**, and **Elasticsearch** services are detected from
-`docker-compose.yml` and connected through Docker. Redis support is
-read-only: browse DB 0–15, SCAN keys, and view values per type
-(string/hash/list as dedicated panes, set/zset/stream as raw JSON).
-Elasticsearch support is read-only too: list indices, view mappings,
-paginate docs with `search_after`, run lucene `q=` searches, and take
-snapshots / diffs over `_search` iteration.
+**Redis**, and **Elasticsearch** services are detected from any
+`docker-compose.yml` (or `compose.yml`) found by the same recursive
+scan — both the repository root and subdirectories are considered, so a
+single `code-viewer --cwd <root>` brings up every DB defined under that
+root. `.git/` and `node_modules/` are skipped. Services whose names
+collide across subdirectories are kept distinct via `docker:<service>@<relDir>`
+ids (cwd-direct compose files keep the historical `docker:<service>` id
+for backward compatibility). Redis support is read-only: browse DB 0–15,
+SCAN keys, and view values per type (string/hash/list as dedicated
+panes, set/zset/stream as raw JSON). Elasticsearch support is read-only
+too: list indices, view mappings, paginate docs with `search_after`, run
+lucene `q=` searches, and take snapshots / diffs over `_search` iteration.
 
 ### Browser UI
 
