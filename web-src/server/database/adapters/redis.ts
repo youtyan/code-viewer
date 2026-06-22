@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import type {
   RedisHashField,
   RedisItem,
   RedisType,
   RedisValue,
 } from "../../../core/database/types";
+import type { SnapshotItem } from "../sources/types";
 
 type RedisConfig = {
   containerName: string;
@@ -13,6 +15,8 @@ type RedisConfig = {
 
 export type RedisExplorer = {
   readonly kind: "redis";
+  readonly model: "kv";
+  readonly capabilities: { snapshot: true };
   listDatabases(): Array<{ index: number; keyCount: number }>;
   listKeys(opts: {
     db: number;
@@ -21,8 +25,36 @@ export type RedisExplorer = {
     count?: number;
   }): { keys: Array<{ name: string; type: RedisType }>; nextCursor: string };
   getValue(opts: { db: number; key: string }): RedisValue;
+  iterateForSnapshot(
+    container: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem>;
+  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
   close(): void;
 };
+
+// iterateForSnapshot に渡される container は JSON 文字列。
+// `{"db":0,"pattern":"user:*"}` のように DB index + key pattern を持つ。
+// pattern だけの文字列を渡された場合は DB 0 を default にする (UI 互換)。
+function parseSnapshotContainer(container: string): {
+  db: number;
+  pattern: string;
+} {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container) as { db?: number; pattern?: string };
+      const db = typeof obj.db === "number" ? obj.db : 0;
+      const pattern =
+        typeof obj.pattern === "string" && obj.pattern.length > 0
+          ? obj.pattern
+          : "*";
+      return { db, pattern };
+    } catch {
+      // fall through
+    }
+  }
+  return { db: 0, pattern: container || "*" };
+}
 
 const DEFAULT_DATABASES = 16;
 // PoC: hard caps to avoid OOM / long blocking on large values.
@@ -486,11 +518,49 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return { type: "none" };
   }
 
+  async function* iterateForSnapshot(
+    container: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem> {
+    const { db, pattern } = parseSnapshotContainer(container);
+    let cursor = "0";
+    do {
+      if (signal?.aborted) return;
+      const page = listKeys({
+        db,
+        pattern,
+        cursor,
+        count: REDIS_COLLECTION_LIMIT,
+      });
+      for (const k of page.keys) {
+        if (signal?.aborted) return;
+        const value = getValue({ db, key: k.name });
+        const keyJson = JSON.stringify({ db, key: k.name });
+        const payloadJson = JSON.stringify({ type: k.type, value });
+        const rowHash = createHash("sha256").update(payloadJson).digest("hex");
+        yield { keyJson, payloadJson, rowHash };
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== "0");
+  }
+
+  async function listSnapshotContainers(): Promise<
+    Array<{ id: string; label: string }>
+  > {
+    // Redis では UI に pattern 入力欄を出して任意 pattern を受け取る想定なので、
+    // adapter から候補は返さない。空配列は UI 側で「pattern 必須」の示唆になる。
+    return [];
+  }
+
   return {
     kind: "redis",
+    model: "kv",
+    capabilities: { snapshot: true },
     listDatabases,
     listKeys,
     getValue,
+    iterateForSnapshot,
+    listSnapshotContainers,
     close() {
       // nothing to close (docker exec is one-shot per call)
     },
