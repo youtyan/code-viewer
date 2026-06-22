@@ -6,6 +6,8 @@ import type {
   DbSchemaResponse,
   DbTableDataResponse,
   TabState,
+  TabsResponse,
+  TabsState,
 } from "../../core/database/types";
 import type { AppRoute, DiffRange } from "../../core/routes";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
@@ -694,6 +696,45 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     { pane: TabPaneInternal; chip: HTMLElement; label: HTMLElement }
   >();
   let activeTabId: string | null = null;
+  // restoring 中は scheduleSave を抑制して、初期復元の連鎖 setState で
+  // 過剰な PUT を発生させないようにする。復元完了後に 1 回まとめて保存する。
+  let restoring = false;
+  let savePending: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleSave(): void {
+    if (!mounted || restoring) return;
+    if (savePending !== null) clearTimeout(savePending);
+    savePending = setTimeout(saveNow, 500);
+  }
+
+  async function saveNow(): Promise<void> {
+    savePending = null;
+    const tabs: TabState[] = [];
+    for (const [, entry] of tabsById) tabs.push(entry.pane.getState());
+    const body: TabsState = { version: 1, tabs, activeTabId };
+    try {
+      await fetch("/_db/tabs", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // ベストエフォート。失敗してもユーザー操作は妨げない。
+    }
+  }
+
+  async function fetchTabs(): Promise<TabsResponse | null> {
+    try {
+      const res = await fetch("/_db/tabs");
+      if (!res.ok) return null;
+      return (await res.json()) as TabsResponse;
+    } catch {
+      return null;
+    }
+  }
 
   const tabsBar = document.createElement("div");
   tabsBar.className = "db-tabs-bar";
@@ -721,6 +762,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.chip.classList.toggle("active", isActive);
     }
     syncActiveRoute();
+    scheduleSave();
   }
 
   function syncActiveRoute(): void {
@@ -785,6 +827,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       onStateChange: () => {
         refreshChipLabel(id);
         if (activeTabId === id) syncActiveRoute();
+        scheduleSave();
       },
     });
     pane.el.hidden = true;
@@ -833,7 +876,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     table?: string,
     view?: TabName,
   ): Promise<void> {
-    if (!mounted) {
+    const firstMount = !mounted;
+    if (firstMount) {
       const content = document.getElementById("content");
       if (!content) return;
       const diff = document.getElementById("diff");
@@ -845,10 +889,45 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       mounted = true;
       deps.setPageMode();
       deps.syncHeaderMenu();
+
+      // 永続化されたタブ構成があれば復元する。復元中は scheduleSave を
+      // 抑制して、復元完了後に 1 回だけ保存する。
+      const restored = await fetchTabs();
+      if (restored && restored.tabs.length > 0) {
+        restoring = true;
+        try {
+          for (const t of restored.tabs) {
+            openTab({
+              id: t.id,
+              dbId: t.dbId ?? null,
+              table: t.table ?? null,
+              view: t.view,
+            });
+          }
+          const targetId =
+            restored.activeTabId && tabsById.has(restored.activeTabId)
+              ? restored.activeTabId
+              : (tabsById.keys().next().value as string | undefined);
+          if (targetId) setActive(targetId);
+        } finally {
+          restoring = false;
+        }
+        // URL の引数があれば active タブに上書き反映 (他タブを潰さない)。
+        if (db || table || view) {
+          const active = tabsById.get(activeTabId ?? "");
+          if (active) {
+            await active.pane.enter(db, table, view);
+            if (activeTabId) refreshChipLabel(activeTabId);
+          }
+        }
+        // 初期復元の連鎖 setState を 1 回の PUT にまとめる。
+        scheduleSave();
+        return;
+      }
     }
 
     if (tabsById.size === 0) {
-      // 初回 enter: URL の引数を初期 state にして 1 タブ作る。
+      // 初回 enter (永続化なし): URL の引数を初期 state にして 1 タブ作る。
       openTab({
         dbId: db || null,
         table: table || null,
