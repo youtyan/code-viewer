@@ -179,14 +179,42 @@ export type RedisType =
   | "none";
 
 export type RedisValue =
-  | { type: "string"; value: string }
-  | { type: "list"; items: string[] }
-  | { type: "hash"; fields: Record<string, string> }
-  | { type: "set"; members: string[] }
-  | { type: "zset"; members: Array<{ member: string; score: number }> }
+  | {
+      type: "string";
+      value: string;
+      binaryBase64?: string;
+      truncated: boolean;
+      fullSize: number;
+    }
+  | {
+      type: "list";
+      items: string[];
+      truncated: boolean;
+      total: number;
+    }
+  | {
+      type: "hash";
+      fields: Record<string, string>;
+      truncated: boolean;
+      total: number;
+    }
+  | {
+      type: "set";
+      members: string[];
+      truncated: boolean;
+      total: number;
+    }
+  | {
+      type: "zset";
+      members: Array<{ member: string; score: number }>;
+      truncated: boolean;
+      total: number;
+    }
   | {
       type: "stream";
       entries: Array<{ id: string; fields: Record<string, string> }>;
+      truncated: boolean;
+      total: number;
     }
   | { type: "none" };
 

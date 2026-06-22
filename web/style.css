@@ -7144,6 +7144,23 @@ body.db-resizing {
   color: var(--fg-muted);
   font-style: italic;
 }
+.redis-value-info,
+.redis-value-truncation {
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-family: var(--mono, monospace);
+}
+.redis-value-info {
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.redis-value-truncation {
+  background: #fff4e0;
+  color: #8a5a22;
+  border: 1px solid #f0d8a0;
+}
 .redis-value-string,
 .redis-value-raw-json {
   font-family: var(--mono, monospace);
