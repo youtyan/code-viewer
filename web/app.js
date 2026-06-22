@@ -8881,6 +8881,57 @@ ${frontmatter.yaml}
         pre.className = "redis-value-string";
         pre.textContent = value.value;
         body.appendChild(pre);
+      } else if (value.type === "hash") {
+        const table2 = document.createElement("table");
+        table2.className = "redis-value-hash-table";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        for (const label of ["Field", "Value"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table2.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        const entries = Object.entries(value.fields);
+        if (entries.length === 0) {
+          const row = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = 2;
+          td.className = "redis-value-empty";
+          td.textContent = "(empty hash)";
+          row.appendChild(td);
+          tbody.appendChild(row);
+        }
+        for (const [field, val] of entries) {
+          const row = document.createElement("tr");
+          const fieldTd = document.createElement("td");
+          fieldTd.className = "redis-value-hash-field";
+          fieldTd.textContent = field;
+          const valTd = document.createElement("td");
+          valTd.className = "redis-value-hash-val";
+          valTd.textContent = val;
+          row.append(fieldTd, valTd);
+          tbody.appendChild(row);
+        }
+        table2.appendChild(tbody);
+        body.appendChild(table2);
+      } else if (value.type === "list") {
+        const ol = document.createElement("ol");
+        ol.className = "redis-value-list";
+        if (value.items.length === 0) {
+          const li = document.createElement("li");
+          li.className = "redis-value-empty";
+          li.textContent = "(empty list)";
+          ol.appendChild(li);
+        }
+        for (const item of value.items) {
+          const li = document.createElement("li");
+          li.textContent = item;
+          ol.appendChild(li);
+        }
+        body.appendChild(ol);
       } else {
         const pre = document.createElement("pre");
         pre.className = "redis-value-raw-json";

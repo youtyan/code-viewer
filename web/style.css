@@ -7155,6 +7155,44 @@ body.db-resizing {
   background: var(--bg-soft);
   border-radius: 4px;
 }
+.redis-value-hash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+}
+.redis-value-hash-table th,
+.redis-value-hash-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.redis-value-hash-table th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+.redis-value-hash-field {
+  width: 30%;
+  word-break: break-all;
+  color: var(--fg-muted);
+}
+.redis-value-hash-val {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.redis-value-list {
+  margin: 0;
+  padding: 0 0 0 28px;
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+}
+.redis-value-list li {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
 .redis-note {
   padding: 8px 12px;
   color: var(--fg-muted);

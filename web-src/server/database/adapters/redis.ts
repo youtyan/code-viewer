@@ -172,7 +172,43 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
       const value = r.stdout.replace(/\n$/, "");
       return { type: "string", value };
     }
-    // Other types are added in later commits.
+    if (rawType === "list") {
+      const lua = `return cjson.encode(redis.call('LRANGE', KEYS[1], 0, -1))`;
+      const r = execRedisCli(config, [
+        "-n",
+        String(opts.db),
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "LRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const items = stdout ? (JSON.parse(stdout) as string[]) : [];
+      return { type: "list", items };
+    }
+    if (rawType === "hash") {
+      const lua = `local h = redis.call('HGETALL', KEYS[1]); local obj = {}; for i = 1, #h, 2 do obj[h[i]] = h[i+1] end; if next(obj) == nil then return '{}' end; return cjson.encode(obj)`;
+      const r = execRedisCli(config, [
+        "-n",
+        String(opts.db),
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "HGETALL failed");
+      }
+      const stdout = r.stdout.trim();
+      const fields = stdout
+        ? (JSON.parse(stdout) as Record<string, string>)
+        : {};
+      return { type: "hash", fields };
+    }
+    // set / zset / stream are added in the next commit.
     return { type: "none" };
   }
 
