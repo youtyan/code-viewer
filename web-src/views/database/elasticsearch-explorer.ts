@@ -6,10 +6,25 @@ import type {
   EsMappingResponse,
 } from "../../core/database/types";
 
+export type ElasticsearchExplorerSelection = {
+  index?: string;
+  query?: string;
+};
+
+export type ElasticsearchExplorerCallbacks = {
+  // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
+  // ごとに persist して reload 復元するために使う。
+  onSelectionChange?: (selection: ElasticsearchExplorerSelection) => void;
+};
+
 export type ElasticsearchExplorerView = {
   el: HTMLElement;
-  load: (dbId: string) => Promise<void>;
+  load: (
+    dbId: string,
+    initial?: ElasticsearchExplorerSelection,
+  ) => Promise<void>;
   clear: () => void;
+  getSelection: () => ElasticsearchExplorerSelection;
 };
 
 function formatBytes(n: number): string {
@@ -20,7 +35,9 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
-export function createElasticsearchExplorer(): ElasticsearchExplorerView {
+export function createElasticsearchExplorer(
+  callbacks: ElasticsearchExplorerCallbacks = {},
+): ElasticsearchExplorerView {
   const container = document.createElement("div");
   container.className = "es-explorer";
 
@@ -105,6 +122,13 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
   let lastSort: unknown[] | undefined;
   let loadingDocs = false;
   let detailTab: "mapping" | "doc" = "mapping";
+
+  function notifySelectionChange(): void {
+    callbacks.onSelectionChange?.({
+      index: currentIndex ?? undefined,
+      query: currentQuery || undefined,
+    });
+  }
 
   function setIndexStatus(message: string, isError = false) {
     indexList.innerHTML = "";
@@ -351,6 +375,7 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
 
   async function selectIndex(name: string): Promise<void> {
     currentIndex = name;
+    notifySelectionChange();
     highlightActiveIndex(name);
     docBody.innerHTML = "";
     docBody.textContent = "Select a doc to view its _source.";
@@ -398,6 +423,7 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
 
   function runSearch(): void {
     currentQuery = searchInput.value.trim();
+    notifySelectionChange();
     if (!currentIndex) return;
     loadDocs(false);
   }
@@ -408,14 +434,26 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
       runSearch();
     }
   });
+  // input イベントでも query 文字列を persist する。実検索は走らせない
+  // (= ユーザーが Enter または Search を押すまで保留)。
+  searchInput.addEventListener("input", () => {
+    currentQuery = searchInput.value.trim();
+    notifySelectionChange();
+  });
   docMoreBtn.addEventListener("click", () => loadDocs(true));
 
-  async function load(dbId: string): Promise<void> {
+  async function load(
+    dbId: string,
+    initial?: ElasticsearchExplorerSelection,
+  ): Promise<void> {
     currentDbId = dbId;
     currentIndex = null;
     currentQuery = "";
     lastSort = undefined;
-    searchInput.value = "";
+    // 復元したい query 文字列があれば先に searchInput に乗せておく。実検索
+    // は selectIndex の中で走るので、ここでは値だけセット。
+    searchInput.value = initial?.query ?? "";
+    currentQuery = searchInput.value.trim();
     docList.innerHTML = "";
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
@@ -436,6 +474,15 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
       const data = (await res.json()) as EsIndicesResponse;
       if (currentDbId !== dbId) return; // stale
       renderIndices(data.indices);
+
+      // initial.index が指定されていて実在するなら、その index を自動選択する
+      // (= selectIndex を呼ぶと query が currentQuery に従って実行される)。
+      if (
+        initial?.index &&
+        data.indices.some((ix) => ix.name === initial.index)
+      ) {
+        await selectIndex(initial.index);
+      }
     } catch (err) {
       setIndexStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -464,5 +511,12 @@ export function createElasticsearchExplorer(): ElasticsearchExplorerView {
   // suppress unused diagnostic when detailTab is only used by helper.
   void detailTab;
 
-  return { el: container, load, clear };
+  function getSelection(): ElasticsearchExplorerSelection {
+    return {
+      index: currentIndex ?? undefined,
+      query: currentQuery || undefined,
+    };
+  }
+
+  return { el: container, load, clear, getSelection };
 }
