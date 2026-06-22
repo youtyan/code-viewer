@@ -263,14 +263,16 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
       throw new Error(`invalid index name: ${opts.index}`);
     }
     const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
-    // search_after は安定 sort が必須。`_shard_doc` (ES 7.12+) で全件
-    // tie-break まで含めた deterministic な順序を取る。lucene query 文字列が
+    // search_after は安定 sort が必須。`_doc` で全件 stable な順序を取る
+    // (PIT なしでも ES 8 で使える tie-breaker)。lucene query 文字列が
     // 与えられていれば `query_string` 経由で渡す。未指定なら match_all。
+    // 補足: `_shard_doc` は PIT 必須 (ES 8 で action_request_validation_exception)
+    // なので、PoC では PIT を取らない代わりに `_doc` を使う。
     const body: Record<string, unknown> = {
       size,
       track_total_hits: true,
       seq_no_primary_term: true,
-      sort: [{ _shard_doc: "asc" }],
+      sort: [{ _doc: "asc" }],
       query: opts.query
         ? { query_string: { query: opts.query } }
         : { match_all: {} },
