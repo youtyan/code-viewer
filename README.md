@@ -136,6 +136,11 @@ lucene `q=` searches, and take snapshots / diffs over `_search` iteration.
 
 Open the database icon in the sidebar to access:
 
+- **Multi-DB tabs** — open multiple databases side by side (each tab has
+  its own sidebar, panes, and history). `+` adds an empty tab; `×` or
+  middle-click closes one (the last tab is reset to empty instead of
+  vanishing). Tabs persist in `.code-viewer/tabs.json` and survive
+  reloads.
 - **Table browser** — paginated data grid with column sorting, text
   filtering, and CSV/JSON export.
 - **Query editor** — execute read-only SQL with syntax highlighting.
