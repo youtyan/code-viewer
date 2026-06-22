@@ -198,6 +198,7 @@ export type CommitMeta = {
 
 export type RefCommitResponse = {
   commits?: CommitMeta[];
+  hasMore?: boolean;
 };
 
 type Diff2HtmlGlobal = {

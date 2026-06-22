@@ -68,37 +68,84 @@ export function createRefPicker(deps: RefPickerDeps) {
   fetchRefs();
 
   let popTab = "commits";
+  const COMMIT_PAGE_SIZE = 50;
   let commitSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let commitSearchSeq = 0;
   let commitSearchAbort: AbortController | null = null;
   let commitSearchLoading = false;
-  function fetchCommitRefs(query: string) {
+  let commitAppendLoading = false;
+  let commitHasMore = false;
+  let commitQuery = "";
+
+  function appendUniqueCommits(commits: RefCommitResponse["commits"]) {
+    const seen = new Set(REFS.commits.map((commit) => commit.sha));
+    for (const commit of commits || []) {
+      if (!commit.sha || seen.has(commit.sha)) continue;
+      seen.add(commit.sha);
+      REFS.commits.push(commit);
+    }
+  }
+
+  function fetchCommitRefs(query: string, options: { append?: boolean } = {}) {
+    const append = !!options.append;
+    const normalizedQuery = (query || "").trim();
     const seq = ++commitSearchSeq;
     if (commitSearchAbort) commitSearchAbort.abort();
     commitSearchAbort = new AbortController();
-    const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
+    const skip = append ? REFS.commits.length : 0;
+    const previousScrollTop = popBody.scrollTop;
+    if (append) commitAppendLoading = true;
+    else {
+      commitQuery = normalizedQuery;
+      commitSearchLoading = true;
+      commitAppendLoading = false;
+      commitHasMore = false;
+    }
+    const url =
+      `/_commits?max=${COMMIT_PAGE_SIZE}&skip=${skip}` +
+      `&q=${encodeURIComponent(normalizedQuery)}`;
     return fetch(url, { signal: commitSearchAbort.signal })
       .then((r) => r.json())
       .then((refs: RefCommitResponse) => {
         if (seq !== commitSearchSeq) return;
         commitSearchLoading = false;
-        REFS.commits = refs.commits || [];
+        commitAppendLoading = false;
+        commitHasMore = !!refs.hasMore;
+        if (append) appendUniqueCommits(refs.commits);
+        else REFS.commits = refs.commits || [];
         if (!popover.hidden && popTab === "commits") {
           buildPopBody(popSearch.value);
+          if (append) popBody.scrollTop = previousScrollTop;
         }
       })
       .catch(() => {
-        if (seq === commitSearchSeq) commitSearchLoading = false;
+        if (seq === commitSearchSeq) {
+          commitSearchLoading = false;
+          commitAppendLoading = false;
+        }
       });
   }
 
   function scheduleCommitSearch(query: string) {
     if (commitSearchTimer) clearTimeout(commitSearchTimer);
+    commitQuery = (query || "").trim();
     commitSearchLoading = true;
+    commitAppendLoading = false;
+    commitHasMore = false;
+    REFS.commits = [];
     commitSearchTimer = setTimeout(() => {
       commitSearchTimer = null;
       fetchCommitRefs(query);
     }, 150);
+  }
+
+  function maybeLoadMoreCommits() {
+    if (popTab !== "commits") return;
+    if (!commitHasMore || commitSearchLoading || commitAppendLoading) return;
+    const remaining =
+      popBody.scrollHeight - popBody.scrollTop - popBody.clientHeight;
+    if (remaining > 96) return;
+    fetchCommitRefs(commitQuery, { append: true });
   }
 
   function relativeWhen(iso: string): string {
@@ -175,6 +222,11 @@ export function createRefPicker(deps: RefPickerDeps) {
             "</div>" +
             "</div>",
         );
+      }
+      if (commitAppendLoading) {
+        html.push('<div class="rp-empty">loading more commits...</div>');
+      } else if (commitHasMore) {
+        html.push('<div class="rp-empty">scroll for more commits...</div>');
       }
     } else if (popTab === "branches") {
       const branches = (REFS.branches || []).filter((b) => m(b.name));
@@ -307,6 +359,7 @@ export function createRefPicker(deps: RefPickerDeps) {
     if (popTab === "commits") scheduleCommitSearch(popSearch.value);
     buildPopBody(popSearch.value);
   });
+  popBody.addEventListener("scroll", maybeLoadMoreCommits, { passive: true });
   popSearch.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       closePopover();

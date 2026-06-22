@@ -1192,9 +1192,12 @@ function handleGrep(url: URL) {
 function handleRefCommits(url: URL) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
+  const parsedSkip = Number(url.searchParams.get("skip") || "0");
   const max =
     Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
-  return json({ commits: git.refCommits(cwd, query, max) });
+  const skip =
+    Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
+  return json(git.refCommitPage(cwd, { query, max, skip }));
 }
 
 function handleLog(url: URL) {
