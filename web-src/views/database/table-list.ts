@@ -12,6 +12,7 @@ export type TableList = {
   el: HTMLElement;
   render: (tables: DbTableInfo[]) => void;
   setActive: (table: string | null) => void;
+  dispose: () => void;
 };
 
 export function createTableList(callbacks: TableListCallbacks): TableList {
@@ -42,8 +43,23 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
   /* ---- Context menu ---- */
   let contextMenu: HTMLDivElement | null = null;
+  let contextMenuClick: ((ev: MouseEvent) => void) | null = null;
+  let contextMenuKeyDown: ((ev: KeyboardEvent) => void) | null = null;
+  let contextMenuTimer: ReturnType<typeof setTimeout> | null = null;
 
   function closeContextMenu() {
+    if (contextMenuTimer) {
+      clearTimeout(contextMenuTimer);
+      contextMenuTimer = null;
+    }
+    if (contextMenuClick) {
+      document.removeEventListener("click", contextMenuClick, true);
+      contextMenuClick = null;
+    }
+    if (contextMenuKeyDown) {
+      document.removeEventListener("keydown", contextMenuKeyDown, true);
+      contextMenuKeyDown = null;
+    }
     if (contextMenu) {
       contextMenu.remove();
       contextMenu = null;
@@ -110,19 +126,18 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     const onDocClick = (ev: MouseEvent) => {
       if (!menu.contains(ev.target as Node)) {
         closeContextMenu();
-        document.removeEventListener("click", onDocClick, true);
-        document.removeEventListener("keydown", onKeyDown, true);
       }
     };
     const onKeyDown = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") {
         closeContextMenu();
-        document.removeEventListener("click", onDocClick, true);
-        document.removeEventListener("keydown", onKeyDown, true);
       }
     };
+    contextMenuClick = onDocClick;
+    contextMenuKeyDown = onKeyDown;
     // Use setTimeout so the current event cycle doesn't immediately close it
-    setTimeout(() => {
+    contextMenuTimer = setTimeout(() => {
+      contextMenuTimer = null;
       document.addEventListener("click", onDocClick, true);
       document.addEventListener("keydown", onKeyDown, true);
     }, 0);
@@ -256,6 +271,10 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
 
   function render(tables: DbTableInfo[]) {
     allTables = tables;
+    expandedTables.clear();
+    columnCache.clear();
+    activeTable = null;
+    closeContextMenu();
     filterInput.value = "";
     renderFiltered(tables, "");
   }
@@ -271,7 +290,15 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     });
   }
 
-  return { el: wrapper, render, setActive };
+  function dispose(): void {
+    closeContextMenu();
+    allTables = [];
+    expandedTables.clear();
+    columnCache.clear();
+    activeTable = null;
+  }
+
+  return { el: wrapper, render, setActive, dispose };
 }
 
 function formatRowCount(n: number): string {

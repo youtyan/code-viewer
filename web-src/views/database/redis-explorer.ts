@@ -91,8 +91,12 @@ export function createRedisExplorer(
   let currentKey: string | null = null;
   let currentCursor = "0";
   let loadingKeys = false;
+  let loadRunId = 0;
+  let keyRunId = 0;
+  let suppressNotify = false;
 
   function notifySelectionChange(): void {
+    if (suppressNotify) return;
     callbacks.onSelectionChange?.({
       dbIndex: currentDbIndex ?? undefined,
       key: currentKey ?? undefined,
@@ -318,6 +322,9 @@ export function createRedisExplorer(
 
   async function selectKey(name: string): Promise<void> {
     if (currentDbId === null || currentDbIndex === null) return;
+    const requestRunId = ++keyRunId;
+    const requestDbId = currentDbId;
+    const requestDbIndex = currentDbIndex;
     currentKey = name;
     notifySelectionChange();
     highlightActiveKey(name);
@@ -326,10 +333,9 @@ export function createRedisExplorer(
     loading.className = "redis-note";
     loading.textContent = "Loading value...";
     mainPane.appendChild(loading);
-    const requestDbIndex = currentDbIndex;
     try {
       const params = new URLSearchParams({
-        db: currentDbId,
+        db: requestDbId,
         dbIndex: String(requestDbIndex),
         key: name,
       });
@@ -344,9 +350,17 @@ export function createRedisExplorer(
         return;
       }
       const data = (await res.json()) as RedisValueResponse;
-      if (requestDbIndex !== currentDbIndex) return;
+      if (
+        requestRunId !== keyRunId ||
+        requestDbId !== currentDbId ||
+        requestDbIndex !== currentDbIndex ||
+        name !== currentKey
+      ) {
+        return;
+      }
       renderValue(data.key, data.value);
     } catch (err) {
+      if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
       mainPane.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "redis-error";
@@ -369,13 +383,16 @@ export function createRedisExplorer(
   async function loadKeys(append: boolean): Promise<void> {
     if (currentDbId === null || currentDbIndex === null) return;
     if (loadingKeys) return;
+    const requestRunId = loadRunId;
+    const requestDbId = currentDbId;
+    const requestDbIndex = currentDbIndex;
     loadingKeys = true;
     keyMoreBtn.disabled = true;
     if (!append) setKeyStatus("Loading keys...");
     try {
       const params = new URLSearchParams({
-        db: currentDbId,
-        dbIndex: String(currentDbIndex),
+        db: requestDbId,
+        dbIndex: String(requestDbIndex),
         pattern: "*",
         cursor: currentCursor,
         count: "200",
@@ -387,7 +404,14 @@ export function createRedisExplorer(
         return;
       }
       const data = (await res.json()) as RedisKeysResponse;
-      if (currentDbIndex !== data.dbIndex) return; // stale
+      if (
+        requestRunId !== loadRunId ||
+        requestDbId !== currentDbId ||
+        requestDbIndex !== currentDbIndex ||
+        data.dbIndex !== requestDbIndex
+      ) {
+        return;
+      }
       if (!append) keyList.innerHTML = "";
       if (data.keys.length === 0 && !append) {
         setKeyStatus("(no keys)");
@@ -397,6 +421,7 @@ export function createRedisExplorer(
       currentCursor = data.nextCursor;
       keyMoreBtn.hidden = currentCursor === "0";
     } catch (err) {
+      if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setKeyStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
@@ -413,6 +438,8 @@ export function createRedisExplorer(
     dbId: string,
     initial?: RedisExplorerSelection,
   ): Promise<void> {
+    if (currentDbId === dbId && !initial) return;
+    const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentDbIndex = null;
     currentKey = null;
@@ -431,7 +458,7 @@ export function createRedisExplorer(
         return;
       }
       const data = (await res.json()) as RedisDatabasesResponse;
-      if (currentDbId !== dbId) return; // stale response
+      if (requestRunId !== loadRunId || currentDbId !== dbId) return;
       renderDatabases(data.databases);
 
       // initial.dbIndex が指定されていて、かつ実在する db index ならその db を
@@ -441,11 +468,17 @@ export function createRedisExplorer(
         initial?.dbIndex !== undefined &&
         data.databases.some((d) => d.index === initial.dbIndex)
       ) {
-        await selectDatabase(initial.dbIndex);
-        if (currentDbId !== dbId) return;
-        if (initial.key) {
-          await selectKey(initial.key);
+        suppressNotify = true;
+        try {
+          await selectDatabase(initial.dbIndex);
+          if (currentDbId !== dbId) return;
+          if (initial.key) {
+            await selectKey(initial.key);
+          }
+        } finally {
+          suppressNotify = false;
         }
+        notifySelectionChange();
       }
     } catch (err) {
       setDbStatus(
@@ -456,6 +489,9 @@ export function createRedisExplorer(
   }
 
   function clear(): void {
+    loadRunId++;
+    keyRunId++;
+    suppressNotify = false;
     currentDbId = null;
     currentDbIndex = null;
     currentKey = null;

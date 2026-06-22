@@ -122,8 +122,13 @@ export function createElasticsearchExplorer(
   let lastSort: unknown[] | undefined;
   let loadingDocs = false;
   let detailTab: "mapping" | "doc" = "mapping";
+  let loadRunId = 0;
+  let docRunId = 0;
+  let suppressNotify = false;
+  let queryNotifyTimer: ReturnType<typeof setTimeout> | null = null;
 
   function notifySelectionChange(): void {
+    if (suppressNotify) return;
     callbacks.onSelectionChange?.({
       index: currentIndex ?? undefined,
       query: currentQuery || undefined,
@@ -298,13 +303,15 @@ export function createElasticsearchExplorer(
 
   async function fetchMapping(index: string): Promise<void> {
     if (!currentDbId) return;
+    const requestRunId = loadRunId;
+    const requestDbId = currentDbId;
     mappingBody.innerHTML = "";
     const loading = document.createElement("div");
     loading.className = "es-note";
     loading.textContent = "Loading mapping...";
     mappingBody.appendChild(loading);
     try {
-      const params = new URLSearchParams({ db: currentDbId, index });
+      const params = new URLSearchParams({ db: requestDbId, index });
       const res = await fetch(`/_db/elasticsearch/mapping?${params}`);
       if (!res.ok) {
         const text = await res.text();
@@ -316,9 +323,16 @@ export function createElasticsearchExplorer(
         return;
       }
       const data = (await res.json()) as EsMappingResponse;
-      if (currentIndex !== index) return; // stale
+      if (
+        requestRunId !== loadRunId ||
+        requestDbId !== currentDbId ||
+        currentIndex !== index
+      ) {
+        return;
+      }
       renderMapping(data);
     } catch (err) {
+      if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       mappingBody.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "es-error";
@@ -330,6 +344,10 @@ export function createElasticsearchExplorer(
   async function loadDocs(append: boolean): Promise<void> {
     if (!currentDbId || !currentIndex) return;
     if (loadingDocs) return;
+    const requestRunId = loadRunId;
+    const requestDbId = currentDbId;
+    const requestIndex = currentIndex;
+    const requestQuery = currentQuery;
     loadingDocs = true;
     docMoreBtn.disabled = true;
     if (!append) {
@@ -338,11 +356,11 @@ export function createElasticsearchExplorer(
     }
     try {
       const params = new URLSearchParams({
-        db: currentDbId,
-        index: currentIndex,
+        db: requestDbId,
+        index: requestIndex,
         size: "200",
       });
-      if (currentQuery) params.set("q", currentQuery);
+      if (requestQuery) params.set("q", requestQuery);
       if (append && lastSort)
         params.set("searchAfter", JSON.stringify(lastSort));
       const res = await fetch(`/_db/elasticsearch/docs?${params}`);
@@ -352,7 +370,15 @@ export function createElasticsearchExplorer(
         return;
       }
       const data = (await res.json()) as EsDocsResponse;
-      if (currentIndex !== data.index) return; // stale
+      if (
+        requestRunId !== loadRunId ||
+        requestDbId !== currentDbId ||
+        requestIndex !== currentIndex ||
+        data.index !== requestIndex ||
+        requestQuery !== currentQuery
+      ) {
+        return;
+      }
       if (!append) docList.innerHTML = "";
       if (data.hits.length === 0 && !append) {
         setDocStatus("(no docs)");
@@ -363,6 +389,7 @@ export function createElasticsearchExplorer(
       // 続きがないか、size を満たさない返却なら more 不要。
       docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
     } catch (err) {
+      if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setDocStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
@@ -385,6 +412,9 @@ export function createElasticsearchExplorer(
 
   async function selectDoc(id: string): Promise<void> {
     if (!currentDbId || !currentIndex) return;
+    const requestRunId = ++docRunId;
+    const requestDbId = currentDbId;
+    const requestIndex = currentIndex;
     highlightActiveDoc(id);
     setDetailTab("doc");
     docBody.innerHTML = "";
@@ -392,10 +422,9 @@ export function createElasticsearchExplorer(
     loading.className = "es-note";
     loading.textContent = "Loading doc...";
     docBody.appendChild(loading);
-    const requestIndex = currentIndex;
     try {
       const params = new URLSearchParams({
-        db: currentDbId,
+        db: requestDbId,
         index: requestIndex,
         id,
       });
@@ -410,9 +439,17 @@ export function createElasticsearchExplorer(
         return;
       }
       const data = (await res.json()) as EsDocResponse;
-      if (requestIndex !== currentIndex) return; // stale
+      if (
+        requestRunId !== docRunId ||
+        requestDbId !== currentDbId ||
+        requestIndex !== currentIndex ||
+        id !== data.id
+      ) {
+        return;
+      }
       renderDoc(data);
     } catch (err) {
+      if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
       docBody.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "es-error";
@@ -438,7 +475,11 @@ export function createElasticsearchExplorer(
   // (= ユーザーが Enter または Search を押すまで保留)。
   searchInput.addEventListener("input", () => {
     currentQuery = searchInput.value.trim();
-    notifySelectionChange();
+    if (queryNotifyTimer) clearTimeout(queryNotifyTimer);
+    queryNotifyTimer = setTimeout(() => {
+      queryNotifyTimer = null;
+      notifySelectionChange();
+    }, 300);
   });
   docMoreBtn.addEventListener("click", () => loadDocs(true));
 
@@ -446,6 +487,12 @@ export function createElasticsearchExplorer(
     dbId: string,
     initial?: ElasticsearchExplorerSelection,
   ): Promise<void> {
+    if (queryNotifyTimer) {
+      clearTimeout(queryNotifyTimer);
+      queryNotifyTimer = null;
+    }
+    if (currentDbId === dbId && !initial) return;
+    const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentIndex = null;
     currentQuery = "";
@@ -472,7 +519,7 @@ export function createElasticsearchExplorer(
         return;
       }
       const data = (await res.json()) as EsIndicesResponse;
-      if (currentDbId !== dbId) return; // stale
+      if (requestRunId !== loadRunId || currentDbId !== dbId) return;
       renderIndices(data.indices);
 
       // initial.index が指定されていて実在するなら、その index を自動選択する
@@ -481,7 +528,13 @@ export function createElasticsearchExplorer(
         initial?.index &&
         data.indices.some((ix) => ix.name === initial.index)
       ) {
-        await selectIndex(initial.index);
+        suppressNotify = true;
+        try {
+          await selectIndex(initial.index);
+        } finally {
+          suppressNotify = false;
+        }
+        notifySelectionChange();
       }
     } catch (err) {
       setIndexStatus(
@@ -492,6 +545,13 @@ export function createElasticsearchExplorer(
   }
 
   function clear(): void {
+    loadRunId++;
+    docRunId++;
+    suppressNotify = false;
+    if (queryNotifyTimer) {
+      clearTimeout(queryNotifyTimer);
+      queryNotifyTimer = null;
+    }
     currentDbId = null;
     currentIndex = null;
     currentQuery = "";

@@ -73,6 +73,7 @@ export type QueryEditor = {
   focus: () => void;
   setSql: (sql: string) => void;
   getSql: () => string;
+  dispose: () => void;
 };
 
 export function createQueryEditor(
@@ -335,7 +336,7 @@ export function createQueryEditor(
     historyDropdown.hidden = false;
   });
 
-  document.addEventListener("click", (e) => {
+  const onDocumentClick = (e: MouseEvent) => {
     if (
       !historyDropdown.hidden &&
       !historyBtn.contains(e.target as Node) &&
@@ -343,7 +344,8 @@ export function createQueryEditor(
     ) {
       historyDropdown.hidden = true;
     }
-  });
+  };
+  document.addEventListener("click", onDocumentClick);
 
   textarea.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -389,7 +391,11 @@ export function createQueryEditor(
     return textarea.value;
   }
 
-  return { el, focus, setSql, getSql };
+  function dispose(): void {
+    document.removeEventListener("click", onDocumentClick);
+  }
+
+  return { el, focus, setSql, getSql, dispose };
 }
 
 function formatValue(value: DbValue): string {

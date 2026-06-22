@@ -50,16 +50,57 @@ function ensureInit() {
   initialized = true;
 }
 
-const dockerAdapterCache = new Map<string, DatabaseAdapter>();
+const MAX_DOCKER_ADAPTER_CACHE = 8;
+const DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
+type DockerAdapterCacheEntry = {
+  adapter: DatabaseAdapter;
+  lastUsed: number;
+};
+const dockerAdapterCache = new Map<string, DockerAdapterCacheEntry>();
+
+function closeDockerAdapterCacheEntry(
+  key: string,
+  entry: DockerAdapterCacheEntry,
+): void {
+  try {
+    entry.adapter.close();
+  } finally {
+    dockerAdapterCache.delete(key);
+  }
+}
+
+function pruneDockerAdapterCache(now = Date.now()): void {
+  for (const [key, entry] of dockerAdapterCache) {
+    if (now - entry.lastUsed > DOCKER_ADAPTER_IDLE_MS) {
+      closeDockerAdapterCacheEntry(key, entry);
+    }
+  }
+  while (dockerAdapterCache.size > MAX_DOCKER_ADAPTER_CACHE) {
+    let oldestKey: string | null = null;
+    let oldestEntry: DockerAdapterCacheEntry | null = null;
+    for (const [key, entry] of dockerAdapterCache) {
+      if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
+        oldestKey = key;
+        oldestEntry = entry;
+      }
+    }
+    if (!oldestKey || !oldestEntry) break;
+    closeDockerAdapterCacheEntry(oldestKey, oldestEntry);
+  }
+}
 
 async function getAdapter(
   r: ResolvedDb,
   _cwd: string,
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
+    pruneDockerAdapterCache();
     const key = r.dbId;
     const cached = dockerAdapterCache.get(key);
-    if (cached) return cached;
+    if (cached) {
+      cached.lastUsed = Date.now();
+      return cached.adapter;
+    }
     // recursive discovery により compose は subdir に置けるので、
     // `docker compose ps` の cwd は r.docker.composeDir に固定する。
     const adapter = openDockerAdapter(
@@ -69,7 +110,8 @@ async function getAdapter(
       r.docker.composeDir,
       r.docker.database,
     );
-    dockerAdapterCache.set(key, adapter);
+    dockerAdapterCache.set(key, { adapter, lastUsed: Date.now() });
+    pruneDockerAdapterCache();
     return adapter;
   }
   return getConnection(r.resolved);
@@ -503,7 +545,10 @@ async function handleQuery(
       const state = loadQueryHistory(cwd);
       const updated = addQueryHistoryEntry(state, entry);
       saveQueryHistory(cwd, updated);
-      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+      sendSse?.(
+        "db-query",
+        JSON.stringify({ action: "add", dbId: body.db, id: entry.id }),
+      );
     }
     return json(response);
   } catch (err) {
@@ -552,9 +597,13 @@ async function handleHistoryDelete(
   }
   if (!body.id) return textError("missing id", 400);
   const state = loadQueryHistory(cwd);
+  const deleted = state.entries.find((entry) => entry.id === body.id);
   const updated = deleteQueryHistoryEntry(state, body.id);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  sendSse?.(
+    "db-query",
+    JSON.stringify({ action: "delete", dbId: deleted?.dbId, id: body.id }),
+  );
   return json({ ok: true });
 }
 
@@ -573,11 +622,14 @@ async function handleHistoryClear(
   const state = loadQueryHistory(cwd);
   const updated = clearQueryHistory(state, body.db);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  sendSse?.("db-query", JSON.stringify({ action: "clear", dbId: body.db }));
   return json({ ok: true });
 }
 
 const EXPORT_MAX_ROWS = 100_000;
+const MAX_TABS_BODY_BYTES = 1_000_000;
+const MAX_SNAPSHOT_TABLES = 512;
+const MAX_SNAPSHOT_TABLE_NAME_LEN = 1024;
 
 function formatCsvField(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -904,6 +956,22 @@ async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
   return json({ snapshots });
 }
 
+function sanitizeSnapshotTables(tables: unknown): string[] | undefined | null {
+  if (tables === undefined || tables === null) return undefined;
+  if (!Array.isArray(tables)) return null;
+  if (tables.length === 0) return undefined;
+  const out: string[] = [];
+  for (const table of tables) {
+    if (out.length >= MAX_SNAPSHOT_TABLES) break;
+    if (typeof table !== "string") return null;
+    if (table.length === 0 || table.length > MAX_SNAPSHOT_TABLE_NAME_LEN) {
+      return null;
+    }
+    out.push(table);
+  }
+  return out;
+}
+
 async function handleSnapshotCreate(
   cwd: string,
   req: Request,
@@ -917,12 +985,17 @@ async function handleSnapshotCreate(
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
+  const requestedTables = sanitizeSnapshotTables(body.tables);
+  if (requestedTables === null) {
+    return textError("invalid tables", 400);
+  }
 
   // Redis (KV) も snapshot を生成できるよう、resolveDb の SQL-only 制限を
   // 迂回して直接 source を引き出す。redis service なら RedisExplorer を、
   // それ以外 (sqlite / pg / mysql) は既存 getAdapter を使う。
   let source: Parameters<typeof runSnapshot>[1];
-  let containers = body.tables;
+  let containers = requestedTables;
+  let closeSourceAfterSnapshot = false;
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
@@ -937,6 +1010,7 @@ async function handleSnapshotCreate(
       const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
         await import("./adapters/redis");
       source = openRedisExplorer(info.serviceName, info.env, info.composeDir);
+      closeSourceAfterSnapshot = true;
       // Redis では UI が key pattern を渡す想定。未指定なら全 key を対象とする。
       if (!containers || containers.length === 0) {
         containers = ["*"];
@@ -954,6 +1028,7 @@ async function handleSnapshotCreate(
         info.env,
         info.composeDir,
       );
+      closeSourceAfterSnapshot = true;
       // ES では UI が index 名 (または `{"index":"...","query":"..."}` JSON)
       // を渡す想定。未指定なら `*` で全 index を 1 つの container 扱い。
       if (!containers || containers.length === 0) {
@@ -991,25 +1066,36 @@ async function handleSnapshotCreate(
   }
 
   const note = body.note ?? "";
+  const snapshotDbId = body.db;
+  const snapshotContainers = containers;
 
   (async () => {
     try {
       const snapshotId = await runSnapshot(
         cwd,
         source,
-        body.db!,
-        containers!,
+        snapshotDbId,
+        snapshotContainers,
         note,
         (table, done) => {
           sendSse?.(
             "db-snapshot",
-            JSON.stringify({ action: "progress", table, done }),
+            JSON.stringify({
+              action: "progress",
+              dbId: snapshotDbId,
+              table,
+              done,
+            }),
           );
         },
       );
       sendSse?.(
         "db-snapshot",
-        JSON.stringify({ action: "created", id: snapshotId }),
+        JSON.stringify({
+          action: "created",
+          dbId: snapshotDbId,
+          id: snapshotId,
+        }),
       );
     } catch (err) {
       console.error(
@@ -1020,9 +1106,18 @@ async function handleSnapshotCreate(
         "db-snapshot",
         JSON.stringify({
           action: "error",
+          dbId: snapshotDbId,
           error: err instanceof Error ? err.message : String(err),
         }),
       );
+    } finally {
+      if (closeSourceAfterSnapshot) {
+        try {
+          (source as { close?: () => void }).close?.();
+        } catch {
+          // ignore close errors after snapshot completion
+        }
+      }
     }
   })();
 
@@ -1121,20 +1216,36 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
   if (req.method !== "PUT" && req.method !== "POST") {
     return textError("method not allowed", 405);
   }
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (contentLength > MAX_TABS_BODY_BYTES) {
+    return textError("tabs body too large", 413);
+  }
   let body: unknown;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_TABS_BODY_BYTES) {
+      return textError("tabs body too large", 413);
+    }
+    body = JSON.parse(raw);
   } catch {
     return textError("invalid JSON body", 400);
+  }
+  if (
+    !body ||
+    typeof body !== "object" ||
+    (body as { version?: unknown }).version !== 1
+  ) {
+    return textError("invalid tabs version", 400);
   }
   try {
     saveTabs(cwd, body as import("../../core/database/types").TabsState);
     return json({ ok: true });
   } catch (err) {
-    return textError(
-      `failed to save tabs: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "tabs state too large") {
+      return textError(message, 413);
+    }
+    return textError(`failed to save tabs: ${message}`, 500);
   }
 }
 
@@ -1152,8 +1263,7 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (r.docker) {
     const cached = dockerAdapterCache.get(r.dbId);
     if (cached) {
-      cached.close();
-      dockerAdapterCache.delete(r.dbId);
+      closeDockerAdapterCacheEntry(r.dbId, cached);
     }
   } else {
     closeConnection(r.resolved);

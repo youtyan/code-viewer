@@ -381,6 +381,7 @@ export function parseDockerDbId(
   // `:` は出ない (URL encode 済み = `%3A`)。
   const atIdx = rest.indexOf("@");
   if (atIdx >= 0) {
+    if (rest.indexOf("@", atIdx + 1) >= 0) return null;
     const afterAt = rest.slice(atIdx + 1);
     const colonIdx = afterAt.indexOf(":");
     if (colonIdx >= 0) {
@@ -388,11 +389,17 @@ export function parseDockerDbId(
       rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx)}`;
     }
     const [serviceName, encodedRel] = rest.split("@");
-    return {
-      serviceName,
-      relDir: decodeURIComponent(encodedRel || ""),
-      database,
-    };
+    if (!/^[A-Za-z0-9_-]+$/.test(serviceName)) return null;
+    if (database && hasControlCharacter(database)) return null;
+    try {
+      return {
+        serviceName,
+        relDir: decodeURIComponent(encodedRel || ""),
+        database,
+      };
+    } catch {
+      return null;
+    }
   }
   // `docker:<svc>:<db>` 形式 (cwd 直下、従来形式)。
   const colonIdx = rest.indexOf(":");
@@ -400,5 +407,15 @@ export function parseDockerDbId(
     database = rest.slice(colonIdx + 1);
     rest = rest.slice(0, colonIdx);
   }
+  if (!/^[A-Za-z0-9_-]+$/.test(rest)) return null;
+  if (database && hasControlCharacter(database)) return null;
   return { serviceName: rest, relDir: "", database };
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
 }

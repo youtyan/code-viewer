@@ -12,6 +12,7 @@ export type QueryHistoryViewCallbacks = {
 export type QueryHistoryView = {
   el: HTMLElement;
   refresh: () => Promise<void>;
+  clear: () => void;
 };
 
 export function createQueryHistoryView(
@@ -68,6 +69,12 @@ export function createQueryHistoryView(
       if (!res.ok) return;
       const state = (await res.json()) as QueryHistoryState;
       entries = state.entries;
+      if (
+        selectedEntryId &&
+        !entries.some((entry) => entry.id === selectedEntryId)
+      ) {
+        clearDetail();
+      }
       render();
     } catch {
       /* ignore */
@@ -89,6 +96,12 @@ export function createQueryHistoryView(
   }
 
   let selectedEntryId: string | null = null;
+
+  function clearDetail() {
+    selectedEntryId = null;
+    detailCol.innerHTML = "";
+    detailCol.appendChild(detailPlaceholder);
+  }
 
   function selectEntry(entry: QueryHistoryEntry) {
     selectedEntryId = entry.id;
@@ -306,7 +319,14 @@ export function createQueryHistoryView(
     refresh();
   });
 
-  return { el, refresh };
+  function clear(): void {
+    entries = [];
+    expandedIds.clear();
+    clearDetail();
+    render();
+  }
+
+  return { el, refresh, clear };
 }
 
 function formatTime(iso: string): string {

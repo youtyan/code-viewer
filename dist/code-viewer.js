@@ -4056,6 +4056,8 @@ function parseDockerDbId(dbId) {
   let database;
   const atIdx = rest.indexOf("@");
   if (atIdx >= 0) {
+    if (rest.indexOf("@", atIdx + 1) >= 0)
+      return null;
     const afterAt = rest.slice(atIdx + 1);
     const colonIdx2 = afterAt.indexOf(":");
     if (colonIdx2 >= 0) {
@@ -4063,18 +4065,38 @@ function parseDockerDbId(dbId) {
       rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx2)}`;
     }
     const [serviceName, encodedRel] = rest.split("@");
-    return {
-      serviceName,
-      relDir: decodeURIComponent(encodedRel || ""),
-      database
-    };
+    if (!/^[A-Za-z0-9_-]+$/.test(serviceName))
+      return null;
+    if (database && hasControlCharacter(database))
+      return null;
+    try {
+      return {
+        serviceName,
+        relDir: decodeURIComponent(encodedRel || ""),
+        database
+      };
+    } catch {
+      return null;
+    }
   }
   const colonIdx = rest.indexOf(":");
   if (colonIdx >= 0) {
     database = rest.slice(colonIdx + 1);
     rest = rest.slice(0, colonIdx);
   }
+  if (!/^[A-Za-z0-9_-]+$/.test(rest))
+    return null;
+  if (database && hasControlCharacter(database))
+    return null;
   return { serviceName: rest, relDir: "", database };
+}
+function hasControlCharacter(value) {
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127)
+      return true;
+  }
+  return false;
 }
 var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES, MAX_DOCKER_SERVICES = 30;
 var init_discovery = __esm(() => {
@@ -4578,6 +4600,7 @@ var init_snapshot_runner = __esm(() => {
 });
 
 // web-src/server/database/tabs-store.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
 import {
   existsSync as existsSync8,
   mkdirSync as mkdirSync6,
@@ -4591,6 +4614,61 @@ function tabsFilePath(root) {
 }
 function emptyState2() {
   return { version: 1, tabs: [], activeTabId: null };
+}
+function isValidCssSize(s) {
+  if (s.length === 0 || s.length > MAX_CSS_SIZE_LEN)
+    return false;
+  const match = /^(\d+(?:\.\d+)?)(px|%)$/.exec(s);
+  if (!match)
+    return false;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value))
+    return false;
+  return match[2] === "%" ? value >= 0 && value <= 100 : value >= 80 && value <= 2000;
+}
+function sanitizeOptionalString(v, maxLen) {
+  if (typeof v !== "string")
+    return;
+  if (v.length === 0)
+    return;
+  if (v.length > maxLen)
+    return v.slice(0, maxLen);
+  return v;
+}
+function sanitizeCssSize(v) {
+  if (typeof v !== "string")
+    return;
+  return isValidCssSize(v) ? v : undefined;
+}
+function sanitizeRedis(v) {
+  if (!v || typeof v !== "object")
+    return;
+  const r = v;
+  const out = {};
+  if (typeof r.dbIndex === "number" && Number.isInteger(r.dbIndex) && r.dbIndex >= 0 && r.dbIndex < 256) {
+    out.dbIndex = r.dbIndex;
+  }
+  const key = sanitizeOptionalString(r.key, MAX_REDIS_KEY_LEN);
+  if (key !== undefined)
+    out.key = key;
+  if (out.dbIndex === undefined && out.key === undefined)
+    return;
+  return out;
+}
+function sanitizeEs(v) {
+  if (!v || typeof v !== "object")
+    return;
+  const r = v;
+  const out = {};
+  const index = sanitizeOptionalString(r.index, MAX_INDEX_NAME_LEN);
+  if (index !== undefined)
+    out.index = index;
+  const query = sanitizeOptionalString(r.query, MAX_ES_QUERY_LEN);
+  if (query !== undefined)
+    out.query = query;
+  if (out.index === undefined && out.query === undefined)
+    return;
+  return out;
 }
 function sanitize(input) {
   if (!input || typeof input !== "object")
@@ -4607,17 +4685,36 @@ function sanitize(input) {
     if (!t || typeof t !== "object")
       continue;
     const tab = t;
-    if (typeof tab.id !== "string" || !tab.id)
+    const id = sanitizeOptionalString(tab.id, MAX_TAB_ID_LEN);
+    if (!id)
       continue;
-    if (seenIds.has(tab.id))
+    if (seenIds.has(id))
       continue;
-    seenIds.add(tab.id);
-    const dbId = typeof tab.dbId === "string" && tab.dbId.length > 0 ? tab.dbId : null;
-    const table = typeof tab.table === "string" && tab.table.length > 0 ? tab.table : null;
+    seenIds.add(id);
+    const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
+    const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
     const view = typeof tab.view === "string" && VALID_VIEWS.has(tab.view) ? tab.view : "data";
-    tabs.push({ id: tab.id, dbId, table, view });
+    const out = { id, dbId, table, view };
+    const sqlDraft = sanitizeOptionalString(tab.sqlDraft, MAX_SQL_DRAFT_LEN);
+    if (sqlDraft !== undefined)
+      out.sqlDraft = sqlDraft;
+    if (typeof tab.historyOpen === "boolean")
+      out.historyOpen = tab.historyOpen;
+    const historyHeight = sanitizeCssSize(tab.historyHeight);
+    if (historyHeight !== undefined)
+      out.historyHeight = historyHeight;
+    const sidebarWidth = sanitizeCssSize(tab.sidebarWidth);
+    if (sidebarWidth !== undefined)
+      out.sidebarWidth = sidebarWidth;
+    const redis = sanitizeRedis(tab.redis);
+    if (redis !== undefined)
+      out.redis = redis;
+    const es = sanitizeEs(tab.es);
+    if (es !== undefined)
+      out.es = es;
+    tabs.push(out);
   }
-  let activeTabId = typeof obj.activeTabId === "string" && obj.activeTabId.length > 0 ? obj.activeTabId : null;
+  let activeTabId = sanitizeOptionalString(obj.activeTabId, MAX_TAB_ID_LEN) ?? null;
   if (activeTabId && !tabs.find((t) => t.id === activeTabId)) {
     activeTabId = tabs.length > 0 ? tabs[0].id : null;
   }
@@ -4629,17 +4726,28 @@ function loadTabs(cwd) {
     return emptyState2();
   try {
     const raw = readFileSync7(file, "utf8");
-    return sanitize(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || parsed.version !== 1) {
+      backupInvalidTabsFile(file);
+      return emptyState2();
+    }
+    return sanitize(parsed);
   } catch {
+    backupInvalidTabsFile(file);
     return emptyState2();
   }
+}
+function backupInvalidTabsFile(file) {
+  try {
+    renameSync3(file, `${file}.bak-${Date.now()}`);
+  } catch {}
 }
 function saveTabs(cwd, state) {
   const normalized = sanitize(state);
   const dir = join11(cwd, CODE_VIEWER_DIR4);
   mkdirSync6(dir, { recursive: true });
   const file = tabsFilePath(cwd);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = `${file}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`;
   const content = `${JSON.stringify(normalized, null, 2)}
 `;
   if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES2) {
@@ -4648,7 +4756,7 @@ function saveTabs(cwd, state) {
   writeFileSync4(tmp, content, "utf8");
   renameSync3(tmp, file);
 }
-var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e5, VALID_VIEWS;
+var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e6, MAX_SQL_DRAFT_LEN = 16000, MAX_ES_QUERY_LEN = 16000, MAX_TAB_ID_LEN = 128, MAX_DB_ID_LEN = 2048, MAX_TABLE_NAME_LEN = 512, MAX_REDIS_KEY_LEN = 1024, MAX_INDEX_NAME_LEN = 256, MAX_CSS_SIZE_LEN = 16, VALID_VIEWS;
 var init_tabs_store = __esm(() => {
   VALID_VIEWS = new Set([
     "data",
@@ -6063,7 +6171,7 @@ __export(exports_handle, {
   json: () => json,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomBytes as randomBytes3 } from "node:crypto";
 import { relative as relative5 } from "node:path";
 function ensureInit() {
   if (initialized)
@@ -6071,14 +6179,45 @@ function ensureInit() {
   setAdapterFactory(sqliteAdapterFactory);
   initialized = true;
 }
+function closeDockerAdapterCacheEntry(key, entry) {
+  try {
+    entry.adapter.close();
+  } finally {
+    dockerAdapterCache.delete(key);
+  }
+}
+function pruneDockerAdapterCache(now = Date.now()) {
+  for (const [key, entry] of dockerAdapterCache) {
+    if (now - entry.lastUsed > DOCKER_ADAPTER_IDLE_MS) {
+      closeDockerAdapterCacheEntry(key, entry);
+    }
+  }
+  while (dockerAdapterCache.size > MAX_DOCKER_ADAPTER_CACHE) {
+    let oldestKey = null;
+    let oldestEntry = null;
+    for (const [key, entry] of dockerAdapterCache) {
+      if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
+        oldestKey = key;
+        oldestEntry = entry;
+      }
+    }
+    if (!oldestKey || !oldestEntry)
+      break;
+    closeDockerAdapterCacheEntry(oldestKey, oldestEntry);
+  }
+}
 async function getAdapter(r, _cwd) {
   if (r.docker) {
+    pruneDockerAdapterCache();
     const key = r.dbId;
     const cached = dockerAdapterCache.get(key);
-    if (cached)
-      return cached;
+    if (cached) {
+      cached.lastUsed = Date.now();
+      return cached.adapter;
+    }
     const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, r.docker.composeDir, r.docker.database);
-    dockerAdapterCache.set(key, adapter);
+    dockerAdapterCache.set(key, { adapter, lastUsed: Date.now() });
+    pruneDockerAdapterCache();
     return adapter;
   }
   return getConnection(r.resolved);
@@ -6355,7 +6494,7 @@ async function handleTable(cwd, url) {
   }
 }
 function makeHistoryId() {
-  return `qh-${randomBytes2(8).toString("hex")}`;
+  return `qh-${randomBytes3(8).toString("hex")}`;
 }
 async function handleQuery(cwd, req, sendSse) {
   if (req.method !== "POST")
@@ -6407,7 +6546,7 @@ async function handleQuery(cwd, req, sendSse) {
       const state = loadQueryHistory(cwd);
       const updated = addQueryHistoryEntry(state, entry);
       saveQueryHistory(cwd, updated);
-      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+      sendSse?.("db-query", JSON.stringify({ action: "add", dbId: body.db, id: entry.id }));
     }
     return json(response);
   } catch (err) {
@@ -6449,9 +6588,10 @@ async function handleHistoryDelete(cwd, req, sendSse) {
   if (!body.id)
     return textError("missing id", 400);
   const state = loadQueryHistory(cwd);
+  const deleted = state.entries.find((entry) => entry.id === body.id);
   const updated = deleteQueryHistoryEntry(state, body.id);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  sendSse?.("db-query", JSON.stringify({ action: "delete", dbId: deleted?.dbId, id: body.id }));
   return json({ ok: true });
 }
 async function handleHistoryClear(cwd, req, sendSse) {
@@ -6466,7 +6606,7 @@ async function handleHistoryClear(cwd, req, sendSse) {
   const state = loadQueryHistory(cwd);
   const updated = clearQueryHistory(state, body.db);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  sendSse?.("db-query", JSON.stringify({ action: "clear", dbId: body.db }));
   return json({ ok: true });
 }
 function formatCsvField(value) {
@@ -6632,7 +6772,7 @@ async function handleSearchStart(cwd, req) {
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response)
     return r;
-  const jobId = `search-${randomBytes2(8).toString("hex")}`;
+  const jobId = `search-${randomBytes3(8).toString("hex")}`;
   const ac = new AbortController;
   const job = {
     id: jobId,
@@ -6731,6 +6871,26 @@ async function handleSnapshotList(cwd, url) {
   const snapshots = await listSnapshots(cwd, dbId);
   return json({ snapshots });
 }
+function sanitizeSnapshotTables(tables) {
+  if (tables === undefined || tables === null)
+    return;
+  if (!Array.isArray(tables))
+    return null;
+  if (tables.length === 0)
+    return;
+  const out = [];
+  for (const table of tables) {
+    if (out.length >= MAX_SNAPSHOT_TABLES)
+      break;
+    if (typeof table !== "string")
+      return null;
+    if (table.length === 0 || table.length > MAX_SNAPSHOT_TABLE_NAME_LEN) {
+      return null;
+    }
+    out.push(table);
+  }
+  return out;
+}
 async function handleSnapshotCreate(cwd, req, sendSse) {
   if (req.method !== "POST")
     return textError("method not allowed", 405);
@@ -6742,8 +6902,13 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   }
   if (!body.db)
     return textError("missing db", 400);
+  const requestedTables = sanitizeSnapshotTables(body.tables);
+  if (requestedTables === null) {
+    return textError("invalid tables", 400);
+  }
   let source;
-  let containers = body.tables;
+  let containers = requestedTables;
+  let closeSourceAfterSnapshot = false;
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed)
@@ -6755,6 +6920,7 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     if (info.kind === "redis") {
       const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
       source = openRedisExplorer2(info.serviceName, info.env, info.composeDir);
+      closeSourceAfterSnapshot = true;
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
@@ -6762,6 +6928,7 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     } else if (info.kind === "elasticsearch") {
       const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
       source = openElasticsearchAdapter2(info.serviceName, info.env, info.composeDir);
+      closeSourceAfterSnapshot = true;
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
@@ -6788,18 +6955,36 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     return textError("missing tables/containers (Redis requires explicit key patterns)", 400);
   }
   const note = body.note ?? "";
+  const snapshotDbId = body.db;
+  const snapshotContainers = containers;
   (async () => {
     try {
-      const snapshotId = await runSnapshot(cwd, source, body.db, containers, note, (table, done) => {
-        sendSse?.("db-snapshot", JSON.stringify({ action: "progress", table, done }));
+      const snapshotId = await runSnapshot(cwd, source, snapshotDbId, snapshotContainers, note, (table, done) => {
+        sendSse?.("db-snapshot", JSON.stringify({
+          action: "progress",
+          dbId: snapshotDbId,
+          table,
+          done
+        }));
       });
-      sendSse?.("db-snapshot", JSON.stringify({ action: "created", id: snapshotId }));
+      sendSse?.("db-snapshot", JSON.stringify({
+        action: "created",
+        dbId: snapshotDbId,
+        id: snapshotId
+      }));
     } catch (err) {
       console.error("[code-viewer] snapshot error:", err instanceof Error ? err.message : String(err));
       sendSse?.("db-snapshot", JSON.stringify({
         action: "error",
+        dbId: snapshotDbId,
         error: err instanceof Error ? err.message : String(err)
       }));
+    } finally {
+      if (closeSourceAfterSnapshot) {
+        try {
+          source.close?.();
+        } catch {}
+      }
     }
   })();
   return json({ ok: true, message: "snapshot started" });
@@ -6866,17 +7051,32 @@ async function handleTabsPut(cwd, req) {
   if (req.method !== "PUT" && req.method !== "POST") {
     return textError("method not allowed", 405);
   }
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (contentLength > MAX_TABS_BODY_BYTES) {
+    return textError("tabs body too large", 413);
+  }
   let body;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_TABS_BODY_BYTES) {
+      return textError("tabs body too large", 413);
+    }
+    body = JSON.parse(raw);
   } catch {
     return textError("invalid JSON body", 400);
+  }
+  if (!body || typeof body !== "object" || body.version !== 1) {
+    return textError("invalid tabs version", 400);
   }
   try {
     saveTabs(cwd, body);
     return json({ ok: true });
   } catch (err) {
-    return textError(`failed to save tabs: ${err instanceof Error ? err.message : String(err)}`, 500);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "tabs state too large") {
+      return textError(message, 413);
+    }
+    return textError(`failed to save tabs: ${message}`, 500);
   }
 }
 async function handleClose(cwd, req) {
@@ -6896,8 +7096,7 @@ async function handleClose(cwd, req) {
   if (r.docker) {
     const cached = dockerAdapterCache.get(r.dbId);
     if (cached) {
-      cached.close();
-      dockerAdapterCache.delete(r.dbId);
+      closeDockerAdapterCacheEntry(r.dbId, cached);
     }
   } else {
     closeConnection(r.resolved);
@@ -7027,7 +7226,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   }
   return null;
 }
-var initialized = false, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, searchJobs;
+var initialized = false, MAX_DOCKER_ADAPTER_CACHE = 8, DOCKER_ADAPTER_IDLE_MS, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
@@ -7039,6 +7238,7 @@ var init_handle = __esm(() => {
   init_snapshot_runner();
   init_snapshot_store();
   init_tabs_store();
+  DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
   dockerAdapterCache = new Map;
   searchJobs = new Map;
 });
