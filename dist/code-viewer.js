@@ -5900,7 +5900,9 @@ Examples:
         process.exit(1);
       }
       try {
-        cwd = repoRoot(next) || realpathSync4(next);
+        const nextReal = realpathSync4(next);
+        const candidate = repoRoot(next);
+        cwd = candidate === nextReal ? candidate : nextReal;
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);

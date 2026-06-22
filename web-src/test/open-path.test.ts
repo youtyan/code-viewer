@@ -54,8 +54,13 @@ describe("open path in OS action", () => {
   });
 
   test("server keeps an explicit non-git cwd as the project root", () => {
+    // --cwd で明示された path が git toplevel そのものでない場合 (非 git
+    // ディレクトリやサブディレクトリ) は、親 repoRoot に勝手に上がらず指定
+    // された path 自身を cwd にする。
+    expect(server.includes("const nextReal = realpathSync(next)")).toBe(true);
+    expect(server.includes("const candidate = git.repoRoot(next)")).toBe(true);
     expect(
-      server.includes("cwd = git.repoRoot(next) || realpathSync(next)"),
+      server.includes("cwd = candidate === nextReal ? candidate : nextReal"),
     ).toBe(true);
     expect(
       server.includes(
