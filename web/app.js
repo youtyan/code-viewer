@@ -11021,8 +11021,15 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/database-view.ts
-  function createDatabaseView(deps) {
-    let mounted = false;
+  function createTabPane(outerDeps, cb) {
+    const deps = {
+      ...outerDeps,
+      setRoute: (route, replace2) => {
+        if (cb.isActive())
+          outerDeps.setRoute(route, replace2);
+        cb.onStateChange();
+      }
+    };
     let currentDb = null;
     let schemaCache = null;
     let lastFiles = [];
@@ -11034,8 +11041,8 @@ ${frontmatter.yaml}
     dbToolbar.appendChild(dbSelect);
     const tabBar = document.createElement("div");
     tabBar.className = "db-tab-bar";
-    const tabData = createTab("Data", true);
-    const tabSchema = createTab("Schema", false);
+    const tabData = createInnerTab("Data", true);
+    const tabSchema = createInnerTab("Schema", false);
     tabBar.append(tabData, tabSchema);
     let currentTab = "data";
     const tableList = createTableList({
@@ -11204,7 +11211,7 @@ ${frontmatter.yaml}
     const container = document.createElement("div");
     container.className = "db-container";
     container.append(upperArea, historyResizer, historyPane);
-    function createTab(text2, active) {
+    function createInnerTab(text2, active) {
       const btn = document.createElement("button");
       btn.className = `db-tab${active ? " active" : ""}`;
       btn.type = "button";
@@ -11217,38 +11224,6 @@ ${frontmatter.yaml}
         notice.remove();
       tabBar.hidden = false;
       grid.el.hidden = false;
-    }
-    function mount() {
-      if (mounted)
-        return;
-      const content = document.getElementById("content");
-      if (!content)
-        return;
-      const diff = document.getElementById("diff");
-      if (diff)
-        diff.hidden = true;
-      const empty = document.getElementById("empty");
-      if (empty)
-        empty.classList.add("hidden");
-      content.appendChild(container);
-      mounted = true;
-      applyHistoryVisibility();
-    }
-    function unmount() {
-      if (!mounted)
-        return;
-      container.remove();
-      const diff = document.getElementById("diff");
-      if (diff)
-        diff.hidden = false;
-      mounted = false;
-      grid.clear();
-      schemaView.clear();
-      erDiagram.clear();
-      redisExplorer.clear();
-      esExplorer.clear();
-      currentDb = null;
-      schemaCache = null;
     }
     function setActiveTab(tab, updateUrl = true) {
       currentTab = tab;
@@ -11363,6 +11338,7 @@ ${frontmatter.yaml}
           esExplorer.el.hidden = false;
           await esExplorer.load(dbId);
         }
+        cb.onStateChange();
         return;
       }
       redisExplorer.el.hidden = true;
@@ -11381,6 +11357,7 @@ ${frontmatter.yaml}
       if (schema.tables.length > 0) {
         selectTable(schema.tables[0].name);
       }
+      cb.onStateChange();
     }
     async function selectTable(table2) {
       tableList.setActive(table2);
@@ -11478,11 +11455,7 @@ ${frontmatter.yaml}
       deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
       selectDb(dbId);
     });
-    async function enter(db, table2, tab) {
-      mount();
-      document.body.classList.add("gdp-database-page");
-      deps.setPageMode();
-      deps.syncHeaderMenu();
+    async function enter(db, table2, view) {
       const files = await fetchDbFiles();
       lastFiles = files;
       dbSelect.innerHTML = "";
@@ -11492,6 +11465,7 @@ ${frontmatter.yaml}
         opt.textContent = "No database files found";
         dbSelect.appendChild(opt);
         dbSelect.disabled = true;
+        cb.onStateChange();
         return;
       }
       dbSelect.disabled = false;
@@ -11503,41 +11477,257 @@ ${frontmatter.yaml}
         opt.textContent = label;
         dbSelect.appendChild(opt);
       }
-      const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
+      if (db && !files.find((f2) => f2.id === db)) {
+        db = files[0].id;
+      }
+      const target = db || files[0].id;
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
       await selectDb(target);
-      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch")
+      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+        cb.onStateChange();
         return;
+      }
       if (table2) {
         await selectTable(table2);
       }
-      if (tab && tab !== "data") {
-        setActiveTab(tab);
-        if (tab === "schema") {
+      if (view && view !== "data") {
+        setActiveTab(view);
+        if (view === "schema") {
           const activeTable = tableList.el.querySelector(".db-table-item.active");
           if (activeTable?.dataset.table)
             showSchema(activeTable.dataset.table);
-        } else if (tab === "er") {
+        } else if (view === "er") {
           if (schemaCache)
             renderErDiagram();
-        } else if (tab === "snapshot") {
+        } else if (view === "snapshot") {
           snapshotView.refresh();
         }
       }
-    }
-    function leave() {
-      document.body.classList.remove("gdp-database-page");
-      unmount();
+      cb.onStateChange();
     }
     function handleSse(event, data) {
-      if (!mounted)
-        return;
       if (historyOpen)
         historyView.refresh();
       if (event === "db-snapshot" && data) {
         snapshotView.handleSse(data);
       }
+    }
+    function getState() {
+      const activeTable = tableList.el.querySelector(".db-table-item.active");
+      return {
+        id: cb.tabId,
+        dbId: currentDb?.id ?? null,
+        table: activeTable?.dataset.table ?? null,
+        view: currentTab
+      };
+    }
+    function getLabel() {
+      if (!currentDb)
+        return "(empty)";
+      if (currentDb.id.startsWith("docker:")) {
+        const m = currentDb.name.match(/^(\S+)/);
+        return m ? m[1] : currentDb.name;
+      }
+      const lastSlash = currentDb.path.lastIndexOf("/");
+      return lastSlash >= 0 ? currentDb.path.slice(lastSlash + 1) : currentDb.path;
+    }
+    function dispose() {
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      redisExplorer.clear();
+      esExplorer.clear();
+      currentDb = null;
+      schemaCache = null;
+    }
+    return {
+      el: container,
+      enter,
+      handleSse,
+      getState,
+      getLabel,
+      dispose
+    };
+  }
+  function makeTabId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `t-${crypto.randomUUID().slice(0, 12)}`;
+    }
+    return `t-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  }
+  function createDatabaseView(deps) {
+    let mounted = false;
+    const tabsById = new Map;
+    let activeTabId = null;
+    const tabsBar = document.createElement("div");
+    tabsBar.className = "db-tabs-bar";
+    const tabsList = document.createElement("div");
+    tabsList.className = "db-tabs-list";
+    const newTabBtn = document.createElement("button");
+    newTabBtn.type = "button";
+    newTabBtn.className = "db-tabs-new-btn";
+    newTabBtn.title = "新しいタブ";
+    newTabBtn.textContent = "+";
+    tabsBar.append(tabsList, newTabBtn);
+    const tabHost = document.createElement("div");
+    tabHost.className = "db-tab-host";
+    const root = document.createElement("div");
+    root.className = "db-root";
+    root.append(tabsBar, tabHost);
+    function setActive(id) {
+      activeTabId = id;
+      for (const [tid, entry] of tabsById) {
+        const isActive = tid === id;
+        entry.pane.el.hidden = !isActive;
+        entry.chip.classList.toggle("active", isActive);
+      }
+      syncActiveRoute();
+    }
+    function syncActiveRoute() {
+      if (!activeTabId)
+        return;
+      const entry = tabsById.get(activeTabId);
+      if (!entry)
+        return;
+      const s2 = entry.pane.getState();
+      deps.setRoute({
+        screen: "database",
+        db: s2.dbId ?? undefined,
+        table: s2.table ?? undefined,
+        tab: s2.view === "data" ? undefined : s2.view,
+        range: deps.currentRange()
+      }, true);
+    }
+    function refreshChipLabel(id) {
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      const label = entry.pane.getLabel();
+      entry.label.textContent = label;
+      entry.label.title = label;
+    }
+    function openTab(initial) {
+      const id = initial?.id || makeTabId();
+      const chip = document.createElement("div");
+      chip.className = "db-tabs-chip";
+      chip.dataset.tabId = id;
+      const labelEl = document.createElement("span");
+      labelEl.className = "db-tabs-chip-label";
+      labelEl.textContent = "(empty)";
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "db-tabs-chip-close";
+      closeBtn.title = "閉じる";
+      closeBtn.textContent = "×";
+      closeBtn.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        closeTab(id);
+      });
+      chip.append(labelEl, closeBtn);
+      chip.addEventListener("click", () => setActive(id));
+      chip.addEventListener("auxclick", (e2) => {
+        if (e2.button === 1) {
+          e2.preventDefault();
+          closeTab(id);
+        }
+      });
+      const pane = createTabPane(deps, {
+        tabId: id,
+        isActive: () => activeTabId === id,
+        onStateChange: () => {
+          refreshChipLabel(id);
+          if (activeTabId === id)
+            syncActiveRoute();
+        }
+      });
+      pane.el.hidden = true;
+      tabsList.appendChild(chip);
+      tabHost.appendChild(pane.el);
+      tabsById.set(id, { pane, chip, label: labelEl });
+      setActive(id);
+      pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined).then(() => refreshChipLabel(id));
+      return id;
+    }
+    function closeTab(id) {
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      entry.pane.dispose();
+      entry.pane.el.remove();
+      entry.chip.remove();
+      tabsById.delete(id);
+      if (activeTabId !== id)
+        return;
+      if (tabsById.size === 0) {
+        openTab({});
+        return;
+      }
+      const firstId = tabsById.keys().next().value;
+      if (firstId)
+        setActive(firstId);
+    }
+    newTabBtn.addEventListener("click", () => {
+      openTab({});
+    });
+    async function enter(db, table2, view) {
+      if (!mounted) {
+        const content = document.getElementById("content");
+        if (!content)
+          return;
+        const diff = document.getElementById("diff");
+        if (diff)
+          diff.hidden = true;
+        const empty = document.getElementById("empty");
+        if (empty)
+          empty.classList.add("hidden");
+        content.appendChild(root);
+        document.body.classList.add("gdp-database-page");
+        mounted = true;
+        deps.setPageMode();
+        deps.syncHeaderMenu();
+      }
+      if (tabsById.size === 0) {
+        openTab({
+          dbId: db || null,
+          table: table2 || null,
+          view: view || "data"
+        });
+        return;
+      }
+      if (!activeTabId)
+        return;
+      const active = tabsById.get(activeTabId);
+      if (!active)
+        return;
+      if (db || table2 || view) {
+        await active.pane.enter(db, table2, view);
+        refreshChipLabel(activeTabId);
+      }
+    }
+    function leave() {
+      if (!mounted)
+        return;
+      for (const [, entry] of tabsById) {
+        entry.pane.dispose();
+      }
+      tabsById.clear();
+      tabsList.innerHTML = "";
+      tabHost.innerHTML = "";
+      activeTabId = null;
+      root.remove();
+      document.body.classList.remove("gdp-database-page");
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+      mounted = false;
+    }
+    function handleSse(event, data) {
+      if (!mounted || !activeTabId)
+        return;
+      const entry = tabsById.get(activeTabId);
+      if (entry)
+        entry.pane.handleSse(event, data);
     }
     return { enter, leave, handleSse };
   }
