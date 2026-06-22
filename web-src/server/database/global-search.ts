@@ -1,5 +1,6 @@
 import type { DbColumn, DbValue } from "../../core/database/types";
 import type { DatabaseAdapter } from "./adapters/types";
+import { serializeDbRow, serializeDbValue } from "./serialize";
 
 export type SearchHit = {
   table: string;
@@ -96,7 +97,7 @@ export function searchTable(
 
       for (const row of result.rows) {
         const colIdx = result.columns.indexOf(col.name);
-        const valueRaw = colIdx >= 0 ? row[colIdx] : null;
+        const valueRaw = colIdx >= 0 ? serializeDbValue(row[colIdx]) : null;
         const valueStr = valueRaw == null ? "" : String(valueRaw);
         const preview =
           valueStr.length > 200 ? `${valueStr.slice(0, 200)}...` : valueStr;
@@ -106,7 +107,7 @@ export function searchTable(
           const keyObj: Record<string, DbValue> = {};
           for (const pk of pkColumns) {
             const pkIdx = result.columns.indexOf(pk);
-            if (pkIdx >= 0) keyObj[pk] = row[pkIdx];
+            if (pkIdx >= 0) keyObj[pk] = serializeDbValue(row[pkIdx]);
           }
           rowKeyJson = JSON.stringify(keyObj);
         }
@@ -116,7 +117,7 @@ export function searchTable(
           column: col.name,
           rowKeyJson,
           valuePreview: preview,
-          rowPreview: row,
+          rowPreview: serializeDbRow(row),
         });
       }
     } catch {

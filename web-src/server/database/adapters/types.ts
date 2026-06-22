@@ -7,11 +7,12 @@ import type {
   DbTableInfo,
   DbValue,
 } from "../../../core/database/types";
+import type { RawDbValue } from "../serialize";
 
 export type QueryResult = {
   columns: string[];
   columnTypes: string[];
-  rows: DbValue[][];
+  rows: RawDbValue[][];
   rowCount: number;
 };
 

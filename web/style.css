@@ -6116,6 +6116,16 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   color: var(--danger);
   background: none;
 }
+.db-grid-detail-copy {
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-left: auto;
+  margin-right: 8px;
+  color: var(--fg-muted);
+}
+.db-grid-detail-copy:hover {
+  color: var(--fg);
+}
 
 .db-grid-detail-content {
   padding: 8px 12px;
