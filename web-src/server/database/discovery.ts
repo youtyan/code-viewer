@@ -132,6 +132,8 @@ function detectDbKind(image: string): DbKind | null {
   if (lower.includes("postgres")) return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
   if (lower.includes("redis")) return "redis";
+  if (lower.includes("elasticsearch") || lower.includes("opensearch"))
+    return "elasticsearch";
   return null;
 }
 
@@ -143,6 +145,8 @@ function defaultPortFor(kind: DbKind): string {
       return "3306";
     case "redis":
       return "6379";
+    case "elasticsearch":
+      return "9200";
     default:
       return "";
   }
@@ -259,7 +263,7 @@ export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
       const hostPort = port || defaultPortFor(kind);
 
       let label: string;
-      if (kind === "redis") {
+      if (kind === "redis" || kind === "elasticsearch") {
         label = `${svc.name} (${image}, localhost:${hostPort})`;
       } else {
         const dbName =
