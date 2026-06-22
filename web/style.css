@@ -5238,6 +5238,51 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   gap: 4px;
   flex-shrink: 0;
 }
+
+/* ---------- Icon toolbar (案 B 改: TablePlus / Beekeeper 風) ---------- */
+.db-icon-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+  min-height: 36px;
+}
+.db-icon-toolbar[hidden] {
+  display: none !important;
+}
+.db-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+.db-icon-btn:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.db-icon-btn.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.db-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.db-icon-btn svg {
+  pointer-events: none;
+}
 .db-tool-btn {
   width: 100%;
   padding: 6px 10px;
