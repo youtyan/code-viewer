@@ -11025,6 +11025,8 @@ ${frontmatter.yaml}
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
       await selectDb(target);
+      if (currentDb?.kind === "redis")
+        return;
       if (table2) {
         await selectTable(table2);
       }

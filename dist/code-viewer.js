@@ -4427,9 +4427,9 @@ function execRedisCli(config, args, timeoutMs = 1e4) {
   const dockerArgs = [
     "exec",
     "-i",
+    ...config.password ? ["-e", `REDISCLI_AUTH=${config.password}`] : [],
     config.containerName,
     "redis-cli",
-    ...config.password ? ["-a", config.password, "--no-auth-warning"] : [],
     "-3",
     ...args
   ];
@@ -4846,6 +4846,9 @@ function resolveDb(cwd, dbParam) {
     const info = dockerDbs.find((d) => d.serviceName === serviceName);
     if (!info)
       return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      return textError("redis services must use the /_db/redis/* routes", 400);
+    }
     const resolved2 = dbName ? { ...info, database: dbName } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved2 };
   }
@@ -4853,6 +4856,15 @@ function resolveDb(cwd, dbParam) {
   if (!resolved)
     return textError("invalid database path", 400);
   return { resolved, dbId: dbParam };
+}
+function toFileInfo(entry) {
+  return {
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    sizeBytes: entry.sizeBytes,
+    kind: entry.kind
+  };
 }
 function handleFiles(cwd, omitDirNames) {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
@@ -4886,7 +4898,7 @@ function handleFiles(cwd, omitDirNames) {
         sizeBytes: f.sizeBytes,
         kind: "sqlite"
       })),
-      ...dockerEntries
+      ...dockerEntries.map(toFileInfo)
     ]
   };
   return json(body);

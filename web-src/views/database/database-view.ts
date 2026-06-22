@@ -571,6 +571,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     currentDb = files.find((f) => f.id === target) || null;
 
     await selectDb(target);
+    // Redis explorer owns its own pane and tabs do not apply.
+    // Skip the SQL-shaped table/tab restoration so URL params like
+    // ?tab=query do not unhide the SQL pane on top of the Redis pane.
+    if (currentDb?.kind === "redis") return;
     if (table) {
       await selectTable(table);
     }

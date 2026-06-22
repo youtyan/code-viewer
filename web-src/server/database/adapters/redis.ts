@@ -26,12 +26,15 @@ function execRedisCli(
   args: string[],
   timeoutMs = 10000,
 ): { stdout: string; stderr: string; code: number } {
+  // Pass the password via REDISCLI_AUTH env var (docker exec -e) so it does
+  // not appear in the host process argv. Mirrors how docker.ts uses
+  // PGPASSWORD for psql and MYSQL_PWD for mysql.
   const dockerArgs = [
     "exec",
     "-i",
+    ...(config.password ? ["-e", `REDISCLI_AUTH=${config.password}`] : []),
     config.containerName,
     "redis-cli",
-    ...(config.password ? ["-a", config.password, "--no-auth-warning"] : []),
     "-3",
     ...args,
   ];
