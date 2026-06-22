@@ -4500,6 +4500,10 @@ var init_snapshot_runner = __esm(() => {
 });
 
 // web-src/server/database/adapters/redis.ts
+var exports_redis = {};
+__export(exports_redis, {
+  openRedisExplorer: () => openRedisExplorer
+});
 import { spawnSync as spawnSync3 } from "node:child_process";
 import { createHash as createHash4 } from "node:crypto";
 function parseSnapshotContainer(container) {
@@ -5746,18 +5750,45 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   }
   if (!body.db)
     return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
-  if (r instanceof Response)
-    return r;
-  const adapter = await getAdapter(r, cwd);
-  let tables = body.tables;
-  if (!tables || tables.length === 0) {
-    tables = adapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+  let source;
+  let containers = body.tables;
+  if (body.db.startsWith("docker:")) {
+    const serviceName = body.db.slice(7).split(":")[0];
+    const dockerDbs = getDockerDbs(cwd);
+    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    if (!info)
+      return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      const { openRedisExplorer: openRedisExplorer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
+      source = openRedisExplorer2(info.serviceName, info.env, cwd);
+      if (!containers || containers.length === 0) {
+        containers = ["*"];
+      }
+    } else {
+      const r = resolveDb(cwd, body.db);
+      if (r instanceof Response)
+        return r;
+      source = await getAdapter(r, cwd);
+    }
+  } else {
+    const r = resolveDb(cwd, body.db);
+    if (r instanceof Response)
+      return r;
+    source = await getAdapter(r, cwd);
+  }
+  if (!containers || containers.length === 0) {
+    const sqlAdapter = source;
+    if (typeof sqlAdapter.getTables === "function") {
+      containers = sqlAdapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+    }
+  }
+  if (!containers || containers.length === 0) {
+    return textError("missing tables/containers (Redis requires explicit key patterns)", 400);
   }
   const note = body.note ?? "";
   (async () => {
     try {
-      const snapshotId = await runSnapshot(cwd, adapter, body.db, tables, note, (table, done) => {
+      const snapshotId = await runSnapshot(cwd, source, body.db, containers, note, (table, done) => {
         sendSse?.("db-snapshot", JSON.stringify({ action: "progress", table, done }));
       });
       sendSse?.("db-snapshot", JSON.stringify({ action: "created", id: snapshotId }));
