@@ -6,3 +6,7 @@ docs/superpowers/
 .DS_Store
 .env
 .env.*
+
+# data/test/<service>/.git は preview server を独立 cwd で動かすための内部 git。
+# 外側のリポジトリには含めない (sub-repo として誤検出されるのを防ぐ)。
+data/test/*/.git/
