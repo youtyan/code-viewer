@@ -5169,11 +5169,15 @@ body.query-history-panel-open #content {
   max-width: none;
 }
 
+.db-root,
 .db-container {
   --db-font-sm: 11px;
   --db-font-base: 12px;
   --db-font-md: 13px;
   --db-font-mono: 13px;
+}
+
+.db-container {
   display: flex;
   flex-direction: column;
   /* `.db-tab-host` の中に置かれるので親の高さに合わせる。
@@ -5186,18 +5190,21 @@ body.query-history-panel-open #content {
   overflow: hidden;
   font-size: var(--db-font-base);
 }
+body[data-sidebar-font-size="compact"] .db-root,
 body[data-sidebar-font-size="compact"] .db-container {
   --db-font-sm: 10px;
   --db-font-base: 11px;
   --db-font-md: 12px;
   --db-font-mono: 12px;
 }
+body[data-sidebar-font-size="large"] .db-root,
 body[data-sidebar-font-size="large"] .db-container {
   --db-font-sm: 12px;
   --db-font-base: 14px;
   --db-font-md: 15px;
   --db-font-mono: 14px;
 }
+body[data-sidebar-font-size="xlarge"] .db-root,
 body[data-sidebar-font-size="xlarge"] .db-container {
   --db-font-sm: 13px;
   --db-font-base: 15px;
@@ -5266,6 +5273,7 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   color: var(--fg-muted);
   border-radius: 4px;
   cursor: pointer;
+  font-size: var(--db-font-base);
   transition: background-color 0.12s, color 0.12s;
 }
 .db-icon-btn:hover {
@@ -5282,6 +5290,8 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 }
 .db-icon-btn svg {
   pointer-events: none;
+  width: 1.25em;
+  height: 1.25em;
 }
 .db-tool-btn {
   width: 100%;
@@ -7050,6 +7060,7 @@ body.db-resizing {
   flex-direction: row;
   overflow: hidden;
   background: var(--bg);
+  font-size: var(--db-font-base);
 }
 .redis-explorer[hidden] {
   display: none;
@@ -7065,6 +7076,7 @@ body.db-resizing {
 .redis-pane-header {
   padding: 8px 12px;
   font-weight: 600;
+  font-size: var(--db-font-md);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
@@ -7092,10 +7104,11 @@ body.db-resizing {
 }
 .redis-db-name {
   font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
   font-weight: 500;
 }
 .redis-db-count {
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   color: var(--fg-muted);
 }
 .redis-key-list-pane {
@@ -7149,7 +7162,7 @@ body.db-resizing {
   border-left: 2px solid transparent;
   user-select: none;
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
 }
 .redis-key-item:hover {
   background: var(--bg-hover, var(--bg-soft));
@@ -7168,7 +7181,7 @@ body.db-resizing {
   display: inline-block;
   padding: 0 6px;
   border-radius: 3px;
-  font-size: 0.75em;
+  font-size: var(--db-font-sm);
   font-family: var(--mono, monospace);
   text-transform: uppercase;
   background: var(--bg-soft);
@@ -7208,7 +7221,7 @@ body.db-resizing {
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   cursor: pointer;
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   color: var(--fg);
 }
 .redis-key-more-btn:hover {
@@ -7237,6 +7250,7 @@ body.db-resizing {
 }
 .redis-value-key-name {
   font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7249,6 +7263,7 @@ body.db-resizing {
 }
 .redis-value-empty {
   color: var(--fg-muted);
+  font-size: var(--db-font-base);
   font-style: italic;
 }
 .redis-value-info,
@@ -7256,7 +7271,7 @@ body.db-resizing {
   padding: 4px 8px;
   margin-bottom: 6px;
   border-radius: 4px;
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   font-family: var(--mono, monospace);
 }
 .redis-value-info {
@@ -7273,7 +7288,7 @@ body.db-resizing {
   padding: 0 6px;
   margin-right: 6px;
   border-radius: 3px;
-  font-size: 0.75em;
+  font-size: var(--db-font-sm);
   font-family: var(--mono, monospace);
   text-transform: uppercase;
   background: #f0e8f8;
@@ -7284,7 +7299,7 @@ body.db-resizing {
 .redis-value-string,
 .redis-value-raw-json {
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
@@ -7296,7 +7311,7 @@ body.db-resizing {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
 }
 .redis-value-hash-table th,
 .redis-value-hash-table td {
@@ -7322,7 +7337,7 @@ body.db-resizing {
   margin: 0;
   padding: 0 0 0 28px;
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
 }
 .redis-value-list li {
   padding: 2px 4px;
@@ -7333,12 +7348,12 @@ body.db-resizing {
 .redis-note {
   padding: 8px 12px;
   color: var(--fg-muted);
-  font-size: 0.9em;
+  font-size: var(--db-font-sm);
 }
 .redis-error {
   padding: 8px 12px;
   color: var(--error, #c00);
-  font-size: 0.9em;
+  font-size: var(--db-font-sm);
 }
 
 /* ---------- Elasticsearch explorer ---------- */
@@ -7348,6 +7363,7 @@ body.db-resizing {
   flex-direction: row;
   overflow: hidden;
   background: var(--bg);
+  font-size: var(--db-font-base);
 }
 .es-explorer[hidden] {
   display: none;
@@ -7355,6 +7371,7 @@ body.db-resizing {
 .es-pane-header {
   padding: 8px 12px;
   font-weight: 600;
+  font-size: var(--db-font-md);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
@@ -7390,13 +7407,14 @@ body.db-resizing {
 }
 .es-index-name {
   font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .es-index-meta {
-  font-size: 0.8em;
+  font-size: var(--db-font-sm);
   color: var(--fg-muted);
 }
 .es-doc-list-pane {
@@ -7423,7 +7441,7 @@ body.db-resizing {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--mono, monospace);
-  font-size: 0.85em;
+  font-size: var(--db-font-mono);
 }
 .es-search-btn {
   padding: 4px 10px;
@@ -7432,7 +7450,7 @@ body.db-resizing {
   background: var(--bg);
   color: var(--fg);
   cursor: pointer;
-  font-size: 0.85em;
+  font-size: var(--db-font-base);
 }
 .es-search-btn:hover {
   background: var(--bg-hover, var(--bg-soft));
@@ -7450,7 +7468,7 @@ body.db-resizing {
   border-left: 2px solid transparent;
   user-select: none;
   font-family: var(--mono, monospace);
-  font-size: 0.85em;
+  font-size: var(--db-font-mono);
   gap: 2px;
   border-bottom: 1px solid var(--border);
 }
@@ -7469,7 +7487,7 @@ body.db-resizing {
 }
 .es-doc-preview {
   color: var(--fg-muted);
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7480,7 +7498,7 @@ body.db-resizing {
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
   cursor: pointer;
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   color: var(--fg);
 }
 .es-doc-more-btn:hover {
@@ -7508,7 +7526,7 @@ body.db-resizing {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 0.9em;
+  font-size: var(--db-font-base);
   color: var(--fg-muted);
   border-bottom: 2px solid transparent;
 }
@@ -7526,6 +7544,7 @@ body.db-resizing {
 .es-mapping-header,
 .es-doc-detail-header {
   font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
   font-weight: 600;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
@@ -7533,7 +7552,7 @@ body.db-resizing {
 }
 .es-doc-detail-meta {
   font-family: var(--mono, monospace);
-  font-size: 0.85em;
+  font-size: var(--db-font-sm);
   color: var(--fg-muted);
   margin-bottom: 8px;
 }
@@ -7541,7 +7560,7 @@ body.db-resizing {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
 }
 .es-mapping-table th,
 .es-mapping-table td {
@@ -7561,13 +7580,14 @@ body.db-resizing {
 }
 .es-doc-source {
   font-family: var(--mono, monospace);
-  font-size: 0.9em;
+  font-size: var(--db-font-mono);
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
 }
 .es-value-empty {
   color: var(--fg-muted);
+  font-size: var(--db-font-base);
   font-style: italic;
   text-align: center;
   padding: 8px;
@@ -7575,12 +7595,12 @@ body.db-resizing {
 .es-note {
   padding: 8px 12px;
   color: var(--fg-muted);
-  font-size: 0.9em;
+  font-size: var(--db-font-sm);
 }
 .es-error {
   padding: 8px 12px;
   color: var(--error, #c00);
-  font-size: 0.9em;
+  font-size: var(--db-font-sm);
 }
 
 /* ---------- Database multi-tab manager ---------- */
@@ -7594,6 +7614,7 @@ body.db-resizing {
   height: calc(100vh - var(--global-header-h));
   width: 100%;
   overflow: hidden;
+  font-size: var(--db-font-base);
 }
 .db-tabs-bar {
   display: flex;
@@ -7623,7 +7644,7 @@ body.db-resizing {
   color: var(--fg-muted);
   cursor: pointer;
   user-select: none;
-  font-size: 0.85em;
+  font-size: var(--db-font-base);
   max-width: 240px;
   min-width: 80px;
   flex-shrink: 0;
@@ -7664,7 +7685,7 @@ body.db-resizing {
   color: var(--fg-muted);
   border-radius: 3px;
   cursor: pointer;
-  font-size: 1.1em;
+  font-size: var(--db-font-md);
   line-height: 1;
 }
 .db-tabs-chip-close:hover {
@@ -7677,7 +7698,7 @@ body.db-resizing {
   background: var(--bg-soft);
   cursor: pointer;
   padding: 0 12px;
-  font-size: 1.1em;
+  font-size: var(--db-font-md);
   color: var(--fg-muted);
   min-width: 36px;
 }
