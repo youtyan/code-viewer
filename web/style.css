@@ -5228,12 +5228,13 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   border-top: 1px solid var(--border);
   padding: 6px 8px;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   flex-shrink: 0;
 }
 .db-tool-btn {
-  flex: 1;
-  padding: 5px 8px;
+  width: 100%;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -5241,7 +5242,10 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   font-size: var(--db-font-base);
   font-family: inherit;
   cursor: pointer;
-  text-align: center;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .db-tool-btn:hover {
   background: var(--bg-mute);
