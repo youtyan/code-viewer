@@ -278,13 +278,56 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
     return { totalHits, hits, lastSort };
   }
-  function getDoc(_opts: { index: string; id: string }): {
+  function getDoc(opts: { index: string; id: string }): {
     found: boolean;
     source: unknown;
     seqNo?: number;
     primaryTerm?: number;
   } {
-    throw new Error("not implemented yet");
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    if (!opts.id) {
+      throw new Error("missing doc id");
+    }
+    // ES の `GET /<index>/_doc/<id>` は doc 不在のとき HTTP 404 と
+    //   `{"_index": "...", "_id": "...", "found": false}`
+    // を返す。callJson は 4xx を全部例外にしてしまうので、ここは
+    // execEsRequest を直接呼んで 404 だけ `{found: false}` に救う。
+    const r = execEsRequest(
+      config,
+      "GET",
+      `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`,
+    );
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    type DocResp = {
+      found?: boolean;
+      _source?: unknown;
+      _seq_no?: number;
+      _primary_term?: number;
+    };
+    if (status === 404) {
+      // 404 でも JSON body が来るが、parse 失敗時は found: false に倒す。
+      try {
+        const parsed = text ? (JSON.parse(text) as DocResp) : { found: false };
+        return { found: parsed.found === true, source: parsed._source };
+      } catch {
+        return { found: false, source: undefined };
+      }
+    }
+    if (status < 200 || status >= 300) {
+      throw new Error(`_doc: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    const parsed = safeJsonParse<DocResp>(text, "_doc");
+    return {
+      found: parsed.found === true,
+      source: parsed._source,
+      seqNo: parsed._seq_no,
+      primaryTerm: parsed._primary_term,
+    };
   }
 
   return {
