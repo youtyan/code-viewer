@@ -2392,6 +2392,15 @@ window.GdpExpandLogic = GdpExpandLogic;
             : "The working tree is clean against this ref.";
       }
     }
+    const routeAtRequest = STATE.route;
+    const fromAtRequest = STATE.from;
+    const toAtRequest = STATE.to;
+    const ignoreWsAtRequest = STATE.ignoreWs;
+    const isCurrentDiffRequest = () =>
+      STATE.route === routeAtRequest &&
+      STATE.from === fromAtRequest &&
+      STATE.to === toAtRequest &&
+      STATE.ignoreWs === ignoreWsAtRequest;
     setStatus("refreshing");
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set("ignore_ws", "1");
@@ -2401,11 +2410,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
+        if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
         setStatus("live");
         return result;
       })
       .catch(() => {
+        if (!isCurrentDiffRequest()) return null;
         setStatus("error");
         return null;
       });
