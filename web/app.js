@@ -11560,6 +11560,42 @@ ${frontmatter.yaml}
     let mounted = false;
     const tabsById = new Map;
     let activeTabId = null;
+    let restoring = false;
+    let savePending = null;
+    function scheduleSave() {
+      if (!mounted || restoring)
+        return;
+      if (savePending !== null)
+        clearTimeout(savePending);
+      savePending = setTimeout(saveNow, 500);
+    }
+    async function saveNow() {
+      savePending = null;
+      const tabs = [];
+      for (const [, entry] of tabsById)
+        tabs.push(entry.pane.getState());
+      const body = { version: 1, tabs, activeTabId };
+      try {
+        await fetch("/_db/tabs", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1"
+          },
+          body: JSON.stringify(body)
+        });
+      } catch {}
+    }
+    async function fetchTabs() {
+      try {
+        const res = await fetch("/_db/tabs");
+        if (!res.ok)
+          return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }
     const tabsBar = document.createElement("div");
     tabsBar.className = "db-tabs-bar";
     const tabsList = document.createElement("div");
@@ -11583,6 +11619,7 @@ ${frontmatter.yaml}
         entry.chip.classList.toggle("active", isActive);
       }
       syncActiveRoute();
+      scheduleSave();
     }
     function syncActiveRoute() {
       if (!activeTabId)
@@ -11639,6 +11676,7 @@ ${frontmatter.yaml}
           refreshChipLabel(id);
           if (activeTabId === id)
             syncActiveRoute();
+          scheduleSave();
         }
       });
       pane.el.hidden = true;
@@ -11671,7 +11709,8 @@ ${frontmatter.yaml}
       openTab({});
     });
     async function enter(db, table2, view) {
-      if (!mounted) {
+      const firstMount = !mounted;
+      if (firstMount) {
         const content = document.getElementById("content");
         if (!content)
           return;
@@ -11686,6 +11725,35 @@ ${frontmatter.yaml}
         mounted = true;
         deps.setPageMode();
         deps.syncHeaderMenu();
+        const restored = await fetchTabs();
+        if (restored && restored.tabs.length > 0) {
+          restoring = true;
+          try {
+            for (const t2 of restored.tabs) {
+              openTab({
+                id: t2.id,
+                dbId: t2.dbId ?? null,
+                table: t2.table ?? null,
+                view: t2.view
+              });
+            }
+            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
+            if (targetId)
+              setActive(targetId);
+          } finally {
+            restoring = false;
+          }
+          if (db || table2 || view) {
+            const active2 = tabsById.get(activeTabId ?? "");
+            if (active2) {
+              await active2.pane.enter(db, table2, view);
+              if (activeTabId)
+                refreshChipLabel(activeTabId);
+            }
+          }
+          scheduleSave();
+          return;
+        }
       }
       if (tabsById.size === 0) {
         openTab({
