@@ -5,6 +5,7 @@ import type {
   EsMappingProperty,
   EsSearchResult,
 } from "../../../core/database/types";
+import type { SnapshotItem } from "../sources/types";
 
 type EsConfig = {
   containerName: string;
@@ -31,6 +32,11 @@ export type ElasticsearchExplorer = {
     seqNo?: number;
     primaryTerm?: number;
   };
+  iterateForSnapshot(
+    container: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem>;
+  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
   close(): void;
 };
 
@@ -330,6 +336,56 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     };
   }
 
+  async function* iterateForSnapshot(
+    container: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem> {
+    const { index, query } = parseEsSnapshotContainer(container);
+    // search_after で全件 iterate。PIT を使うのが本式だが PoC では
+    // search_after だけで進める (R3 仕様書通り)。size 1000 で chunk しつつ、
+    // 最終 hit の sort を次ループに渡す。size 未満が返れば終了。
+    const PAGE = 1000;
+    let searchAfter: unknown[] | undefined;
+    for (;;) {
+      if (signal?.aborted) return;
+      const result = searchDocs({
+        index,
+        query,
+        size: PAGE,
+        searchAfter,
+      });
+      if (result.hits.length === 0) return;
+      for (const hit of result.hits) {
+        if (signal?.aborted) return;
+        const keyJson = JSON.stringify({ _index: hit._index, _id: hit._id });
+        const payloadJson = JSON.stringify({ _source: hit._source });
+        // doc version 識別: ES の _seq_no + _primary_term は idempotent な
+        // version 番号 (write のたびに seq_no が単調増加、term は primary
+        // 切り替えで増える)。両方欠落していたら _source の JSON で fallback。
+        const rowHash =
+          hit._seq_no !== undefined && hit._primary_term !== undefined
+            ? `${hit._seq_no}-${hit._primary_term}`
+            : payloadJson;
+        yield { keyJson, payloadJson, rowHash };
+      }
+      if (result.hits.length < PAGE) return;
+      searchAfter = result.lastSort;
+      if (!searchAfter || searchAfter.length === 0) return;
+    }
+  }
+
+  async function listSnapshotContainers(): Promise<
+    Array<{ id: string; label: string }>
+  > {
+    // index 一覧を SnapshotIterable の container 候補として返す。
+    // id は canonical JSON で、label は表示用の生 index 名。
+    const indices = listIndices();
+    return indices.map((ix) => ({
+      id: JSON.stringify({ index: ix.name }),
+      label: ix.name,
+    }));
+  }
+
   return {
     kind: "elasticsearch",
     model: "document",
@@ -338,10 +394,35 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     getMapping,
     searchDocs,
     getDoc,
+    iterateForSnapshot,
+    listSnapshotContainers,
     close() {
       // nothing to close (docker exec is one-shot per call)
     },
   };
+}
+
+// canonicalizeEsSnapshotContainer と pair で、JSON 文字列または raw index 名
+// から {index, query} に正規化する。canonicalize 側は JSON 文字列を返す関数で、
+// こちらは内部で使う構造化値を返す。
+function parseEsSnapshotContainer(container: string): {
+  index: string;
+  query?: string;
+} {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container) as { index?: string; query?: string };
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query =
+        typeof obj.query === "string" && obj.query.length > 0
+          ? obj.query
+          : undefined;
+      return { index, query };
+    } catch {
+      // fall through
+    }
+  }
+  return { index: container || "*" };
 }
 
 // "1kb" / "2.3mb" / "10gb" / "500b" のような表記を bytes に変換する。

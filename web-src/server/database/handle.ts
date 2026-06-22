@@ -927,6 +927,16 @@ async function handleSnapshotCreate(
       // 2 回 snapshot を取って summary 比較するときに container ID 差で
       // 別物扱いになるのを防ぐ。
       containers = containers.map(canonicalizeRedisSnapshotContainer);
+    } else if (info.kind === "elasticsearch") {
+      const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
+        await import("./adapters/elasticsearch");
+      source = openElasticsearchAdapter(info.serviceName, info.env, cwd);
+      // ES では UI が index 名 (または `{"index":"...","query":"..."}` JSON)
+      // を渡す想定。未指定なら `*` で全 index を 1 つの container 扱い。
+      if (!containers || containers.length === 0) {
+        containers = ["*"];
+      }
+      containers = containers.map(canonicalizeEsSnapshotContainer);
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response) return r;

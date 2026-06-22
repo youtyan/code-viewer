@@ -5174,140 +5174,12 @@ var init_redis = __esm(() => {
   SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
 });
 
-// web-src/server/database/handle-redis.ts
-var exports_handle_redis = {};
-__export(exports_handle_redis, {
-  handleRedisRoute: () => handleRedisRoute
-});
-function getRedisServices(cwd) {
-  if (cachedRedisCwd === cwd && cachedRedisDbs)
-    return cachedRedisDbs;
-  const all = discoverDockerDatabases(cwd);
-  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({ serviceName: d.serviceName, env: d.env }));
-  cachedRedisCwd = cwd;
-  return cachedRedisDbs;
-}
-function resolveRedis(cwd, dbParam) {
-  if (!dbParam)
-    return textError("missing db parameter", 400);
-  if (!dbParam.startsWith("docker:")) {
-    return textError("redis requires docker: prefix", 400);
-  }
-  const serviceName = dbParam.slice(7).split(":")[0];
-  const services = getRedisServices(cwd);
-  const info = services.find((s) => s.serviceName === serviceName);
-  if (!info)
-    return textError("redis service not found", 404);
-  const cached = redisAdapterCache.get(dbParam);
-  if (cached)
-    return { dbId: dbParam, explorer: cached };
-  const explorer = openRedisExplorer(info.serviceName, info.env, cwd);
-  redisAdapterCache.set(dbParam, explorer);
-  return { dbId: dbParam, explorer };
-}
-function handleDatabases(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  try {
-    const databases = r.explorer.listDatabases();
-    const body = { dbId: r.dbId, databases };
-    return json(body);
-  } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`, 500);
-  }
-}
-function handleKeys(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const dbIndexRaw = url.searchParams.get("dbIndex");
-  if (dbIndexRaw === null)
-    return textError("missing dbIndex", 400);
-  const dbIndex = Number(dbIndexRaw);
-  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
-    return textError("dbIndex must be an integer in 0..15", 400);
-  }
-  const pattern = url.searchParams.get("pattern") || "*";
-  const cursor = url.searchParams.get("cursor") || "0";
-  const countRaw = url.searchParams.get("count");
-  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
-  try {
-    const { keys, nextCursor } = r.explorer.listKeys({
-      db: dbIndex,
-      pattern,
-      cursor,
-      count
-    });
-    const body = {
-      dbId: r.dbId,
-      dbIndex,
-      keys,
-      nextCursor
-    };
-    return json(body);
-  } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
-  }
-}
-async function handleRedisRoute(req, url, cwd) {
-  const path = url.pathname;
-  const start = Date.now();
-  const method = req.method;
-  const log = (status) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
-  };
-  const wrap = (res) => {
-    log(res.status);
-    return res;
-  };
-  if (path !== "/_db/redis/databases" && path !== "/_db/redis/keys" && path !== "/_db/redis/value") {
-    return null;
-  }
-  if (method !== "GET") {
-    return wrap(textError("method not allowed", 405));
-  }
-  if (path === "/_db/redis/databases")
-    return wrap(handleDatabases(cwd, url));
-  if (path === "/_db/redis/keys")
-    return wrap(handleKeys(cwd, url));
-  return wrap(handleValue(cwd, url));
-}
-function handleValue(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const dbIndexRaw = url.searchParams.get("dbIndex");
-  if (dbIndexRaw === null)
-    return textError("missing dbIndex", 400);
-  const dbIndex = Number(dbIndexRaw);
-  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
-    return textError("dbIndex must be an integer in 0..15", 400);
-  }
-  const key = url.searchParams.get("key");
-  if (!key)
-    return textError("missing key", 400);
-  try {
-    const value = r.explorer.getValue({ db: dbIndex, key });
-    const body = { dbId: r.dbId, dbIndex, key, value };
-    return json(body);
-  } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read redis value: ${err instanceof Error ? err.message : String(err)}`, 500);
-  }
-}
-var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
-var init_handle_redis = __esm(() => {
-  init_redis();
-  init_discovery();
-  init_handle();
-  redisAdapterCache = new Map;
-});
-
 // web-src/server/database/adapters/elasticsearch.ts
+var exports_elasticsearch = {};
+__export(exports_elasticsearch, {
+  openElasticsearchAdapter: () => openElasticsearchAdapter,
+  canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
+});
 import { spawnSync as spawnSync4 } from "node:child_process";
 function execEsRequest(config, method, path, body, timeoutMs = 15000) {
   const hasPassword = !!config.password;
@@ -5496,6 +5368,43 @@ function createElasticsearchAdapter(config) {
       primaryTerm: parsed._primary_term
     };
   }
+  async function* iterateForSnapshot(container, signal) {
+    const { index, query } = parseEsSnapshotContainer(container);
+    const PAGE = 1000;
+    let searchAfter;
+    for (;; ) {
+      if (signal?.aborted)
+        return;
+      const result = searchDocs({
+        index,
+        query,
+        size: PAGE,
+        searchAfter
+      });
+      if (result.hits.length === 0)
+        return;
+      for (const hit of result.hits) {
+        if (signal?.aborted)
+          return;
+        const keyJson = JSON.stringify({ _index: hit._index, _id: hit._id });
+        const payloadJson = JSON.stringify({ _source: hit._source });
+        const rowHash = hit._seq_no !== undefined && hit._primary_term !== undefined ? `${hit._seq_no}-${hit._primary_term}` : payloadJson;
+        yield { keyJson, payloadJson, rowHash };
+      }
+      if (result.hits.length < PAGE)
+        return;
+      searchAfter = result.lastSort;
+      if (!searchAfter || searchAfter.length === 0)
+        return;
+    }
+  }
+  async function listSnapshotContainers() {
+    const indices = listIndices();
+    return indices.map((ix) => ({
+      id: JSON.stringify({ index: ix.name }),
+      label: ix.name
+    }));
+  }
   return {
     kind: "elasticsearch",
     model: "document",
@@ -5504,8 +5413,21 @@ function createElasticsearchAdapter(config) {
     getMapping,
     searchDocs,
     getDoc,
+    iterateForSnapshot,
+    listSnapshotContainers,
     close() {}
   };
+}
+function parseEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" && obj.query.length > 0 ? obj.query : undefined;
+      return { index, query };
+    } catch {}
+  }
+  return { index: container || "*" };
 }
 function parseEsSize(raw) {
   if (!raw)
@@ -5527,6 +5449,20 @@ function parseEsSize(raw) {
   };
   return Math.round(n * (mult[unit] || 1));
 }
+function canonicalizeEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" ? obj.query : undefined;
+      const out = { index };
+      if (query !== undefined)
+        out.query = query;
+      return JSON.stringify(out);
+    } catch {}
+  }
+  return JSON.stringify({ index: container || "*" });
+}
 function openElasticsearchAdapter(serviceName, env, cwd) {
   const containerName = resolveContainerName3(serviceName, cwd);
   if (!containerName) {
@@ -5537,6 +5473,139 @@ function openElasticsearchAdapter(serviceName, env, cwd) {
 }
 var ES_DEFAULT_SIZE = 200;
 var init_elasticsearch = () => {};
+
+// web-src/server/database/handle-redis.ts
+var exports_handle_redis = {};
+__export(exports_handle_redis, {
+  handleRedisRoute: () => handleRedisRoute
+});
+function getRedisServices(cwd) {
+  if (cachedRedisCwd === cwd && cachedRedisDbs)
+    return cachedRedisDbs;
+  const all = discoverDockerDatabases(cwd);
+  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({ serviceName: d.serviceName, env: d.env }));
+  cachedRedisCwd = cwd;
+  return cachedRedisDbs;
+}
+function resolveRedis(cwd, dbParam) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError("redis requires docker: prefix", 400);
+  }
+  const serviceName = dbParam.slice(7).split(":")[0];
+  const services = getRedisServices(cwd);
+  const info = services.find((s) => s.serviceName === serviceName);
+  if (!info)
+    return textError("redis service not found", 404);
+  const cached = redisAdapterCache.get(dbParam);
+  if (cached)
+    return { dbId: dbParam, explorer: cached };
+  const explorer = openRedisExplorer(info.serviceName, info.env, cwd);
+  redisAdapterCache.set(dbParam, explorer);
+  return { dbId: dbParam, explorer };
+}
+function handleDatabases(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  try {
+    const databases = r.explorer.listDatabases();
+    const body = { dbId: r.dbId, databases };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+function handleKeys(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const pattern = url.searchParams.get("pattern") || "*";
+  const cursor = url.searchParams.get("cursor") || "0";
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
+  try {
+    const { keys, nextCursor } = r.explorer.listKeys({
+      db: dbIndex,
+      pattern,
+      cursor,
+      count
+    });
+    const body = {
+      dbId: r.dbId,
+      dbIndex,
+      keys,
+      nextCursor
+    };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleRedisRoute(req, url, cwd) {
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  const log = (status) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
+  };
+  const wrap = (res) => {
+    log(res.status);
+    return res;
+  };
+  if (path !== "/_db/redis/databases" && path !== "/_db/redis/keys" && path !== "/_db/redis/value") {
+    return null;
+  }
+  if (method !== "GET") {
+    return wrap(textError("method not allowed", 405));
+  }
+  if (path === "/_db/redis/databases")
+    return wrap(handleDatabases(cwd, url));
+  if (path === "/_db/redis/keys")
+    return wrap(handleKeys(cwd, url));
+  return wrap(handleValue(cwd, url));
+}
+function handleValue(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const key = url.searchParams.get("key");
+  if (!key)
+    return textError("missing key", 400);
+  try {
+    const value = r.explorer.getValue({ db: dbIndex, key });
+    const body = { dbId: r.dbId, dbIndex, key, value };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to read redis value: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
+var init_handle_redis = __esm(() => {
+  init_redis();
+  init_discovery();
+  init_handle();
+  redisAdapterCache = new Map;
+});
 
 // web-src/server/database/handle-elasticsearch.ts
 var exports_handle_elasticsearch = {};
@@ -6408,6 +6477,13 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
         containers = ["*"];
       }
       containers = containers.map(canonicalizeRedisSnapshotContainer2);
+    } else if (info.kind === "elasticsearch") {
+      const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
+      source = openElasticsearchAdapter2(info.serviceName, info.env, cwd);
+      if (!containers || containers.length === 0) {
+        containers = ["*"];
+      }
+      containers = containers.map(canonicalizeEsSnapshotContainer2);
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response)
