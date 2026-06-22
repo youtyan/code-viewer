@@ -4502,10 +4502,15 @@ var init_snapshot_runner = __esm(() => {
 // web-src/server/database/adapters/redis.ts
 var exports_redis = {};
 __export(exports_redis, {
-  openRedisExplorer: () => openRedisExplorer
+  openRedisExplorer: () => openRedisExplorer,
+  canonicalizeRedisSnapshotContainer: () => canonicalizeRedisSnapshotContainer
 });
 import { spawnSync as spawnSync3 } from "node:child_process";
 import { createHash as createHash4 } from "node:crypto";
+function canonicalizeRedisSnapshotContainer(container) {
+  const { db, pattern } = parseSnapshotContainer(container);
+  return JSON.stringify({ db, pattern });
+}
 function parseSnapshotContainer(container) {
   if (container.startsWith("{")) {
     try {
@@ -5990,11 +5995,12 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
-      const { openRedisExplorer: openRedisExplorer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
+      const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
       source = openRedisExplorer2(info.serviceName, info.env, cwd);
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
+      containers = containers.map(canonicalizeRedisSnapshotContainer2);
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response)
