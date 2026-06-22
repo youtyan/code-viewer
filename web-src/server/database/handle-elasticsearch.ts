@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import type {
   EsDocResponse,
   EsDocsResponse,
@@ -9,7 +10,7 @@ import {
   type ElasticsearchExplorer,
   openElasticsearchAdapter,
 } from "./adapters/elasticsearch";
-import { discoverDockerDatabases } from "./discovery";
+import { discoverDockerDatabases, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
 
 const esAdapterCache = new Map<string, ElasticsearchExplorer>();
@@ -17,6 +18,7 @@ const esAdapterCache = new Map<string, ElasticsearchExplorer>();
 type DockerEsInfo = {
   serviceName: string;
   env: Record<string, string>;
+  composeDir: string;
 };
 
 let cachedEsServices: DockerEsInfo[] | null = null;
@@ -27,7 +29,11 @@ function getEsServices(cwd: string): DockerEsInfo[] {
   const all = discoverDockerDatabases(cwd);
   cachedEsServices = all
     .filter((d) => d.kind === "elasticsearch")
-    .map((d) => ({ serviceName: d.serviceName, env: d.env }));
+    .map((d) => ({
+      serviceName: d.serviceName,
+      env: d.env,
+      composeDir: d.composeDir,
+    }));
   cachedEsCwd = cwd;
   return cachedEsServices;
 }
@@ -40,15 +46,26 @@ function resolveEs(
   if (!dbParam.startsWith("docker:")) {
     return textError("elasticsearch requires docker: prefix", 400);
   }
-  const serviceName = dbParam.slice(7).split(":")[0];
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed) return textError("invalid docker db id", 400);
   const services = getEsServices(cwd);
-  const info = services.find((s) => s.serviceName === serviceName);
+  const info = services.find(
+    (s) =>
+      s.serviceName === parsed.serviceName &&
+      relative(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir,
+  );
   if (!info) return textError("elasticsearch service not found", 404);
 
   const cached = esAdapterCache.get(dbParam);
   if (cached) return { dbId: dbParam, explorer: cached };
 
-  const explorer = openElasticsearchAdapter(info.serviceName, info.env, cwd);
+  // openElasticsearchAdapter の cwd 引数は `docker compose ps` の実行 dir。
+  // recursive discovery 後は compose のあるディレクトリを渡す。
+  const explorer = openElasticsearchAdapter(
+    info.serviceName,
+    info.env,
+    info.composeDir,
+  );
   esAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { relative } from "node:path";
 import type {
   DbFilesResponse,
   DbOrder,
@@ -19,6 +20,7 @@ import {
   type DockerDbInfo,
   discoverDockerDatabases,
   discoverSqliteFiles,
+  parseDockerDbId,
   validateDbPath,
 } from "./discovery";
 import { getPrimaryKeyColumns, searchTable } from "./global-search";
@@ -51,17 +53,19 @@ const dockerAdapterCache = new Map<string, DatabaseAdapter>();
 
 async function getAdapter(
   r: ResolvedDb,
-  cwd: string,
+  _cwd: string,
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
     const key = r.dbId;
     const cached = dockerAdapterCache.get(key);
     if (cached) return cached;
+    // recursive discovery により compose は subdir に置けるので、
+    // `docker compose ps` の cwd は r.docker.composeDir に固定する。
     const adapter = openDockerAdapter(
       r.docker.serviceName,
       r.docker.kind as "postgresql" | "mysql",
       r.docker.env,
-      cwd,
+      r.docker.composeDir,
       r.docker.database,
     );
     dockerAdapterCache.set(key, adapter);
@@ -102,6 +106,8 @@ let cachedDockerCwd: string | null = null;
 
 function getDockerDbs(cwd: string): DockerDbInfo[] {
   if (cachedDockerCwd === cwd && cachedDockerDbs) return cachedDockerDbs;
+  // omit list は handleFiles と揃え (`.git`, `node_modules` は discovery 側
+  // で常時 omit、それ以外はユーザー指定が無いので空配列で十分)。
   cachedDockerDbs = discoverDockerDatabases(cwd);
   cachedDockerCwd = cwd;
   return cachedDockerDbs;
@@ -110,12 +116,15 @@ function getDockerDbs(cwd: string): DockerDbInfo[] {
 function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
-    const rest = dbParam.slice(7);
-    const colonIdx = rest.indexOf(":");
-    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
-    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
+    const parsed = parseDockerDbId(dbParam);
+    if (!parsed) return textError("invalid docker db id", 400);
     const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    // service 名だけでなく relDir も合わせて検索 (subdir compose の衝突対策)。
+    const info = dockerDbs.find(
+      (d) =>
+        d.serviceName === parsed.serviceName &&
+        relative(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir,
+    );
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
@@ -126,7 +135,9 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
         400,
       );
     }
-    const resolved = dbName ? { ...info, database: dbName } : info;
+    const resolved = parsed.database
+      ? { ...info, database: parsed.database }
+      : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved };
   }
   const resolved = validateDbPath(cwd, dbParam);
@@ -152,7 +163,7 @@ function toFileInfo(entry: {
 
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
   const dockerEntries: typeof dockerServices = [];
   for (const svc of dockerServices) {
     if (svc.kind === "redis" || svc.kind === "elasticsearch") {
@@ -163,15 +174,17 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
       svc.serviceName,
       svc.kind as "postgresql" | "mysql",
       svc.env,
-      cwd,
+      svc.composeDir,
     );
     if (dbs.length <= 1) {
       dockerEntries.push(svc);
     } else {
       for (const db of dbs) {
+        // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
+        // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
         dockerEntries.push({
           ...svc,
-          id: `docker:${svc.serviceName}:${db}`,
+          id: `${svc.id}:${db}`,
           name: svc.name.replace(/\)$/, ` / ${db})`),
           database: db,
         });
@@ -910,14 +923,19 @@ async function handleSnapshotCreate(
   let source: Parameters<typeof runSnapshot>[1];
   let containers = body.tables;
   if (body.db.startsWith("docker:")) {
-    const serviceName = body.db.slice(7).split(":")[0];
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed) return textError("invalid docker db id", 400);
     const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    const info = dockerDbs.find(
+      (d) =>
+        d.serviceName === parsed.serviceName &&
+        relative(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir,
+    );
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
         await import("./adapters/redis");
-      source = openRedisExplorer(info.serviceName, info.env, cwd);
+      source = openRedisExplorer(info.serviceName, info.env, info.composeDir);
       // Redis では UI が key pattern を渡す想定。未指定なら全 key を対象とする。
       if (!containers || containers.length === 0) {
         containers = ["*"];
@@ -930,7 +948,11 @@ async function handleSnapshotCreate(
     } else if (info.kind === "elasticsearch") {
       const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
         await import("./adapters/elasticsearch");
-      source = openElasticsearchAdapter(info.serviceName, info.env, cwd);
+      source = openElasticsearchAdapter(
+        info.serviceName,
+        info.env,
+        info.composeDir,
+      );
       // ES では UI が index 名 (または `{"index":"...","query":"..."}` JSON)
       // を渡す想定。未指定なら `*` で全 index を 1 つの container 扱い。
       if (!containers || containers.length === 0) {
