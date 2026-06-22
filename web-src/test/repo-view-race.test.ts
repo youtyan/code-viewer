@@ -16,12 +16,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function treeResponse(): RepoTreeResponse {
+function treeResponse(path = "README.md"): RepoTreeResponse {
   return {
     ref: "worktree",
     path: "",
     project: "code-viewer",
-    entries: [{ name: "README.md", path: "README.md", type: "blob" }],
+    entries: [{ name: path.split("/").pop() || path, path, type: "blob" }],
   };
 }
 
@@ -46,8 +46,28 @@ function installNullDocument() {
   } as unknown as Document;
 }
 
-function makeRepoView(route: AppRoute) {
-  let repoSidebarRef: string | null = null;
+function installFilelistDocument(hasEntries: () => boolean) {
+  globalThis.document = {
+    querySelector: (selector: string) =>
+      selector === "#filelist"
+        ? ({
+            querySelector: () => (hasEntries() ? ({} as Element) : null),
+          } as unknown as HTMLElement)
+        : null,
+  } as unknown as Document;
+}
+
+function makeRepoView(
+  route: AppRoute,
+  options: {
+    repoMode?: boolean;
+    repoSidebarRef?: string | null;
+    repoSidebarDomReady?: boolean;
+    polluteSidebarAfterRender?: boolean;
+  } = {},
+) {
+  let repoSidebarRef: string | null = options.repoSidebarRef ?? null;
+  let repoSidebarDomReady = !!options.repoSidebarDomReady;
   const state: RepoViewDeps["STATE"] = {
     route,
     files: [],
@@ -88,7 +108,7 @@ function makeRepoView(route: AppRoute) {
     scrollVirtualSidebarPathIntoView() {},
     shouldLazyLoadSidebarDir: () => false,
     setFolderIcon() {},
-    isRepositorySidebarMode: () => false,
+    isRepositorySidebarMode: () => !!options.repoMode,
     placeSidebarToggle() {},
     createOpenPathButton: () => ({}) as HTMLElement,
     removeStandaloneSource() {},
@@ -101,6 +121,8 @@ function makeRepoView(route: AppRoute) {
     setRepoSidebarRef(ref) {
       repoSidebarRef = ref;
     },
+    getSidebarOnFileClick: () =>
+      repoSidebarDomReady ? ((() => {}) as unknown) : null,
     syncHeaderMenu() {
       calls.headerSyncs++;
     },
@@ -115,7 +137,18 @@ function makeRepoView(route: AppRoute) {
       throw new Error("stale repository render touched the DOM");
     },
   };
-  return { view: createRepoView(deps), state, calls };
+  return {
+    view: createRepoView({
+      ...deps,
+      renderSidebar(files, onFileClick) {
+        calls.sidebarRenders.push(files);
+        repoSidebarDomReady = !!onFileClick;
+        if (options.polluteSidebarAfterRender) repoSidebarDomReady = false;
+      },
+    }),
+    state,
+    calls,
+  };
 }
 
 describe("repo view route races", () => {
@@ -159,5 +192,67 @@ describe("repo view route races", () => {
 
     expect(calls.sidebarRenders).toEqual([]);
     expect(calls.activePaths).toEqual([]);
+  });
+
+  test("renderRepoBlobSidebar does not reuse a matching ref when the sidebar is no longer repo-rendered", async () => {
+    installFilelistDocument(() => true);
+    let fetches = 0;
+    globalThis.fetch = (() => {
+      fetches++;
+      return Promise.resolve(jsonResponse(treeResponse("src/repo.ts")));
+    }) as unknown as typeof fetch;
+    const { view, calls } = makeRepoView(
+      {
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range,
+      },
+      {
+        repoMode: true,
+        repoSidebarRef: "worktree",
+        repoSidebarDomReady: false,
+      },
+    );
+
+    await view.renderRepoBlobSidebar("", "worktree");
+
+    expect(fetches).toBe(1);
+    expect(calls.sidebarRenders).toHaveLength(1);
+    expect(calls.sidebarRenders[0].map((file) => file.path)).toEqual([
+      "src/repo.ts",
+    ]);
+  });
+
+  test("renderRepoBlobSidebar refreshes after a shared pending load leaves polluted sidebar state", async () => {
+    installFilelistDocument(() => true);
+    const pending = deferred<Response>();
+    let fetches = 0;
+    globalThis.fetch = (() => {
+      fetches++;
+      return fetches === 1
+        ? pending.promise
+        : Promise.resolve(jsonResponse(treeResponse("src/fresh.ts")));
+    }) as unknown as typeof fetch;
+    const { view, calls } = makeRepoView(
+      {
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range,
+      },
+      { repoMode: true, polluteSidebarAfterRender: true },
+    );
+
+    const firstLoad = view.renderRepoBlobSidebar("", "worktree");
+    const sharedLoad = view.renderRepoBlobSidebar("src/fresh.ts", "worktree");
+    pending.resolve(jsonResponse(treeResponse("src/stale.ts")));
+    await Promise.all([firstLoad, sharedLoad]);
+
+    expect(fetches).toBe(2);
+    expect(calls.sidebarRenders.map((files) => files[0]?.path)).toEqual([
+      "src/stale.ts",
+      "src/fresh.ts",
+    ]);
   });
 });

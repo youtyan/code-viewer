@@ -8891,30 +8891,46 @@ ${frontmatter.yaml}
       thNum.textContent = "#";
       thNum.className = "db-grid-rownum";
       headRow.appendChild(thNum);
-      for (const col of result.columns) {
+      for (let i2 = 0;i2 < result.columns.length; i2++) {
         const th = document.createElement("th");
-        th.textContent = col;
+        const name = document.createElement("div");
+        name.className = "db-query-header-name";
+        name.textContent = result.columns[i2];
+        const type = document.createElement("div");
+        type.className = "db-query-header-type";
+        type.textContent = result.columnTypes[i2] || "";
+        th.append(name, type);
         headRow.appendChild(th);
       }
       thead.appendChild(headRow);
       const tbody = document.createElement("tbody");
-      for (let i2 = 0;i2 < result.rows.length; i2++) {
-        const row = result.rows[i2];
+      if (result.rows.length === 0) {
         const tr = document.createElement("tr");
-        if (i2 % 2 === 1)
-          tr.classList.add("alt");
-        const tdNum = document.createElement("td");
-        tdNum.className = "db-grid-rownum";
-        tdNum.textContent = String(i2 + 1);
-        tr.appendChild(tdNum);
-        for (const value of row) {
-          const td = document.createElement("td");
-          td.textContent = formatValue(value);
-          if (value === null)
-            td.classList.add("null");
-          tr.appendChild(td);
-        }
+        const td = document.createElement("td");
+        td.className = "db-query-empty";
+        td.colSpan = result.columns.length + 1;
+        td.textContent = "No rows";
+        tr.appendChild(td);
         tbody.appendChild(tr);
+      } else {
+        for (let i2 = 0;i2 < result.rows.length; i2++) {
+          const row = result.rows[i2];
+          const tr = document.createElement("tr");
+          if (i2 % 2 === 1)
+            tr.classList.add("alt");
+          const tdNum = document.createElement("td");
+          tdNum.className = "db-grid-rownum";
+          tdNum.textContent = String(i2 + 1);
+          tr.appendChild(tdNum);
+          for (const value of row) {
+            const td = document.createElement("td");
+            td.textContent = formatValue(value);
+            if (value === null)
+              td.classList.add("null");
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
       }
       table2.append(thead, tbody);
       const wrapper = document.createElement("div");
@@ -12924,7 +12940,8 @@ ${frontmatter.yaml}
       persistViewedFiles,
       applyHideTests,
       getServerGeneration,
-      setServerGeneration
+      setServerGeneration,
+      invalidateRepoSidebar
     } = deps;
     function rerenderLoadedDiffs() {
       document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
@@ -13189,6 +13206,7 @@ ${frontmatter.yaml}
       const newListSig = computeListSignature(newFiles);
       const listSame = newListSig === prevListSignature && prevListSignature !== "";
       STATE.files = newFiles;
+      invalidateRepoSidebar();
       setServerGeneration(meta.generation || 0);
       window._lastMeta = meta;
       renderMeta(meta);
@@ -15023,6 +15041,21 @@ ${frontmatter.yaml}
         return `${day}d ago`;
       return iso.slice(0, 10);
     }
+    function absoluteWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const d2 = new Date(t2);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}`;
+    }
+    function displayWhen(iso) {
+      const relative = relativeWhen(iso);
+      const absolute = absoluteWhen(iso);
+      if (relative === absolute || relative === absolute.slice(0, 10))
+        return absolute;
+      return `${relative} (${absolute})`;
+    }
     function fetchPage(skip) {
       const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` + (query ? `&q=${encodeURIComponent(query)}` : "");
       return deps.trackLoad(fetch(url).then(async (r2) => {
@@ -15036,7 +15069,7 @@ ${frontmatter.yaml}
     }
     function commitRow(commit) {
       const active = commit.sha === selectedSha ? " active" : "";
-      return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` + `</span>` + `</li>`;
+      return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` + `</span>` + `</li>`;
     }
     function renderList() {
       const now = new Date;
@@ -15816,6 +15849,39 @@ ${frontmatter.yaml}
         fetchCommitRefs(query);
       }, 150);
     }
+    function relativeWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const sec = Math.round((Date.now() - t2) / 1000);
+      if (sec < 60)
+        return "just now";
+      const min = Math.round(sec / 60);
+      if (min < 60)
+        return `${min}m ago`;
+      const hour = Math.round(min / 60);
+      if (hour < 24)
+        return `${hour}h ago`;
+      const day = Math.round(hour / 24);
+      if (day < 30)
+        return `${day}d ago`;
+      return iso.slice(0, 10);
+    }
+    function absoluteWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const d2 = new Date(t2);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}`;
+    }
+    function displayWhen(iso) {
+      const relative = relativeWhen(iso);
+      const absolute = absoluteWhen(iso);
+      if (relative === absolute || relative === absolute.slice(0, 10))
+        return absolute;
+      return `${relative} (${absolute})`;
+    }
     function buildPopBody(query) {
       const q = (query || "").toLowerCase().trim();
       const m = (s2) => !q || String(s2).toLowerCase().includes(q);
@@ -15835,7 +15901,7 @@ ${frontmatter.yaml}
           if (!commit.sha)
             continue;
           const shortSha = commit.sha.slice(0, 7);
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when || "") + "</span>" + "</div>" + "</div>");
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when ? displayWhen(commit.when) : "") + "</span>" + "</div>" + "</div>");
         }
       } else if (popTab === "branches") {
         const branches = (REFS.branches || []).filter((b2) => m(b2.name));
@@ -16410,6 +16476,7 @@ ${frontmatter.yaml}
       getProjectName,
       getRepoSidebarRef,
       setRepoSidebarRef,
+      getSidebarOnFileClick,
       syncHeaderMenu,
       getSidebarRowByPath,
       getSidebarVirtualActivePath,
@@ -16420,7 +16487,13 @@ ${frontmatter.yaml}
       direction: "asc"
     };
     function isRepoSidebarReusable(ref) {
-      return getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode();
+      return getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode() && isRepoSidebarDomReusable();
+    }
+    function isRepoSidebarDomReusable() {
+      const filelist = document.querySelector("#filelist");
+      if (!filelist || !getSidebarOnFileClick())
+        return false;
+      return !!filelist.querySelector("[data-path], [data-dirpath]");
     }
     function syncRepoTargetInput(ref) {
       const input = document.querySelector("#repo-target");
@@ -17069,6 +17142,10 @@ ${frontmatter.yaml}
         return REPO_SIDEBAR_LOAD.then(() => {
           if (!isActiveRepoTreeRef(normalizedRef))
             return;
+          if (!isRepoSidebarReusable(normalizedRef)) {
+            invalidateRepoSidebar();
+            return renderRepoBlobSidebar(currentPath, normalizedRef);
+          }
           activateRepoSidebarPath(currentPath);
         });
       }
@@ -21211,6 +21288,7 @@ ${frontmatter.yaml}
         language: savedLanguage,
         sbView: localStorage.getItem("gdp:sbview") || "tree",
         sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+        historyWidth: parseInt(localStorage.getItem("gdp:historywidth") ?? "", 10) || 320,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
         collapsedDirs: new Set(JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]")),
         ignoreWs: igRaw === null ? true : igRaw === "1",
@@ -21377,6 +21455,7 @@ ${frontmatter.yaml}
       setRepoSidebarRef: (ref) => {
         REPO_SIDEBAR_REF = ref;
       },
+      getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
       syncHeaderMenu,
       getSidebarRowByPath,
       getSidebarVirtualActivePath,
@@ -22283,7 +22362,8 @@ ${frontmatter.yaml}
       getServerGeneration: () => SERVER_GENERATION,
       setServerGeneration: (generation) => {
         SERVER_GENERATION = generation;
-      }
+      },
+      invalidateRepoSidebar
     });
     const {
       renderShell,
@@ -22342,6 +22422,13 @@ ${frontmatter.yaml}
       else
         focusMainPanel();
     });
+    function applyHistoryWidth(w) {
+      const cw = Math.max(220, Math.min(640, w));
+      document.documentElement.style.setProperty("--history-w", `${cw}px`);
+      STATE.historyWidth = cw;
+      localStorage.setItem("gdp:historywidth", String(cw));
+    }
+    applyHistoryWidth(STATE.historyWidth);
     applySidebarWidth(STATE.sbWidth);
     (function trackSidebarInteraction() {
       const sb = document.getElementById("sidebar");
@@ -22371,13 +22458,51 @@ ${frontmatter.yaml}
       document.body.appendChild(preview);
       const MIN = 180, MAX = 900;
       const clamp = (w) => Math.max(MIN, Math.min(MAX, w));
-      let dragging = false, startX = 0, startW = 0, currentW = 0;
+      const sidebarLeft = () => document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
+      let dragging = false, startX = 0, startW = 0, startLeft = 0, currentW = 0;
       handle.addEventListener("mousedown", (e2) => {
         dragging = true;
         startX = e2.clientX;
         startW = STATE.sbWidth;
+        startLeft = sidebarLeft();
         currentW = startW;
         document.body.classList.add("gdp-resizing");
+        preview.style.display = "block";
+        preview.style.left = `${startLeft + startW}px`;
+        e2.preventDefault();
+      });
+      window.addEventListener("mousemove", (e2) => {
+        if (!dragging)
+          return;
+        currentW = clamp(startW + (e2.clientX - startX));
+        preview.style.left = `${startLeft + currentW}px`;
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging)
+          return;
+        dragging = false;
+        preview.style.display = "none";
+        document.body.classList.remove("gdp-resizing");
+        applySidebarWidth(currentW);
+      });
+      handle.addEventListener("dblclick", () => applySidebarWidth(308));
+    })();
+    (function setupHistoryResizer() {
+      const handle = document.getElementById("history-resizer");
+      if (!handle)
+        return;
+      const preview = document.createElement("div");
+      preview.id = "history-resize-preview";
+      document.body.appendChild(preview);
+      const MIN = 220, MAX = 640;
+      const clamp = (w) => Math.max(MIN, Math.min(MAX, w));
+      let dragging = false, startX = 0, startW = 0, currentW = 0;
+      handle.addEventListener("mousedown", (e2) => {
+        dragging = true;
+        startX = e2.clientX;
+        startW = STATE.historyWidth;
+        currentW = startW;
+        document.body.classList.add("gdp-history-resizing");
         preview.style.display = "block";
         preview.style.left = `${startW}px`;
         e2.preventDefault();
@@ -22393,10 +22518,10 @@ ${frontmatter.yaml}
           return;
         dragging = false;
         preview.style.display = "none";
-        document.body.classList.remove("gdp-resizing");
-        applySidebarWidth(currentW);
+        document.body.classList.remove("gdp-history-resizing");
+        applyHistoryWidth(currentW);
       });
-      handle.addEventListener("dblclick", () => applySidebarWidth(308));
+      handle.addEventListener("dblclick", () => applyHistoryWidth(320));
     })();
     $$("#topbar .seg button").forEach((b2) => {
       b2.addEventListener("click", () => setLayout(b2.dataset.layout || "side-by-side"));

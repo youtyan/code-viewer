@@ -63,6 +63,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return iso.slice(0, 10);
   }
 
+  function absoluteWhen(iso: string): string {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const d = new Date(t);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function displayWhen(iso: string): string {
+    const relative = relativeWhen(iso);
+    const absolute = absoluteWhen(iso);
+    if (relative === absolute || relative === absolute.slice(0, 10))
+      return absolute;
+    return `${relative} (${absolute})`;
+  }
+
   function fetchPage(skip: number): Promise<HistoryLogResponse | null> {
     const url =
       `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` +
@@ -88,7 +104,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
-      `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` +
+      `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` +
       `</span>` +
       `</li>`
     );

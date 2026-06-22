@@ -101,6 +101,36 @@ export function createRefPicker(deps: RefPickerDeps) {
     }, 150);
   }
 
+  function relativeWhen(iso: string): string {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const sec = Math.round((Date.now() - t) / 1000);
+    if (sec < 60) return "just now";
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hour = Math.round(min / 60);
+    if (hour < 24) return `${hour}h ago`;
+    const day = Math.round(hour / 24);
+    if (day < 30) return `${day}d ago`;
+    return iso.slice(0, 10);
+  }
+
+  function absoluteWhen(iso: string): string {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const d = new Date(t);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function displayWhen(iso: string): string {
+    const relative = relativeWhen(iso);
+    const absolute = absoluteWhen(iso);
+    if (relative === absolute || relative === absolute.slice(0, 10))
+      return absolute;
+    return `${relative} (${absolute})`;
+  }
+
   function buildPopBody(query: string) {
     const q = (query || "").toLowerCase().trim();
     const m = (s: string) => !q || String(s).toLowerCase().includes(q);
@@ -140,7 +170,7 @@ export function createRefPicker(deps: RefPickerDeps) {
             deps.escapeHtml(commit.author || "") +
             "</span>" +
             '<span class="when">' +
-            deps.escapeHtml(commit.when || "") +
+            deps.escapeHtml(commit.when ? displayWhen(commit.when) : "") +
             "</span>" +
             "</div>" +
             "</div>",

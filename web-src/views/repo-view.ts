@@ -59,6 +59,7 @@ export type RepoViewDeps = {
   repoFileTargetFromRoute(): string | null;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   setRepoSidebarRef(ref: string | null): void;
+  getSidebarOnFileClick(): unknown;
   syncHeaderMenu(): void;
   getSidebarRowByPath(
     path: string,
@@ -107,6 +108,7 @@ export function createRepoView(deps: RepoViewDeps) {
     getProjectName,
     getRepoSidebarRef,
     setRepoSidebarRef,
+    getSidebarOnFileClick,
     syncHeaderMenu,
     getSidebarRowByPath,
     getSidebarVirtualActivePath,
@@ -124,8 +126,16 @@ export function createRepoView(deps: RepoViewDeps) {
 
   function isRepoSidebarReusable(ref: string): boolean {
     return (
-      getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode()
+      getRepoSidebarRef() === (ref || "worktree") &&
+      isRepositorySidebarMode() &&
+      isRepoSidebarDomReusable()
     );
+  }
+
+  function isRepoSidebarDomReusable(): boolean {
+    const filelist = document.querySelector<HTMLElement>("#filelist");
+    if (!filelist || !getSidebarOnFileClick()) return false;
+    return !!filelist.querySelector("[data-path], [data-dirpath]");
   }
 
   function syncRepoTargetInput(ref: string) {
@@ -895,6 +905,10 @@ export function createRepoView(deps: RepoViewDeps) {
     if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
       return REPO_SIDEBAR_LOAD.then(() => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
+        if (!isRepoSidebarReusable(normalizedRef)) {
+          invalidateRepoSidebar();
+          return renderRepoBlobSidebar(currentPath, normalizedRef);
+        }
         activateRepoSidebarPath(currentPath);
       });
     }

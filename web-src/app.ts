@@ -79,6 +79,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     language: ViewerLanguage;
     sbView: SidebarView;
     sbWidth: number;
+    historyWidth: number;
     sidebarHidden: boolean;
     collapsedDirs: Set<string>;
     ignoreWs: boolean;
@@ -468,6 +469,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       language: savedLanguage,
       sbView: (localStorage.getItem("gdp:sbview") as SidebarView) || "tree",
       sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+      historyWidth:
+        parseInt(localStorage.getItem("gdp:historywidth") ?? "", 10) || 320,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
       collapsedDirs: new Set<string>(
         JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]"),
@@ -661,6 +664,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRepoSidebarRef: (ref: string | null) => {
       REPO_SIDEBAR_REF = ref;
     },
+    getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
     syncHeaderMenu,
     getSidebarRowByPath,
     getSidebarVirtualActivePath,
@@ -1921,6 +1925,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setServerGeneration: (generation: number) => {
       SERVER_GENERATION = generation;
     },
+    invalidateRepoSidebar,
   });
   const {
     renderShell,
@@ -2002,7 +2007,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     else focusMainPanel();
   });
 
-  // Sidebar resizer (drag right edge)
+  function applyHistoryWidth(w: number) {
+    const cw = Math.max(220, Math.min(640, w));
+    document.documentElement.style.setProperty("--history-w", `${cw}px`);
+    STATE.historyWidth = cw;
+    localStorage.setItem("gdp:historywidth", String(cw));
+  }
+
+  // History and sidebar resizers (drag right edge)
+  applyHistoryWidth(STATE.historyWidth);
   applySidebarWidth(STATE.sbWidth);
   // Track sidebar touch / wheel / scroll so the scrollSpy auto-scroll
   // doesn't fight against an active manual scroll. window.__gdpSidebarTouchedAt
@@ -2035,6 +2048,50 @@ window.GdpExpandLogic = GdpExpandLogic;
     const MIN = 180,
       MAX = 900;
     const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
+    const sidebarLeft = () =>
+      document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
+    let dragging = false,
+      startX = 0,
+      startW = 0,
+      startLeft = 0,
+      currentW = 0;
+
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startW = STATE.sbWidth;
+      startLeft = sidebarLeft();
+      currentW = startW;
+      document.body.classList.add("gdp-resizing");
+      preview.style.display = "block";
+      preview.style.left = `${startLeft + startW}px`;
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      currentW = clamp(startW + (e.clientX - startX));
+      preview.style.left = `${startLeft + currentW}px`;
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      preview.style.display = "none";
+      document.body.classList.remove("gdp-resizing");
+      applySidebarWidth(currentW);
+    });
+    // double-click to reset
+    handle.addEventListener("dblclick", () => applySidebarWidth(308));
+  })();
+  (function setupHistoryResizer() {
+    const handle = document.getElementById("history-resizer");
+    if (!handle) return;
+    const preview = document.createElement("div");
+    preview.id = "history-resize-preview";
+    document.body.appendChild(preview);
+
+    const MIN = 220,
+      MAX = 640;
+    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
     let dragging = false,
       startX = 0,
       startW = 0,
@@ -2043,9 +2100,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     handle.addEventListener("mousedown", (e) => {
       dragging = true;
       startX = e.clientX;
-      startW = STATE.sbWidth;
+      startW = STATE.historyWidth;
       currentW = startW;
-      document.body.classList.add("gdp-resizing");
+      document.body.classList.add("gdp-history-resizing");
       preview.style.display = "block";
       preview.style.left = `${startW}px`;
       e.preventDefault();
@@ -2059,11 +2116,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!dragging) return;
       dragging = false;
       preview.style.display = "none";
-      document.body.classList.remove("gdp-resizing");
-      applySidebarWidth(currentW);
+      document.body.classList.remove("gdp-history-resizing");
+      applyHistoryWidth(currentW);
     });
-    // double-click to reset
-    handle.addEventListener("dblclick", () => applySidebarWidth(308));
+    handle.addEventListener("dblclick", () => applyHistoryWidth(320));
   })();
 
   $$("#topbar .seg button").forEach((b) => {
