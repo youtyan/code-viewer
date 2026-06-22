@@ -5288,6 +5288,26 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   font-weight: 600;
 }
 
+/* ---------- [hidden] 属性を効かせる ---------- */
+/* `.db-*` クラスの多くが `display: flex` を主張しており、ブラウザ標準の
+   `[hidden] { display: none }` (specificity 0,1,0) と CSS specificity が
+   同点で後勝ちで負ける。各要素について [hidden] 専用ルールを明示する。 */
+.db-tools-section[hidden],
+.db-tool-btn[hidden],
+.db-tab-bar[hidden],
+.db-history-toggle[hidden],
+.db-history-pane[hidden],
+.db-history-resizer[hidden],
+.db-table-list[hidden],
+.db-table-list-wrapper[hidden],
+.db-table-filter-wrap[hidden],
+.db-toolbar[hidden],
+.db-upper-area[hidden],
+.db-container[hidden],
+.db-tab-host[hidden] {
+  display: none !important;
+}
+
 /* ---------- Sidebar ---------- */
 .db-sidebar {
   width: 260px;
@@ -7522,7 +7542,11 @@ body.db-resizing {
 .db-root {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* `#content` 由来の高さが viewport いっぱいにならない環境があり、
+     `height: 100%` だと `.db-tab-host` が縮んで内側の history pane / main
+     content が画面途中で切れる。Round 5 前の `.db-container` と同様、
+     ここで viewport 基準の高さを明示する。 */
+  height: calc(100vh - var(--global-header-h));
   width: 100%;
   overflow: hidden;
 }
