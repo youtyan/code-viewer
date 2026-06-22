@@ -256,6 +256,10 @@ function clampCommitLimit(max: number): number {
   return Math.max(1, Math.min(max, MAX_REF_COMMIT_LIMIT));
 }
 
+function clampCommitSkip(skip: number): number {
+  return Math.max(0, Math.floor(skip) || 0);
+}
+
 function parseCommitLog(stdout: string): GitCommitMeta[] {
   const parts = stdout.split("\0");
   const commits: GitCommitMeta[] = [];
@@ -273,8 +277,8 @@ function parseCommitLog(stdout: string): GitCommitMeta[] {
   return commits;
 }
 
-function commitLogArgs(limit: number): string[] {
-  return [
+function commitLogArgs(limit: number, skip = 0): string[] {
+  const args = [
     "git",
     "log",
     "--all",
@@ -282,6 +286,8 @@ function commitLogArgs(limit: number): string[] {
     `--max-count=${limit}`,
     `--format=${COMMIT_FORMAT}`,
   ];
+  if (skip > 0) args.splice(4, 0, `--skip=${skip}`);
+  return args;
 }
 
 function mergeCommitResults(
@@ -311,10 +317,19 @@ export function refCommits(
   query = "",
   max = DEFAULT_REF_COMMIT_LIMIT,
 ): GitCommitMeta[] {
-  const limit = clampCommitLimit(max);
-  const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  return refCommitPage(cwd, { query, max }).commits;
+}
+
+export function refCommitPage(
+  cwd: string,
+  options: { query?: string; max?: number; skip?: number } = {},
+): { commits: GitCommitMeta[]; hasMore: boolean } {
+  const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
+  const skip = clampCommitSkip(options.skip ?? 0);
+  const fetchLimit = limit + 1;
   const hashMatches: GitCommitMeta[] = [];
-  if (/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+  const trimmed = (options.query || "").trim().slice(0, 200).replace(/\0/g, "");
+  if (skip === 0 && /^[0-9a-f]{4,40}$/i.test(trimmed)) {
     const verified = run(
       ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
       cwd,
@@ -337,21 +352,34 @@ export function refCommits(
     }
   }
   if (!trimmed) {
-    return runCommitLog(cwd, commitLogArgs(limit));
+    const commits = runCommitLog(cwd, commitLogArgs(fetchLimit, skip));
+    return {
+      commits: commits.slice(0, limit),
+      hasMore: commits.length > limit,
+    };
   }
   const subjectMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--grep=${trimmed}`,
   ]);
   const authorMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--author=${trimmed}`,
   ]);
-  return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
+  const merged = mergeCommitResults(
+    fetchLimit,
+    hashMatches,
+    subjectMatches,
+    authorMatches,
+  );
+  return {
+    commits: merged.slice(0, limit),
+    hasMore: merged.length > limit,
+  };
 }
 
 // Converts a git remote URL to the matching https web URL (GitHub-style

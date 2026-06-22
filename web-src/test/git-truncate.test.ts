@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { fileDiffCacheKey, worktreeFileSignature } from "../server/cache";
 import {
   listTree,
+  refCommitPage,
   refCommits,
   refs,
   treeEntries,
@@ -541,6 +542,41 @@ describe("repository tree helpers", () => {
       expect(refCommits(dir, "", 99999).length).toBe(8);
       expect(refCommits(dir, "--evil", 5)).toEqual([]);
       expect(refCommits(dir, "commit\0".repeat(300), 5)).toEqual([]);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
+  test("pages ref picker commits with hasMore", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-ref-page-"));
+    try {
+      git(dir, ["init"]);
+      git(dir, ["config", "user.email", "tester@example.com"]);
+      git(dir, ["config", "user.name", "Test User"]);
+      for (let index = 1; index <= 5; index++) {
+        writeFileSync(join(dir, "file.txt"), `commit ${index}\n`);
+        git(dir, ["add", "file.txt"]);
+        git(dir, ["commit", "-m", `commit ${index}`]);
+      }
+
+      const page1 = refCommitPage(dir, { max: 2 });
+      const page2 = refCommitPage(dir, { max: 2, skip: 2 });
+      const page3 = refCommitPage(dir, { max: 2, skip: 4 });
+
+      expect(page1.commits.map((commit) => commit.subject)).toEqual([
+        "commit 5",
+        "commit 4",
+      ]);
+      expect(page1.hasMore).toBe(true);
+      expect(page2.commits.map((commit) => commit.subject)).toEqual([
+        "commit 3",
+        "commit 2",
+      ]);
+      expect(page2.hasMore).toBe(true);
+      expect(page3.commits.map((commit) => commit.subject)).toEqual([
+        "commit 1",
+      ]);
+      expect(page3.hasMore).toBe(false);
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }

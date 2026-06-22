@@ -15817,37 +15817,85 @@ ${frontmatter.yaml}
     }
     fetchRefs();
     let popTab = "commits";
+    const COMMIT_PAGE_SIZE = 50;
     let commitSearchTimer = null;
     let commitSearchSeq = 0;
     let commitSearchAbort = null;
     let commitSearchLoading = false;
-    function fetchCommitRefs(query) {
+    let commitAppendLoading = false;
+    let commitHasMore = false;
+    let commitQuery = "";
+    function appendUniqueCommits(commits) {
+      const seen = new Set(REFS.commits.map((commit) => commit.sha));
+      for (const commit of commits || []) {
+        if (!commit.sha || seen.has(commit.sha))
+          continue;
+        seen.add(commit.sha);
+        REFS.commits.push(commit);
+      }
+    }
+    function fetchCommitRefs(query, options = {}) {
+      const append = !!options.append;
+      const normalizedQuery = (query || "").trim();
       const seq = ++commitSearchSeq;
       if (commitSearchAbort)
         commitSearchAbort.abort();
       commitSearchAbort = new AbortController;
-      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
+      const skip = append ? REFS.commits.length : 0;
+      const previousScrollTop = popBody.scrollTop;
+      if (append)
+        commitAppendLoading = true;
+      else {
+        commitQuery = normalizedQuery;
+        commitSearchLoading = true;
+        commitAppendLoading = false;
+        commitHasMore = false;
+      }
+      const url = `/_commits?max=${COMMIT_PAGE_SIZE}&skip=${skip}` + `&q=${encodeURIComponent(normalizedQuery)}`;
       return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
         if (seq !== commitSearchSeq)
           return;
         commitSearchLoading = false;
-        REFS.commits = refs.commits || [];
+        commitAppendLoading = false;
+        commitHasMore = !!refs.hasMore;
+        if (append)
+          appendUniqueCommits(refs.commits);
+        else
+          REFS.commits = refs.commits || [];
         if (!popover.hidden && popTab === "commits") {
           buildPopBody(popSearch.value);
+          if (append)
+            popBody.scrollTop = previousScrollTop;
         }
       }).catch(() => {
-        if (seq === commitSearchSeq)
+        if (seq === commitSearchSeq) {
           commitSearchLoading = false;
+          commitAppendLoading = false;
+        }
       });
     }
     function scheduleCommitSearch(query) {
       if (commitSearchTimer)
         clearTimeout(commitSearchTimer);
+      commitQuery = (query || "").trim();
       commitSearchLoading = true;
+      commitAppendLoading = false;
+      commitHasMore = false;
+      REFS.commits = [];
       commitSearchTimer = setTimeout(() => {
         commitSearchTimer = null;
         fetchCommitRefs(query);
       }, 150);
+    }
+    function maybeLoadMoreCommits() {
+      if (popTab !== "commits")
+        return;
+      if (!commitHasMore || commitSearchLoading || commitAppendLoading)
+        return;
+      const remaining = popBody.scrollHeight - popBody.scrollTop - popBody.clientHeight;
+      if (remaining > 96)
+        return;
+      fetchCommitRefs(commitQuery, { append: true });
     }
     function relativeWhen(iso) {
       const t2 = Date.parse(iso);
@@ -15902,6 +15950,11 @@ ${frontmatter.yaml}
             continue;
           const shortSha = commit.sha.slice(0, 7);
           html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when ? displayWhen(commit.when) : "") + "</span>" + "</div>" + "</div>");
+        }
+        if (commitAppendLoading) {
+          html.push('<div class="rp-empty">loading more commits...</div>');
+        } else if (commitHasMore) {
+          html.push('<div class="rp-empty">scroll for more commits...</div>');
         }
       } else if (popTab === "branches") {
         const branches = (REFS.branches || []).filter((b2) => m(b2.name));
@@ -15997,6 +16050,7 @@ ${frontmatter.yaml}
         scheduleCommitSearch(popSearch.value);
       buildPopBody(popSearch.value);
     });
+    popBody.addEventListener("scroll", maybeLoadMoreCommits, { passive: true });
     popSearch.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape") {
         closePopover();
