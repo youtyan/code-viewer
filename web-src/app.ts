@@ -45,6 +45,7 @@ import {
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
+import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -307,6 +308,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     reloadScopedState();
   }
 
+  function setProjectBranch(branch: string) {
+    const el = document.querySelector<HTMLElement>("#project-branch");
+    if (!el) return;
+    el.hidden = !branch;
+    el.textContent = branch;
+    el.title = branch ? `Current branch: ${branch}` : "";
+  }
+
   function reloadScopedState() {
     const collapsed = readScopedStorage("gdp:collapsed-dirs");
     if (collapsed !== null) {
@@ -420,6 +429,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!res.ok) return null;
       const settings = (await res.json()) as SettingsResponse;
       setProjectName(settings.project || "");
+      setProjectBranch(settings.branch || "");
       const repoLink =
         document.querySelector<HTMLAnchorElement>("#repo-web-link");
       if (repoLink && settings.repo_web_url) {
@@ -1017,13 +1027,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (annotationsToggle) {
       annotationsToggle.title = text.global.annotations;
       annotationsToggle.setAttribute("aria-label", text.global.annotations);
-    }
-    const queryHistoryToggle = document.querySelector<HTMLButtonElement>(
-      "#query-history-toggle",
-    );
-    if (queryHistoryToggle) {
-      queryHistoryToggle.title = text.global.queryHistory;
-      queryHistoryToggle.setAttribute("aria-label", text.global.queryHistory);
     }
     const viewerSettings =
       document.querySelector<HTMLButtonElement>("#viewer-settings");
@@ -1685,16 +1688,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
 
-    // Toggle header buttons: annotations vs query-history
+    // Hide annotations on the database screen, where the main surface is not
+    // a source/diff viewer.
     const isDatabase = STATE.route.screen === "database";
     const annotationsToggle = document.querySelector<HTMLButtonElement>(
       "#annotations-toggle",
     );
-    const qhToggle = document.querySelector<HTMLButtonElement>(
-      "#query-history-toggle",
-    );
     if (annotationsToggle) annotationsToggle.hidden = isDatabase;
-    if (qhToggle) qhToggle.hidden = !isDatabase;
 
     // Close query-history panel when leaving database screen
     if (!isDatabase) {
@@ -1928,6 +1928,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     invalidateRepoSidebar,
   });
   const {
+    renderMeta,
     renderShell,
     rerenderLoadedDiffs,
     mountDiff,
@@ -2552,19 +2553,23 @@ window.GdpExpandLogic = GdpExpandLogic;
       return load().then(() => {});
     },
     showEmptyDiffPane: () => {
-      const diff = $("#diff");
-      if (diff) diff.innerHTML = "";
-      const empty = $("#empty");
-      if (empty) {
-        empty.classList.remove("hidden");
-        const h2 = empty.querySelector("h2");
-        if (h2) h2.textContent = "No commit selected";
-        const p = empty.querySelector("p");
-        if (p)
-          p.textContent = "Select a commit from the list to see its changes.";
-      }
-      setStatus("live");
+      showEmptyHistoryDiffPane({
+        diff: $("#diff"),
+        empty: $("#empty"),
+        renderSidebar,
+        setFiles: (files) => {
+          STATE.files = files;
+        },
+        clearLastMeta: () => {
+          window._lastMeta = null;
+        },
+        renderMeta,
+        invalidateRepoSidebar,
+        clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+        setStatus,
+      });
     },
+    getSyntaxHighlight: () => STATE.syntaxHighlight,
     trackLoad,
   });
 
@@ -2601,19 +2606,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
   function applyRouteFromLocation() {
+    const previousRoute = STATE.route;
     // Leaving the history screen: bring back the range the user had picked
     // for the other screens before the URL fallback below reads it.
     if (
-      STATE.route.screen === "history" &&
+      previousRoute.screen === "history" &&
       window.location.pathname !== "/history"
     ) {
       restoreRangeAfterHistory();
-    }
-    if (
-      STATE.route.screen === "database" &&
-      window.location.pathname !== "/database"
-    ) {
-      DATABASE_VIEW.leave();
     }
     const parsedRoute = parseRoute(
       window.location.pathname,
@@ -2627,6 +2627,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       parsedRoute.screen === "unknown"
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
+    if (previousRoute.screen === "database" && nextRoute.screen !== "database")
+      DATABASE_VIEW.leave();
+    if (previousRoute.screen === "history" && nextRoute.screen !== "history")
+      HISTORY_VIEW.leaveHistory();
     STATE.route =
       nextRoute.screen === "help" &&
       !new URLSearchParams(window.location.search).has("lang")
@@ -2822,16 +2826,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
 
-  // ---- Query History panel toggle ----
-  const qhToggleBtn = document.getElementById("query-history-toggle");
-  if (qhToggleBtn) {
-    qhToggleBtn.addEventListener("click", () => {
-      const panel = document.getElementById("query-history-panel");
-      const opening = panel ? panel.hidden : true;
-      setQueryHistoryPanelOpen(opening);
-      if (opening) DATABASE_VIEW.handleSse();
-    });
-  }
   const qhCloseBtn = document.getElementById("query-history-panel-close");
   if (qhCloseBtn) {
     qhCloseBtn.addEventListener("click", () => {
