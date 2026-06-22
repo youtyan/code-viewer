@@ -5417,8 +5417,18 @@ function createElasticsearchAdapter(config) {
     result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
   }
-  function getMapping(_index) {
-    throw new Error("not implemented yet");
+  function getMapping(index) {
+    if (!index || index.includes("/") || index.includes("?")) {
+      throw new Error(`invalid index name: ${index}`);
+    }
+    const raw = callJson("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
+    const keys = Object.keys(raw);
+    if (keys.length === 0) {
+      return { index, properties: {} };
+    }
+    const realIndex = keys[0];
+    const props = raw[realIndex]?.mappings?.properties ?? {};
+    return { index: realIndex, properties: props };
   }
   function searchDocs(_opts) {
     throw new Error("not implemented yet");
@@ -5511,6 +5521,22 @@ function handleIndices(cwd, url) {
     return textError(`failed to list elasticsearch indices: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+function handleMapping(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  try {
+    const mapping = r.explorer.getMapping(index);
+    const body = { dbId: r.dbId, mapping };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to read elasticsearch mapping: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
 async function handleElasticsearchRoute(req, url, cwd) {
   const path = url.pathname;
   const start = Date.now();
@@ -5523,12 +5549,19 @@ async function handleElasticsearchRoute(req, url, cwd) {
     log(res.status);
     return res;
   };
-  if (path !== "/_db/elasticsearch/indices")
-    return null;
-  if (method !== "GET") {
-    return wrap(textError("method not allowed", 405));
+  if (path === "/_db/elasticsearch/indices") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleIndices(cwd, url));
   }
-  return wrap(handleIndices(cwd, url));
+  if (path === "/_db/elasticsearch/mapping") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleMapping(cwd, url));
+  }
+  return null;
 }
 var esAdapterCache, cachedEsServices = null, cachedEsCwd = null;
 var init_handle_elasticsearch = __esm(() => {

@@ -1,4 +1,7 @@
-import type { EsIndicesResponse } from "../../core/database/types";
+import type {
+  EsIndicesResponse,
+  EsMappingResponse,
+} from "../../core/database/types";
 import {
   type ElasticsearchExplorer,
   openElasticsearchAdapter,
@@ -66,6 +69,27 @@ function handleIndices(cwd: string, url: URL): Response {
   }
 }
 
+function handleMapping(cwd: string, url: URL): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const index = url.searchParams.get("index");
+  if (!index) return textError("missing index parameter", 400);
+  try {
+    const mapping = r.explorer.getMapping(index);
+    const body: EsMappingResponse = { dbId: r.dbId, mapping };
+    return json(body);
+  } catch (err) {
+    console.error(
+      "[code-viewer] elasticsearch error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to read elasticsearch mapping: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 export async function handleElasticsearchRoute(
   req: Request,
   url: URL,
@@ -84,9 +108,17 @@ export async function handleElasticsearchRoute(
     return res;
   };
 
-  if (path !== "/_db/elasticsearch/indices") return null;
-  if (method !== "GET") {
-    return wrap(textError("method not allowed", 405));
+  if (path === "/_db/elasticsearch/indices") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleIndices(cwd, url));
   }
-  return wrap(handleIndices(cwd, url));
+  if (path === "/_db/elasticsearch/mapping") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleMapping(cwd, url));
+  }
+  return null;
 }

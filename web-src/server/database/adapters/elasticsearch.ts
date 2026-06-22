@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import type {
   EsIndexInfo,
   EsMapping,
+  EsMappingProperty,
   EsSearchResult,
 } from "../../../core/database/types";
 
@@ -189,9 +190,30 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     return result;
   }
 
-  // 仮実装。次コミット以降で getMapping / searchDocs / getDoc を埋める。
-  function getMapping(_index: string): EsMapping {
-    throw new Error("not implemented yet");
+  function getMapping(index: string): EsMapping {
+    if (!index || index.includes("/") || index.includes("?")) {
+      throw new Error(`invalid index name: ${index}`);
+    }
+    // GET /<index>/_mapping レスポンス:
+    //   { "<index>": { "mappings": { "properties": {...} } } }
+    // index が alias の場合は実 index 名が key になるので Object.keys で拾う。
+    const raw = callJson<
+      Record<
+        string,
+        {
+          mappings?: {
+            properties?: Record<string, EsMappingProperty>;
+          };
+        }
+      >
+    >("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
+    const keys = Object.keys(raw);
+    if (keys.length === 0) {
+      return { index, properties: {} };
+    }
+    const realIndex = keys[0];
+    const props = raw[realIndex]?.mappings?.properties ?? {};
+    return { index: realIndex, properties: props };
   }
   function searchDocs(_opts: {
     index: string;
