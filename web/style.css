@@ -5176,7 +5176,13 @@ body.query-history-panel-open #content {
   --db-font-mono: 13px;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--global-header-h));
+  /* `.db-tab-host` の中に置かれるので親の高さに合わせる。
+     Round 5 multi-tab 以前は #content 直下だったため calc(100vh - header) で
+     固定していたが、いまは .db-root > .db-tabs-bar (固定) + .db-tab-host
+     (flex: 1) の下にいるため、ここで自分で viewport 高さを再計算すると
+     親より縦長になり sidebar 末尾の history toggle が下にはみ出す。 */
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   font-size: var(--db-font-base);
 }
