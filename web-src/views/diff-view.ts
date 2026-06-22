@@ -199,6 +199,14 @@ export function createDiffView(deps: DiffViewDeps) {
       : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
   }
 
+  function setProjectBranch(branch: string) {
+    const el = document.querySelector<HTMLElement>("#project-branch");
+    if (!el) return;
+    el.hidden = !branch;
+    el.textContent = branch;
+    el.title = branch ? `Current branch: ${branch}` : "";
+  }
+
   function renderMeta(meta: DiffMeta | null) {
     const el = $("#meta");
     if (!meta) {
@@ -206,13 +214,8 @@ export function createDiffView(deps: DiffViewDeps) {
       return;
     }
     setProjectName(meta.project || "");
+    setProjectBranch(meta.branch || "");
     el.innerHTML = "";
-    if (meta.branch) {
-      const b = document.createElement("span");
-      b.className = "ref";
-      b.textContent = `⎇ ${meta.branch}`;
-      el.appendChild(b);
-    }
     if (meta.totals) {
       const t = document.createElement("span");
       t.className = "num";

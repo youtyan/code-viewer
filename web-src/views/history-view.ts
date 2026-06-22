@@ -10,7 +10,10 @@ import {
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
+import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
+
+export const HISTORY_BODY_COLLAPSE_LINES = 10;
 
 export type HistoryViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -21,8 +24,57 @@ export type HistoryViewDeps = {
   applyCommitRange(range: { from: string; to: string }): Promise<void>;
   // Clears the diff pane and shows the "no commit selected" empty state.
   showEmptyDiffPane(): void;
+  getSyntaxHighlight(): boolean;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
 };
+
+export function historyBodyLineCount(rawText: string): number {
+  if (!rawText) return 0;
+  return rawText.split(/\r?\n/).length;
+}
+
+export function historyBodyToggleLabel(
+  expanded: boolean,
+  remainingLines: number,
+) {
+  return expanded ? "閉じる" : `もっと見る (${remainingLines} 行)`;
+}
+
+export function buildExpandableHistoryBody(
+  rendered: HTMLElement,
+  rawText: string,
+): HTMLElement {
+  const lineCount = historyBodyLineCount(rawText);
+  if (lineCount <= HISTORY_BODY_COLLAPSE_LINES) return rendered;
+  const wrap = document.createElement("div");
+  wrap.className = "hci-body-expandable";
+  const collapsible = document.createElement("div");
+  collapsible.className = "hci-body-collapsible";
+  collapsible.appendChild(rendered);
+  const button = document.createElement("div");
+  button.className = "hci-body-toggle";
+  button.setAttribute("role", "button");
+  button.setAttribute("tabindex", "0");
+  const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
+  const sync = () => {
+    const expanded = collapsible.classList.contains("expanded");
+    button.textContent = historyBodyToggleLabel(expanded, remainingLines);
+    button.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+  const toggle = () => {
+    collapsible.classList.toggle("expanded");
+    sync();
+  };
+  button.addEventListener("click", toggle);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggle();
+  });
+  sync();
+  wrap.append(collapsible, button);
+  return wrap;
+}
 
 export function createHistoryView(deps: HistoryViewDeps) {
   const panel = deps.$<HTMLElement>("#history-panel");
@@ -47,6 +99,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function setStatusText(message: string) {
     statusEl.textContent = message;
     statusEl.hidden = !message;
+  }
+
+  function clearCommitInfo() {
+    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    if (!info) return;
+    info.hidden = true;
+    info.querySelector<HTMLElement>(".hci-body")?.replaceChildren();
   }
 
   function relativeWhen(iso: string): string {
@@ -128,13 +187,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
     setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
   }
 
-  function updateCommitInfo(commit: HistoryCommit | null) {
+  async function updateCommitInfo(commit: HistoryCommit | null) {
     const info = document.querySelector<HTMLElement>("#history-commit-info");
     if (!info) return;
     if (!commit) {
-      info.hidden = true;
+      clearCommitInfo();
       return;
     }
+    const gen = generation;
     const set = (sel: string, text: string) => {
       const el = info.querySelector<HTMLElement>(sel);
       if (el) el.textContent = text;
@@ -149,8 +209,19 @@ export function createHistoryView(deps: HistoryViewDeps) {
     set(".hci-subject", commit.subject);
     const body = info.querySelector<HTMLElement>(".hci-body");
     if (body) {
-      body.textContent = commit.body;
-      body.hidden = !commit.body;
+      body.replaceChildren();
+      if (!commit.body) {
+        body.hidden = true;
+      } else {
+        body.hidden = false;
+        const rendered = await renderMarkdownPreview(
+          commit.body,
+          { path: "COMMIT_MSG", ref: commit.sha },
+          { syntaxHighlight: deps.getSyntaxHighlight() },
+        );
+        if (gen !== generation || selectedSha !== commit.sha) return;
+        body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
+      }
     }
     info.hidden = false;
   }
@@ -198,7 +269,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const gen = generation;
     selectedSha = commit.sha;
     updateActiveRow();
-    updateCommitInfo(commit);
+    await updateCommitInfo(commit);
     if (gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
@@ -268,7 +339,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
           ? `failed to load commit: ${sha}`
           : `commit not found: ${sha}`,
       );
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       deps.showEmptyDiffPane();
       return;
     }
@@ -306,6 +377,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const refChanged = nextRef !== ref;
     if (refChanged || force || commits.length === 0) {
       generation++;
+      const gen = generation;
       ref = nextRef;
       commits = [];
       hasMore = false;
@@ -313,9 +385,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
       inFlight = null;
       selectedSha = "";
       setBanner("");
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       renderList();
       await loadNextPage();
+      if (gen !== generation) return;
     }
     const route2 = deps.getRoute();
     if (route2.screen !== "history") return;
@@ -324,7 +397,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     } else {
       selectedSha = "";
       updateActiveRow();
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       deps.showEmptyDiffPane();
     }
   }
@@ -341,6 +414,17 @@ export function createHistoryView(deps: HistoryViewDeps) {
     );
     // Force a reload even if the picked ref equals the current one.
     void enterHistory(true);
+  }
+
+  function leaveHistory() {
+    generation++;
+    loading = false;
+    inFlight = null;
+    selectedSha = "";
+    setBanner("");
+    setStatusText("");
+    updateActiveRow();
+    clearCommitInfo();
   }
 
   list.addEventListener("click", (e) => {
@@ -395,5 +479,5 @@ export function createHistoryView(deps: HistoryViewDeps) {
   );
   observer.observe(sentinel);
 
-  return { enterHistory, onRefPicked };
+  return { enterHistory, leaveHistory, onRefPicked };
 }

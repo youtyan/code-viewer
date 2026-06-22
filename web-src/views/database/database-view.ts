@@ -512,7 +512,9 @@ function createTabPane(
         executedBy: "user",
       }),
     });
-    return (await res.json()) as DbQueryResponse;
+    const result = (await res.json()) as DbQueryResponse;
+    if (historyOpen) historyView.refresh();
+    return result;
   }
 
   async function selectDb(
