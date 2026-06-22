@@ -150,50 +150,55 @@ function createTabPane(
   // sidebar 幅はタブごとに独立 (タブ A で狭めてもタブ B には反映しない)。
   // initial 値があれば復元し、なければ CSS の default を使う。
   if (initial.sidebarWidth) sidebar.style.width = initial.sidebarWidth;
+
+  // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
+  // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
+  // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
+  // 最上端に集約する。kind === redis / elasticsearch ではこのツールバーごと
+  // 隠す (applyKindVisibility が toolsSection.hidden を制御)。
   const toolsSection = document.createElement("div");
-  toolsSection.className = "db-tools-section";
+  toolsSection.className = "db-icon-toolbar";
+  toolsSection.setAttribute("role", "toolbar");
+  toolsSection.setAttribute("aria-label", "Database tools");
 
-  const queryBtn = document.createElement("button");
-  queryBtn.className = "db-tool-btn";
-  queryBtn.type = "button";
-  queryBtn.textContent = "Query";
-  queryBtn.title = "SQL Query Editor";
-  queryBtn.addEventListener("click", () => {
-    setActiveTab("query");
+  const queryBtn = makeIconButton({
+    label: "Query",
+    title: "Query Editor",
+    pathD: ICON_PATH_QUERY,
+    onClick: () => setActiveTab("query"),
   });
 
-  const erBtn = document.createElement("button");
-  erBtn.className = "db-tool-btn";
-  erBtn.type = "button";
-  erBtn.textContent = "ER Diagram";
-  erBtn.title = "Entity Relationship Diagram";
-  erBtn.addEventListener("click", () => {
-    setActiveTab("er");
-    if (schemaCache) renderErDiagram();
+  const erBtn = makeIconButton({
+    label: "ER Diagram",
+    title: "Entity Relationship Diagram",
+    pathD: ICON_PATH_ER,
+    onClick: () => {
+      setActiveTab("er");
+      if (schemaCache) renderErDiagram();
+    },
   });
 
-  const searchBtn = document.createElement("button");
-  searchBtn.className = "db-tool-btn";
-  searchBtn.type = "button";
-  searchBtn.textContent = "Search";
-  searchBtn.title = "Search all tables";
-  searchBtn.addEventListener("click", () => {
-    setActiveTab("search");
+  const searchBtn = makeIconButton({
+    label: "Search",
+    title: "Search across tables",
+    pathD: ICON_PATH_SEARCH,
+    onClick: () => setActiveTab("search"),
   });
 
-  const snapshotBtn = document.createElement("button");
-  snapshotBtn.className = "db-tool-btn";
-  snapshotBtn.type = "button";
-  snapshotBtn.textContent = "Snapshot";
-  snapshotBtn.title = "Snapshot & Diff";
-  snapshotBtn.addEventListener("click", () => {
-    setActiveTab("snapshot");
-    snapshotView.refresh();
+  const snapshotBtn = makeIconButton({
+    label: "Snapshot",
+    title: "Snapshot & Diff",
+    pathD: ICON_PATH_SNAPSHOT,
+    onClick: () => {
+      setActiveTab("snapshot");
+      snapshotView.refresh();
+    },
   });
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
-  sidebar.append(dbToolbar, tableList.el, toolsSection);
+  // 順序: アイコンツールバー → DB select → table list の順。
+  sidebar.append(toolsSection, dbToolbar, tableList.el);
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "db-sidebar-resize";
@@ -396,7 +401,10 @@ function createTabPane(
     searchBtn.classList.toggle("active", currentTab === "search");
     snapshotBtn.classList.toggle("active", currentTab === "snapshot");
     const sqlMode = isSqlKind(currentDb?.kind);
-    tabBar.hidden = !sqlMode;
+    // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
+    // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
+    const onTableView = currentTab === "data" || currentTab === "schema";
+    tabBar.hidden = !sqlMode || !onTableView;
     grid.el.hidden = !sqlMode || currentTab !== "data";
     queryEditor.el.hidden = !sqlMode || currentTab !== "query";
     schemaView.el.hidden = !sqlMode || currentTab !== "schema";
@@ -879,6 +887,48 @@ function createTabPane(
     getLabel,
     dispose,
   };
+}
+
+// ----- アイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
+// octicon / bootstrap-icons ベースの 16x16 path。currentColor で描画して
+// hover / active 時の色変更を CSS から制御できるようにする。
+
+const ICON_PATH_QUERY =
+  "M5.72 4.22a.75.75 0 0 1 0 1.06L2.81 8l2.91 2.72a.75.75 0 1 1-1.06 1.06L1.22 8.53a.75.75 0 0 1 0-1.06l3.44-3.25a.75.75 0 0 1 1.06 0Zm4.56 0a.75.75 0 0 1 1.06 0l3.44 3.25a.75.75 0 0 1 0 1.06l-3.44 3.25a.75.75 0 1 1-1.06-1.06L13.19 8l-2.91-2.72a.75.75 0 0 1 0-1.06Z";
+
+const ICON_PATH_ER =
+  "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";
+
+const ICON_PATH_SEARCH =
+  "M10.68 11.74a6 6 0 0 1-7.917-8.984 6 6 0 0 1 8.997 7.905l3.05 3.05a.75.75 0 1 1-1.06 1.06l-3.07-3.03ZM11.5 7a4.499 4.499 0 1 1-8.997 0A4.499 4.499 0 0 1 11.5 7Z";
+
+const ICON_PATH_SNAPSHOT =
+  "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
+
+function makeIconButton(opts: {
+  label: string;
+  title: string;
+  pathD: string;
+  onClick: () => void;
+}): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "db-icon-btn";
+  btn.title = opts.title;
+  btn.setAttribute("aria-label", opts.label);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", opts.pathD);
+  path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  btn.appendChild(svg);
+  btn.addEventListener("click", opts.onClick);
+  return btn;
 }
 
 // ----- 外側: 複数 TabPane を束ねる -----
