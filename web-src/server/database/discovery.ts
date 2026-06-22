@@ -131,7 +131,21 @@ function detectDbKind(image: string): DbKind | null {
   const lower = image.toLowerCase();
   if (lower.includes("postgres")) return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
+  if (lower.includes("redis")) return "redis";
   return null;
+}
+
+function defaultPortFor(kind: DbKind): string {
+  switch (kind) {
+    case "postgresql":
+      return "5432";
+    case "mysql":
+      return "3306";
+    case "redis":
+      return "6379";
+    default:
+      return "";
+  }
 }
 
 function resolveEnvValue(raw: string): string {
@@ -242,20 +256,24 @@ export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
 
       const env = parseComposeEnv(svcBlock);
       const port = parseComposePorts(svcBlock);
+      const hostPort = port || defaultPortFor(kind);
 
-      const dbName =
-        env.POSTGRES_DB ||
-        env.MYSQL_DATABASE ||
-        env.MARIADB_DATABASE ||
-        svc.name;
-      const user =
-        env.POSTGRES_USER ||
-        env.MYSQL_USER ||
-        env.MARIADB_USER ||
-        (kind === "postgresql" ? "postgres" : "root");
-      const hostPort = port || (kind === "postgresql" ? "5432" : "3306");
-
-      const label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+      let label: string;
+      if (kind === "redis") {
+        label = `${svc.name} (${image}, localhost:${hostPort})`;
+      } else {
+        const dbName =
+          env.POSTGRES_DB ||
+          env.MYSQL_DATABASE ||
+          env.MARIADB_DATABASE ||
+          svc.name;
+        const user =
+          env.POSTGRES_USER ||
+          env.MYSQL_USER ||
+          env.MARIADB_USER ||
+          (kind === "postgresql" ? "postgres" : "root");
+        label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+      }
 
       results.push({
         id: `docker:${svc.name}`,

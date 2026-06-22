@@ -59,7 +59,7 @@ export function searchTable(
   includeNonText: boolean,
   pkColumns: string[],
 ): SearchHit[] {
-  const kind = adapter.kind;
+  const kind = adapter.kind as "sqlite" | "postgresql" | "mysql";
   const searchCols = includeNonText
     ? columns.filter(
         (c) =>

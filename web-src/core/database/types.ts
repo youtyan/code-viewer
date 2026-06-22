@@ -1,4 +1,4 @@
-export type DbKind = "sqlite" | "postgresql" | "mysql";
+export type DbKind = "sqlite" | "postgresql" | "mysql" | "redis";
 
 export type DbValue = string | number | boolean | null | Uint8Array;
 
