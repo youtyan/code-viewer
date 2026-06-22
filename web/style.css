@@ -6967,3 +6967,74 @@ body.db-resizing {
   background: var(--bg-soft);
   align-items: center;
 }
+
+/* ---------- Redis explorer ---------- */
+.redis-explorer {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg);
+}
+.redis-db-list-pane {
+  width: 220px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.redis-pane-header {
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.redis-db-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.redis-db-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+}
+.redis-db-item:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.redis-db-item.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.redis-db-name {
+  font-family: var(--mono, monospace);
+  font-weight: 500;
+}
+.redis-db-count {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+.redis-main-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+  color: var(--fg-muted);
+}
+.redis-note {
+  padding: 8px 12px;
+  color: var(--fg-muted);
+  font-size: 0.9em;
+}
+.redis-error {
+  padding: 8px 12px;
+  color: var(--error, #c00);
+  font-size: 0.9em;
+}
