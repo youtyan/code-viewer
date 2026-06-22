@@ -10,10 +10,17 @@ import type { TabsState } from "../../core/database/types";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const TABS_FILE_NAME = "tabs.json";
-// tabs は dbId / id / view 等の短い文字列だけなので、上限は控えめで OK。
-// 暴走防止用の hard cap。
+// 暴走防止用の hard cap。sqlDraft / es.query 等を 1 タブ最大 ~16KB 持つ
+// 想定で、最大 64 tabs * 16KB ≒ 1MB を上限にしておく (実用上はもっと小さい)。
 const MAX_TABS = 64;
-const MAX_JSON_BYTES = 100_000;
+const MAX_JSON_BYTES = 1_000_000;
+// 1 タブの自由入力フィールドの個別上限。
+const MAX_SQL_DRAFT_LEN = 16_000;
+const MAX_ES_QUERY_LEN = 16_000;
+const MAX_REDIS_KEY_LEN = 1024;
+const MAX_INDEX_NAME_LEN = 256;
+// CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
+const MAX_CSS_SIZE_LEN = 16;
 const VALID_VIEWS = new Set([
   "data",
   "query",
@@ -29,6 +36,62 @@ function tabsFilePath(root: string): string {
 
 function emptyState(): TabsState {
   return { version: 1, tabs: [], activeTabId: null };
+}
+
+// CSS の "240px" のような size 文字列を受け付けるか判定する。
+// 形式: 数値 + 単位 (px / %)。安全側に厳しめ。
+function isValidCssSize(s: string): boolean {
+  if (s.length === 0 || s.length > MAX_CSS_SIZE_LEN) return false;
+  return /^-?\d+(?:\.\d+)?(?:px|%)$/.test(s);
+}
+
+function sanitizeOptionalString(
+  v: unknown,
+  maxLen: number,
+): string | undefined {
+  if (typeof v !== "string") return undefined;
+  if (v.length === 0) return undefined;
+  if (v.length > maxLen) return v.slice(0, maxLen);
+  return v;
+}
+
+function sanitizeCssSize(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  return isValidCssSize(v) ? v : undefined;
+}
+
+function sanitizeRedis(
+  v: unknown,
+): { dbIndex?: number; key?: string } | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  const out: { dbIndex?: number; key?: string } = {};
+  if (
+    typeof r.dbIndex === "number" &&
+    Number.isInteger(r.dbIndex) &&
+    r.dbIndex >= 0 &&
+    r.dbIndex < 256
+  ) {
+    out.dbIndex = r.dbIndex;
+  }
+  const key = sanitizeOptionalString(r.key, MAX_REDIS_KEY_LEN);
+  if (key !== undefined) out.key = key;
+  if (out.dbIndex === undefined && out.key === undefined) return undefined;
+  return out;
+}
+
+function sanitizeEs(
+  v: unknown,
+): { index?: string; query?: string } | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  const out: { index?: string; query?: string } = {};
+  const index = sanitizeOptionalString(r.index, MAX_INDEX_NAME_LEN);
+  if (index !== undefined) out.index = index;
+  const query = sanitizeOptionalString(r.query, MAX_ES_QUERY_LEN);
+  if (query !== undefined) out.query = query;
+  if (out.index === undefined && out.query === undefined) return undefined;
+  return out;
 }
 
 // 入力 JSON を厳密に検証して unknown フィールドを捨てる。tabs.json は
@@ -55,7 +118,23 @@ function sanitize(input: unknown): TabsState {
       typeof tab.view === "string" && VALID_VIEWS.has(tab.view)
         ? (tab.view as TabsState["tabs"][number]["view"])
         : "data";
-    tabs.push({ id: tab.id, dbId, table, view });
+    const out: TabsState["tabs"][number] = { id: tab.id, dbId, table, view };
+
+    // optional 永続化 field — 値が valid なときだけ載せる。undefined のときは
+    // 載せない (旧形式 tabs.json と同じ表現になる)。
+    const sqlDraft = sanitizeOptionalString(tab.sqlDraft, MAX_SQL_DRAFT_LEN);
+    if (sqlDraft !== undefined) out.sqlDraft = sqlDraft;
+    if (typeof tab.historyOpen === "boolean") out.historyOpen = tab.historyOpen;
+    const historyHeight = sanitizeCssSize(tab.historyHeight);
+    if (historyHeight !== undefined) out.historyHeight = historyHeight;
+    const sidebarWidth = sanitizeCssSize(tab.sidebarWidth);
+    if (sidebarWidth !== undefined) out.sidebarWidth = sidebarWidth;
+    const redis = sanitizeRedis(tab.redis);
+    if (redis !== undefined) out.redis = redis;
+    const es = sanitizeEs(tab.es);
+    if (es !== undefined) out.es = es;
+
+    tabs.push(out);
   }
   let activeTabId =
     typeof obj.activeTabId === "string" && obj.activeTabId.length > 0
