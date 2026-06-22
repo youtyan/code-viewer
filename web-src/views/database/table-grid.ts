@@ -108,11 +108,17 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
   /* ---- Column width management ---- */
   const colWidths = new Map<string, number>();
+  let activeResize: {
+    onMouseMove: (e: MouseEvent) => void;
+    onMouseUp: () => void;
+  } | null = null;
 
   function storageKey(): string | null {
     const project = callbacks.getProjectName?.() ?? "";
+    const dbId = callbacks.getDbId();
     if (!currentTable) return null;
-    return `db:col-widths:${project}:${currentTable}`;
+    if (!dbId) return null;
+    return `db:col-widths:${project}:${dbId}:${currentTable}`;
   }
 
   function saveColWidths() {
@@ -228,6 +234,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   }
 
   function clear() {
+    cleanupResize();
     currentTable = "";
     columns = [];
     columnNames = [];
@@ -392,6 +399,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   }
 
   function startResize(colIndex: number, startEvent: MouseEvent) {
+    cleanupResize();
     const colName = columnNames[colIndex];
     const startX = startEvent.clientX;
     const startWidth = getColWidth(colName);
@@ -408,14 +416,21 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     };
 
     const onMouseUp = () => {
-      document.body.classList.remove("db-resizing");
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      cleanupResize();
       saveColWidths();
     };
 
+    activeResize = { onMouseMove, onMouseUp };
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+  }
+
+  function cleanupResize(): void {
+    if (!activeResize) return;
+    document.body.classList.remove("db-resizing");
+    document.removeEventListener("mousemove", activeResize.onMouseMove);
+    document.removeEventListener("mouseup", activeResize.onMouseUp);
+    activeResize = null;
   }
 
   function renderFilterRow() {
@@ -700,19 +715,16 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     invalidateData();
   });
 
-  viewport.addEventListener(
-    "scroll",
-    () => {
-      headerWrap.scrollLeft = viewport.scrollLeft;
-      filterRowWrap.scrollLeft = viewport.scrollLeft;
-      renderViewport();
-    },
-    { passive: true },
-  );
+  const onViewportScroll = () => {
+    headerWrap.scrollLeft = viewport.scrollLeft;
+    filterRowWrap.scrollLeft = viewport.scrollLeft;
+    renderViewport();
+  };
+  viewport.addEventListener("scroll", onViewportScroll, { passive: true });
 
   function destroy() {
     clear();
-    viewport.removeEventListener("scroll", renderViewport);
+    viewport.removeEventListener("scroll", onViewportScroll);
   }
 
   return { el, load, clear, destroy };

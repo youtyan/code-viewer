@@ -90,6 +90,8 @@ function createTabPane(
   let currentDb: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
   let lastFiles: DbFileInfo[] = [];
+  let currentTable: string | null = initial.table ?? null;
+  let loadGeneration = 0;
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -348,15 +350,12 @@ function createTabPane(
     globalSearchView.el.hidden = tab !== "search";
     snapshotView.el.hidden = tab !== "snapshot";
     if (tab === "query") queryEditor.focus();
-    if (updateUrl) {
-      const activeTable = tableList.el.querySelector<HTMLElement>(
-        ".db-table-item.active",
-      );
+    if (updateUrl && currentDb) {
       deps.setRoute(
         {
           screen: "database",
           db: currentDb?.id,
-          table: activeTable?.dataset.table,
+          table: currentTable ?? undefined,
           tab: tab === "data" ? undefined : tab,
           range: deps.currentRange(),
         },
@@ -440,7 +439,10 @@ function createTabPane(
       redis?: { dbIndex?: number; key?: string };
       es?: { index?: string; query?: string };
     },
+    generation = loadGeneration,
   ) {
+    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
+    currentTable = null;
     if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
       tableList.render([]);
       grid.clear();
@@ -465,6 +467,7 @@ function createTabPane(
         esExplorer.el.hidden = false;
         await esExplorer.load(dbId, explorerInitial?.es);
       }
+      if (generation !== loadGeneration || currentDb?.id !== dbId) return;
       cb.onStateChange();
       return;
     }
@@ -473,6 +476,7 @@ function createTabPane(
     esExplorer.el.hidden = true;
     esExplorer.clear();
     const schema = await fetchSchema(dbId);
+    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
     if (!schema) return;
     schemaCache = schema;
     tableList.render(schema.tables);
@@ -481,14 +485,17 @@ function createTabPane(
     erDiagram.clear();
     setActiveTab("data");
     if (schema.tables.length > 0) {
-      selectTable(schema.tables[0].name);
+      await selectTable(schema.tables[0].name, generation);
     }
     cb.onStateChange();
   }
 
-  async function selectTable(table: string) {
+  async function selectTable(table: string, generation = loadGeneration) {
+    if (generation !== loadGeneration) return;
+    currentTable = table;
     tableList.setActive(table);
     if (!currentDb) return;
+    const requestDbId = currentDb.id;
     if (currentTab === "query" || currentTab === "er") {
       setActiveTab("data", false);
     }
@@ -506,12 +513,33 @@ function createTabPane(
       const data = await deps.trackLoad(
         fetchTablePage(table, 0, 200, null, []),
       );
+      if (
+        generation !== loadGeneration ||
+        currentDb?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
       grid.load(table, data);
     } catch {
+      if (
+        generation !== loadGeneration ||
+        currentDb?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
       grid.load(table);
     }
     if (currentTab === "schema") {
       const columns = await fetchColumns(table);
+      if (
+        generation !== loadGeneration ||
+        currentDb?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
       schemaView.render(table, columns, schemaCache?.indexes || []);
     }
   }
@@ -581,8 +609,13 @@ function createTabPane(
   }
 
   dbSelect.addEventListener("change", () => {
+    void handleDbSelectChange();
+  });
+
+  async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
+    const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);
     const option = dbSelect.selectedOptions[0];
     currentDb = {
@@ -593,12 +626,20 @@ function createTabPane(
       kind: file?.kind || "sqlite",
     };
     clearDockerNotice();
+    await selectDb(dbId, undefined, generation);
+    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
     deps.setRoute(
-      { screen: "database", db: dbId, range: deps.currentRange() },
+      {
+        screen: "database",
+        db: dbId,
+        table: currentTable ?? undefined,
+        tab: currentTab === "data" ? undefined : currentTab,
+        range: deps.currentRange(),
+      },
       true,
     );
-    selectDb(dbId);
-  });
+    cb.onStateChange();
+  }
 
   // 初回 enter のみ initial.redis / initial.es を消費する。手動で DB を
   // 切り替えたあとは undefined にして二度と適用しない (= 古い state を
@@ -607,7 +648,9 @@ function createTabPane(
   let pendingEsInitial = initial.es;
 
   async function enter(db?: string, table?: string, view?: TabName) {
+    const generation = ++loadGeneration;
     const files = await fetchDbFiles();
+    if (generation !== loadGeneration) return;
     lastFiles = files;
     dbSelect.innerHTML = "";
     if (files.length === 0) {
@@ -646,14 +689,16 @@ function createTabPane(
     };
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
-    await selectDb(target, explorerInitial);
+    await selectDb(target, explorerInitial, generation);
+    if (generation !== loadGeneration || currentDb?.id !== target) return;
     if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
       cb.onStateChange();
       return;
     }
     if (table) {
-      await selectTable(table);
+      await selectTable(table, generation);
     }
+    if (generation !== loadGeneration) return;
     if (view && view !== "data") {
       setActiveTab(view);
       if (view === "schema") {
@@ -684,7 +729,7 @@ function createTabPane(
     const state: TabState = {
       id: cb.tabId,
       dbId: currentDb?.id ?? null,
-      table: activeTable?.dataset.table ?? null,
+      table: currentTable ?? activeTable?.dataset.table ?? null,
       view: currentTab,
     };
 
@@ -731,12 +776,19 @@ function createTabPane(
   }
 
   function dispose(): void {
-    grid.clear();
+    loadGeneration++;
+    grid.destroy();
     schemaView.clear();
-    erDiagram.clear();
+    erDiagram.dispose();
+    tableList.dispose();
+    queryEditor.dispose();
+    globalSearchView.dispose();
+    snapshotView.dispose();
+    historyView.clear();
     redisExplorer.clear();
     esExplorer.clear();
     currentDb = null;
+    currentTable = null;
     schemaCache = null;
   }
 
@@ -769,11 +821,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     string,
     { pane: TabPaneInternal; chip: HTMLElement; label: HTMLElement }
   >();
+  const paneReadyById = new Map<string, Promise<void>>();
   let activeTabId: string | null = null;
   // restoring 中は scheduleSave を抑制して、初期復元の連鎖 setState で
   // 過剰な PUT を発生させないようにする。復元完了後に 1 回まとめて保存する。
   let restoring = false;
   let savePending: ReturnType<typeof setTimeout> | null = null;
+  let unloadListenerInstalled = false;
 
   function scheduleSave(): void {
     if (!mounted || restoring) return;
@@ -781,10 +835,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     savePending = setTimeout(saveNow, 500);
   }
 
-  async function saveNow(): Promise<void> {
+  async function saveNow(options: { keepalive?: boolean } = {}): Promise<void> {
     savePending = null;
+    if (!mounted || restoring) return;
     const tabs: TabState[] = [];
     for (const [, entry] of tabsById) tabs.push(entry.pane.getState());
+    if (tabs.length === 0) return;
     const body: TabsState = { version: 1, tabs, activeTabId };
     try {
       await fetch("/_db/tabs", {
@@ -794,10 +850,23 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           "X-Code-Viewer-Action": "1",
         },
         body: JSON.stringify(body),
+        keepalive: options.keepalive,
       });
     } catch {
       // ベストエフォート。失敗してもユーザー操作は妨げない。
     }
+  }
+
+  function flushPendingSave(options: { keepalive?: boolean } = {}): void {
+    if (savePending !== null) {
+      clearTimeout(savePending);
+      savePending = null;
+    }
+    void saveNow(options);
+  }
+
+  function handleBeforeUnload(): void {
+    flushPendingSave({ keepalive: true });
   }
 
   async function fetchTabs(): Promise<TabsResponse | null> {
@@ -814,6 +883,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   tabsBar.className = "db-tabs-bar";
   const tabsList = document.createElement("div");
   tabsList.className = "db-tabs-list";
+  tabsList.setAttribute("role", "tablist");
   const newTabBtn = document.createElement("button");
   newTabBtn.type = "button";
   newTabBtn.className = "db-tabs-new-btn";
@@ -834,8 +904,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const isActive = tid === id;
       entry.pane.el.hidden = !isActive;
       entry.chip.classList.toggle("active", isActive);
+      entry.chip.setAttribute("aria-selected", isActive ? "true" : "false");
+      entry.chip.tabIndex = isActive ? 0 : -1;
     }
-    syncActiveRoute();
+    if (!restoring) syncActiveRoute();
     scheduleSave();
   }
 
@@ -870,6 +942,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const chip = document.createElement("div");
     chip.className = "db-tabs-chip";
     chip.dataset.tabId = id;
+    chip.setAttribute("role", "tab");
+    chip.setAttribute("aria-selected", "false");
+    chip.tabIndex = -1;
 
     const labelEl = document.createElement("span");
     labelEl.className = "db-tabs-chip-label";
@@ -887,6 +962,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     chip.append(labelEl, closeBtn);
     chip.addEventListener("click", () => setActive(id));
+    chip.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setActive(id);
+      }
+    });
     // middle-click でも閉じる。
     chip.addEventListener("auxclick", (e) => {
       if (e.button === 1) {
@@ -902,7 +983,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         isActive: () => activeTabId === id,
         onStateChange: () => {
           refreshChipLabel(id);
-          if (activeTabId === id) syncActiveRoute();
+          if (activeTabId === id && !restoring) syncActiveRoute();
           scheduleSave();
         },
       },
@@ -930,13 +1011,17 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
     // 引数で渡し、それ以外の per-tab UI state は createTabPane の initial で
     // すでに復元済み。
-    pane
+    const ready = pane
       .enter(
         initial?.dbId || undefined,
         initial?.table || undefined,
         initial?.view || undefined,
       )
-      .then(() => refreshChipLabel(id));
+      .then(() => refreshChipLabel(id))
+      .finally(() => {
+        paneReadyById.delete(id);
+      });
+    paneReadyById.set(id, ready);
 
     return id;
   }
@@ -948,7 +1033,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     entry.pane.el.remove();
     entry.chip.remove();
     tabsById.delete(id);
-    if (activeTabId !== id) return;
+    paneReadyById.delete(id);
+    if (activeTabId !== id) {
+      scheduleSave();
+      return;
+    }
     if (tabsById.size === 0) {
       // 最後のタブを閉じようとした → 空タブにリセットして残す。
       openTab({});
@@ -962,6 +1051,47 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   newTabBtn.addEventListener("click", () => {
     openTab({});
   });
+
+  function routeMatchesState(
+    state: TabState,
+    db?: string,
+    table?: string,
+    view?: TabName,
+  ): boolean {
+    if (!db && (table || view) && !state.dbId) return false;
+    if (db !== undefined && state.dbId !== db) return false;
+    if (table !== undefined && state.table !== table) return false;
+    if (view !== undefined && state.view !== view) return false;
+    return true;
+  }
+
+  async function applyRouteToTab(
+    db?: string,
+    table?: string,
+    view?: TabName,
+  ): Promise<void> {
+    for (const [id, entry] of tabsById) {
+      if (routeMatchesState(entry.pane.getState(), db, table, view)) {
+        setActive(id);
+        refreshChipLabel(id);
+        return;
+      }
+    }
+    const active = tabsById.get(activeTabId ?? "");
+    if (!active || !activeTabId) return;
+    await active.pane.enter(db, table, view);
+    refreshChipLabel(activeTabId);
+  }
+
+  function parseSseDbId(data?: string): string | null {
+    if (!data) return null;
+    try {
+      const parsed = JSON.parse(data) as { dbId?: unknown };
+      return typeof parsed.dbId === "string" ? parsed.dbId : null;
+    } catch {
+      return null;
+    }
+  }
 
   async function enter(
     db?: string,
@@ -979,6 +1109,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       content.appendChild(root);
       document.body.classList.add("gdp-database-page");
       mounted = true;
+      if (!unloadListenerInstalled) {
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        unloadListenerInstalled = true;
+      }
       deps.setPageMode();
       deps.syncHeaderMenu();
 
@@ -987,30 +1121,28 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const restored = await fetchTabs();
       if (restored && restored.tabs.length > 0) {
         restoring = true;
+        const restoredIds: string[] = [];
         try {
           for (const t of restored.tabs) {
-            openTab({
-              id: t.id,
-              dbId: t.dbId ?? null,
-              table: t.table ?? null,
-              view: t.view,
-            });
+            restoredIds.push(openTab(t));
           }
           const targetId =
             restored.activeTabId && tabsById.has(restored.activeTabId)
               ? restored.activeTabId
               : (tabsById.keys().next().value as string | undefined);
           if (targetId) setActive(targetId);
+          await Promise.all(
+            restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean),
+          );
         } finally {
           restoring = false;
         }
-        // URL の引数があれば active タブに上書き反映 (他タブを潰さない)。
+        // URL の引数があれば、まず同じ状態の既存タブを active 化する。
+        // なければ active タブに上書き反映する。
         if (db || table || view) {
-          const active = tabsById.get(activeTabId ?? "");
-          if (active) {
-            await active.pane.enter(db, table, view);
-            if (activeTabId) refreshChipLabel(activeTabId);
-          }
+          await applyRouteToTab(db, table, view);
+        } else {
+          syncActiveRoute();
         }
         // 初期復元の連鎖 setState を 1 回の PUT にまとめる。
         scheduleSave();
@@ -1031,13 +1163,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const active = tabsById.get(activeTabId);
     if (!active) return;
     if (db || table || view) {
-      await active.pane.enter(db, table, view);
-      refreshChipLabel(activeTabId);
+      await applyRouteToTab(db, table, view);
     }
   }
 
   function leave(): void {
     if (!mounted) return;
+    flushPendingSave();
     for (const [, entry] of tabsById) {
       entry.pane.dispose();
     }
@@ -1047,15 +1179,22 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     activeTabId = null;
     root.remove();
     document.body.classList.remove("gdp-database-page");
+    if (unloadListenerInstalled) {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      unloadListenerInstalled = false;
+    }
     const diff = document.getElementById("diff");
     if (diff) diff.hidden = false;
     mounted = false;
   }
 
   function handleSse(event?: string, data?: string): void {
-    if (!mounted || !activeTabId) return;
-    const entry = tabsById.get(activeTabId);
-    if (entry) entry.pane.handleSse(event, data);
+    if (!mounted) return;
+    const dbId = parseSseDbId(data);
+    for (const [, entry] of tabsById) {
+      if (dbId && entry.pane.getState().dbId !== dbId) continue;
+      entry.pane.handleSse(event, data);
+    }
   }
 
   return { enter, leave, handleSse };

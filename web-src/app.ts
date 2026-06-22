@@ -2991,8 +2991,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   es.addEventListener("annotation", (event) => {
     ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
   });
-  es.addEventListener("db-query", () => {
-    DATABASE_VIEW.handleSse("db-query");
+  es.addEventListener("db-query", (event) => {
+    DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
   });
   es.addEventListener("db-snapshot", (event) => {
     DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);

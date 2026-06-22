@@ -42,6 +42,7 @@ export type ErDiagram = {
     columnsMap: Map<string, DbColumn[]>,
   ) => Promise<void>;
   clear: () => void;
+  dispose: () => void;
 };
 
 function mermaidType(sqlType: string): string {
@@ -202,17 +203,19 @@ export function createErDiagram(): ErDiagram {
     container.style.cursor = "grabbing";
     e.preventDefault();
   });
-  window.addEventListener("mousemove", (e) => {
+  const onWindowMouseMove = (e: MouseEvent) => {
     if (!dragState) return;
     container.scrollLeft = dragState.sl - (e.clientX - dragState.x);
     container.scrollTop = dragState.st - (e.clientY - dragState.y);
-  });
-  window.addEventListener("mouseup", () => {
+  };
+  const onWindowMouseUp = () => {
     if (dragState) {
       dragState = null;
       container.style.cursor = "";
     }
-  });
+  };
+  window.addEventListener("mousemove", onWindowMouseMove);
+  window.addEventListener("mouseup", onWindowMouseUp);
 
   container.addEventListener(
     "wheel",
@@ -267,7 +270,15 @@ export function createErDiagram(): ErDiagram {
     el.hidden = true;
     svgWrap.innerHTML = "";
     lastMarkup = "";
+    dragState = null;
+    container.style.cursor = "";
   }
 
-  return { el, render, clear };
+  function dispose(): void {
+    clear();
+    window.removeEventListener("mousemove", onWindowMouseMove);
+    window.removeEventListener("mouseup", onWindowMouseUp);
+  }
+
+  return { el, render, clear, dispose };
 }

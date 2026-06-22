@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -17,6 +18,9 @@ const MAX_JSON_BYTES = 1_000_000;
 // 1 タブの自由入力フィールドの個別上限。
 const MAX_SQL_DRAFT_LEN = 16_000;
 const MAX_ES_QUERY_LEN = 16_000;
+const MAX_TAB_ID_LEN = 128;
+const MAX_DB_ID_LEN = 2048;
+const MAX_TABLE_NAME_LEN = 512;
 const MAX_REDIS_KEY_LEN = 1024;
 const MAX_INDEX_NAME_LEN = 256;
 // CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
@@ -42,7 +46,13 @@ function emptyState(): TabsState {
 // 形式: 数値 + 単位 (px / %)。安全側に厳しめ。
 function isValidCssSize(s: string): boolean {
   if (s.length === 0 || s.length > MAX_CSS_SIZE_LEN) return false;
-  return /^-?\d+(?:\.\d+)?(?:px|%)$/.test(s);
+  const match = /^(\d+(?:\.\d+)?)(px|%)$/.exec(s);
+  if (!match) return false;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return false;
+  return match[2] === "%"
+    ? value >= 0 && value <= 100
+    : value >= 80 && value <= 2000;
 }
 
 function sanitizeOptionalString(
@@ -107,18 +117,17 @@ function sanitize(input: unknown): TabsState {
     if (tabs.length >= MAX_TABS) break;
     if (!t || typeof t !== "object") continue;
     const tab = t as Record<string, unknown>;
-    if (typeof tab.id !== "string" || !tab.id) continue;
-    if (seenIds.has(tab.id)) continue;
-    seenIds.add(tab.id);
-    const dbId =
-      typeof tab.dbId === "string" && tab.dbId.length > 0 ? tab.dbId : null;
-    const table =
-      typeof tab.table === "string" && tab.table.length > 0 ? tab.table : null;
+    const id = sanitizeOptionalString(tab.id, MAX_TAB_ID_LEN);
+    if (!id) continue;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
+    const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
     const view =
       typeof tab.view === "string" && VALID_VIEWS.has(tab.view)
         ? (tab.view as TabsState["tabs"][number]["view"])
         : "data";
-    const out: TabsState["tabs"][number] = { id: tab.id, dbId, table, view };
+    const out: TabsState["tabs"][number] = { id, dbId, table, view };
 
     // optional 永続化 field — 値が valid なときだけ載せる。undefined のときは
     // 載せない (旧形式 tabs.json と同じ表現になる)。
@@ -137,9 +146,7 @@ function sanitize(input: unknown): TabsState {
     tabs.push(out);
   }
   let activeTabId =
-    typeof obj.activeTabId === "string" && obj.activeTabId.length > 0
-      ? obj.activeTabId
-      : null;
+    sanitizeOptionalString(obj.activeTabId, MAX_TAB_ID_LEN) ?? null;
   if (activeTabId && !tabs.find((t) => t.id === activeTabId)) {
     activeTabId = tabs.length > 0 ? tabs[0].id : null;
   }
@@ -151,9 +158,27 @@ export function loadTabs(cwd: string): TabsState {
   if (!existsSync(file)) return emptyState();
   try {
     const raw = readFileSync(file, "utf8");
-    return sanitize(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      (parsed as { version?: unknown }).version !== 1
+    ) {
+      backupInvalidTabsFile(file);
+      return emptyState();
+    }
+    return sanitize(parsed);
   } catch {
+    backupInvalidTabsFile(file);
     return emptyState();
+  }
+}
+
+function backupInvalidTabsFile(file: string): void {
+  try {
+    renameSync(file, `${file}.bak-${Date.now()}`);
+  } catch {
+    // best effort only
   }
 }
 
@@ -162,7 +187,7 @@ export function saveTabs(cwd: string, state: TabsState): void {
   const dir = join(cwd, CODE_VIEWER_DIR);
   mkdirSync(dir, { recursive: true });
   const file = tabsFilePath(cwd);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = `${file}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
   const content = `${JSON.stringify(normalized, null, 2)}\n`;
   if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
     // 上限を超えるほど巨大な state は受けない (構造上ありえないが defensive)。

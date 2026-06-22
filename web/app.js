@@ -7878,7 +7878,13 @@ ${frontmatter.yaml}
     let lastSort;
     let loadingDocs = false;
     let detailTab = "mapping";
+    let loadRunId = 0;
+    let docRunId = 0;
+    let suppressNotify = false;
+    let queryNotifyTimer = null;
     function notifySelectionChange() {
+      if (suppressNotify)
+        return;
       callbacks.onSelectionChange?.({
         index: currentIndex ?? undefined,
         query: currentQuery || undefined
@@ -8042,13 +8048,15 @@ ${frontmatter.yaml}
     async function fetchMapping(index) {
       if (!currentDbId)
         return;
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
       mappingBody.innerHTML = "";
       const loading = document.createElement("div");
       loading.className = "es-note";
       loading.textContent = "Loading mapping...";
       mappingBody.appendChild(loading);
       try {
-        const params = new URLSearchParams({ db: currentDbId, index });
+        const params = new URLSearchParams({ db: requestDbId, index });
         const res = await fetch(`/_db/elasticsearch/mapping?${params}`);
         if (!res.ok) {
           const text2 = await res.text();
@@ -8060,10 +8068,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (currentIndex !== index)
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
           return;
+        }
         renderMapping(data);
       } catch (err) {
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
         mappingBody.innerHTML = "";
         const errEl = document.createElement("div");
         errEl.className = "es-error";
@@ -8076,6 +8087,10 @@ ${frontmatter.yaml}
         return;
       if (loadingDocs)
         return;
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
+      const requestIndex = currentIndex;
+      const requestQuery = currentQuery;
       loadingDocs = true;
       docMoreBtn.disabled = true;
       if (!append) {
@@ -8084,12 +8099,12 @@ ${frontmatter.yaml}
       }
       try {
         const params = new URLSearchParams({
-          db: currentDbId,
-          index: currentIndex,
+          db: requestDbId,
+          index: requestIndex,
           size: "200"
         });
-        if (currentQuery)
-          params.set("q", currentQuery);
+        if (requestQuery)
+          params.set("q", requestQuery);
         if (append && lastSort)
           params.set("searchAfter", JSON.stringify(lastSort));
         const res = await fetch(`/_db/elasticsearch/docs?${params}`);
@@ -8099,8 +8114,9 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (currentIndex !== data.index)
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
           return;
+        }
         if (!append)
           docList.innerHTML = "";
         if (data.hits.length === 0 && !append) {
@@ -8111,6 +8127,8 @@ ${frontmatter.yaml}
         lastSort = data.lastSort;
         docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
       } catch (err) {
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
         setDocStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
         loadingDocs = false;
@@ -8129,6 +8147,9 @@ ${frontmatter.yaml}
     async function selectDoc(id) {
       if (!currentDbId || !currentIndex)
         return;
+      const requestRunId = ++docRunId;
+      const requestDbId = currentDbId;
+      const requestIndex = currentIndex;
       highlightActiveDoc(id);
       setDetailTab("doc");
       docBody.innerHTML = "";
@@ -8136,10 +8157,9 @@ ${frontmatter.yaml}
       loading.className = "es-note";
       loading.textContent = "Loading doc...";
       docBody.appendChild(loading);
-      const requestIndex = currentIndex;
       try {
         const params = new URLSearchParams({
-          db: currentDbId,
+          db: requestDbId,
           index: requestIndex,
           id
         });
@@ -8154,10 +8174,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (requestIndex !== currentIndex)
+        if (requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
           return;
+        }
         renderDoc(data);
       } catch (err) {
+        if (requestRunId !== docRunId || requestDbId !== currentDbId)
+          return;
         docBody.innerHTML = "";
         const errEl = document.createElement("div");
         errEl.className = "es-error";
@@ -8181,10 +8204,22 @@ ${frontmatter.yaml}
     });
     searchInput.addEventListener("input", () => {
       currentQuery = searchInput.value.trim();
-      notifySelectionChange();
+      if (queryNotifyTimer)
+        clearTimeout(queryNotifyTimer);
+      queryNotifyTimer = setTimeout(() => {
+        queryNotifyTimer = null;
+        notifySelectionChange();
+      }, 300);
     });
     docMoreBtn.addEventListener("click", () => loadDocs(true));
     async function load(dbId, initial) {
+      if (queryNotifyTimer) {
+        clearTimeout(queryNotifyTimer);
+        queryNotifyTimer = null;
+      }
+      if (currentDbId === dbId && !initial)
+        return;
+      const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentIndex = null;
       currentQuery = "";
@@ -8207,17 +8242,30 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (currentDbId !== dbId)
+        if (requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderIndices(data.indices);
         if (initial?.index && data.indices.some((ix) => ix.name === initial.index)) {
-          await selectIndex(initial.index);
+          suppressNotify = true;
+          try {
+            await selectIndex(initial.index);
+          } finally {
+            suppressNotify = false;
+          }
+          notifySelectionChange();
         }
       } catch (err) {
         setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       }
     }
     function clear() {
+      loadRunId++;
+      docRunId++;
+      suppressNotify = false;
+      if (queryNotifyTimer) {
+        clearTimeout(queryNotifyTimer);
+        queryNotifyTimer = null;
+      }
       currentDbId = null;
       currentIndex = null;
       currentQuery = "";
@@ -8399,18 +8447,20 @@ ${frontmatter.yaml}
       container.style.cursor = "grabbing";
       e2.preventDefault();
     });
-    window.addEventListener("mousemove", (e2) => {
+    const onWindowMouseMove = (e2) => {
       if (!dragState)
         return;
       container.scrollLeft = dragState.sl - (e2.clientX - dragState.x);
       container.scrollTop = dragState.st - (e2.clientY - dragState.y);
-    });
-    window.addEventListener("mouseup", () => {
+    };
+    const onWindowMouseUp = () => {
       if (dragState) {
         dragState = null;
         container.style.cursor = "";
       }
-    });
+    };
+    window.addEventListener("mousemove", onWindowMouseMove);
+    window.addEventListener("mouseup", onWindowMouseUp);
     container.addEventListener("wheel", (e2) => {
       if (e2.ctrlKey || e2.metaKey) {
         e2.preventDefault();
@@ -8450,8 +8500,15 @@ ${frontmatter.yaml}
       el.hidden = true;
       svgWrap.innerHTML = "";
       lastMarkup = "";
+      dragState = null;
+      container.style.cursor = "";
     }
-    return { el, render, clear };
+    function dispose() {
+      clear();
+      window.removeEventListener("mousemove", onWindowMouseMove);
+      window.removeEventListener("mouseup", onWindowMouseUp);
+    }
+    return { el, render, clear, dispose };
   }
 
   // web-src/views/database/global-search-view.ts
@@ -8489,6 +8546,7 @@ ${frontmatter.yaml}
     el.append(header, optionsRow, progress, results);
     let currentJobId = null;
     let pollTimer = null;
+    let disposed = false;
     function stopPolling() {
       if (pollTimer) {
         clearInterval(pollTimer);
@@ -8499,6 +8557,8 @@ ${frontmatter.yaml}
       input.disabled = false;
     }
     async function startSearch() {
+      if (disposed)
+        return;
       const dbId = deps.getDbId();
       if (!dbId)
         return;
@@ -8530,6 +8590,10 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
+        if (disposed) {
+          cancelJob(data.jobId);
+          return;
+        }
         currentJobId = data.jobId;
         pollTimer = setInterval(() => pollStatus(), 500);
       } catch (err) {
@@ -8538,6 +8602,8 @@ ${frontmatter.yaml}
       }
     }
     async function pollStatus() {
+      if (disposed)
+        return;
       if (!currentJobId)
         return;
       try {
@@ -8547,6 +8613,8 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
+        if (disposed)
+          return;
         if (data.error) {
           progress.textContent = `エラー: ${data.error}`;
           stopPolling();
@@ -8564,6 +8632,15 @@ ${frontmatter.yaml}
     async function cancelSearch() {
       if (!currentJobId)
         return;
+      const jobId = currentJobId;
+      currentJobId = null;
+      await cancelJob(jobId);
+      stopPolling();
+      if (disposed)
+        return;
+      progress.textContent = "検索をキャンセルしました。";
+    }
+    async function cancelJob(jobId) {
       try {
         await fetch("/_db/search/cancel", {
           method: "POST",
@@ -8571,11 +8648,9 @@ ${frontmatter.yaml}
             "Content-Type": "application/json",
             "X-Code-Viewer-Action": "1"
           },
-          body: JSON.stringify({ id: currentJobId })
+          body: JSON.stringify({ id: jobId })
         });
       } catch {}
-      stopPolling();
-      progress.textContent = "検索をキャンセルしました。";
     }
     function renderHits(hits) {
       results.innerHTML = "";
@@ -8624,7 +8699,19 @@ ${frontmatter.yaml}
         startSearch();
     });
     cancelBtn.addEventListener("click", cancelSearch);
-    return { el };
+    function dispose() {
+      disposed = true;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (currentJobId) {
+        const jobId = currentJobId;
+        currentJobId = null;
+        cancelJob(jobId);
+      }
+    }
+    return { el, dispose };
   }
 
   // web-src/views/database/query-editor.ts
@@ -8899,11 +8986,12 @@ ${frontmatter.yaml}
       }
       historyDropdown.hidden = false;
     });
-    document.addEventListener("click", (e2) => {
+    const onDocumentClick = (e2) => {
       if (!historyDropdown.hidden && !historyBtn.contains(e2.target) && !historyDropdown.contains(e2.target)) {
         historyDropdown.hidden = true;
       }
-    });
+    };
+    document.addEventListener("click", onDocumentClick);
     textarea.addEventListener("keydown", (e2) => {
       if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
         e2.preventDefault();
@@ -8940,7 +9028,10 @@ ${frontmatter.yaml}
     function getSql() {
       return textarea.value;
     }
-    return { el, focus, setSql, getSql };
+    function dispose() {
+      document.removeEventListener("click", onDocumentClick);
+    }
+    return { el, focus, setSql, getSql, dispose };
   }
   function formatValue(value) {
     if (value === null)
@@ -8997,6 +9088,9 @@ ${frontmatter.yaml}
           return;
         const state = await res.json();
         entries = state.entries;
+        if (selectedEntryId && !entries.some((entry) => entry.id === selectedEntryId)) {
+          clearDetail();
+        }
         render();
       } catch {}
     }
@@ -9014,6 +9108,11 @@ ${frontmatter.yaml}
       }
     }
     let selectedEntryId = null;
+    function clearDetail() {
+      selectedEntryId = null;
+      detailCol.innerHTML = "";
+      detailCol.appendChild(detailPlaceholder);
+    }
     function selectEntry(entry) {
       selectedEntryId = entry.id;
       listEl.querySelectorAll(".db-query-history-entry").forEach((el2) => {
@@ -9190,7 +9289,13 @@ ${frontmatter.yaml}
     refreshBtn.addEventListener("click", () => {
       refresh();
     });
-    return { el, refresh };
+    function clear() {
+      entries = [];
+      expandedIds.clear();
+      clearDetail();
+      render();
+    }
+    return { el, refresh, clear };
   }
   function formatTime(iso) {
     try {
@@ -9265,7 +9370,12 @@ ${frontmatter.yaml}
     let currentKey = null;
     let currentCursor = "0";
     let loadingKeys = false;
+    let loadRunId = 0;
+    let keyRunId = 0;
+    let suppressNotify = false;
     function notifySelectionChange() {
+      if (suppressNotify)
+        return;
       callbacks.onSelectionChange?.({
         dbIndex: currentDbIndex ?? undefined,
         key: currentKey ?? undefined
@@ -9447,6 +9557,9 @@ ${frontmatter.yaml}
     async function selectKey(name) {
       if (currentDbId === null || currentDbIndex === null)
         return;
+      const requestRunId = ++keyRunId;
+      const requestDbId = currentDbId;
+      const requestDbIndex = currentDbIndex;
       currentKey = name;
       notifySelectionChange();
       highlightActiveKey(name);
@@ -9455,10 +9568,9 @@ ${frontmatter.yaml}
       loading.className = "redis-note";
       loading.textContent = "Loading value...";
       mainPane.appendChild(loading);
-      const requestDbIndex = currentDbIndex;
       try {
         const params = new URLSearchParams({
-          db: currentDbId,
+          db: requestDbId,
           dbIndex: String(requestDbIndex),
           key: name
         });
@@ -9473,10 +9585,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (requestDbIndex !== currentDbIndex)
+        if (requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
           return;
+        }
         renderValue(data.key, data.value);
       } catch (err) {
+        if (requestRunId !== keyRunId || requestDbId !== currentDbId)
+          return;
         mainPane.innerHTML = "";
         const errEl = document.createElement("div");
         errEl.className = "redis-error";
@@ -9499,14 +9614,17 @@ ${frontmatter.yaml}
         return;
       if (loadingKeys)
         return;
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
+      const requestDbIndex = currentDbIndex;
       loadingKeys = true;
       keyMoreBtn.disabled = true;
       if (!append)
         setKeyStatus("Loading keys...");
       try {
         const params = new URLSearchParams({
-          db: currentDbId,
-          dbIndex: String(currentDbIndex),
+          db: requestDbId,
+          dbIndex: String(requestDbIndex),
           pattern: "*",
           cursor: currentCursor,
           count: "200"
@@ -9518,8 +9636,9 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (currentDbIndex !== data.dbIndex)
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
           return;
+        }
         if (!append)
           keyList.innerHTML = "";
         if (data.keys.length === 0 && !append) {
@@ -9530,6 +9649,8 @@ ${frontmatter.yaml}
         currentCursor = data.nextCursor;
         keyMoreBtn.hidden = currentCursor === "0";
       } catch (err) {
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
         setKeyStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
         loadingKeys = false;
@@ -9538,6 +9659,9 @@ ${frontmatter.yaml}
     }
     keyMoreBtn.addEventListener("click", () => loadKeys(true));
     async function load(dbId, initial) {
+      if (currentDbId === dbId && !initial)
+        return;
+      const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentDbIndex = null;
       currentKey = null;
@@ -9554,22 +9678,31 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (currentDbId !== dbId)
+        if (requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderDatabases(data.databases);
         if (initial?.dbIndex !== undefined && data.databases.some((d2) => d2.index === initial.dbIndex)) {
-          await selectDatabase(initial.dbIndex);
-          if (currentDbId !== dbId)
-            return;
-          if (initial.key) {
-            await selectKey(initial.key);
+          suppressNotify = true;
+          try {
+            await selectDatabase(initial.dbIndex);
+            if (currentDbId !== dbId)
+              return;
+            if (initial.key) {
+              await selectKey(initial.key);
+            }
+          } finally {
+            suppressNotify = false;
           }
+          notifySelectionChange();
         }
       } catch (err) {
         setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       }
     }
     function clear() {
+      loadRunId++;
+      keyRunId++;
+      suppressNotify = false;
       currentDbId = null;
       currentDbIndex = null;
       currentKey = null;
@@ -9789,7 +9922,13 @@ ${frontmatter.yaml}
     el.className = "db-snapshot-view";
     const guide = document.createElement("div");
     guide.className = "db-snapshot-guide";
-    guide.innerHTML = '<div class="db-snapshot-guide-title">スナップショット差分</div>' + '<div class="db-snapshot-guide-body">' + "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます" + "</div>";
+    const guideTitle = document.createElement("div");
+    guideTitle.className = "db-snapshot-guide-title";
+    guideTitle.textContent = "スナップショット差分";
+    const guideBody = document.createElement("div");
+    guideBody.className = "db-snapshot-guide-body";
+    guideBody.textContent = "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます";
+    guide.append(guideTitle, guideBody);
     const toolbar = document.createElement("div");
     toolbar.className = "db-snapshot-toolbar";
     const createBtn = document.createElement("button");
@@ -9841,6 +9980,8 @@ ${frontmatter.yaml}
     mainArea.className = "db-snapshot-main-area";
     el.append(guide, toolbar, tableSelector, mainArea);
     let snapshots = [];
+    let disposed = false;
+    const autoRefreshTimers = new Set;
     function showTableSelector() {
       const tables = deps.getTables();
       const lastTables = getLastTables();
@@ -9901,12 +10042,23 @@ ${frontmatter.yaml}
           note: noteInput.value.trim()
         });
         tableSelector.hidden = true;
-        setTimeout(() => refreshAndAutoDiff(), 3000);
+        scheduleAutoRefresh(dbId);
       } catch {} finally {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "取得開始";
+        if (!disposed) {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = "取得開始";
+        }
       }
     });
+    function scheduleAutoRefresh(dbId) {
+      const timer = setTimeout(() => {
+        autoRefreshTimers.delete(timer);
+        if (disposed || deps.getDbId() !== dbId)
+          return;
+        refreshAndAutoDiff();
+      }, 3000);
+      autoRefreshTimers.add(timer);
+    }
     refreshBtn.addEventListener("click", refresh);
     async function refresh() {
       const dbId = deps.getDbId();
@@ -9916,8 +10068,12 @@ ${frontmatter.yaml}
         const snapRes = await fetch(`/_db/snapshot/list?db=${encodeURIComponent(dbId)}`);
         if (snapRes.ok) {
           const data = await snapRes.json();
+          if (disposed || deps.getDbId() !== dbId)
+            return;
           snapshots = data.snapshots;
         }
+        if (disposed || deps.getDbId() !== dbId)
+          return;
         renderMain();
       } catch {}
     }
@@ -9936,7 +10092,10 @@ ${frontmatter.yaml}
       mainArea.innerHTML = "";
       const done = snapshots.filter((s2) => s2.status === "done");
       if (snapshots.length === 0) {
-        mainArea.innerHTML = '<div class="db-snapshot-empty">まだスナップショットがありません。「スナップショット取得」で開始します。</div>';
+        const empty = document.createElement("div");
+        empty.className = "db-snapshot-empty";
+        empty.textContent = "まだスナップショットがありません。「スナップショット取得」で開始します。";
+        mainArea.appendChild(empty);
         return;
       }
       const snapshotSection = document.createElement("div");
@@ -9948,9 +10107,23 @@ ${frontmatter.yaml}
       for (const snap of snapshots) {
         const item = document.createElement("div");
         item.className = "db-snapshot-item";
+        item.dataset.snapshotId = snap.id;
         const info = document.createElement("div");
         info.className = "db-snapshot-info";
-        info.innerHTML = `<span class="db-snapshot-date">${new Date(snap.createdAt).toLocaleString()}</span>` + `<span class="db-snapshot-tables-count" title="${snap.tables.join(", ")}">${snap.tables.length}テーブル</span>` + (snap.note ? `<span class="db-snapshot-note">${snap.note}</span>` : "");
+        const date = document.createElement("span");
+        date.className = "db-snapshot-date";
+        date.textContent = new Date(snap.createdAt).toLocaleString();
+        const tables = document.createElement("span");
+        tables.className = "db-snapshot-tables-count";
+        tables.title = snap.tables.join(", ");
+        tables.textContent = `${snap.tables.length}テーブル`;
+        info.append(date, tables);
+        if (snap.note) {
+          const note = document.createElement("span");
+          note.className = "db-snapshot-note";
+          note.textContent = snap.note;
+          info.appendChild(note);
+        }
         const actions = document.createElement("div");
         actions.className = "db-snapshot-actions";
         const noteBtn = document.createElement("button");
@@ -10012,19 +10185,30 @@ ${frontmatter.yaml}
         existing.remove();
       const loading = document.createElement("div");
       loading.className = "db-snapshot-diff-inline";
-      loading.innerHTML = '<div class="db-snapshot-loading">差分を計算中...</div>';
+      const loadingText = document.createElement("div");
+      loadingText.className = "db-snapshot-loading";
+      loadingText.textContent = "差分を計算中...";
+      loading.appendChild(loadingText);
       mainArea.appendChild(loading);
       try {
         const res = await fetch(`/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`);
         if (!res.ok) {
-          loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+          loading.innerHTML = "";
+          const error2 = document.createElement("div");
+          error2.className = "db-snapshot-error";
+          error2.textContent = "差分の計算に失敗しました";
+          loading.appendChild(error2);
           return;
         }
         const data = await res.json();
         loading.remove();
         renderDiffInline(beforeId, afterId, data.tables);
       } catch {
-        loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+        loading.innerHTML = "";
+        const error2 = document.createElement("div");
+        error2.className = "db-snapshot-error";
+        error2.textContent = "差分の計算に失敗しました";
+        loading.appendChild(error2);
       }
     }
     function renderDiffInline(beforeId, afterId, tables) {
@@ -10077,17 +10261,29 @@ ${frontmatter.yaml}
       mainArea.appendChild(section);
     }
     async function loadDiffRows(beforeId, afterId, table2, container) {
-      container.innerHTML = '<div class="db-snapshot-loading">読み込み中...</div>';
+      container.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "db-snapshot-loading";
+      loading.textContent = "読み込み中...";
+      container.appendChild(loading);
       try {
         const res = await fetch(`/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table2)}&limit=200`);
         if (!res.ok) {
-          container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+          container.innerHTML = "";
+          const error2 = document.createElement("div");
+          error2.className = "db-snapshot-error";
+          error2.textContent = "読み込みに失敗しました";
+          container.appendChild(error2);
           return;
         }
         const data = await res.json();
         renderDiffRows(container, data.rows, data.total);
       } catch {
-        container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+        container.innerHTML = "";
+        const error2 = document.createElement("div");
+        error2.className = "db-snapshot-error";
+        error2.textContent = "読み込みに失敗しました";
+        container.appendChild(error2);
       }
     }
     function renderDiffRows(container, rows, total) {
@@ -10210,7 +10406,7 @@ ${frontmatter.yaml}
           dialog.remove();
       });
       dialog.append(input, saveBtn, cancelDlgBtn);
-      const item = el.querySelector(`.db-snapshot-item [title="${snapshotId}"]`)?.closest(".db-snapshot-item");
+      const item = Array.from(el.querySelectorAll(".db-snapshot-item")).find((node) => node.dataset.snapshotId === snapshotId);
       if (item) {
         item.after(dialog);
       } else {
@@ -10225,12 +10421,21 @@ ${frontmatter.yaml}
     function handleSse(data) {
       try {
         const parsed = JSON.parse(data);
+        const dbId = deps.getDbId();
+        if (parsed.dbId && dbId && parsed.dbId !== dbId)
+          return;
         if (parsed.action === "created" || parsed.action === "error") {
           refreshAndAutoDiff();
         }
       } catch {}
     }
-    return { el, refresh, handleSse };
+    function dispose() {
+      disposed = true;
+      for (const timer of autoRefreshTimers)
+        clearTimeout(timer);
+      autoRefreshTimers.clear();
+    }
+    return { el, refresh, handleSse, dispose };
   }
 
   // web-src/views/database/table-grid.ts
@@ -10295,11 +10500,15 @@ ${frontmatter.yaml}
     let filterTimer = null;
     let selectedRowIndex = -1;
     const colWidths = new Map;
+    let activeResize = null;
     function storageKey() {
       const project = callbacks.getProjectName?.() ?? "";
+      const dbId = callbacks.getDbId();
       if (!currentTable)
         return null;
-      return `db:col-widths:${project}:${currentTable}`;
+      if (!dbId)
+        return null;
+      return `db:col-widths:${project}:${dbId}:${currentTable}`;
     }
     function saveColWidths() {
       const key = storageKey();
@@ -10396,6 +10605,7 @@ ${frontmatter.yaml}
       ensurePage(0);
     }
     function clear() {
+      cleanupResize();
       currentTable = "";
       columns = [];
       columnNames = [];
@@ -10534,6 +10744,7 @@ ${frontmatter.yaml}
       syncContentWidth();
     }
     function startResize(colIndex, startEvent) {
+      cleanupResize();
       const colName = columnNames[colIndex];
       const startX = startEvent.clientX;
       const startWidth = getColWidth(colName);
@@ -10547,13 +10758,20 @@ ${frontmatter.yaml}
         renderViewport();
       };
       const onMouseUp = () => {
-        document.body.classList.remove("db-resizing");
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
+        cleanupResize();
         saveColWidths();
       };
+      activeResize = { onMouseMove, onMouseUp };
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
+    }
+    function cleanupResize() {
+      if (!activeResize)
+        return;
+      document.body.classList.remove("db-resizing");
+      document.removeEventListener("mousemove", activeResize.onMouseMove);
+      document.removeEventListener("mouseup", activeResize.onMouseUp);
+      activeResize = null;
     }
     function renderFilterRow() {
       filterRow.innerHTML = "";
@@ -10814,14 +11032,15 @@ ${frontmatter.yaml}
       filterClear.hidden = true;
       invalidateData();
     });
-    viewport.addEventListener("scroll", () => {
+    const onViewportScroll = () => {
       headerWrap.scrollLeft = viewport.scrollLeft;
       filterRowWrap.scrollLeft = viewport.scrollLeft;
       renderViewport();
-    }, { passive: true });
+    };
+    viewport.addEventListener("scroll", onViewportScroll, { passive: true });
     function destroy() {
       clear();
-      viewport.removeEventListener("scroll", renderViewport);
+      viewport.removeEventListener("scroll", onViewportScroll);
     }
     return { el, load, clear, destroy };
   }
@@ -10878,7 +11097,22 @@ ${frontmatter.yaml}
     const expandedTables = new Set;
     const columnCache = new Map;
     let contextMenu = null;
+    let contextMenuClick = null;
+    let contextMenuKeyDown = null;
+    let contextMenuTimer = null;
     function closeContextMenu() {
+      if (contextMenuTimer) {
+        clearTimeout(contextMenuTimer);
+        contextMenuTimer = null;
+      }
+      if (contextMenuClick) {
+        document.removeEventListener("click", contextMenuClick, true);
+        contextMenuClick = null;
+      }
+      if (contextMenuKeyDown) {
+        document.removeEventListener("keydown", contextMenuKeyDown, true);
+        contextMenuKeyDown = null;
+      }
       if (contextMenu) {
         contextMenu.remove();
         contextMenu = null;
@@ -10934,18 +11168,17 @@ ${frontmatter.yaml}
       const onDocClick = (ev) => {
         if (!menu.contains(ev.target)) {
           closeContextMenu();
-          document.removeEventListener("click", onDocClick, true);
-          document.removeEventListener("keydown", onKeyDown, true);
         }
       };
       const onKeyDown = (ev) => {
         if (ev.key === "Escape") {
           closeContextMenu();
-          document.removeEventListener("click", onDocClick, true);
-          document.removeEventListener("keydown", onKeyDown, true);
         }
       };
-      setTimeout(() => {
+      contextMenuClick = onDocClick;
+      contextMenuKeyDown = onKeyDown;
+      contextMenuTimer = setTimeout(() => {
+        contextMenuTimer = null;
         document.addEventListener("click", onDocClick, true);
         document.addEventListener("keydown", onKeyDown, true);
       }, 0);
@@ -11054,6 +11287,10 @@ ${frontmatter.yaml}
     }
     function render(tables) {
       allTables = tables;
+      expandedTables.clear();
+      columnCache.clear();
+      activeTable = null;
+      closeContextMenu();
       filterInput.value = "";
       renderFiltered(tables, "");
     }
@@ -11066,7 +11303,14 @@ ${frontmatter.yaml}
         item.classList.toggle("active", item.dataset.table === table2);
       });
     }
-    return { el: wrapper, render, setActive };
+    function dispose() {
+      closeContextMenu();
+      allTables = [];
+      expandedTables.clear();
+      columnCache.clear();
+      activeTable = null;
+    }
+    return { el: wrapper, render, setActive, dispose };
   }
   function formatRowCount(n2) {
     if (n2 >= 1e6)
@@ -11089,6 +11333,8 @@ ${frontmatter.yaml}
     let currentDb = null;
     let schemaCache = null;
     let lastFiles = [];
+    let currentTable = initial.table ?? null;
+    let loadGeneration = 0;
     const dbSelect = document.createElement("select");
     dbSelect.className = "db-file-select";
     dbSelect.title = "Select database file";
@@ -11303,12 +11549,11 @@ ${frontmatter.yaml}
       snapshotView.el.hidden = tab !== "snapshot";
       if (tab === "query")
         queryEditor.focus();
-      if (updateUrl) {
-        const activeTable = tableList.el.querySelector(".db-table-item.active");
+      if (updateUrl && currentDb) {
         deps.setRoute({
           screen: "database",
           db: currentDb?.id,
-          table: activeTable?.dataset.table,
+          table: currentTable ?? undefined,
           tab: tab === "data" ? undefined : tab,
           range: deps.currentRange()
         }, true);
@@ -11374,7 +11619,10 @@ ${frontmatter.yaml}
       });
       return await res.json();
     }
-    async function selectDb(dbId, explorerInitial) {
+    async function selectDb(dbId, explorerInitial, generation = loadGeneration) {
+      if (generation !== loadGeneration || currentDb?.id !== dbId)
+        return;
+      currentTable = null;
       if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
         tableList.render([]);
         grid.clear();
@@ -11399,6 +11647,8 @@ ${frontmatter.yaml}
           esExplorer.el.hidden = false;
           await esExplorer.load(dbId, explorerInitial?.es);
         }
+        if (generation !== loadGeneration || currentDb?.id !== dbId)
+          return;
         cb.onStateChange();
         return;
       }
@@ -11407,6 +11657,8 @@ ${frontmatter.yaml}
       esExplorer.el.hidden = true;
       esExplorer.clear();
       const schema = await fetchSchema(dbId);
+      if (generation !== loadGeneration || currentDb?.id !== dbId)
+        return;
       if (!schema)
         return;
       schemaCache = schema;
@@ -11416,14 +11668,18 @@ ${frontmatter.yaml}
       erDiagram.clear();
       setActiveTab("data");
       if (schema.tables.length > 0) {
-        selectTable(schema.tables[0].name);
+        await selectTable(schema.tables[0].name, generation);
       }
       cb.onStateChange();
     }
-    async function selectTable(table2) {
+    async function selectTable(table2, generation = loadGeneration) {
+      if (generation !== loadGeneration)
+        return;
+      currentTable = table2;
       tableList.setActive(table2);
       if (!currentDb)
         return;
+      const requestDbId = currentDb.id;
       if (currentTab === "query" || currentTab === "er") {
         setActiveTab("data", false);
       }
@@ -11436,12 +11692,21 @@ ${frontmatter.yaml}
       }, true);
       try {
         const data = await deps.trackLoad(fetchTablePage(table2, 0, 200, null, []));
+        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
         grid.load(table2, data);
       } catch {
+        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
         grid.load(table2);
       }
       if (currentTab === "schema") {
         const columns = await fetchColumns(table2);
+        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
         schemaView.render(table2, columns, schemaCache?.indexes || []);
       }
     }
@@ -11500,9 +11765,13 @@ ${frontmatter.yaml}
       erDiagram.render(schemaCache, columnsMap);
     }
     dbSelect.addEventListener("change", () => {
+      handleDbSelectChange();
+    });
+    async function handleDbSelectChange() {
       const dbId = dbSelect.value;
       if (!dbId)
         return;
+      const generation = ++loadGeneration;
       const file = lastFiles.find((f2) => f2.id === dbId);
       const option = dbSelect.selectedOptions[0];
       currentDb = {
@@ -11513,13 +11782,25 @@ ${frontmatter.yaml}
         kind: file?.kind || "sqlite"
       };
       clearDockerNotice();
-      deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
-      selectDb(dbId);
-    });
+      await selectDb(dbId, undefined, generation);
+      if (generation !== loadGeneration || currentDb?.id !== dbId)
+        return;
+      deps.setRoute({
+        screen: "database",
+        db: dbId,
+        table: currentTable ?? undefined,
+        tab: currentTab === "data" ? undefined : currentTab,
+        range: deps.currentRange()
+      }, true);
+      cb.onStateChange();
+    }
     let pendingRedisInitial = initial.redis;
     let pendingEsInitial = initial.es;
     async function enter(db, table2, view) {
+      const generation = ++loadGeneration;
       const files = await fetchDbFiles();
+      if (generation !== loadGeneration)
+        return;
       lastFiles = files;
       dbSelect.innerHTML = "";
       if (files.length === 0) {
@@ -11552,14 +11833,18 @@ ${frontmatter.yaml}
       };
       pendingRedisInitial = undefined;
       pendingEsInitial = undefined;
-      await selectDb(target, explorerInitial);
+      await selectDb(target, explorerInitial, generation);
+      if (generation !== loadGeneration || currentDb?.id !== target)
+        return;
       if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
         cb.onStateChange();
         return;
       }
       if (table2) {
-        await selectTable(table2);
+        await selectTable(table2, generation);
       }
+      if (generation !== loadGeneration)
+        return;
       if (view && view !== "data") {
         setActiveTab(view);
         if (view === "schema") {
@@ -11587,7 +11872,7 @@ ${frontmatter.yaml}
       const state = {
         id: cb.tabId,
         dbId: currentDb?.id ?? null,
-        table: activeTable?.dataset.table ?? null,
+        table: currentTable ?? activeTable?.dataset.table ?? null,
         view: currentTab
       };
       const sqlDraft = queryEditor.getSql();
@@ -11623,12 +11908,19 @@ ${frontmatter.yaml}
       return lastSlash >= 0 ? currentDb.path.slice(lastSlash + 1) : currentDb.path;
     }
     function dispose() {
-      grid.clear();
+      loadGeneration++;
+      grid.destroy();
       schemaView.clear();
-      erDiagram.clear();
+      erDiagram.dispose();
+      tableList.dispose();
+      queryEditor.dispose();
+      globalSearchView.dispose();
+      snapshotView.dispose();
+      historyView.clear();
       redisExplorer.clear();
       esExplorer.clear();
       currentDb = null;
+      currentTable = null;
       schemaCache = null;
     }
     return {
@@ -11649,9 +11941,11 @@ ${frontmatter.yaml}
   function createDatabaseView(deps) {
     let mounted = false;
     const tabsById = new Map;
+    const paneReadyById = new Map;
     let activeTabId = null;
     let restoring = false;
     let savePending = null;
+    let unloadListenerInstalled = false;
     function scheduleSave() {
       if (!mounted || restoring)
         return;
@@ -11659,11 +11953,15 @@ ${frontmatter.yaml}
         clearTimeout(savePending);
       savePending = setTimeout(saveNow, 500);
     }
-    async function saveNow() {
+    async function saveNow(options = {}) {
       savePending = null;
+      if (!mounted || restoring)
+        return;
       const tabs = [];
       for (const [, entry] of tabsById)
         tabs.push(entry.pane.getState());
+      if (tabs.length === 0)
+        return;
       const body = { version: 1, tabs, activeTabId };
       try {
         await fetch("/_db/tabs", {
@@ -11672,9 +11970,20 @@ ${frontmatter.yaml}
             "Content-Type": "application/json",
             "X-Code-Viewer-Action": "1"
           },
-          body: JSON.stringify(body)
+          body: JSON.stringify(body),
+          keepalive: options.keepalive
         });
       } catch {}
+    }
+    function flushPendingSave(options = {}) {
+      if (savePending !== null) {
+        clearTimeout(savePending);
+        savePending = null;
+      }
+      saveNow(options);
+    }
+    function handleBeforeUnload() {
+      flushPendingSave({ keepalive: true });
     }
     async function fetchTabs() {
       try {
@@ -11690,6 +11999,7 @@ ${frontmatter.yaml}
     tabsBar.className = "db-tabs-bar";
     const tabsList = document.createElement("div");
     tabsList.className = "db-tabs-list";
+    tabsList.setAttribute("role", "tablist");
     const newTabBtn = document.createElement("button");
     newTabBtn.type = "button";
     newTabBtn.className = "db-tabs-new-btn";
@@ -11707,8 +12017,11 @@ ${frontmatter.yaml}
         const isActive = tid === id;
         entry.pane.el.hidden = !isActive;
         entry.chip.classList.toggle("active", isActive);
+        entry.chip.setAttribute("aria-selected", isActive ? "true" : "false");
+        entry.chip.tabIndex = isActive ? 0 : -1;
       }
-      syncActiveRoute();
+      if (!restoring)
+        syncActiveRoute();
       scheduleSave();
     }
     function syncActiveRoute() {
@@ -11739,6 +12052,9 @@ ${frontmatter.yaml}
       const chip = document.createElement("div");
       chip.className = "db-tabs-chip";
       chip.dataset.tabId = id;
+      chip.setAttribute("role", "tab");
+      chip.setAttribute("aria-selected", "false");
+      chip.tabIndex = -1;
       const labelEl = document.createElement("span");
       labelEl.className = "db-tabs-chip-label";
       labelEl.textContent = "(empty)";
@@ -11753,6 +12069,12 @@ ${frontmatter.yaml}
       });
       chip.append(labelEl, closeBtn);
       chip.addEventListener("click", () => setActive(id));
+      chip.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" || e2.key === " ") {
+          e2.preventDefault();
+          setActive(id);
+        }
+      });
       chip.addEventListener("auxclick", (e2) => {
         if (e2.button === 1) {
           e2.preventDefault();
@@ -11764,7 +12086,7 @@ ${frontmatter.yaml}
         isActive: () => activeTabId === id,
         onStateChange: () => {
           refreshChipLabel(id);
-          if (activeTabId === id)
+          if (activeTabId === id && !restoring)
             syncActiveRoute();
           scheduleSave();
         }
@@ -11784,7 +12106,10 @@ ${frontmatter.yaml}
       tabHost.appendChild(pane.el);
       tabsById.set(id, { pane, chip, label: labelEl });
       setActive(id);
-      pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined).then(() => refreshChipLabel(id));
+      const ready = pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined).then(() => refreshChipLabel(id)).finally(() => {
+        paneReadyById.delete(id);
+      });
+      paneReadyById.set(id, ready);
       return id;
     }
     function closeTab(id) {
@@ -11795,8 +12120,11 @@ ${frontmatter.yaml}
       entry.pane.el.remove();
       entry.chip.remove();
       tabsById.delete(id);
-      if (activeTabId !== id)
+      paneReadyById.delete(id);
+      if (activeTabId !== id) {
+        scheduleSave();
         return;
+      }
       if (tabsById.size === 0) {
         openTab({});
         return;
@@ -11808,6 +12136,41 @@ ${frontmatter.yaml}
     newTabBtn.addEventListener("click", () => {
       openTab({});
     });
+    function routeMatchesState(state, db, table2, view) {
+      if (!db && (table2 || view) && !state.dbId)
+        return false;
+      if (db !== undefined && state.dbId !== db)
+        return false;
+      if (table2 !== undefined && state.table !== table2)
+        return false;
+      if (view !== undefined && state.view !== view)
+        return false;
+      return true;
+    }
+    async function applyRouteToTab(db, table2, view) {
+      for (const [id, entry] of tabsById) {
+        if (routeMatchesState(entry.pane.getState(), db, table2, view)) {
+          setActive(id);
+          refreshChipLabel(id);
+          return;
+        }
+      }
+      const active = tabsById.get(activeTabId ?? "");
+      if (!active || !activeTabId)
+        return;
+      await active.pane.enter(db, table2, view);
+      refreshChipLabel(activeTabId);
+    }
+    function parseSseDbId(data) {
+      if (!data)
+        return null;
+      try {
+        const parsed = JSON.parse(data);
+        return typeof parsed.dbId === "string" ? parsed.dbId : null;
+      } catch {
+        return null;
+      }
+    }
     async function enter(db, table2, view) {
       const firstMount = !mounted;
       if (firstMount) {
@@ -11823,33 +12186,31 @@ ${frontmatter.yaml}
         content.appendChild(root);
         document.body.classList.add("gdp-database-page");
         mounted = true;
+        if (!unloadListenerInstalled) {
+          window.addEventListener("beforeunload", handleBeforeUnload);
+          unloadListenerInstalled = true;
+        }
         deps.setPageMode();
         deps.syncHeaderMenu();
         const restored = await fetchTabs();
         if (restored && restored.tabs.length > 0) {
           restoring = true;
+          const restoredIds = [];
           try {
             for (const t2 of restored.tabs) {
-              openTab({
-                id: t2.id,
-                dbId: t2.dbId ?? null,
-                table: t2.table ?? null,
-                view: t2.view
-              });
+              restoredIds.push(openTab(t2));
             }
             const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
             if (targetId)
               setActive(targetId);
+            await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
           } finally {
             restoring = false;
           }
           if (db || table2 || view) {
-            const active2 = tabsById.get(activeTabId ?? "");
-            if (active2) {
-              await active2.pane.enter(db, table2, view);
-              if (activeTabId)
-                refreshChipLabel(activeTabId);
-            }
+            await applyRouteToTab(db, table2, view);
+          } else {
+            syncActiveRoute();
           }
           scheduleSave();
           return;
@@ -11869,13 +12230,13 @@ ${frontmatter.yaml}
       if (!active)
         return;
       if (db || table2 || view) {
-        await active.pane.enter(db, table2, view);
-        refreshChipLabel(activeTabId);
+        await applyRouteToTab(db, table2, view);
       }
     }
     function leave() {
       if (!mounted)
         return;
+      flushPendingSave();
       for (const [, entry] of tabsById) {
         entry.pane.dispose();
       }
@@ -11885,17 +12246,24 @@ ${frontmatter.yaml}
       activeTabId = null;
       root.remove();
       document.body.classList.remove("gdp-database-page");
+      if (unloadListenerInstalled) {
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+        unloadListenerInstalled = false;
+      }
       const diff = document.getElementById("diff");
       if (diff)
         diff.hidden = false;
       mounted = false;
     }
     function handleSse(event, data) {
-      if (!mounted || !activeTabId)
+      if (!mounted)
         return;
-      const entry = tabsById.get(activeTabId);
-      if (entry)
+      const dbId = parseSseDbId(data);
+      for (const [, entry] of tabsById) {
+        if (dbId && entry.pane.getState().dbId !== dbId)
+          continue;
         entry.pane.handleSse(event, data);
+      }
     }
     return { enter, leave, handleSse };
   }
@@ -22379,8 +22747,8 @@ ${frontmatter.yaml}
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse(event.data);
     });
-    es.addEventListener("db-query", () => {
-      DATABASE_VIEW.handleSse("db-query");
+    es.addEventListener("db-query", (event) => {
+      DATABASE_VIEW.handleSse("db-query", event.data);
     });
     es.addEventListener("db-snapshot", (event) => {
       DATABASE_VIEW.handleSse("db-snapshot", event.data);
