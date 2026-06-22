@@ -1,112 +1,115 @@
-import { createHash } from "node:crypto";
-import type { DbValue } from "../../core/database/types";
-import type { DatabaseAdapter } from "./adapters/types";
-import type { RawDbValue } from "./serialize";
-import { serializeDbValue } from "./serialize";
+// snapshot-runner.ts は capability mixin (SnapshotIterable) 経由で
+// generic に snapshot を取る薄いエンジン。
+// 個々の data source (SQL / Redis / 将来の S3 / ES) は iterateForSnapshot
+// と listSnapshotContainers を実装するだけで snapshot 機能を得られる。
+//
+// row 作成ロジックは各 adapter が持つ (sources/sql-snapshot.ts や Redis adapter の
+// inline 実装)。runner 側はそれを呼び出して snapshot-store に流すだけ。
+//
+// 後方互換: 旧 signature `runSnapshot(cwd, adapter, dbId, tables, note, onProgress)`
+// は維持する。`adapter` は SnapshotIterable を満たす必要があり、
+// 持たない場合は明示的にエラーを返す。
+
+import type { DbKind } from "../../core/database/types";
 import {
   addSnapshotTableData,
   createSnapshot,
   finalizeSnapshot,
 } from "./snapshot-store";
+import type { SnapshotIterable } from "./sources/types";
+import { hasSnapshotCapability } from "./sources/types";
 
-function normalizeValue(v: RawDbValue): string {
-  if (v === null) return "\\N";
-  if (typeof v === "bigint") return v.toString();
-  if (v instanceof Uint8Array) {
-    return `\\x${Buffer.from(v).toString("hex")}`;
-  }
-  return String(v);
-}
+const SNAPSHOT_FLUSH_THRESHOLD = 500;
 
-function rowToPayloadJson(columns: string[], row: RawDbValue[]): string {
-  const obj: Record<string, DbValue> = {};
-  for (let i = 0; i < columns.length; i++) {
-    obj[columns[i]] = serializeDbValue(row[i]);
-  }
-  return JSON.stringify(obj);
-}
+// runSnapshot に渡せる最小限の source shape。
+// SnapshotIterable に加えて、snapshot メタに kind を載せるため kind を持つ。
+type SnapshotSource = SnapshotIterable & { readonly kind: DbKind };
 
-function computeRowHash(columns: string[], row: RawDbValue[]): string {
-  const parts = columns.map((_, i) => normalizeValue(row[i]));
-  return createHash("sha256").update(parts.join("\t")).digest("hex");
-}
-
-function buildRowKeyJson(
-  pkColumns: string[],
-  allColumns: string[],
-  row: RawDbValue[],
-  rowIndex: number,
-): string {
-  if (pkColumns.length === 0) {
-    return JSON.stringify({ __rowIndex: rowIndex });
-  }
-  const keyObj: Record<string, DbValue> = {};
-  for (const pk of pkColumns) {
-    const idx = allColumns.indexOf(pk);
-    if (idx >= 0) keyObj[pk] = serializeDbValue(row[idx]);
-  }
-  return JSON.stringify(keyObj);
-}
-
-const BATCH_SIZE = 500;
+// 既存呼び出し元 (handle.ts 等) は `DatabaseAdapter` 型で adapter を持っているので、
+// runtime で capability check して narrow する設計にする。caller は cast 不要。
+type MaybeSnapshotSource = { readonly kind: DbKind } & {
+  capabilities?: unknown;
+};
 
 export async function runSnapshot(
   cwd: string,
-  adapter: DatabaseAdapter,
+  source: MaybeSnapshotSource,
   dbId: string,
-  tables: string[],
+  containers: string[],
   note: string,
-  onProgress?: (table: string, done: boolean) => void,
+  onProgress?: (container: string, done: boolean) => void,
 ): Promise<string> {
+  if (!hasSnapshotCapability(source)) {
+    throw new Error(
+      "data source does not support snapshot (missing SnapshotIterable capability)",
+    );
+  }
+  // この時点で source は SnapshotIterable を持つことが保証されている。
+  const snapshotSource = source as SnapshotSource;
+
   const snapshotId = await createSnapshot(
     cwd,
     dbId,
-    adapter.kind,
-    tables,
+    snapshotSource.kind,
+    containers,
     note,
   );
 
   try {
-    for (const table of tables) {
-      onProgress?.(table, false);
+    for (const container of containers) {
+      onProgress?.(container, false);
 
-      const columns = adapter.getColumns(table);
-      const colNames = columns.map((c) => c.name);
-      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
-
-      let offset = 0;
-      let rowIndex = 0;
-      const allRows: {
+      // snapshot-store の addSnapshotTableData は historically `rowKeyJson`
+      // フィールド名を使うので、SnapshotItem.keyJson から rename して詰める。
+      const collected: Array<{
         rowKeyJson: string;
         rowHash: string;
         payloadJson: string;
-      }[] = [];
-
-      for (;;) {
-        const result = adapter.getTablePage(table, {
-          offset,
-          limit: BATCH_SIZE,
-        });
-        if (result.rows.length === 0) break;
-
-        for (const row of result.rows) {
-          const rowKeyJson = buildRowKeyJson(
-            pkColumns,
-            colNames,
-            row,
-            rowIndex,
-          );
-          const rowHash = computeRowHash(colNames, row);
-          const payloadJson = rowToPayloadJson(colNames, row);
-          allRows.push({ rowKeyJson, rowHash, payloadJson });
-          rowIndex++;
+      }> = [];
+      // Redis の iterateForSnapshot 等は async / await が混じるので、
+      // 順次 yield を消費する形にする。
+      // pk 列情報は SQL 系のみ意味を持つので、ここでは空配列を渡す。
+      // snapshot-store のスキーマは pk_columns_json を表示用のヒントとして
+      // 持つだけで、diff 計算は row_key_hash + row_hash に依存しているので、
+      // 空配列でも diff は正しく動く。
+      let pkColumns: string[] = [];
+      try {
+        const adapterAny = snapshotSource as {
+          getColumns?: (t: string) => unknown;
+        };
+        if (typeof adapterAny.getColumns === "function") {
+          const cols = adapterAny.getColumns(container) as Array<{
+            name: string;
+            primaryKey: boolean;
+          }>;
+          pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
         }
-
-        offset += result.rows.length;
-        if (result.rows.length < BATCH_SIZE) break;
+      } catch {
+        // 非 SQL source や container が table ではない場合は無視。
       }
 
-      await addSnapshotTableData(cwd, snapshotId, table, pkColumns, allRows);
+      for await (const item of snapshotSource.iterateForSnapshot(container)) {
+        collected.push({
+          rowKeyJson: item.keyJson,
+          rowHash: item.rowHash,
+          payloadJson: item.payloadJson,
+        });
+        // 大量データに備えて threshold ごとに flush しても良いが、
+        // 既存 snapshot-store は table 単位で 1 回 commit する仕様なので
+        // ここではメモリに溜めてから一括書き込みする (旧実装と同じ挙動)。
+      }
+
+      // SNAPSHOT_FLUSH_THRESHOLD は将来 streaming 化する際の hook。
+      // 現状は単純に全件まとめて書く。
+      void SNAPSHOT_FLUSH_THRESHOLD;
+
+      await addSnapshotTableData(
+        cwd,
+        snapshotId,
+        container,
+        pkColumns,
+        collected,
+      );
     }
 
     await finalizeSnapshot(cwd, snapshotId);
