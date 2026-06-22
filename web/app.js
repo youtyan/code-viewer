@@ -8859,6 +8859,19 @@ ${frontmatter.yaml}
         row.classList.toggle("active", row.dataset.keyName === name);
       }
     }
+    function formatBytes(n2) {
+      if (n2 >= 1024 * 1024)
+        return `${(n2 / (1024 * 1024)).toFixed(2)} MB`;
+      if (n2 >= 1024)
+        return `${(n2 / 1024).toFixed(1)} KB`;
+      return `${n2} B`;
+    }
+    function makeNotice(message, kind = "info") {
+      const div = document.createElement("div");
+      div.className = kind === "warn" ? "redis-value-truncation" : "redis-value-info";
+      div.textContent = message;
+      return div;
+    }
     function renderValue(key, value) {
       mainPane.innerHTML = "";
       const header = document.createElement("div");
@@ -8877,11 +8890,25 @@ ${frontmatter.yaml}
         body.textContent = "(key does not exist or has no value)";
         body.classList.add("redis-value-empty");
       } else if (value.type === "string") {
-        const pre = document.createElement("pre");
-        pre.className = "redis-value-string";
-        pre.textContent = value.value;
-        body.appendChild(pre);
+        if (value.binaryBase64 !== undefined) {
+          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes(value.fullSize)}${value.truncated ? `, showing first ${formatBytes(64 * 1024)}` : ""})`, "warn"));
+          const pre = document.createElement("pre");
+          pre.className = "redis-value-string";
+          pre.textContent = value.binaryBase64;
+          body.appendChild(pre);
+        } else {
+          if (value.truncated) {
+            body.appendChild(makeNotice(`(showing first ${formatBytes(64 * 1024)} of ${formatBytes(value.fullSize)})`, "warn"));
+          }
+          const pre = document.createElement("pre");
+          pre.className = "redis-value-string";
+          pre.textContent = value.value;
+          body.appendChild(pre);
+        }
       } else if (value.type === "hash") {
+        if (value.truncated) {
+          body.appendChild(makeNotice(`(showing ${Object.keys(value.fields).length} of ${value.total} fields, truncated)`, "warn"));
+        }
         const table2 = document.createElement("table");
         table2.className = "redis-value-hash-table";
         const thead = document.createElement("thead");
@@ -8918,6 +8945,9 @@ ${frontmatter.yaml}
         table2.appendChild(tbody);
         body.appendChild(table2);
       } else if (value.type === "list") {
+        if (value.truncated) {
+          body.appendChild(makeNotice(`(showing ${value.items.length} of ${value.total} items, truncated)`, "warn"));
+        }
         const ol = document.createElement("ol");
         ol.className = "redis-value-list";
         if (value.items.length === 0) {
@@ -8933,6 +8963,10 @@ ${frontmatter.yaml}
         }
         body.appendChild(ol);
       } else {
+        if (value.truncated) {
+          const shown = value.type === "set" ? value.members.length : value.type === "zset" ? value.members.length : value.entries.length;
+          body.appendChild(makeNotice(`(showing ${shown} of ${value.total} entries, truncated)`, "warn"));
+        }
         const pre = document.createElement("pre");
         pre.className = "redis-value-raw-json";
         pre.textContent = JSON.stringify(value, null, 2);

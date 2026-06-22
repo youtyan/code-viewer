@@ -4475,6 +4475,93 @@ function parseInfoKeyspace(stdout) {
 function isValidRedisType(t) {
   return t === "string" || t === "list" || t === "set" || t === "zset" || t === "hash" || t === "stream" || t === "none";
 }
+function safeJsonParse(stdout, command) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${command} 返却 JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function decodeQuotedRedisBytes(output) {
+  const trimmed = output.replace(/\r?\n$/, "");
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
+    return {
+      bytes: Buffer.from(trimmed, "utf8"),
+      sawBinaryEscape: false
+    };
+  }
+  const inner = trimmed.slice(1, -1);
+  const bytes = [];
+  let sawBinaryEscape = false;
+  let i = 0;
+  while (i < inner.length) {
+    const ch = inner.charCodeAt(i);
+    if (ch === 92 && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (next === "x" && i + 3 < inner.length) {
+        const b = parseInt(inner.slice(i + 2, i + 4), 16);
+        if (Number.isFinite(b)) {
+          bytes.push(b);
+          if (b < 32 || b >= 127)
+            sawBinaryEscape = true;
+          i += 4;
+          continue;
+        }
+      }
+      if (next === "n") {
+        bytes.push(10);
+        i += 2;
+        continue;
+      }
+      if (next === "r") {
+        bytes.push(13);
+        i += 2;
+        continue;
+      }
+      if (next === "t") {
+        bytes.push(9);
+        i += 2;
+        continue;
+      }
+      if (next === "a") {
+        bytes.push(7);
+        i += 2;
+        continue;
+      }
+      if (next === "b") {
+        bytes.push(8);
+        i += 2;
+        continue;
+      }
+      if (next === "\\") {
+        bytes.push(92);
+        i += 2;
+        continue;
+      }
+      if (next === '"') {
+        bytes.push(34);
+        i += 2;
+        continue;
+      }
+      bytes.push(92);
+      i += 1;
+      continue;
+    }
+    if (ch > 127)
+      sawBinaryEscape = true;
+    bytes.push(ch & 255);
+    i += 1;
+  }
+  return { bytes: Buffer.from(bytes), sawBinaryEscape };
+}
+function isValidUtf8(buf) {
+  try {
+    const decoded = buf.toString("utf8");
+    return Buffer.from(decoded, "utf8").equals(buf);
+  } catch {
+    return false;
+  }
+}
 function createRedisAdapter(config) {
   function listDatabases() {
     const result = execRedisCli(config, ["INFO", "keyspace"]);
@@ -4508,12 +4595,7 @@ function createRedisAdapter(config) {
     const stdout = result.stdout.trim();
     if (!stdout)
       return { keys: [], nextCursor: "0" };
-    let parsed;
-    try {
-      parsed = JSON.parse(stdout);
-    } catch {
-      throw new Error(`failed to parse SCAN result: ${stdout.slice(0, 200)}`);
-    }
+    const parsed = safeJsonParse(stdout, "SCAN");
     const keys = [];
     for (let i = 0;i < parsed.keys.length; i++) {
       const rawType = parsed.types[i] || "none";
@@ -4523,12 +4605,8 @@ function createRedisAdapter(config) {
     return { keys, nextCursor: parsed.cursor };
   }
   function getValue(opts) {
-    const typeResult = execRedisCli(config, [
-      "-n",
-      String(opts.db),
-      "TYPE",
-      opts.key
-    ]);
+    const dbArg = ["-n", String(opts.db)];
+    const typeResult = execRedisCli(config, [...dbArg, "TYPE", opts.key]);
     if (typeResult.code !== 0) {
       throw new Error(typeResult.stderr.trim() || "TYPE failed");
     }
@@ -4537,97 +4615,152 @@ function createRedisAdapter(config) {
       return { type: "none" };
     }
     if (rawType === "string") {
-      const r = execRedisCli(config, ["-n", String(opts.db), "GET", opts.key]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "GET failed");
+      const lenR = execRedisCli(config, [...dbArg, "STRLEN", opts.key]);
+      if (lenR.code !== 0) {
+        throw new Error(lenR.stderr.trim() || "STRLEN failed");
       }
-      const value = r.stdout.replace(/\n$/, "");
-      return { type: "string", value };
+      const fullSize = Number(lenR.stdout.trim()) || 0;
+      const lastIndex = REDIS_STRING_BYTE_LIMIT - 1;
+      const r = execRedisCli(config, [
+        "--no-raw",
+        ...dbArg,
+        "GETRANGE",
+        opts.key,
+        "0",
+        String(lastIndex)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "GETRANGE failed");
+      }
+      const { bytes, sawBinaryEscape } = decodeQuotedRedisBytes(r.stdout);
+      const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+      if (sawBinaryEscape || !isValidUtf8(bytes)) {
+        return {
+          type: "string",
+          value: "",
+          binaryBase64: bytes.toString("base64"),
+          truncated,
+          fullSize
+        };
+      }
+      return {
+        type: "string",
+        value: bytes.toString("utf8"),
+        truncated,
+        fullSize
+      };
     }
     if (rawType === "list") {
-      const lua = `return cjson.encode(redis.call('LRANGE', KEYS[1], 0, -1))`;
+      const lua = `local total = redis.call('LLEN', KEYS[1]); local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1); return cjson.encode({total = total, items = items})`;
       const r = execRedisCli(config, [
-        "-n",
-        String(opts.db),
+        ...dbArg,
         "EVAL",
         lua,
         "1",
-        opts.key
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
       ]);
       if (r.code !== 0) {
         throw new Error(r.stderr.trim() || "LRANGE failed");
       }
       const stdout = r.stdout.trim();
-      const items = stdout ? JSON.parse(stdout) : [];
-      return { type: "list", items };
+      const parsed = stdout ? safeJsonParse(stdout, "LRANGE") : { total: 0, items: [] };
+      return {
+        type: "list",
+        items: parsed.items,
+        total: parsed.total,
+        truncated: parsed.items.length < parsed.total
+      };
     }
     if (rawType === "hash") {
-      const lua = `local h = redis.call('HGETALL', KEYS[1]); local obj = {}; for i = 1, #h, 2 do obj[h[i]] = h[i+1] end; if next(obj) == nil then return '{}' end; return cjson.encode(obj)`;
+      const lua = `local total = redis.call('HLEN', KEYS[1]); local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])); local fields = result[2]; local obj = {}; local count = 0; for i = 1, #fields, 2 do if count >= tonumber(ARGV[1]) then break end; obj[fields[i]] = fields[i+1]; count = count + 1 end; return cjson.encode({total = total, fields = obj, count = count, cursor = result[1]})`;
       const r = execRedisCli(config, [
-        "-n",
-        String(opts.db),
+        ...dbArg,
         "EVAL",
         lua,
         "1",
-        opts.key
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
       ]);
       if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "HGETALL failed");
+        throw new Error(r.stderr.trim() || "HSCAN failed");
       }
       const stdout = r.stdout.trim();
-      const fields = stdout ? JSON.parse(stdout) : {};
-      return { type: "hash", fields };
+      const parsed = stdout ? safeJsonParse(stdout, "HSCAN") : { total: 0, fields: {}, count: 0, cursor: "0" };
+      const truncated = parsed.count < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "hash",
+        fields: parsed.fields,
+        total: parsed.total,
+        truncated
+      };
     }
     if (rawType === "set") {
-      const lua = `return cjson.encode(redis.call('SMEMBERS', KEYS[1]))`;
+      const lua = `local total = redis.call('SCARD', KEYS[1]); local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])); local members = {}; local limit = tonumber(ARGV[1]); for i = 1, math.min(#result[2], limit) do members[i] = result[2][i] end; return cjson.encode({total = total, members = members, cursor = result[1]})`;
       const r = execRedisCli(config, [
-        "-n",
-        String(opts.db),
+        ...dbArg,
         "EVAL",
         lua,
         "1",
-        opts.key
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
       ]);
       if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "SMEMBERS failed");
+        throw new Error(r.stderr.trim() || "SSCAN failed");
       }
       const stdout = r.stdout.trim();
-      const members = stdout ? JSON.parse(stdout) : [];
-      return { type: "set", members };
+      const parsed = stdout ? safeJsonParse(stdout, "SSCAN") : { total: 0, members: [], cursor: "0" };
+      const truncated = parsed.members.length < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "set",
+        members: parsed.members,
+        total: parsed.total,
+        truncated
+      };
     }
     if (rawType === "zset") {
-      const lua = `local r = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES'); local arr = {}; for i = 1, #r, 2 do table.insert(arr, {member = r[i], score = tonumber(r[i+1])}) end; return cjson.encode(arr)`;
+      const lua = `local total = redis.call('ZCARD', KEYS[1]); local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES'); local arr = {}; for i = 1, #r, 2 do table.insert(arr, {member = r[i], score = tonumber(r[i+1])}) end; return cjson.encode({total = total, members = arr})`;
       const r = execRedisCli(config, [
-        "-n",
-        String(opts.db),
+        ...dbArg,
         "EVAL",
         lua,
         "1",
-        opts.key
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
       ]);
       if (r.code !== 0) {
         throw new Error(r.stderr.trim() || "ZRANGE failed");
       }
       const stdout = r.stdout.trim();
-      const members = stdout ? JSON.parse(stdout) : [];
-      return { type: "zset", members };
+      const parsed = stdout ? safeJsonParse(stdout, "ZRANGE") : { total: 0, members: [] };
+      return {
+        type: "zset",
+        members: parsed.members,
+        total: parsed.total,
+        truncated: parsed.members.length < parsed.total
+      };
     }
     if (rawType === "stream") {
-      const lua = `local r = redis.call('XRANGE', KEYS[1], '-', '+'); local arr = {}; for _, entry in ipairs(r) do local fields = {}; for i = 1, #entry[2], 2 do fields[entry[2][i]] = entry[2][i+1] end; table.insert(arr, {id = entry[1], fields = fields}) end; return cjson.encode(arr)`;
+      const lua = `local total = redis.call('XLEN', KEYS[1]); local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])); local arr = {}; for _, entry in ipairs(r) do local fields = {}; for i = 1, #entry[2], 2 do fields[entry[2][i]] = entry[2][i+1] end; table.insert(arr, {id = entry[1], fields = fields}) end; return cjson.encode({total = total, entries = arr})`;
       const r = execRedisCli(config, [
-        "-n",
-        String(opts.db),
+        ...dbArg,
         "EVAL",
         lua,
         "1",
-        opts.key
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
       ]);
       if (r.code !== 0) {
         throw new Error(r.stderr.trim() || "XRANGE failed");
       }
       const stdout = r.stdout.trim();
-      const entries = stdout ? JSON.parse(stdout) : [];
-      return { type: "stream", entries };
+      const parsed = stdout ? safeJsonParse(stdout, "XRANGE") : { total: 0, entries: [] };
+      return {
+        type: "stream",
+        entries: parsed.entries,
+        total: parsed.total,
+        truncated: parsed.entries.length < parsed.total
+      };
     }
     return { type: "none" };
   }
@@ -4647,7 +4780,7 @@ function openRedisExplorer(serviceName, env, cwd) {
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }
-var DEFAULT_DATABASES = 16, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`;
+var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`;
 var init_redis = () => {};
 
 // web-src/server/database/handle-redis.ts
