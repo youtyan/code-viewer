@@ -8764,6 +8764,73 @@ ${frontmatter.yaml}
     return String(value);
   }
 
+  // web-src/views/database/redis-explorer.ts
+  function createRedisExplorer() {
+    const container = document.createElement("div");
+    container.className = "redis-explorer";
+    const dbListPane = document.createElement("div");
+    dbListPane.className = "redis-db-list-pane";
+    const dbListHeader = document.createElement("div");
+    dbListHeader.className = "redis-pane-header";
+    dbListHeader.textContent = "Databases";
+    dbListPane.appendChild(dbListHeader);
+    const dbList = document.createElement("div");
+    dbList.className = "redis-db-list";
+    dbListPane.appendChild(dbList);
+    const mainPane = document.createElement("div");
+    mainPane.className = "redis-main-pane";
+    mainPane.textContent = "Select a database to view keys.";
+    container.append(dbListPane, mainPane);
+    let currentDbId = null;
+    function setStatus(message, isError = false) {
+      dbList.innerHTML = "";
+      const note = document.createElement("div");
+      note.className = isError ? "redis-error" : "redis-note";
+      note.textContent = message;
+      dbList.appendChild(note);
+    }
+    function renderDatabases(databases) {
+      dbList.innerHTML = "";
+      for (const db of databases) {
+        const item = document.createElement("div");
+        item.className = "redis-db-item";
+        item.dataset.dbIndex = String(db.index);
+        const name = document.createElement("span");
+        name.className = "redis-db-name";
+        name.textContent = `db${db.index}`;
+        const count = document.createElement("span");
+        count.className = "redis-db-count";
+        count.textContent = `${db.keyCount.toLocaleString()} keys`;
+        item.append(name, count);
+        dbList.appendChild(item);
+      }
+    }
+    async function load(dbId) {
+      currentDbId = dbId;
+      setStatus("Loading databases...");
+      try {
+        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          setStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (currentDbId !== dbId)
+          return;
+        renderDatabases(data.databases);
+      } catch (err) {
+        setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      }
+    }
+    function clear() {
+      currentDbId = null;
+      dbList.innerHTML = "";
+      mainPane.textContent = "Select a database to view keys.";
+    }
+    return { el: container, load, clear };
+  }
+
   // web-src/views/database/schema-view.ts
   function createSchemaView() {
     const el = document.createElement("div");
@@ -10368,9 +10435,11 @@ ${frontmatter.yaml}
         setActiveTab("query");
       }
     });
+    const redisExplorer = createRedisExplorer();
+    redisExplorer.el.hidden = true;
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el, redisExplorer.el);
     queryEditor.el.hidden = true;
     globalSearchView.el.hidden = true;
     snapshotView.el.hidden = true;
@@ -10473,6 +10542,7 @@ ${frontmatter.yaml}
       grid.clear();
       schemaView.clear();
       erDiagram.clear();
+      redisExplorer.clear();
       currentDb = null;
       schemaCache = null;
     }
@@ -10565,6 +10635,25 @@ ${frontmatter.yaml}
       return await res.json();
     }
     async function selectDb(dbId) {
+      if (currentDb?.kind === "redis") {
+        tableList.render([]);
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        schemaCache = null;
+        tabBar.hidden = true;
+        grid.el.hidden = true;
+        queryEditor.el.hidden = true;
+        schemaView.el.hidden = true;
+        erDiagram.el.hidden = true;
+        globalSearchView.el.hidden = true;
+        snapshotView.el.hidden = true;
+        redisExplorer.el.hidden = false;
+        await redisExplorer.load(dbId);
+        return;
+      }
+      redisExplorer.el.hidden = true;
+      redisExplorer.clear();
       const schema = await fetchSchema(dbId);
       if (!schema)
         return;

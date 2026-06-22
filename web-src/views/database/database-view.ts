@@ -11,6 +11,7 @@ import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
+import { createRedisExplorer } from "./redis-explorer";
 import { createSchemaView } from "./schema-view";
 import { createSnapshotView } from "./snapshot-view";
 import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
@@ -163,6 +164,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     },
   });
 
+  const redisExplorer = createRedisExplorer();
+  redisExplorer.el.hidden = true;
+
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
@@ -173,6 +177,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     erDiagram.el,
     globalSearchView.el,
     snapshotView.el,
+    redisExplorer.el,
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
@@ -278,6 +283,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     grid.clear();
     schemaView.clear();
     erDiagram.clear();
+    redisExplorer.clear();
     currentDb = null;
     schemaCache = null;
   }
@@ -385,6 +391,25 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   async function selectDb(dbId: string) {
+    if (currentDb?.kind === "redis") {
+      tableList.render([]);
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      schemaCache = null;
+      tabBar.hidden = true;
+      grid.el.hidden = true;
+      queryEditor.el.hidden = true;
+      schemaView.el.hidden = true;
+      erDiagram.el.hidden = true;
+      globalSearchView.el.hidden = true;
+      snapshotView.el.hidden = true;
+      redisExplorer.el.hidden = false;
+      await redisExplorer.load(dbId);
+      return;
+    }
+    redisExplorer.el.hidden = true;
+    redisExplorer.clear();
     const schema = await fetchSchema(dbId);
     if (!schema) return;
     schemaCache = schema;
