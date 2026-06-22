@@ -60,6 +60,28 @@ export function createQueryHistoryView(
 
   let entries: QueryHistoryEntry[] = [];
   const expandedIds = new Set<string>();
+  let clearConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function armButtonConfirm(
+    button: HTMLButtonElement,
+    confirmText: string,
+    defaultText: string,
+  ): boolean {
+    if (button.dataset.confirm === "1") {
+      button.dataset.confirm = "";
+      button.textContent = defaultText;
+      return true;
+    }
+    button.dataset.confirm = "1";
+    button.textContent = confirmText;
+    window.setTimeout(() => {
+      if (button.dataset.confirm === "1") {
+        button.dataset.confirm = "";
+        button.textContent = defaultText;
+      }
+    }, 3000);
+    return false;
+  }
 
   async function refresh() {
     const dbId = callbacks.getDbId();
@@ -146,6 +168,7 @@ export function createQueryHistoryView(
     deleteBtn.type = "button";
     deleteBtn.textContent = "Delete";
     deleteBtn.addEventListener("click", () => {
+      if (!armButtonConfirm(deleteBtn, "Confirm delete", "Delete")) return;
       deleteEntry(entry.id);
     });
 
@@ -299,6 +322,23 @@ export function createQueryHistoryView(
 
   clearBtn.addEventListener("click", async () => {
     const dbId = callbacks.getDbId();
+    if (clearBtn.dataset.confirm !== "1") {
+      clearBtn.dataset.confirm = "1";
+      clearBtn.textContent = "Confirm clear";
+      if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
+      clearConfirmTimer = setTimeout(() => {
+        clearBtn.dataset.confirm = "";
+        clearBtn.textContent = "Clear All";
+        clearConfirmTimer = null;
+      }, 3000);
+      return;
+    }
+    clearBtn.dataset.confirm = "";
+    clearBtn.textContent = "Clear All";
+    if (clearConfirmTimer) {
+      clearTimeout(clearConfirmTimer);
+      clearConfirmTimer = null;
+    }
     try {
       await fetch("/_db/history/clear", {
         method: "POST",
@@ -322,6 +362,12 @@ export function createQueryHistoryView(
   function clear(): void {
     entries = [];
     expandedIds.clear();
+    if (clearConfirmTimer) {
+      clearTimeout(clearConfirmTimer);
+      clearConfirmTimer = null;
+    }
+    clearBtn.dataset.confirm = "";
+    clearBtn.textContent = "Clear All";
     clearDetail();
     render();
   }

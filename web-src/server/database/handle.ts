@@ -1282,7 +1282,7 @@ export async function handleDatabaseRoute(
   ensureInit();
   if (url.pathname.startsWith("/_db/redis/")) {
     const { handleRedisRoute } = await import("./handle-redis");
-    return handleRedisRoute(req, url, cwd);
+    return handleRedisRoute(req, url, cwd, sideEffectAllowed);
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute } = await import("./handle-elasticsearch");

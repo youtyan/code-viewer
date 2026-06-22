@@ -70,6 +70,26 @@ function resolveEs(
   return { dbId: dbParam, explorer };
 }
 
+async function handleClose(req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db) return textError("missing db", 400);
+  const cached = esAdapterCache.get(body.db);
+  if (cached) {
+    try {
+      cached.close();
+    } finally {
+      esAdapterCache.delete(body.db);
+    }
+  }
+  return json({ ok: true });
+}
+
 function handleIndices(cwd: string, url: URL): Response {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -297,6 +317,12 @@ export async function handleElasticsearchRoute(
       return wrap(textError("forbidden", 403));
     }
     return wrap(await handleSearch(cwd, req, url));
+  }
+  if (path === "/_db/elasticsearch/close") {
+    if (sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleClose(req));
   }
   return null;
 }
