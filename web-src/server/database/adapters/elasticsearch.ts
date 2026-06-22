@@ -215,13 +215,68 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     const props = raw[realIndex]?.mappings?.properties ?? {};
     return { index: realIndex, properties: props };
   }
-  function searchDocs(_opts: {
+  function searchDocs(opts: {
     index: string;
     query?: string;
     size?: number;
     searchAfter?: unknown[];
   }): EsSearchResult {
-    throw new Error("not implemented yet");
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
+    // search_after は安定 sort が必須。`_shard_doc` (ES 7.12+) で全件
+    // tie-break まで含めた deterministic な順序を取る。lucene query 文字列が
+    // 与えられていれば `query_string` 経由で渡す。未指定なら match_all。
+    const body: Record<string, unknown> = {
+      size,
+      track_total_hits: true,
+      seq_no_primary_term: true,
+      sort: [{ _shard_doc: "asc" }],
+      query: opts.query
+        ? { query_string: { query: opts.query } }
+        : { match_all: {} },
+    };
+    if (opts.searchAfter && opts.searchAfter.length > 0) {
+      body.search_after = opts.searchAfter;
+    }
+    type RawHit = {
+      _index?: string;
+      _id?: string;
+      _score?: number | null;
+      _source?: unknown;
+      _seq_no?: number;
+      _primary_term?: number;
+      sort?: unknown[];
+    };
+    type RawResult = {
+      hits?: {
+        total?: { value?: number } | number;
+        hits?: RawHit[];
+      };
+    };
+    const raw = callJson<RawResult>(
+      "POST",
+      `/${encodeURIComponent(opts.index)}/_search`,
+      body,
+      "_search",
+    );
+    const rawHits = raw.hits?.hits ?? [];
+    const hits = rawHits.map((h) => ({
+      _index: h._index ?? opts.index,
+      _id: h._id ?? "",
+      _score: h._score ?? null,
+      _source: h._source,
+      sort: h.sort,
+      _seq_no: h._seq_no,
+      _primary_term: h._primary_term,
+    }));
+    let totalHits = 0;
+    const t = raw.hits?.total;
+    if (typeof t === "number") totalHits = t;
+    else if (t && typeof t.value === "number") totalHits = t.value;
+    const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
+    return { totalHits, hits, lastSort };
   }
   function getDoc(_opts: { index: string; id: string }): {
     found: boolean;

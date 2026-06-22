@@ -1,4 +1,5 @@
 import type {
+  EsDocsResponse,
   EsIndicesResponse,
   EsMappingResponse,
 } from "../../core/database/types";
@@ -69,6 +70,46 @@ function handleIndices(cwd: string, url: URL): Response {
   }
 }
 
+function handleDocs(cwd: string, url: URL): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const index = url.searchParams.get("index");
+  if (!index) return textError("missing index parameter", 400);
+  const query = url.searchParams.get("q") || undefined;
+  const sizeRaw = url.searchParams.get("size");
+  const size = sizeRaw ? Number(sizeRaw) : undefined;
+  const sa = url.searchParams.get("searchAfter");
+  let searchAfter: unknown[] | undefined;
+  if (sa) {
+    try {
+      const parsed = JSON.parse(sa);
+      if (Array.isArray(parsed)) searchAfter = parsed;
+    } catch {
+      return textError("invalid searchAfter (must be JSON array)", 400);
+    }
+  }
+  try {
+    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
+    const body: EsDocsResponse = {
+      dbId: r.dbId,
+      index,
+      hits: result.hits,
+      totalHits: result.totalHits,
+      lastSort: result.lastSort,
+    };
+    return json(body);
+  } catch (err) {
+    console.error(
+      "[code-viewer] elasticsearch error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 function handleMapping(cwd: string, url: URL): Response {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -119,6 +160,12 @@ export async function handleElasticsearchRoute(
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleMapping(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/docs") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleDocs(cwd, url));
   }
   return null;
 }
