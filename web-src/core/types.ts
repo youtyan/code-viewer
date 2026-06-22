@@ -64,6 +64,7 @@ export type RepoTreeResponse = {
 
 export type SettingsResponse = {
   project: string;
+  branch?: string;
   repo_web_url: string | null;
   scope: {
     omit_dirs_effective: string[];
@@ -139,12 +140,35 @@ export type AnnotationLineRange = {
   end: number;
 };
 
+export type AnnotationDatabaseTab =
+  | "data"
+  | "query"
+  | "schema"
+  | "er"
+  | "search"
+  | "snapshot";
+
+export type AnnotationTarget =
+  | {
+      kind: "code";
+      path: string;
+      line?: AnnotationLineRange;
+      range: { from: string; to: string };
+    }
+  | {
+      kind: "database";
+      db?: string;
+      table?: string;
+      tab?: AnnotationDatabaseTab;
+    };
+
 export type AnnotationEntry = {
   id: string;
   created_at: string;
   path: string;
   line?: AnnotationLineRange;
   range: { from: string; to: string };
+  target?: AnnotationTarget;
   title?: string;
   body: string;
 };
@@ -231,7 +255,7 @@ declare global {
     Diff2HtmlUI: Diff2HtmlGlobal;
     hljs: unknown;
     GdpExpandLogic: typeof GdpExpandLogic;
-    _lastMeta?: DiffMeta;
+    _lastMeta?: DiffMeta | null;
     __gdpScrollSpy?: EventListener;
     __gdpSidebarTouchedAt?: number;
   }

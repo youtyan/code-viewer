@@ -7177,6 +7177,16 @@ ${frontmatter.yaml}
       return entry.line.start === entry.line.end ? entry.line.start : { start: entry.line.start, end: entry.line.end };
     }
     function annotationLocationLabel(entry) {
+      if (entry.target?.kind === "database") {
+        const parts = ["Database"];
+        if (entry.target.db)
+          parts.push(entry.target.db);
+        if (entry.target.table)
+          parts.push(entry.target.table);
+        if (entry.target.tab)
+          parts.push(entry.target.tab);
+        return parts.join(" / ");
+      }
       if (!entry.line)
         return entry.path;
       return entry.line.start === entry.line.end ? `${entry.path}:${entry.line.start}` : `${entry.path}:${entry.line.start}-${entry.line.end}`;
@@ -7184,6 +7194,21 @@ ${frontmatter.yaml}
     function annotationRefForEntry(entry) {
       const to = entry.range.to || "worktree";
       return to === "worktree" || to === "" ? "worktree" : to;
+    }
+    function databaseAnnotationMatchesRoute(entry) {
+      if (entry.target?.kind !== "database")
+        return false;
+      const route = deps.getRoute();
+      if (route.screen !== "database")
+        return false;
+      const target = entry.target;
+      if (target.db && target.db !== route.db)
+        return false;
+      if (target.table && target.table !== route.table)
+        return false;
+      if (target.tab && target.tab !== (route.tab || "data"))
+        return false;
+      return true;
     }
     function withSessionParam(rawUrl) {
       const url = new URL(rawUrl, window.location.origin);
@@ -7217,6 +7242,51 @@ ${frontmatter.yaml}
       td.appendChild(box);
       tr.appendChild(td);
       return tr;
+    }
+    function buildDatabaseAnnotationBlock(entry) {
+      const box = document.createElement("div");
+      box.className = "gdp-db-annotation-inline";
+      box.dataset.annotationId = entry.id;
+      box.classList.toggle("active", entry.id === activeAnnotationId);
+      const head = document.createElement("div");
+      head.className = "gdp-db-annotation-inline-head";
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "gdp-db-annotation-inline-title";
+      title.textContent = entry.title || annotationLocationLabel(entry);
+      title.addEventListener("click", () => {
+        openAnnotationEntry(entry.id);
+      });
+      const location2 = document.createElement("span");
+      location2.className = "gdp-db-annotation-inline-location";
+      location2.textContent = annotationLocationLabel(entry);
+      head.append(title, location2, createCopyRefButton(entry));
+      const markdown = document.createElement("div");
+      markdown.className = "gdp-db-annotation-inline-body";
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
+      box.append(head, markdown);
+      return box;
+    }
+    function applyDatabaseAnnotations(session) {
+      document.querySelectorAll(".gdp-db-annotation-strip").forEach((el) => {
+        el.remove();
+      });
+      if (!session || deps.getRoute().screen !== "database")
+        return;
+      const matches = session.entries.filter(databaseAnnotationMatchesRoute);
+      if (!matches.length)
+        return;
+      const root = document.querySelector(".db-root");
+      if (!root)
+        return;
+      const strip = document.createElement("section");
+      strip.className = "gdp-db-annotation-strip";
+      strip.setAttribute("aria-label", "Database annotations");
+      for (const entry of matches) {
+        strip.appendChild(buildDatabaseAnnotationBlock(entry));
+      }
+      root.prepend(strip);
     }
     function inlineAnnotationTargetRow(entry) {
       if (!entry.line)
@@ -7260,6 +7330,7 @@ ${frontmatter.yaml}
         row.remove();
       });
       const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId);
+      applyDatabaseAnnotations(session);
       if (!session)
         return;
       for (const entry of session.entries) {
@@ -7344,6 +7415,9 @@ ${frontmatter.yaml}
     function syncInlineAnnotationActive() {
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.classList.toggle("active", row.dataset.annotationId === activeAnnotationId);
+      });
+      document.querySelectorAll(".gdp-db-annotation-inline").forEach((box) => {
+        box.classList.toggle("active", box.dataset.annotationId === activeAnnotationId);
       });
     }
     function annotationAiReference(session, entry) {
@@ -7655,6 +7729,27 @@ ${frontmatter.yaml}
         notifyAnnotationsChanged();
       notifyAnnotationOpened(entry.id);
       showAnnotationDetail(session, entry, index);
+      if (entry.target?.kind === "database") {
+        const target = entry.target;
+        deps.cancelActiveSourceLoad("navigation");
+        deps.removeStandaloneSource();
+        deps.setRoute({
+          screen: "database",
+          db: target.db,
+          table: target.table,
+          tab: target.tab,
+          range: deps.currentRange()
+        });
+        deps.setPageMode();
+        await deps.openDatabaseAnnotation(target);
+        if (stale())
+          return;
+        applyInlineAnnotations();
+        const block2 = document.querySelector(`.gdp-db-annotation-inline[data-annotation-id="${CSS.escape(entryId)}"]`);
+        if (block2)
+          deps.scrollDiffElementIntoView(block2, "center");
+        return;
+      }
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
       const range = { from, to };
@@ -11779,7 +11874,10 @@ ${frontmatter.yaml}
           executedBy: "user"
         })
       });
-      return await res.json();
+      const result = await res.json();
+      if (historyOpen)
+        historyView.refresh();
+      return result;
     }
     async function selectDb(dbId, explorerInitial, generation = loadGeneration) {
       if (generation !== loadGeneration || currentDb?.id !== dbId)
@@ -12995,6 +13093,14 @@ ${frontmatter.yaml}
       button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
       button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
     }
+    function setProjectBranch(branch) {
+      const el = document.querySelector("#project-branch");
+      if (!el)
+        return;
+      el.hidden = !branch;
+      el.textContent = branch;
+      el.title = branch ? `Current branch: ${branch}` : "";
+    }
     function renderMeta(meta) {
       const el = $("#meta");
       if (!meta) {
@@ -13002,13 +13108,8 @@ ${frontmatter.yaml}
         return;
       }
       setProjectName(meta.project || "");
+      setProjectBranch(meta.branch || "");
       el.innerHTML = "";
-      if (meta.branch) {
-        const b2 = document.createElement("span");
-        b2.className = "ref";
-        b2.textContent = `⎇ ${meta.branch}`;
-        el.appendChild(b2);
-      }
       if (meta.totals) {
         const t2 = document.createElement("span");
         t2.className = "num";
@@ -14117,6 +14218,28 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/empty-diff-pane.ts
+  function showEmptyHistoryDiffPane(deps) {
+    if (deps.diff)
+      deps.diff.innerHTML = "";
+    deps.renderSidebar([], undefined);
+    deps.setFiles([]);
+    deps.clearLastMeta();
+    deps.renderMeta(null);
+    deps.invalidateRepoSidebar();
+    deps.clearLoadQueue();
+    if (deps.empty) {
+      deps.empty.classList.remove("hidden");
+      const h2 = deps.empty.querySelector("h2");
+      if (h2)
+        h2.textContent = "No commit selected";
+      const p2 = deps.empty.querySelector("p");
+      if (p2)
+        p2.textContent = "Select a commit from the list to see its changes.";
+    }
+    deps.setStatus("live");
+  }
+
   // web-src/views/help-page.ts
   var HELP_LANGUAGES = ["en", "ja"];
   var HELP_SECTIONS = [
@@ -15002,6 +15125,49 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/history-view.ts
+  var HISTORY_BODY_COLLAPSE_LINES = 10;
+  function historyBodyLineCount(rawText) {
+    if (!rawText)
+      return 0;
+    return rawText.split(/\r?\n/).length;
+  }
+  function historyBodyToggleLabel(expanded, remainingLines) {
+    return expanded ? "閉じる" : `もっと見る (${remainingLines} 行)`;
+  }
+  function buildExpandableHistoryBody(rendered, rawText) {
+    const lineCount = historyBodyLineCount(rawText);
+    if (lineCount <= HISTORY_BODY_COLLAPSE_LINES)
+      return rendered;
+    const wrap = document.createElement("div");
+    wrap.className = "hci-body-expandable";
+    const collapsible = document.createElement("div");
+    collapsible.className = "hci-body-collapsible";
+    collapsible.appendChild(rendered);
+    const button = document.createElement("div");
+    button.className = "hci-body-toggle";
+    button.setAttribute("role", "button");
+    button.setAttribute("tabindex", "0");
+    const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
+    const sync = () => {
+      const expanded = collapsible.classList.contains("expanded");
+      button.textContent = historyBodyToggleLabel(expanded, remainingLines);
+      button.setAttribute("aria-expanded", expanded ? "true" : "false");
+    };
+    const toggle = () => {
+      collapsible.classList.toggle("expanded");
+      sync();
+    };
+    button.addEventListener("click", toggle);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      toggle();
+    });
+    sync();
+    wrap.append(collapsible, button);
+    return wrap;
+  }
   function createHistoryView(deps) {
     const panel = deps.$("#history-panel");
     const list2 = deps.$("#history-list");
@@ -15022,6 +15188,13 @@ ${frontmatter.yaml}
     function setStatusText(message) {
       statusEl.textContent = message;
       statusEl.hidden = !message;
+    }
+    function clearCommitInfo() {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      info.hidden = true;
+      info.querySelector(".hci-body")?.replaceChildren();
     }
     function relativeWhen(iso) {
       const t2 = Date.parse(iso);
@@ -15086,14 +15259,15 @@ ${frontmatter.yaml}
       list2.innerHTML = html.join("");
       setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
     }
-    function updateCommitInfo(commit) {
+    async function updateCommitInfo(commit) {
       const info = document.querySelector("#history-commit-info");
       if (!info)
         return;
       if (!commit) {
-        info.hidden = true;
+        clearCommitInfo();
         return;
       }
+      const gen = generation;
       const set2 = (sel, text2) => {
         const el = info.querySelector(sel);
         if (el)
@@ -15106,8 +15280,16 @@ ${frontmatter.yaml}
       set2(".hci-subject", commit.subject);
       const body = info.querySelector(".hci-body");
       if (body) {
-        body.textContent = commit.body;
-        body.hidden = !commit.body;
+        body.replaceChildren();
+        if (!commit.body) {
+          body.hidden = true;
+        } else {
+          body.hidden = false;
+          const rendered = await renderMarkdownPreview(commit.body, { path: "COMMIT_MSG", ref: commit.sha }, { syntaxHighlight: deps.getSyntaxHighlight() });
+          if (gen !== generation || selectedSha !== commit.sha)
+            return;
+          body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
+        }
       }
       info.hidden = false;
     }
@@ -15148,7 +15330,7 @@ ${frontmatter.yaml}
       const gen = generation;
       selectedSha = commit.sha;
       updateActiveRow();
-      updateCommitInfo(commit);
+      await updateCommitInfo(commit);
       if (gen !== generation)
         return;
       if (options.updateUrl !== false) {
@@ -15211,7 +15393,7 @@ ${frontmatter.yaml}
         return;
       if (!single) {
         setBanner(lookupFailed ? `failed to load commit: ${sha}` : `commit not found: ${sha}`);
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         deps.showEmptyDiffPane();
         return;
       }
@@ -15237,6 +15419,7 @@ ${frontmatter.yaml}
       const refChanged = nextRef !== ref;
       if (refChanged || force || commits.length === 0) {
         generation++;
+        const gen = generation;
         ref = nextRef;
         commits = [];
         hasMore = false;
@@ -15244,9 +15427,11 @@ ${frontmatter.yaml}
         inFlight = null;
         selectedSha = "";
         setBanner("");
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         renderList();
         await loadNextPage();
+        if (gen !== generation)
+          return;
       }
       const route2 = deps.getRoute();
       if (route2.screen !== "history")
@@ -15256,7 +15441,7 @@ ${frontmatter.yaml}
       } else {
         selectedSha = "";
         updateActiveRow();
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         deps.showEmptyDiffPane();
       }
     }
@@ -15268,6 +15453,16 @@ ${frontmatter.yaml}
         range: { from: "HEAD", to: "worktree" }
       }, false);
       enterHistory(true);
+    }
+    function leaveHistory() {
+      generation++;
+      loading = false;
+      inFlight = null;
+      selectedSha = "";
+      setBanner("");
+      setStatusText("");
+      updateActiveRow();
+      clearCommitInfo();
     }
     list2.addEventListener("click", (e2) => {
       const row = e2.target.closest(".history-item");
@@ -15317,7 +15512,7 @@ ${frontmatter.yaml}
         loadNextPage();
     }, { root: panel, rootMargin: "200px" });
     observer.observe(sentinel);
-    return { enterHistory, onRefPicked };
+    return { enterHistory, leaveHistory, onRefPicked };
   }
 
   // web-src/views/hunk-expand.ts
@@ -21219,6 +21414,14 @@ ${frontmatter.yaml}
       }
       reloadScopedState();
     }
+    function setProjectBranch(branch) {
+      const el = document.querySelector("#project-branch");
+      if (!el)
+        return;
+      el.hidden = !branch;
+      el.textContent = branch;
+      el.title = branch ? `Current branch: ${branch}` : "";
+    }
     function reloadScopedState() {
       const collapsed = readScopedStorage("gdp:collapsed-dirs");
       if (collapsed !== null) {
@@ -21314,6 +21517,7 @@ ${frontmatter.yaml}
           return null;
         const settings = await res.json();
         setProjectName(settings.project || "");
+        setProjectBranch(settings.branch || "");
         const repoLink = document.querySelector("#repo-web-link");
         if (repoLink && settings.repo_web_url) {
           repoLink.href = settings.repo_web_url;
@@ -21756,11 +21960,6 @@ ${frontmatter.yaml}
       if (annotationsToggle) {
         annotationsToggle.title = text2.global.annotations;
         annotationsToggle.setAttribute("aria-label", text2.global.annotations);
-      }
-      const queryHistoryToggle = document.querySelector("#query-history-toggle");
-      if (queryHistoryToggle) {
-        queryHistoryToggle.title = text2.global.queryHistory;
-        queryHistoryToggle.setAttribute("aria-label", text2.global.queryHistory);
       }
       const viewerSettings = document.querySelector("#viewer-settings");
       if (viewerSettings) {
@@ -22222,14 +22421,7 @@ ${frontmatter.yaml}
           historyRefInput.value = STATE.route.ref || "HEAD";
       }
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
-      const isDatabase = STATE.route.screen === "database";
-      const annotationsToggle = document.querySelector("#annotations-toggle");
-      const qhToggle = document.querySelector("#query-history-toggle");
-      if (annotationsToggle)
-        annotationsToggle.hidden = isDatabase;
-      if (qhToggle)
-        qhToggle.hidden = !isDatabase;
-      if (!isDatabase) {
+      if (STATE.route.screen !== "database") {
         setQueryHistoryPanelOpen(false);
       }
       if (isDatabase && ANNOTATIONS_UI) {
@@ -22420,6 +22612,7 @@ ${frontmatter.yaml}
       invalidateRepoSidebar
     });
     const {
+      renderMeta,
       renderShell,
       rerenderLoadedDiffs,
       mountDiff,
@@ -22935,21 +23128,23 @@ ${frontmatter.yaml}
         return load().then(() => {});
       },
       showEmptyDiffPane: () => {
-        const diff = $("#diff");
-        if (diff)
-          diff.innerHTML = "";
-        const empty = $("#empty");
-        if (empty) {
-          empty.classList.remove("hidden");
-          const h2 = empty.querySelector("h2");
-          if (h2)
-            h2.textContent = "No commit selected";
-          const p2 = empty.querySelector("p");
-          if (p2)
-            p2.textContent = "Select a commit from the list to see its changes.";
-        }
-        setStatus("live");
+        showEmptyHistoryDiffPane({
+          diff: $("#diff"),
+          empty: $("#empty"),
+          renderSidebar,
+          setFiles: (files) => {
+            STATE.files = files;
+          },
+          clearLastMeta: () => {
+            window._lastMeta = null;
+          },
+          renderMeta,
+          invalidateRepoSidebar,
+          clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+          setStatus
+        });
       },
+      getSyntaxHighlight: () => STATE.syntaxHighlight,
       trackLoad
     });
     const DATABASE_VIEW = createDatabaseView({
@@ -22980,17 +23175,19 @@ ${frontmatter.yaml}
     }
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
     function applyRouteFromLocation() {
-      if (STATE.route.screen === "history" && window.location.pathname !== "/history") {
+      const previousRoute = STATE.route;
+      if (previousRoute.screen === "history" && window.location.pathname !== "/history") {
         restoreRangeAfterHistory();
-      }
-      if (STATE.route.screen === "database" && window.location.pathname !== "/database") {
-        DATABASE_VIEW.leave();
       }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       const routeLanguage = viewerLanguageFromSearch(window.location.search);
       if (routeLanguage && routeLanguage !== STATE.language)
         setViewerLanguage(routeLanguage);
       const nextRoute = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      if (previousRoute.screen === "database" && nextRoute.screen !== "database")
+        DATABASE_VIEW.leave();
+      if (previousRoute.screen === "history" && nextRoute.screen !== "history")
+        HISTORY_VIEW.leaveHistory();
       STATE.route = nextRoute.screen === "help" && !new URLSearchParams(window.location.search).has("lang") ? { ...nextRoute, lang: STATE.language } : nextRoute;
       STATE.from = STATE.route.range.from;
       STATE.to = STATE.route.range.to;
@@ -23139,6 +23336,11 @@ ${frontmatter.yaml}
       currentRange,
       getFiles: () => STATE.files,
       getRoute: () => STATE.route,
+      openDatabaseAnnotation: (target) => {
+        DATABASE_VIEW.enter(target.db, target.table, target.tab);
+        setStatus("live");
+        return Promise.resolve();
+      },
       setRange: (from, to) => {
         STATE.from = from;
         STATE.to = to;
@@ -23155,16 +23357,6 @@ ${frontmatter.yaml}
       onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
       getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
-    const qhToggleBtn = document.getElementById("query-history-toggle");
-    if (qhToggleBtn) {
-      qhToggleBtn.addEventListener("click", () => {
-        const panel = document.getElementById("query-history-panel");
-        const opening = panel ? panel.hidden : true;
-        setQueryHistoryPanelOpen(opening);
-        if (opening)
-          DATABASE_VIEW.handleSse();
-      });
-    }
     const qhCloseBtn = document.getElementById("query-history-panel-close");
     if (qhCloseBtn) {
       qhCloseBtn.addEventListener("click", () => {

@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import type {
+  AnnotationDatabaseTab,
   AnnotationEntry,
   AnnotationLineRange,
   AnnotationSession,
@@ -24,6 +25,23 @@ export type AnnotateCommand =
       sessionTitle?: string;
       body?: string;
       bodyFile?: string;
+      before?: string;
+      after?: string;
+      position?: number;
+    }
+  | {
+      kind: "add-db";
+      db?: string;
+      table?: string;
+      tab?: AnnotationDatabaseTab;
+      title?: string;
+      session?: string;
+      sessionTitle?: string;
+      body?: string;
+      bodyFile?: string;
+      before?: string;
+      after?: string;
+      position?: number;
     }
   | { kind: "rename"; id: string; title: string }
   | {
@@ -32,6 +50,13 @@ export type AnnotateCommand =
       title?: string;
       body?: string;
       bodyFile?: string;
+    }
+  | {
+      kind: "move";
+      id: string;
+      before?: string;
+      after?: string;
+      position?: number;
     }
   | { kind: "list"; json: boolean }
   | { kind: "delete"; id: string }
@@ -61,10 +86,16 @@ Usage:
   code-viewer annotate start [--title <text>]
   code-viewer annotate add --file <path> [--line <n>|<n>-<m>]
       [--from <ref>] [--to <ref>] [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
+      [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate add-db [--db <id>] [--table <name>] [--tab <tab>]
+      [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
   code-viewer annotate rename <session-id> --title <text>
   code-viewer annotate edit <id> [--title <text>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate move <id> [--before <id> | --after <id> | --position <n>]
   code-viewer annotate list [--json]
   code-viewer annotate delete <id>
   code-viewer annotate clear
@@ -77,6 +108,9 @@ Examples:
   code-viewer annotate start --title "How SSE updates work"
   code-viewer annotate add --file web-src/server/preview.ts --line 2220-2250 \\
       --body "This endpoint keeps one SSE stream per browser tab."
+  code-viewer annotate add-db --db app.db --table users --tab schema \\
+      --body "This schema note explains how users relate to orders."
+  code-viewer annotate move a-123 --before a-456
   git diff HEAD~1 | code-viewer annotate add --file src/app.ts --line 10 \\
       --from HEAD~1 --to worktree --body "The fix moves the guard up here."
 `;
@@ -109,6 +143,10 @@ location and renders your explanation directly under the annotated lines.
    follow). Each add without --session appends to the most recent session:
      code-viewer annotate add --file src/cache.ts --line 120-145 \\
          --title "Entry point" --body "Writes land here first. ..."
+   To insert or reorder later:
+     code-viewer annotate add --after a-123 --file src/cache.ts --line 150 \\
+         --body "This follow-up belongs here."
+     code-viewer annotate move a-999 --before a-123
 3. Verify what you posted:
      code-viewer annotate list
 
@@ -148,6 +186,13 @@ location and renders your explanation directly under the annotated lines.
     code-viewer annotate add --session <session-id> --file <path> --line <n> \
         --title "回答: ..." --body "<markdown>"
 - Rename a session: code-viewer annotate rename <session-id> --title <text>
+- Move an annotation without changing its id:
+    code-viewer annotate move <id> --before <other-id>
+    code-viewer annotate move <id> --after <other-id>
+    code-viewer annotate move <id> --position <1-based-index>
+- Annotate the Database screen:
+    code-viewer annotate add-db --db <db-id> --table <table> --tab schema \\
+        --title "Why this table matters" --body "<markdown>"
 
 ## Cleanup
 
@@ -166,6 +211,25 @@ function takeValue(
   return { value, next: index + 1 };
 }
 
+function parsePosition(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : Number.NaN;
+}
+
+function parseDatabaseTab(
+  value: string | undefined,
+): AnnotationDatabaseTab | undefined {
+  return value === "data" ||
+    value === "query" ||
+    value === "schema" ||
+    value === "er" ||
+    value === "search" ||
+    value === "snapshot"
+    ? value
+    : undefined;
+}
+
 export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
   const rest: string[] = [];
   let cwd: string | undefined;
@@ -182,6 +246,12 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     "--session-title",
     "--body",
     "--body-file",
+    "--before",
+    "--after",
+    "--position",
+    "--db",
+    "--table",
+    "--tab",
   ]);
 
   for (let i = 0; i < argv.length; i++) {
@@ -237,6 +307,9 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     const bodyFile = options.get("--body-file");
     if (body !== undefined && bodyFile !== undefined)
       return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
     return {
       ok: true,
       args: {
@@ -251,6 +324,46 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           sessionTitle: options.get("--session-title"),
           body,
           bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position,
+        },
+        cwd,
+        server,
+      },
+    };
+  }
+  if (subcommand === "add-db") {
+    const body = options.get("--body");
+    const bodyFile = options.get("--body-file");
+    if (body !== undefined && bodyFile !== undefined)
+      return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    const rawTab = options.get("--tab");
+    const tab = parseDatabaseTab(rawTab);
+    if (rawTab !== undefined && tab === undefined)
+      return {
+        ok: false,
+        error: "--tab must be one of data, query, schema, er, search, snapshot",
+      };
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "add-db",
+          db: options.get("--db"),
+          table: options.get("--table"),
+          tab,
+          title: options.get("--title"),
+          session: options.get("--session"),
+          sessionTitle: options.get("--session-title"),
+          body,
+          bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position,
         },
         cwd,
         server,
@@ -283,6 +396,27 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           title: options.get("--title"),
           body,
           bodyFile,
+        },
+        cwd,
+        server,
+      },
+    };
+  }
+  if (subcommand === "move") {
+    const id = rest[1];
+    if (!id) return { ok: false, error: "move requires an annotation id" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "move",
+          id,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position,
         },
         cwd,
         server,
@@ -419,6 +553,29 @@ function printList(state: AnnotationsState): void {
   }
 }
 
+async function annotationBodyFromCommand(command: {
+  body?: string;
+  bodyFile?: string;
+}): Promise<string> {
+  let body = command.body;
+  if (body === undefined && command.bodyFile !== undefined) {
+    try {
+      body = readFileSync(command.bodyFile, "utf8");
+    } catch {
+      console.error(`could not read --body-file: ${command.bodyFile}`);
+      process.exit(1);
+    }
+  }
+  if (body === undefined) body = await readStdin();
+  if (!body.trim()) {
+    console.error(
+      "annotation body is empty. Pass --body, --body-file, or pipe stdin.",
+    );
+    process.exit(1);
+  }
+  return body;
+}
+
 export async function runAnnotateCli(argv: string[]): Promise<void> {
   const parsed = parseAnnotateArgs(argv);
   if (parsed.ok === false) {
@@ -450,22 +607,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "add") {
-    let body = command.body;
-    if (body === undefined && command.bodyFile !== undefined) {
-      try {
-        body = readFileSync(command.bodyFile, "utf8");
-      } catch {
-        console.error(`could not read --body-file: ${command.bodyFile}`);
-        process.exit(1);
-      }
-    }
-    if (body === undefined) body = await readStdin();
-    if (!body.trim()) {
-      console.error(
-        "annotation body is empty. Pass --body, --body-file, or pipe stdin.",
-      );
-      process.exit(1);
-    }
+    const body = await annotationBodyFromCommand(command);
     const result = (await request(serverUrl, "POST", {
       action: "add",
       session_id: command.session,
@@ -475,6 +617,9 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       range: { from: command.from, to: command.to },
       title: command.title,
       body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position,
     })) as {
       session_id: string;
       session_title?: string;
@@ -488,6 +633,43 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     }
     console.log(
       `annotated ${result.entry.path}${formatLine(result.entry.line)} ` +
+        `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`,
+    );
+    console.error(
+      `view annotations at ${serverUrl}/ with the code annotations panel`,
+    );
+    return;
+  }
+  if (command.kind === "add-db") {
+    const body = await annotationBodyFromCommand(command);
+    const result = (await request(serverUrl, "POST", {
+      action: "add",
+      session_id: command.session,
+      session_title: command.sessionTitle,
+      target: {
+        kind: "database",
+        db: command.db,
+        table: command.table,
+        tab: command.tab,
+      },
+      title: command.title,
+      body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position,
+    })) as {
+      session_id: string;
+      session_title?: string;
+      created_session?: boolean;
+      entry: AnnotationEntry;
+    };
+    if (result.created_session) {
+      console.error(
+        `created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`,
+      );
+    }
+    console.log(
+      `annotated ${result.entry.path} ` +
         `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`,
     );
     console.error(
@@ -530,6 +712,19 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     })) as { entry: AnnotationEntry };
     console.log(
       `updated annotation ${result.entry.id} (${result.entry.path}${formatLine(result.entry.line)})`,
+    );
+    return;
+  }
+  if (command.kind === "move") {
+    const result = (await request(serverUrl, "POST", {
+      action: "move",
+      id: command.id,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position,
+    })) as { entry: AnnotationEntry; session_id: string };
+    console.log(
+      `moved annotation ${result.entry.id} to session ${result.session_id}`,
     );
     return;
   }

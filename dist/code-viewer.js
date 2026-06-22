@@ -554,6 +554,9 @@ function refs(cwd) {
 function clampCommitLimit(max) {
   return Math.max(1, Math.min(max, MAX_REF_COMMIT_LIMIT));
 }
+function clampCommitSkip(skip) {
+  return Math.max(0, Math.floor(skip) || 0);
+}
 function parseCommitLog(stdout) {
   const parts = stdout.split("\x00");
   const commits = [];
@@ -571,8 +574,8 @@ function parseCommitLog(stdout) {
   }
   return commits;
 }
-function commitLogArgs(limit) {
-  return [
+function commitLogArgs(limit, skip = 0) {
+  const args = [
     "git",
     "log",
     "--all",
@@ -580,6 +583,9 @@ function commitLogArgs(limit) {
     `--max-count=${limit}`,
     `--format=${COMMIT_FORMAT}`
   ];
+  if (skip > 0)
+    args.splice(4, 0, `--skip=${skip}`);
+  return args;
 }
 function mergeCommitResults(limit, ...groups) {
   const seen = new Set;
@@ -601,10 +607,15 @@ function runCommitLog(cwd, args) {
   return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
 }
 function refCommits(cwd, query = "", max = DEFAULT_REF_COMMIT_LIMIT) {
-  const limit = clampCommitLimit(max);
-  const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  return refCommitPage(cwd, { query, max }).commits;
+}
+function refCommitPage(cwd, options = {}) {
+  const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
+  const skip = clampCommitSkip(options.skip ?? 0);
+  const fetchLimit = limit + 1;
   const hashMatches = [];
-  if (/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+  const trimmed = (options.query || "").trim().slice(0, 200).replace(/\0/g, "");
+  if (skip === 0 && /^[0-9a-f]{4,40}$/i.test(trimmed)) {
     const verified = run(["git", "rev-parse", "--verify", `${trimmed}^{commit}`], cwd);
     const single = run([
       "git",
@@ -619,21 +630,29 @@ function refCommits(cwd, query = "", max = DEFAULT_REF_COMMIT_LIMIT) {
     }
   }
   if (!trimmed) {
-    return runCommitLog(cwd, commitLogArgs(limit));
+    const commits = runCommitLog(cwd, commitLogArgs(fetchLimit, skip));
+    return {
+      commits: commits.slice(0, limit),
+      hasMore: commits.length > limit
+    };
   }
   const subjectMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--grep=${trimmed}`
   ]);
   const authorMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--author=${trimmed}`
   ]);
-  return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
+  const merged = mergeCommitResults(fetchLimit, hashMatches, subjectMatches, authorMatches);
+  return {
+    commits: merged.slice(0, limit),
+    hasMore: merged.length > limit
+  };
 }
 function parseRemoteWebUrl(remote) {
   const raw = (remote || "").trim();
@@ -7947,6 +7966,7 @@ function handleTree(url) {
 function handleSettings() {
   return json2({
     project: basename3(cwd),
+    branch: currentBranch(cwd) || undefined,
     repo_web_url: remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -8106,8 +8126,10 @@ function handleGrep(url) {
 function handleRefCommits(url) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
+  const parsedSkip = Number(url.searchParams.get("skip") || "0");
   const max = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
-  return json2({ commits: refCommits(cwd, query, max) });
+  const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
+  return json2(refCommitPage(cwd, { query, max, skip }));
 }
 function handleLog(url) {
   const ref = url.searchParams.get("ref") || "HEAD";

@@ -1688,21 +1688,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
 
-    // Hide annotations on the database screen, where the main surface is not
-    // a source/diff viewer.
-    const isDatabase = STATE.route.screen === "database";
-    const annotationsToggle = document.querySelector<HTMLButtonElement>(
-      "#annotations-toggle",
-    );
-    if (annotationsToggle) annotationsToggle.hidden = isDatabase;
-
     // Close query-history panel when leaving database screen
-    if (!isDatabase) {
+    if (STATE.route.screen !== "database") {
       setQueryHistoryPanelOpen(false);
-    }
-    // Close annotation panel when entering database screen
-    if (isDatabase && ANNOTATIONS_UI) {
-      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
     }
   }
 
@@ -2802,6 +2790,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     getFiles: () => STATE.files,
     getRoute: () => STATE.route,
+    openDatabaseAnnotation: (target) => {
+      DATABASE_VIEW.enter(target.db, target.table, target.tab);
+      setStatus("live");
+      return Promise.resolve();
+    },
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
