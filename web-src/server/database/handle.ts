@@ -117,12 +117,31 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
     const dockerDbs = getDockerDbs(cwd);
     const info = dockerDbs.find((d) => d.serviceName === serviceName);
     if (!info) return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      return textError("redis services must use the /_db/redis/* routes", 400);
+    }
     const resolved = dbName ? { ...info, database: dbName } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved };
   }
   const resolved = validateDbPath(cwd, dbParam);
   if (!resolved) return textError("invalid database path", 400);
   return { resolved, dbId: dbParam };
+}
+
+function toFileInfo(entry: {
+  id: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  kind: import("../../core/database/types").DbKind;
+}): import("../../core/database/types").DbFileInfo {
+  return {
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    sizeBytes: entry.sizeBytes,
+    kind: entry.kind,
+  };
 }
 
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
@@ -153,6 +172,8 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
       }
     }
   }
+  // Strip env / serviceName / database from the response — these contain
+  // credentials and internal state that the browser must not see.
   const body: DbFilesResponse = {
     files: [
       ...sqliteFiles.map((f) => ({
@@ -162,7 +183,7 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
         sizeBytes: f.sizeBytes,
         kind: "sqlite" as const,
       })),
-      ...dockerEntries,
+      ...dockerEntries.map(toFileInfo),
     ],
   };
   return json(body);
