@@ -7800,6 +7800,426 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/database/elasticsearch-explorer.ts
+  function formatBytes(n2) {
+    if (n2 >= 1024 * 1024 * 1024)
+      return `${(n2 / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    if (n2 >= 1024 * 1024)
+      return `${(n2 / (1024 * 1024)).toFixed(2)} MB`;
+    if (n2 >= 1024)
+      return `${(n2 / 1024).toFixed(1)} KB`;
+    return `${n2} B`;
+  }
+  function createElasticsearchExplorer() {
+    const container = document.createElement("div");
+    container.className = "es-explorer";
+    const indexListPane = document.createElement("div");
+    indexListPane.className = "es-index-list-pane";
+    const indexListHeader = document.createElement("div");
+    indexListHeader.className = "es-pane-header";
+    indexListHeader.textContent = "Indices";
+    indexListPane.appendChild(indexListHeader);
+    const indexList = document.createElement("div");
+    indexList.className = "es-index-list";
+    indexListPane.appendChild(indexList);
+    const docListPane = document.createElement("div");
+    docListPane.className = "es-doc-list-pane";
+    const docListHeader = document.createElement("div");
+    docListHeader.className = "es-pane-header";
+    docListHeader.textContent = "Docs";
+    docListPane.appendChild(docListHeader);
+    const searchBar = document.createElement("div");
+    searchBar.className = "es-search-bar";
+    const searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.placeholder = "lucene query (e.g. field:value)";
+    searchInput.className = "es-search-input";
+    const searchBtn = document.createElement("button");
+    searchBtn.type = "button";
+    searchBtn.className = "es-search-btn";
+    searchBtn.textContent = "Search";
+    searchBar.append(searchInput, searchBtn);
+    docListPane.appendChild(searchBar);
+    const docList = document.createElement("div");
+    docList.className = "es-doc-list";
+    docListPane.appendChild(docList);
+    const docMoreBtn = document.createElement("button");
+    docMoreBtn.type = "button";
+    docMoreBtn.className = "es-doc-more-btn";
+    docMoreBtn.textContent = "Load more";
+    docMoreBtn.hidden = true;
+    docListPane.appendChild(docMoreBtn);
+    const detailPane = document.createElement("div");
+    detailPane.className = "es-detail-pane";
+    const detailTabs = document.createElement("div");
+    detailTabs.className = "es-detail-tabs";
+    const tabMapping = document.createElement("button");
+    tabMapping.type = "button";
+    tabMapping.className = "es-detail-tab active";
+    tabMapping.textContent = "Mapping";
+    const tabDoc = document.createElement("button");
+    tabDoc.type = "button";
+    tabDoc.className = "es-detail-tab";
+    tabDoc.textContent = "Doc";
+    detailTabs.append(tabMapping, tabDoc);
+    detailPane.appendChild(detailTabs);
+    const mappingBody = document.createElement("div");
+    mappingBody.className = "es-mapping-body";
+    mappingBody.textContent = "Select an index to view its mapping.";
+    const docBody = document.createElement("div");
+    docBody.className = "es-doc-body";
+    docBody.hidden = true;
+    docBody.textContent = "Select a doc to view its _source.";
+    detailPane.append(mappingBody, docBody);
+    container.append(indexListPane, docListPane, detailPane);
+    let currentDbId = null;
+    let currentIndex = null;
+    let currentQuery = "";
+    let lastSort;
+    let loadingDocs = false;
+    let detailTab = "mapping";
+    function setIndexStatus(message, isError = false) {
+      indexList.innerHTML = "";
+      const note = document.createElement("div");
+      note.className = isError ? "es-error" : "es-note";
+      note.textContent = message;
+      indexList.appendChild(note);
+    }
+    function setDocStatus(message, isError = false) {
+      docList.innerHTML = "";
+      const note = document.createElement("div");
+      note.className = isError ? "es-error" : "es-note";
+      note.textContent = message;
+      docList.appendChild(note);
+      docMoreBtn.hidden = true;
+    }
+    function renderIndices(indices) {
+      indexList.innerHTML = "";
+      if (indices.length === 0) {
+        setIndexStatus("(no indices)");
+        return;
+      }
+      for (const ix of indices) {
+        const item = document.createElement("div");
+        item.className = "es-index-item";
+        item.dataset.indexName = ix.name;
+        const name = document.createElement("span");
+        name.className = "es-index-name";
+        name.textContent = ix.name;
+        name.title = ix.name;
+        const meta = document.createElement("span");
+        meta.className = "es-index-meta";
+        meta.textContent = `${ix.docCount.toLocaleString()} docs / ${formatBytes(ix.sizeBytes)}`;
+        item.append(name, meta);
+        item.addEventListener("click", () => selectIndex(ix.name));
+        indexList.appendChild(item);
+      }
+    }
+    function highlightActiveIndex(name) {
+      for (const item of indexList.querySelectorAll(".es-index-item")) {
+        item.classList.toggle("active", item.dataset.indexName === name);
+      }
+    }
+    function appendDocs(hits) {
+      for (const hit of hits) {
+        const row = document.createElement("div");
+        row.className = "es-doc-item";
+        row.dataset.docId = hit._id;
+        const id = document.createElement("span");
+        id.className = "es-doc-id";
+        id.textContent = hit._id;
+        id.title = hit._id;
+        const preview = document.createElement("span");
+        preview.className = "es-doc-preview";
+        preview.textContent = previewSource(hit._source);
+        row.append(id, preview);
+        row.addEventListener("click", () => selectDoc(hit._id));
+        docList.appendChild(row);
+      }
+    }
+    function previewSource(src) {
+      if (src === null || src === undefined)
+        return "";
+      try {
+        const s2 = JSON.stringify(src);
+        return s2.length > 200 ? `${s2.slice(0, 200)}…` : s2;
+      } catch {
+        return String(src);
+      }
+    }
+    function highlightActiveDoc(id) {
+      for (const row of docList.querySelectorAll(".es-doc-item")) {
+        row.classList.toggle("active", row.dataset.docId === id);
+      }
+    }
+    function setDetailTab(tab) {
+      detailTab = tab;
+      tabMapping.classList.toggle("active", tab === "mapping");
+      tabDoc.classList.toggle("active", tab === "doc");
+      mappingBody.hidden = tab !== "mapping";
+      docBody.hidden = tab !== "doc";
+    }
+    tabMapping.addEventListener("click", () => setDetailTab("mapping"));
+    tabDoc.addEventListener("click", () => setDetailTab("doc"));
+    function renderMapping(resp) {
+      mappingBody.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "es-mapping-header";
+      header.textContent = resp.mapping.index;
+      mappingBody.appendChild(header);
+      const table2 = document.createElement("table");
+      table2.className = "es-mapping-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const label of ["Field", "Type"]) {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table2.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      const props = resp.mapping.properties;
+      const keys = Object.keys(props).sort();
+      if (keys.length === 0) {
+        const row = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 2;
+        td.className = "es-value-empty";
+        td.textContent = "(no mapped fields)";
+        row.appendChild(td);
+        tbody.appendChild(row);
+      }
+      for (const key of keys) {
+        const row = document.createElement("tr");
+        const fieldTd = document.createElement("td");
+        fieldTd.className = "es-mapping-field";
+        fieldTd.textContent = key;
+        const typeTd = document.createElement("td");
+        typeTd.className = "es-mapping-type";
+        const p2 = props[key];
+        typeTd.textContent = p2.type ?? (p2.properties ? "object" : "(unknown)");
+        row.append(fieldTd, typeTd);
+        tbody.appendChild(row);
+      }
+      table2.appendChild(tbody);
+      mappingBody.appendChild(table2);
+    }
+    function renderDoc(resp) {
+      docBody.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "es-doc-detail-header";
+      header.textContent = `${resp.index} / ${resp.id}`;
+      docBody.appendChild(header);
+      if (!resp.found) {
+        const note = document.createElement("div");
+        note.className = "es-note";
+        note.textContent = "(doc not found)";
+        docBody.appendChild(note);
+        return;
+      }
+      if (resp.seqNo !== undefined || resp.primaryTerm !== undefined) {
+        const meta = document.createElement("div");
+        meta.className = "es-doc-detail-meta";
+        meta.textContent = `_seq_no=${resp.seqNo ?? "?"} _primary_term=${resp.primaryTerm ?? "?"}`;
+        docBody.appendChild(meta);
+      }
+      const pre = document.createElement("pre");
+      pre.className = "es-doc-source";
+      try {
+        pre.textContent = JSON.stringify(resp.source, null, 2);
+      } catch {
+        pre.textContent = String(resp.source);
+      }
+      docBody.appendChild(pre);
+    }
+    async function fetchMapping(index) {
+      if (!currentDbId)
+        return;
+      mappingBody.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "es-note";
+      loading.textContent = "Loading mapping...";
+      mappingBody.appendChild(loading);
+      try {
+        const params = new URLSearchParams({ db: currentDbId, index });
+        const res = await fetch(`/_db/elasticsearch/mapping?${params}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          mappingBody.innerHTML = "";
+          const err = document.createElement("div");
+          err.className = "es-error";
+          err.textContent = `Error: ${text2 || res.statusText}`;
+          mappingBody.appendChild(err);
+          return;
+        }
+        const data = await res.json();
+        if (currentIndex !== index)
+          return;
+        renderMapping(data);
+      } catch (err) {
+        mappingBody.innerHTML = "";
+        const errEl = document.createElement("div");
+        errEl.className = "es-error";
+        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        mappingBody.appendChild(errEl);
+      }
+    }
+    async function loadDocs(append) {
+      if (!currentDbId || !currentIndex)
+        return;
+      if (loadingDocs)
+        return;
+      loadingDocs = true;
+      docMoreBtn.disabled = true;
+      if (!append) {
+        lastSort = undefined;
+        setDocStatus("Loading docs...");
+      }
+      try {
+        const params = new URLSearchParams({
+          db: currentDbId,
+          index: currentIndex,
+          size: "200"
+        });
+        if (currentQuery)
+          params.set("q", currentQuery);
+        if (append && lastSort)
+          params.set("searchAfter", JSON.stringify(lastSort));
+        const res = await fetch(`/_db/elasticsearch/docs?${params}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          setDocStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (currentIndex !== data.index)
+          return;
+        if (!append)
+          docList.innerHTML = "";
+        if (data.hits.length === 0 && !append) {
+          setDocStatus("(no docs)");
+        } else {
+          appendDocs(data.hits);
+        }
+        lastSort = data.lastSort;
+        docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
+      } catch (err) {
+        setDocStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        loadingDocs = false;
+        docMoreBtn.disabled = false;
+      }
+    }
+    async function selectIndex(name) {
+      currentIndex = name;
+      highlightActiveIndex(name);
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+      await Promise.all([fetchMapping(name), loadDocs(false)]);
+    }
+    async function selectDoc(id) {
+      if (!currentDbId || !currentIndex)
+        return;
+      highlightActiveDoc(id);
+      setDetailTab("doc");
+      docBody.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "es-note";
+      loading.textContent = "Loading doc...";
+      docBody.appendChild(loading);
+      const requestIndex = currentIndex;
+      try {
+        const params = new URLSearchParams({
+          db: currentDbId,
+          index: requestIndex,
+          id
+        });
+        const res = await fetch(`/_db/elasticsearch/doc?${params}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          docBody.innerHTML = "";
+          const err = document.createElement("div");
+          err.className = "es-error";
+          err.textContent = `Error: ${text2 || res.statusText}`;
+          docBody.appendChild(err);
+          return;
+        }
+        const data = await res.json();
+        if (requestIndex !== currentIndex)
+          return;
+        renderDoc(data);
+      } catch (err) {
+        docBody.innerHTML = "";
+        const errEl = document.createElement("div");
+        errEl.className = "es-error";
+        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        docBody.appendChild(errEl);
+      }
+    }
+    function runSearch() {
+      currentQuery = searchInput.value.trim();
+      if (!currentIndex)
+        return;
+      loadDocs(false);
+    }
+    searchBtn.addEventListener("click", runSearch);
+    searchInput.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        runSearch();
+      }
+    });
+    docMoreBtn.addEventListener("click", () => loadDocs(true));
+    async function load(dbId) {
+      currentDbId = dbId;
+      currentIndex = null;
+      currentQuery = "";
+      lastSort = undefined;
+      searchInput.value = "";
+      docList.innerHTML = "";
+      docMoreBtn.hidden = true;
+      mappingBody.innerHTML = "";
+      mappingBody.textContent = "Select an index to view its mapping.";
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+      setIndexStatus("Loading indices...");
+      try {
+        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          setIndexStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (currentDbId !== dbId)
+          return;
+        renderIndices(data.indices);
+      } catch (err) {
+        setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      }
+    }
+    function clear() {
+      currentDbId = null;
+      currentIndex = null;
+      currentQuery = "";
+      lastSort = undefined;
+      loadingDocs = false;
+      searchInput.value = "";
+      indexList.innerHTML = "";
+      docList.innerHTML = "";
+      docMoreBtn.hidden = true;
+      mappingBody.innerHTML = "";
+      mappingBody.textContent = "Select an index to view its mapping.";
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+    }
+    return { el: container, load, clear };
+  }
+
   // web-src/views/database/er-diagram.ts
   var mermaidPromise2 = null;
   var mermaidInitialized2 = false;
@@ -8874,7 +9294,7 @@ ${frontmatter.yaml}
         row.classList.toggle("active", row.dataset.keyName === name);
       }
     }
-    function formatBytes(n2) {
+    function formatBytes2(n2) {
       if (n2 >= 1024 * 1024)
         return `${(n2 / (1024 * 1024)).toFixed(2)} MB`;
       if (n2 >= 1024)
@@ -8906,14 +9326,14 @@ ${frontmatter.yaml}
         body.classList.add("redis-value-empty");
       } else if (value.type === "string") {
         if (value.binaryBase64 !== undefined) {
-          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes(value.fullSize)}${value.truncated ? `, showing first ${formatBytes(64 * 1024)}` : ""})`, "warn"));
+          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes2(value.fullSize)}${value.truncated ? `, showing first ${formatBytes2(64 * 1024)}` : ""})`, "warn"));
           const pre = document.createElement("pre");
           pre.className = "redis-value-string";
           pre.textContent = value.binaryBase64;
           body.appendChild(pre);
         } else {
           if (value.truncated) {
-            body.appendChild(makeNotice(`(showing first ${formatBytes(64 * 1024)} of ${formatBytes(value.fullSize)})`, "warn"));
+            body.appendChild(makeNotice(`(showing first ${formatBytes2(64 * 1024)} of ${formatBytes2(value.fullSize)})`, "warn"));
           }
           const pre = document.createElement("pre");
           pre.className = "redis-value-string";
@@ -10718,9 +11138,11 @@ ${frontmatter.yaml}
     });
     const redisExplorer = createRedisExplorer();
     redisExplorer.el.hidden = true;
+    const esExplorer = createElasticsearchExplorer();
+    esExplorer.el.hidden = true;
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el, redisExplorer.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el, redisExplorer.el, esExplorer.el);
     queryEditor.el.hidden = true;
     globalSearchView.el.hidden = true;
     snapshotView.el.hidden = true;
@@ -10824,6 +11246,7 @@ ${frontmatter.yaml}
       schemaView.clear();
       erDiagram.clear();
       redisExplorer.clear();
+      esExplorer.clear();
       currentDb = null;
       schemaCache = null;
     }
@@ -10916,7 +11339,7 @@ ${frontmatter.yaml}
       return await res.json();
     }
     async function selectDb(dbId) {
-      if (currentDb?.kind === "redis") {
+      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
         tableList.render([]);
         grid.clear();
         schemaView.clear();
@@ -10929,12 +11352,23 @@ ${frontmatter.yaml}
         erDiagram.el.hidden = true;
         globalSearchView.el.hidden = true;
         snapshotView.el.hidden = true;
-        redisExplorer.el.hidden = false;
-        await redisExplorer.load(dbId);
+        if (currentDb.kind === "redis") {
+          esExplorer.el.hidden = true;
+          esExplorer.clear();
+          redisExplorer.el.hidden = false;
+          await redisExplorer.load(dbId);
+        } else {
+          redisExplorer.el.hidden = true;
+          redisExplorer.clear();
+          esExplorer.el.hidden = false;
+          await esExplorer.load(dbId);
+        }
         return;
       }
       redisExplorer.el.hidden = true;
       redisExplorer.clear();
+      esExplorer.el.hidden = true;
+      esExplorer.clear();
       const schema = await fetchSchema(dbId);
       if (!schema)
         return;
@@ -11073,7 +11507,7 @@ ${frontmatter.yaml}
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
       await selectDb(target);
-      if (currentDb?.kind === "redis")
+      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch")
         return;
       if (table2) {
         await selectTable(table2);
@@ -14723,7 +15157,7 @@ ${frontmatter.yaml}
       return "text";
     return "unsupported";
   }
-  function formatBytes(bytes) {
+  function formatBytes2(bytes) {
     if (!Number.isFinite(bytes) || bytes < 0)
       return "";
     const units = ["B", "KB", "MB", "GB"];
@@ -15559,7 +15993,7 @@ ${frontmatter.yaml}
     function createRepoEntrySize(entry) {
       const size = document.createElement("span");
       size.className = "size";
-      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
+      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes2(entry.size) : "";
       return size;
     }
     function repoEntryUpdatedTime(entry) {
@@ -15668,7 +16102,7 @@ ${frontmatter.yaml}
         item.append(labelEl, valueEl);
         wrap.appendChild(item);
       };
-      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
+      addItem("Size", meta.size == null ? "" : formatBytes2(meta.size));
       addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
       addItem("Created", formatFileDate(meta.created_at));
       if (!wrap.childElementCount) {
@@ -18135,7 +18569,7 @@ ${frontmatter.yaml}
         type.textContent = humanFileKind(target.path, meta.type, kind);
         if (meta.size != null) {
           const size = document.createElement("span");
-          size.textContent = formatBytes(meta.size);
+          size.textContent = formatBytes2(meta.size);
           info.appendChild(size);
         }
       });
@@ -18615,7 +19049,7 @@ ${frontmatter.yaml}
       badge.textContent = "Virtual mode";
       const summary = document.createElement("span");
       summary.className = "gdp-source-virtual-summary";
-      summary.textContent = lines.length.toLocaleString() + " lines, " + formatBytes(textValue.length) + ". Only visible rows are rendered. Highlighting is per-line.";
+      summary.textContent = lines.length.toLocaleString() + " lines, " + formatBytes2(textValue.length) + ". Only visible rows are rendered. Highlighting is per-line.";
       const actions = document.createElement("span");
       actions.className = "gdp-source-virtual-actions";
       const copy = document.createElement("button");
@@ -18794,7 +19228,7 @@ ${frontmatter.yaml}
       }
       const updateTotals = () => {
         SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-        summary.textContent = (complete ? totalRows.toLocaleString() : `${lines.size.toLocaleString()}+`) + " lines loaded from " + formatBytes(size) + ". More rows load as you scroll.";
+        summary.textContent = (complete ? totalRows.toLocaleString() : `${lines.size.toLocaleString()}+`) + " lines loaded from " + formatBytes2(size) + ". More rows load as you scroll.";
         spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
       };
       const loadPage = (line) => {

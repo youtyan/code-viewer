@@ -7,6 +7,7 @@ import type {
   DbTableDataResponse,
 } from "../../core/database/types";
 import type { AppRoute, DiffRange } from "../../core/routes";
+import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { createQueryEditor } from "./query-editor";
@@ -167,6 +168,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const redisExplorer = createRedisExplorer();
   redisExplorer.el.hidden = true;
 
+  const esExplorer = createElasticsearchExplorer();
+  esExplorer.el.hidden = true;
+
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
@@ -178,6 +182,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     globalSearchView.el,
     snapshotView.el,
     redisExplorer.el,
+    esExplorer.el,
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
@@ -284,6 +289,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     schemaView.clear();
     erDiagram.clear();
     redisExplorer.clear();
+    esExplorer.clear();
     currentDb = null;
     schemaCache = null;
   }
@@ -391,7 +397,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   async function selectDb(dbId: string) {
-    if (currentDb?.kind === "redis") {
+    if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
       tableList.render([]);
       grid.clear();
       schemaView.clear();
@@ -404,12 +410,23 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       erDiagram.el.hidden = true;
       globalSearchView.el.hidden = true;
       snapshotView.el.hidden = true;
-      redisExplorer.el.hidden = false;
-      await redisExplorer.load(dbId);
+      if (currentDb.kind === "redis") {
+        esExplorer.el.hidden = true;
+        esExplorer.clear();
+        redisExplorer.el.hidden = false;
+        await redisExplorer.load(dbId);
+      } else {
+        redisExplorer.el.hidden = true;
+        redisExplorer.clear();
+        esExplorer.el.hidden = false;
+        await esExplorer.load(dbId);
+      }
       return;
     }
     redisExplorer.el.hidden = true;
     redisExplorer.clear();
+    esExplorer.el.hidden = true;
+    esExplorer.clear();
     const schema = await fetchSchema(dbId);
     if (!schema) return;
     schemaCache = schema;
@@ -571,10 +588,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     currentDb = files.find((f) => f.id === target) || null;
 
     await selectDb(target);
-    // Redis explorer owns its own pane and tabs do not apply.
+    // Redis / Elasticsearch explorers own their own pane and tabs do not apply.
     // Skip the SQL-shaped table/tab restoration so URL params like
-    // ?tab=query do not unhide the SQL pane on top of the Redis pane.
-    if (currentDb?.kind === "redis") return;
+    // ?tab=query do not unhide the SQL pane on top of them.
+    if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch")
+      return;
     if (table) {
       await selectTable(table);
     }
