@@ -1,6 +1,7 @@
 import type {
   RedisDatabasesResponse,
   RedisKeysResponse,
+  RedisValueResponse,
 } from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
 import { discoverDockerDatabases } from "./discovery";
@@ -126,5 +127,33 @@ export async function handleRedisRoute(
   };
   if (path === "/_db/redis/databases") return wrap(handleDatabases(cwd, url));
   if (path === "/_db/redis/keys") return wrap(handleKeys(cwd, url));
+  if (path === "/_db/redis/value") return wrap(handleValue(cwd, url));
   return null;
+}
+
+function handleValue(cwd: string, url: URL): Response {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null) return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const key = url.searchParams.get("key");
+  if (!key) return textError("missing key", 400);
+  try {
+    const value = r.explorer.getValue({ db: dbIndex, key });
+    const body: RedisValueResponse = { dbId: r.dbId, dbIndex, key, value };
+    return json(body);
+  } catch (err) {
+    console.error(
+      "[code-viewer] redis error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to read redis value: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
 }

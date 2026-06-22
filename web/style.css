@@ -7117,7 +7117,43 @@ body.db-resizing {
   flex-direction: column;
   overflow: hidden;
   padding: 12px;
+  color: var(--fg);
+  gap: 8px;
+}
+.redis-value-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.redis-value-key-name {
+  font-family: var(--mono, monospace);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.redis-value-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.redis-value-empty {
   color: var(--fg-muted);
+  font-style: italic;
+}
+.redis-value-string,
+.redis-value-raw-json {
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  padding: 8px;
+  background: var(--bg-soft);
+  border-radius: 4px;
 }
 .redis-note {
   padding: 8px 12px;

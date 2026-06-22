@@ -8850,7 +8850,81 @@ ${frontmatter.yaml}
         nameEl.textContent = k.name;
         nameEl.title = k.name;
         row.append(typeBadge, nameEl);
+        row.addEventListener("click", () => selectKey(k.name));
         keyList.appendChild(row);
+      }
+    }
+    function highlightActiveKey(name) {
+      for (const row of keyList.querySelectorAll(".redis-key-item")) {
+        row.classList.toggle("active", row.dataset.keyName === name);
+      }
+    }
+    function renderValue(key, value) {
+      mainPane.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "redis-value-header";
+      const typeBadge = document.createElement("span");
+      typeBadge.className = `redis-type-badge redis-type-${value.type}`;
+      typeBadge.textContent = value.type;
+      const keyEl = document.createElement("span");
+      keyEl.className = "redis-value-key-name";
+      keyEl.textContent = key;
+      header.append(typeBadge, keyEl);
+      mainPane.appendChild(header);
+      const body = document.createElement("div");
+      body.className = "redis-value-body";
+      if (value.type === "none") {
+        body.textContent = "(key does not exist or has no value)";
+        body.classList.add("redis-value-empty");
+      } else if (value.type === "string") {
+        const pre = document.createElement("pre");
+        pre.className = "redis-value-string";
+        pre.textContent = value.value;
+        body.appendChild(pre);
+      } else {
+        const pre = document.createElement("pre");
+        pre.className = "redis-value-raw-json";
+        pre.textContent = JSON.stringify(value, null, 2);
+        body.appendChild(pre);
+      }
+      mainPane.appendChild(body);
+    }
+    async function selectKey(name) {
+      if (currentDbId === null || currentDbIndex === null)
+        return;
+      highlightActiveKey(name);
+      mainPane.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "redis-note";
+      loading.textContent = "Loading value...";
+      mainPane.appendChild(loading);
+      const requestDbIndex = currentDbIndex;
+      try {
+        const params = new URLSearchParams({
+          db: currentDbId,
+          dbIndex: String(requestDbIndex),
+          key: name
+        });
+        const res = await fetch(`/_db/redis/value?${params}`);
+        if (!res.ok) {
+          const text2 = await res.text();
+          mainPane.innerHTML = "";
+          const err = document.createElement("div");
+          err.className = "redis-error";
+          err.textContent = `Error: ${text2 || res.statusText}`;
+          mainPane.appendChild(err);
+          return;
+        }
+        const data = await res.json();
+        if (requestDbIndex !== currentDbIndex)
+          return;
+        renderValue(data.key, data.value);
+      } catch (err) {
+        mainPane.innerHTML = "";
+        const errEl = document.createElement("div");
+        errEl.className = "redis-error";
+        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        mainPane.appendChild(errEl);
       }
     }
     async function selectDatabase(dbIndex) {

@@ -4522,13 +4522,35 @@ function createRedisAdapter(config) {
     }
     return { keys, nextCursor: parsed.cursor };
   }
+  function getValue(opts) {
+    const typeResult = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "TYPE",
+      opts.key
+    ]);
+    if (typeResult.code !== 0) {
+      throw new Error(typeResult.stderr.trim() || "TYPE failed");
+    }
+    const rawType = typeResult.stdout.trim();
+    if (rawType === "none" || !isValidRedisType(rawType)) {
+      return { type: "none" };
+    }
+    if (rawType === "string") {
+      const r = execRedisCli(config, ["-n", String(opts.db), "GET", opts.key]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "GET failed");
+      }
+      const value = r.stdout.replace(/\n$/, "");
+      return { type: "string", value };
+    }
+    return { type: "none" };
+  }
   return {
     kind: "redis",
     listDatabases,
     listKeys,
-    getValue() {
-      throw new Error("not implemented yet");
-    },
+    getValue,
     close() {}
   };
 }
@@ -4638,7 +4660,32 @@ async function handleRedisRoute(req, url, cwd) {
     return wrap(handleDatabases(cwd, url));
   if (path === "/_db/redis/keys")
     return wrap(handleKeys(cwd, url));
+  if (path === "/_db/redis/value")
+    return wrap(handleValue(cwd, url));
   return null;
+}
+function handleValue(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const key = url.searchParams.get("key");
+  if (!key)
+    return textError("missing key", 400);
+  try {
+    const value = r.explorer.getValue({ db: dbIndex, key });
+    const body = { dbId: r.dbId, dbIndex, key, value };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to read redis value: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
 }
 var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
 var init_handle_redis = __esm(() => {
