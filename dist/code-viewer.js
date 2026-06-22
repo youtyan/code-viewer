@@ -5307,6 +5307,237 @@ var init_handle_redis = __esm(() => {
   redisAdapterCache = new Map;
 });
 
+// web-src/server/database/adapters/elasticsearch.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
+function execEsRequest(config, method, path, body, timeoutMs = 15000) {
+  const hasPassword = !!config.password;
+  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const args = [
+    "exec",
+    "-i",
+    ...hasPassword ? ["-e", "ES_HTTP_PASSWORD"] : [],
+    config.containerName,
+    "curl",
+    "-s",
+    "-S",
+    "-X",
+    method,
+    url,
+    "-w",
+    `
+__ES_STATUS__:%{http_code}
+`,
+    "-H",
+    "Content-Type: application/json",
+    ...hasPassword ? ["-K", "-"] : [],
+    ...body !== undefined ? ["--data-binary", JSON.stringify(body)] : []
+  ];
+  const proc = spawnSync4("docker", args, {
+    encoding: "utf8",
+    env: hasPassword ? { ...process.env, ES_HTTP_PASSWORD: config.password } : process.env,
+    timeout: timeoutMs,
+    input: hasPassword ? `user = "elastic:${config.password}"
+` : undefined,
+    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
+  });
+  return {
+    code: proc.status ?? 1,
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || ""
+  };
+}
+function parseEsResponse(stdout) {
+  const marker = "__ES_STATUS__:";
+  const idx = stdout.lastIndexOf(marker);
+  if (idx < 0)
+    return { status: 0, body: stdout };
+  const statusPart = stdout.slice(idx + marker.length).trim();
+  const status = Number(statusPart) || 0;
+  let body = stdout.slice(0, idx);
+  if (body.endsWith(`
+`))
+    body = body.slice(0, -1);
+  return { status, body };
+}
+function safeJsonParse2(stdout, label) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function resolveContainerName3(serviceName, cwd) {
+  const proc = spawnSync4("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    let containers;
+    if (output.startsWith("[")) {
+      containers = JSON.parse(output);
+    } else {
+      containers = output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    }
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+function createElasticsearchAdapter(config) {
+  function callJson(method, path, body, label) {
+    const r = execEsRequest(config, method, path, body);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status < 200 || status >= 300) {
+      throw new Error(`${label}: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    if (!text.trim())
+      return {};
+    return safeJsonParse2(text, label);
+  }
+  function listIndices() {
+    const raw = callJson("GET", "/_cat/indices?format=json&expand_wildcards=open", undefined, "_cat/indices");
+    const result = [];
+    for (const row of raw) {
+      const name = row.index;
+      if (!name || name.startsWith("."))
+        continue;
+      result.push({
+        name,
+        docCount: Number(row["docs.count"]) || 0,
+        sizeBytes: parseEsSize(row["store.size"]),
+        health: row.health,
+        status: row.status
+      });
+    }
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    return result;
+  }
+  function getMapping(_index) {
+    throw new Error("not implemented yet");
+  }
+  function searchDocs(_opts) {
+    throw new Error("not implemented yet");
+  }
+  function getDoc(_opts) {
+    throw new Error("not implemented yet");
+  }
+  return {
+    kind: "elasticsearch",
+    model: "document",
+    capabilities: { snapshot: true, query: true },
+    listIndices,
+    getMapping,
+    searchDocs,
+    getDoc,
+    close() {}
+  };
+}
+function parseEsSize(raw) {
+  if (!raw)
+    return 0;
+  const m = raw.trim().toLowerCase().match(/^([\d.]+)\s*(b|kb|mb|gb|tb|pb)?$/);
+  if (!m)
+    return 0;
+  const n = Number.parseFloat(m[1]);
+  if (!Number.isFinite(n))
+    return 0;
+  const unit = m[2] || "b";
+  const mult = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+    tb: 1024 ** 4,
+    pb: 1024 ** 5
+  };
+  return Math.round(n * (mult[unit] || 1));
+}
+function openElasticsearchAdapter(serviceName, env, cwd) {
+  const containerName = resolveContainerName3(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  const password = env.ELASTIC_PASSWORD || "";
+  return createElasticsearchAdapter({ containerName, password });
+}
+var init_elasticsearch = () => {};
+
+// web-src/server/database/handle-elasticsearch.ts
+var exports_handle_elasticsearch = {};
+__export(exports_handle_elasticsearch, {
+  handleElasticsearchRoute: () => handleElasticsearchRoute
+});
+function getEsServices(cwd) {
+  if (cachedEsCwd === cwd && cachedEsServices)
+    return cachedEsServices;
+  const all = discoverDockerDatabases(cwd);
+  cachedEsServices = all.filter((d) => d.kind === "elasticsearch").map((d) => ({ serviceName: d.serviceName, env: d.env }));
+  cachedEsCwd = cwd;
+  return cachedEsServices;
+}
+function resolveEs(cwd, dbParam) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError("elasticsearch requires docker: prefix", 400);
+  }
+  const serviceName = dbParam.slice(7).split(":")[0];
+  const services = getEsServices(cwd);
+  const info = services.find((s) => s.serviceName === serviceName);
+  if (!info)
+    return textError("elasticsearch service not found", 404);
+  const cached = esAdapterCache.get(dbParam);
+  if (cached)
+    return { dbId: dbParam, explorer: cached };
+  const explorer = openElasticsearchAdapter(info.serviceName, info.env, cwd);
+  esAdapterCache.set(dbParam, explorer);
+  return { dbId: dbParam, explorer };
+}
+function handleIndices(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  try {
+    const indices = r.explorer.listIndices();
+    const body = { dbId: r.dbId, indices };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to list elasticsearch indices: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleElasticsearchRoute(req, url, cwd) {
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  const log = (status) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
+  };
+  const wrap = (res) => {
+    log(res.status);
+    return res;
+  };
+  if (path !== "/_db/elasticsearch/indices")
+    return null;
+  if (method !== "GET") {
+    return wrap(textError("method not allowed", 405));
+  }
+  return wrap(handleIndices(cwd, url));
+}
+var esAdapterCache, cachedEsServices = null, cachedEsCwd = null;
+var init_handle_elasticsearch = __esm(() => {
+  init_elasticsearch();
+  init_discovery();
+  init_handle();
+  esAdapterCache = new Map;
+});
+
 // web-src/server/database/handle.ts
 var exports_handle = {};
 __export(exports_handle, {
@@ -6131,6 +6362,10 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   if (url.pathname.startsWith("/_db/redis/")) {
     const { handleRedisRoute: handleRedisRoute2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
     return handleRedisRoute2(req, url, cwd);
+  }
+  if (url.pathname.startsWith("/_db/elasticsearch/")) {
+    const { handleElasticsearchRoute: handleElasticsearchRoute2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
+    return handleElasticsearchRoute2(req, url, cwd);
   }
   const path = url.pathname;
   const start = Date.now();

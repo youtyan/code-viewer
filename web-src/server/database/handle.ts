@@ -1114,6 +1114,10 @@ export async function handleDatabaseRoute(
     const { handleRedisRoute } = await import("./handle-redis");
     return handleRedisRoute(req, url, cwd);
   }
+  if (url.pathname.startsWith("/_db/elasticsearch/")) {
+    const { handleElasticsearchRoute } = await import("./handle-elasticsearch");
+    return handleElasticsearchRoute(req, url, cwd);
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
