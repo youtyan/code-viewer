@@ -63,6 +63,7 @@ export type DiffViewDeps = {
   applyHideTests(): void;
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
+  invalidateRepoSidebar(): void;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
 };
@@ -127,6 +128,7 @@ export function createDiffView(deps: DiffViewDeps) {
     applyHideTests,
     getServerGeneration,
     setServerGeneration,
+    invalidateRepoSidebar,
   } = deps;
 
   function rerenderLoadedDiffs() {
@@ -479,6 +481,7 @@ export function createDiffView(deps: DiffViewDeps) {
       newListSig === prevListSignature && prevListSignature !== "";
 
     STATE.files = newFiles;
+    invalidateRepoSidebar();
     setServerGeneration(meta.generation || 0);
     window._lastMeta = meta;
     renderMeta(meta);
