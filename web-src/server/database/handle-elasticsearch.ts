@@ -3,6 +3,7 @@ import type {
   EsDocsResponse,
   EsIndicesResponse,
   EsMappingResponse,
+  EsQueryResponse,
 } from "../../core/database/types";
 import {
   type ElasticsearchExplorer,
@@ -111,6 +112,69 @@ function handleDocs(cwd: string, url: URL): Response {
   }
 }
 
+async function handleSearch(
+  cwd: string,
+  req: Request,
+  url: URL,
+): Promise<Response> {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+
+  // GET の場合は `?q=<lucene>` を受けて `_search?q=...` に流す簡易フォーム。
+  // POST の場合は JSON body で `{method, path, body}` をそのまま渡す
+  // (UI からの DSL 実行用)。どちらも adapter 側の read-only allowlist が
+  // 書き込み系を弾く。
+  let input: { method: "GET" | "POST"; path: string; body?: unknown };
+  if (req.method === "GET") {
+    const q = url.searchParams.get("q");
+    if (!q) return textError("missing q parameter", 400);
+    const index = url.searchParams.get("index");
+    const pathPrefix = index ? `/${encodeURIComponent(index)}` : "";
+    input = {
+      method: "GET",
+      path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`,
+    };
+  } else if (req.method === "POST") {
+    let body: { method?: string; path?: string; body?: unknown };
+    try {
+      body = (await req.json()) as typeof body;
+    } catch {
+      return textError("invalid JSON body", 400);
+    }
+    if (body.method !== "GET" && body.method !== "POST") {
+      return textError("method must be GET or POST", 400);
+    }
+    if (!body.path || typeof body.path !== "string") {
+      return textError("missing path", 400);
+    }
+    input = { method: body.method, path: body.path, body: body.body };
+  } else {
+    return textError("method not allowed", 405);
+  }
+
+  try {
+    const result = await r.explorer.query(input);
+    const body: EsQueryResponse = {
+      dbId: r.dbId,
+      status: result.status,
+      body: result.body,
+      elapsedMs: result.elapsedMs,
+    };
+    return json(body);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[code-viewer] elasticsearch error:", msg);
+    const body: EsQueryResponse = {
+      dbId: r.dbId,
+      status: 0,
+      body: null,
+      elapsedMs: 0,
+      error: msg,
+    };
+    return json(body, 400);
+  }
+}
+
 function handleDoc(cwd: string, url: URL): Response {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -167,6 +231,7 @@ export async function handleElasticsearchRoute(
   req: Request,
   url: URL,
   cwd: string,
+  sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
   const path = url.pathname;
   const start = Date.now();
@@ -204,6 +269,17 @@ export async function handleElasticsearchRoute(
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleDoc(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/search") {
+    if (method !== "GET" && method !== "POST") {
+      return wrap(textError("method not allowed", 405));
+    }
+    // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
+    // CSRF ガードをかける。GET は q= だけの read-only なので通す。
+    if (method === "POST" && sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleSearch(cwd, req, url));
   }
   return null;
 }
