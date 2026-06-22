@@ -5181,6 +5181,14 @@ __export(exports_elasticsearch, {
   canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
 });
 import { spawnSync as spawnSync4 } from "node:child_process";
+function isReadOnlyEsPath(rawPath) {
+  const path = rawPath.split("?")[0];
+  for (const seg of path.split("/")) {
+    if (ES_QUERY_ALLOWED_SUBPATHS.has(seg))
+      return true;
+  }
+  return false;
+}
 function execEsRequest(config, method, path, body, timeoutMs = 15000) {
   const hasPassword = !!config.password;
   const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
@@ -5369,7 +5377,7 @@ function createElasticsearchAdapter(config) {
     };
   }
   async function* iterateForSnapshot(container, signal) {
-    const { index, query } = parseEsSnapshotContainer(container);
+    const { index, query: query2 } = parseEsSnapshotContainer(container);
     const PAGE = 1000;
     let searchAfter;
     for (;; ) {
@@ -5377,7 +5385,7 @@ function createElasticsearchAdapter(config) {
         return;
       const result = searchDocs({
         index,
-        query,
+        query: query2,
         size: PAGE,
         searchAfter
       });
@@ -5398,6 +5406,33 @@ function createElasticsearchAdapter(config) {
         return;
     }
   }
+  async function query(input) {
+    if (input.method !== "GET" && input.method !== "POST") {
+      throw new Error(`method not allowed: ${input.method}`);
+    }
+    if (!input.path || typeof input.path !== "string") {
+      throw new Error("missing path");
+    }
+    if (!isReadOnlyEsPath(input.path)) {
+      throw new Error(`path is not in the read-only allowlist: ${input.path.split("?")[0]}`);
+    }
+    const start = Date.now();
+    const r = execEsRequest(config, input.method, input.path, input.body);
+    const elapsedMs = Date.now() - start;
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    let body = text;
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text);
+      } catch {}
+    } else {
+      body = null;
+    }
+    return { status, body, elapsedMs };
+  }
   async function listSnapshotContainers() {
     const indices = listIndices();
     return indices.map((ix) => ({
@@ -5415,6 +5450,7 @@ function createElasticsearchAdapter(config) {
     getDoc,
     iterateForSnapshot,
     listSnapshotContainers,
+    query,
     close() {}
   };
 }
@@ -5471,8 +5507,18 @@ function openElasticsearchAdapter(serviceName, env, cwd) {
   const password = env.ELASTIC_PASSWORD || "";
   return createElasticsearchAdapter({ containerName, password });
 }
-var ES_DEFAULT_SIZE = 200;
-var init_elasticsearch = () => {};
+var ES_QUERY_ALLOWED_SUBPATHS, ES_DEFAULT_SIZE = 200;
+var init_elasticsearch = __esm(() => {
+  ES_QUERY_ALLOWED_SUBPATHS = new Set([
+    "_search",
+    "_count",
+    "_msearch",
+    "_explain",
+    "_validate",
+    "_field_caps",
+    "_eql"
+  ]);
+});
 
 // web-src/server/database/handle-redis.ts
 var exports_handle_redis = {};
@@ -5687,6 +5733,60 @@ function handleDocs(cwd, url) {
     return textError(`failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+async function handleSearch(cwd, req, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  let input;
+  if (req.method === "GET") {
+    const q = url.searchParams.get("q");
+    if (!q)
+      return textError("missing q parameter", 400);
+    const index = url.searchParams.get("index");
+    const pathPrefix = index ? `/${encodeURIComponent(index)}` : "";
+    input = {
+      method: "GET",
+      path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`
+    };
+  } else if (req.method === "POST") {
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return textError("invalid JSON body", 400);
+    }
+    if (body.method !== "GET" && body.method !== "POST") {
+      return textError("method must be GET or POST", 400);
+    }
+    if (!body.path || typeof body.path !== "string") {
+      return textError("missing path", 400);
+    }
+    input = { method: body.method, path: body.path, body: body.body };
+  } else {
+    return textError("method not allowed", 405);
+  }
+  try {
+    const result = await r.explorer.query(input);
+    const body = {
+      dbId: r.dbId,
+      status: result.status,
+      body: result.body,
+      elapsedMs: result.elapsedMs
+    };
+    return json(body);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[code-viewer] elasticsearch error:", msg);
+    const body = {
+      dbId: r.dbId,
+      status: 0,
+      body: null,
+      elapsedMs: 0,
+      error: msg
+    };
+    return json(body, 400);
+  }
+}
 function handleDoc(cwd, url) {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response)
@@ -5730,7 +5830,7 @@ function handleMapping(cwd, url) {
     return textError(`failed to read elasticsearch mapping: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
-async function handleElasticsearchRoute(req, url, cwd) {
+async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
@@ -5765,6 +5865,15 @@ async function handleElasticsearchRoute(req, url, cwd) {
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleDoc(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/search") {
+    if (method !== "GET" && method !== "POST") {
+      return wrap(textError("method not allowed", 405));
+    }
+    if (method === "POST" && sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleSearch(cwd, req, url));
   }
   return null;
 }
@@ -6610,7 +6719,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute: handleElasticsearchRoute2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
-    return handleElasticsearchRoute2(req, url, cwd);
+    return handleElasticsearchRoute2(req, url, cwd, sideEffectAllowed);
   }
   const path = url.pathname;
   const start = Date.now();

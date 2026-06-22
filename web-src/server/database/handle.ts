@@ -1126,7 +1126,7 @@ export async function handleDatabaseRoute(
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute } = await import("./handle-elasticsearch");
-    return handleElasticsearchRoute(req, url, cwd);
+    return handleElasticsearchRoute(req, url, cwd, sideEffectAllowed);
   }
   const path = url.pathname;
   const start = Date.now();

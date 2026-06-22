@@ -3,9 +3,16 @@ import type {
   EsIndexInfo,
   EsMapping,
   EsMappingProperty,
+  EsQueryRequest,
   EsSearchResult,
 } from "../../../core/database/types";
 import type { SnapshotItem } from "../sources/types";
+
+export type EsQueryResult = {
+  status: number;
+  body: unknown;
+  elapsedMs: number;
+};
 
 type EsConfig = {
   containerName: string;
@@ -37,8 +44,33 @@ export type ElasticsearchExplorer = {
     signal?: AbortSignal,
   ): AsyncIterable<SnapshotItem>;
   listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+  query(input: EsQueryRequest): Promise<EsQueryResult>;
   close(): void;
 };
+
+// read-only ガード: 任意 path に書き込み系 API を投げられたら危険なので、
+// query() 経由で許可する path を allowlist で限定する。最初の `/` を除いた
+// 1 セグメント目で判定する (例: `/_search` / `/my-index/_search` どちらも OK)。
+const ES_QUERY_ALLOWED_SUBPATHS = new Set([
+  "_search",
+  "_count",
+  "_msearch",
+  "_explain",
+  "_validate",
+  "_field_caps",
+  "_eql",
+]);
+
+function isReadOnlyEsPath(rawPath: string): boolean {
+  // path に query string が付くケースもあるので `?` で切る。
+  const path = rawPath.split("?")[0];
+  // path に含まれる各 segment のいずれかが allowlist にあれば OK。
+  // 例: `/my-index/_search`, `/_search?pretty`, `/_count`。
+  for (const seg of path.split("/")) {
+    if (ES_QUERY_ALLOWED_SUBPATHS.has(seg)) return true;
+  }
+  return false;
+}
 
 const ES_DEFAULT_SIZE = 200;
 
@@ -374,6 +406,39 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     }
   }
 
+  async function query(input: EsQueryRequest): Promise<EsQueryResult> {
+    if (input.method !== "GET" && input.method !== "POST") {
+      throw new Error(`method not allowed: ${input.method}`);
+    }
+    if (!input.path || typeof input.path !== "string") {
+      throw new Error("missing path");
+    }
+    if (!isReadOnlyEsPath(input.path)) {
+      throw new Error(
+        `path is not in the read-only allowlist: ${input.path.split("?")[0]}`,
+      );
+    }
+    // path 先頭の / は execEsRequest 側で吸収するのでそのまま渡す。
+    const start = Date.now();
+    const r = execEsRequest(config, input.method, input.path, input.body);
+    const elapsedMs = Date.now() - start;
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    let body: unknown = text;
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // text のまま返す (debug 用)。
+      }
+    } else {
+      body = null;
+    }
+    return { status, body, elapsedMs };
+  }
+
   async function listSnapshotContainers(): Promise<
     Array<{ id: string; label: string }>
   > {
@@ -396,6 +461,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     getDoc,
     iterateForSnapshot,
     listSnapshotContainers,
+    query,
     close() {
       // nothing to close (docker exec is one-shot per call)
     },
