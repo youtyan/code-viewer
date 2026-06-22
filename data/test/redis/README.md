@@ -63,6 +63,57 @@ bun run preview --cwd data/test/redis
 - 「Load more」ボタンで残りを読み込み
 - 1000 件全部読めるまで cursor が `0` に戻らない
 
+## Round 2 (capability mixin / generic snapshot) の検証
+
+Round 2 で snapshot エンジンが SnapshotIterable 経由になり、Redis にも
+適用できるようになった。以下の手順で SQL/Redis 両方の snapshot 動作を確認する。
+
+### Redis snapshot
+
+`POST /_db/snapshot/create` に redis service を渡せば key pattern ベースで
+snapshot が取れる。`tables` 省略時は default `["*"]` で全 key を対象とする。
+
+```sh
+# 1 回目の snapshot を取る (DB 0 の `user:*` を対象)
+curl -sS -X POST http://localhost:<PORT>/_db/snapshot/create \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "db": "docker:redis-svc",
+    "tables": ["{\"db\":0,\"pattern\":\"user:*\"}"],
+    "note": "before"
+  }'
+
+# データを書き換える
+docker exec -i code-viewer-test-redis redis-cli -3 -n 0 SET user:42 "modified"
+
+# 2 回目の snapshot
+curl -sS -X POST http://localhost:<PORT>/_db/snapshot/create \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "db": "docker:redis-svc",
+    "tables": ["{\"db\":0,\"pattern\":\"user:*\"}"],
+    "note": "after"
+  }'
+
+# snapshot 一覧を確認
+curl -sS "http://localhost:<PORT>/_db/snapshot/list?db=docker:redis-svc" | jq
+
+# 2 snapshot 間の diff (id は上で取得したもの)
+curl -sS "http://localhost:<PORT>/_db/snapshot/diff/tables?before=<BEFORE_ID>&after=<AFTER_ID>" | jq
+```
+
+### SQL 退行確認
+
+既存 SQL の snapshot が壊れていないことを確認する。data/test/redis に
+SQL 系のテストデータは置いていないので、別途 PG/MySQL の compose を持つ
+プロジェクト or sqlite ファイルを使う:
+
+```sh
+cd <sqlite project>
+bun run preview --cwd .
+# ブラウザで Snapshot タブ → Take Snapshot → 一覧表示 → 2 つの diff
+```
+
 ## クリーンアップ
 
 ```sh
