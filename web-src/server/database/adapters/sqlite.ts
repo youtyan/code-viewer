@@ -13,16 +13,31 @@ import type {
   TriggerInfo,
 } from "./types";
 
+type SqliteStmt = {
+  all(...params: unknown[]): Record<string, unknown>[];
+  get(...params: unknown[]): Record<string, unknown> | undefined;
+  run(...params: unknown[]): { changes: number };
+  columns?(): { name: string; type?: string }[];
+  safeIntegers?(toggle: boolean): SqliteStmt;
+};
+
 type SqliteDb = {
-  prepare(sql: string): {
-    all(...params: unknown[]): Record<string, unknown>[];
-    get(...params: unknown[]): Record<string, unknown> | undefined;
-    run(...params: unknown[]): { changes: number };
-    columns?(): { name: string; type?: string }[];
-  };
+  prepare(sql: string): SqliteStmt;
   close(): void;
   readonly?: boolean;
 };
+
+function safePrepare(db: SqliteDb, sql: string): SqliteStmt {
+  const stmt = db.prepare(sql);
+  if (typeof stmt.safeIntegers === "function") {
+    try {
+      stmt.safeIntegers(true);
+    } catch {
+      // some drivers reject for non-SELECT; ignore
+    }
+  }
+  return stmt;
+}
 
 type SqliteConstructor = new (
   path: string,
@@ -203,10 +218,10 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
     ): QueryResult {
       const order = buildOrderClause(options.orderBy);
       const sql = `SELECT * FROM ${sanitizeIdentifier(table)}${order} LIMIT ? OFFSET ?`;
-      const rows = db.prepare(sql).all(options.limit, options.offset) as Record<
-        string,
-        DbValue
-      >[];
+      const rows = safePrepare(db, sql).all(
+        options.limit,
+        options.offset,
+      ) as Record<string, DbValue>[];
       const cols = queryColumns(db, table);
       if (rows.length === 0) {
         return {
@@ -253,14 +268,14 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
       const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
       let rows: Record<string, DbValue>[];
       try {
-        rows = db.prepare(wrappedSql).all(...(params || [])) as Record<
+        rows = safePrepare(db, wrappedSql).all(...(params || [])) as Record<
           string,
           DbValue
         >[];
       } catch (wrapErr) {
         const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
         try {
-          rows = db.prepare(fallbackSql).all(...(params || [])) as Record<
+          rows = safePrepare(db, fallbackSql).all(...(params || [])) as Record<
             string,
             DbValue
           >[];

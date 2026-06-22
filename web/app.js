@@ -9415,6 +9415,7 @@ ${frontmatter.yaml}
   var PAGE_SIZE = 200;
   var FILTER_DEBOUNCE_MS = 300;
   var DEFAULT_COL_WIDTH = 180;
+  var CELL_PREVIEW_MAX_CHARS = 4000;
   function createTableGrid(callbacks) {
     const el = document.createElement("div");
     el.className = "db-grid";
@@ -9557,11 +9558,17 @@ ${frontmatter.yaml}
       }
       return filters;
     }
+    function resetSelectionAndDetail() {
+      selectedRowIndex = -1;
+      detailPanel.hidden = true;
+      detailPanel.innerHTML = "";
+    }
     function invalidateData() {
       pageCache = new Map;
       pendingPages = new Set;
       loadGeneration++;
       viewport.scrollTop = 0;
+      resetSelectionAndDetail();
       ensurePage(0);
     }
     function clear() {
@@ -9600,6 +9607,22 @@ ${frontmatter.yaml}
       const title = document.createElement("span");
       title.className = "db-grid-detail-title";
       title.textContent = `${colName} (${colType})`;
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "db-btn db-grid-detail-copy";
+      copyBtn.textContent = "Copy";
+      const copyText = formatValueForCopy(value);
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(copyText).then(() => {
+          const original = copyBtn.textContent;
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = original;
+          }, 800);
+        }, () => {
+          copyBtn.textContent = "Copy failed";
+        });
+      });
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
@@ -9607,7 +9630,7 @@ ${frontmatter.yaml}
       closeBtn.addEventListener("click", () => {
         detailPanel.hidden = true;
       });
-      header.append(title, closeBtn);
+      header.append(title, copyBtn, closeBtn);
       const content = document.createElement("div");
       content.className = "db-grid-detail-content";
       if (value === null) {
@@ -9769,6 +9792,7 @@ ${frontmatter.yaml}
       }
       pageCache = new Map;
       pendingPages = new Set;
+      resetSelectionAndDetail();
       renderHeader();
       renderViewport();
     }
@@ -9852,11 +9876,6 @@ ${frontmatter.yaml}
                 });
                 row.classList.add("selected");
                 showCellDetail(cellColIndex, cellValue);
-                const text2 = formatValueForCopy(cellValue);
-                navigator.clipboard.writeText(text2).then(() => {
-                  cell.classList.add("copied");
-                  setTimeout(() => cell.classList.remove("copied"), 600);
-                }, () => {});
               });
               row.appendChild(cell);
             }
@@ -9994,6 +10013,10 @@ ${frontmatter.yaml}
     const s2 = String(value);
     if (s2 === "")
       return "<empty>";
+    if (s2.length > CELL_PREVIEW_MAX_CHARS) {
+      const truncated = s2.slice(0, CELL_PREVIEW_MAX_CHARS);
+      return `${truncated} … (+${s2.length - CELL_PREVIEW_MAX_CHARS} chars)`;
+    }
     return s2;
   }
   function formatValueForCopy(value) {
