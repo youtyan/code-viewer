@@ -116,19 +116,28 @@ export async function handleRedisRoute(
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
-  const qs = url.search ? url.search.slice(0, 120) : "";
+  // ログには query string を含めない (key=, pattern= 等にユーザーデータが乗る)。
   const log = (status: number) => {
     const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
+    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
   };
   const wrap = (res: Response): Response => {
     log(res.status);
     return res;
   };
+  if (
+    path !== "/_db/redis/databases" &&
+    path !== "/_db/redis/keys" &&
+    path !== "/_db/redis/value"
+  ) {
+    return null;
+  }
+  if (method !== "GET") {
+    return wrap(textError("method not allowed", 405));
+  }
   if (path === "/_db/redis/databases") return wrap(handleDatabases(cwd, url));
   if (path === "/_db/redis/keys") return wrap(handleKeys(cwd, url));
-  if (path === "/_db/redis/value") return wrap(handleValue(cwd, url));
-  return null;
+  return wrap(handleValue(cwd, url));
 }
 
 function handleValue(cwd: string, url: URL): Response {
