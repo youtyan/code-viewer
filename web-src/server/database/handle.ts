@@ -909,12 +909,18 @@ async function handleSnapshotCreate(
     const info = dockerDbs.find((d) => d.serviceName === serviceName);
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
-      const { openRedisExplorer } = await import("./adapters/redis");
+      const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
+        await import("./adapters/redis");
       source = openRedisExplorer(info.serviceName, info.env, cwd);
       // Redis では UI が key pattern を渡す想定。未指定なら全 key を対象とする。
       if (!containers || containers.length === 0) {
         containers = ["*"];
       }
+      // container 文字列を `{"db":N,"pattern":"P"}` の canonical form に揃える。
+      // raw pattern (`"*"`) でも JSON でも同じ snapshot メタになるので、
+      // 2 回 snapshot を取って summary 比較するときに container ID 差で
+      // 別物扱いになるのを防ぐ。
+      containers = containers.map(canonicalizeRedisSnapshotContainer);
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response) return r;

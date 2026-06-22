@@ -36,6 +36,15 @@ export type RedisExplorer = {
 // iterateForSnapshot に渡される container は JSON 文字列。
 // `{"db":0,"pattern":"user:*"}` のように DB index + key pattern を持つ。
 // pattern だけの文字列を渡された場合は DB 0 を default にする (UI 互換)。
+//
+// canonicalizeRedisSnapshotContainer は外部から呼ばれる canonicalize 関数。
+// 既存 snapshot メタの container 文字列が "raw pattern" でも JSON でも
+// 同じ正規化形に揃えるために handle.ts の入口で適用する。
+export function canonicalizeRedisSnapshotContainer(container: string): string {
+  const { db, pattern } = parseSnapshotContainer(container);
+  return JSON.stringify({ db, pattern });
+}
+
 function parseSnapshotContainer(container: string): {
   db: number;
   pattern: string;
