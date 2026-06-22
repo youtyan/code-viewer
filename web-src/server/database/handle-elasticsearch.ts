@@ -1,4 +1,5 @@
 import type {
+  EsDocResponse,
   EsDocsResponse,
   EsIndicesResponse,
   EsMappingResponse,
@@ -110,6 +111,37 @@ function handleDocs(cwd: string, url: URL): Response {
   }
 }
 
+function handleDoc(cwd: string, url: URL): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response) return r;
+  const index = url.searchParams.get("index");
+  const id = url.searchParams.get("id");
+  if (!index) return textError("missing index parameter", 400);
+  if (!id) return textError("missing id parameter", 400);
+  try {
+    const doc = r.explorer.getDoc({ index, id });
+    const body: EsDocResponse = {
+      dbId: r.dbId,
+      index,
+      id,
+      found: doc.found,
+      source: doc.source,
+      seqNo: doc.seqNo,
+      primaryTerm: doc.primaryTerm,
+    };
+    return json(body);
+  } catch (err) {
+    console.error(
+      "[code-viewer] elasticsearch error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return textError(
+      `failed to get elasticsearch doc: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 function handleMapping(cwd: string, url: URL): Response {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -166,6 +198,12 @@ export async function handleElasticsearchRoute(
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleDocs(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/doc") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleDoc(cwd, url));
   }
   return null;
 }

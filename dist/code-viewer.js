@@ -5465,8 +5465,36 @@ function createElasticsearchAdapter(config) {
     const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
     return { totalHits, hits, lastSort };
   }
-  function getDoc(_opts) {
-    throw new Error("not implemented yet");
+  function getDoc(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    if (!opts.id) {
+      throw new Error("missing doc id");
+    }
+    const r = execEsRequest(config, "GET", `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status === 404) {
+      try {
+        const parsed2 = text ? JSON.parse(text) : { found: false };
+        return { found: parsed2.found === true, source: parsed2._source };
+      } catch {
+        return { found: false, source: undefined };
+      }
+    }
+    if (status < 200 || status >= 300) {
+      throw new Error(`_doc: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    const parsed = safeJsonParse2(text, "_doc");
+    return {
+      found: parsed.found === true,
+      source: parsed._source,
+      seqNo: parsed._seq_no,
+      primaryTerm: parsed._primary_term
+    };
   }
   return {
     kind: "elasticsearch",
@@ -5590,6 +5618,33 @@ function handleDocs(cwd, url) {
     return textError(`failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+function handleDoc(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  const id = url.searchParams.get("id");
+  if (!index)
+    return textError("missing index parameter", 400);
+  if (!id)
+    return textError("missing id parameter", 400);
+  try {
+    const doc = r.explorer.getDoc({ index, id });
+    const body = {
+      dbId: r.dbId,
+      index,
+      id,
+      found: doc.found,
+      source: doc.source,
+      seqNo: doc.seqNo,
+      primaryTerm: doc.primaryTerm
+    };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to get elasticsearch doc: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
 function handleMapping(cwd, url) {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response)
@@ -5635,6 +5690,12 @@ async function handleElasticsearchRoute(req, url, cwd) {
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleDocs(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/doc") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleDoc(cwd, url));
   }
   return null;
 }
