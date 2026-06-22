@@ -120,6 +120,12 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
     }
+    if (info.kind === "elasticsearch") {
+      return textError(
+        "elasticsearch services must use the /_db/elasticsearch/* routes",
+        400,
+      );
+    }
     const resolved = dbName ? { ...info, database: dbName } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved };
   }
@@ -149,7 +155,7 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const dockerServices = discoverDockerDatabases(cwd);
   const dockerEntries: typeof dockerServices = [];
   for (const svc of dockerServices) {
-    if (svc.kind === "redis") {
+    if (svc.kind === "redis" || svc.kind === "elasticsearch") {
       dockerEntries.push(svc);
       continue;
     }

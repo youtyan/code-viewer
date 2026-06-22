@@ -1,4 +1,9 @@
-export type DbKind = "sqlite" | "postgresql" | "mysql" | "redis";
+export type DbKind =
+  | "sqlite"
+  | "postgresql"
+  | "mysql"
+  | "redis"
+  | "elasticsearch";
 
 export type DbValue = string | number | boolean | null | Uint8Array;
 
@@ -243,4 +248,88 @@ export type RedisValueResponse = {
   dbIndex: number;
   key: string;
   value: RedisValue;
+};
+
+// ---------- Elasticsearch ----------
+
+export type EsIndexInfo = {
+  name: string;
+  docCount: number;
+  sizeBytes: number;
+  health?: string;
+  status?: string;
+};
+
+export type EsMappingProperty = {
+  type?: string;
+  // ES の mapping は再帰的だが、UI 表示用には flat か浅い表示で十分。
+  // 内部にネストがあるときは properties を持つ。
+  properties?: Record<string, EsMappingProperty>;
+  // 他フィールドはそのまま raw に格納。
+  [key: string]: unknown;
+};
+
+export type EsMapping = {
+  index: string;
+  properties: Record<string, EsMappingProperty>;
+};
+
+export type EsDocHit = {
+  _index: string;
+  _id: string;
+  _score?: number | null;
+  _source: unknown;
+  // search_after 用の sort 値。検索結果に sort を含めるとき入る。
+  sort?: unknown[];
+  _seq_no?: number;
+  _primary_term?: number;
+};
+
+export type EsSearchResult = {
+  totalHits: number;
+  hits: EsDocHit[];
+  // 続きを取りたい呼び出し元のためにそのまま渡す。
+  lastSort?: unknown[];
+};
+
+export type EsIndicesResponse = {
+  dbId: string;
+  indices: EsIndexInfo[];
+};
+
+export type EsMappingResponse = {
+  dbId: string;
+  mapping: EsMapping;
+};
+
+export type EsDocsResponse = {
+  dbId: string;
+  index: string;
+  hits: EsDocHit[];
+  totalHits: number;
+  lastSort?: unknown[];
+};
+
+export type EsDocResponse = {
+  dbId: string;
+  index: string;
+  id: string;
+  found: boolean;
+  source: unknown;
+  seqNo?: number;
+  primaryTerm?: number;
+};
+
+export type EsQueryRequest = {
+  method: "GET" | "POST";
+  path: string;
+  body?: unknown;
+};
+
+export type EsQueryResponse = {
+  dbId: string;
+  status: number;
+  body: unknown;
+  elapsedMs: number;
+  error?: string;
 };

@@ -3877,6 +3877,8 @@ function detectDbKind(image) {
     return "mysql";
   if (lower.includes("redis"))
     return "redis";
+  if (lower.includes("elasticsearch") || lower.includes("opensearch"))
+    return "elasticsearch";
   return null;
 }
 function defaultPortFor(kind) {
@@ -3887,6 +3889,8 @@ function defaultPortFor(kind) {
       return "3306";
     case "redis":
       return "6379";
+    case "elasticsearch":
+      return "9200";
     default:
       return "";
   }
@@ -3977,7 +3981,7 @@ function discoverDockerDatabases(cwd) {
       const port = parseComposePorts(svcBlock);
       const hostPort = port || defaultPortFor(kind);
       let label;
-      if (kind === "redis") {
+      if (kind === "redis" || kind === "elasticsearch") {
         label = `${svc.name} (${image}, localhost:${hostPort})`;
       } else {
         const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
@@ -5372,6 +5376,9 @@ function resolveDb(cwd, dbParam) {
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
     }
+    if (info.kind === "elasticsearch") {
+      return textError("elasticsearch services must use the /_db/elasticsearch/* routes", 400);
+    }
     const resolved2 = dbName ? { ...info, database: dbName } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved2 };
   }
@@ -5394,7 +5401,7 @@ function handleFiles(cwd, omitDirNames) {
   const dockerServices = discoverDockerDatabases(cwd);
   const dockerEntries = [];
   for (const svc of dockerServices) {
-    if (svc.kind === "redis") {
+    if (svc.kind === "redis" || svc.kind === "elasticsearch") {
       dockerEntries.push(svc);
       continue;
     }
