@@ -196,7 +196,13 @@ Examples:
         process.exit(1);
       }
       try {
-        cwd = git.repoRoot(next) || realpathSync(next);
+        // --cwd で明示された path が git repo の toplevel そのものなら
+        // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
+        // 親 repoRoot に勝手に上がらず、指定された path 自身を cwd にする
+        // (data/test/* のような独立 cwd を含めるための挙動)。
+        const nextReal = realpathSync(next);
+        const candidate = git.repoRoot(next);
+        cwd = candidate === nextReal ? candidate : nextReal;
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);
