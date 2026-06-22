@@ -339,11 +339,42 @@ export type EsQueryResponse = {
 // 1 つの database タブ。画面全体 (サイドバー + メイン pane + 履歴 pane) の
 // 独立 instance に対応する。dbId が null のときは「未選択タブ」(まだ DB を
 // 選んでいない状態)。
+//
+// optional フィールドはすべて backward-compatible: 旧形式 tabs.json (id/dbId/
+// table/view のみ) はそのまま読める。これらは「タブ独立で永続化したい」UI
+// 状態 (Chrome のタブと同じ感覚で、タブごとに別の値を保持して reload で
+// 復元する)。
 export type TabState = {
   id: string;
   dbId: string | null;
   table: string | null;
   view: "data" | "query" | "schema" | "er" | "search" | "snapshot";
+
+  // Query editor (SQL タブ) の textarea 内容。リロードで復元される。
+  sqlDraft?: string;
+
+  // history pane の開閉状態。タブごとに独立。default は true (= 開いている)。
+  historyOpen?: boolean;
+
+  // history pane の高さ。CSS pixel 表現 (例: "240px")。
+  historyHeight?: string;
+
+  // sidebar 幅。CSS pixel 表現 (例: "240px")。
+  sidebarWidth?: string;
+
+  // Redis explorer の選択中 state。SQL の table を persist するのと整合的に、
+  // Redis でも「選択中の db index + key」を persist する。
+  redis?: {
+    dbIndex?: number;
+    key?: string;
+  };
+
+  // Elasticsearch explorer の選択中 state。SQL の table と整合的に、
+  // 「選択中の index + lucene query 文字列」を persist する。
+  es?: {
+    index?: string;
+    query?: string;
+  };
 };
 
 export type TabsState = {
