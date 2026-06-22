@@ -166,3 +166,45 @@ export type SnapshotDiffRow = {
   beforeValues?: Record<string, DbValue>;
   afterValues?: Record<string, DbValue>;
 };
+
+// --- Redis ---
+
+export type RedisType =
+  | "string"
+  | "list"
+  | "set"
+  | "zset"
+  | "hash"
+  | "stream"
+  | "none";
+
+export type RedisValue =
+  | { type: "string"; value: string }
+  | { type: "list"; items: string[] }
+  | { type: "hash"; fields: Record<string, string> }
+  | { type: "set"; members: string[] }
+  | { type: "zset"; members: Array<{ member: string; score: number }> }
+  | {
+      type: "stream";
+      entries: Array<{ id: string; fields: Record<string, string> }>;
+    }
+  | { type: "none" };
+
+export type RedisDatabasesResponse = {
+  dbId: string;
+  databases: Array<{ index: number; keyCount: number }>;
+};
+
+export type RedisKeysResponse = {
+  dbId: string;
+  dbIndex: number;
+  keys: Array<{ name: string; type: RedisType }>;
+  nextCursor: string;
+};
+
+export type RedisValueResponse = {
+  dbId: string;
+  dbIndex: number;
+  key: string;
+  value: RedisValue;
+};

@@ -4421,9 +4421,167 @@ var init_snapshot_runner = __esm(() => {
   init_snapshot_store();
 });
 
+// web-src/server/database/adapters/redis.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
+function execRedisCli(config, args, timeoutMs = 1e4) {
+  const dockerArgs = [
+    "exec",
+    "-i",
+    config.containerName,
+    "redis-cli",
+    ...config.password ? ["-a", config.password, "--no-auth-warning"] : [],
+    "-3",
+    ...args
+  ];
+  const proc = spawnSync3("docker", dockerArgs, {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || "",
+    code: proc.status ?? 1
+  };
+}
+function resolveContainerName2(serviceName, cwd) {
+  const proc = spawnSync3("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    let containers;
+    if (output.startsWith("[")) {
+      containers = JSON.parse(output);
+    } else {
+      containers = output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    }
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+function parseInfoKeyspace(stdout) {
+  const counts = new Map;
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = line.match(/^db(\d+):keys=(\d+)/);
+    if (m)
+      counts.set(Number(m[1]), Number(m[2]));
+  }
+  return counts;
+}
+function createRedisAdapter(config) {
+  function listDatabases() {
+    const result = execRedisCli(config, ["INFO", "keyspace"]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "INFO keyspace failed");
+    }
+    const counts = parseInfoKeyspace(result.stdout);
+    const dbs = [];
+    for (let i = 0;i < DEFAULT_DATABASES; i++) {
+      dbs.push({ index: i, keyCount: counts.get(i) ?? 0 });
+    }
+    return dbs;
+  }
+  return {
+    kind: "redis",
+    listDatabases,
+    listKeys() {
+      throw new Error("not implemented yet");
+    },
+    getValue() {
+      throw new Error("not implemented yet");
+    },
+    close() {}
+  };
+}
+function openRedisExplorer(serviceName, env, cwd) {
+  const containerName = resolveContainerName2(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  const password = env.REDIS_PASSWORD || "";
+  return createRedisAdapter({ containerName, password });
+}
+var DEFAULT_DATABASES = 16;
+var init_redis = () => {};
+
+// web-src/server/database/handle-redis.ts
+var exports_handle_redis = {};
+__export(exports_handle_redis, {
+  handleRedisRoute: () => handleRedisRoute
+});
+function getRedisServices(cwd) {
+  if (cachedRedisCwd === cwd && cachedRedisDbs)
+    return cachedRedisDbs;
+  const all = discoverDockerDatabases(cwd);
+  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({ serviceName: d.serviceName, env: d.env }));
+  cachedRedisCwd = cwd;
+  return cachedRedisDbs;
+}
+function resolveRedis(cwd, dbParam) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError("redis requires docker: prefix", 400);
+  }
+  const serviceName = dbParam.slice(7).split(":")[0];
+  const services = getRedisServices(cwd);
+  const info = services.find((s) => s.serviceName === serviceName);
+  if (!info)
+    return textError("redis service not found", 404);
+  const cached = redisAdapterCache.get(dbParam);
+  if (cached)
+    return { dbId: dbParam, explorer: cached };
+  const explorer = openRedisExplorer(info.serviceName, info.env, cwd);
+  redisAdapterCache.set(dbParam, explorer);
+  return { dbId: dbParam, explorer };
+}
+function handleDatabases(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  try {
+    const databases = r.explorer.listDatabases();
+    const body = { dbId: r.dbId, databases };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
+async function handleRedisRoute(req, url, cwd) {
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  const qs = url.search ? url.search.slice(0, 120) : "";
+  const log = (status) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
+  };
+  const wrap = (res) => {
+    log(res.status);
+    return res;
+  };
+  if (path === "/_db/redis/databases")
+    return wrap(handleDatabases(cwd, url));
+  return null;
+}
+var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
+var init_handle_redis = __esm(() => {
+  init_redis();
+  init_discovery();
+  init_handle();
+  redisAdapterCache = new Map;
+});
+
 // web-src/server/database/handle.ts
 var exports_handle = {};
 __export(exports_handle, {
+  textError: () => textError,
+  json: () => json,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -5197,6 +5355,10 @@ async function handleClose(cwd, req) {
 }
 async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowed, sendSse) {
   ensureInit();
+  if (url.pathname.startsWith("/_db/redis/")) {
+    const { handleRedisRoute: handleRedisRoute2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
+    return handleRedisRoute2(req, url, cwd);
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
