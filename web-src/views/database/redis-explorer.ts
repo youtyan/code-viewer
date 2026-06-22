@@ -25,13 +25,27 @@ function renderItemInto(el: HTMLElement, item: RedisItem): void {
   el.textContent = item;
 }
 
-export type RedisExplorerView = {
-  el: HTMLElement;
-  load: (dbId: string) => Promise<void>;
-  clear: () => void;
+export type RedisExplorerSelection = {
+  dbIndex?: number;
+  key?: string;
 };
 
-export function createRedisExplorer(): RedisExplorerView {
+export type RedisExplorerCallbacks = {
+  // 選択中 (db index / key) が変わったことを外側に通知する。タブごとに
+  // persist して reload 復元するために使う。
+  onSelectionChange?: (selection: RedisExplorerSelection) => void;
+};
+
+export type RedisExplorerView = {
+  el: HTMLElement;
+  load: (dbId: string, initial?: RedisExplorerSelection) => Promise<void>;
+  clear: () => void;
+  getSelection: () => RedisExplorerSelection;
+};
+
+export function createRedisExplorer(
+  callbacks: RedisExplorerCallbacks = {},
+): RedisExplorerView {
   const container = document.createElement("div");
   container.className = "redis-explorer";
 
@@ -74,8 +88,16 @@ export function createRedisExplorer(): RedisExplorerView {
 
   let currentDbId: string | null = null;
   let currentDbIndex: number | null = null;
+  let currentKey: string | null = null;
   let currentCursor = "0";
   let loadingKeys = false;
+
+  function notifySelectionChange(): void {
+    callbacks.onSelectionChange?.({
+      dbIndex: currentDbIndex ?? undefined,
+      key: currentKey ?? undefined,
+    });
+  }
 
   function setDbStatus(message: string, isError = false) {
     dbList.innerHTML = "";
@@ -296,6 +318,8 @@ export function createRedisExplorer(): RedisExplorerView {
 
   async function selectKey(name: string): Promise<void> {
     if (currentDbId === null || currentDbIndex === null) return;
+    currentKey = name;
+    notifySelectionChange();
     highlightActiveKey(name);
     mainPane.innerHTML = "";
     const loading = document.createElement("div");
@@ -333,7 +357,9 @@ export function createRedisExplorer(): RedisExplorerView {
 
   async function selectDatabase(dbIndex: number): Promise<void> {
     currentDbIndex = dbIndex;
+    currentKey = null;
     currentCursor = "0";
+    notifySelectionChange();
     highlightActiveDb(dbIndex);
     keyList.innerHTML = "";
     mainPane.textContent = "Select a key to view its value.";
@@ -383,9 +409,13 @@ export function createRedisExplorer(): RedisExplorerView {
 
   keyMoreBtn.addEventListener("click", () => loadKeys(true));
 
-  async function load(dbId: string): Promise<void> {
+  async function load(
+    dbId: string,
+    initial?: RedisExplorerSelection,
+  ): Promise<void> {
     currentDbId = dbId;
     currentDbIndex = null;
+    currentKey = null;
     currentCursor = "0";
     keyList.innerHTML = "";
     keyMoreBtn.hidden = true;
@@ -403,6 +433,20 @@ export function createRedisExplorer(): RedisExplorerView {
       const data = (await res.json()) as RedisDatabasesResponse;
       if (currentDbId !== dbId) return; // stale response
       renderDatabases(data.databases);
+
+      // initial.dbIndex が指定されていて、かつ実在する db index ならその db を
+      // 自動選択し、さらに initial.key が指定されていればその key も再選択する。
+      // load 自体が「タブ復元」用に呼ばれることがあるので、ここで再現する。
+      if (
+        initial?.dbIndex !== undefined &&
+        data.databases.some((d) => d.index === initial.dbIndex)
+      ) {
+        await selectDatabase(initial.dbIndex);
+        if (currentDbId !== dbId) return;
+        if (initial.key) {
+          await selectKey(initial.key);
+        }
+      }
     } catch (err) {
       setDbStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -414,6 +458,7 @@ export function createRedisExplorer(): RedisExplorerView {
   function clear(): void {
     currentDbId = null;
     currentDbIndex = null;
+    currentKey = null;
     currentCursor = "0";
     dbList.innerHTML = "";
     keyList.innerHTML = "";
@@ -421,5 +466,12 @@ export function createRedisExplorer(): RedisExplorerView {
     mainPane.textContent = "Select a database to view keys.";
   }
 
-  return { el: container, load, clear };
+  function getSelection(): RedisExplorerSelection {
+    return {
+      dbIndex: currentDbIndex ?? undefined,
+      key: currentKey ?? undefined,
+    };
+  }
+
+  return { el: container, load, clear, getSelection };
 }
