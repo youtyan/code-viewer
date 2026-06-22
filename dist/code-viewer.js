@@ -2883,6 +2883,77 @@ var init_worktree_watcher = __esm(() => {
   init_search();
 });
 
+// web-src/server/database/serialize.ts
+function serializeDbValue(value) {
+  if (value === null || value === undefined)
+    return null;
+  if (typeof value === "bigint") {
+    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return `<blob ${value.byteLength} bytes>`;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value;
+}
+function serializeDbRow(row) {
+  return row.map(serializeDbValue);
+}
+function serializeDbRows(rows) {
+  return rows.map(serializeDbRow);
+}
+var MIN_SAFE, MAX_SAFE;
+var init_serialize = __esm(() => {
+  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+});
+
+// web-src/server/database/sources/sql-snapshot.ts
+import { createHash as createHash2 } from "node:crypto";
+function normalizeRawValue(v) {
+  if (v === null)
+    return "\\N";
+  if (typeof v === "bigint")
+    return v.toString();
+  if (v instanceof Uint8Array) {
+    return `\\x${Buffer.from(v).toString("hex")}`;
+  }
+  return String(v);
+}
+function rowToPayloadJson(columns, row) {
+  const obj = {};
+  for (let i = 0;i < columns.length; i++) {
+    obj[columns[i]] = serializeDbValue(row[i]);
+  }
+  return JSON.stringify(obj);
+}
+function computeRowHash(columns, row) {
+  const parts = columns.map((_, i) => normalizeRawValue(row[i]));
+  return createHash2("sha256").update(parts.join("\t")).digest("hex");
+}
+function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
+  if (pkColumns.length === 0) {
+    return JSON.stringify({ __rowIndex: rowIndex });
+  }
+  const keyObj = {};
+  for (const pk of pkColumns) {
+    const idx = allColumns.indexOf(pk);
+    if (idx >= 0)
+      keyObj[pk] = serializeDbValue(row[idx]);
+  }
+  return JSON.stringify(keyObj);
+}
+var SQL_SNAPSHOT_BATCH_SIZE = 500;
+var init_sql_snapshot = __esm(() => {
+  init_serialize();
+});
+
 // web-src/server/database/adapters/docker.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
 function execInContainer(config, sql, timeoutMs = 1e4) {
@@ -3012,8 +3083,10 @@ function createDockerAdapter(config) {
       defaultValue: row[3] === "NULL" ? null : row[3]
     }));
   }
-  return {
+  const adapter = {
     kind: config.kind,
+    model: "sql",
+    capabilities: { snapshot: true },
     getTables() {
       let sql;
       if (config.kind === "postgresql") {
@@ -3265,8 +3338,40 @@ function createDockerAdapter(config) {
     },
     close() {
       columnCache.clear();
+    },
+    async* iterateForSnapshot(table, signal) {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;; ) {
+        if (signal?.aborted)
+          return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE
+        });
+        if (result.rows.length === 0)
+          return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row)
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE)
+          return;
+      }
+    },
+    async listSnapshotContainers() {
+      return adapter.getTables().filter((t) => t.type === "table").map((t) => ({ id: t.name, label: t.name }));
     }
   };
+  return adapter;
 }
 function resolveContainerName(serviceName, cwd) {
   const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
@@ -3334,77 +3439,8 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
     database
   });
 }
-var init_docker = () => {};
-
-// web-src/server/database/serialize.ts
-function serializeDbValue(value) {
-  if (value === null || value === undefined)
-    return null;
-  if (typeof value === "bigint") {
-    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
-  }
-  if (value instanceof Uint8Array) {
-    return `<blob ${value.byteLength} bytes>`;
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return value;
-}
-function serializeDbRow(row) {
-  return row.map(serializeDbValue);
-}
-function serializeDbRows(rows) {
-  return rows.map(serializeDbRow);
-}
-var MIN_SAFE, MAX_SAFE;
-var init_serialize = __esm(() => {
-  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
-  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
-});
-
-// web-src/server/database/sources/sql-snapshot.ts
-import { createHash as createHash2 } from "node:crypto";
-function normalizeRawValue(v) {
-  if (v === null)
-    return "\\N";
-  if (typeof v === "bigint")
-    return v.toString();
-  if (v instanceof Uint8Array) {
-    return `\\x${Buffer.from(v).toString("hex")}`;
-  }
-  return String(v);
-}
-function rowToPayloadJson(columns, row) {
-  const obj = {};
-  for (let i = 0;i < columns.length; i++) {
-    obj[columns[i]] = serializeDbValue(row[i]);
-  }
-  return JSON.stringify(obj);
-}
-function computeRowHash(columns, row) {
-  const parts = columns.map((_, i) => normalizeRawValue(row[i]));
-  return createHash2("sha256").update(parts.join("\t")).digest("hex");
-}
-function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
-  if (pkColumns.length === 0) {
-    return JSON.stringify({ __rowIndex: rowIndex });
-  }
-  const keyObj = {};
-  for (const pk of pkColumns) {
-    const idx = allColumns.indexOf(pk);
-    if (idx >= 0)
-      keyObj[pk] = serializeDbValue(row[idx]);
-  }
-  return JSON.stringify(keyObj);
-}
-var SQL_SNAPSHOT_BATCH_SIZE = 500;
-var init_sql_snapshot = __esm(() => {
-  init_serialize();
+var init_docker = __esm(() => {
+  init_sql_snapshot();
 });
 
 // web-src/server/database/adapters/sqlite.ts

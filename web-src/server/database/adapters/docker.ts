@@ -7,7 +7,26 @@ import type {
   DbTableInfo,
   DbValue,
 } from "../../../core/database/types";
+import {
+  buildRowKeyJson,
+  computeRowHash,
+  rowToPayloadJson,
+  SQL_SNAPSHOT_BATCH_SIZE,
+} from "../sources/sql-snapshot";
+import type { SnapshotItem } from "../sources/types";
 import type { DatabaseAdapter, QueryResult, TriggerInfo } from "./types";
+
+// adapters は SqlSource & SnapshotIterable を満たす形を返す。
+// DockerSource は DatabaseAdapter の上位互換なので、既存 caller の型は維持される。
+type DockerSource = DatabaseAdapter & {
+  readonly model: "sql";
+  readonly capabilities: { snapshot: true };
+  iterateForSnapshot(
+    table: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem>;
+  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+};
 
 type DockerDbConfig = {
   kind: "postgresql" | "mysql";
@@ -113,7 +132,7 @@ function buildOrderClause(
   return ` ORDER BY ${parts.join(", ")}`;
 }
 
-function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
+function createDockerAdapter(config: DockerDbConfig): DockerSource {
   function exec(sql: string): { columns: string[]; rows: string[][] } {
     const result = execInContainer(config, sql);
     if (result.code !== 0) {
@@ -163,8 +182,10 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     }));
   }
 
-  return {
+  const adapter: DockerSource = {
     kind: config.kind,
+    model: "sql",
+    capabilities: { snapshot: true },
 
     getTables(): DbTableInfo[] {
       let sql: string;
@@ -472,7 +493,46 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     close(): void {
       columnCache.clear();
     },
+
+    async *iterateForSnapshot(
+      table: string,
+      signal?: AbortSignal,
+    ): AsyncIterable<SnapshotItem> {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;;) {
+        if (signal?.aborted) return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE,
+        });
+        if (result.rows.length === 0) return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row),
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE) return;
+      }
+    },
+
+    async listSnapshotContainers(): Promise<
+      Array<{ id: string; label: string }>
+    > {
+      return adapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => ({ id: t.name, label: t.name }));
+    },
   };
+  return adapter;
 }
 
 function resolveContainerName(serviceName: string, cwd: string): string | null {
