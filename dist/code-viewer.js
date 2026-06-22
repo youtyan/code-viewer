@@ -3337,6 +3337,15 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
 var init_docker = () => {};
 
 // web-src/server/database/adapters/sqlite.ts
+function safePrepare(db, sql) {
+  const stmt = db.prepare(sql);
+  if (typeof stmt.safeIntegers === "function") {
+    try {
+      stmt.safeIntegers(true);
+    } catch {}
+  }
+  return stmt;
+}
 async function getSqliteClass() {
   if (cachedDbClass)
     return cachedDbClass;
@@ -3450,7 +3459,7 @@ function createSqliteAdapter(db) {
     getTablePage(table, options) {
       const order = buildOrderClause2(options.orderBy);
       const sql = `SELECT * FROM ${sanitizeIdentifier2(table)}${order} LIMIT ? OFFSET ?`;
-      const rows = db.prepare(sql).all(options.limit, options.offset);
+      const rows = safePrepare(db, sql).all(options.limit, options.offset);
       const cols = queryColumns(db, table);
       if (rows.length === 0) {
         return {
@@ -3484,11 +3493,11 @@ function createSqliteAdapter(db) {
       const wrappedSql = `SELECT * FROM (${limited}) LIMIT ${maxRows + 1}`;
       let rows;
       try {
-        rows = db.prepare(wrappedSql).all(...params || []);
+        rows = safePrepare(db, wrappedSql).all(...params || []);
       } catch (wrapErr) {
         const fallbackSql = `${limited} LIMIT ${maxRows + 1}`;
         try {
-          rows = db.prepare(fallbackSql).all(...params || []);
+          rows = safePrepare(db, fallbackSql).all(...params || []);
         } catch {
           throw wrapErr;
         }
@@ -3839,6 +3848,37 @@ var init_discovery = __esm(() => {
   ];
 });
 
+// web-src/server/database/serialize.ts
+function serializeDbValue(value) {
+  if (value === null || value === undefined)
+    return null;
+  if (typeof value === "bigint") {
+    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return `<blob ${value.byteLength} bytes>`;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value;
+}
+function serializeDbRow(row) {
+  return row.map(serializeDbValue);
+}
+function serializeDbRows(rows) {
+  return rows.map(serializeDbRow);
+}
+var MIN_SAFE, MAX_SAFE;
+var init_serialize = __esm(() => {
+  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+});
+
 // web-src/server/database/global-search.ts
 function sanitizeIdentifier3(name, kind) {
   if (kind === "mysql")
@@ -3880,7 +3920,7 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
       const result = kind === "sqlite" ? adapter.executeReadonlyQuery(sql, [`%${escapedTerm}%`], remaining) : adapter.executeReadonlyQuery(sql, undefined, remaining);
       for (const row of result.rows) {
         const colIdx = result.columns.indexOf(col.name);
-        const valueRaw = colIdx >= 0 ? row[colIdx] : null;
+        const valueRaw = colIdx >= 0 ? serializeDbValue(row[colIdx]) : null;
         const valueStr = valueRaw == null ? "" : String(valueRaw);
         const preview = valueStr.length > 200 ? `${valueStr.slice(0, 200)}...` : valueStr;
         let rowKeyJson;
@@ -3889,7 +3929,7 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
           for (const pk of pkColumns) {
             const pkIdx = result.columns.indexOf(pk);
             if (pkIdx >= 0)
-              keyObj[pk] = row[pkIdx];
+              keyObj[pk] = serializeDbValue(row[pkIdx]);
           }
           rowKeyJson = JSON.stringify(keyObj);
         }
@@ -3898,7 +3938,7 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
           column: col.name,
           rowKeyJson,
           valuePreview: preview,
-          rowPreview: row
+          rowPreview: serializeDbRow(row)
         });
       }
     } catch {}
@@ -3909,6 +3949,9 @@ function getPrimaryKeyColumns(adapter, table) {
   const columns = adapter.getColumns(table);
   return columns.filter((c) => c.primaryKey).map((c) => c.name);
 }
+var init_global_search = __esm(() => {
+  init_serialize();
+});
 
 // web-src/server/database/query-history.ts
 import {
@@ -4283,6 +4326,8 @@ import { createHash as createHash3 } from "node:crypto";
 function normalizeValue(v) {
   if (v === null)
     return "\\N";
+  if (typeof v === "bigint")
+    return v.toString();
   if (v instanceof Uint8Array) {
     return `\\x${Buffer.from(v).toString("hex")}`;
   }
@@ -4291,7 +4336,7 @@ function normalizeValue(v) {
 function rowToPayloadJson(columns, row) {
   const obj = {};
   for (let i = 0;i < columns.length; i++) {
-    obj[columns[i]] = row[i] instanceof Uint8Array ? `<blob ${row[i].byteLength} bytes>` : row[i];
+    obj[columns[i]] = serializeDbValue(row[i]);
   }
   return JSON.stringify(obj);
 }
@@ -4307,7 +4352,7 @@ function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
   for (const pk of pkColumns) {
     const idx = allColumns.indexOf(pk);
     if (idx >= 0)
-      keyObj[pk] = row[idx];
+      keyObj[pk] = serializeDbValue(row[idx]);
   }
   return JSON.stringify(keyObj);
 }
@@ -4353,6 +4398,7 @@ async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
 }
 var BATCH_SIZE = 500;
 var init_snapshot_runner = __esm(() => {
+  init_serialize();
   init_snapshot_store();
 });
 
@@ -4606,7 +4652,7 @@ async function handleTable(cwd, url) {
           dbId: r.dbId,
           table,
           columns,
-          rows: dataResult.rows,
+          rows: serializeDbRows(dataResult.rows),
           totalRows: totalRows2,
           offset,
           limit,
@@ -4621,7 +4667,7 @@ async function handleTable(cwd, url) {
       dbId: r.dbId,
       table,
       columns,
-      rows: result.rows,
+      rows: serializeDbRows(result.rows),
       totalRows,
       offset,
       limit,
@@ -4656,11 +4702,12 @@ async function handleQuery(cwd, req, sendSse) {
     const adapter = await getAdapter(r, cwd);
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
+    const serializedRows = serializeDbRows(result.rows);
     const response = {
       dbId: body.db,
       columns: result.columns,
       columnTypes: result.columnTypes,
-      rows: result.rows,
+      rows: serializedRows,
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
       elapsedMs: elapsed
@@ -4673,9 +4720,9 @@ async function handleQuery(cwd, req, sendSse) {
         title: body.title,
         body: body.body,
         columns: result.columns,
-        rowsPreview: result.rows,
+        rowsPreview: serializedRows,
         rowCount: result.rowCount,
-        savedRows: result.rows.length,
+        savedRows: serializedRows.length,
         truncated: result.rowCount >= maxRows,
         elapsedMs: elapsed,
         executedAt: new Date().toISOString(),
@@ -4750,6 +4797,8 @@ async function handleHistoryClear(cwd, req, sendSse) {
 function formatCsvField(value) {
   if (value === null || value === undefined)
     return "";
+  if (typeof value === "bigint")
+    return value.toString();
   if (value instanceof Uint8Array)
     return `<blob ${value.byteLength} bytes>`;
   const str = typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -4789,7 +4838,7 @@ async function handleExport(cwd, url) {
     if (sortCol && !colNameSet.has(sortCol)) {
       return textError(`invalid sort column: ${sortCol}`, 400);
     }
-    let rows;
+    let rawRows;
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNameSet.has(f.column));
       if (validFilters.length > 0) {
@@ -4806,14 +4855,14 @@ async function handleExport(cwd, url) {
         const limitOffset = filter.useParams ? "LIMIT ? OFFSET ?" : `LIMIT ${EXPORT_MAX_ROWS} OFFSET 0`;
         const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
         const result = adapter.executeReadonlyQuery(dataSql, filter.useParams ? [...filter.params, EXPORT_MAX_ROWS, 0] : undefined);
-        rows = result.rows;
+        rawRows = result.rows;
       } else {
         const result = adapter.getTablePage(table, {
           offset: 0,
           limit: EXPORT_MAX_ROWS,
           orderBy
         });
-        rows = result.rows;
+        rawRows = result.rows;
       }
     } else {
       const result = adapter.getTablePage(table, {
@@ -4821,8 +4870,9 @@ async function handleExport(cwd, url) {
         limit: EXPORT_MAX_ROWS,
         orderBy
       });
-      rows = result.rows;
+      rawRows = result.rows;
     }
+    const rows = serializeDbRows(rawRows);
     if (format === "csv") {
       const lines = [colNames.map(formatCsvField).join(",")];
       for (const row of rows) {
@@ -4842,8 +4892,7 @@ async function handleExport(cwd, url) {
     const objects = rows.map((row) => {
       const obj = {};
       for (let i = 0;i < colNames.length; i++) {
-        const val = row[i];
-        obj[colNames[i]] = val instanceof Uint8Array ? `<blob ${val.byteLength} bytes>` : val;
+        obj[colNames[i]] = row[i];
       }
       return obj;
     });
@@ -5232,7 +5281,9 @@ var init_handle = __esm(() => {
   init_sqlite();
   init_connection_pool();
   init_discovery();
+  init_global_search();
   init_query_history();
+  init_serialize();
   init_snapshot_runner();
   init_snapshot_store();
   dockerAdapterCache = new Map;
@@ -7194,6 +7245,14 @@ data: ok
 });
 
 // web-src/server/cli.ts
+var REQUIRED_NODE_MAJOR = 20;
+var nodeMajor = Number.parseInt((process.versions.node || "0").split(".")[0] || "0", 10);
+if (!Number.isFinite(nodeMajor) || nodeMajor < REQUIRED_NODE_MAJOR) {
+  process.stderr.write(`code-viewer requires Node.js >= ${REQUIRED_NODE_MAJOR}.0.0, but found ${process.versions.node}.
+` + `Please upgrade Node.js (e.g. via nvm, volta, or your package manager) and retry.
+`);
+  process.exit(1);
+}
 if (process.argv[2] === "annotate") {
   const { runAnnotateCli: runAnnotateCli2 } = await Promise.resolve().then(() => (init_annotate_cli(), exports_annotate_cli));
   await runAnnotateCli2(process.argv.slice(3));

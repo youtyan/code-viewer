@@ -29,6 +29,7 @@ import {
   loadQueryHistory,
   saveQueryHistory,
 } from "./query-history";
+import { serializeDbRows } from "./serialize";
 import { runSnapshot } from "./snapshot-runner";
 import {
   computeDiffRows,
@@ -355,7 +356,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
           dbId: r.dbId,
           table,
           columns,
-          rows: dataResult.rows,
+          rows: serializeDbRows(dataResult.rows),
           totalRows,
           offset,
           limit,
@@ -374,7 +375,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
       dbId: r.dbId,
       table,
       columns,
-      rows: result.rows,
+      rows: serializeDbRows(result.rows),
       totalRows,
       offset,
       limit,
@@ -427,11 +428,12 @@ async function handleQuery(
     const adapter = await getAdapter(r, cwd);
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
+    const serializedRows = serializeDbRows(result.rows);
     const response: DbQueryResponse = {
       dbId: body.db,
       columns: result.columns,
       columnTypes: result.columnTypes,
-      rows: result.rows,
+      rows: serializedRows,
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
       elapsedMs: elapsed,
@@ -444,9 +446,9 @@ async function handleQuery(
         title: body.title,
         body: body.body,
         columns: result.columns,
-        rowsPreview: result.rows,
+        rowsPreview: serializedRows,
         rowCount: result.rowCount,
-        savedRows: result.rows.length,
+        savedRows: serializedRows.length,
         truncated: result.rowCount >= maxRows,
         elapsedMs: elapsed,
         executedAt: new Date().toISOString(),
@@ -534,6 +536,7 @@ const EXPORT_MAX_ROWS = 100_000;
 
 function formatCsvField(value: unknown): string {
   if (value === null || value === undefined) return "";
+  if (typeof value === "bigint") return value.toString();
   if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;
   const str = typeof value === "object" ? JSON.stringify(value) : String(value);
   if (
@@ -577,7 +580,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
     if (sortCol && !colNameSet.has(sortCol)) {
       return textError(`invalid sort column: ${sortCol}`, 400);
     }
-    let rows: import("../../core/database/types").DbValue[][];
+    let rawRows: import("./serialize").RawDbValue[][];
 
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNameSet.has(f.column));
@@ -602,14 +605,14 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
           dataSql,
           filter.useParams ? [...filter.params, EXPORT_MAX_ROWS, 0] : undefined,
         );
-        rows = result.rows;
+        rawRows = result.rows;
       } else {
         const result = adapter.getTablePage(table, {
           offset: 0,
           limit: EXPORT_MAX_ROWS,
           orderBy,
         });
-        rows = result.rows;
+        rawRows = result.rows;
       }
     } else {
       const result = adapter.getTablePage(table, {
@@ -617,8 +620,9 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
         limit: EXPORT_MAX_ROWS,
         orderBy,
       });
-      rows = result.rows;
+      rawRows = result.rows;
     }
+    const rows = serializeDbRows(rawRows);
 
     if (format === "csv") {
       const lines: string[] = [colNames.map(formatCsvField).join(",")];
@@ -639,9 +643,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
     const objects = rows.map((row) => {
       const obj: Record<string, unknown> = {};
       for (let i = 0; i < colNames.length; i++) {
-        const val = row[i];
-        obj[colNames[i]] =
-          val instanceof Uint8Array ? `<blob ${val.byteLength} bytes>` : val;
+        obj[colNames[i]] = row[i];
       }
       return obj;
     });

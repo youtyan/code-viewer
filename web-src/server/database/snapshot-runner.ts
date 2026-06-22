@@ -1,32 +1,32 @@
 import { createHash } from "node:crypto";
 import type { DbValue } from "../../core/database/types";
 import type { DatabaseAdapter } from "./adapters/types";
+import type { RawDbValue } from "./serialize";
+import { serializeDbValue } from "./serialize";
 import {
   addSnapshotTableData,
   createSnapshot,
   finalizeSnapshot,
 } from "./snapshot-store";
 
-function normalizeValue(v: DbValue): string {
+function normalizeValue(v: RawDbValue): string {
   if (v === null) return "\\N";
+  if (typeof v === "bigint") return v.toString();
   if (v instanceof Uint8Array) {
     return `\\x${Buffer.from(v).toString("hex")}`;
   }
   return String(v);
 }
 
-function rowToPayloadJson(columns: string[], row: DbValue[]): string {
+function rowToPayloadJson(columns: string[], row: RawDbValue[]): string {
   const obj: Record<string, DbValue> = {};
   for (let i = 0; i < columns.length; i++) {
-    obj[columns[i]] =
-      row[i] instanceof Uint8Array
-        ? `<blob ${(row[i] as Uint8Array).byteLength} bytes>`
-        : row[i];
+    obj[columns[i]] = serializeDbValue(row[i]);
   }
   return JSON.stringify(obj);
 }
 
-function computeRowHash(columns: string[], row: DbValue[]): string {
+function computeRowHash(columns: string[], row: RawDbValue[]): string {
   const parts = columns.map((_, i) => normalizeValue(row[i]));
   return createHash("sha256").update(parts.join("\t")).digest("hex");
 }
@@ -34,7 +34,7 @@ function computeRowHash(columns: string[], row: DbValue[]): string {
 function buildRowKeyJson(
   pkColumns: string[],
   allColumns: string[],
-  row: DbValue[],
+  row: RawDbValue[],
   rowIndex: number,
 ): string {
   if (pkColumns.length === 0) {
@@ -43,7 +43,7 @@ function buildRowKeyJson(
   const keyObj: Record<string, DbValue> = {};
   for (const pk of pkColumns) {
     const idx = allColumns.indexOf(pk);
-    if (idx >= 0) keyObj[pk] = row[idx];
+    if (idx >= 0) keyObj[pk] = serializeDbValue(row[idx]);
   }
   return JSON.stringify(keyObj);
 }
