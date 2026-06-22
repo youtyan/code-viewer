@@ -7194,6 +7194,14 @@ data: ok
 });
 
 // web-src/server/cli.ts
+var REQUIRED_NODE_MAJOR = 20;
+var nodeMajor = Number.parseInt((process.versions.node || "0").split(".")[0] || "0", 10);
+if (!Number.isFinite(nodeMajor) || nodeMajor < REQUIRED_NODE_MAJOR) {
+  process.stderr.write(`code-viewer requires Node.js >= ${REQUIRED_NODE_MAJOR}.0.0, but found ${process.versions.node}.
+` + `Please upgrade Node.js (e.g. via nvm, volta, or your package manager) and retry.
+`);
+  process.exit(1);
+}
 if (process.argv[2] === "annotate") {
   const { runAnnotateCli: runAnnotateCli2 } = await Promise.resolve().then(() => (init_annotate_cli(), exports_annotate_cli));
   await runAnnotateCli2(process.argv.slice(3));
