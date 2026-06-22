@@ -3336,6 +3336,77 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
 }
 var init_docker = () => {};
 
+// web-src/server/database/serialize.ts
+function serializeDbValue(value) {
+  if (value === null || value === undefined)
+    return null;
+  if (typeof value === "bigint") {
+    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return `<blob ${value.byteLength} bytes>`;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value;
+}
+function serializeDbRow(row) {
+  return row.map(serializeDbValue);
+}
+function serializeDbRows(rows) {
+  return rows.map(serializeDbRow);
+}
+var MIN_SAFE, MAX_SAFE;
+var init_serialize = __esm(() => {
+  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+});
+
+// web-src/server/database/sources/sql-snapshot.ts
+import { createHash as createHash2 } from "node:crypto";
+function normalizeRawValue(v) {
+  if (v === null)
+    return "\\N";
+  if (typeof v === "bigint")
+    return v.toString();
+  if (v instanceof Uint8Array) {
+    return `\\x${Buffer.from(v).toString("hex")}`;
+  }
+  return String(v);
+}
+function rowToPayloadJson(columns, row) {
+  const obj = {};
+  for (let i = 0;i < columns.length; i++) {
+    obj[columns[i]] = serializeDbValue(row[i]);
+  }
+  return JSON.stringify(obj);
+}
+function computeRowHash(columns, row) {
+  const parts = columns.map((_, i) => normalizeRawValue(row[i]));
+  return createHash2("sha256").update(parts.join("\t")).digest("hex");
+}
+function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
+  if (pkColumns.length === 0) {
+    return JSON.stringify({ __rowIndex: rowIndex });
+  }
+  const keyObj = {};
+  for (const pk of pkColumns) {
+    const idx = allColumns.indexOf(pk);
+    if (idx >= 0)
+      keyObj[pk] = serializeDbValue(row[idx]);
+  }
+  return JSON.stringify(keyObj);
+}
+var SQL_SNAPSHOT_BATCH_SIZE = 500;
+var init_sql_snapshot = __esm(() => {
+  init_serialize();
+});
+
 // web-src/server/database/adapters/sqlite.ts
 function safePrepare(db, sql) {
   const stmt = db.prepare(sql);
@@ -3381,8 +3452,10 @@ function queryColumns(db, table) {
   }));
 }
 function createSqliteAdapter(db) {
-  return {
+  const adapter = {
     kind: "sqlite",
+    model: "sql",
+    capabilities: { snapshot: true },
     getTables() {
       const rows = db.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
       return rows.map((row) => ({
@@ -3526,11 +3599,44 @@ function createSqliteAdapter(db) {
     },
     close() {
       db.close();
+    },
+    async* iterateForSnapshot(table, signal) {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;; ) {
+        if (signal?.aborted)
+          return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE
+        });
+        if (result.rows.length === 0)
+          return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row)
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE)
+          return;
+      }
+    },
+    async listSnapshotContainers() {
+      return adapter.getTables().filter((t) => t.type === "table").map((t) => ({ id: t.name, label: t.name }));
     }
   };
+  return adapter;
 }
 var cachedDbClass = null, sqliteAdapterFactory;
 var init_sqlite = __esm(() => {
+  init_sql_snapshot();
   sqliteAdapterFactory = {
     async open(path) {
       const DbClass = await getSqliteClass();
@@ -3867,37 +3973,6 @@ var init_discovery = __esm(() => {
   ];
 });
 
-// web-src/server/database/serialize.ts
-function serializeDbValue(value) {
-  if (value === null || value === undefined)
-    return null;
-  if (typeof value === "bigint") {
-    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
-  }
-  if (value instanceof Uint8Array) {
-    return `<blob ${value.byteLength} bytes>`;
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return value;
-}
-function serializeDbRow(row) {
-  return row.map(serializeDbValue);
-}
-function serializeDbRows(rows) {
-  return rows.map(serializeDbRow);
-}
-var MIN_SAFE, MAX_SAFE;
-var init_serialize = __esm(() => {
-  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
-  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
-});
-
 // web-src/server/database/global-search.ts
 function sanitizeIdentifier3(name, kind) {
   if (kind === "mysql")
@@ -4051,7 +4126,7 @@ var CODE_VIEWER_DIR2 = ".code-viewer", HISTORY_FILE_NAME = "query-history.json",
 var init_query_history = () => {};
 
 // web-src/server/database/snapshot-store.ts
-import { createHash as createHash2, randomBytes } from "node:crypto";
+import { createHash as createHash3, randomBytes } from "node:crypto";
 import { mkdirSync as mkdirSync5 } from "node:fs";
 import { join as join10 } from "node:path";
 async function getSqliteClass2() {
@@ -4091,7 +4166,7 @@ function makeId(prefix) {
   return `${prefix}-${randomBytes(8).toString("hex")}`;
 }
 function hashPayload(payloadJson) {
-  return createHash2("sha256").update(payloadJson).digest("hex");
+  return createHash3("sha256").update(payloadJson).digest("hex");
 }
 async function createSnapshot(cwd, dbId, kind, tables, note) {
   const db = await getStoreDb(cwd);
@@ -4104,11 +4179,11 @@ async function createSnapshot(cwd, dbId, kind, tables, note) {
 }
 async function addSnapshotTableData(cwd, snapshotId, tableName, pkColumns, rows) {
   const db = await getStoreDb(cwd);
-  const tableHasher = createHash2("sha256");
+  const tableHasher = createHash3("sha256");
   const insertRow = db.prepare("INSERT OR IGNORE INTO snapshot_rows (snapshot_id, table_name, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?, ?)");
   const insertPayload = db.prepare("INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)");
   for (const row of rows) {
-    const rowKeyHash = createHash2("sha256").update(row.rowKeyJson).digest("hex");
+    const rowKeyHash = createHash3("sha256").update(row.rowKeyJson).digest("hex");
     const payloadHash = hashPayload(row.payloadJson);
     tableHasher.update(row.rowHash);
     insertRow.run(snapshotId, tableName, rowKeyHash, row.rowKeyJson, row.rowHash, payloadHash);
@@ -4341,7 +4416,7 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
 var init_snapshot_store = () => {};
 
 // web-src/server/database/snapshot-runner.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 function normalizeValue(v) {
   if (v === null)
     return "\\N";
@@ -4352,18 +4427,18 @@ function normalizeValue(v) {
   }
   return String(v);
 }
-function rowToPayloadJson(columns, row) {
+function rowToPayloadJson2(columns, row) {
   const obj = {};
   for (let i = 0;i < columns.length; i++) {
     obj[columns[i]] = serializeDbValue(row[i]);
   }
   return JSON.stringify(obj);
 }
-function computeRowHash(columns, row) {
+function computeRowHash2(columns, row) {
   const parts = columns.map((_, i) => normalizeValue(row[i]));
-  return createHash3("sha256").update(parts.join("\t")).digest("hex");
+  return createHash4("sha256").update(parts.join("\t")).digest("hex");
 }
-function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
+function buildRowKeyJson2(pkColumns, allColumns, row, rowIndex) {
   if (pkColumns.length === 0) {
     return JSON.stringify({ __rowIndex: rowIndex });
   }
@@ -4394,9 +4469,9 @@ async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
         if (result.rows.length === 0)
           break;
         for (const row of result.rows) {
-          const rowKeyJson = buildRowKeyJson(pkColumns, colNames, row, rowIndex);
-          const rowHash = computeRowHash(colNames, row);
-          const payloadJson = rowToPayloadJson(colNames, row);
+          const rowKeyJson = buildRowKeyJson2(pkColumns, colNames, row, rowIndex);
+          const rowHash = computeRowHash2(colNames, row);
+          const payloadJson = rowToPayloadJson2(colNames, row);
           allRows.push({ rowKeyJson, rowHash, payloadJson });
           rowIndex++;
         }

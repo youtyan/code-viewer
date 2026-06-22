@@ -6,12 +6,32 @@ import type {
   DbTableInfo,
   DbValue,
 } from "../../../core/database/types";
+import {
+  buildRowKeyJson,
+  computeRowHash,
+  rowToPayloadJson,
+  SQL_SNAPSHOT_BATCH_SIZE,
+} from "../sources/sql-snapshot";
+import type { SnapshotItem } from "../sources/types";
 import type {
   DatabaseAdapter,
   DatabaseAdapterFactory,
   QueryResult,
   TriggerInfo,
 } from "./types";
+
+// adapters は SqlSource & SnapshotIterable を実体として返す。
+// 旧 DatabaseAdapter signature の caller 互換のため、返却型は
+// `DatabaseAdapter` を満たす上位互換になっている。
+type SqliteSource = DatabaseAdapter & {
+  readonly model: "sql";
+  readonly capabilities: { snapshot: true };
+  iterateForSnapshot(
+    table: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem>;
+  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+};
 
 type SqliteStmt = {
   all(...params: unknown[]): Record<string, unknown>[];
@@ -102,9 +122,11 @@ function queryColumns(db: SqliteDb, table: string): DbColumn[] {
   }));
 }
 
-function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
-  return {
+function createSqliteAdapter(db: SqliteDb): SqliteSource {
+  const adapter: SqliteSource = {
     kind: "sqlite",
+    model: "sql",
+    capabilities: { snapshot: true },
 
     getTables(): DbTableInfo[] {
       const rows = db
@@ -316,7 +338,46 @@ function createSqliteAdapter(db: SqliteDb): DatabaseAdapter {
     close(): void {
       db.close();
     },
+
+    async *iterateForSnapshot(
+      table: string,
+      signal?: AbortSignal,
+    ): AsyncIterable<SnapshotItem> {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;;) {
+        if (signal?.aborted) return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE,
+        });
+        if (result.rows.length === 0) return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row),
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE) return;
+      }
+    },
+
+    async listSnapshotContainers(): Promise<
+      Array<{ id: string; label: string }>
+    > {
+      return adapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => ({ id: t.name, label: t.name }));
+    },
   };
+  return adapter;
 }
 
 export const sqliteAdapterFactory: DatabaseAdapterFactory = {
