@@ -5319,7 +5319,7 @@ function createElasticsearchAdapter(config) {
       size,
       track_total_hits: true,
       seq_no_primary_term: true,
-      sort: [{ _shard_doc: "asc" }],
+      sort: [{ _doc: "asc" }],
       query: opts.query ? { query_string: { query: opts.query } } : { match_all: {} }
     };
     if (opts.searchAfter && opts.searchAfter.length > 0) {
