@@ -40,6 +40,7 @@ import {
   listSnapshots,
   updateSnapshotNote,
 } from "./snapshot-store";
+import { loadTabs, saveTabs } from "./tabs-store";
 
 let initialized = false;
 
@@ -1110,6 +1111,33 @@ async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
   }
 }
 
+// --- Tabs ---
+
+function handleTabsGet(cwd: string): Response {
+  return json(loadTabs(cwd));
+}
+
+async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
+  if (req.method !== "PUT" && req.method !== "POST") {
+    return textError("method not allowed", 405);
+  }
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  try {
+    saveTabs(cwd, body as import("../../core/database/types").TabsState);
+    return json({ ok: true });
+  } catch (err) {
+    return textError(
+      `failed to save tabs: ${err instanceof Error ? err.message : String(err)}`,
+      500,
+    );
+  }
+}
+
 async function handleClose(cwd: string, req: Request): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
   let body: { db?: string };
@@ -1247,5 +1275,17 @@ export async function handleDatabaseRoute(
     return wrapResponse(handleDiffTables(cwd, url));
   if (path === "/_db/snapshot/diff/rows")
     return wrapResponse(handleDiffRows(cwd, url));
+  // --- Tabs ---
+  if (path === "/_db/tabs") {
+    if (method === "GET") return wrapResponse(handleTabsGet(cwd));
+    if (method === "PUT" || method === "POST") {
+      if (!sideEffectAllowed(req)) {
+        log(403);
+        return textError("forbidden", 403);
+      }
+      return wrapResponse(handleTabsPut(cwd, req));
+    }
+    return wrapResponse(textError("method not allowed", 405));
+  }
   return null;
 }

@@ -4577,6 +4577,89 @@ var init_snapshot_runner = __esm(() => {
   init_snapshot_store();
 });
 
+// web-src/server/database/tabs-store.ts
+import {
+  existsSync as existsSync8,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync7,
+  renameSync as renameSync3,
+  writeFileSync as writeFileSync4
+} from "node:fs";
+import { join as join11 } from "node:path";
+function tabsFilePath(root) {
+  return join11(root, CODE_VIEWER_DIR4, TABS_FILE_NAME);
+}
+function emptyState2() {
+  return { version: 1, tabs: [], activeTabId: null };
+}
+function sanitize(input) {
+  if (!input || typeof input !== "object")
+    return emptyState2();
+  const obj = input;
+  if (obj.version !== 1)
+    return emptyState2();
+  const rawTabs = Array.isArray(obj.tabs) ? obj.tabs : [];
+  const seenIds = new Set;
+  const tabs = [];
+  for (const t of rawTabs) {
+    if (tabs.length >= MAX_TABS)
+      break;
+    if (!t || typeof t !== "object")
+      continue;
+    const tab = t;
+    if (typeof tab.id !== "string" || !tab.id)
+      continue;
+    if (seenIds.has(tab.id))
+      continue;
+    seenIds.add(tab.id);
+    const dbId = typeof tab.dbId === "string" && tab.dbId.length > 0 ? tab.dbId : null;
+    const table = typeof tab.table === "string" && tab.table.length > 0 ? tab.table : null;
+    const view = typeof tab.view === "string" && VALID_VIEWS.has(tab.view) ? tab.view : "data";
+    tabs.push({ id: tab.id, dbId, table, view });
+  }
+  let activeTabId = typeof obj.activeTabId === "string" && obj.activeTabId.length > 0 ? obj.activeTabId : null;
+  if (activeTabId && !tabs.find((t) => t.id === activeTabId)) {
+    activeTabId = tabs.length > 0 ? tabs[0].id : null;
+  }
+  return { version: 1, tabs, activeTabId };
+}
+function loadTabs(cwd) {
+  const file = tabsFilePath(cwd);
+  if (!existsSync8(file))
+    return emptyState2();
+  try {
+    const raw = readFileSync7(file, "utf8");
+    return sanitize(JSON.parse(raw));
+  } catch {
+    return emptyState2();
+  }
+}
+function saveTabs(cwd, state) {
+  const normalized = sanitize(state);
+  const dir = join11(cwd, CODE_VIEWER_DIR4);
+  mkdirSync6(dir, { recursive: true });
+  const file = tabsFilePath(cwd);
+  const tmp = `${file}.tmp-${process.pid}`;
+  const content = `${JSON.stringify(normalized, null, 2)}
+`;
+  if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES2) {
+    throw new Error("tabs state too large");
+  }
+  writeFileSync4(tmp, content, "utf8");
+  renameSync3(tmp, file);
+}
+var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e5, VALID_VIEWS;
+var init_tabs_store = __esm(() => {
+  VALID_VIEWS = new Set([
+    "data",
+    "query",
+    "schema",
+    "er",
+    "search",
+    "snapshot"
+  ]);
+});
+
 // web-src/server/database/adapters/redis.ts
 var exports_redis = {};
 __export(exports_redis, {
@@ -6776,6 +6859,26 @@ async function handleDiffRows(cwd, url) {
     return textError(`failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+function handleTabsGet(cwd) {
+  return json(loadTabs(cwd));
+}
+async function handleTabsPut(cwd, req) {
+  if (req.method !== "PUT" && req.method !== "POST") {
+    return textError("method not allowed", 405);
+  }
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  try {
+    saveTabs(cwd, body);
+    return json({ ok: true });
+  } catch (err) {
+    return textError(`failed to save tabs: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
 async function handleClose(cwd, req) {
   if (req.method !== "POST")
     return textError("method not allowed", 405);
@@ -6910,6 +7013,18 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     return wrapResponse(handleDiffTables(cwd, url));
   if (path === "/_db/snapshot/diff/rows")
     return wrapResponse(handleDiffRows(cwd, url));
+  if (path === "/_db/tabs") {
+    if (method === "GET")
+      return wrapResponse(handleTabsGet(cwd));
+    if (method === "PUT" || method === "POST") {
+      if (!sideEffectAllowed(req)) {
+        log(403);
+        return textError("forbidden", 403);
+      }
+      return wrapResponse(handleTabsPut(cwd, req));
+    }
+    return wrapResponse(textError("method not allowed", 405));
+  }
   return null;
 }
 var initialized = false, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, searchJobs;
@@ -6923,6 +7038,7 @@ var init_handle = __esm(() => {
   init_serialize();
   init_snapshot_runner();
   init_snapshot_store();
+  init_tabs_store();
   dockerAdapterCache = new Map;
   searchJobs = new Map;
 });
@@ -6932,20 +7048,20 @@ var exports_preview = {};
 import {
   closeSync as closeSync2,
   constants,
-  existsSync as existsSync8,
+  existsSync as existsSync9,
   lstatSync as lstatSync5,
-  mkdirSync as mkdirSync6,
+  mkdirSync as mkdirSync7,
   openSync as openSync2,
-  readFileSync as readFileSync7,
+  readFileSync as readFileSync8,
   realpathSync as realpathSync4,
-  renameSync as renameSync3,
+  renameSync as renameSync4,
   statSync as statSync3,
   unlinkSync as unlinkSync2,
   watch,
-  writeFileSync as writeFileSync4
+  writeFileSync as writeFileSync5
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname2, extname, join as join11, relative as relative6 } from "node:path";
+import { basename as basename3, dirname as dirname2, extname, join as join12, relative as relative6 } from "node:path";
 function parseCli() {
   const rest = [];
   for (let i = 2;i < process.argv.length; i++) {
@@ -7086,10 +7202,10 @@ function staticFile(pathname) {
   const spec = map[pathname];
   if (!spec)
     return null;
-  const full = join11(WEB_ROOT, spec[0]);
-  if (!existsSync8(full))
+  const full = join12(WEB_ROOT, spec[0]);
+  if (!existsSync9(full))
     return text("not found", 404);
-  return new Response(readFileSync7(full), {
+  return new Response(readFileSync8(full), {
     headers: { "Content-Type": spec[1], "Cache-Control": "no-store" }
   });
 }
@@ -7320,8 +7436,8 @@ function parseScopeExcludeNamesQuery(value) {
   return normalizeScopeExcludeNames(names);
 }
 function loadProjectConfig() {
-  const full = join11(cwd, ".code-viewer.json");
-  if (!existsSync8(full))
+  const full = join12(cwd, ".code-viewer.json");
+  if (!existsSync9(full))
     return null;
   let realCwd;
   let realConfig;
@@ -7334,7 +7450,7 @@ function loadProjectConfig() {
   if (dirname2(realConfig) !== realCwd || basename3(realConfig) !== ".code-viewer.json")
     return null;
   try {
-    const parsed = JSON.parse(readFileSync7(realConfig, "utf8"));
+    const parsed = JSON.parse(readFileSync8(realConfig, "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "version" in parsed && parsed.version !== 1)
       return null;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
@@ -7385,8 +7501,8 @@ function safeWorktreePath(path) {
     return null;
   if (isGitInternalPath(path))
     return null;
-  const full = join11(cwd, path);
-  if (!existsSync8(full))
+  const full = join12(cwd, path);
+  if (!existsSync9(full))
     return null;
   let realCwd;
   let realFull;
@@ -7404,7 +7520,7 @@ function safeWorktreePath(path) {
   return realFull;
 }
 function worktreePath(path) {
-  return join11(cwd, path);
+  return join12(cwd, path);
 }
 function safeOpenWorktreePath(path) {
   if (path === "") {
@@ -7497,7 +7613,7 @@ function readReadme(target, dirPath) {
       if (!full)
         continue;
       try {
-        return { path, text: readFileSync7(full, "utf8") };
+        return { path, text: readFileSync8(full, "utf8") };
       } catch {
         continue;
       }
@@ -7610,7 +7726,7 @@ function grepWorktreeFallback(query, max, paths, omitDirNames, excludeNames) {
       continue;
     let data;
     try {
-      data = readFileSync7(full);
+      data = readFileSync8(full);
     } catch {
       continue;
     }
@@ -8182,10 +8298,10 @@ async function handleUploadFiles(req) {
     total += file.size;
     if (total > MAX_UPLOAD_TOTAL_BYTES)
       return text("upload too large", 413);
-    const target = join11(realDir, safeName);
+    const target = join12(realDir, safeName);
     if (relative6(realDir, dirname2(target)) !== "")
       return text("invalid filename", 400);
-    if (existsSync8(target))
+    if (existsSync9(target))
       return text("file exists", 409);
     uploads.push({ file, name: safeName, target });
   }
@@ -8194,7 +8310,7 @@ async function handleUploadFiles(req) {
     for (const upload of uploads) {
       const fd = openSync2(upload.target, uploadOpenFlags(), 420);
       try {
-        writeFileSync4(fd, new Uint8Array(await upload.file.arrayBuffer()));
+        writeFileSync5(fd, new Uint8Array(await upload.file.arrayBuffer()));
       } finally {
         closeSync2(fd);
       }
@@ -8304,12 +8420,12 @@ function triggerUpdate(changedPaths) {
   sendSse("update", data);
 }
 function moveMacPathIntoTrash(path) {
-  const trashDir = join11(homedir3(), ".Trash");
+  const trashDir = join12(homedir3(), ".Trash");
   const base = basename3(path) || "code-viewer-trash-item";
-  const target = join11(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+  const target = join12(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
   try {
-    mkdirSync6(trashDir, { recursive: true });
-    renameSync3(path, target);
+    mkdirSync7(trashDir, { recursive: true });
+    renameSync4(path, target);
     return { ok: true, trashPath: target };
   } catch (error) {
     return { ok: false, error: String(error) };
@@ -8340,20 +8456,20 @@ function restoreTrashPath(originalPath, trashPath) {
   if (!parentFullPath)
     return { ok: false, error: "invalid restore target" };
   const original = worktreePath(originalPath);
-  if (existsSync8(original))
+  if (existsSync9(original))
     return { ok: false, error: "restore target exists" };
   if (trashPath) {
     if (process.platform !== "darwin")
       return { ok: false, error: "invalid trash handle" };
-    if (!existsSync8(trashPath))
+    if (!existsSync9(trashPath))
       return { ok: false, error: "trash item not found" };
     try {
-      const trashRoot = join11(homedir3(), ".Trash");
+      const trashRoot = join12(homedir3(), ".Trash");
       const trashRelative = relative6(trashRoot, trashPath);
       if (trashRelative === "" || trashRelative.startsWith("..") || trashRelative.startsWith("/") || trashRelative.startsWith("\\"))
         return { ok: false, error: "invalid trash handle" };
-      mkdirSync6(dirname2(original), { recursive: true });
-      renameSync3(trashPath, original);
+      mkdirSync7(dirname2(original), { recursive: true });
+      renameSync4(trashPath, original);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };
@@ -8498,11 +8614,11 @@ async function handleCreateDirectory(req) {
   const targetPath = dir ? `${dir}/${name}` : name;
   if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
     return text("invalid target", 400);
-  const target = join11(parent, name);
-  if (existsSync8(target))
+  const target = join12(parent, name);
+  if (existsSync9(target))
     return text("already exists", 409);
   try {
-    mkdirSync6(target, { recursive: false });
+    mkdirSync7(target, { recursive: false });
   } catch (error) {
     if (error.code === "EEXIST")
       return text("already exists", 409);
@@ -8680,8 +8796,8 @@ var init_preview = __esm(async () => {
   init_search();
   init_server_registry();
   init_worktree_watcher();
-  WEB_ROOT = join11(ROOT, "web");
-  VERSION = JSON.parse(readFileSync7(join11(ROOT, "package.json"), "utf8")).version;
+  WEB_ROOT = join12(ROOT, "web");
+  VERSION = JSON.parse(readFileSync8(join12(ROOT, "package.json"), "utf8")).version;
   DEFAULT_ARGS = ["HEAD"];
   WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
   LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024;
