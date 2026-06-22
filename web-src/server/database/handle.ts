@@ -130,6 +130,10 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const dockerServices = discoverDockerDatabases(cwd);
   const dockerEntries: typeof dockerServices = [];
   for (const svc of dockerServices) {
+    if (svc.kind === "redis") {
+      dockerEntries.push(svc);
+      continue;
+    }
     const dbs = listDockerDatabases(
       svc.serviceName,
       svc.kind as "postgresql" | "mysql",
@@ -331,7 +335,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
           existing.push(f.column);
           grouped.set(f.value, existing);
         }
-        const k = adapter.kind;
+        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy
           ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
@@ -591,7 +595,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
           existing.push(f.column);
           grouped.set(f.value, existing);
         }
-        const k = adapter.kind;
+        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy
           ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`

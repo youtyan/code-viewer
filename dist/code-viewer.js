@@ -3733,7 +3733,21 @@ function detectDbKind(image) {
     return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb"))
     return "mysql";
+  if (lower.includes("redis"))
+    return "redis";
   return null;
+}
+function defaultPortFor(kind) {
+  switch (kind) {
+    case "postgresql":
+      return "5432";
+    case "mysql":
+      return "3306";
+    case "redis":
+      return "6379";
+    default:
+      return "";
+  }
 }
 function resolveEnvValue(raw) {
   return raw.replace(/\$\{([^}]+)\}/g, (_, expr) => {
@@ -3819,10 +3833,15 @@ function discoverDockerDatabases(cwd) {
         continue;
       const env = parseComposeEnv(svcBlock);
       const port = parseComposePorts(svcBlock);
-      const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
-      const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
-      const hostPort = port || (kind === "postgresql" ? "5432" : "3306");
-      const label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+      const hostPort = port || defaultPortFor(kind);
+      let label;
+      if (kind === "redis") {
+        label = `${svc.name} (${image}, localhost:${hostPort})`;
+      } else {
+        const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
+        const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
+        label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
+      }
       results.push({
         id: `docker:${svc.name}`,
         path: filename,
@@ -4479,6 +4498,10 @@ function handleFiles(cwd, omitDirNames) {
   const dockerServices = discoverDockerDatabases(cwd);
   const dockerEntries = [];
   for (const svc of dockerServices) {
+    if (svc.kind === "redis") {
+      dockerEntries.push(svc);
+      continue;
+    }
     const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, cwd);
     if (dbs.length <= 1) {
       dockerEntries.push(svc);
