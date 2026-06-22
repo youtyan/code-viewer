@@ -5430,8 +5430,40 @@ function createElasticsearchAdapter(config) {
     const props = raw[realIndex]?.mappings?.properties ?? {};
     return { index: realIndex, properties: props };
   }
-  function searchDocs(_opts) {
-    throw new Error("not implemented yet");
+  function searchDocs(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
+    const body = {
+      size,
+      track_total_hits: true,
+      seq_no_primary_term: true,
+      sort: [{ _shard_doc: "asc" }],
+      query: opts.query ? { query_string: { query: opts.query } } : { match_all: {} }
+    };
+    if (opts.searchAfter && opts.searchAfter.length > 0) {
+      body.search_after = opts.searchAfter;
+    }
+    const raw = callJson("POST", `/${encodeURIComponent(opts.index)}/_search`, body, "_search");
+    const rawHits = raw.hits?.hits ?? [];
+    const hits = rawHits.map((h) => ({
+      _index: h._index ?? opts.index,
+      _id: h._id ?? "",
+      _score: h._score ?? null,
+      _source: h._source,
+      sort: h.sort,
+      _seq_no: h._seq_no,
+      _primary_term: h._primary_term
+    }));
+    let totalHits = 0;
+    const t = raw.hits?.total;
+    if (typeof t === "number")
+      totalHits = t;
+    else if (t && typeof t.value === "number")
+      totalHits = t.value;
+    const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
+    return { totalHits, hits, lastSort };
   }
   function getDoc(_opts) {
     throw new Error("not implemented yet");
@@ -5475,6 +5507,7 @@ function openElasticsearchAdapter(serviceName, env, cwd) {
   const password = env.ELASTIC_PASSWORD || "";
   return createElasticsearchAdapter({ containerName, password });
 }
+var ES_DEFAULT_SIZE = 200;
 var init_elasticsearch = () => {};
 
 // web-src/server/database/handle-elasticsearch.ts
@@ -5521,6 +5554,42 @@ function handleIndices(cwd, url) {
     return textError(`failed to list elasticsearch indices: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
+function handleDocs(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  const query = url.searchParams.get("q") || undefined;
+  const sizeRaw = url.searchParams.get("size");
+  const size = sizeRaw ? Number(sizeRaw) : undefined;
+  const sa = url.searchParams.get("searchAfter");
+  let searchAfter;
+  if (sa) {
+    try {
+      const parsed = JSON.parse(sa);
+      if (Array.isArray(parsed))
+        searchAfter = parsed;
+    } catch {
+      return textError("invalid searchAfter (must be JSON array)", 400);
+    }
+  }
+  try {
+    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
+    const body = {
+      dbId: r.dbId,
+      index,
+      hits: result.hits,
+      totalHits: result.totalHits,
+      lastSort: result.lastSort
+    };
+    return json(body);
+  } catch (err) {
+    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
+    return textError(`failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`, 500);
+  }
+}
 function handleMapping(cwd, url) {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response)
@@ -5560,6 +5629,12 @@ async function handleElasticsearchRoute(req, url, cwd) {
       return wrap(textError("method not allowed", 405));
     }
     return wrap(handleMapping(cwd, url));
+  }
+  if (path === "/_db/elasticsearch/docs") {
+    if (method !== "GET") {
+      return wrap(textError("method not allowed", 405));
+    }
+    return wrap(handleDocs(cwd, url));
   }
   return null;
 }
