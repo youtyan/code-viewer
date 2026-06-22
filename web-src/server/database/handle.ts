@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { relative } from "node:path";
 import type {
+  DbColumn,
   DbFilesResponse,
   DbOrder,
   DbQueryResponse,
@@ -485,6 +486,49 @@ function makeHistoryId(): string {
   return `qh-${randomBytes(8).toString("hex")}`;
 }
 
+function unquoteSqlIdentifier(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    return trimmed.slice(1, -1).replace(/``/g, "`");
+  }
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1).replace(/]]/g, "]");
+  }
+  return trimmed;
+}
+
+function parseSelectAllTable(sql: string): string | null {
+  const identifier =
+    '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
+  const match = sql
+    .trim()
+    .replace(/;\s*$/, "")
+    .match(
+      new RegExp(
+        String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?(?:\s|$)`,
+        "i",
+      ),
+    );
+  if (!match) return null;
+  return unquoteSqlIdentifier(match[2] || match[1]);
+}
+
+function inferEmptyQueryColumns(
+  adapter: DatabaseAdapter,
+  sql: string,
+): DbColumn[] {
+  const table = parseSelectAllTable(sql);
+  if (!table) return [];
+  try {
+    return adapter.getColumns(table);
+  } catch {
+    return [];
+  }
+}
+
 async function handleQuery(
   cwd: string,
   req: Request,
@@ -516,10 +560,22 @@ async function handleQuery(
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
     const serializedRows = serializeDbRows(result.rows);
+    const inferredColumns =
+      result.columns.length === 0 && result.rows.length === 0
+        ? inferEmptyQueryColumns(adapter, body.sql)
+        : [];
+    const columns =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.name)
+        : result.columns;
+    const columnTypes =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.type)
+        : result.columnTypes;
     const response: DbQueryResponse = {
       dbId: body.db,
-      columns: result.columns,
-      columnTypes: result.columnTypes,
+      columns,
+      columnTypes,
       rows: serializedRows,
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
@@ -532,7 +588,7 @@ async function handleQuery(
         sql: body.sql,
         title: body.title,
         body: body.body,
-        columns: result.columns,
+        columns,
         rowsPreview: serializedRows,
         rowCount: result.rowCount,
         savedRows: serializedRows.length,
