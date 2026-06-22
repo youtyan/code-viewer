@@ -70,7 +70,7 @@ async function getAdapter(
   return getConnection(r.resolved);
 }
 
-function json(data: unknown, status = 200): Response {
+export function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -80,7 +80,7 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function textError(message: string, status: number): Response {
+export function textError(message: string, status: number): Response {
   return new Response(message, {
     status,
     headers: {
@@ -1041,6 +1041,10 @@ export async function handleDatabaseRoute(
   sendSse?: (event: string, data?: string) => void,
 ): Promise<Response | null> {
   ensureInit();
+  if (url.pathname.startsWith("/_db/redis/")) {
+    const { handleRedisRoute } = await import("./handle-redis");
+    return handleRedisRoute(req, url, cwd);
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
