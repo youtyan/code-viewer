@@ -31,6 +31,12 @@ bun run preview --cwd data/test/elasticsearch
 ブラウザでサイドバーに `es-svc` が出てくる。クリックすると `products` /
 `events` / `binary-test` の indices と各 doc が確認できる。
 
+`data/test/redis/` も同時に立てておけば、リポジトリ root を cwd にして
+`bun run preview --cwd .` で起動するだけで ES と Redis が一画面に並ぶ
+(recursive compose discovery、サブディレクトリの compose も拾われる)。
+subdirectory 由来の service は id が `docker:<svc>@<relDir>` 形式になる
+(例: `docker:es-svc@data%2Ftest%2Felasticsearch`)。
+
 ## 検証ポイント
 
 ### R3-C1 / C2: discovery + indices 一覧
