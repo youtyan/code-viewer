@@ -7233,3 +7233,242 @@ body.db-resizing {
   color: var(--error, #c00);
   font-size: 0.9em;
 }
+
+/* ---------- Elasticsearch explorer ---------- */
+.es-explorer {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg);
+}
+.es-pane-header {
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.es-index-list-pane {
+  width: 260px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+.es-index-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.es-index-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+  gap: 2px;
+}
+.es-index-item:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.es-index-item.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.es-index-name {
+  font-family: var(--mono, monospace);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.es-index-meta {
+  font-size: 0.8em;
+  color: var(--fg-muted);
+}
+.es-doc-list-pane {
+  width: 380px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.es-search-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+.es-search-input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+}
+.es-search-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.es-search-btn:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.es-doc-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.es-doc-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.es-doc-item:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.es-doc-item.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.es-doc-id {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.es-doc-preview {
+  color: var(--fg-muted);
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.es-doc-more-btn {
+  padding: 6px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  cursor: pointer;
+  font-size: 0.85em;
+  color: var(--fg);
+}
+.es-doc-more-btn:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.es-doc-more-btn:disabled {
+  cursor: default;
+  color: var(--fg-muted);
+}
+.es-detail-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.es-detail-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+}
+.es-detail-tab {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9em;
+  color: var(--fg-muted);
+  border-bottom: 2px solid transparent;
+}
+.es-detail-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.es-mapping-body,
+.es-doc-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  color: var(--fg);
+}
+.es-mapping-header,
+.es-doc-detail-header {
+  font-family: var(--mono, monospace);
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.es-doc-detail-meta {
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  margin-bottom: 8px;
+}
+.es-mapping-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+}
+.es-mapping-table th,
+.es-mapping-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.es-mapping-table th {
+  font-weight: 600;
+  background: var(--bg-soft);
+}
+.es-mapping-field {
+  font-weight: 500;
+}
+.es-mapping-type {
+  color: var(--fg-muted);
+}
+.es-doc-source {
+  font-family: var(--mono, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.es-value-empty {
+  color: var(--fg-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 8px;
+}
+.es-note {
+  padding: 8px 12px;
+  color: var(--fg-muted);
+  font-size: 0.9em;
+}
+.es-error {
+  padding: 8px 12px;
+  color: var(--error, #c00);
+  font-size: 0.9em;
+}
