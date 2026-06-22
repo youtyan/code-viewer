@@ -150,13 +150,37 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return { keys, nextCursor: parsed.cursor };
   }
 
+  function getValue(opts: { db: number; key: string }): RedisValue {
+    const typeResult = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "TYPE",
+      opts.key,
+    ]);
+    if (typeResult.code !== 0) {
+      throw new Error(typeResult.stderr.trim() || "TYPE failed");
+    }
+    const rawType = typeResult.stdout.trim();
+    if (rawType === "none" || !isValidRedisType(rawType)) {
+      return { type: "none" };
+    }
+    if (rawType === "string") {
+      const r = execRedisCli(config, ["-n", String(opts.db), "GET", opts.key]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "GET failed");
+      }
+      const value = r.stdout.replace(/\n$/, "");
+      return { type: "string", value };
+    }
+    // Other types are added in later commits.
+    return { type: "none" };
+  }
+
   return {
     kind: "redis",
     listDatabases,
     listKeys,
-    getValue() {
-      throw new Error("not implemented yet");
-    },
+    getValue,
     close() {
       // nothing to close (docker exec is one-shot per call)
     },
