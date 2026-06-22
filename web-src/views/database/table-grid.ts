@@ -10,6 +10,7 @@ const OVERSCAN = 20;
 const PAGE_SIZE = 200;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
+const CELL_PREVIEW_MAX_CHARS = 4000;
 
 export type GridSort = {
   column: string;
@@ -211,11 +212,18 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     return filters;
   }
 
+  function resetSelectionAndDetail() {
+    selectedRowIndex = -1;
+    detailPanel.hidden = true;
+    detailPanel.innerHTML = "";
+  }
+
   function invalidateData() {
     pageCache = new Map();
     pendingPages = new Set();
     loadGeneration++;
     viewport.scrollTop = 0;
+    resetSelectionAndDetail();
     ensurePage(0);
   }
 
@@ -259,6 +267,26 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     title.className = "db-grid-detail-title";
     title.textContent = `${colName} (${colType})`;
 
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "db-btn db-grid-detail-copy";
+    copyBtn.textContent = "Copy";
+    const copyText = formatValueForCopy(value);
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(copyText).then(
+        () => {
+          const original = copyBtn.textContent;
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = original;
+          }, 800);
+        },
+        () => {
+          copyBtn.textContent = "Copy failed";
+        },
+      );
+    });
+
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
@@ -267,7 +295,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       detailPanel.hidden = true;
     });
 
-    header.append(title, closeBtn);
+    header.append(title, copyBtn, closeBtn);
 
     const content = document.createElement("div");
     content.className = "db-grid-detail-content";
@@ -454,6 +482,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
     pageCache = new Map();
     pendingPages = new Set();
+    resetSelectionAndDetail();
     renderHeader();
     renderViewport();
   }
@@ -547,14 +576,6 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
               });
               row.classList.add("selected");
               showCellDetail(cellColIndex, cellValue);
-              const text = formatValueForCopy(cellValue);
-              navigator.clipboard.writeText(text).then(
-                () => {
-                  cell.classList.add("copied");
-                  setTimeout(() => cell.classList.remove("copied"), 600);
-                },
-                () => {},
-              );
             });
             row.appendChild(cell);
           }
@@ -704,6 +725,10 @@ function formatValue(value: DbValue): string {
   if (typeof value === "object") return JSON.stringify(value);
   const s = String(value);
   if (s === "") return "<empty>";
+  if (s.length > CELL_PREVIEW_MAX_CHARS) {
+    const truncated = s.slice(0, CELL_PREVIEW_MAX_CHARS);
+    return `${truncated} … (+${s.length - CELL_PREVIEW_MAX_CHARS} chars)`;
+  }
   return s;
 }
 
