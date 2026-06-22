@@ -8828,8 +8828,8 @@ ${frontmatter.yaml}
     const historyBtn = document.createElement("button");
     historyBtn.className = "db-btn db-query-history-btn";
     historyBtn.type = "button";
-    historyBtn.textContent = "History";
-    historyBtn.title = "Query history";
+    historyBtn.textContent = "Local History";
+    historyBtn.title = "Local editor history";
     const statusSpan = document.createElement("span");
     statusSpan.className = "db-query-status";
     const historyDropdown = document.createElement("div");
@@ -9079,6 +9079,23 @@ ${frontmatter.yaml}
     el.append(toolbar, body);
     let entries = [];
     const expandedIds = new Set;
+    let clearConfirmTimer = null;
+    function armButtonConfirm(button, confirmText, defaultText) {
+      if (button.dataset.confirm === "1") {
+        button.dataset.confirm = "";
+        button.textContent = defaultText;
+        return true;
+      }
+      button.dataset.confirm = "1";
+      button.textContent = confirmText;
+      window.setTimeout(() => {
+        if (button.dataset.confirm === "1") {
+          button.dataset.confirm = "";
+          button.textContent = defaultText;
+        }
+      }, 3000);
+      return false;
+    }
     async function refresh() {
       const dbId = callbacks.getDbId();
       const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
@@ -9146,6 +9163,8 @@ ${frontmatter.yaml}
       deleteBtn.type = "button";
       deleteBtn.textContent = "Delete";
       deleteBtn.addEventListener("click", () => {
+        if (!armButtonConfirm(deleteBtn, "Confirm delete", "Delete"))
+          return;
         deleteEntry(entry.id);
       });
       actions.append(useBtn, copyBtn, deleteBtn);
@@ -9273,6 +9292,24 @@ ${frontmatter.yaml}
     }
     clearBtn.addEventListener("click", async () => {
       const dbId = callbacks.getDbId();
+      if (clearBtn.dataset.confirm !== "1") {
+        clearBtn.dataset.confirm = "1";
+        clearBtn.textContent = "Confirm clear";
+        if (clearConfirmTimer)
+          clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = setTimeout(() => {
+          clearBtn.dataset.confirm = "";
+          clearBtn.textContent = "Clear All";
+          clearConfirmTimer = null;
+        }, 3000);
+        return;
+      }
+      clearBtn.dataset.confirm = "";
+      clearBtn.textContent = "Clear All";
+      if (clearConfirmTimer) {
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = null;
+      }
       try {
         await fetch("/_db/history/clear", {
           method: "POST",
@@ -9292,6 +9329,12 @@ ${frontmatter.yaml}
     function clear() {
       entries = [];
       expandedIds.clear();
+      if (clearConfirmTimer) {
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = null;
+      }
+      clearBtn.dataset.confirm = "";
+      clearBtn.textContent = "Clear All";
       clearDetail();
       render();
     }
@@ -9352,6 +9395,19 @@ ${frontmatter.yaml}
     keyListHeader.className = "redis-pane-header";
     keyListHeader.textContent = "Keys";
     keyListPane.appendChild(keyListHeader);
+    const keyFilterForm = document.createElement("form");
+    keyFilterForm.className = "redis-key-filter-form";
+    const keyFilterInput = document.createElement("input");
+    keyFilterInput.type = "search";
+    keyFilterInput.className = "redis-key-filter";
+    keyFilterInput.placeholder = "key pattern, e.g. user:*";
+    keyFilterInput.autocomplete = "off";
+    const keyFilterBtn = document.createElement("button");
+    keyFilterBtn.type = "submit";
+    keyFilterBtn.className = "redis-key-filter-btn";
+    keyFilterBtn.textContent = "Search";
+    keyFilterForm.append(keyFilterInput, keyFilterBtn);
+    keyListPane.appendChild(keyFilterForm);
     const keyList = document.createElement("div");
     keyList.className = "redis-key-list";
     keyListPane.appendChild(keyList);
@@ -9368,6 +9424,7 @@ ${frontmatter.yaml}
     let currentDbId = null;
     let currentDbIndex = null;
     let currentKey = null;
+    let currentKeyFilter = "*";
     let currentCursor = "0";
     let loadingKeys = false;
     let loadRunId = 0;
@@ -9378,7 +9435,8 @@ ${frontmatter.yaml}
         return;
       callbacks.onSelectionChange?.({
         dbIndex: currentDbIndex ?? undefined,
-        key: currentKey ?? undefined
+        key: currentKey ?? undefined,
+        keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter
       });
     }
     function setDbStatus(message, isError = false) {
@@ -9625,7 +9683,7 @@ ${frontmatter.yaml}
         const params = new URLSearchParams({
           db: requestDbId,
           dbIndex: String(requestDbIndex),
-          pattern: "*",
+          pattern: currentKeyFilter || "*",
           cursor: currentCursor,
           count: "200"
         });
@@ -9658,6 +9716,18 @@ ${frontmatter.yaml}
       }
     }
     keyMoreBtn.addEventListener("click", () => loadKeys(true));
+    keyFilterForm.addEventListener("submit", (e2) => {
+      e2.preventDefault();
+      const nextFilter = keyFilterInput.value.trim() || "*";
+      if (nextFilter === currentKeyFilter && currentCursor === "0")
+        return;
+      currentKeyFilter = nextFilter;
+      currentKey = null;
+      currentCursor = "0";
+      notifySelectionChange();
+      mainPane.textContent = "Select a key to view its value.";
+      loadKeys(false);
+    });
     async function load(dbId, initial) {
       if (currentDbId === dbId && !initial)
         return;
@@ -9665,6 +9735,8 @@ ${frontmatter.yaml}
       currentDbId = dbId;
       currentDbIndex = null;
       currentKey = null;
+      currentKeyFilter = initial?.keyFilter?.trim() || "*";
+      keyFilterInput.value = currentKeyFilter === "*" ? "" : currentKeyFilter;
       currentCursor = "0";
       keyList.innerHTML = "";
       keyMoreBtn.hidden = true;
@@ -9706,6 +9778,8 @@ ${frontmatter.yaml}
       currentDbId = null;
       currentDbIndex = null;
       currentKey = null;
+      currentKeyFilter = "*";
+      keyFilterInput.value = "";
       currentCursor = "0";
       dbList.innerHTML = "";
       keyList.innerHTML = "";
@@ -9715,7 +9789,8 @@ ${frontmatter.yaml}
     function getSelection() {
       return {
         dbIndex: currentDbIndex ?? undefined,
-        key: currentKey ?? undefined
+        key: currentKey ?? undefined,
+        keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter
       };
     }
     return { el: container, load, clear, getSelection };
@@ -10133,7 +10208,22 @@ ${frontmatter.yaml}
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.textContent = "削除";
-        deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+        deleteBtn.addEventListener("click", () => {
+          if (deleteBtn.dataset.confirm !== "1") {
+            deleteBtn.dataset.confirm = "1";
+            deleteBtn.textContent = "削除を確認";
+            window.setTimeout(() => {
+              if (deleteBtn.dataset.confirm === "1") {
+                deleteBtn.dataset.confirm = "";
+                deleteBtn.textContent = "削除";
+              }
+            }, 3000);
+            return;
+          }
+          deleteBtn.dataset.confirm = "";
+          deleteBtn.textContent = "削除";
+          deleteSnap(snap.id);
+        });
         actions.append(noteBtn, deleteBtn);
         item.append(info, actions);
         snapshotSection.appendChild(item);
@@ -10392,10 +10482,14 @@ ${frontmatter.yaml}
       cancelDlgBtn.textContent = "キャンセル";
       cancelDlgBtn.addEventListener("click", () => dialog.remove());
       saveBtn.addEventListener("click", async () => {
+        if (disposed)
+          return;
         await postJson("/_db/snapshot/update-note", {
           id: snapshotId,
           note: input.value
         });
+        if (disposed)
+          return;
         dialog.remove();
         refresh();
       });
@@ -10415,7 +10509,11 @@ ${frontmatter.yaml}
       input.focus();
     }
     async function deleteSnap(snapshotId) {
+      if (disposed)
+        return;
       await postJson("/_db/snapshot/delete", { id: snapshotId });
+      if (disposed)
+        return;
       refresh();
     }
     function handleSse(data) {
@@ -11321,6 +11419,17 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/database-view.ts
+  function isSqlKind(kind) {
+    return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
+  }
+  function isSqlView(view) {
+    return view === "data" || view === "query" || view === "schema" || view === "er" || view === "search" || view === "snapshot";
+  }
+  function normalizeViewForDb(view, db) {
+    if (!db || !isSqlKind(db.kind))
+      return "data";
+    return view && isSqlView(view) ? view : "data";
+  }
   function createTabPane(outerDeps, cb, initial = {}) {
     const deps = {
       ...outerDeps,
@@ -11503,10 +11612,11 @@ ${frontmatter.yaml}
     sidebar.appendChild(historyToggle);
     let historyOpen = initial.historyOpen ?? true;
     function applyHistoryVisibility() {
-      historyResizer.hidden = !historyOpen;
-      historyPane.hidden = !historyOpen;
+      const sqlMode = isSqlKind(currentDb?.kind);
+      historyResizer.hidden = !sqlMode || !historyOpen;
+      historyPane.hidden = !sqlMode || !historyOpen;
       historyToggle.classList.toggle("active", historyOpen);
-      if (historyOpen)
+      if (sqlMode && historyOpen)
         historyView.refresh();
     }
     applyHistoryVisibility();
@@ -11532,29 +11642,56 @@ ${frontmatter.yaml}
       tabBar.hidden = false;
       grid.el.hidden = false;
     }
+    function applyKindVisibility() {
+      const sqlMode = isSqlKind(currentDb?.kind);
+      toolsSection.hidden = !sqlMode;
+      historyToggle.hidden = !sqlMode;
+      historyResizer.hidden = !sqlMode || !historyOpen;
+      historyPane.hidden = !sqlMode || !historyOpen;
+      tableList.el.hidden = !sqlMode;
+      tabBar.hidden = !sqlMode;
+      if (!sqlMode) {
+        queryBtn.classList.remove("active");
+        erBtn.classList.remove("active");
+        searchBtn.classList.remove("active");
+        snapshotBtn.classList.remove("active");
+        grid.el.hidden = true;
+        queryEditor.el.hidden = true;
+        schemaView.el.hidden = true;
+        erDiagram.el.hidden = true;
+        globalSearchView.el.hidden = true;
+        snapshotView.el.hidden = true;
+        redisExplorer.el.hidden = currentDb?.kind !== "redis";
+        esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
+      }
+    }
     function setActiveTab(tab, updateUrl = true) {
-      currentTab = tab;
-      tabData.classList.toggle("active", tab === "data");
-      tabSchema.classList.toggle("active", tab === "schema");
-      queryBtn.classList.toggle("active", tab === "query");
-      erBtn.classList.toggle("active", tab === "er");
-      searchBtn.classList.toggle("active", tab === "search");
-      snapshotBtn.classList.toggle("active", tab === "snapshot");
-      tabBar.hidden = tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
-      grid.el.hidden = tab !== "data";
-      queryEditor.el.hidden = tab !== "query";
-      schemaView.el.hidden = tab !== "schema";
-      erDiagram.el.hidden = tab !== "er";
-      globalSearchView.el.hidden = tab !== "search";
-      snapshotView.el.hidden = tab !== "snapshot";
-      if (tab === "query")
+      currentTab = normalizeViewForDb(tab, currentDb);
+      tabData.classList.toggle("active", currentTab === "data");
+      tabSchema.classList.toggle("active", currentTab === "schema");
+      queryBtn.classList.toggle("active", currentTab === "query");
+      erBtn.classList.toggle("active", currentTab === "er");
+      searchBtn.classList.toggle("active", currentTab === "search");
+      snapshotBtn.classList.toggle("active", currentTab === "snapshot");
+      const sqlMode = isSqlKind(currentDb?.kind);
+      tabBar.hidden = !sqlMode;
+      grid.el.hidden = !sqlMode || currentTab !== "data";
+      queryEditor.el.hidden = !sqlMode || currentTab !== "query";
+      schemaView.el.hidden = !sqlMode || currentTab !== "schema";
+      erDiagram.el.hidden = !sqlMode || currentTab !== "er";
+      globalSearchView.el.hidden = !sqlMode || currentTab !== "search";
+      snapshotView.el.hidden = !sqlMode || currentTab !== "snapshot";
+      redisExplorer.el.hidden = currentDb?.kind !== "redis";
+      esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
+      applyKindVisibility();
+      if (currentTab === "query")
         queryEditor.focus();
       if (updateUrl && currentDb) {
         deps.setRoute({
           screen: "database",
           db: currentDb?.id,
           table: currentTable ?? undefined,
-          tab: tab === "data" ? undefined : tab,
+          tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange()
         }, true);
       }
@@ -11624,18 +11761,13 @@ ${frontmatter.yaml}
         return;
       currentTable = null;
       if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+        currentTab = "data";
         tableList.render([]);
         grid.clear();
         schemaView.clear();
         erDiagram.clear();
         schemaCache = null;
-        tabBar.hidden = true;
-        grid.el.hidden = true;
-        queryEditor.el.hidden = true;
-        schemaView.el.hidden = true;
-        erDiagram.el.hidden = true;
-        globalSearchView.el.hidden = true;
-        snapshotView.el.hidden = true;
+        applyKindVisibility();
         if (currentDb.kind === "redis") {
           esExplorer.el.hidden = true;
           esExplorer.clear();
@@ -11656,6 +11788,7 @@ ${frontmatter.yaml}
       redisExplorer.clear();
       esExplorer.el.hidden = true;
       esExplorer.clear();
+      applyKindVisibility();
       const schema = await fetchSchema(dbId);
       if (generation !== loadGeneration || currentDb?.id !== dbId)
         return;
@@ -11666,7 +11799,7 @@ ${frontmatter.yaml}
       grid.clear();
       schemaView.clear();
       erDiagram.clear();
-      setActiveTab("data");
+      setActiveTab("data", false);
       if (schema.tables.length > 0) {
         await selectTable(schema.tables[0].name, generation);
       }
@@ -11796,7 +11929,7 @@ ${frontmatter.yaml}
     }
     let pendingRedisInitial = initial.redis;
     let pendingEsInitial = initial.es;
-    async function enter(db, table2, view) {
+    async function enter(db, table2, view, options = {}) {
       const generation = ++loadGeneration;
       const files = await fetchDbFiles();
       if (generation !== loadGeneration)
@@ -11824,6 +11957,22 @@ ${frontmatter.yaml}
       if (db && !files.find((f2) => f2.id === db)) {
         db = files[0].id;
       }
+      const autoSelectFirst = options.autoSelectFirst ?? true;
+      if (!db && !autoSelectFirst) {
+        dbSelect.value = "";
+        currentDb = null;
+        currentTable = null;
+        schemaCache = null;
+        tableList.render([]);
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        redisExplorer.clear();
+        esExplorer.clear();
+        setActiveTab("data", false);
+        cb.onStateChange();
+        return;
+      }
       const target = db || files[0].id;
       dbSelect.value = target;
       currentDb = files.find((f2) => f2.id === target) || null;
@@ -11845,16 +11994,17 @@ ${frontmatter.yaml}
       }
       if (generation !== loadGeneration)
         return;
-      if (view && view !== "data") {
-        setActiveTab(view);
-        if (view === "schema") {
+      const normalizedView = normalizeViewForDb(view, currentDb);
+      if (normalizedView !== "data") {
+        setActiveTab(normalizedView);
+        if (normalizedView === "schema") {
           const activeTable = tableList.el.querySelector(".db-table-item.active");
           if (activeTable?.dataset.table)
             showSchema(activeTable.dataset.table);
-        } else if (view === "er") {
+        } else if (normalizedView === "er") {
           if (schemaCache)
             renderErDiagram();
-        } else if (view === "snapshot") {
+        } else if (normalizedView === "snapshot") {
           snapshotView.refresh();
         }
       }
@@ -11886,7 +12036,7 @@ ${frontmatter.yaml}
         state.sidebarWidth = sidebar.style.width;
       if (currentDb?.kind === "redis") {
         const sel = redisExplorer.getSelection();
-        if (sel.dbIndex !== undefined || sel.key !== undefined) {
+        if (sel.dbIndex !== undefined || sel.key !== undefined || sel.keyFilter !== undefined) {
           state.redis = sel;
         }
       } else if (currentDb?.kind === "elasticsearch") {
@@ -11945,6 +12095,9 @@ ${frontmatter.yaml}
     let activeTabId = null;
     let restoring = false;
     let savePending = null;
+    let saveChain = Promise.resolve();
+    let lifecycleSeq = 0;
+    let enterQueue = Promise.resolve();
     let unloadListenerInstalled = false;
     function scheduleSave() {
       if (!mounted || restoring)
@@ -11963,17 +12116,26 @@ ${frontmatter.yaml}
       if (tabs.length === 0)
         return;
       const body = { version: 1, tabs, activeTabId };
-      try {
-        await fetch("/_db/tabs", {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Code-Viewer-Action": "1"
-          },
-          body: JSON.stringify(body),
-          keepalive: options.keepalive
-        });
-      } catch {}
+      const raw = JSON.stringify(body);
+      if (options.keepalive && navigator.sendBeacon) {
+        const blob = new Blob([raw], { type: "application/json" });
+        if (navigator.sendBeacon("/_db/tabs", blob))
+          return;
+      }
+      saveChain = saveChain.catch(() => {}).then(async () => {
+        try {
+          await fetch("/_db/tabs", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Code-Viewer-Action": "1"
+            },
+            body: raw,
+            keepalive: options.keepalive
+          });
+        } catch {}
+      });
+      await saveChain;
     }
     function flushPendingSave(options = {}) {
       if (savePending !== null) {
@@ -12019,6 +12181,7 @@ ${frontmatter.yaml}
         entry.chip.classList.toggle("active", isActive);
         entry.chip.setAttribute("aria-selected", isActive ? "true" : "false");
         entry.chip.tabIndex = isActive ? 0 : -1;
+        entry.closeBtn.tabIndex = isActive ? 0 : -1;
       }
       if (!restoring)
         syncActiveRoute();
@@ -12046,8 +12209,50 @@ ${frontmatter.yaml}
       const label = entry.pane.getLabel();
       entry.label.textContent = label;
       entry.label.title = label;
+      entry.closeBtn.setAttribute("aria-label", `${label} を閉じる`);
     }
-    function openTab(initial) {
+    function dedupeTabs(tabs) {
+      const seen = new Set;
+      const deduped = [];
+      for (const tab of tabs) {
+        const key = JSON.stringify({
+          dbId: tab.dbId,
+          table: tab.table,
+          view: tab.view,
+          redis: tab.redis ?? null,
+          es: tab.es ?? null
+        });
+        if (seen.has(key))
+          continue;
+        seen.add(key);
+        deduped.push(tab);
+      }
+      return deduped;
+    }
+    function isDbStillOpen(dbId) {
+      for (const [, entry] of tabsById) {
+        if (entry.pane.getState().dbId === dbId)
+          return true;
+      }
+      return false;
+    }
+    function closeDbIfUnused(dbId) {
+      if (!dbId || isDbStillOpen(dbId))
+        return;
+      const body = JSON.stringify({ db: dbId });
+      const headers = {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1"
+      };
+      for (const path of [
+        "/_db/close",
+        "/_db/redis/close",
+        "/_db/elasticsearch/close"
+      ]) {
+        fetch(path, { method: "POST", headers, body }).catch(() => {});
+      }
+    }
+    function openTab(initial, options = {}) {
       const id = initial?.id || makeTabId();
       const chip = document.createElement("div");
       chip.className = "db-tabs-chip";
@@ -12062,6 +12267,7 @@ ${frontmatter.yaml}
       closeBtn.type = "button";
       closeBtn.className = "db-tabs-chip-close";
       closeBtn.title = "閉じる";
+      closeBtn.tabIndex = -1;
       closeBtn.textContent = "×";
       closeBtn.addEventListener("click", (e2) => {
         e2.stopPropagation();
@@ -12104,9 +12310,9 @@ ${frontmatter.yaml}
       pane.el.hidden = true;
       tabsList.appendChild(chip);
       tabHost.appendChild(pane.el);
-      tabsById.set(id, { pane, chip, label: labelEl });
+      tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
       setActive(id);
-      const ready = pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined).then(() => refreshChipLabel(id)).finally(() => {
+      const ready = pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined, options).then(() => refreshChipLabel(id)).finally(() => {
         paneReadyById.delete(id);
       });
       paneReadyById.set(id, ready);
@@ -12116,17 +12322,19 @@ ${frontmatter.yaml}
       const entry = tabsById.get(id);
       if (!entry)
         return;
+      const closedDbId = entry.pane.getState().dbId;
       entry.pane.dispose();
       entry.pane.el.remove();
       entry.chip.remove();
       tabsById.delete(id);
       paneReadyById.delete(id);
+      closeDbIfUnused(closedDbId);
       if (activeTabId !== id) {
         scheduleSave();
         return;
       }
       if (tabsById.size === 0) {
-        openTab({});
+        openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
         return;
       }
       const firstId = tabsById.keys().next().value;
@@ -12134,7 +12342,7 @@ ${frontmatter.yaml}
         setActive(firstId);
     }
     newTabBtn.addEventListener("click", () => {
-      openTab({});
+      openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
     });
     function routeMatchesState(state, db, table2, view) {
       if (!db && (table2 || view) && !state.dbId)
@@ -12148,18 +12356,22 @@ ${frontmatter.yaml}
       return true;
     }
     async function applyRouteToTab(db, table2, view) {
-      for (const [id, entry] of tabsById) {
+      for (const [id2, entry] of tabsById) {
         if (routeMatchesState(entry.pane.getState(), db, table2, view)) {
-          setActive(id);
-          refreshChipLabel(id);
+          setActive(id2);
+          refreshChipLabel(id2);
           return;
         }
       }
-      const active = tabsById.get(activeTabId ?? "");
-      if (!active || !activeTabId)
-        return;
-      await active.pane.enter(db, table2, view);
-      refreshChipLabel(activeTabId);
+      const id = openTab({
+        dbId: db ?? null,
+        table: table2 ?? null,
+        view: view ?? "data"
+      }, { autoSelectFirst: db !== undefined });
+      const ready = paneReadyById.get(id);
+      if (ready)
+        await ready;
+      refreshChipLabel(id);
     }
     function parseSseDbId(data) {
       if (!data)
@@ -12171,7 +12383,9 @@ ${frontmatter.yaml}
         return null;
       }
     }
-    async function enter(db, table2, view) {
+    async function doEnter(seq, db, table2, view) {
+      if (seq !== lifecycleSeq)
+        return;
       const firstMount = !mounted;
       if (firstMount) {
         const content = document.getElementById("content");
@@ -12193,17 +12407,24 @@ ${frontmatter.yaml}
         deps.setPageMode();
         deps.syncHeaderMenu();
         const restored = await fetchTabs();
+        if (!mounted || seq !== lifecycleSeq)
+          return;
         if (restored && restored.tabs.length > 0) {
           restoring = true;
           const restoredIds = [];
           try {
-            for (const t2 of restored.tabs) {
-              restoredIds.push(openTab(t2));
+            const restoredTabs = dedupeTabs(restored.tabs);
+            for (const t2 of restoredTabs) {
+              if (!mounted || seq !== lifecycleSeq)
+                return;
+              restoredIds.push(openTab(t2, { autoSelectFirst: false }));
             }
             const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
             if (targetId)
               setActive(targetId);
             await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
+            if (!mounted || seq !== lifecycleSeq)
+              return;
           } finally {
             restoring = false;
           }
@@ -12221,7 +12442,7 @@ ${frontmatter.yaml}
           dbId: db || null,
           table: table2 || null,
           view: view || "data"
-        });
+        }, { autoSelectFirst: !db });
         return;
       }
       if (!activeTabId)
@@ -12233,9 +12454,15 @@ ${frontmatter.yaml}
         await applyRouteToTab(db, table2, view);
       }
     }
+    async function enter(db, table2, view) {
+      const seq = lifecycleSeq;
+      enterQueue = enterQueue.catch(() => {}).then(() => doEnter(seq, db, table2, view));
+      await enterQueue;
+    }
     function leave() {
       if (!mounted)
         return;
+      lifecycleSeq++;
       flushPendingSave();
       for (const [, entry] of tabsById) {
         entry.pane.dispose();
@@ -16010,6 +16237,20 @@ ${frontmatter.yaml}
       wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
       syncSidebarHeaderHeight();
     }
+    function activeRepoTreeRef() {
+      const fileRef = repoFileTargetFromRoute();
+      if (fileRef != null)
+        return fileRef || "worktree";
+      if (STATE.route.screen === "repo")
+        return STATE.route.ref || "worktree";
+      return null;
+    }
+    function isActiveRepoTreeRef(ref) {
+      return activeRepoTreeRef() === (ref || "worktree");
+    }
+    function isActiveRepoRoute(ref, path) {
+      return STATE.route.screen === "repo" && (STATE.route.ref || "worktree") === (ref || "worktree") && (STATE.route.path || "") === path;
+    }
     function fileEntryIcon() {
       return iconSvg("octicon-file", FILE_16_PATH);
     }
@@ -16624,12 +16865,16 @@ ${frontmatter.yaml}
     function renderRepoBlobSidebar(currentPath, ref) {
       syncRepoTargetInput(ref);
       const normalizedRef = ref || "worktree";
+      if (!isActiveRepoTreeRef(normalizedRef))
+        return Promise.resolve();
       if (isRepoSidebarReusable(normalizedRef)) {
         activateRepoSidebarPath(currentPath);
         return Promise.resolve();
       }
       if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
         return REPO_SIDEBAR_LOAD.then(() => {
+          if (!isActiveRepoTreeRef(normalizedRef))
+            return;
           activateRepoSidebarPath(currentPath);
         });
       }
@@ -16643,8 +16888,7 @@ ${frontmatter.yaml}
           throw new Error("failed to load repository tree");
         return r2.json();
       })).then((meta) => {
-        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
-        if ((activeRepoRef || "worktree") !== normalizedRef)
+        if (!isActiveRepoTreeRef(normalizedRef))
           return;
         const files = meta.entries.map((entry, index) => ({
           order: index + 1,
@@ -16672,6 +16916,8 @@ ${frontmatter.yaml}
         });
         activateRepoSidebarPath(currentPath);
       }).catch(() => {
+        if (!isActiveRepoTreeRef(normalizedRef))
+          return;
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
         $("#totals").textContent = "Cannot load tree";
@@ -16841,20 +17087,28 @@ ${frontmatter.yaml}
       if (STATE.route.screen !== "repo")
         return Promise.resolve();
       setStatus("refreshing");
+      const routeRef = STATE.route.ref || "worktree";
+      const routePath = STATE.route.path || "";
       const params = new URLSearchParams;
-      params.set("ref", STATE.route.ref || "worktree");
-      if (STATE.route.path)
-        params.set("path", STATE.route.path);
+      params.set("ref", routeRef);
+      if (routePath)
+        params.set("path", routePath);
       appendScopeParams(params);
       return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");
         return r2.json();
       })).then(async (data) => {
+        if (!isActiveRepoRoute(routeRef, routePath))
+          return;
         await renderRepo(data);
         setStatus("live");
         syncHeaderMenu();
-      }).catch(() => setStatus("error"));
+      }).catch(() => {
+        if (!isActiveRepoRoute(routeRef, routePath))
+          return;
+        setStatus("error");
+      });
     }
     let creatingDirectory = false;
     function showTrashError(message) {
@@ -22214,6 +22468,11 @@ ${frontmatter.yaml}
             p2.textContent = onHistory ? "This commit has no changes against its first parent." : "The working tree is clean against this ref.";
         }
       }
+      const routeAtRequest = STATE.route;
+      const fromAtRequest = STATE.from;
+      const toAtRequest = STATE.to;
+      const ignoreWsAtRequest = STATE.ignoreWs;
+      const isCurrentDiffRequest = () => STATE.route === routeAtRequest && STATE.from === fromAtRequest && STATE.to === toAtRequest && STATE.ignoreWs === ignoreWsAtRequest;
       setStatus("refreshing");
       const params = new URLSearchParams;
       if (STATE.ignoreWs)
@@ -22226,10 +22485,14 @@ ${frontmatter.yaml}
         params.set("nocache", "1");
       const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
       return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        if (!isCurrentDiffRequest())
+          return null;
         const result = renderShell(data, options.changedPaths);
         setStatus("live");
         return result;
       }).catch(() => {
+        if (!isCurrentDiffRequest())
+          return null;
         setStatus("error");
         return null;
       });

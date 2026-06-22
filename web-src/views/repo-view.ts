@@ -139,6 +139,25 @@ export function createRepoView(deps: RepoViewDeps) {
     syncSidebarHeaderHeight();
   }
 
+  function activeRepoTreeRef(): string | null {
+    const fileRef = repoFileTargetFromRoute();
+    if (fileRef != null) return fileRef || "worktree";
+    if (STATE.route.screen === "repo") return STATE.route.ref || "worktree";
+    return null;
+  }
+
+  function isActiveRepoTreeRef(ref: string) {
+    return activeRepoTreeRef() === (ref || "worktree");
+  }
+
+  function isActiveRepoRoute(ref: string, path: string) {
+    return (
+      STATE.route.screen === "repo" &&
+      (STATE.route.ref || "worktree") === (ref || "worktree") &&
+      (STATE.route.path || "") === path
+    );
+  }
+
   function fileEntryIcon(): string {
     return iconSvg("octicon-file", FILE_16_PATH);
   }
@@ -868,12 +887,14 @@ export function createRepoView(deps: RepoViewDeps) {
   function renderRepoBlobSidebar(currentPath: string, ref: string) {
     syncRepoTargetInput(ref);
     const normalizedRef = ref || "worktree";
+    if (!isActiveRepoTreeRef(normalizedRef)) return Promise.resolve();
     if (isRepoSidebarReusable(normalizedRef)) {
       activateRepoSidebarPath(currentPath);
       return Promise.resolve();
     }
     if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
       return REPO_SIDEBAR_LOAD.then(() => {
+        if (!isActiveRepoTreeRef(normalizedRef)) return;
         activateRepoSidebarPath(currentPath);
       });
     }
@@ -889,10 +910,7 @@ export function createRepoView(deps: RepoViewDeps) {
       }),
     )
       .then((meta) => {
-        const activeRepoRef =
-          repoFileTargetFromRoute() ||
-          (STATE.route.screen === "repo" ? STATE.route.ref : "");
-        if ((activeRepoRef || "worktree") !== normalizedRef) return;
+        if (!isActiveRepoTreeRef(normalizedRef)) return;
         const files = meta.entries.map(
           (entry, index) =>
             ({
@@ -923,6 +941,7 @@ export function createRepoView(deps: RepoViewDeps) {
         activateRepoSidebarPath(currentPath);
       })
       .catch(() => {
+        if (!isActiveRepoTreeRef(normalizedRef)) return;
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
         $("#totals").textContent = "Cannot load tree";
@@ -1109,9 +1128,11 @@ export function createRepoView(deps: RepoViewDeps) {
   function loadRepo(): Promise<void> {
     if (STATE.route.screen !== "repo") return Promise.resolve();
     setStatus("refreshing");
+    const routeRef = STATE.route.ref || "worktree";
+    const routePath = STATE.route.path || "";
     const params = new URLSearchParams();
-    params.set("ref", STATE.route.ref || "worktree");
-    if (STATE.route.path) params.set("path", STATE.route.path);
+    params.set("ref", routeRef);
+    if (routePath) params.set("path", routePath);
     appendScopeParams(params);
     return trackLoad<RepoTreeResponse>(
       fetch(`/_tree?${params.toString()}`).then((r) => {
@@ -1120,11 +1141,15 @@ export function createRepoView(deps: RepoViewDeps) {
       }),
     )
       .then(async (data) => {
+        if (!isActiveRepoRoute(routeRef, routePath)) return;
         await renderRepo(data);
         setStatus("live");
         syncHeaderMenu();
       })
-      .catch(() => setStatus("error"));
+      .catch(() => {
+        if (!isActiveRepoRoute(routeRef, routePath)) return;
+        setStatus("error");
+      });
   }
 
   let creatingDirectory = false;

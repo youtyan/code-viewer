@@ -4651,7 +4651,10 @@ function sanitizeRedis(v) {
   const key = sanitizeOptionalString(r.key, MAX_REDIS_KEY_LEN);
   if (key !== undefined)
     out.key = key;
-  if (out.dbIndex === undefined && out.key === undefined)
+  const keyFilter = sanitizeOptionalString(r.keyFilter, MAX_REDIS_KEY_FILTER_LEN);
+  if (keyFilter !== undefined)
+    out.keyFilter = keyFilter;
+  if (out.dbIndex === undefined && out.key === undefined && out.keyFilter === undefined)
     return;
   return out;
 }
@@ -4756,7 +4759,7 @@ function saveTabs(cwd, state) {
   writeFileSync4(tmp, content, "utf8");
   renameSync3(tmp, file);
 }
-var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e6, MAX_SQL_DRAFT_LEN = 16000, MAX_ES_QUERY_LEN = 16000, MAX_TAB_ID_LEN = 128, MAX_DB_ID_LEN = 2048, MAX_TABLE_NAME_LEN = 512, MAX_REDIS_KEY_LEN = 1024, MAX_INDEX_NAME_LEN = 256, MAX_CSS_SIZE_LEN = 16, VALID_VIEWS;
+var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e6, MAX_SQL_DRAFT_LEN = 16000, MAX_ES_QUERY_LEN = 16000, MAX_TAB_ID_LEN = 128, MAX_DB_ID_LEN = 2048, MAX_TABLE_NAME_LEN = 512, MAX_REDIS_KEY_LEN = 1024, MAX_REDIS_KEY_FILTER_LEN = 512, MAX_INDEX_NAME_LEN = 256, MAX_CSS_SIZE_LEN = 16, VALID_VIEWS;
 var init_tabs_store = __esm(() => {
   VALID_VIEWS = new Set([
     "data",
@@ -5823,6 +5826,27 @@ function resolveRedis(cwd, dbParam) {
   redisAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }
+async function handleClose(req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db)
+    return textError("missing db", 400);
+  const cached = redisAdapterCache.get(body.db);
+  if (cached) {
+    try {
+      cached.close();
+    } finally {
+      redisAdapterCache.delete(body.db);
+    }
+  }
+  return json({ ok: true });
+}
 function handleDatabases(cwd, url) {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
   if (r instanceof Response)
@@ -5870,7 +5894,7 @@ function handleKeys(cwd, url) {
     return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
-async function handleRedisRoute(req, url, cwd) {
+async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
@@ -5882,8 +5906,14 @@ async function handleRedisRoute(req, url, cwd) {
     log(res.status);
     return res;
   };
-  if (path !== "/_db/redis/databases" && path !== "/_db/redis/keys" && path !== "/_db/redis/value") {
+  if (path !== "/_db/redis/databases" && path !== "/_db/redis/keys" && path !== "/_db/redis/value" && path !== "/_db/redis/close") {
     return null;
+  }
+  if (path === "/_db/redis/close") {
+    if (sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleClose(req));
   }
   if (method !== "GET") {
     return wrap(textError("method not allowed", 405));
@@ -5962,6 +5992,27 @@ function resolveEs(cwd, dbParam) {
   const explorer = openElasticsearchAdapter(info.serviceName, info.env, info.composeDir);
   esAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
+}
+async function handleClose2(req) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db)
+    return textError("missing db", 400);
+  const cached = esAdapterCache.get(body.db);
+  if (cached) {
+    try {
+      cached.close();
+    } finally {
+      esAdapterCache.delete(body.db);
+    }
+  }
+  return json({ ok: true });
 }
 function handleIndices(cwd, url) {
   const r = resolveEs(cwd, url.searchParams.get("db"));
@@ -6153,6 +6204,12 @@ async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
       return wrap(textError("forbidden", 403));
     }
     return wrap(await handleSearch(cwd, req, url));
+  }
+  if (path === "/_db/elasticsearch/close") {
+    if (sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleClose2(req));
   }
   return null;
 }
@@ -7079,7 +7136,7 @@ async function handleTabsPut(cwd, req) {
     return textError(`failed to save tabs: ${message}`, 500);
   }
 }
-async function handleClose(cwd, req) {
+async function handleClose3(cwd, req) {
   if (req.method !== "POST")
     return textError("method not allowed", 405);
   let body;
@@ -7107,7 +7164,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   ensureInit();
   if (url.pathname.startsWith("/_db/redis/")) {
     const { handleRedisRoute: handleRedisRoute2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
-    return handleRedisRoute2(req, url, cwd);
+    return handleRedisRoute2(req, url, cwd, sideEffectAllowed);
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute: handleElasticsearchRoute2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
@@ -7151,7 +7208,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
       log(403);
       return textError("forbidden", 403);
     }
-    return wrapResponse(handleClose(cwd, req));
+    return wrapResponse(handleClose3(cwd, req));
   }
   if (path === "/_db/history")
     return wrapResponse(handleHistory(cwd, url));
