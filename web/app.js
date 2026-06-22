@@ -12727,6 +12727,19 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/diff-view.ts
+  function isDiffShellDomIntact(target, expectedKeys) {
+    const children = Array.from(target.children);
+    if (children.length !== expectedKeys.length)
+      return false;
+    return children.every((child, index) => {
+      if (!child.classList.contains("gdp-file-shell"))
+        return false;
+      return child.dataset.key === expectedKeys[index];
+    });
+  }
+  function shouldRenderDiffSidebar(listSame, domIntact) {
+    return !listSame || !domIntact;
+  }
   function createDiffView(deps) {
     const {
       $,
@@ -13026,10 +13039,13 @@ ${frontmatter.yaml}
       renderMeta(meta);
       const target = $("#diff");
       const empty = $("#empty");
+      const expectedKeys = newFiles.map(fileKey);
+      const domIntact = isDiffShellDomIntact(target, expectedKeys);
+      const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
       if (!newFiles.length) {
         prevListSignature = newListSig;
         prevCardSignatures.clear();
-        if (!listSame)
+        if (sidebarNeedsRender)
           renderSidebar(newFiles);
         if (STATE.route.screen === "file") {
           empty.classList.add("hidden");
@@ -13040,9 +13056,9 @@ ${frontmatter.yaml}
         }
         LOAD_QUEUE.length = 0;
         return {
-          structureChanged: !listSame,
+          structureChanged: sidebarNeedsRender,
           invalidatedCards: 0,
-          preservedDom: listSame
+          preservedDom: listSame && domIntact
         };
       }
       empty.classList.add("hidden");
@@ -13051,7 +13067,7 @@ ${frontmatter.yaml}
         newCardSigs.set(fileKey(f2), computeCardSignature(f2));
       }
       let invalidatedCards = 0;
-      if (listSame) {
+      if (listSame && domIntact) {
         const pathsUnknown = !changedPaths;
         let sidebarNeedsStatsUpdate = false;
         for (const f2 of newFiles) {
@@ -13114,7 +13130,7 @@ ${frontmatter.yaml}
           preservedDom: invalidatedCards === 0
         };
       }
-      if (!listSame)
+      if (sidebarNeedsRender)
         renderSidebar(newFiles);
       const oldByKey = new Map;
       document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
