@@ -18,6 +18,7 @@ import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
+  AnnotationTarget,
   DiffMeta,
   FileDiffResponse,
   FileMeta,
@@ -35,6 +36,7 @@ import {
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
+  moveAnnotationEntry,
   renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
@@ -934,6 +936,7 @@ function handleTree(url: URL) {
 function handleSettings() {
   return json({
     project: basename(cwd),
+    branch: git.currentBranch(cwd) || undefined,
     repo_web_url: git.remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -2251,11 +2254,37 @@ async function handleAnnotations(req: Request) {
     return json({ ok: true, session: started.session });
   }
   if (action === "add") {
+    const rawTarget =
+      body.target && typeof body.target === "object"
+        ? (body.target as Record<string, unknown>)
+        : null;
+    const rawTargetTab = rawTarget?.tab;
+    const targetTab =
+      rawTargetTab === "data" ||
+      rawTargetTab === "query" ||
+      rawTargetTab === "schema" ||
+      rawTargetTab === "er" ||
+      rawTargetTab === "search" ||
+      rawTargetTab === "snapshot"
+        ? rawTargetTab
+        : undefined;
+    const target: AnnotationTarget | undefined =
+      rawTarget?.kind === "database"
+        ? {
+            kind: "database" as const,
+            db: typeof rawTarget.db === "string" ? rawTarget.db : undefined,
+            table:
+              typeof rawTarget.table === "string" ? rawTarget.table : undefined,
+            tab: targetTab,
+          }
+        : undefined;
     const path =
       typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
-    if (!path || !safeRepoPath(path)) return text("invalid path", 400);
-    if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
-      return text("forbidden", 403);
+    if (!target) {
+      if (!path || !safeRepoPath(path)) return text("invalid path", 400);
+      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+        return text("forbidden", 403);
+    }
     const result = addAnnotationEntry(
       loadAnnotationsState(cwd),
       {
@@ -2274,8 +2303,13 @@ async function handleAnnotations(req: Request) {
           body.range && typeof body.range === "object"
             ? (body.range as { from?: string; to?: string })
             : undefined,
+        target,
         title: typeof body.title === "string" ? body.title : undefined,
         body: typeof body.body === "string" ? body.body : "",
+        before_id:
+          typeof body.before_id === "string" ? body.before_id : undefined,
+        after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+        position: typeof body.position === "number" ? body.position : undefined,
       },
       new Date().toISOString(),
     );
@@ -2287,6 +2321,24 @@ async function handleAnnotations(req: Request) {
       session_id: result.session.id,
       session_title: result.session.title,
       created_session: result.created_session,
+      entry: result.entry,
+    });
+  }
+  if (action === "move") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return text("invalid id", 400);
+    const result = moveAnnotationEntry(loadAnnotationsState(cwd), id, {
+      before_id:
+        typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined,
+    });
+    if (result.ok === false) return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", result.session.id, result.entry.id);
+    return json({
+      ok: true,
+      session_id: result.session.id,
       entry: result.entry,
     });
   }
