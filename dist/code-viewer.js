@@ -4534,6 +4534,18 @@ var init_snapshot_runner = __esm(() => {
 
 // web-src/server/database/adapters/redis.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
+import { createHash as createHash5 } from "node:crypto";
+function parseSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const db = typeof obj.db === "number" ? obj.db : 0;
+      const pattern = typeof obj.pattern === "string" && obj.pattern.length > 0 ? obj.pattern : "*";
+      return { db, pattern };
+    } catch {}
+  }
+  return { db: 0, pattern: container || "*" };
+}
 function execRedisCli(config, args, timeoutMs = 1e4) {
   const hasPassword = !!config.password;
   const dockerArgs = [
@@ -4901,11 +4913,42 @@ function createRedisAdapter(config) {
     }
     return { type: "none" };
   }
+  async function* iterateForSnapshot(container, signal) {
+    const { db, pattern } = parseSnapshotContainer(container);
+    let cursor = "0";
+    do {
+      if (signal?.aborted)
+        return;
+      const page = listKeys({
+        db,
+        pattern,
+        cursor,
+        count: REDIS_COLLECTION_LIMIT
+      });
+      for (const k of page.keys) {
+        if (signal?.aborted)
+          return;
+        const value = getValue({ db, key: k.name });
+        const keyJson = JSON.stringify({ db, key: k.name });
+        const payloadJson = JSON.stringify({ type: k.type, value });
+        const rowHash = createHash5("sha256").update(payloadJson).digest("hex");
+        yield { keyJson, payloadJson, rowHash };
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== "0");
+  }
+  async function listSnapshotContainers() {
+    return [];
+  }
   return {
     kind: "redis",
+    model: "kv",
+    capabilities: { snapshot: true },
     listDatabases,
     listKeys,
     getValue,
+    iterateForSnapshot,
+    listSnapshotContainers,
     close() {}
   };
 }
