@@ -6976,6 +6976,9 @@ body.db-resizing {
   overflow: hidden;
   background: var(--bg);
 }
+.redis-explorer[hidden] {
+  display: none;
+}
 .redis-db-list-pane {
   width: 220px;
   border-right: 1px solid var(--border);
@@ -7241,6 +7244,9 @@ body.db-resizing {
   flex-direction: row;
   overflow: hidden;
   background: var(--bg);
+}
+.es-explorer[hidden] {
+  display: none;
 }
 .es-pane-header {
   padding: 8px 12px;
