@@ -7660,6 +7660,16 @@ body.db-resizing {
   font-weight: 500;
   margin-bottom: -1px;
 }
+.db-tabs-chip.dragging {
+  opacity: 0.55;
+}
+.db-tabs-chip.drop-target {
+  background: var(--accent-subtle);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.db-tabs-chip.drop-target.drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
 .db-tabs-chip:focus-visible,
 .db-tabs-new-btn:focus-visible,
 .db-tabs-chip-close:focus-visible {

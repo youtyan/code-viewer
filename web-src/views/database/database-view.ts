@@ -363,8 +363,16 @@ function createTabPane(
   function clearDockerNotice() {
     const notice = mainContent.querySelector<HTMLElement>(".db-docker-notice");
     if (notice) notice.remove();
-    tabBar.hidden = false;
-    grid.el.hidden = false;
+    applyInnerTabBarVisibility();
+    grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
+  }
+
+  function isTableViewTab(): boolean {
+    return currentTab === "data" || currentTab === "schema";
+  }
+
+  function applyInnerTabBarVisibility(): void {
+    tabBar.hidden = !isSqlKind(currentDb?.kind) || !isTableViewTab();
   }
 
   function applyKindVisibility() {
@@ -374,7 +382,7 @@ function createTabPane(
     historyResizer.hidden = !sqlMode || !historyOpen;
     historyPane.hidden = !sqlMode || !historyOpen;
     tableList.el.hidden = !sqlMode;
-    tabBar.hidden = !sqlMode;
+    applyInnerTabBarVisibility();
 
     if (!sqlMode) {
       queryBtn.classList.remove("active");
@@ -403,8 +411,7 @@ function createTabPane(
     const sqlMode = isSqlKind(currentDb?.kind);
     // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
     // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
-    const onTableView = currentTab === "data" || currentTab === "schema";
-    tabBar.hidden = !sqlMode || !onTableView;
+    applyInnerTabBarVisibility();
     grid.el.hidden = !sqlMode || currentTab !== "data";
     queryEditor.el.hidden = !sqlMode || currentTab !== "query";
     schemaView.el.hidden = !sqlMode || currentTab !== "schema";
@@ -955,8 +962,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       closeBtn: HTMLButtonElement;
     }
   >();
+  const tabOrder: string[] = [];
   const paneReadyById = new Map<string, Promise<void>>();
   let activeTabId: string | null = null;
+  let draggingTabId: string | null = null;
+  let dropTargetId: string | null = null;
+  let dropAfterTarget = false;
   // restoring 中は scheduleSave を抑制して、初期復元の連鎖 setState で
   // 過剰な PUT を発生させないようにする。復元完了後に 1 回まとめて保存する。
   let restoring = false;
@@ -976,7 +987,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     savePending = null;
     if (!mounted || restoring) return;
     const tabs: TabState[] = [];
-    for (const [, entry] of tabsById) tabs.push(entry.pane.getState());
+    for (const id of tabOrder) {
+      const entry = tabsById.get(id);
+      if (entry) tabs.push(entry.pane.getState());
+    }
     if (tabs.length === 0) return;
     const body: TabsState = { version: 1, tabs, activeTabId };
     const raw = JSON.stringify(body);
@@ -1126,6 +1140,145 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
+  function clearDropTarget(): void {
+    if (!dropTargetId) return;
+    const entry = tabsById.get(dropTargetId);
+    if (entry) {
+      entry.chip.classList.remove("drop-target", "drop-after");
+    }
+    dropTargetId = null;
+    dropAfterTarget = false;
+  }
+
+  function clearDragState(): void {
+    for (const [, entry] of tabsById) {
+      entry.chip.classList.remove("dragging", "drop-target", "drop-after");
+    }
+    draggingTabId = null;
+    dropTargetId = null;
+    dropAfterTarget = false;
+  }
+
+  function isDropAfter(chip: HTMLElement, ev: DragEvent): boolean {
+    const rect = chip.getBoundingClientRect();
+    return ev.clientX > rect.left + rect.width / 2;
+  }
+
+  function markDropTarget(id: string, after: boolean): void {
+    if (dropTargetId !== id || dropAfterTarget !== after) clearDropTarget();
+    dropTargetId = id;
+    dropAfterTarget = after;
+    const entry = tabsById.get(id);
+    if (!entry) return;
+    entry.chip.classList.add("drop-target");
+    entry.chip.classList.toggle("drop-after", after);
+  }
+
+  function moveTabBeforeOrAfter(
+    dragId: string,
+    targetId: string,
+    after: boolean,
+  ): void {
+    if (dragId === targetId) return;
+    const dragEntry = tabsById.get(dragId);
+    const targetEntry = tabsById.get(targetId);
+    if (!dragEntry || !targetEntry) return;
+    const dragIndex = tabOrder.indexOf(dragId);
+    if (dragIndex < 0) return;
+    tabOrder.splice(dragIndex, 1);
+    const targetIndex = tabOrder.indexOf(targetId);
+    if (targetIndex < 0) {
+      tabOrder.splice(dragIndex, 0, dragId);
+      return;
+    }
+    const insertIndex = targetIndex + (after ? 1 : 0);
+    tabOrder.splice(insertIndex, 0, dragId);
+    tabsList.insertBefore(
+      dragEntry.chip,
+      after ? targetEntry.chip.nextSibling : targetEntry.chip,
+    );
+    scheduleSave();
+  }
+
+  function moveTabToEnd(dragId: string): void {
+    const dragEntry = tabsById.get(dragId);
+    if (!dragEntry) return;
+    const dragIndex = tabOrder.indexOf(dragId);
+    if (dragIndex < 0 || dragIndex === tabOrder.length - 1) return;
+    tabOrder.splice(dragIndex, 1);
+    tabOrder.push(dragId);
+    tabsList.appendChild(dragEntry.chip);
+    scheduleSave();
+  }
+
+  function attachTabDragHandlers(
+    chip: HTMLElement,
+    closeBtn: HTMLButtonElement,
+    id: string,
+  ): void {
+    chip.draggable = true;
+    closeBtn.draggable = false;
+
+    chip.addEventListener("dragstart", (e) => {
+      if ((e.target as HTMLElement | null)?.closest(".db-tabs-chip-close")) {
+        e.preventDefault();
+        return;
+      }
+      draggingTabId = id;
+      chip.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", id);
+      }
+    });
+
+    chip.addEventListener("dragenter", (e) => {
+      if (!draggingTabId || draggingTabId === id) return;
+      e.preventDefault();
+      markDropTarget(id, isDropAfter(chip, e));
+    });
+
+    chip.addEventListener("dragover", (e) => {
+      if (!draggingTabId || draggingTabId === id) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      markDropTarget(id, isDropAfter(chip, e));
+    });
+
+    chip.addEventListener("dragleave", (e) => {
+      const related = e.relatedTarget as Node | null;
+      if (related && chip.contains(related)) return;
+      if (dropTargetId === id) clearDropTarget();
+    });
+
+    chip.addEventListener("drop", (e) => {
+      if (!draggingTabId || draggingTabId === id) return;
+      e.preventDefault();
+      moveTabBeforeOrAfter(draggingTabId, id, isDropAfter(chip, e));
+      clearDragState();
+    });
+
+    chip.addEventListener("dragend", () => clearDragState());
+  }
+
+  tabsList.addEventListener("dragover", (e) => {
+    if (!draggingTabId) return;
+    const target = (e.target as HTMLElement | null)?.closest(".db-tabs-chip");
+    if (target && tabsList.contains(target)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    clearDropTarget();
+  });
+
+  tabsList.addEventListener("drop", (e) => {
+    if (!draggingTabId) return;
+    const target = (e.target as HTMLElement | null)?.closest(".db-tabs-chip");
+    if (target && tabsList.contains(target)) return;
+    e.preventDefault();
+    moveTabToEnd(draggingTabId);
+    clearDragState();
+  });
+
   function openTab(
     initial?: Partial<TabState>,
     options: { autoSelectFirst?: boolean } = {},
@@ -1155,6 +1308,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     });
 
     chip.append(labelEl, closeBtn);
+    attachTabDragHandlers(chip, closeBtn, id);
     chip.addEventListener("click", () => setActive(id));
     chip.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1200,6 +1354,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabsList.appendChild(chip);
     tabHost.appendChild(pane.el);
     tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
+    tabOrder.push(id);
 
     setActive(id);
     // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
@@ -1229,6 +1384,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     entry.pane.el.remove();
     entry.chip.remove();
     tabsById.delete(id);
+    const orderIndex = tabOrder.indexOf(id);
+    if (orderIndex >= 0) tabOrder.splice(orderIndex, 1);
     paneReadyById.delete(id);
     closeDbIfUnused(closedDbId);
     if (activeTabId !== id) {
@@ -1244,7 +1401,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       return;
     }
     // 残りの先頭を active 化。
-    const firstId = tabsById.keys().next().value as string | undefined;
+    const firstId = tabOrder[0];
     if (firstId) setActive(firstId);
   }
 
@@ -1344,7 +1501,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           const targetId =
             restored.activeTabId && tabsById.has(restored.activeTabId)
               ? restored.activeTabId
-              : (tabsById.keys().next().value as string | undefined);
+              : tabOrder[0];
           if (targetId) setActive(targetId);
           await Promise.all(
             restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean),
@@ -1406,6 +1563,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.pane.dispose();
     }
     tabsById.clear();
+    tabOrder.length = 0;
     tabsList.innerHTML = "";
     tabHost.innerHTML = "";
     activeTabId = null;
