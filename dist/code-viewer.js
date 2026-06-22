@@ -4884,28 +4884,257 @@ function createRedisAdapter(config) {
     }
     return { type: "none" };
   }
+  function snapshotFetch(db, hexKey, type) {
+    if (type === "none") {
+      return {
+        payload: { type: "none" },
+        fullHash: createHash4("sha256").update("").digest("hex")
+      };
+    }
+    if (type === "string")
+      return snapshotFetchString(db, hexKey);
+    if (type === "list")
+      return snapshotFetchList(db, hexKey);
+    if (type === "hash")
+      return snapshotFetchHash(db, hexKey);
+    if (type === "set")
+      return snapshotFetchSet(db, hexKey);
+    if (type === "zset")
+      return snapshotFetchZset(db, hexKey);
+    if (type === "stream")
+      return snapshotFetchStream(db, hexKey);
+    return {
+      payload: { type: "none" },
+      fullHash: createHash4("sha256").update("").digest("hex")
+    };
+  }
+  function evalHex(db, luaBody, extraArgv, label) {
+    const r = execRedisCli(config, [
+      "-n",
+      String(db),
+      "EVAL",
+      luaBody,
+      "0",
+      ...extraArgv
+    ]);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label} failed`);
+    }
+    return r.stdout.replace(/\r?\n$/, "");
+  }
+  function snapshotFetchString(db, hexKey) {
+    const fullSize = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('STRLEN', fromhex(ARGV[1]))`, [hexKey], "STRLEN")) || 0;
+    const hasher = createHash4("sha256");
+    let previewBytes = Buffer.alloc(0);
+    for (let offset = 0;offset < fullSize; offset += REDIS_STRING_BYTE_LIMIT) {
+      const end = Math.min(offset + REDIS_STRING_BYTE_LIMIT - 1, fullSize - 1);
+      const hexChunk = evalHex(db, `${LUA_HEX_KEY_PRELUDE} return tohex(redis.call('GETRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])))`, [hexKey, String(offset), String(end)], "GETRANGE");
+      const bytes = Buffer.from(hexChunk, "hex");
+      hasher.update(bytes);
+      if (offset === 0)
+        previewBytes = bytes;
+    }
+    const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+    const payload = isValidUtf8(previewBytes) ? {
+      type: "string",
+      value: previewBytes.toString("utf8"),
+      truncated,
+      fullSize
+    } : {
+      type: "string",
+      value: "",
+      binaryBase64: previewBytes.toString("base64"),
+      truncated,
+      fullSize
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function hashHexItem(hasher, hex) {
+    hasher.update(`${hex.length.toString(16)}:${hex}
+`);
+  }
+  function snapshotFetchList(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('LLEN', fromhex(ARGV[1]))`, [hexKey], "LLEN")) || 0;
+    const hasher = createHash4("sha256");
+    let previewItems = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local items = redis.call('LRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])) local hex = {} for i, v in ipairs(items) do hex[i] = tohex(v) end return cjson.encode(hex)`, [hexKey, String(offset), String(end)], "LRANGE");
+      const chunk = safeJsonParse(stdout, "LRANGE");
+      for (const hex of chunk)
+        hashHexItem(hasher, hex);
+      if (offset === 0)
+        previewItems = chunk.map(decodeHexItem);
+    }
+    const payload = {
+      type: "list",
+      items: previewItems,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchHash(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('HLEN', fromhex(ARGV[1]))`, [hexKey], "HLEN")) || 0;
+    const allPairs = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('HSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local raw = r[2] local pairs_arr = {} for i = 1, #raw, 2 do table.insert(pairs_arr, {tohex(raw[i]), tohex(raw[i+1])}) end return cjson.encode({cursor=r[1], pairs=pairs_arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "HSCAN");
+      const parsed = safeJsonParse(stdout, "HSCAN");
+      allPairs.push(...parsed.pairs);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const seenField = new Set;
+    const uniquePairs = [];
+    for (const p of allPairs) {
+      if (seenField.has(p[0]))
+        continue;
+      seenField.add(p[0]);
+      uniquePairs.push(p);
+    }
+    uniquePairs.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    const hasher = createHash4("sha256");
+    for (const [f, v] of uniquePairs) {
+      hashHexItem(hasher, f);
+      hashHexItem(hasher, v);
+    }
+    const previewFields = uniquePairs.slice(0, REDIS_COLLECTION_LIMIT).map(([f, v]) => ({ field: decodeHexItem(f), value: decodeHexItem(v) }));
+    const payload = {
+      type: "hash",
+      fields: previewFields,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchSet(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('SCARD', fromhex(ARGV[1]))`, [hexKey], "SCARD")) || 0;
+    const allMembers = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('SSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local arr = {} for i, v in ipairs(r[2]) do arr[i] = tohex(v) end return cjson.encode({cursor=r[1], members=arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "SSCAN");
+      const parsed = safeJsonParse(stdout, "SSCAN");
+      allMembers.push(...parsed.members);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const dedup = Array.from(new Set(allMembers));
+    dedup.sort();
+    const hasher = createHash4("sha256");
+    for (const m of dedup)
+      hashHexItem(hasher, m);
+    const previewMembers = dedup.slice(0, REDIS_COLLECTION_LIMIT).map(decodeHexItem);
+    const payload = {
+      type: "set",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchZset(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('ZCARD', fromhex(ARGV[1]))`, [hexKey], "ZCARD")) || 0;
+    const hasher = createHash4("sha256");
+    let previewMembers = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('ZRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {tohex(r[i]), tonumber(r[i+1])}) end return cjson.encode(arr)`, [hexKey, String(offset), String(end)], "ZRANGE");
+      const chunk = safeJsonParse(stdout, "ZRANGE");
+      for (const [hex, score] of chunk) {
+        hashHexItem(hasher, hex);
+        hasher.update(`${score}
+`);
+      }
+      if (offset === 0) {
+        previewMembers = chunk.map(([h, s]) => ({
+          member: decodeHexItem(h),
+          score: s
+        }));
+      }
+    }
+    const payload = {
+      type: "zset",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchStream(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('XLEN', fromhex(ARGV[1]))`, [hexKey], "XLEN")) || 0;
+    const hasher = createHash4("sha256");
+    let previewEntries = [];
+    let startId = "-";
+    const seenIds = new Set;
+    let first = true;
+    for (;; ) {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('XRANGE', fromhex(ARGV[1]), ARGV[2], '+', 'COUNT', tonumber(ARGV[3])) local arr = {} for _, e in ipairs(r) do local fs = {} for i = 1, #e[2], 2 do fs[#fs+1] = tohex(e[2][i]) fs[#fs+1] = tohex(e[2][i+1]) end arr[#arr+1] = {id=e[1], fs=fs} end return cjson.encode(arr)`, [hexKey, startId, String(REDIS_COLLECTION_LIMIT)], "XRANGE");
+      const chunk = safeJsonParse(stdout, "XRANGE");
+      if (chunk.length === 0)
+        break;
+      const newEntries = [];
+      for (const e of chunk) {
+        if (seenIds.has(e.id))
+          continue;
+        seenIds.add(e.id);
+        newEntries.push(e);
+      }
+      for (const e of newEntries) {
+        hasher.update(`${e.id}
+`);
+        for (const hex of e.fs)
+          hashHexItem(hasher, hex);
+      }
+      if (first) {
+        previewEntries = newEntries.slice(0, REDIS_COLLECTION_LIMIT).map((e) => {
+          const fields = [];
+          for (let i = 0;i < e.fs.length; i += 2) {
+            fields.push({
+              field: decodeHexItem(e.fs[i]),
+              value: decodeHexItem(e.fs[i + 1])
+            });
+          }
+          return { id: e.id, fields };
+        });
+        first = false;
+      }
+      if (chunk.length < REDIS_COLLECTION_LIMIT)
+        break;
+      startId = chunk[chunk.length - 1].id;
+    }
+    const payload = {
+      type: "stream",
+      entries: previewEntries,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
   async function* iterateForSnapshot(container, signal) {
     const { db, pattern } = parseSnapshotContainer(container);
+    const seen = new Set;
     let cursor = "0";
     do {
       if (signal?.aborted)
         return;
-      const page = listKeys({
-        db,
-        pattern,
-        cursor,
-        count: REDIS_COLLECTION_LIMIT
-      });
-      for (const k of page.keys) {
+      const stdout = evalHex(db, SCAN_HEX_KEYS_LUA, [cursor, pattern, String(REDIS_COLLECTION_LIMIT)], "SCAN");
+      const parsed = safeJsonParse(stdout, "SCAN");
+      for (let i = 0;i < parsed.keys.length; i++) {
         if (signal?.aborted)
           return;
-        const value = getValue({ db, key: k.name });
-        const keyJson = JSON.stringify({ db, key: k.name });
-        const payloadJson = JSON.stringify({ type: k.type, value });
-        const rowHash = createHash4("sha256").update(payloadJson).digest("hex");
-        yield { keyJson, payloadJson, rowHash };
+        const hexKey = parsed.keys[i];
+        if (seen.has(hexKey))
+          continue;
+        seen.add(hexKey);
+        const rawType = parsed.types[i] || "none";
+        const type = isValidRedisType(rawType) ? rawType : "none";
+        const { payload, fullHash } = snapshotFetch(db, hexKey, type);
+        const keyBytes = Buffer.from(hexKey, "hex");
+        const keyName = isValidUtf8(keyBytes) ? keyBytes.toString("utf8") : { binaryBase64: keyBytes.toString("base64") };
+        const keyJson = JSON.stringify({ db, key: keyName });
+        const payloadJson = JSON.stringify({ type, value: payload });
+        yield { keyJson, payloadJson, rowHash: fullHash };
       }
-      cursor = page.nextCursor;
+      cursor = parsed.cursor;
     } while (cursor !== "0");
   }
   async function listSnapshotContainers() {
@@ -4931,8 +5160,10 @@ function openRedisExplorer(serviceName, env, cwd) {
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }
-var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`;
-var init_redis = () => {};
+var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`, LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`, SCAN_HEX_KEYS_LUA;
+var init_redis = __esm(() => {
+  SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
+});
 
 // web-src/server/database/handle-redis.ts
 var exports_handle_redis = {};

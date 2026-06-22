@@ -249,6 +249,17 @@ function isValidUtf8(buf: Buffer): boolean {
 // hex → bytes → utf8/base64 判定して binary 安全に decode できる。
 const LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`;
 
+// snapshot 専用 Lua prelude。tohex に加えて、ARGV 経由で渡された hex key を
+// raw bytes に戻す fromhex も提供する。binary key を ARGV から redis.call の
+// key 引数として渡すために使う (redis-cli の argv は string なので binary を
+// 直接渡せないが、hex を ARGV で受け Lua 内で復元すれば任意 byte 列で
+// command を発行できる)。
+const LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`;
+
+// snapshot 用 SCAN: key を hex で返す。binary key 対応 (R2-M1) と、
+// 後段の dedup (R2-M2) のために hex 比較で同一性を判定する。
+const SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
+
 function decodeHexItem(hex: string): RedisItem {
   const buf = Buffer.from(hex, "hex");
   if (isValidUtf8(buf)) return buf.toString("utf8");
@@ -518,29 +529,395 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return { type: "none" };
   }
 
+  // snapshot 用に "全データ" を読んで SHA256 を取り、UI 互換の truncated payload
+  // も同時に作る。binary key 対応のため、key は hex で受けて Lua 側で fromhex
+  // で復元してから redis コマンドに渡す。各 yield する SnapshotItem の
+  // rowHash は閲覧用 truncation の影響を受けない完全データ hash になる。
+  function snapshotFetch(
+    db: number,
+    hexKey: string,
+    type: RedisType,
+  ): { payload: RedisValue; fullHash: string } {
+    if (type === "none") {
+      return {
+        payload: { type: "none" },
+        fullHash: createHash("sha256").update("").digest("hex"),
+      };
+    }
+    if (type === "string") return snapshotFetchString(db, hexKey);
+    if (type === "list") return snapshotFetchList(db, hexKey);
+    if (type === "hash") return snapshotFetchHash(db, hexKey);
+    if (type === "set") return snapshotFetchSet(db, hexKey);
+    if (type === "zset") return snapshotFetchZset(db, hexKey);
+    if (type === "stream") return snapshotFetchStream(db, hexKey);
+    return {
+      payload: { type: "none" },
+      fullHash: createHash("sha256").update("").digest("hex"),
+    };
+  }
+
+  function evalHex(
+    db: number,
+    luaBody: string,
+    extraArgv: string[],
+    label: string,
+  ): string {
+    const r = execRedisCli(config, [
+      "-n",
+      String(db),
+      "EVAL",
+      luaBody,
+      "0",
+      ...extraArgv,
+    ]);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label} failed`);
+    }
+    return r.stdout.replace(/\r?\n$/, "");
+  }
+
+  function snapshotFetchString(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const fullSize =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('STRLEN', fromhex(ARGV[1]))`,
+          [hexKey],
+          "STRLEN",
+        ),
+      ) || 0;
+    const hasher = createHash("sha256");
+    let previewBytes = Buffer.alloc(0);
+    for (let offset = 0; offset < fullSize; offset += REDIS_STRING_BYTE_LIMIT) {
+      const end = Math.min(offset + REDIS_STRING_BYTE_LIMIT - 1, fullSize - 1);
+      const hexChunk = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} return tohex(redis.call('GETRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])))`,
+        [hexKey, String(offset), String(end)],
+        "GETRANGE",
+      );
+      const bytes = Buffer.from(hexChunk, "hex");
+      hasher.update(bytes);
+      if (offset === 0) previewBytes = bytes;
+    }
+    const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+    const payload: RedisValue = isValidUtf8(previewBytes)
+      ? {
+          type: "string",
+          value: previewBytes.toString("utf8"),
+          truncated,
+          fullSize,
+        }
+      : {
+          type: "string",
+          value: "",
+          binaryBase64: previewBytes.toString("base64"),
+          truncated,
+          fullSize,
+        };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
+  // 長さ prefix 付きで hash に詰める。`<len_hex>:<hex>\n` 形式。
+  // delimiter のみだと "ab|c" と "a|bc" が同じ hash になるので長さも入れる。
+  function hashHexItem(hasher: import("node:crypto").Hash, hex: string): void {
+    hasher.update(`${hex.length.toString(16)}:${hex}\n`);
+  }
+
+  function snapshotFetchList(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const total =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('LLEN', fromhex(ARGV[1]))`,
+          [hexKey],
+          "LLEN",
+        ),
+      ) || 0;
+    const hasher = createHash("sha256");
+    let previewItems: RedisItem[] = [];
+    for (let offset = 0; offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} local items = redis.call('LRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])) local hex = {} for i, v in ipairs(items) do hex[i] = tohex(v) end return cjson.encode(hex)`,
+        [hexKey, String(offset), String(end)],
+        "LRANGE",
+      );
+      const chunk = safeJsonParse<string[]>(stdout, "LRANGE");
+      for (const hex of chunk) hashHexItem(hasher, hex);
+      if (offset === 0) previewItems = chunk.map(decodeHexItem);
+    }
+    const payload: RedisValue = {
+      type: "list",
+      items: previewItems,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT,
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
+  function snapshotFetchHash(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const total =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('HLEN', fromhex(ARGV[1]))`,
+          [hexKey],
+          "HLEN",
+        ),
+      ) || 0;
+    // HSCAN は dedup を保証しないので全件集めてから field hex で sort する。
+    const allPairs: Array<[string, string]> = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} local r = redis.call('HSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local raw = r[2] local pairs_arr = {} for i = 1, #raw, 2 do table.insert(pairs_arr, {tohex(raw[i]), tohex(raw[i+1])}) end return cjson.encode({cursor=r[1], pairs=pairs_arr})`,
+        [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)],
+        "HSCAN",
+      );
+      const parsed = safeJsonParse<{
+        cursor: string;
+        pairs: [string, string][];
+      }>(stdout, "HSCAN");
+      allPairs.push(...parsed.pairs);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    // HSCAN 自体が同じ要素を複数回返すこともあるので、field hex で dedup。
+    const seenField = new Set<string>();
+    const uniquePairs: Array<[string, string]> = [];
+    for (const p of allPairs) {
+      if (seenField.has(p[0])) continue;
+      seenField.add(p[0]);
+      uniquePairs.push(p);
+    }
+    uniquePairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const hasher = createHash("sha256");
+    for (const [f, v] of uniquePairs) {
+      hashHexItem(hasher, f);
+      hashHexItem(hasher, v);
+    }
+    const previewFields: RedisHashField[] = uniquePairs
+      .slice(0, REDIS_COLLECTION_LIMIT)
+      .map(([f, v]) => ({ field: decodeHexItem(f), value: decodeHexItem(v) }));
+    const payload: RedisValue = {
+      type: "hash",
+      fields: previewFields,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT,
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
+  function snapshotFetchSet(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const total =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('SCARD', fromhex(ARGV[1]))`,
+          [hexKey],
+          "SCARD",
+        ),
+      ) || 0;
+    const allMembers: string[] = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} local r = redis.call('SSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local arr = {} for i, v in ipairs(r[2]) do arr[i] = tohex(v) end return cjson.encode({cursor=r[1], members=arr})`,
+        [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)],
+        "SSCAN",
+      );
+      const parsed = safeJsonParse<{ cursor: string; members: string[] }>(
+        stdout,
+        "SSCAN",
+      );
+      allMembers.push(...parsed.members);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    // SSCAN duplicate を dedupe してから sort。
+    const dedup = Array.from(new Set(allMembers));
+    dedup.sort();
+    const hasher = createHash("sha256");
+    for (const m of dedup) hashHexItem(hasher, m);
+    const previewMembers = dedup
+      .slice(0, REDIS_COLLECTION_LIMIT)
+      .map(decodeHexItem);
+    const payload: RedisValue = {
+      type: "set",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT,
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
+  function snapshotFetchZset(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const total =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('ZCARD', fromhex(ARGV[1]))`,
+          [hexKey],
+          "ZCARD",
+        ),
+      ) || 0;
+    // ZRANGE は score 順で stable なので chunked pagination で順次ハッシュする。
+    const hasher = createHash("sha256");
+    let previewMembers: Array<{ member: RedisItem; score: number }> = [];
+    for (let offset = 0; offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} local r = redis.call('ZRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {tohex(r[i]), tonumber(r[i+1])}) end return cjson.encode(arr)`,
+        [hexKey, String(offset), String(end)],
+        "ZRANGE",
+      );
+      const chunk = safeJsonParse<[string, number][]>(stdout, "ZRANGE");
+      for (const [hex, score] of chunk) {
+        hashHexItem(hasher, hex);
+        hasher.update(`${score}\n`);
+      }
+      if (offset === 0) {
+        previewMembers = chunk.map(([h, s]) => ({
+          member: decodeHexItem(h),
+          score: s,
+        }));
+      }
+    }
+    const payload: RedisValue = {
+      type: "zset",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT,
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
+  function snapshotFetchStream(
+    db: number,
+    hexKey: string,
+  ): { payload: RedisValue; fullHash: string } {
+    const total =
+      Number(
+        evalHex(
+          db,
+          `${LUA_HEX_KEY_PRELUDE} return redis.call('XLEN', fromhex(ARGV[1]))`,
+          [hexKey],
+          "XLEN",
+        ),
+      ) || 0;
+    // XRANGE は id 順で安定。ページング: 直前最後の id の次から取り直す。
+    // 簡単のため <id>-\0 のような hack をせず、見た id を Set で持って二重 yield 防止。
+    const hasher = createHash("sha256");
+    let previewEntries: Array<{ id: string; fields: RedisHashField[] }> = [];
+    let startId = "-";
+    const seenIds = new Set<string>();
+    let first = true;
+    for (;;) {
+      const stdout = evalHex(
+        db,
+        `${LUA_HEX_KEY_PRELUDE} local r = redis.call('XRANGE', fromhex(ARGV[1]), ARGV[2], '+', 'COUNT', tonumber(ARGV[3])) local arr = {} for _, e in ipairs(r) do local fs = {} for i = 1, #e[2], 2 do fs[#fs+1] = tohex(e[2][i]) fs[#fs+1] = tohex(e[2][i+1]) end arr[#arr+1] = {id=e[1], fs=fs} end return cjson.encode(arr)`,
+        [hexKey, startId, String(REDIS_COLLECTION_LIMIT)],
+        "XRANGE",
+      );
+      const chunk = safeJsonParse<Array<{ id: string; fs: string[] }>>(
+        stdout,
+        "XRANGE",
+      );
+      if (chunk.length === 0) break;
+      const newEntries: Array<{ id: string; fs: string[] }> = [];
+      for (const e of chunk) {
+        if (seenIds.has(e.id)) continue;
+        seenIds.add(e.id);
+        newEntries.push(e);
+      }
+      for (const e of newEntries) {
+        hasher.update(`${e.id}\n`);
+        for (const hex of e.fs) hashHexItem(hasher, hex);
+      }
+      if (first) {
+        previewEntries = newEntries
+          .slice(0, REDIS_COLLECTION_LIMIT)
+          .map((e) => {
+            const fields: RedisHashField[] = [];
+            for (let i = 0; i < e.fs.length; i += 2) {
+              fields.push({
+                field: decodeHexItem(e.fs[i]),
+                value: decodeHexItem(e.fs[i + 1]),
+              });
+            }
+            return { id: e.id, fields };
+          });
+        first = false;
+      }
+      if (chunk.length < REDIS_COLLECTION_LIMIT) break;
+      startId = chunk[chunk.length - 1].id;
+    }
+    const payload: RedisValue = {
+      type: "stream",
+      entries: previewEntries,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT,
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+
   async function* iterateForSnapshot(
     container: string,
     signal?: AbortSignal,
   ): AsyncIterable<SnapshotItem> {
     const { db, pattern } = parseSnapshotContainer(container);
+    // SCAN は同じ要素を複数回返すことがあるので hex key ベースで dedup する。
+    // hex 化することで binary key も Set のキーとして扱える。
+    const seen = new Set<string>();
     let cursor = "0";
     do {
       if (signal?.aborted) return;
-      const page = listKeys({
+      const stdout = evalHex(
         db,
-        pattern,
-        cursor,
-        count: REDIS_COLLECTION_LIMIT,
-      });
-      for (const k of page.keys) {
+        SCAN_HEX_KEYS_LUA,
+        [cursor, pattern, String(REDIS_COLLECTION_LIMIT)],
+        "SCAN",
+      );
+      const parsed = safeJsonParse<{
+        cursor: string;
+        keys: string[];
+        types: string[];
+      }>(stdout, "SCAN");
+      for (let i = 0; i < parsed.keys.length; i++) {
         if (signal?.aborted) return;
-        const value = getValue({ db, key: k.name });
-        const keyJson = JSON.stringify({ db, key: k.name });
-        const payloadJson = JSON.stringify({ type: k.type, value });
-        const rowHash = createHash("sha256").update(payloadJson).digest("hex");
-        yield { keyJson, payloadJson, rowHash };
+        const hexKey = parsed.keys[i];
+        if (seen.has(hexKey)) continue;
+        seen.add(hexKey);
+        const rawType = parsed.types[i] || "none";
+        const type: RedisType = isValidRedisType(rawType) ? rawType : "none";
+        const { payload, fullHash } = snapshotFetch(db, hexKey, type);
+        const keyBytes = Buffer.from(hexKey, "hex");
+        const keyName: RedisItem = isValidUtf8(keyBytes)
+          ? keyBytes.toString("utf8")
+          : { binaryBase64: keyBytes.toString("base64") };
+        const keyJson = JSON.stringify({ db, key: keyName });
+        const payloadJson = JSON.stringify({ type, value: payload });
+        yield { keyJson, payloadJson, rowHash: fullHash };
       }
-      cursor = page.nextCursor;
+      cursor = parsed.cursor;
     } while (cursor !== "0");
   }
 
