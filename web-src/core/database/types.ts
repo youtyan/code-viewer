@@ -367,6 +367,7 @@ export type TabState = {
   redis?: {
     dbIndex?: number;
     key?: string;
+    keyFilter?: string;
   };
 
   // Elasticsearch explorer の選択中 state。SQL の table と整合的に、

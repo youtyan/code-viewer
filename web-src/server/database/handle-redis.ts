@@ -65,6 +65,26 @@ function resolveRedis(
   return { dbId: dbParam, explorer };
 }
 
+async function handleClose(req: Request): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let body: { db?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+  if (!body.db) return textError("missing db", 400);
+  const cached = redisAdapterCache.get(body.db);
+  if (cached) {
+    try {
+      cached.close();
+    } finally {
+      redisAdapterCache.delete(body.db);
+    }
+  }
+  return json({ ok: true });
+}
+
 function handleDatabases(cwd: string, url: URL): Response {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -129,6 +149,7 @@ export async function handleRedisRoute(
   req: Request,
   url: URL,
   cwd: string,
+  sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
   const path = url.pathname;
   const start = Date.now();
@@ -145,9 +166,16 @@ export async function handleRedisRoute(
   if (
     path !== "/_db/redis/databases" &&
     path !== "/_db/redis/keys" &&
-    path !== "/_db/redis/value"
+    path !== "/_db/redis/value" &&
+    path !== "/_db/redis/close"
   ) {
     return null;
+  }
+  if (path === "/_db/redis/close") {
+    if (sideEffectAllowed && !sideEffectAllowed(req)) {
+      return wrap(textError("forbidden", 403));
+    }
+    return wrap(await handleClose(req));
   }
   if (method !== "GET") {
     return wrap(textError("method not allowed", 405));

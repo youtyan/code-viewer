@@ -7031,6 +7031,35 @@ body.db-resizing {
   overflow: hidden;
   background: var(--bg);
 }
+.redis-key-filter-form {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.redis-key-filter {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.redis-key-filter-btn {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+}
+.redis-key-filter-btn:hover {
+  background: var(--bg-hover, var(--bg));
+}
 .redis-key-list {
   flex: 1;
   overflow-y: auto;

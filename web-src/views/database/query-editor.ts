@@ -168,8 +168,8 @@ export function createQueryEditor(
   const historyBtn = document.createElement("button");
   historyBtn.className = "db-btn db-query-history-btn";
   historyBtn.type = "button";
-  historyBtn.textContent = "History";
-  historyBtn.title = "Query history";
+  historyBtn.textContent = "Local History";
+  historyBtn.title = "Local editor history";
 
   const statusSpan = document.createElement("span");
   statusSpan.className = "db-query-status";

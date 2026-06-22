@@ -319,7 +319,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.textContent = "削除";
-      deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+      deleteBtn.addEventListener("click", () => {
+        if (deleteBtn.dataset.confirm !== "1") {
+          deleteBtn.dataset.confirm = "1";
+          deleteBtn.textContent = "削除を確認";
+          window.setTimeout(() => {
+            if (deleteBtn.dataset.confirm === "1") {
+              deleteBtn.dataset.confirm = "";
+              deleteBtn.textContent = "削除";
+            }
+          }, 3000);
+          return;
+        }
+        deleteBtn.dataset.confirm = "";
+        deleteBtn.textContent = "削除";
+        deleteSnap(snap.id);
+      });
       actions.append(noteBtn, deleteBtn);
 
       item.append(info, actions);
@@ -649,10 +664,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancelDlgBtn.textContent = "キャンセル";
     cancelDlgBtn.addEventListener("click", () => dialog.remove());
     saveBtn.addEventListener("click", async () => {
+      if (disposed) return;
       await postJson("/_db/snapshot/update-note", {
         id: snapshotId,
         note: input.value,
       });
+      if (disposed) return;
       dialog.remove();
       refresh();
     });
@@ -673,7 +690,9 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   }
 
   async function deleteSnap(snapshotId: string) {
+    if (disposed) return;
     await postJson("/_db/snapshot/delete", { id: snapshotId });
+    if (disposed) return;
     refresh();
   }
 

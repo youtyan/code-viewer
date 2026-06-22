@@ -22,6 +22,7 @@ const MAX_TAB_ID_LEN = 128;
 const MAX_DB_ID_LEN = 2048;
 const MAX_TABLE_NAME_LEN = 512;
 const MAX_REDIS_KEY_LEN = 1024;
+const MAX_REDIS_KEY_FILTER_LEN = 512;
 const MAX_INDEX_NAME_LEN = 256;
 // CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
 const MAX_CSS_SIZE_LEN = 16;
@@ -72,10 +73,10 @@ function sanitizeCssSize(v: unknown): string | undefined {
 
 function sanitizeRedis(
   v: unknown,
-): { dbIndex?: number; key?: string } | undefined {
+): { dbIndex?: number; key?: string; keyFilter?: string } | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;
-  const out: { dbIndex?: number; key?: string } = {};
+  const out: { dbIndex?: number; key?: string; keyFilter?: string } = {};
   if (
     typeof r.dbIndex === "number" &&
     Number.isInteger(r.dbIndex) &&
@@ -86,7 +87,17 @@ function sanitizeRedis(
   }
   const key = sanitizeOptionalString(r.key, MAX_REDIS_KEY_LEN);
   if (key !== undefined) out.key = key;
-  if (out.dbIndex === undefined && out.key === undefined) return undefined;
+  const keyFilter = sanitizeOptionalString(
+    r.keyFilter,
+    MAX_REDIS_KEY_FILTER_LEN,
+  );
+  if (keyFilter !== undefined) out.keyFilter = keyFilter;
+  if (
+    out.dbIndex === undefined &&
+    out.key === undefined &&
+    out.keyFilter === undefined
+  )
+    return undefined;
   return out;
 }
 

@@ -49,7 +49,12 @@ type TabPaneCallbacks = {
 
 type TabPaneInternal = {
   el: HTMLElement;
-  enter: (db?: string, table?: string, view?: TabName) => Promise<void>;
+  enter: (
+    db?: string | null,
+    table?: string | null,
+    view?: TabName,
+    options?: { autoSelectFirst?: boolean },
+  ) => Promise<void>;
   handleSse: (event?: string, data?: string) => void;
   getState: () => TabState;
   getLabel: () => string;
@@ -67,9 +72,32 @@ type TabPaneInitial = {
   historyOpen?: boolean;
   historyHeight?: string;
   sidebarWidth?: string;
-  redis?: { dbIndex?: number; key?: string };
+  redis?: { dbIndex?: number; key?: string; keyFilter?: string };
   es?: { index?: string; query?: string };
 };
+
+function isSqlKind(kind: DbFileInfo["kind"] | undefined): boolean {
+  return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
+}
+
+function isSqlView(view: TabName): boolean {
+  return (
+    view === "data" ||
+    view === "query" ||
+    view === "schema" ||
+    view === "er" ||
+    view === "search" ||
+    view === "snapshot"
+  );
+}
+
+function normalizeViewForDb(
+  view: TabName | undefined,
+  db: DbFileInfo | null,
+): TabName {
+  if (!db || !isSqlKind(db.kind)) return "data";
+  return view && isSqlView(view) ? view : "data";
+}
 
 function createTabPane(
   outerDeps: DatabaseViewDeps,
@@ -300,10 +328,11 @@ function createTabPane(
   // 「開いている」状態 (= 旧 localStorage default と同じ)。
   let historyOpen = initial.historyOpen ?? true;
   function applyHistoryVisibility() {
-    historyResizer.hidden = !historyOpen;
-    historyPane.hidden = !historyOpen;
+    const sqlMode = isSqlKind(currentDb?.kind);
+    historyResizer.hidden = !sqlMode || !historyOpen;
+    historyPane.hidden = !sqlMode || !historyOpen;
     historyToggle.classList.toggle("active", historyOpen);
-    if (historyOpen) historyView.refresh();
+    if (sqlMode && historyOpen) historyView.refresh();
   }
   applyHistoryVisibility();
 
@@ -333,30 +362,58 @@ function createTabPane(
     grid.el.hidden = false;
   }
 
+  function applyKindVisibility() {
+    const sqlMode = isSqlKind(currentDb?.kind);
+    toolsSection.hidden = !sqlMode;
+    historyToggle.hidden = !sqlMode;
+    historyResizer.hidden = !sqlMode || !historyOpen;
+    historyPane.hidden = !sqlMode || !historyOpen;
+    tableList.el.hidden = !sqlMode;
+    tabBar.hidden = !sqlMode;
+
+    if (!sqlMode) {
+      queryBtn.classList.remove("active");
+      erBtn.classList.remove("active");
+      searchBtn.classList.remove("active");
+      snapshotBtn.classList.remove("active");
+      grid.el.hidden = true;
+      queryEditor.el.hidden = true;
+      schemaView.el.hidden = true;
+      erDiagram.el.hidden = true;
+      globalSearchView.el.hidden = true;
+      snapshotView.el.hidden = true;
+      redisExplorer.el.hidden = currentDb?.kind !== "redis";
+      esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
+    }
+  }
+
   function setActiveTab(tab: TabName, updateUrl = true) {
-    currentTab = tab;
-    tabData.classList.toggle("active", tab === "data");
-    tabSchema.classList.toggle("active", tab === "schema");
-    queryBtn.classList.toggle("active", tab === "query");
-    erBtn.classList.toggle("active", tab === "er");
-    searchBtn.classList.toggle("active", tab === "search");
-    snapshotBtn.classList.toggle("active", tab === "snapshot");
-    tabBar.hidden =
-      tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
-    grid.el.hidden = tab !== "data";
-    queryEditor.el.hidden = tab !== "query";
-    schemaView.el.hidden = tab !== "schema";
-    erDiagram.el.hidden = tab !== "er";
-    globalSearchView.el.hidden = tab !== "search";
-    snapshotView.el.hidden = tab !== "snapshot";
-    if (tab === "query") queryEditor.focus();
+    currentTab = normalizeViewForDb(tab, currentDb);
+    tabData.classList.toggle("active", currentTab === "data");
+    tabSchema.classList.toggle("active", currentTab === "schema");
+    queryBtn.classList.toggle("active", currentTab === "query");
+    erBtn.classList.toggle("active", currentTab === "er");
+    searchBtn.classList.toggle("active", currentTab === "search");
+    snapshotBtn.classList.toggle("active", currentTab === "snapshot");
+    const sqlMode = isSqlKind(currentDb?.kind);
+    tabBar.hidden = !sqlMode;
+    grid.el.hidden = !sqlMode || currentTab !== "data";
+    queryEditor.el.hidden = !sqlMode || currentTab !== "query";
+    schemaView.el.hidden = !sqlMode || currentTab !== "schema";
+    erDiagram.el.hidden = !sqlMode || currentTab !== "er";
+    globalSearchView.el.hidden = !sqlMode || currentTab !== "search";
+    snapshotView.el.hidden = !sqlMode || currentTab !== "snapshot";
+    redisExplorer.el.hidden = currentDb?.kind !== "redis";
+    esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
+    applyKindVisibility();
+    if (currentTab === "query") queryEditor.focus();
     if (updateUrl && currentDb) {
       deps.setRoute(
         {
           screen: "database",
           db: currentDb?.id,
           table: currentTable ?? undefined,
-          tab: tab === "data" ? undefined : tab,
+          tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange(),
         },
         true,
@@ -436,7 +493,7 @@ function createTabPane(
   async function selectDb(
     dbId: string,
     explorerInitial?: {
-      redis?: { dbIndex?: number; key?: string };
+      redis?: { dbIndex?: number; key?: string; keyFilter?: string };
       es?: { index?: string; query?: string };
     },
     generation = loadGeneration,
@@ -444,18 +501,13 @@ function createTabPane(
     if (generation !== loadGeneration || currentDb?.id !== dbId) return;
     currentTable = null;
     if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+      currentTab = "data";
       tableList.render([]);
       grid.clear();
       schemaView.clear();
       erDiagram.clear();
       schemaCache = null;
-      tabBar.hidden = true;
-      grid.el.hidden = true;
-      queryEditor.el.hidden = true;
-      schemaView.el.hidden = true;
-      erDiagram.el.hidden = true;
-      globalSearchView.el.hidden = true;
-      snapshotView.el.hidden = true;
+      applyKindVisibility();
       if (currentDb.kind === "redis") {
         esExplorer.el.hidden = true;
         esExplorer.clear();
@@ -475,6 +527,7 @@ function createTabPane(
     redisExplorer.clear();
     esExplorer.el.hidden = true;
     esExplorer.clear();
+    applyKindVisibility();
     const schema = await fetchSchema(dbId);
     if (generation !== loadGeneration || currentDb?.id !== dbId) return;
     if (!schema) return;
@@ -483,7 +536,7 @@ function createTabPane(
     grid.clear();
     schemaView.clear();
     erDiagram.clear();
-    setActiveTab("data");
+    setActiveTab("data", false);
     if (schema.tables.length > 0) {
       await selectTable(schema.tables[0].name, generation);
     }
@@ -647,7 +700,12 @@ function createTabPane(
   let pendingRedisInitial = initial.redis;
   let pendingEsInitial = initial.es;
 
-  async function enter(db?: string, table?: string, view?: TabName) {
+  async function enter(
+    db?: string | null,
+    table?: string | null,
+    view?: TabName,
+    options: { autoSelectFirst?: boolean } = {},
+  ) {
     const generation = ++loadGeneration;
     const files = await fetchDbFiles();
     if (generation !== loadGeneration) return;
@@ -678,6 +736,22 @@ function createTabPane(
       // 復元したい dbId が現在の files に無い場合は、最初のファイルに fall back。
       db = files[0].id;
     }
+    const autoSelectFirst = options.autoSelectFirst ?? true;
+    if (!db && !autoSelectFirst) {
+      dbSelect.value = "";
+      currentDb = null;
+      currentTable = null;
+      schemaCache = null;
+      tableList.render([]);
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      redisExplorer.clear();
+      esExplorer.clear();
+      setActiveTab("data", false);
+      cb.onStateChange();
+      return;
+    }
     const target = db || files[0].id;
     dbSelect.value = target;
     currentDb = files.find((f) => f.id === target) || null;
@@ -699,16 +773,17 @@ function createTabPane(
       await selectTable(table, generation);
     }
     if (generation !== loadGeneration) return;
-    if (view && view !== "data") {
-      setActiveTab(view);
-      if (view === "schema") {
+    const normalizedView = normalizeViewForDb(view, currentDb);
+    if (normalizedView !== "data") {
+      setActiveTab(normalizedView);
+      if (normalizedView === "schema") {
         const activeTable = tableList.el.querySelector<HTMLElement>(
           ".db-table-item.active",
         );
         if (activeTable?.dataset.table) showSchema(activeTable.dataset.table);
-      } else if (view === "er") {
+      } else if (normalizedView === "er") {
         if (schemaCache) renderErDiagram();
-      } else if (view === "snapshot") {
+      } else if (normalizedView === "snapshot") {
         snapshotView.refresh();
       }
     }
@@ -746,7 +821,11 @@ function createTabPane(
 
     if (currentDb?.kind === "redis") {
       const sel = redisExplorer.getSelection();
-      if (sel.dbIndex !== undefined || sel.key !== undefined) {
+      if (
+        sel.dbIndex !== undefined ||
+        sel.key !== undefined ||
+        sel.keyFilter !== undefined
+      ) {
         state.redis = sel;
       }
     } else if (currentDb?.kind === "elasticsearch") {
@@ -819,7 +898,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
   const tabsById = new Map<
     string,
-    { pane: TabPaneInternal; chip: HTMLElement; label: HTMLElement }
+    {
+      pane: TabPaneInternal;
+      chip: HTMLElement;
+      label: HTMLElement;
+      closeBtn: HTMLButtonElement;
+    }
   >();
   const paneReadyById = new Map<string, Promise<void>>();
   let activeTabId: string | null = null;
@@ -827,6 +911,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   // 過剰な PUT を発生させないようにする。復元完了後に 1 回まとめて保存する。
   let restoring = false;
   let savePending: ReturnType<typeof setTimeout> | null = null;
+  let saveChain: Promise<void> = Promise.resolve();
+  let lifecycleSeq = 0;
+  let enterQueue: Promise<void> = Promise.resolve();
   let unloadListenerInstalled = false;
 
   function scheduleSave(): void {
@@ -842,19 +929,29 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     for (const [, entry] of tabsById) tabs.push(entry.pane.getState());
     if (tabs.length === 0) return;
     const body: TabsState = { version: 1, tabs, activeTabId };
-    try {
-      await fetch("/_db/tabs", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Code-Viewer-Action": "1",
-        },
-        body: JSON.stringify(body),
-        keepalive: options.keepalive,
-      });
-    } catch {
-      // ベストエフォート。失敗してもユーザー操作は妨げない。
+    const raw = JSON.stringify(body);
+    if (options.keepalive && navigator.sendBeacon) {
+      const blob = new Blob([raw], { type: "application/json" });
+      if (navigator.sendBeacon("/_db/tabs", blob)) return;
     }
+    saveChain = saveChain
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await fetch("/_db/tabs", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Code-Viewer-Action": "1",
+            },
+            body: raw,
+            keepalive: options.keepalive,
+          });
+        } catch {
+          // ベストエフォート。失敗してもユーザー操作は妨げない。
+        }
+      });
+    await saveChain;
   }
 
   function flushPendingSave(options: { keepalive?: boolean } = {}): void {
@@ -906,6 +1003,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.chip.classList.toggle("active", isActive);
       entry.chip.setAttribute("aria-selected", isActive ? "true" : "false");
       entry.chip.tabIndex = isActive ? 0 : -1;
+      entry.closeBtn.tabIndex = isActive ? 0 : -1;
     }
     if (!restoring) syncActiveRoute();
     scheduleSave();
@@ -934,9 +1032,54 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const label = entry.pane.getLabel();
     entry.label.textContent = label;
     entry.label.title = label;
+    entry.closeBtn.setAttribute("aria-label", `${label} を閉じる`);
   }
 
-  function openTab(initial?: Partial<TabState>): string {
+  function dedupeTabs(tabs: TabState[]): TabState[] {
+    const seen = new Set<string>();
+    const deduped: TabState[] = [];
+    for (const tab of tabs) {
+      const key = JSON.stringify({
+        dbId: tab.dbId,
+        table: tab.table,
+        view: tab.view,
+        redis: tab.redis ?? null,
+        es: tab.es ?? null,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(tab);
+    }
+    return deduped;
+  }
+
+  function isDbStillOpen(dbId: string): boolean {
+    for (const [, entry] of tabsById) {
+      if (entry.pane.getState().dbId === dbId) return true;
+    }
+    return false;
+  }
+
+  function closeDbIfUnused(dbId: string | null): void {
+    if (!dbId || isDbStillOpen(dbId)) return;
+    const body = JSON.stringify({ db: dbId });
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Code-Viewer-Action": "1",
+    };
+    for (const path of [
+      "/_db/close",
+      "/_db/redis/close",
+      "/_db/elasticsearch/close",
+    ]) {
+      void fetch(path, { method: "POST", headers, body }).catch(() => {});
+    }
+  }
+
+  function openTab(
+    initial?: Partial<TabState>,
+    options: { autoSelectFirst?: boolean } = {},
+  ): string {
     const id = initial?.id || makeTabId();
 
     const chip = document.createElement("div");
@@ -954,6 +1097,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     closeBtn.type = "button";
     closeBtn.className = "db-tabs-chip-close";
     closeBtn.title = "閉じる";
+    closeBtn.tabIndex = -1;
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1005,7 +1149,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     tabsList.appendChild(chip);
     tabHost.appendChild(pane.el);
-    tabsById.set(id, { pane, chip, label: labelEl });
+    tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
 
     setActive(id);
     // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
@@ -1016,6 +1160,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         initial?.dbId || undefined,
         initial?.table || undefined,
         initial?.view || undefined,
+        options,
       )
       .then(() => refreshChipLabel(id))
       .finally(() => {
@@ -1029,18 +1174,23 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   function closeTab(id: string): void {
     const entry = tabsById.get(id);
     if (!entry) return;
+    const closedDbId = entry.pane.getState().dbId;
     entry.pane.dispose();
     entry.pane.el.remove();
     entry.chip.remove();
     tabsById.delete(id);
     paneReadyById.delete(id);
+    closeDbIfUnused(closedDbId);
     if (activeTabId !== id) {
       scheduleSave();
       return;
     }
     if (tabsById.size === 0) {
       // 最後のタブを閉じようとした → 空タブにリセットして残す。
-      openTab({});
+      openTab(
+        { dbId: null, table: null, view: "data" },
+        { autoSelectFirst: false },
+      );
       return;
     }
     // 残りの先頭を active 化。
@@ -1049,7 +1199,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   newTabBtn.addEventListener("click", () => {
-    openTab({});
+    openTab(
+      { dbId: null, table: null, view: "data" },
+      { autoSelectFirst: false },
+    );
   });
 
   function routeMatchesState(
@@ -1077,10 +1230,17 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         return;
       }
     }
-    const active = tabsById.get(activeTabId ?? "");
-    if (!active || !activeTabId) return;
-    await active.pane.enter(db, table, view);
-    refreshChipLabel(activeTabId);
+    const id = openTab(
+      {
+        dbId: db ?? null,
+        table: table ?? null,
+        view: view ?? "data",
+      },
+      { autoSelectFirst: db !== undefined },
+    );
+    const ready = paneReadyById.get(id);
+    if (ready) await ready;
+    refreshChipLabel(id);
   }
 
   function parseSseDbId(data?: string): string | null {
@@ -1093,11 +1253,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
-  async function enter(
+  async function doEnter(
+    seq: number,
     db?: string,
     table?: string,
     view?: TabName,
   ): Promise<void> {
+    if (seq !== lifecycleSeq) return;
     const firstMount = !mounted;
     if (firstMount) {
       const content = document.getElementById("content");
@@ -1119,12 +1281,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       // 永続化されたタブ構成があれば復元する。復元中は scheduleSave を
       // 抑制して、復元完了後に 1 回だけ保存する。
       const restored = await fetchTabs();
+      if (!mounted || seq !== lifecycleSeq) return;
       if (restored && restored.tabs.length > 0) {
         restoring = true;
         const restoredIds: string[] = [];
         try {
-          for (const t of restored.tabs) {
-            restoredIds.push(openTab(t));
+          const restoredTabs = dedupeTabs(restored.tabs);
+          for (const t of restoredTabs) {
+            if (!mounted || seq !== lifecycleSeq) return;
+            restoredIds.push(openTab(t, { autoSelectFirst: false }));
           }
           const targetId =
             restored.activeTabId && tabsById.has(restored.activeTabId)
@@ -1134,6 +1299,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           await Promise.all(
             restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean),
           );
+          if (!mounted || seq !== lifecycleSeq) return;
         } finally {
           restoring = false;
         }
@@ -1152,11 +1318,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
     if (tabsById.size === 0) {
       // 初回 enter (永続化なし): URL の引数を初期 state にして 1 タブ作る。
-      openTab({
-        dbId: db || null,
-        table: table || null,
-        view: view || "data",
-      });
+      openTab(
+        {
+          dbId: db || null,
+          table: table || null,
+          view: view || "data",
+        },
+        { autoSelectFirst: !db },
+      );
       return;
     }
     if (!activeTabId) return;
@@ -1167,8 +1336,21 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
+  async function enter(
+    db?: string,
+    table?: string,
+    view?: TabName,
+  ): Promise<void> {
+    const seq = lifecycleSeq;
+    enterQueue = enterQueue
+      .catch(() => {})
+      .then(() => doEnter(seq, db, table, view));
+    await enterQueue;
+  }
+
   function leave(): void {
     if (!mounted) return;
+    lifecycleSeq++;
     flushPendingSave();
     for (const [, entry] of tabsById) {
       entry.pane.dispose();

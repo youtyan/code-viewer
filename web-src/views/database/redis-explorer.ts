@@ -28,6 +28,7 @@ function renderItemInto(el: HTMLElement, item: RedisItem): void {
 export type RedisExplorerSelection = {
   dbIndex?: number;
   key?: string;
+  keyFilter?: string;
 };
 
 export type RedisExplorerCallbacks = {
@@ -69,6 +70,20 @@ export function createRedisExplorer(
   keyListHeader.textContent = "Keys";
   keyListPane.appendChild(keyListHeader);
 
+  const keyFilterForm = document.createElement("form");
+  keyFilterForm.className = "redis-key-filter-form";
+  const keyFilterInput = document.createElement("input");
+  keyFilterInput.type = "search";
+  keyFilterInput.className = "redis-key-filter";
+  keyFilterInput.placeholder = "key pattern, e.g. user:*";
+  keyFilterInput.autocomplete = "off";
+  const keyFilterBtn = document.createElement("button");
+  keyFilterBtn.type = "submit";
+  keyFilterBtn.className = "redis-key-filter-btn";
+  keyFilterBtn.textContent = "Search";
+  keyFilterForm.append(keyFilterInput, keyFilterBtn);
+  keyListPane.appendChild(keyFilterForm);
+
   const keyList = document.createElement("div");
   keyList.className = "redis-key-list";
   keyListPane.appendChild(keyList);
@@ -89,6 +104,7 @@ export function createRedisExplorer(
   let currentDbId: string | null = null;
   let currentDbIndex: number | null = null;
   let currentKey: string | null = null;
+  let currentKeyFilter = "*";
   let currentCursor = "0";
   let loadingKeys = false;
   let loadRunId = 0;
@@ -100,6 +116,7 @@ export function createRedisExplorer(
     callbacks.onSelectionChange?.({
       dbIndex: currentDbIndex ?? undefined,
       key: currentKey ?? undefined,
+      keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter,
     });
   }
 
@@ -393,7 +410,7 @@ export function createRedisExplorer(
       const params = new URLSearchParams({
         db: requestDbId,
         dbIndex: String(requestDbIndex),
-        pattern: "*",
+        pattern: currentKeyFilter || "*",
         cursor: currentCursor,
         count: "200",
       });
@@ -434,6 +451,18 @@ export function createRedisExplorer(
 
   keyMoreBtn.addEventListener("click", () => loadKeys(true));
 
+  keyFilterForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const nextFilter = keyFilterInput.value.trim() || "*";
+    if (nextFilter === currentKeyFilter && currentCursor === "0") return;
+    currentKeyFilter = nextFilter;
+    currentKey = null;
+    currentCursor = "0";
+    notifySelectionChange();
+    mainPane.textContent = "Select a key to view its value.";
+    void loadKeys(false);
+  });
+
   async function load(
     dbId: string,
     initial?: RedisExplorerSelection,
@@ -443,6 +472,8 @@ export function createRedisExplorer(
     currentDbId = dbId;
     currentDbIndex = null;
     currentKey = null;
+    currentKeyFilter = initial?.keyFilter?.trim() || "*";
+    keyFilterInput.value = currentKeyFilter === "*" ? "" : currentKeyFilter;
     currentCursor = "0";
     keyList.innerHTML = "";
     keyMoreBtn.hidden = true;
@@ -495,6 +526,8 @@ export function createRedisExplorer(
     currentDbId = null;
     currentDbIndex = null;
     currentKey = null;
+    currentKeyFilter = "*";
+    keyFilterInput.value = "";
     currentCursor = "0";
     dbList.innerHTML = "";
     keyList.innerHTML = "";
@@ -506,6 +539,7 @@ export function createRedisExplorer(
     return {
       dbIndex: currentDbIndex ?? undefined,
       key: currentKey ?? undefined,
+      keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter,
     };
   }
 
