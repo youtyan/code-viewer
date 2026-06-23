@@ -43,19 +43,6 @@ function resolveEs(
   return { dbId: dbParam, explorer };
 }
 
-async function handleClose(req: Request): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.db) return textError("missing db", 400);
-  closeElasticsearchAdapter(body.db);
-  return json({ ok: true });
-}
-
 function handleIndices(cwd: string, url: URL): Response {
   const r = resolveEs(cwd, url.searchParams.get("db"));
   if (r instanceof Response) return r;
@@ -267,11 +254,6 @@ export async function handleElasticsearchRoute(
       // CSRF ガードをかける。GET は q= だけの read-only なので通す。
       sideEffect: (m) => m === "POST",
       handler: () => handleSearch(cwd, req, url),
-    },
-    "/_db/elasticsearch/close": {
-      methods: ["POST"],
-      sideEffect: () => true,
-      handler: () => handleClose(req),
     },
   };
   const route = routes[path];

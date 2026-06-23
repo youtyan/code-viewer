@@ -3498,8 +3498,26 @@ var init_sql_snapshot = __esm(() => {
   init_serialize();
 });
 
-// web-src/server/database/adapters/docker.ts
+// web-src/server/database/adapters/docker-utils.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
+function resolveRunningComposeContainerName(serviceName, cwd) {
+  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    const containers = output.startsWith("[") ? JSON.parse(output) : output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+var init_docker_utils = () => {};
+
+// web-src/server/database/adapters/docker.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
 function execInContainer(config, sql, timeoutMs = 1e4) {
   let args;
   if (config.kind === "postgresql") {
@@ -3545,7 +3563,7 @@ function execInContainer(config, sql, timeoutMs = 1e4) {
       sql
     ];
   }
-  const proc = spawnSync2(args[0], args.slice(1), {
+  const proc = spawnSync3(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"]
@@ -3917,27 +3935,8 @@ function createDockerAdapter(config) {
   };
   return adapter;
 }
-function resolveContainerName(serviceName, cwd) {
-  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
-    return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers;
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output.split(`
-`).filter(Boolean).map((line) => JSON.parse(line));
-    }
-    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
-  } catch {
-    return null;
-  }
-}
 function listDockerDatabases(serviceName, kind, env, cwd) {
-  const containerName = resolveContainerName(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName)
     return [];
   const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
@@ -3968,7 +3967,7 @@ function listDockerDatabases(serviceName, kind, env, cwd) {
   }
 }
 function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
-  const containerName = resolveContainerName(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
     throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
   }
@@ -3985,6 +3984,7 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
 }
 var init_docker = __esm(() => {
   init_sql_snapshot();
+  init_docker_utils();
 });
 
 // web-src/server/database/adapters/sqlite.ts
@@ -5446,24 +5446,6 @@ var init_tabs_store = __esm(() => {
   ]);
 });
 
-// web-src/server/database/adapters/docker-utils.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-function resolveRunningComposeContainerName(serviceName, cwd) {
-  const proc = spawnSync3("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
-    return null;
-  try {
-    const output = proc.stdout.trim();
-    const containers = output.startsWith("[") ? JSON.parse(output) : output.split(`
-`).filter(Boolean).map((line) => JSON.parse(line));
-    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
-  } catch {
-    return null;
-  }
-}
-var init_docker_utils = () => {};
-
 // web-src/server/database/adapters/redis.ts
 var exports_redis = {};
 __export(exports_redis, {
@@ -6481,20 +6463,6 @@ function resolveRedis(cwd, dbParam) {
   const explorer = redisAdapterCache.getOrOpen(dbParam, () => openRedisExplorer(info.serviceName, info.env, info.composeDir));
   return { dbId: dbParam, explorer };
 }
-async function handleClose(req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.db)
-    return textError("missing db", 400);
-  closeRedisAdapter(body.db);
-  return json({ ok: true });
-}
 function handleDatabases(cwd, url) {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
   if (r instanceof Response)
@@ -6542,7 +6510,7 @@ function handleKeys(cwd, url) {
     return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
-async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
+async function handleRedisRoute(req, url, cwd, _sideEffectAllowed) {
   const path = url.pathname;
   const method = req.method;
   const wrap = createQueryStrippedLogger("redis", req, url);
@@ -6558,11 +6526,6 @@ async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
     "/_db/redis/value": {
       methods: ["GET"],
       handler: () => handleValue(cwd, url)
-    },
-    "/_db/redis/close": {
-      methods: ["POST"],
-      sideEffect: true,
-      handler: () => handleClose(req)
     }
   };
   const route = routes[path];
@@ -6570,9 +6533,6 @@ async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
     return null;
   if (!route.methods.includes(method)) {
     return wrap(textError("method not allowed", 405));
-  }
-  if (route.sideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
-    return wrap(textError("forbidden", 403));
   }
   return wrap(await route.handler());
 }
@@ -6631,20 +6591,6 @@ function resolveEs(cwd, dbParam) {
     return textError("elasticsearch service not found", 404);
   const explorer = esAdapterCache.getOrOpen(dbParam, () => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir));
   return { dbId: dbParam, explorer };
-}
-async function handleClose2(req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
-  if (!body.db)
-    return textError("missing db", 400);
-  closeElasticsearchAdapter(body.db);
-  return json({ ok: true });
 }
 function handleIndices(cwd, url) {
   const r = resolveEs(cwd, url.searchParams.get("db"));
@@ -6815,11 +6761,6 @@ async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
       methods: ["GET", "POST"],
       sideEffect: (m) => m === "POST",
       handler: () => handleSearch(cwd, req, url)
-    },
-    "/_db/elasticsearch/close": {
-      methods: ["POST"],
-      sideEffect: () => true,
-      handler: () => handleClose2(req)
     }
   };
   const route = routes[path];
@@ -7784,7 +7725,7 @@ async function handleTabsPut(cwd, req) {
     return textError(`failed to save tabs: ${message}`, 500);
   }
 }
-async function handleClose3(cwd, req) {
+async function handleClose(cwd, req) {
   if (req.method !== "POST")
     return textError("method not allowed", 405);
   let body;
@@ -7871,7 +7812,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
       log(403);
       return textError("forbidden", 403);
     }
-    return wrapResponse(handleClose3(cwd, req));
+    return wrapResponse(handleClose(cwd, req));
   }
   if (path === "/_db/history")
     return wrapResponse(handleHistory(cwd, url));

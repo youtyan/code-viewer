@@ -18,10 +18,7 @@ type RedisConfig = {
   password: string;
 };
 
-export type RedisExplorer = Omit<
-  KvSource,
-  "capabilities" | "getValue" | "listDatabases" | "listKeys"
-> &
+export type RedisExplorer = KvSource<RedisValue, RedisType> &
   SnapshotIterable & {
     readonly kind: "redis";
     readonly model: "kv";

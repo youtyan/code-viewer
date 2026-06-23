@@ -23,6 +23,9 @@ import type {
   DbOrder,
   DbTableInfo,
   DbValue,
+  EsIndexInfo,
+  EsMapping,
+  EsSearchResult,
 } from "../../../core/database/types";
 import type {
   DatabaseAdapter,
@@ -47,22 +50,25 @@ export type SqlSource = DatabaseAdapter & {
 };
 
 // KV 系 (Redis 等): keyspace × key × type-specific value。
-// 既存の sync な RedisExplorer をそのままラップする必要があるので、
-// 戻り値は値 or Promise どちらでも受けられるよう Awaitable で表現する。
-export type Awaitable<T> = T | Promise<T>;
+// 現行 explorer は request 内で同期的に docker exec し、結果を返す。
+export type KvKeyEntry<TKeyType extends string = string> = {
+  name: string;
+  type: TKeyType;
+};
 
-export type KvKeyEntry = { name: string; type: string };
-
-export type KvSource = DataSourceBase & {
+export type KvSource<
+  TValue = unknown,
+  TKeyType extends string = string,
+> = DataSourceBase & {
   readonly model: "kv";
-  listDatabases(): Awaitable<Array<{ index: number; keyCount: number }>>;
+  listDatabases(): Array<{ index: number; keyCount: number }>;
   listKeys(opts: {
     db: number;
     pattern?: string;
     cursor?: string;
     count?: number;
-  }): Awaitable<{ keys: KvKeyEntry[]; nextCursor: string }>;
-  getValue(opts: { db: number; key: string }): Awaitable<unknown>;
+  }): { keys: Array<KvKeyEntry<TKeyType>>; nextCursor: string };
+  getValue(opts: { db: number; key: string }): TValue;
 };
 
 // Object store 系 (S3 / MinIO)。Round 3 で実装する。型だけ予約。
@@ -71,10 +77,23 @@ export type ObjectSource = DataSourceBase & {
   // 具体メソッドは Round 3 で確定。
 };
 
-// Document store 系 (Elasticsearch)。Round 4 で実装する。型だけ予約。
+// Document store 系 (Elasticsearch)。
 export type DocSource = DataSourceBase & {
   readonly model: "document";
-  // 具体メソッドは Round 4 で確定。
+  listIndices(): EsIndexInfo[];
+  getMapping(index: string): EsMapping;
+  searchDocs(opts: {
+    index: string;
+    query?: string;
+    size?: number;
+    searchAfter?: unknown[];
+  }): EsSearchResult;
+  getDoc(opts: { index: string; id: string }): {
+    found: boolean;
+    source: unknown;
+    seqNo?: number;
+    primaryTerm?: number;
+  };
 };
 
 // ---------- capability mixin ----------
