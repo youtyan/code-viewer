@@ -3410,6 +3410,23 @@ var init_worktree_watcher = __esm(() => {
   init_search();
 });
 
+// web-src/core/id.ts
+function bytesToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function makeId(prefix) {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return `${prefix}-${cryptoApi.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  }
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(8);
+    cryptoApi.getRandomValues(bytes);
+    return `${prefix}-${bytesToHex(bytes)}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // web-src/server/database/serialize.ts
 function serializeDbValue(value) {
   if (value === null || value === undefined)
@@ -4923,7 +4940,7 @@ async function getStoreDb(cwd) {
   storeDb.exec(SCHEMA_SQL);
   return storeDb;
 }
-function makeId(prefix) {
+function makeId2(prefix) {
   return `${prefix}-${randomBytes(8).toString("hex")}`;
 }
 function hashPayload(payloadJson) {
@@ -4931,7 +4948,7 @@ function hashPayload(payloadJson) {
 }
 async function createSnapshot(cwd, dbId, kind, tables, note) {
   const db = await getStoreDb(cwd);
-  const id = makeId("snap");
+  const id = makeId2("snap");
   db.prepare("INSERT INTO snapshots (id, db_id, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)").run(id, dbId, kind, note, new Date().toISOString(), "running");
   for (const t of tables) {
     db.prepare("INSERT INTO snapshot_tables (snapshot_id, table_name) VALUES (?, ?)").run(id, t);
@@ -5225,7 +5242,6 @@ var init_snapshot_runner = __esm(() => {
 });
 
 // web-src/server/database/tabs-store.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
 import {
   existsSync as existsSync8,
   mkdirSync as mkdirSync6,
@@ -5375,7 +5391,7 @@ function saveTabs(cwd, state) {
   const dir = join11(cwd, CODE_VIEWER_DIR4);
   mkdirSync6(dir, { recursive: true });
   const file = tabsFilePath(cwd);
-  const tmp = `${file}.tmp-${process.pid}-${randomBytes2(6).toString("hex")}`;
+  const tmp = `${file}.${makeId(`tmp-${process.pid}`)}`;
   const content = `${JSON.stringify(normalized, null, 2)}
 `;
   if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES2) {
@@ -6781,7 +6797,6 @@ __export(exports_handle, {
   json: () => json,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
-import { randomBytes as randomBytes3 } from "node:crypto";
 function ensureInit() {
   if (initialized)
     return;
@@ -7061,7 +7076,7 @@ async function handleTable(cwd, url) {
   }
 }
 function makeHistoryId() {
-  return `qh-${randomBytes3(8).toString("hex")}`;
+  return makeId("qh");
 }
 function unquoteSqlIdentifier(raw) {
   const trimmed = raw.trim();
@@ -7372,7 +7387,7 @@ async function handleSearchStart(cwd, req) {
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response)
     return r;
-  const jobId = `search-${randomBytes3(8).toString("hex")}`;
+  const jobId = makeId("search");
   const ac = new AbortController;
   const job = {
     id: jobId,

@@ -7274,7 +7274,7 @@ body.db-resizing {
   overflow: hidden;
   background: var(--bg-soft);
 }
-.redis-pane-header {
+.db-explorer-pane-header {
   padding: 8px 12px;
   font-weight: 600;
   font-size: var(--db-font-md);
@@ -7546,12 +7546,12 @@ body.db-resizing {
   word-break: break-all;
   white-space: pre-wrap;
 }
-.redis-note {
+.db-pane-note {
   padding: 8px 12px;
   color: var(--fg-muted);
   font-size: var(--db-font-sm);
 }
-.redis-error {
+.db-pane-error {
   padding: 8px 12px;
   color: var(--error, #c00);
   font-size: var(--db-font-sm);
@@ -7568,14 +7568,6 @@ body.db-resizing {
 }
 .es-explorer[hidden] {
   display: none;
-}
-.es-pane-header {
-  padding: 8px 12px;
-  font-weight: 600;
-  font-size: var(--db-font-md);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  flex-shrink: 0;
 }
 .es-index-list-pane {
   width: 260px;
@@ -7793,17 +7785,6 @@ body.db-resizing {
   text-align: center;
   padding: 8px;
 }
-.es-note {
-  padding: 8px 12px;
-  color: var(--fg-muted);
-  font-size: var(--db-font-sm);
-}
-.es-error {
-  padding: 8px 12px;
-  color: var(--error, #c00);
-  font-size: var(--db-font-sm);
-}
-
 /* ---------- Database multi-tab manager ---------- */
 .db-root {
   display: flex;

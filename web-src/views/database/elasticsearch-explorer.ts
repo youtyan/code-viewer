@@ -36,7 +36,7 @@ export function createElasticsearchExplorer(
   indexListPane.className = "es-index-list-pane";
 
   const indexListHeader = document.createElement("div");
-  indexListHeader.className = "es-pane-header";
+  indexListHeader.className = "db-explorer-pane-header";
   indexListHeader.textContent = "Indices";
   indexListPane.appendChild(indexListHeader);
 
@@ -49,7 +49,7 @@ export function createElasticsearchExplorer(
   docListPane.className = "es-doc-list-pane";
 
   const docListHeader = document.createElement("div");
-  docListHeader.className = "es-pane-header";
+  docListHeader.className = "db-explorer-pane-header";
   docListHeader.textContent = "Docs";
   docListPane.appendChild(docListHeader);
 
@@ -132,7 +132,7 @@ export function createElasticsearchExplorer(
   function setIndexStatus(message: string, isError = false) {
     indexList.innerHTML = "";
     const note = document.createElement("div");
-    note.className = isError ? "es-error" : "es-note";
+    note.className = isError ? "db-pane-error" : "db-pane-note";
     note.textContent = message;
     indexList.appendChild(note);
   }
@@ -140,7 +140,7 @@ export function createElasticsearchExplorer(
   function setDocStatus(message: string, isError = false) {
     docList.innerHTML = "";
     const note = document.createElement("div");
-    note.className = isError ? "es-error" : "es-note";
+    note.className = isError ? "db-pane-error" : "db-pane-note";
     note.textContent = message;
     docList.appendChild(note);
     docMoreBtn.hidden = true;
@@ -274,7 +274,7 @@ export function createElasticsearchExplorer(
     docBody.appendChild(header);
     if (!resp.found) {
       const note = document.createElement("div");
-      note.className = "es-note";
+      note.className = "db-pane-note";
       note.textContent = "(doc not found)";
       docBody.appendChild(note);
       return;
@@ -304,7 +304,7 @@ export function createElasticsearchExplorer(
     const requestDbId = currentDbId;
     mappingBody.innerHTML = "";
     const loading = document.createElement("div");
-    loading.className = "es-note";
+    loading.className = "db-pane-note";
     loading.textContent = "Loading mapping...";
     mappingBody.appendChild(loading);
     try {
@@ -317,7 +317,7 @@ export function createElasticsearchExplorer(
         const text = await res.text();
         mappingBody.innerHTML = "";
         const err = document.createElement("div");
-        err.className = "es-error";
+        err.className = "db-pane-error";
         err.textContent = `Error: ${text || res.statusText}`;
         mappingBody.appendChild(err);
         return;
@@ -337,7 +337,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       mappingBody.innerHTML = "";
       const errEl = document.createElement("div");
-      errEl.className = "es-error";
+      errEl.className = "db-pane-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       mappingBody.appendChild(errEl);
     } finally {
@@ -433,7 +433,7 @@ export function createElasticsearchExplorer(
     setDetailTab("doc");
     docBody.innerHTML = "";
     const loading = document.createElement("div");
-    loading.className = "es-note";
+    loading.className = "db-pane-note";
     loading.textContent = "Loading doc...";
     docBody.appendChild(loading);
     try {
@@ -450,7 +450,7 @@ export function createElasticsearchExplorer(
         const text = await res.text();
         docBody.innerHTML = "";
         const err = document.createElement("div");
-        err.className = "es-error";
+        err.className = "db-pane-error";
         err.textContent = `Error: ${text || res.statusText}`;
         docBody.appendChild(err);
         return;
@@ -471,7 +471,7 @@ export function createElasticsearchExplorer(
       if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
       docBody.innerHTML = "";
       const errEl = document.createElement("div");
-      errEl.className = "es-error";
+      errEl.className = "db-pane-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       docBody.appendChild(errEl);
     } finally {

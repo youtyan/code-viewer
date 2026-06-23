@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type {
   DbColumn,
   DbFilesResponse,
@@ -9,6 +8,7 @@ import type {
   DbTableDataResponse,
   QueryHistoryEntry,
 } from "../../core/database/types";
+import { makeId } from "../../core/id";
 import { listDockerDatabases, openDockerAdapter } from "./adapters/docker";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
@@ -425,7 +425,7 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
 }
 
 function makeHistoryId(): string {
-  return `qh-${randomBytes(8).toString("hex")}`;
+  return makeId("qh");
 }
 
 function unquoteSqlIdentifier(raw: string): string {
@@ -840,7 +840,7 @@ async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response) return r;
 
-  const jobId = `search-${randomBytes(8).toString("hex")}`;
+  const jobId = makeId("search");
   const ac = new AbortController();
   const job: SearchJob = {
     id: jobId,
