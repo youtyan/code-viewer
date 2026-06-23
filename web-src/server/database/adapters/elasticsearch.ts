@@ -75,6 +75,16 @@ export function isReadOnlyEsPath(rawPath: string): boolean {
 
 const ES_DEFAULT_SIZE = 200;
 
+export function quoteCurlConfigString(value: string): string {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      throw new Error("curl config value must not contain control characters");
+    }
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 function execEsRequest(
   config: EsConfig,
   method: "GET" | "POST",
@@ -92,6 +102,9 @@ function execEsRequest(
   //   --write-out '\n__ES_STATUS__:%{http_code}\n'
   // tail で status を取り、それより上を body とする。
   const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const curlConfig = hasPassword
+    ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}\n`
+    : undefined;
   const args = [
     "exec",
     "-i",
@@ -116,7 +129,7 @@ function execEsRequest(
       ? { ...process.env, ES_HTTP_PASSWORD: config.password }
       : process.env,
     timeout: timeoutMs,
-    input: hasPassword ? `user = "elastic:${config.password}"\n` : undefined,
+    input: curlConfig,
     stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
   });
   return {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   canonicalizeEsSnapshotContainer,
   isReadOnlyEsPath,
+  quoteCurlConfigString,
 } from "../server/database/adapters/elasticsearch";
 import { canonicalizeRedisSnapshotContainer } from "../server/database/adapters/redis";
 import { parseDockerDbId } from "../server/database/discovery";
@@ -21,6 +22,28 @@ describe("Elasticsearch read-only path allowlist", () => {
   ] as const) {
     test(`${path} => ${expected}`, () => {
       expect(isReadOnlyEsPath(path)).toBe(expected);
+    });
+  }
+});
+
+describe("Elasticsearch curl config quoting", () => {
+  test("escapes quotes and backslashes inside curl config strings", () => {
+    expect(quoteCurlConfigString('elastic:pw"\\tail')).toBe(
+      '"elastic:pw\\"\\\\tail"',
+    );
+  });
+
+  for (const value of ["elastic:pw\nnext = bad", "elastic:pw\rbad"]) {
+    test("rejects control characters", () => {
+      let message = "";
+      try {
+        quoteCurlConfigString(value);
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).toBe(
+        "curl config value must not contain control characters",
+      );
     });
   }
 });

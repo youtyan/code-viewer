@@ -6086,6 +6086,7 @@ var init_redis = __esm(() => {
 // web-src/server/database/adapters/elasticsearch.ts
 var exports_elasticsearch = {};
 __export(exports_elasticsearch, {
+  quoteCurlConfigString: () => quoteCurlConfigString,
   openElasticsearchAdapter: () => openElasticsearchAdapter,
   isReadOnlyEsPath: () => isReadOnlyEsPath,
   canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
@@ -6099,9 +6100,20 @@ function isReadOnlyEsPath(rawPath) {
   const apiSegment = segments[segments.length - 1];
   return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
 }
+function quoteCurlConfigString(value) {
+  for (let i = 0;i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      throw new Error("curl config value must not contain control characters");
+    }
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
 function execEsRequest(config, method, path, body, timeoutMs = 15000) {
   const hasPassword = !!config.password;
   const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const curlConfig = hasPassword ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}
+` : undefined;
   const args = [
     "exec",
     "-i",
@@ -6126,8 +6138,7 @@ __ES_STATUS__:%{http_code}
     encoding: "utf8",
     env: hasPassword ? { ...process.env, ES_HTTP_PASSWORD: config.password } : process.env,
     timeout: timeoutMs,
-    input: hasPassword ? `user = "elastic:${config.password}"
-` : undefined,
+    input: curlConfig,
     stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
   });
   return {
