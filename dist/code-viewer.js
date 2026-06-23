@@ -6415,8 +6415,12 @@ var init_elasticsearch = __esm(() => {
 // web-src/server/database/handle-redis.ts
 var exports_handle_redis = {};
 __export(exports_handle_redis, {
-  handleRedisRoute: () => handleRedisRoute
+  handleRedisRoute: () => handleRedisRoute,
+  closeRedisAdapter: () => closeRedisAdapter
 });
+function closeRedisAdapter(dbId) {
+  redisAdapterCache.close(dbId);
+}
 function resolveRedis(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
@@ -6443,7 +6447,7 @@ async function handleClose(req) {
   }
   if (!body.db)
     return textError("missing db", 400);
-  redisAdapterCache.close(body.db);
+  closeRedisAdapter(body.db);
   return json({ ok: true });
 }
 function handleDatabases(cwd, url) {
@@ -6562,8 +6566,12 @@ var init_handle_redis = __esm(() => {
 // web-src/server/database/handle-elasticsearch.ts
 var exports_handle_elasticsearch = {};
 __export(exports_handle_elasticsearch, {
-  handleElasticsearchRoute: () => handleElasticsearchRoute
+  handleElasticsearchRoute: () => handleElasticsearchRoute,
+  closeElasticsearchAdapter: () => closeElasticsearchAdapter
 });
+function closeElasticsearchAdapter(dbId) {
+  esAdapterCache.close(dbId);
+}
 function resolveEs(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
@@ -6590,7 +6598,7 @@ async function handleClose2(req) {
   }
   if (!body.db)
     return textError("missing db", 400);
-  esAdapterCache.close(body.db);
+  closeElasticsearchAdapter(body.db);
   return json({ ok: true });
 }
 function handleIndices(cwd, url) {
@@ -7697,6 +7705,24 @@ async function handleClose3(cwd, req) {
   }
   if (!body.db)
     return textError("missing db", 400);
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db);
+    if (!info)
+      return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      const { closeRedisAdapter: closeRedisAdapter2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
+      closeRedisAdapter2(body.db);
+      return json({ ok: true });
+    }
+    if (info.kind === "elasticsearch") {
+      const { closeElasticsearchAdapter: closeElasticsearchAdapter2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
+      closeElasticsearchAdapter2(body.db);
+      return json({ ok: true });
+    }
+  }
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response)
     return r;
