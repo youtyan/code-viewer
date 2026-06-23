@@ -1120,7 +1120,7 @@ async function handleSnapshotCreate(
     } finally {
       snapshotJob.done = true;
       if (activeSnapshotId) {
-        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60_000);
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60_000).unref();
       }
       if (closeSourceAfterSnapshot) {
         try {
@@ -1136,7 +1136,6 @@ async function handleSnapshotCreate(
 }
 
 async function handleSnapshotCancel(req: Request, url: URL): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
   let id = url.searchParams.get("id") || "";
   if (!id) {
     const body = await parsePostJsonBody<{ id?: string }>(req);
@@ -1225,9 +1224,6 @@ function handleTabsGet(cwd: string): Response {
 }
 
 async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
-  if (req.method !== "PUT" && req.method !== "POST") {
-    return textError("method not allowed", 405);
-  }
   const contentLength = Number(req.headers.get("content-length") || "0");
   if (contentLength > MAX_TABS_BODY_BYTES) {
     return textError("tabs body too large", 413);

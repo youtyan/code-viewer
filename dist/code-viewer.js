@@ -4854,9 +4854,9 @@ function textErrorResponse(message, status) {
   });
 }
 async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res) {
-  const route = routes[url.pathname];
-  if (!route)
+  if (!Object.prototype.hasOwnProperty.call(routes, url.pathname))
     return null;
+  const route = routes[url.pathname];
   if (!route.methods.includes(req.method)) {
     return wrap(textErrorResponse("method not allowed", 405));
   }
@@ -5271,7 +5271,6 @@ async function runSnapshot(cwd, source, dbId, containers, note, onProgress, opti
     throw new Error("data source does not support snapshot (missing SnapshotIterable capability)");
   }
   const snapshotSource = source;
-  throwIfSnapshotAborted(options.signal);
   const snapshotId = await createSnapshot(cwd, dbId, snapshotSource.kind, containers, note);
   options.onSnapshotId?.(snapshotId);
   try {
@@ -6170,7 +6169,6 @@ function execEsRequest(config, method, path, body, timeoutMs = 15000) {
   const args = [
     "exec",
     "-i",
-    ...hasPassword ? ["-e", "ES_HTTP_PASSWORD"] : [],
     config.containerName,
     "curl",
     "-s",
@@ -6189,7 +6187,7 @@ __ES_STATUS__:%{http_code}
   ];
   const proc = spawnSync5("docker", args, {
     encoding: "utf8",
-    env: hasPassword ? { ...process.env, ES_HTTP_PASSWORD: config.password } : process.env,
+    env: process.env,
     timeout: timeoutMs,
     input: curlConfig,
     stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
@@ -6545,7 +6543,7 @@ function handleKeys(cwd, url) {
     return handleError("redis", "list redis keys", err);
   }
 }
-async function handleRedisRoute(req, url, cwd, _sideEffectAllowed) {
+async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
   const wrap = createQueryStrippedLogger("redis", req, url);
   return dispatchRoutes(req, url, {
     "/_db/redis/databases": {
@@ -6560,7 +6558,7 @@ async function handleRedisRoute(req, url, cwd, _sideEffectAllowed) {
       methods: ["GET"],
       handler: () => handleValue(cwd, url)
     }
-  }, _sideEffectAllowed, wrap);
+  }, sideEffectAllowed, wrap);
 }
 function handleValue(cwd, url) {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
@@ -7578,7 +7576,7 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     } finally {
       snapshotJob.done = true;
       if (activeSnapshotId) {
-        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60000);
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60000).unref();
       }
       if (closeSourceAfterSnapshot) {
         try {
@@ -7590,8 +7588,6 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   return json({ ok: true, message: "snapshot started" });
 }
 async function handleSnapshotCancel(req, url) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
   let id = url.searchParams.get("id") || "";
   if (!id) {
     const body = await parsePostJsonBody(req);
@@ -7658,9 +7654,6 @@ function handleTabsGet(cwd) {
   return json(loadTabs(cwd));
 }
 async function handleTabsPut(cwd, req) {
-  if (req.method !== "PUT" && req.method !== "POST") {
-    return textError("method not allowed", 405);
-  }
   const contentLength = Number(req.headers.get("content-length") || "0");
   if (contentLength > MAX_TABS_BODY_BYTES) {
     return textError("tabs body too large", 413);
