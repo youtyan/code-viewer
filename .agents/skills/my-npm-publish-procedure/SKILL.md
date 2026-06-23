@@ -48,7 +48,7 @@ The first publish creates the npm package page. Trusted Publisher setup may not 
 1. Confirm package and GitHub state:
 
 ```sh
-cd /Users/youtyan/Project/code-viewer
+cd <repo-root>  # this repository's root
 npm pkg get name version
 git status --short --branch
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
@@ -139,7 +139,7 @@ Do not run `npm whoami`, `npm access list packages`, `npm view`, or `npm publish
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `@youtyan/browser-pilot` appears in publish output | command was run in the wrong repository | stop; `cd /Users/youtyan/Project/code-viewer`; rerun `npm pkg get name version` |
+| `@youtyan/browser-pilot` appears in publish output | command was run in the wrong repository | stop; `cd <repo-root>` (back to this repository); rerun `npm pkg get name version` |
 | `Automatic provenance generation not supported for provider: null` | local publish used provenance outside GitHub Actions | first publish only: use `npm publish --access public --provenance=false` |
 | `EOTP` | npm requires one-time auth for publish or settings changes | authenticate in the browser or rerun with local OTP; never expose OTP in chat |
 | package access page says `Not Found` | package has not been published yet | perform first publish, then configure Trusted Publisher |
