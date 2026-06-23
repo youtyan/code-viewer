@@ -1,3 +1,10 @@
+import type { DbKind } from "../../core/database/types";
+import {
+  type DockerDbInfo,
+  findDockerServiceByDbId,
+  parseDockerDbId,
+} from "./discovery";
+
 export type CloseableDatabaseHandle = {
   close(): void;
 };
@@ -105,6 +112,26 @@ export function textError(message: string, status: number): Response {
       "Cache-Control": "no-store",
     },
   });
+}
+
+export function resolveDockerExplorer<T extends CloseableDatabaseHandle>(
+  cwd: string,
+  dbParam: string | null,
+  kind: DbKind,
+  cache: DockerAdapterCache<T>,
+  openFn: (info: DockerDbInfo) => T,
+): { dbId: string; explorer: T } | Response {
+  if (!dbParam) return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError(`${kind} requires docker: prefix`, 400);
+  }
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed) return textError("invalid docker db id", 400);
+  const info = findDockerServiceByDbId(cwd, dbParam, kind);
+  if (!info) return textError(`${kind} service not found`, 404);
+
+  const explorer = cache.getOrOpen(dbParam, () => openFn(info));
+  return { dbId: dbParam, explorer };
 }
 
 export type RouteEntry = {

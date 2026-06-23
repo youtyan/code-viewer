@@ -9,7 +9,6 @@ import {
   type ElasticsearchExplorer,
   openElasticsearchAdapter,
 } from "./adapters/elasticsearch";
-import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
@@ -17,6 +16,7 @@ import {
   handleError,
   json,
   parsePostJsonBody,
+  resolveDockerExplorer,
   textError,
 } from "./handle-shared";
 
@@ -30,21 +30,14 @@ function resolveEs(
   cwd: string,
   dbParam: string | null,
 ): { dbId: string; explorer: ElasticsearchExplorer } | Response {
-  if (!dbParam) return textError("missing db parameter", 400);
-  if (!dbParam.startsWith("docker:")) {
-    return textError("elasticsearch requires docker: prefix", 400);
-  }
-  const parsed = parseDockerDbId(dbParam);
-  if (!parsed) return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
-  if (!info) return textError("elasticsearch service not found", 404);
-
-  const explorer = esAdapterCache.getOrOpen(dbParam, () =>
-    // openElasticsearchAdapter の cwd 引数は `docker compose ps` の実行 dir。
-    // recursive discovery 後は compose のあるディレクトリを渡す。
-    openElasticsearchAdapter(info.serviceName, info.env, info.composeDir),
+  return resolveDockerExplorer<ElasticsearchExplorer>(
+    cwd,
+    dbParam,
+    "elasticsearch",
+    esAdapterCache,
+    (info) =>
+      openElasticsearchAdapter(info.serviceName, info.env, info.composeDir),
   );
-  return { dbId: dbParam, explorer };
 }
 
 function handleIndices(cwd: string, url: URL): Response {
