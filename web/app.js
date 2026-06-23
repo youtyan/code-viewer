@@ -22,8 +22,15 @@
   });
 
   // web-src/core/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  function shouldAutoLoadForRoute(route, options = {}) {
+    if (route.screen === "history")
+      return options.historyWorktreeSelected === true;
+    if (route.screen === "database" || route.screen === "help" || route.screen === "unknown")
+      return false;
+    return true;
+  }
+  function shouldCatchUpDiff(route, options = {}) {
+    return shouldAutoLoadForRoute(route, options) && route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
   }
   function createCatchUpGate(now, minIntervalMs) {
     let lastForceAt = 0;
@@ -7159,6 +7166,11 @@ ${frontmatter.yaml}
     const annotationDetail = $("#annotation-detail");
     const annotationCountEl = $("#annotations-count");
     const annotationListCountEl = $("#annotation-list-count");
+    const annotationCaptureDb = $("#annotation-capture-db");
+    annotationCaptureDb.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+    function updateDatabaseCaptureButton() {
+      annotationCaptureDb.hidden = deps.getRoute().screen !== "database";
+    }
     function setAnnotationPanelOpen(open) {
       annotationPanel.hidden = !open;
       document.body.classList.toggle("annotation-panel-open", open);
@@ -7334,6 +7346,8 @@ ${frontmatter.yaml}
       if (!session)
         return;
       for (const entry of session.entries) {
+        if (entry.target?.kind === "database")
+          continue;
         const target = inlineAnnotationTargetRow(entry);
         if (!target)
           continue;
@@ -7522,7 +7536,101 @@ ${frontmatter.yaml}
 `)[0].trim();
       return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
     }
+    function databaseAnnotationTitle(target) {
+      const parts = [target.table || target.db || "Database"];
+      if (target.tab === "data" && target.data?.search)
+        parts.push(`search: ${target.data.search}`);
+      else if (target.tab === "query" && target.query?.sql)
+        parts.push("query");
+      else if (target.tab === "search" && target.search?.term)
+        parts.push(`global search: ${target.search.term}`);
+      else if (target.tab)
+        parts.push(target.tab);
+      return parts.join(" / ");
+    }
+    function openDatabaseCaptureForm(target) {
+      $("#annotation-detail-session").textContent = activeSessionId || "Database annotations";
+      $("#annotation-detail-step").textContent = "new";
+      const location2 = $("#annotation-detail-location");
+      location2.textContent = databaseAnnotationTitle(target);
+      location2.href = "#";
+      const head = annotationDetail.querySelector(".annotation-detail-head");
+      head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+        el.remove();
+      });
+      const body = $("#annotation-detail-body");
+      body.replaceChildren();
+      const form = document.createElement("div");
+      form.className = "annotation-edit-form";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "title (optional)";
+      titleInput.value = databaseAnnotationTitle(target);
+      const bodyInput = document.createElement("textarea");
+      bodyInput.rows = 10;
+      bodyInput.placeholder = "annotation body";
+      const buttons = document.createElement("div");
+      buttons.className = "annotation-edit-buttons";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "gdp-btn gdp-btn-sm";
+      save.textContent = "Save";
+      save.addEventListener("click", async () => {
+        if (!bodyInput.value.trim())
+          return;
+        save.disabled = true;
+        annotationCaptureDb.disabled = true;
+        try {
+          const res = await fetch("/_annotations", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Code-Viewer-Action": "1"
+            },
+            body: JSON.stringify({
+              action: "add",
+              session_id: activeSessionId || undefined,
+              session_title: activeSessionId ? undefined : "Database annotations",
+              target,
+              title: titleInput.value,
+              body: bodyInput.value
+            })
+          });
+          const result = res.ok ? await res.json() : null;
+          if (result?.session_id) {
+            activeSessionId = result.session_id;
+            syncSessionUrl();
+          }
+          await refreshAnnotations();
+          if (result?.entry?.id)
+            await openAnnotationEntry(result.entry.id);
+        } finally {
+          save.disabled = false;
+          annotationCaptureDb.disabled = false;
+        }
+      });
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "gdp-btn gdp-btn-sm";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        annotationDetail.hidden = true;
+      });
+      buttons.append(save, cancel);
+      form.append(titleInput, bodyInput, buttons);
+      body.appendChild(form);
+      annotationDetail.hidden = false;
+      setAnnotationPanelOpen(true);
+      titleInput.focus();
+    }
+    async function captureCurrentDatabaseAnnotation() {
+      const target = deps.captureDatabaseAnnotationTarget();
+      if (!target?.db)
+        return;
+      openDatabaseCaptureForm(target);
+    }
     function renderAnnotationPanel() {
+      updateDatabaseCaptureButton();
       annotationSessionsEl.replaceChildren();
       if (!ANNOTATIONS.sessions.length) {
         const empty = document.createElement("p");
@@ -7757,6 +7865,8 @@ ${frontmatter.yaml}
       const rangeChanged = current.from !== from || current.to !== to;
       const prevRoute = deps.getRoute();
       const line = annotationLineTarget(entry);
+      if (prevRoute.screen === "database")
+        deps.leaveDatabaseView();
       deps.setRange(from, to);
       deps.syncRefInputs();
       deps.cancelActiveSourceLoad("navigation");
@@ -7836,10 +7946,15 @@ ${frontmatter.yaml}
     }
     if (localStorage.getItem("gdp:annotation-panel") === "1")
       setAnnotationPanelOpen(true);
+    updateDatabaseCaptureButton();
     $("#annotations-toggle").addEventListener("click", () => {
       setAnnotationPanelOpen(annotationPanel.hidden);
+      updateDatabaseCaptureButton();
       if (!annotationPanel.hidden)
         refreshAnnotations();
+    });
+    annotationCaptureDb.addEventListener("click", () => {
+      captureCurrentDatabaseAnnotation();
     });
     $("#annotation-panel-close").addEventListener("click", () => {
       annotationPanelDismissed = true;
@@ -8794,6 +8909,19 @@ ${frontmatter.yaml}
         startSearch();
     });
     cancelBtn.addEventListener("click", cancelSearch);
+    function setSearch(term, options = {}) {
+      input.value = term;
+      nonTextCheck.checked = !!options.includeNonText;
+      if (options.autoRun && term.trim())
+        startSearch();
+    }
+    function getSearch() {
+      const term = input.value.trim();
+      return {
+        ...term ? { term } : {},
+        ...nonTextCheck.checked ? { includeNonText: true } : {}
+      };
+    }
     function dispose() {
       disposed = true;
       if (pollTimer) {
@@ -8806,7 +8934,7 @@ ${frontmatter.yaml}
         cancelJob(jobId);
       }
     }
-    return { el, dispose };
+    return { el, setSearch, getSearch, dispose };
   }
 
   // web-src/views/database/query-editor.ts
@@ -9142,7 +9270,7 @@ ${frontmatter.yaml}
     function dispose() {
       document.removeEventListener("click", onDocumentClick);
     }
-    return { el, focus, setSql, getSql, dispose };
+    return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
   }
   function formatValue(value) {
     if (value === null)
@@ -11222,6 +11350,36 @@ ${frontmatter.yaml}
         renderViewport();
       }
     }
+    function applyState(state) {
+      if (state.search !== undefined) {
+        globalSearchValue = state.search;
+        filterInput.value = state.search;
+        filterClear.hidden = !globalSearchValue;
+      }
+      columnFilters.clear();
+      for (const filter of state.filters || []) {
+        if (filter.column && filter.value)
+          columnFilters.set(filter.column, filter.value);
+      }
+      sort = state.sort || null;
+      const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
+      renderHeader();
+      invalidateData();
+      if (targetRowIndex >= 0) {
+        selectedRowIndex = targetRowIndex;
+        viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+        renderViewport();
+      }
+    }
+    function getState() {
+      const filters = collectFilters().filter((filter) => filter.value !== globalSearchValue);
+      return {
+        ...globalSearchValue ? { search: globalSearchValue } : {},
+        ...filters.length ? { filters } : {},
+        ...sort ? { sort } : {},
+        ...selectedRowIndex >= 0 ? { row: selectedRowIndex + 1 } : {}
+      };
+    }
     filterInput.addEventListener("input", () => {
       globalSearchValue = filterInput.value.trim();
       filterClear.hidden = !globalSearchValue;
@@ -11251,7 +11409,7 @@ ${frontmatter.yaml}
       clear();
       viewport.removeEventListener("scroll", onViewportScroll);
     }
-    return { el, load, clear, destroy };
+    return { el, load, applyState, getState, clear, destroy };
   }
   function formatValue3(value) {
     if (value === null)
@@ -11530,6 +11688,10 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/database-view.ts
+  function looksReadOnlySql(sql) {
+    const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
+    return /^(select|with|pragma|explain)\b/i.test(normalized);
+  }
   function isSqlKind(kind) {
     return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
   }
@@ -11926,6 +12088,7 @@ ${frontmatter.yaml}
       if (schema.tables.length > 0) {
         await selectTable(schema.tables[0].name, generation);
       }
+      applyHistoryVisibility();
       cb.onStateChange();
     }
     async function selectTable(table2, generation = loadGeneration) {
@@ -12131,7 +12294,35 @@ ${frontmatter.yaml}
           snapshotView.refresh();
         }
       }
+      applyAnnotationTarget(options.annotationTarget);
       cb.onStateChange();
+    }
+    function applyAnnotationTarget(target) {
+      if (!target || target.db !== currentDb?.id)
+        return;
+      if (target.data) {
+        if (target.table && target.table !== currentTable)
+          return;
+        setActiveTab("data");
+        grid.applyState(target.data);
+      }
+      if (target.query) {
+        setActiveTab("query");
+        if (target.query.sql)
+          queryEditor.setSql(target.query.sql);
+        if (target.query.autoRun && target.query.sql) {
+          if (!looksReadOnlySql(target.query.sql))
+            return;
+          target.query.mode === "explain" ? queryEditor.explain() : queryEditor.run();
+        }
+      }
+      if (target.search) {
+        setActiveTab("search");
+        globalSearchView.setSearch(target.search.term || "", {
+          includeNonText: target.search.includeNonText,
+          autoRun: target.search.autoRun
+        });
+      }
     }
     function handleSse(event, data) {
       if (historyOpen)
@@ -12170,6 +12361,25 @@ ${frontmatter.yaml}
       }
       return state;
     }
+    function getAnnotationTarget() {
+      if (!currentDb)
+        return null;
+      const target = {
+        kind: "database",
+        db: currentDb.id,
+        ...currentTable ? { table: currentTable } : {},
+        tab: currentTab
+      };
+      if (currentTab === "data") {
+        target.data = grid.getState();
+      } else if (currentTab === "query") {
+        const sql = queryEditor.getSql();
+        target.query = { ...sql ? { sql } : {}, mode: "run" };
+      } else if (currentTab === "search") {
+        target.search = globalSearchView.getSearch();
+      }
+      return target;
+    }
     function getLabel() {
       if (!currentDb)
         return "(empty)";
@@ -12201,6 +12411,7 @@ ${frontmatter.yaml}
       enter,
       handleSse,
       getState,
+      getAnnotationTarget,
       getLabel,
       dispose
     };
@@ -12600,9 +12811,18 @@ ${frontmatter.yaml}
       tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
       tabOrder.push(id);
       setActive(id);
-      const ready = pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined, options).then(() => refreshChipLabel(id)).finally(() => {
-        paneReadyById.delete(id);
-      });
+      const ready = (async () => {
+        if (options.annotationTarget)
+          restoring = true;
+        try {
+          await pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined, options);
+          refreshChipLabel(id);
+        } finally {
+          if (options.annotationTarget)
+            restoring = false;
+          paneReadyById.delete(id);
+        }
+      })();
       paneReadyById.set(id, ready);
       return id;
     }
@@ -12646,10 +12866,38 @@ ${frontmatter.yaml}
         return false;
       return true;
     }
-    async function applyRouteToTab(db, table2, view) {
+    async function applyRouteToTab(db, table2, view, options = {}) {
+      async function enterPane(pane, targetDb, targetTable, targetView, enterOptions) {
+        if (!enterOptions?.annotationTarget) {
+          await pane.enter(targetDb, targetTable, targetView, enterOptions);
+          return;
+        }
+        restoring = true;
+        try {
+          await pane.enter(targetDb, targetTable, targetView, enterOptions);
+        } finally {
+          restoring = false;
+        }
+      }
+      if (options.reuseActiveTab && activeTabId) {
+        const targetId = activeTabId;
+        const active = tabsById.get(activeTabId);
+        if (active) {
+          await enterPane(active.pane, db, table2, view, options);
+          if (!mounted)
+            return;
+          refreshChipLabel(targetId);
+          return;
+        }
+      }
       for (const [id2, entry] of tabsById) {
         if (routeMatchesState(entry.pane.getState(), db, table2, view)) {
           setActive(id2);
+          if (options.annotationTarget) {
+            await enterPane(entry.pane, db, table2, view, options);
+            if (!mounted)
+              return;
+          }
           refreshChipLabel(id2);
           return;
         }
@@ -12658,7 +12906,7 @@ ${frontmatter.yaml}
         dbId: db ?? null,
         table: table2 ?? null,
         view: view ?? "data"
-      }, { autoSelectFirst: db !== undefined });
+      }, { autoSelectFirst: db !== undefined, ...options });
       const ready = paneReadyById.get(id);
       if (ready)
         await ready;
@@ -12674,7 +12922,7 @@ ${frontmatter.yaml}
         return null;
       }
     }
-    async function doEnter(seq, db, table2, view) {
+    async function doEnter(seq, db, table2, view, options = {}) {
       if (seq !== lifecycleSeq)
         return;
       const firstMount = !mounted;
@@ -12720,20 +12968,36 @@ ${frontmatter.yaml}
             restoring = false;
           }
           if (db || table2 || view) {
-            await applyRouteToTab(db, table2, view);
+            await applyRouteToTab(db, table2, view, options);
           } else {
             syncActiveRoute();
           }
           scheduleSave();
           return;
         }
+      } else {
+        const diff = document.getElementById("diff");
+        if (diff)
+          diff.hidden = true;
+        const empty = document.getElementById("empty");
+        if (empty)
+          empty.classList.add("hidden");
+        root.hidden = false;
+        document.body.classList.add("gdp-database-page");
+        deps.setPageMode();
+        deps.syncHeaderMenu();
       }
       if (tabsById.size === 0) {
-        openTab({
+        const id = openTab({
           dbId: db || null,
           table: table2 || null,
           view: view || "data"
-        }, { autoSelectFirst: !db });
+        }, { autoSelectFirst: !db, ...options });
+        const ready = paneReadyById.get(id);
+        if (ready)
+          await ready;
+        if (!mounted || seq !== lifecycleSeq)
+          return;
         return;
       }
       if (!activeTabId)
@@ -12742,12 +13006,12 @@ ${frontmatter.yaml}
       if (!active)
         return;
       if (db || table2 || view) {
-        await applyRouteToTab(db, table2, view);
+        await applyRouteToTab(db, table2, view, options);
       }
     }
-    async function enter(db, table2, view) {
+    async function enter(db, table2, view, options = {}) {
       const seq = lifecycleSeq;
-      enterQueue = enterQueue.catch(() => {}).then(() => doEnter(seq, db, table2, view));
+      enterQueue = enterQueue.catch(() => {}).then(() => doEnter(seq, db, table2, view, options));
       await enterQueue;
     }
     function leave() {
@@ -12774,6 +13038,16 @@ ${frontmatter.yaml}
         diff.hidden = false;
       mounted = false;
     }
+    function suspend() {
+      if (!mounted)
+        return;
+      flushPendingSave();
+      root.hidden = true;
+      document.body.classList.remove("gdp-database-page");
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+    }
     function handleSse(event, data) {
       if (!mounted)
         return;
@@ -12784,7 +13058,12 @@ ${frontmatter.yaml}
         entry.pane.handleSse(event, data);
       }
     }
-    return { enter, leave, handleSse };
+    function captureAnnotationTarget() {
+      if (!activeTabId)
+        return null;
+      return tabsById.get(activeTabId)?.pane.getAnnotationTarget() ?? null;
+    }
+    return { enter, captureAnnotationTarget, suspend, leave, handleSse };
   }
   function formatSize(bytes) {
     if (bytes >= 1024 * 1024 * 1024)
@@ -14222,6 +14501,7 @@ ${frontmatter.yaml}
   function showEmptyHistoryDiffPane(deps) {
     if (deps.diff)
       deps.diff.innerHTML = "";
+    deps.placeSidebarToggle();
     deps.renderSidebar([], undefined);
     deps.setFiles([]);
     deps.clearLastMeta();
@@ -14345,6 +14625,22 @@ ${frontmatter.yaml}
                 },
                 {
                   kind: "command",
+                  title: "Insert or move a step",
+                  command: `code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "This belongs here."
+code-viewer annotate move a-999 --before a-123`
+                },
+                {
+                  kind: "command",
+                  title: "Annotate a database view",
+                  command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "This restores the filtered failure rows."
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "This reopens the result being discussed."`
+                },
+                {
+                  kind: "command",
                   title: "Inspect posted annotations",
                   command: "code-viewer annotate list"
                 }
@@ -14371,6 +14667,10 @@ ${frontmatter.yaml}
                     [
                       "Fix in place",
                       "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable."
+                    ],
+                    [
+                      "Place notes deliberately",
+                      "Use --before, --after, --position, or annotate move when the reading order changes."
                     ]
                   ]
                 }
@@ -14688,6 +14988,22 @@ ${frontmatter.yaml}
                 },
                 {
                   kind: "command",
+                  title: "説明を途中に差し込む・移動する",
+                  command: `code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "ここに入る補足です。"
+code-viewer annotate move a-999 --before a-123`
+                },
+                {
+                  kind: "command",
+                  title: "データベース画面へ注釈を追加する",
+                  command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "失敗注文で絞り込んだ調査画面を復元します。"
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "説明対象のクエリ結果を開き直します。"`
+                },
+                {
+                  kind: "command",
                   title: "投稿済み注釈を確認する",
                   command: "code-viewer annotate list"
                 }
@@ -14714,6 +15030,10 @@ ${frontmatter.yaml}
                     [
                       "間違いは edit で直す",
                       "削除して追加し直すより、注釈IDと順番を保ったまま修正します。"
+                    ],
+                    [
+                      "順番は明示的に直す",
+                      "--before、--after、--position、annotate move で読み順を整えます。"
                     ]
                   ]
                 }
@@ -15126,6 +15446,8 @@ ${frontmatter.yaml}
 
   // web-src/views/history-view.ts
   var HISTORY_BODY_COLLAPSE_LINES = 10;
+  var HISTORY_WORKTREE_COMMIT = "worktree";
+  var HISTORY_WORKTREE_LABEL = "未コミット変更 (Working tree)";
   function historyBodyLineCount(rawText) {
     if (!rawText)
       return 0;
@@ -15181,6 +15503,9 @@ ${frontmatter.yaml}
     let generation = 0;
     let selectedSha = "";
     let query = "";
+    function worktreeDiffRange() {
+      return { from: "HEAD", to: "worktree" };
+    }
     function setBanner(message) {
       banner.textContent = message;
       banner.hidden = !message;
@@ -15194,6 +15519,7 @@ ${frontmatter.yaml}
       if (!info)
         return;
       info.hidden = true;
+      info.querySelector(".hci-head")?.removeAttribute("hidden");
       info.querySelector(".hci-body")?.replaceChildren();
     }
     function relativeWhen(iso) {
@@ -15244,9 +15570,13 @@ ${frontmatter.yaml}
       const active = commit.sha === selectedSha ? " active" : "";
       return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` + `</span>` + `</li>`;
     }
+    function worktreeRow() {
+      const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
+      return `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` + `<span class="subject" title="${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}">${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}</span>` + `<span class="meta2">` + `<span class="sha">HEAD..worktree</span>` + `<span class="author">Working tree</span>` + `</span>` + `</li>`;
+    }
     function renderList() {
       const now = new Date;
-      const html = [];
+      const html = [worktreeRow()];
       let lastGroup = "";
       for (const commit of commits) {
         const group = historyGroupLabel(commit.when, now);
@@ -15273,6 +15603,7 @@ ${frontmatter.yaml}
         if (el)
           el.textContent = text2;
       };
+      info.querySelector(".hci-head")?.removeAttribute("hidden");
       set2(".hci-sha", commit.sha);
       set2(".hci-author", commit.author);
       const t2 = Date.parse(commit.when);
@@ -15290,6 +15621,21 @@ ${frontmatter.yaml}
             return;
           body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
         }
+      }
+      info.hidden = false;
+    }
+    function updateWorktreeInfo() {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      info.querySelector(".hci-head")?.setAttribute("hidden", "");
+      const subject = info.querySelector(".hci-subject");
+      if (subject)
+        subject.textContent = HISTORY_WORKTREE_LABEL;
+      const body = info.querySelector(".hci-body");
+      if (body) {
+        body.hidden = true;
+        body.replaceChildren();
       }
       info.hidden = false;
     }
@@ -15343,6 +15689,21 @@ ${frontmatter.yaml}
       if (gen !== generation)
         return;
     }
+    async function selectWorktree(options = {}) {
+      const gen = generation;
+      selectedSha = HISTORY_WORKTREE_COMMIT;
+      updateActiveRow();
+      updateWorktreeInfo();
+      const range = worktreeDiffRange();
+      if (options.updateUrl !== false) {
+        deps.setRoute({ screen: "history", ref, commit: selectedSha, range }, true);
+      }
+      if (gen !== generation)
+        return;
+      await deps.applyCommitRange(range);
+      if (gen !== generation)
+        return;
+    }
     let lookupFailed = false;
     async function fetchSingleCommit(sha) {
       const url = `/_log?ref=${encodeURIComponent(sha)}&skip=0&limit=1`;
@@ -15363,6 +15724,10 @@ ${frontmatter.yaml}
     }
     async function resolveDeepLink(sha) {
       const gen = generation;
+      if (sha === HISTORY_WORKTREE_COMMIT) {
+        await selectWorktree({ updateUrl: false });
+        return;
+      }
       let pagesLoaded = 0;
       if (commits.length === 0) {
         await loadNextPage();
@@ -15468,6 +15833,10 @@ ${frontmatter.yaml}
       const row = e2.target.closest(".history-item");
       if (!row?.dataset.sha)
         return;
+      if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
+        selectWorktree();
+        return;
+      }
       const commit = commits.find((c2) => c2.sha === row.dataset.sha);
       if (commit)
         selectCommit(commit);
@@ -15512,7 +15881,12 @@ ${frontmatter.yaml}
         loadNextPage();
     }, { root: panel, rootMargin: "200px" });
     observer.observe(sentinel);
-    return { enterHistory, leaveHistory, onRefPicked };
+    return {
+      enterHistory,
+      leaveHistory,
+      onRefPicked,
+      isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT
+    };
   }
 
   // web-src/views/hunk-expand.ts
@@ -18496,21 +18870,48 @@ ${frontmatter.yaml}
     }
     function setSidebarTreeActionIcons() {
       const settings = document.querySelector("#viewer-settings");
-      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      const sidebarToggle = ensureSidebarToggleButton();
       const expand = document.querySelector("#sb-expand-all");
       const collapse = document.querySelector("#sb-collapse-all");
       if (settings)
         settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
-      if (sidebarToggle)
-        sidebarToggle.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+      syncSidebarToggleIcon(sidebarToggle);
       if (expand)
         expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
       if (collapse)
         collapse.innerHTML = iconSvg("octicon-chevron-up", COLLAPSE_ALL_16_PATHS);
     }
+    function syncSidebarToggleIcon(button) {
+      button.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+    }
+    function createSidebarToggleButton() {
+      const button = document.createElement("button");
+      button.id = "sidebar-toggle";
+      button.type = "button";
+      syncSidebarToggleIcon(button);
+      return button;
+    }
+    function bindSidebarToggleButton(button) {
+      if (button.dataset.gdpSidebarToggleBound === "1")
+        return;
+      button.dataset.gdpSidebarToggleBound = "1";
+      button.addEventListener("click", toggleSidebarHidden);
+    }
+    function ensureSidebarToggleButton() {
+      let button = document.querySelector("#sidebar-toggle");
+      if (!button)
+        button = createSidebarToggleButton();
+      bindSidebarToggleButton(button);
+      button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
+      button.title = STATE.sidebarHidden ? "show sidebar" : "hide sidebar";
+      button.setAttribute("aria-label", STATE.sidebarHidden ? "show sidebar" : "hide sidebar");
+      syncSidebarToggleIcon(button);
+      return button;
+    }
     function attachSidebarToggle(host) {
-      const button = document.querySelector("#sidebar-toggle");
-      if (!button || button.parentElement === host)
+      const button = ensureSidebarToggleButton();
+      syncSidebarToggleIcon(button);
+      if (button.parentElement === host)
         return;
       host.prepend(button);
     }
@@ -18522,6 +18923,9 @@ ${frontmatter.yaml}
         attachSidebarToggle(restoreHost);
       else if (sidebarHead)
         attachSidebarToggle(sidebarHead);
+      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      if (sidebarToggle)
+        syncSidebarToggleIcon(sidebarToggle);
       placeSidebarFilter();
     }
     function placeSidebarFilter() {
@@ -18543,12 +18947,7 @@ ${frontmatter.yaml}
       STATE.sidebarHidden = hidden;
       document.body.classList.toggle("gdp-sidebar-hidden", hidden);
       localStorage.setItem("gdp:sidebar-hidden", hidden ? "1" : "0");
-      const button = document.querySelector("#sidebar-toggle");
-      if (button) {
-        button.setAttribute("aria-pressed", hidden ? "true" : "false");
-        button.title = hidden ? "show sidebar" : "hide sidebar";
-        button.setAttribute("aria-label", hidden ? "show sidebar" : "hide sidebar");
-      }
+      ensureSidebarToggleButton();
       setSidebarTreeActionIcons();
       placeSidebarToggle();
       syncSidebarHeaderHeight();
@@ -19652,6 +20051,7 @@ ${frontmatter.yaml}
       setFolderIcon,
       isRepositorySidebarMode,
       placeSidebarToggle,
+      ensureSidebarToggleButton,
       placeSidebarFilter,
       applySidebarHidden,
       toggleSidebarHidden,
@@ -22424,9 +22824,6 @@ ${frontmatter.yaml}
       if (STATE.route.screen !== "database") {
         setQueryHistoryPanelOpen(false);
       }
-      if (isDatabase && ANNOTATIONS_UI) {
-        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
-      }
     }
     function syncHeaderMenu() {
       document.querySelectorAll(".app-menu-item, .global-help-link").forEach((link2) => {
@@ -22643,7 +23040,6 @@ ${frontmatter.yaml}
     });
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
-    $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
     $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
     $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
     $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
@@ -23007,7 +23403,7 @@ ${frontmatter.yaml}
         return Promise.resolve(null);
       }
       if (STATE.route.screen === "database") {
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
         setStatus("live");
         return Promise.resolve(null);
       }
@@ -23078,7 +23474,7 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
       } else if (STATE.route.screen === "database") {
         setStatus("live");
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       } else
         load();
       syncLineRefPill();
@@ -23141,6 +23537,7 @@ ${frontmatter.yaml}
           renderMeta,
           invalidateRepoSidebar,
           clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+          placeSidebarToggle,
           setStatus
         });
       },
@@ -23185,7 +23582,7 @@ ${frontmatter.yaml}
         setViewerLanguage(routeLanguage);
       const nextRoute = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
       if (previousRoute.screen === "database" && nextRoute.screen !== "database")
-        DATABASE_VIEW.leave();
+        DATABASE_VIEW.suspend();
       if (previousRoute.screen === "history" && nextRoute.screen !== "history")
         HISTORY_VIEW.leaveHistory();
       STATE.route = nextRoute.screen === "help" && !new URLSearchParams(window.location.search).has("lang") ? { ...nextRoute, lang: STATE.language } : nextRoute;
@@ -23223,7 +23620,7 @@ ${frontmatter.yaml}
         cancelActiveSourceLoad("navigation");
         setPageMode();
         removeStandaloneSource();
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
         setStatus("live");
         return;
       }
@@ -23336,11 +23733,17 @@ ${frontmatter.yaml}
       currentRange,
       getFiles: () => STATE.files,
       getRoute: () => STATE.route,
-      openDatabaseAnnotation: (target) => {
-        DATABASE_VIEW.enter(target.db, target.table, target.tab);
-        setStatus("live");
-        return Promise.resolve();
+      leaveDatabaseView: () => {
+        DATABASE_VIEW.suspend();
       },
+      openDatabaseAnnotation: (target) => {
+        setStatus("live");
+        return DATABASE_VIEW.enter(target.db, target.table, target.tab, {
+          annotationTarget: target,
+          reuseActiveTab: true
+        });
+      },
+      captureDatabaseAnnotationTarget: () => DATABASE_VIEW.captureAnnotationTarget(),
       setRange: (from, to) => {
         STATE.from = from;
         STATE.to = to;
@@ -23418,6 +23821,8 @@ ${frontmatter.yaml}
         if (bannerPendingPaths) {
           const paths = bannerPendingPaths;
           hideChangeBanner();
+          if (!shouldAutoLoadCurrentRoute())
+            return;
           doSseLoad(paths);
           return;
         }
@@ -23478,6 +23883,8 @@ ${frontmatter.yaml}
       const paths = bannerPendingPaths;
       hideChangeBanner();
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route))
+        return;
       if (isRepoBlobRoute(route)) {
         renderStandaloneSource({
           path: route.path,
@@ -23494,8 +23901,15 @@ ${frontmatter.yaml}
       setAutoUpdate(!STATE.autoUpdate);
     });
     applyAutoUpdateButton();
+    function shouldAutoLoadCurrentRoute(route = STATE.route) {
+      return shouldAutoLoadForRoute(route, {
+        historyWorktreeSelected: HISTORY_VIEW.isWorktreeSelected()
+      });
+    }
     function doSseLoad(paths) {
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route))
+        return;
       if (isRepoBlobRoute(route)) {
         const viewingPath = route.path;
         if (paths && viewingPath && !paths.has(viewingPath))
@@ -23509,6 +23923,9 @@ ${frontmatter.yaml}
       if (route.screen === "repo") {
         invalidateRepoSidebar();
         loadRepo();
+        return;
+      }
+      if (route.screen !== "diff" && route.screen !== "history") {
         return;
       }
       const savedScroll = window.scrollY;
@@ -23529,7 +23946,7 @@ ${frontmatter.yaml}
     let sseTimer = null;
     let pendingSseChangedPaths = new Set;
     function scheduleSseLoad(changedPaths) {
-      if (STATE.route.screen === "database" || STATE.route.screen === "help")
+      if (!shouldAutoLoadCurrentRoute())
         return;
       if (changedPaths && pendingSseChangedPaths) {
         for (const p2 of changedPaths)
@@ -23591,7 +24008,10 @@ ${frontmatter.yaml}
       catchUpDiff();
     });
     function catchUpDiff() {
-      if (!shouldCatchUpDiff(STATE.route))
+      const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
+      if (!shouldAutoLoadCurrentRoute())
+        return;
+      if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected }))
         return;
       if (!catchUpGate())
         return;

@@ -64,26 +64,155 @@ function normalizeRange(raw) {
   const to = raw && typeof raw === "object" && typeof raw.to === "string" ? raw.to || "worktree" : "worktree";
   return { from, to };
 }
+function normalizeDatabaseTab(raw) {
+  return raw === "data" || raw === "query" || raw === "schema" || raw === "er" || raw === "search" || raw === "snapshot" ? raw : undefined;
+}
+function normalizeDatabaseDataState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.search === "string" && value.search)
+    state.search = value.search;
+  if (Array.isArray(value.filters)) {
+    const filters = value.filters.map((item) => {
+      if (!item || typeof item !== "object")
+        return null;
+      const filter = item;
+      return typeof filter.column === "string" && filter.column && typeof filter.value === "string" && filter.value ? { column: filter.column, value: filter.value } : null;
+    }).filter((item) => !!item);
+    if (filters.length)
+      state.filters = filters;
+  }
+  if (value.sort && typeof value.sort === "object") {
+    const sort = value.sort;
+    if (typeof sort.column === "string" && sort.column && (sort.direction === "asc" || sort.direction === "desc")) {
+      state.sort = { column: sort.column, direction: sort.direction };
+    }
+  }
+  if (Number.isInteger(value.row) && value.row > 0)
+    state.row = value.row;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseQueryState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.sql === "string" && value.sql)
+    state.sql = value.sql;
+  if (value.mode === "run" || value.mode === "explain")
+    state.mode = value.mode;
+  if (typeof value.autoRun === "boolean")
+    state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseSearchState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.term === "string" && value.term)
+    state.term = value.term;
+  if (typeof value.includeNonText === "boolean")
+    state.includeNonText = value.includeNonText;
+  if (typeof value.autoRun === "boolean")
+    state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseSnapshotState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.fromSnapshotId === "string" && value.fromSnapshotId)
+    state.fromSnapshotId = value.fromSnapshotId;
+  if (typeof value.toSnapshotId === "string" && value.toSnapshotId)
+    state.toSnapshotId = value.toSnapshotId;
+  if (typeof value.table === "string" && value.table)
+    state.table = value.table;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeAnnotationTarget(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const target = raw;
+  if (target.kind === "database") {
+    const db = typeof target.db === "string" && target.db ? target.db : undefined;
+    const table = typeof target.table === "string" && target.table ? target.table : undefined;
+    const tab = normalizeDatabaseTab(target.tab);
+    const data = normalizeDatabaseDataState(target.data);
+    const query = normalizeDatabaseQueryState(target.query);
+    const search = normalizeDatabaseSearchState(target.search);
+    const snapshot = normalizeDatabaseSnapshotState(target.snapshot);
+    return {
+      kind: "database",
+      ...db ? { db } : {},
+      ...table ? { table } : {},
+      ...tab ? { tab } : {},
+      ...data ? { data } : {},
+      ...query ? { query } : {},
+      ...search ? { search } : {},
+      ...snapshot ? { snapshot } : {}
+    };
+  }
+  if (target.kind === "code") {
+    const path = typeof target.path === "string" ? target.path.replace(/^\/+|\/+$/g, "") : "";
+    if (!path)
+      return;
+    const line = normalizeLineRange(target.line);
+    return {
+      kind: "code",
+      path,
+      range: normalizeRange(target.range),
+      ...line ? { line } : {}
+    };
+  }
+  return;
+}
+function databaseTargetPath(target) {
+  const labelPart = (value, max = 48) => value.replace(/[^A-Za-z0-9._=-]+/g, "_").slice(0, max).replace(/^_+|_+$/g, "");
+  const parts = ["database"];
+  if (target.db)
+    parts.push(labelPart(target.db));
+  if (target.table)
+    parts.push(labelPart(target.table));
+  if (target.tab)
+    parts.push(target.tab);
+  if (target.data?.search)
+    parts.push(`search=${labelPart(target.data.search, 32)}`);
+  if (target.query?.sql)
+    parts.push("query");
+  if (target.search?.term)
+    parts.push(`global-search=${labelPart(target.search.term, 32)}`);
+  if (target.snapshot?.fromSnapshotId || target.snapshot?.toSnapshotId)
+    parts.push("snapshot-diff");
+  return parts.join(":");
+}
 function normalizeEntry(raw) {
   if (!raw || typeof raw !== "object")
     return null;
   const entry = raw;
   if (typeof entry.id !== "string" || !entry.id)
     return null;
-  if (typeof entry.path !== "string" || !entry.path)
-    return null;
   if (typeof entry.body !== "string" || !entry.body)
+    return null;
+  const target = normalizeAnnotationTarget(entry.target);
+  const path = typeof entry.path === "string" && entry.path ? entry.path : target?.kind === "database" ? databaseTargetPath(target) : "";
+  if (!path)
     return null;
   const normalized = {
     id: entry.id,
     created_at: typeof entry.created_at === "string" ? entry.created_at : "",
-    path: entry.path,
+    path,
     range: normalizeRange(entry.range),
     body: entry.body
   };
   const line = normalizeLineRange(entry.line);
   if (line)
     normalized.line = line;
+  if (target)
+    normalized.target = target;
   if (typeof entry.title === "string" && entry.title)
     normalized.title = entry.title;
   return normalized;
@@ -144,8 +273,47 @@ function startAnnotationSession(state, title, now, id = makeAnnotationId("s")) {
     session
   };
 }
+function insertOptionCount(input) {
+  return (input.before_id ? 1 : 0) + (input.after_id ? 1 : 0) + (input.position !== undefined ? 1 : 0);
+}
+function entryInsertIndex(entries, input) {
+  if (insertOptionCount(input) > 1)
+    return { ok: false, error: "use only one of before, after, or position" };
+  if (input.before_id) {
+    const index = entries.findIndex((entry) => entry.id === input.before_id);
+    if (index < 0)
+      return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index };
+  }
+  if (input.after_id) {
+    const index = entries.findIndex((entry) => entry.id === input.after_id);
+    if (index < 0)
+      return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index: index + 1 };
+  }
+  if (input.position !== undefined) {
+    if (!Number.isInteger(input.position) || input.position < 1)
+      return { ok: false, error: "position must be a positive integer" };
+    if (input.position > entries.length + 1)
+      return { ok: false, error: "position is out of range" };
+    return { ok: true, index: input.position - 1 };
+  }
+  return { ok: true, index: entries.length };
+}
+function findSessionByEntryId(sessions, entryId) {
+  return sessions.find((session) => session.entries.some((entry) => entry.id === entryId));
+}
 function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
-  const path = input.path.replace(/^\/+|\/+$/g, "");
+  const target = normalizeAnnotationTarget(input.target);
+  if (target?.kind === "database" && !target.db)
+    return { ok: false, error: "database annotation requires db" };
+  if (target?.kind === "database" && target.data && !target.table) {
+    return {
+      ok: false,
+      error: "database data annotations require table"
+    };
+  }
+  const path = target?.kind === "database" ? databaseTargetPath(target) : (input.path || "").replace(/^\/+|\/+$/g, "");
   if (!path)
     return { ok: false, error: "path is required" };
   const body = input.body;
@@ -159,10 +327,21 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
   let sessions = state.sessions;
   let session;
   let createdSession = false;
+  const anchorId = input.before_id || input.after_id;
+  const anchorSession = anchorId ? findSessionByEntryId(sessions, anchorId) : undefined;
+  if (anchorId && !anchorSession)
+    return { ok: false, error: "anchor annotation not found" };
   if (input.session_id) {
     session = sessions.find((s) => s.id === input.session_id);
     if (!session)
       return { ok: false, error: "session not found" };
+    if (anchorSession && anchorSession.id !== session.id)
+      return {
+        ok: false,
+        error: "anchor annotation belongs to another session"
+      };
+  } else if (anchorSession) {
+    session = anchorSession;
   } else {
     session = sessions[sessions.length - 1];
   }
@@ -181,12 +360,19 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
   };
   if (line)
     entry.line = line;
+  if (target)
+    entry.target = target;
   const title = (input.title || "").trim();
   if (title)
     entry.title = title.slice(0, ANNOTATION_TITLE_MAX_CHARS);
+  const insertAt = entryInsertIndex(session.entries, input);
+  if (insertAt.ok === false)
+    return { ok: false, error: insertAt.error };
+  const entries = [...session.entries];
+  entries.splice(insertAt.index, 0, entry);
   const updatedSession = {
     ...session,
-    entries: [...session.entries, entry]
+    entries
   };
   return {
     ok: true,
@@ -197,6 +383,41 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
     session: updatedSession,
     entry,
     created_session: createdSession
+  };
+}
+function moveAnnotationEntry(state, id, input) {
+  if (insertOptionCount(input) !== 1)
+    return { ok: false, error: "move requires before, after, or position" };
+  const sourceSession = findSessionByEntryId(state.sessions, id);
+  const entry = sourceSession?.entries.find((e) => e.id === id);
+  if (!sourceSession || !entry)
+    return { ok: false, error: "annotation not found" };
+  if (input.before_id === id || input.after_id === id)
+    return { ok: false, error: "cannot move annotation relative to itself" };
+  const anchorId = input.before_id || input.after_id;
+  const destinationSession = anchorId ? findSessionByEntryId(state.sessions, anchorId) : sourceSession;
+  if (!destinationSession)
+    return { ok: false, error: "anchor annotation not found" };
+  if (destinationSession.id !== sourceSession.id)
+    return { ok: false, error: "anchor annotation belongs to another session" };
+  const sessionsWithoutEntry = state.sessions.map((session) => session.id === sourceSession.id ? { ...session, entries: session.entries.filter((e) => e.id !== id) } : session);
+  const targetSession = sessionsWithoutEntry.find((session) => session.id === destinationSession.id);
+  if (!targetSession)
+    return { ok: false, error: "destination session not found" };
+  const insertAt = entryInsertIndex(targetSession.entries, input);
+  if (insertAt.ok === false)
+    return { ok: false, error: insertAt.error };
+  const movedEntries = [...targetSession.entries];
+  movedEntries.splice(insertAt.index, 0, entry);
+  const updatedSession = { ...targetSession, entries: movedEntries };
+  return {
+    ok: true,
+    state: {
+      version: 1,
+      sessions: sessionsWithoutEntry.map((session) => session.id === updatedSession.id ? updatedSession : session)
+    },
+    session: updatedSession,
+    entry
   };
 }
 function renameAnnotationSession(state, id, title) {
@@ -1299,11 +1520,39 @@ function takeValue(argv, index, flag) {
     return { error: `${flag} requires a value` };
   return { value, next: index + 1 };
 }
+function parsePosition(value) {
+  if (value === undefined)
+    return;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : Number.NaN;
+}
+function parseDatabaseTab(value) {
+  return value === "data" || value === "query" || value === "schema" || value === "er" || value === "search" || value === "snapshot" ? value : undefined;
+}
+function parseFilter(value) {
+  const idx = value.indexOf("=");
+  if (idx <= 0)
+    return null;
+  const column = value.slice(0, idx).trim();
+  const filterValue = value.slice(idx + 1).trim();
+  return column && filterValue ? { column, value: filterValue } : null;
+}
+function parseSort(value) {
+  if (value === undefined)
+    return;
+  const idx = value.lastIndexOf(":");
+  if (idx <= 0)
+    return null;
+  const column = value.slice(0, idx).trim();
+  const direction = value.slice(idx + 1).trim();
+  return column && (direction === "asc" || direction === "desc") ? { column, direction } : null;
+}
 function parseAnnotateArgs(argv) {
   const rest = [];
   let cwd;
   let server;
   const options = new Map;
+  const multiOptions = new Map;
   const flags = new Set;
   const valueFlags = new Set([
     "--title",
@@ -1314,7 +1563,21 @@ function parseAnnotateArgs(argv) {
     "--session",
     "--session-title",
     "--body",
-    "--body-file"
+    "--body-file",
+    "--before",
+    "--after",
+    "--position",
+    "--db",
+    "--table",
+    "--tab",
+    "--grid-search",
+    "--filter",
+    "--sort",
+    "--row",
+    "--sql",
+    "--sql-file",
+    "--query-mode",
+    "--search-term"
   ]);
   for (let i = 0;i < argv.length; i++) {
     const arg = argv[i];
@@ -1334,8 +1597,11 @@ function parseAnnotateArgs(argv) {
       if ("error" in taken)
         return { ok: false, error: taken.error };
       options.set(arg, taken.value);
+      const values = multiOptions.get(arg) || [];
+      values.push(taken.value);
+      multiOptions.set(arg, values);
       i = taken.next;
-    } else if (arg === "--json") {
+    } else if (arg === "--json" || arg === "--run-query" || arg === "--run-search" || arg === "--include-non-text") {
       flags.add(arg);
     } else if (arg.startsWith("-")) {
       return { ok: false, error: `unknown option: ${arg}` };
@@ -1374,6 +1640,9 @@ function parseAnnotateArgs(argv) {
     const bodyFile = options.get("--body-file");
     if (body !== undefined && bodyFile !== undefined)
       return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
     return {
       ok: true,
       args: {
@@ -1387,7 +1656,108 @@ function parseAnnotateArgs(argv) {
           session: options.get("--session"),
           sessionTitle: options.get("--session-title"),
           body,
-          bodyFile
+          bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "add-db") {
+    if (!options.get("--db"))
+      return { ok: false, error: "add-db requires --db <id>" };
+    const body = options.get("--body");
+    const bodyFile = options.get("--body-file");
+    if (body !== undefined && bodyFile !== undefined)
+      return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    const rawTab = options.get("--tab");
+    const tab = parseDatabaseTab(rawTab);
+    if (rawTab !== undefined && tab === undefined)
+      return {
+        ok: false,
+        error: "--tab must be one of data, query, schema, er, search, snapshot"
+      };
+    const filters = [];
+    for (const raw of multiOptions.get("--filter") || []) {
+      const parsed = parseFilter(raw);
+      if (!parsed)
+        return { ok: false, error: "--filter must be <column=value>" };
+      filters.push(parsed);
+    }
+    const sort = parseSort(options.get("--sort"));
+    if (sort === null)
+      return { ok: false, error: "--sort must be <column:asc|desc>" };
+    const row = parsePosition(options.get("--row"));
+    if (Number.isNaN(row))
+      return { ok: false, error: "--row must be a positive integer" };
+    const sql = options.get("--sql");
+    const sqlFile = options.get("--sql-file");
+    if (sql !== undefined && sqlFile !== undefined)
+      return { ok: false, error: "use either --sql or --sql-file" };
+    const rawQueryMode = options.get("--query-mode");
+    const queryMode = rawQueryMode === undefined || rawQueryMode === "run" ? "run" : rawQueryMode === "explain" ? "explain" : null;
+    if (queryMode === null)
+      return { ok: false, error: "--query-mode must be run or explain" };
+    const hasDataState = options.has("--grid-search") || filters.length > 0 || sort !== undefined || row !== undefined;
+    const hasQueryState = sql !== undefined || sqlFile !== undefined || flags.has("--run-query");
+    const hasSearchState = options.has("--search-term") || flags.has("--include-non-text") || flags.has("--run-search");
+    if (hasDataState && !options.get("--table")) {
+      return {
+        ok: false,
+        error: "data grid annotations require --table"
+      };
+    }
+    if (tab === "data" && (hasQueryState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab data cannot be combined with query or search options"
+      };
+    }
+    if (tab === "query" && (hasDataState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab query cannot be combined with data or search options"
+      };
+    }
+    if (tab === "search" && (hasDataState || hasQueryState)) {
+      return {
+        ok: false,
+        error: "--tab search cannot be combined with data or query options"
+      };
+    }
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "add-db",
+          db: options.get("--db"),
+          table: options.get("--table"),
+          tab,
+          gridSearch: options.get("--grid-search"),
+          filters,
+          sort: sort || undefined,
+          row,
+          sql,
+          sqlFile,
+          queryMode,
+          queryAutoRun: flags.has("--run-query"),
+          searchTerm: options.get("--search-term"),
+          includeNonText: flags.has("--include-non-text") || undefined,
+          searchAutoRun: flags.has("--run-search"),
+          title: options.get("--title"),
+          session: options.get("--session"),
+          sessionTitle: options.get("--session-title"),
+          body,
+          bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
         },
         cwd,
         server
@@ -1423,6 +1793,33 @@ function parseAnnotateArgs(argv) {
           title: options.get("--title"),
           body,
           bodyFile
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "move") {
+    const id = rest[1];
+    if (!id)
+      return { ok: false, error: "move requires an annotation id" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    if (!options.get("--before") && !options.get("--after") && position === undefined)
+      return {
+        ok: false,
+        error: "move requires --before, --after, or --position"
+      };
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "move",
+          id,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
         },
         cwd,
         server
@@ -1541,6 +1938,24 @@ function printList(state) {
     });
   }
 }
+async function annotationBodyFromCommand(command) {
+  let body = command.body;
+  if (body === undefined && command.bodyFile !== undefined) {
+    try {
+      body = readFileSync4(command.bodyFile, "utf8");
+    } catch {
+      console.error(`could not read --body-file: ${command.bodyFile}`);
+      process.exit(1);
+    }
+  }
+  if (body === undefined)
+    body = await readStdin();
+  if (!body.trim()) {
+    console.error("annotation body is empty. Pass --body, --body-file, or pipe stdin.");
+    process.exit(1);
+  }
+  return body;
+}
 async function runAnnotateCli(argv) {
   const parsed = parseAnnotateArgs(argv);
   if (parsed.ok === false) {
@@ -1569,21 +1984,7 @@ async function runAnnotateCli(argv) {
     return;
   }
   if (command.kind === "add") {
-    let body = command.body;
-    if (body === undefined && command.bodyFile !== undefined) {
-      try {
-        body = readFileSync4(command.bodyFile, "utf8");
-      } catch {
-        console.error(`could not read --body-file: ${command.bodyFile}`);
-        process.exit(1);
-      }
-    }
-    if (body === undefined)
-      body = await readStdin();
-    if (!body.trim()) {
-      console.error("annotation body is empty. Pass --body, --body-file, or pipe stdin.");
-      process.exit(1);
-    }
+    const body = await annotationBodyFromCommand(command);
     const result = await request(serverUrl, "POST", {
       action: "add",
       session_id: command.session,
@@ -1592,12 +1993,69 @@ async function runAnnotateCli(argv) {
       line: command.line,
       range: { from: command.from, to: command.to },
       title: command.title,
-      body
+      body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
     });
     if (result.created_session) {
       console.error(`created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`);
     }
     console.log(`annotated ${result.entry.path}${formatLine(result.entry.line)} ` + `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`);
+    console.error(`view annotations at ${serverUrl}/ with the code annotations panel`);
+    return;
+  }
+  if (command.kind === "add-db") {
+    const body = await annotationBodyFromCommand(command);
+    let sql = command.sql;
+    if (sql === undefined && command.sqlFile !== undefined) {
+      try {
+        sql = readFileSync4(command.sqlFile, "utf8");
+      } catch {
+        console.error(`could not read --sql-file: ${command.sqlFile}`);
+        process.exit(1);
+      }
+    }
+    const dataState = command.gridSearch || command.filters && command.filters.length > 0 || command.sort || command.row ? {
+      search: command.gridSearch,
+      filters: command.filters,
+      sort: command.sort,
+      row: command.row
+    } : undefined;
+    const queryState = sql || command.queryAutoRun ? {
+      sql,
+      mode: command.queryMode,
+      autoRun: command.queryAutoRun
+    } : undefined;
+    const searchState = command.searchTerm || command.includeNonText ? {
+      term: command.searchTerm,
+      includeNonText: command.includeNonText,
+      autoRun: command.searchAutoRun
+    } : undefined;
+    const inferredTab = command.tab || (queryState ? "query" : searchState ? "search" : dataState ? "data" : undefined);
+    const result = await request(serverUrl, "POST", {
+      action: "add",
+      session_id: command.session,
+      session_title: command.sessionTitle,
+      target: {
+        kind: "database",
+        db: command.db,
+        table: command.table,
+        tab: inferredTab,
+        data: dataState,
+        query: queryState,
+        search: searchState
+      },
+      title: command.title,
+      body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
+    });
+    if (result.created_session) {
+      console.error(`created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`);
+    }
+    console.log(`annotated ${result.entry.path} ` + `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`);
     console.error(`view annotations at ${serverUrl}/ with the code annotations panel`);
     return;
   }
@@ -1640,6 +2098,17 @@ async function runAnnotateCli(argv) {
     console.log(`updated annotation ${result.entry.id} (${result.entry.path}${formatLine(result.entry.line)})`);
     return;
   }
+  if (command.kind === "move") {
+    const result = await request(serverUrl, "POST", {
+      action: "move",
+      id: command.id,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
+    });
+    console.log(`moved annotation ${result.entry.id} to session ${result.session_id}`);
+    return;
+  }
   if (command.kind === "delete") {
     const result = await request(serverUrl, "POST", {
       action: "delete",
@@ -1669,10 +2138,19 @@ Usage:
   code-viewer annotate start [--title <text>]
   code-viewer annotate add --file <path> [--line <n>|<n>-<m>]
       [--from <ref>] [--to <ref>] [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
+      [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate add-db --db <id> [--table <name>] [--tab <tab>]
+      [--grid-search <text>] [--filter <column=value>] [--sort <column:asc|desc>]
+      [--sql <text> | --sql-file <path>] [--query-mode <run|explain>] [--run-query]
+      [--search-term <text>] [--include-non-text] [--run-search]
+      [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
   code-viewer annotate rename <session-id> --title <text>
   code-viewer annotate edit <id> [--title <text>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate move <id> [--before <id> | --after <id> | --position <n>]
   code-viewer annotate list [--json]
   code-viewer annotate delete <id>
   code-viewer annotate clear
@@ -1685,6 +2163,14 @@ Examples:
   code-viewer annotate start --title "How SSE updates work"
   code-viewer annotate add --file web-src/server/preview.ts --line 2220-2250 \\
       --body "This endpoint keeps one SSE stream per browser tab."
+  code-viewer annotate add-db --db app.db --table users --tab schema \\
+      --body "This schema note explains how users relate to orders."
+  code-viewer annotate add-db --db app.db --table orders --tab data \\
+      --grid-search failed --sort created_at:desc --body "Filtered failure rows."
+  code-viewer annotate add-db --db app.db --tab query \\
+      --sql "select * from users where role = 'admin'" --run-query \\
+      --body "This result shows the admin accounts."
+  code-viewer annotate move a-123 --before a-456
   git diff HEAD~1 | code-viewer annotate add --file src/app.ts --line 10 \\
       --from HEAD~1 --to worktree --body "The fix moves the guard up here."
 `, ANNOTATE_AGENT_HELP = `code-viewer annotate — agent guide
@@ -1715,6 +2201,10 @@ location and renders your explanation directly under the annotated lines.
    follow). Each add without --session appends to the most recent session:
      code-viewer annotate add --file src/cache.ts --line 120-145 \\
          --title "Entry point" --body "Writes land here first. ..."
+   To insert or reorder later:
+     code-viewer annotate add --after a-123 --file src/cache.ts --line 150 \\
+         --body "This follow-up belongs here."
+     code-viewer annotate move a-999 --before a-123
 3. Verify what you posted:
      code-viewer annotate list
 
@@ -1737,6 +2227,8 @@ location and renders your explanation directly under the annotated lines.
 - add (no --session) → appends to the most recent session.
 - annotate start      → begins a NEW session; later adds go there.
 - add --session <id>  → targets a specific session (ids: annotate list).
+- add --before/--after <id> → targets the anchor annotation's session.
+  If --session points at another session, the command is rejected.
 - The human can share a walkthrough as a URL; one session = one shareable
   walkthrough. Do not mix unrelated topics in one session.
 
@@ -1753,6 +2245,22 @@ location and renders your explanation directly under the annotated lines.
 - Post a follow-up answer next to the original instead of replacing it:
     code-viewer annotate add --session <session-id> --file <path> --line <n>         --title "回答: ..." --body "<markdown>"
 - Rename a session: code-viewer annotate rename <session-id> --title <text>
+- Move an annotation without changing its id:
+    code-viewer annotate move <id> --before <other-id>
+    code-viewer annotate move <id> --after <other-id>
+    code-viewer annotate move <id> --position <1-based-index>
+- Annotate the Database screen:
+    code-viewer annotate add-db --db <db-id> --table <table> --tab schema \\
+        --title "Why this table matters" --body "<markdown>"
+  Data/search/query state can be captured explicitly:
+    code-viewer annotate add-db --db app.db --table orders --tab data \\
+        --grid-search failed --filter status=failed --sort created_at:desc \\
+        --title "Failed orders" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab query \\
+        --sql "select * from orders where status = 'failed'" --run-query \\
+        --title "Query result" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab search --search-term failed \\
+        --include-non-text --run-search         --title "Global search result" --body "<markdown>"
 
 ## Cleanup
 
@@ -9006,19 +9514,31 @@ async function handleAnnotations(req) {
     return json2({ ok: true, session: started.session });
   }
   if (action === "add") {
+    const rawTarget = body.target && typeof body.target === "object" ? body.target : null;
+    const target = rawTarget?.kind === "database" ? normalizeAnnotationTarget(rawTarget) : undefined;
+    if (target?.kind === "database" && !target.db)
+      return text("database annotation requires db", 400);
+    if (target?.kind === "database" && target.data && !target.table)
+      return text("database data annotations require table", 400);
     const path = typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
-    if (!path || !safeRepoPath(path))
-      return text("invalid path", 400);
-    if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
-      return text("forbidden", 403);
+    if (!target) {
+      if (!path || !safeRepoPath(path))
+        return text("invalid path", 400);
+      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+        return text("forbidden", 403);
+    }
     const result = addAnnotationEntry(loadAnnotationsState(cwd), {
       session_id: typeof body.session_id === "string" ? body.session_id : undefined,
       session_title: typeof body.session_title === "string" ? body.session_title : undefined,
       path,
       line: body.line && typeof body.line === "object" ? body.line : undefined,
       range: body.range && typeof body.range === "object" ? body.range : undefined,
+      target,
       title: typeof body.title === "string" ? body.title : undefined,
-      body: typeof body.body === "string" ? body.body : ""
+      body: typeof body.body === "string" ? body.body : "",
+      before_id: typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined
     }, new Date().toISOString());
     if (result.ok === false)
       return text(result.error, 400);
@@ -9029,6 +9549,25 @@ async function handleAnnotations(req) {
       session_id: result.session.id,
       session_title: result.session.title,
       created_session: result.created_session,
+      entry: result.entry
+    });
+  }
+  if (action === "move") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id)
+      return text("invalid id", 400);
+    const result = moveAnnotationEntry(loadAnnotationsState(cwd), id, {
+      before_id: typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined
+    });
+    if (result.ok === false)
+      return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", result.session.id, result.entry.id);
+    return json2({
+      ok: true,
+      session_id: result.session.id,
       entry: result.entry
     });
   }

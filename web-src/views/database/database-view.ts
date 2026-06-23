@@ -10,6 +10,7 @@ import type {
   TabsState,
 } from "../../core/database/types";
 import type { AppRoute, DiffRange } from "../../core/routes";
+import type { AnnotationTarget } from "../../core/types";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
@@ -30,12 +31,30 @@ export type DatabaseViewDeps = {
 };
 
 export type DatabaseView = {
-  enter: (db?: string, table?: string, tab?: TabName) => void;
+  enter: (
+    db?: string,
+    table?: string,
+    tab?: TabName,
+    options?: DatabaseEnterOptions,
+  ) => Promise<void>;
+  captureAnnotationTarget: () => DatabaseAnnotationTarget | null;
+  suspend: () => void;
   leave: () => void;
   handleSse: (event?: string, data?: string) => void;
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
+type DatabaseAnnotationTarget = Extract<AnnotationTarget, { kind: "database" }>;
+type DatabaseEnterOptions = {
+  autoSelectFirst?: boolean;
+  annotationTarget?: DatabaseAnnotationTarget;
+  reuseActiveTab?: boolean;
+};
+
+function looksReadOnlySql(sql: string): boolean {
+  const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
+  return /^(select|with|pragma|explain)\b/i.test(normalized);
+}
 
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
 
@@ -53,10 +72,11 @@ type TabPaneInternal = {
     db?: string | null,
     table?: string | null,
     view?: TabName,
-    options?: { autoSelectFirst?: boolean },
+    options?: DatabaseEnterOptions,
   ) => Promise<void>;
   handleSse: (event?: string, data?: string) => void;
   getState: () => TabState;
+  getAnnotationTarget: () => DatabaseAnnotationTarget | null;
   getLabel: () => string;
   dispose: () => void;
 };
@@ -567,6 +587,11 @@ function createTabPane(
     if (schema.tables.length > 0) {
       await selectTable(schema.tables[0].name, generation);
     }
+    // currentDb が確定したので Query History pane を自動 refresh する。
+    // 構築時の applyHistoryVisibility() 呼び出し時は currentDb=null で
+    // refresh が skip されていた (sqlMode = false 判定) のを、ここで補う。
+    // ユーザー報告: 「Refresh ボタンを押さないと History が出ない」の修正。
+    applyHistoryVisibility();
     cb.onStateChange();
   }
 
@@ -740,7 +765,7 @@ function createTabPane(
     db?: string | null,
     table?: string | null,
     view?: TabName,
-    options: { autoSelectFirst?: boolean } = {},
+    options: DatabaseEnterOptions = {},
   ) {
     const generation = ++loadGeneration;
     const files = await fetchDbFiles();
@@ -823,7 +848,38 @@ function createTabPane(
         snapshotView.refresh();
       }
     }
+    applyAnnotationTarget(options.annotationTarget);
     cb.onStateChange();
+  }
+
+  function applyAnnotationTarget(
+    target: DatabaseAnnotationTarget | undefined,
+  ): void {
+    if (!target || target.db !== currentDb?.id) return;
+    if (target.data) {
+      if (target.table && target.table !== currentTable) return;
+      setActiveTab("data");
+      grid.applyState(target.data);
+    }
+    if (target.query) {
+      setActiveTab("query");
+      if (target.query.sql) queryEditor.setSql(target.query.sql);
+      if (target.query.autoRun && target.query.sql) {
+        // Client-side SQL classification is only a UX hint; the server-side
+        // readonly execution path is the actual protection boundary.
+        if (!looksReadOnlySql(target.query.sql)) return;
+        void (target.query.mode === "explain"
+          ? queryEditor.explain()
+          : queryEditor.run());
+      }
+    }
+    if (target.search) {
+      setActiveTab("search");
+      globalSearchView.setSearch(target.search.term || "", {
+        includeNonText: target.search.includeNonText,
+        autoRun: target.search.autoRun,
+      });
+    }
   }
 
   function handleSse(event?: string, data?: string) {
@@ -874,6 +930,25 @@ function createTabPane(
     return state;
   }
 
+  function getAnnotationTarget(): DatabaseAnnotationTarget | null {
+    if (!currentDb) return null;
+    const target: DatabaseAnnotationTarget = {
+      kind: "database",
+      db: currentDb.id,
+      ...(currentTable ? { table: currentTable } : {}),
+      tab: currentTab,
+    };
+    if (currentTab === "data") {
+      target.data = grid.getState();
+    } else if (currentTab === "query") {
+      const sql = queryEditor.getSql();
+      target.query = { ...(sql ? { sql } : {}), mode: "run" };
+    } else if (currentTab === "search") {
+      target.search = globalSearchView.getSearch();
+    }
+    return target;
+  }
+
   function getLabel(): string {
     if (!currentDb) return "(empty)";
     // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
@@ -912,6 +987,7 @@ function createTabPane(
     enter,
     handleSse,
     getState,
+    getAnnotationTarget,
     getLabel,
     dispose,
   };
@@ -1302,7 +1378,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   function openTab(
     initial?: Partial<TabState>,
-    options: { autoSelectFirst?: boolean } = {},
+    options: DatabaseEnterOptions = {},
   ): string {
     const id = initial?.id || makeTabId();
 
@@ -1381,17 +1457,21 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
     // 引数で渡し、それ以外の per-tab UI state は createTabPane の initial で
     // すでに復元済み。
-    const ready = pane
-      .enter(
-        initial?.dbId || undefined,
-        initial?.table || undefined,
-        initial?.view || undefined,
-        options,
-      )
-      .then(() => refreshChipLabel(id))
-      .finally(() => {
+    const ready = (async () => {
+      if (options.annotationTarget) restoring = true;
+      try {
+        await pane.enter(
+          initial?.dbId || undefined,
+          initial?.table || undefined,
+          initial?.view || undefined,
+          options,
+        );
+        refreshChipLabel(id);
+      } finally {
+        if (options.annotationTarget) restoring = false;
         paneReadyById.delete(id);
-      });
+      }
+    })();
     paneReadyById.set(id, ready);
 
     return id;
@@ -1450,10 +1530,43 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     db?: string,
     table?: string,
     view?: TabName,
+    options: DatabaseEnterOptions = {},
   ): Promise<void> {
+    async function enterPane(
+      pane: TabPaneInternal,
+      targetDb?: string,
+      targetTable?: string,
+      targetView?: TabName,
+      enterOptions?: DatabaseEnterOptions,
+    ): Promise<void> {
+      if (!enterOptions?.annotationTarget) {
+        await pane.enter(targetDb, targetTable, targetView, enterOptions);
+        return;
+      }
+      restoring = true;
+      try {
+        await pane.enter(targetDb, targetTable, targetView, enterOptions);
+      } finally {
+        restoring = false;
+      }
+    }
+    if (options.reuseActiveTab && activeTabId) {
+      const targetId = activeTabId;
+      const active = tabsById.get(activeTabId);
+      if (active) {
+        await enterPane(active.pane, db, table, view, options);
+        if (!mounted) return;
+        refreshChipLabel(targetId);
+        return;
+      }
+    }
     for (const [id, entry] of tabsById) {
       if (routeMatchesState(entry.pane.getState(), db, table, view)) {
         setActive(id);
+        if (options.annotationTarget) {
+          await enterPane(entry.pane, db, table, view, options);
+          if (!mounted) return;
+        }
         refreshChipLabel(id);
         return;
       }
@@ -1464,7 +1577,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         table: table ?? null,
         view: view ?? "data",
       },
-      { autoSelectFirst: db !== undefined },
+      { autoSelectFirst: db !== undefined, ...options },
     );
     const ready = paneReadyById.get(id);
     if (ready) await ready;
@@ -1486,6 +1599,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     db?: string,
     table?: string,
     view?: TabName,
+    options: DatabaseEnterOptions = {},
   ): Promise<void> {
     if (seq !== lifecycleSeq) return;
     const firstMount = !mounted;
@@ -1534,7 +1648,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         // URL の引数があれば、まず同じ状態の既存タブを active 化する。
         // なければ active タブに上書き反映する。
         if (db || table || view) {
-          await applyRouteToTab(db, table, view);
+          await applyRouteToTab(db, table, view, options);
         } else {
           syncActiveRoute();
         }
@@ -1542,25 +1656,37 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         scheduleSave();
         return;
       }
+    } else {
+      const diff = document.getElementById("diff");
+      if (diff) diff.hidden = true;
+      const empty = document.getElementById("empty");
+      if (empty) empty.classList.add("hidden");
+      root.hidden = false;
+      document.body.classList.add("gdp-database-page");
+      deps.setPageMode();
+      deps.syncHeaderMenu();
     }
 
     if (tabsById.size === 0) {
       // 初回 enter (永続化なし): URL の引数を初期 state にして 1 タブ作る。
-      openTab(
+      const id = openTab(
         {
           dbId: db || null,
           table: table || null,
           view: view || "data",
         },
-        { autoSelectFirst: !db },
+        { autoSelectFirst: !db, ...options },
       );
+      const ready = paneReadyById.get(id);
+      if (ready) await ready;
+      if (!mounted || seq !== lifecycleSeq) return;
       return;
     }
     if (!activeTabId) return;
     const active = tabsById.get(activeTabId);
     if (!active) return;
     if (db || table || view) {
-      await applyRouteToTab(db, table, view);
+      await applyRouteToTab(db, table, view, options);
     }
   }
 
@@ -1568,11 +1694,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     db?: string,
     table?: string,
     view?: TabName,
+    options: DatabaseEnterOptions = {},
   ): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
       .catch(() => {})
-      .then(() => doEnter(seq, db, table, view));
+      .then(() => doEnter(seq, db, table, view, options));
     await enterQueue;
   }
 
@@ -1599,6 +1726,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     mounted = false;
   }
 
+  function suspend(): void {
+    if (!mounted) return;
+    flushPendingSave();
+    root.hidden = true;
+    document.body.classList.remove("gdp-database-page");
+    const diff = document.getElementById("diff");
+    if (diff) diff.hidden = false;
+  }
+
   function handleSse(event?: string, data?: string): void {
     if (!mounted) return;
     const dbId = parseSseDbId(data);
@@ -1608,7 +1744,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
-  return { enter, leave, handleSse };
+  function captureAnnotationTarget(): DatabaseAnnotationTarget | null {
+    if (!activeTabId) return null;
+    return tabsById.get(activeTabId)?.pane.getAnnotationTarget() ?? null;
+  }
+
+  return { enter, captureAnnotationTarget, suspend, leave, handleSse };
 }
 
 function formatSize(bytes: number): string {
