@@ -11750,7 +11750,11 @@ ${frontmatter.yaml}
         spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
         updateStatus();
         renderViewport();
-      }).catch(() => {});
+      }).catch((err) => {
+        if (gen === loadGeneration) {
+          showError(err instanceof Error ? err.message : String(err));
+        }
+      });
       const tracked = promise.finally(() => {
         if (pendingPages.get(pageStart) === tracked) {
           pendingPages.delete(pageStart);
@@ -11891,6 +11895,13 @@ ${frontmatter.yaml}
         statusEl.insertBefore(document.createTextNode(`${parts.join(" | ")} `), statusEl.firstChild);
       }
     }
+    function showError(message) {
+      clear();
+      statusEl = document.createElement("div");
+      statusEl.className = "db-grid-status db-pane-error";
+      statusEl.textContent = message;
+      el.appendChild(statusEl);
+    }
     function load(table2, initialData) {
       clear();
       currentTable = table2;
@@ -11974,7 +11985,7 @@ ${frontmatter.yaml}
       clear();
       viewport.removeEventListener("scroll", onViewportScroll);
     }
-    return { el, load, applyState, getState, clear, destroy };
+    return { el, load, showError, applyState, getState, clear, destroy };
   }
   function formatValue3(value) {
     if (value === null)
@@ -12257,6 +12268,13 @@ ${frontmatter.yaml}
     const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
     return /^(select|with|pragma|explain)\b/i.test(normalized);
   }
+  async function responseErrorMessage(res, fallback) {
+    const text2 = await res.text().catch(() => "");
+    return text2 || `${fallback} (${res.status})`;
+  }
+  function errorMessage(err) {
+    return err instanceof Error ? err.message : String(err);
+  }
   function isSqlKind(kind) {
     return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
   }
@@ -12524,6 +12542,11 @@ ${frontmatter.yaml}
       notice.textContent = message;
       mainContent.prepend(notice);
     }
+    function setTableListStatus(message, options) {
+      const list2 = tableList.el.querySelector(".db-table-list");
+      if (list2)
+        setPaneStatus(list2, message, options);
+    }
     function setActiveTab(tab, updateUrl = true) {
       currentTab = normalizeViewForDb(tab, currentDbInfo);
       const tableScopedTab = currentTab === "data" || currentTab === "schema";
@@ -12566,8 +12589,9 @@ ${frontmatter.yaml}
     }
     async function fetchSchema(dbId) {
       const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`));
-      if (!res.ok)
-        return null;
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to fetch schema"));
+      }
       return await res.json();
     }
     async function fetchTablePage(table2, offset, limit, sort, filters) {
@@ -12587,8 +12611,9 @@ ${frontmatter.yaml}
         params.set("filters", JSON.stringify(filters));
       }
       const res = await fetch(`/_db/table?${params}`);
-      if (!res.ok)
-        throw new Error(await res.text());
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to fetch table"));
+      }
       return await res.json();
     }
     async function executeQuery(sql) {
@@ -12608,6 +12633,9 @@ ${frontmatter.yaml}
           executedBy: "user"
         })
       });
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to execute query"));
+      }
       const result = await res.json();
       if (userPrefersHistoryOpen)
         historyView.refresh();
@@ -12640,7 +12668,23 @@ ${frontmatter.yaml}
       redisExplorer.clear();
       esExplorer.clear();
       applyVisibility();
-      const schema = await fetchSchema(dbId);
+      tableList.render([]);
+      setTableListStatus("Loading schema...");
+      grid.clear();
+      const schema = await fetchSchema(dbId).catch((err) => {
+        if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+          return;
+        const message = errorMessage(err);
+        schemaCache = null;
+        tableList.render([]);
+        setTableListStatus(message, { error: true });
+        grid.showError(message);
+        schemaView.clear();
+        erDiagram.clear();
+        setActiveTab("data", false);
+        cb.onStateChange();
+        return null;
+      });
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;
       if (!schema)
@@ -12681,11 +12725,11 @@ ${frontmatter.yaml}
           return;
         }
         grid.load(table2, data);
-      } catch {
+      } catch (err) {
         if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
           return;
         }
-        grid.load(table2);
+        grid.showError(errorMessage(err));
       }
       if (currentTab === "schema") {
         const columns = await fetchColumns(table2);
@@ -12844,6 +12888,10 @@ ${frontmatter.yaml}
       if (generation !== loadGeneration || currentDbInfo?.id !== target)
         return;
       if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
+        cb.onStateChange();
+        return;
+      }
+      if (!schemaCache) {
         cb.onStateChange();
         return;
       }

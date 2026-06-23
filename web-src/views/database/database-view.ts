@@ -15,6 +15,7 @@ import type { AnnotationTarget } from "../../core/types";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
+import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
@@ -61,6 +62,18 @@ type DbTabEntry = {
 function looksReadOnlySql(sql: string): boolean {
   const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
   return /^(select|with|pragma|explain)\b/i.test(normalized);
+}
+
+async function responseErrorMessage(
+  res: Response,
+  fallback: string,
+): Promise<string> {
+  const text = await res.text().catch(() => "");
+  return text || `${fallback} (${res.status})`;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
@@ -458,6 +471,11 @@ function createTabPane(
     mainContent.prepend(notice);
   }
 
+  function setTableListStatus(message: string, options?: { error?: boolean }) {
+    const list = tableList.el.querySelector<HTMLElement>(".db-table-list");
+    if (list) setPaneStatus(list, message, options);
+  }
+
   function setActiveTab(tab: TabName, updateUrl = true) {
     currentTab = normalizeViewForDb(tab, currentDbInfo);
     // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
@@ -510,11 +528,15 @@ function createTabPane(
     return data;
   }
 
-  async function fetchSchema(dbId: string): Promise<DbSchemaResponse | null> {
+  async function fetchSchema(dbId: string): Promise<DbSchemaResponse> {
     const res = await deps.trackLoad(
       fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`),
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "failed to fetch schema"),
+      );
+    }
     return (await res.json()) as DbSchemaResponse;
   }
 
@@ -540,7 +562,9 @@ function createTabPane(
       params.set("filters", JSON.stringify(filters));
     }
     const res = await fetch(`/_db/table?${params}`);
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      throw new Error(await responseErrorMessage(res, "failed to fetch table"));
+    }
     return (await res.json()) as DbTableDataResponse;
   }
 
@@ -560,6 +584,11 @@ function createTabPane(
         executedBy: "user",
       }),
     });
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "failed to execute query"),
+      );
+    }
     const result = (await res.json()) as DbQueryResponse;
     if (userPrefersHistoryOpen) historyView.refresh();
     return result;
@@ -600,7 +629,22 @@ function createTabPane(
     redisExplorer.clear();
     esExplorer.clear();
     applyVisibility();
-    const schema = await fetchSchema(dbId);
+    tableList.render([]);
+    setTableListStatus("Loading schema...");
+    grid.clear();
+    const schema = await fetchSchema(dbId).catch((err) => {
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+      const message = errorMessage(err);
+      schemaCache = null;
+      tableList.render([]);
+      setTableListStatus(message, { error: true });
+      grid.showError(message);
+      schemaView.clear();
+      erDiagram.clear();
+      setActiveTab("data", false);
+      cb.onStateChange();
+      return null;
+    });
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     if (!schema) return;
     schemaCache = schema;
@@ -660,7 +704,7 @@ function createTabPane(
         return;
       }
       grid.load(table, data);
-    } catch {
+    } catch (err) {
       if (
         generation !== loadGeneration ||
         currentDbInfo?.id !== requestDbId ||
@@ -668,7 +712,7 @@ function createTabPane(
       ) {
         return;
       }
-      grid.load(table);
+      grid.showError(errorMessage(err));
     }
     if (currentTab === "schema") {
       const columns = await fetchColumns(table);
@@ -863,6 +907,10 @@ function createTabPane(
       currentDbInfo?.kind === "redis" ||
       currentDbInfo?.kind === "elasticsearch"
     ) {
+      cb.onStateChange();
+      return;
+    }
+    if (!schemaCache) {
       cb.onStateChange();
       return;
     }
