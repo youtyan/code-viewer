@@ -118,4 +118,57 @@ describe("docker table meta queries", () => {
     expect(sql[2]).toMatch(/WHERE CAST\(`name` AS CHAR\) LIKE '%Ada%'/);
     expect(result.totalRows).toBe(7);
   });
+
+  test("uses TTL cache for columns and unfiltered row count", async () => {
+    activeHarness = installSpawnHarness();
+    const adapter = createMysqlAdapter();
+    const originalNow = Date.now;
+    let now = 1000;
+    Date.now = () => now;
+    try {
+      await adapter.getTablePageWithMeta("users", {
+        offset: 0,
+        limit: 25,
+      });
+      expect(activeHarness.calls).toHaveLength(3);
+
+      await adapter.getTablePageWithMeta("users", {
+        offset: 25,
+        limit: 25,
+      });
+      expect(activeHarness.calls).toHaveLength(4);
+      expect(activeHarness.calls[3].sql).toBe(
+        "SELECT * FROM `users` LIMIT 25 OFFSET 25",
+      );
+
+      now += 15_100;
+      await adapter.getTablePageWithMeta("users", {
+        offset: 50,
+        limit: 25,
+      });
+      expect(activeHarness.calls).toHaveLength(6);
+      expect(activeHarness.calls[4].sql).toBe(
+        "SELECT * FROM `users` LIMIT 25 OFFSET 50",
+      );
+      expect(activeHarness.calls[5].sql).toBe(
+        "SELECT COUNT(*) AS cnt FROM `users`",
+      );
+
+      now += 16_000;
+      await adapter.getTablePageWithMeta("users", {
+        offset: 75,
+        limit: 25,
+      });
+      expect(activeHarness.calls).toHaveLength(9);
+      expect(activeHarness.calls[6].sql).toMatch(/information_schema\.columns/);
+      expect(activeHarness.calls[7].sql).toBe(
+        "SELECT * FROM `users` LIMIT 25 OFFSET 75",
+      );
+      expect(activeHarness.calls[8].sql).toBe(
+        "SELECT COUNT(*) AS cnt FROM `users`",
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });

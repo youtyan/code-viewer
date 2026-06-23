@@ -59,6 +59,9 @@ type BunSpawnFn = (
   opts?: Record<string, unknown>,
 ) => BunSpawnResult;
 
+const COLUMNS_TTL_MS = 30_000;
+const ROWCOUNT_TTL_MS = 15_000;
+
 function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
   if (config.kind === "postgresql") {
     return [
@@ -290,6 +293,46 @@ function buildDockerFilterWhere(
   return whereParts.join(" AND ");
 }
 
+function createTableMetaCache(now = () => Date.now()) {
+  const columns = new Map<string, { value: DbColumn[]; expires: number }>();
+  const rowCounts = new Map<string, { value: number; expires: number }>();
+  return {
+    async getColumns(
+      table: string,
+      fetch: () => DbColumn[] | Promise<DbColumn[]>,
+    ): Promise<DbColumn[]> {
+      const cached = columns.get(table);
+      const current = now();
+      if (cached && cached.expires > current) return cached.value;
+      const value = await fetch();
+      columns.set(table, { value, expires: now() + COLUMNS_TTL_MS });
+      return value;
+    },
+
+    async getRowCount(
+      table: string,
+      fetch: () => number | Promise<number>,
+    ): Promise<number> {
+      const cached = rowCounts.get(table);
+      const current = now();
+      if (cached && cached.expires > current) return cached.value;
+      const value = await fetch();
+      rowCounts.set(table, { value, expires: now() + ROWCOUNT_TTL_MS });
+      return value;
+    },
+
+    invalidate(table?: string): void {
+      if (table) {
+        columns.delete(table);
+        rowCounts.delete(table);
+        return;
+      }
+      columns.clear();
+      rowCounts.clear();
+    },
+  };
+}
+
 export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   function exec(sql: string): { columns: string[]; rows: string[][] } {
     const result = execInContainer(config, sql);
@@ -315,6 +358,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   }
 
   const columnCache = new Map<string, DbColumn[]>();
+  const tableMetaCache = createTableMetaCache();
 
   function buildColumnsSql(table: string): string {
     const tableLiteral = table.replace(/'/g, "''");
@@ -351,16 +395,20 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   function tablePageMetaFromResults(
     columns: DbColumn[],
     dataResult: { columns: string[]; rows: string[][] },
-    countResult: { rows: string[][] },
+    totalRows: number,
   ): TablePageMeta {
-    const totalRows =
-      countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
     return {
       columns,
       rows: dataResult.rows.map((row) => row.map(toDbValue)),
       rowCount: dataResult.rows.length,
       totalRows,
     };
+  }
+
+  function rowCountFromResult(countResult: { rows: string[][] }): number {
+    return countResult.rows.length > 0
+      ? Number(countResult.rows[0][0]) || 0
+      : 0;
   }
 
   function fetchColumnsUncached(table: string): DbColumn[] {
@@ -590,12 +638,16 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const order = buildOrderClause(options.orderBy, config.kind);
       const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
-      const [columns, dataResult, countResult] = await Promise.all([
-        fetchColumnsAsyncUncached(table),
+      const [columns, dataResult, totalRows] = await Promise.all([
+        tableMetaCache.getColumns(table, () =>
+          fetchColumnsAsyncUncached(table),
+        ),
         execAsync(dataSql),
-        execAsync(countSql),
+        tableMetaCache.getRowCount(table, async () =>
+          rowCountFromResult(await execAsync(countSql)),
+        ),
       ]);
-      return tablePageMetaFromResults(columns, dataResult, countResult);
+      return tablePageMetaFromResults(columns, dataResult, totalRows);
     },
 
     async getFilteredTablePageWithMeta(
@@ -614,11 +666,17 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
       const [columns, dataResult, countResult] = await Promise.all([
-        fetchColumnsAsyncUncached(table),
+        tableMetaCache.getColumns(table, () =>
+          fetchColumnsAsyncUncached(table),
+        ),
         execAsync(dataSql),
         execAsync(countSql),
       ]);
-      return tablePageMetaFromResults(columns, dataResult, countResult);
+      return tablePageMetaFromResults(
+        columns,
+        dataResult,
+        rowCountFromResult(countResult),
+      );
     },
 
     getTablePage(
@@ -705,6 +763,10 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       };
     },
 
+    invalidateTableMetaCache(table?: string): void {
+      tableMetaCache.invalidate(table);
+    },
+
     getCreateStatement(table: string): string {
       if (config.kind === "mysql") {
         try {
@@ -746,6 +808,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
 
     close(): void {
       columnCache.clear();
+      tableMetaCache.invalidate();
     },
 
     async *iterateForSnapshot(
