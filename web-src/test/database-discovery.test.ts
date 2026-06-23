@@ -43,10 +43,10 @@ services:
       context: ./docker/db
       dockerfile: Dockerfile
     ports:
-      - '$RERAKU_V2_DATABASE_PORT:3306'
+      - '$CV_TEST_DB_PORT:3306'
     environment:
-      MYSQL_DATABASE: $RERAKU_V2_DATABASE_NAME
-      MYSQL_ROOT_PASSWORD: '$RERAKU_V2_DATABASE_PASSWORD'
+      MYSQL_DATABASE: $CV_TEST_DB_NAME
+      MYSQL_ROOT_PASSWORD: '$CV_TEST_DB_PASSWORD'
 `);
 
     expect(results).toHaveLength(1);
