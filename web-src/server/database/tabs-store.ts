@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,6 +7,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { TabState, TabsState } from "../../core/database/types";
+import { makeId } from "../../core/id";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const TABS_FILE_NAME = "tabs.json";
@@ -194,7 +194,7 @@ export function saveTabs(cwd: string, state: TabsState): void {
   const dir = join(cwd, CODE_VIEWER_DIR);
   mkdirSync(dir, { recursive: true });
   const file = tabsFilePath(cwd);
-  const tmp = `${file}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+  const tmp = `${file}.${makeId(`tmp-${process.pid}`)}`;
   const content = `${JSON.stringify(normalized, null, 2)}\n`;
   if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
     // 上限を超えるほど巨大な state は受けない (構造上ありえないが defensive)。

@@ -10,6 +10,7 @@ import type {
   TabsResponse,
   TabsState,
 } from "../../core/database/types";
+import { makeId } from "../../core/id";
 import type { AppRoute, DiffRange } from "../../core/routes";
 import type { AnnotationTarget } from "../../core/types";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
@@ -50,6 +51,12 @@ type DatabaseEnterOptions = {
   autoSelectFirst?: boolean;
   annotationTarget?: DatabaseAnnotationTarget;
   reuseActiveTab?: boolean;
+};
+type DbTabEntry = {
+  pane: TabPaneInternal;
+  chip: HTMLElement;
+  label: HTMLElement;
+  closeBtn: HTMLButtonElement;
 };
 
 function looksReadOnlySql(sql: string): boolean {
@@ -170,7 +177,7 @@ function createTabPane(
     },
   };
 
-  let currentDb: DbFileInfo | null = null;
+  let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
   let lastFiles: DbFileInfo[] = [];
   let currentTable: string | null = initial.table ?? null;
@@ -284,7 +291,7 @@ function createTabPane(
   const grid = createTableGrid({
     fetchPage: (table, offset, limit, sort, filters) =>
       fetchTablePage(table, offset, limit, sort, filters),
-    getDbId: () => currentDb?.id || null,
+    getDbId: () => currentDbInfo?.id || null,
   });
 
   const queryEditor = createQueryEditor({
@@ -298,14 +305,14 @@ function createTabPane(
   const schemaView = createSchemaView();
   const erDiagram = createErDiagram();
   const globalSearchView = createGlobalSearchView({
-    getDbId: () => currentDb?.id || null,
+    getDbId: () => currentDbInfo?.id || null,
   });
   const snapshotView = createSnapshotView({
-    getDbId: () => currentDb?.id || null,
+    getDbId: () => currentDbInfo?.id || null,
     getTables: () => schemaCache?.tables || [],
   });
   const historyView = createQueryHistoryView({
-    getDbId: () => currentDb?.id || null,
+    getDbId: () => currentDbInfo?.id || null,
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
       setActiveTab("query");
@@ -386,13 +393,13 @@ function createTabPane(
 
   // history pane の開閉はタブごとに独立。initial が無ければ default は
   // 「開いている」状態 (= 旧 localStorage default と同じ)。
-  let historyOpen = initial.historyOpen ?? true;
+  let userPrefersHistoryOpen = initial.historyOpen ?? true;
 
   function applyVisibility() {
     const visibility = computeVisibility(
-      currentDb?.kind,
+      currentDbInfo?.kind,
       currentTab,
-      historyOpen,
+      userPrefersHistoryOpen,
     );
     toolsSection.hidden = visibility.toolsHidden;
     historyToggle.hidden = visibility.historyToggleHidden;
@@ -408,13 +415,13 @@ function createTabPane(
     snapshotView.el.hidden = visibility.snapshotHidden;
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
-    historyToggle.classList.toggle("active", historyOpen);
+    historyToggle.classList.toggle("active", userPrefersHistoryOpen);
     if (!visibility.historyPaneHidden) historyView.refresh();
   }
   applyVisibility();
 
   historyToggle.addEventListener("click", () => {
-    historyOpen = !historyOpen;
+    userPrefersHistoryOpen = !userPrefersHistoryOpen;
     applyVisibility();
     // タブごとに persist (localStorage ではなく tabs.json 経由)。
     cb.onStateChange();
@@ -448,7 +455,7 @@ function createTabPane(
 
   function applyKindVisibility() {
     applyVisibility();
-    if (!isSqlKind(currentDb?.kind)) {
+    if (!isSqlKind(currentDbInfo?.kind)) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
       searchBtn.classList.remove("active");
@@ -457,7 +464,7 @@ function createTabPane(
   }
 
   function setActiveTab(tab: TabName, updateUrl = true) {
-    currentTab = normalizeViewForDb(tab, currentDb);
+    currentTab = normalizeViewForDb(tab, currentDbInfo);
     // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
     // 操作なので、これらを active にしたときは table list の active 表示を
     // 外す (= アイコン中はテーブル選択を持たない)。
@@ -478,11 +485,11 @@ function createTabPane(
     // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
     applyKindVisibility();
     if (currentTab === "query") queryEditor.focus();
-    if (updateUrl && currentDb) {
+    if (updateUrl && currentDbInfo) {
       deps.setRoute(
         {
           screen: "database",
-          db: currentDb?.id,
+          db: currentDbInfo?.id,
           table: currentTable ?? undefined,
           tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange(),
@@ -523,9 +530,9 @@ function createTabPane(
     sort: GridSort | null,
     filters: GridFilter[],
   ): Promise<DbTableDataResponse> {
-    if (!currentDb) throw new Error("no database selected");
+    if (!currentDbInfo) throw new Error("no database selected");
     const params = new URLSearchParams({
-      db: currentDb.id,
+      db: currentDbInfo.id,
       table,
       offset: String(offset),
       limit: String(limit),
@@ -543,7 +550,7 @@ function createTabPane(
   }
 
   async function executeQuery(sql: string): Promise<DbQueryResponse> {
-    if (!currentDb) throw new Error("no database selected");
+    if (!currentDbInfo) throw new Error("no database selected");
     const res = await fetch("/_db/query", {
       method: "POST",
       headers: {
@@ -551,7 +558,7 @@ function createTabPane(
         "X-Code-Viewer-Action": "1",
       },
       body: JSON.stringify({
-        db: currentDb.id,
+        db: currentDbInfo.id,
         sql,
         saveHistory: true,
         source: "browser",
@@ -559,7 +566,7 @@ function createTabPane(
       }),
     });
     const result = (await res.json()) as DbQueryResponse;
-    if (historyOpen) historyView.refresh();
+    if (userPrefersHistoryOpen) historyView.refresh();
     return result;
   }
 
@@ -571,9 +578,12 @@ function createTabPane(
     },
     generation = loadGeneration,
   ) {
-    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     currentTable = null;
-    if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+    if (
+      currentDbInfo?.kind === "redis" ||
+      currentDbInfo?.kind === "elasticsearch"
+    ) {
       currentTab = "data";
       tableList.render([]);
       grid.clear();
@@ -581,7 +591,7 @@ function createTabPane(
       erDiagram.clear();
       schemaCache = null;
       applyKindVisibility();
-      if (currentDb.kind === "redis") {
+      if (currentDbInfo.kind === "redis") {
         esExplorer.el.hidden = true;
         esExplorer.clear();
         redisExplorer.el.hidden = false;
@@ -592,7 +602,7 @@ function createTabPane(
         esExplorer.el.hidden = false;
         await esExplorer.load(dbId, explorerInitial?.es);
       }
-      if (generation !== loadGeneration || currentDb?.id !== dbId) return;
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
       cb.onStateChange();
       return;
     }
@@ -602,7 +612,7 @@ function createTabPane(
     esExplorer.clear();
     applyKindVisibility();
     const schema = await fetchSchema(dbId);
-    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     if (!schema) return;
     schemaCache = schema;
     tableList.render(schema.tables);
@@ -613,8 +623,8 @@ function createTabPane(
     if (schema.tables.length > 0) {
       await selectTable(schema.tables[0].name, generation);
     }
-    // currentDb が確定したので Query History pane を自動 refresh する。
-    // 構築時の applyVisibility() 呼び出し時は currentDb=null で
+    // currentDbInfo が確定したので Query History pane を自動 refresh する。
+    // 構築時の applyVisibility() 呼び出し時は currentDbInfo=null で
     // refresh が skip されていた (sqlMode = false 判定) のを、ここで補う。
     // ユーザー報告: 「Refresh ボタンを押さないと History が出ない」の修正。
     applyVisibility();
@@ -625,8 +635,8 @@ function createTabPane(
     if (generation !== loadGeneration) return;
     currentTable = table;
     tableList.setActive(table);
-    if (!currentDb) return;
-    const requestDbId = currentDb.id;
+    if (!currentDbInfo) return;
+    const requestDbId = currentDbInfo.id;
     // テーブル選択は「テーブル中身の表示」なので、Query / ER / Search /
     // Snapshot のような「テーブルに紐づかない」ビュー中だった場合は
     // Data に戻す。これによりアイコンの active も自動で外れる
@@ -642,7 +652,7 @@ function createTabPane(
     deps.setRoute(
       {
         screen: "database",
-        db: currentDb.id,
+        db: currentDbInfo.id,
         table,
         tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange(),
@@ -655,7 +665,7 @@ function createTabPane(
       );
       if (
         generation !== loadGeneration ||
-        currentDb?.id !== requestDbId ||
+        currentDbInfo?.id !== requestDbId ||
         currentTable !== table
       ) {
         return;
@@ -664,7 +674,7 @@ function createTabPane(
     } catch {
       if (
         generation !== loadGeneration ||
-        currentDb?.id !== requestDbId ||
+        currentDbInfo?.id !== requestDbId ||
         currentTable !== table
       ) {
         return;
@@ -675,7 +685,7 @@ function createTabPane(
       const columns = await fetchColumns(table);
       if (
         generation !== loadGeneration ||
-        currentDb?.id !== requestDbId ||
+        currentDbInfo?.id !== requestDbId ||
         currentTable !== table
       ) {
         return;
@@ -688,9 +698,9 @@ function createTabPane(
     if (schemaCache?.columnsMap?.[table]) {
       return schemaCache.columnsMap[table];
     }
-    if (!currentDb) return [];
+    if (!currentDbInfo) return [];
     const res = await fetch(
-      `/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table)}`,
+      `/_db/columns?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table)}`,
     );
     if (!res.ok) return [];
     const data = (await res.json()) as { columns: DbColumn[] };
@@ -699,17 +709,17 @@ function createTabPane(
 
   async function showSchema(table: string) {
     setActiveTab("schema");
-    if (!currentDb) return;
+    if (!currentDbInfo) return;
     const columns = await fetchColumns(table);
     schemaView.render(table, columns, schemaCache?.indexes || []);
   }
 
   async function showDdl(table: string) {
-    if (!currentDb) return;
+    if (!currentDbInfo) return;
     setActiveTab("schema");
     try {
       const res = await fetch(
-        `/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table)}`,
+        `/_db/ddl?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table)}`,
       );
       if (!res.ok) return;
       const data = (await res.json()) as {
@@ -728,7 +738,7 @@ function createTabPane(
   }
 
   async function renderErDiagram() {
-    if (!schemaCache || !currentDb) return;
+    if (!schemaCache || !currentDbInfo) return;
     const columnsMap = new Map<string, DbColumn[]>();
     if (schemaCache.columnsMap) {
       for (const [name, cols] of Object.entries(schemaCache.columnsMap)) {
@@ -758,7 +768,7 @@ function createTabPane(
     const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);
     const option = dbSelect.selectedOptions[0];
-    currentDb = {
+    currentDbInfo = {
       id: dbId,
       path: file?.path || dbId,
       name: option?.textContent || dbId,
@@ -767,7 +777,7 @@ function createTabPane(
     };
     clearDockerNotice();
     await selectDb(dbId, undefined, generation);
-    if (generation !== loadGeneration || currentDb?.id !== dbId) return;
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     deps.setRoute(
       {
         screen: "database",
@@ -834,7 +844,7 @@ function createTabPane(
     const autoSelectFirst = options.autoSelectFirst ?? true;
     if (!db && !autoSelectFirst) {
       dbSelect.value = "";
-      currentDb = null;
+      currentDbInfo = null;
       currentTable = null;
       schemaCache = null;
       tableList.render([]);
@@ -849,7 +859,7 @@ function createTabPane(
     }
     const target = db || files[0].id;
     dbSelect.value = target;
-    currentDb = files.find((f) => f.id === target) || null;
+    currentDbInfo = files.find((f) => f.id === target) || null;
 
     // 復元時は initial の redis/es selection を 1 度だけ流し込む。
     const explorerInitial = {
@@ -859,8 +869,11 @@ function createTabPane(
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
     await selectDb(target, explorerInitial, generation);
-    if (generation !== loadGeneration || currentDb?.id !== target) return;
-    if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+    if (generation !== loadGeneration || currentDbInfo?.id !== target) return;
+    if (
+      currentDbInfo?.kind === "redis" ||
+      currentDbInfo?.kind === "elasticsearch"
+    ) {
       cb.onStateChange();
       return;
     }
@@ -868,7 +881,7 @@ function createTabPane(
       await selectTable(table, generation);
     }
     if (generation !== loadGeneration) return;
-    const normalizedView = normalizeViewForDb(view, currentDb);
+    const normalizedView = normalizeViewForDb(view, currentDbInfo);
     if (normalizedView !== "data") {
       setActiveTab(normalizedView);
       if (normalizedView === "schema") {
@@ -889,7 +902,7 @@ function createTabPane(
   function applyAnnotationTarget(
     target: DatabaseAnnotationTarget | undefined,
   ): void {
-    if (!target || target.db !== currentDb?.id) return;
+    if (!target || target.db !== currentDbInfo?.id) return;
     if (target.data) {
       if (target.table && target.table !== currentTable) return;
       setActiveTab("data");
@@ -918,7 +931,7 @@ function createTabPane(
   }
 
   function handleSse(event?: string, data?: string) {
-    if (historyOpen) historyView.refresh();
+    if (userPrefersHistoryOpen) historyView.refresh();
     if (event === "db-snapshot" && data) {
       snapshotView.handleSse(data);
     }
@@ -930,7 +943,7 @@ function createTabPane(
     );
     const state: TabState = {
       id: cb.tabId,
-      dbId: currentDb?.id ?? null,
+      dbId: currentDbInfo?.id ?? null,
       table: currentTable ?? activeTable?.dataset.table ?? null,
       view: currentTab,
     };
@@ -941,12 +954,12 @@ function createTabPane(
     if (sqlDraft) state.sqlDraft = sqlDraft;
     // historyOpen は default = true なので、true のときは載せない (= 既定値)。
     // false のときだけ load 時に「閉じる」と判定できればよい。
-    if (!historyOpen) state.historyOpen = false;
+    if (!userPrefersHistoryOpen) state.historyOpen = false;
     if (historyPane.style.height)
       state.historyHeight = historyPane.style.height;
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
 
-    if (currentDb?.kind === "redis") {
+    if (currentDbInfo?.kind === "redis") {
       const sel = redisExplorer.getSelection();
       if (
         sel.dbIndex !== undefined ||
@@ -955,7 +968,7 @@ function createTabPane(
       ) {
         state.redis = sel;
       }
-    } else if (currentDb?.kind === "elasticsearch") {
+    } else if (currentDbInfo?.kind === "elasticsearch") {
       const sel = esExplorer.getSelection();
       if (sel.index !== undefined || sel.query !== undefined) {
         state.es = sel;
@@ -966,14 +979,14 @@ function createTabPane(
   }
 
   function getDbKind(): DbKind | null {
-    return currentDb?.kind ?? null;
+    return currentDbInfo?.kind ?? null;
   }
 
   function getAnnotationTarget(): DatabaseAnnotationTarget | null {
-    if (!currentDb) return null;
+    if (!currentDbInfo) return null;
     const target: DatabaseAnnotationTarget = {
       kind: "database",
-      db: currentDb.id,
+      db: currentDbInfo.id,
       ...(currentTable ? { table: currentTable } : {}),
       tab: currentTab,
     };
@@ -989,19 +1002,19 @@ function createTabPane(
   }
 
   function getLabel(): string {
-    if (!currentDb) return "(empty)";
+    if (!currentDbInfo) return "(empty)";
     // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
-    if (currentDb.id.startsWith("docker:")) {
-      // currentDb.name は recursive discovery の長い label なので、service 部分だけ取り出す。
+    if (currentDbInfo.id.startsWith("docker:")) {
+      // currentDbInfo.name は recursive discovery の長い label なので、service 部分だけ取り出す。
       // 例: "redis-svc (redis:7-alpine, localhost:6390 — data/test/redis)"
       //  → "redis-svc"
-      const m = currentDb.name.match(/^(\S+)/);
-      return m ? m[1] : currentDb.name;
+      const m = currentDbInfo.name.match(/^(\S+)/);
+      return m ? m[1] : currentDbInfo.name;
     }
-    const lastSlash = currentDb.path.lastIndexOf("/");
+    const lastSlash = currentDbInfo.path.lastIndexOf("/");
     return lastSlash >= 0
-      ? currentDb.path.slice(lastSlash + 1)
-      : currentDb.path;
+      ? currentDbInfo.path.slice(lastSlash + 1)
+      : currentDbInfo.path;
   }
 
   function dispose(): void {
@@ -1016,7 +1029,7 @@ function createTabPane(
     historyView.clear();
     redisExplorer.dispose();
     esExplorer.dispose();
-    currentDb = null;
+    currentDbInfo = null;
     currentTable = null;
     schemaCache = null;
   }
@@ -1077,29 +1090,9 @@ function makeIconButton(opts: {
 
 // ----- 外側: 複数 TabPane を束ねる -----
 
-function makeTabId(): string {
-  // crypto.randomUUID は modern browser で利用可能。fallback も入れる。
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `t-${crypto.randomUUID().slice(0, 12)}`;
-  }
-  return `t-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-}
-
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
-  const tabsById = new Map<
-    string,
-    {
-      pane: TabPaneInternal;
-      chip: HTMLElement;
-      label: HTMLElement;
-      closeBtn: HTMLButtonElement;
-    }
-  >();
-  const tabOrder: string[] = [];
+  const tabsById = new Map<string, DbTabEntry>();
   const paneReadyById = new Map<string, Promise<void>>();
   let activeTabId: string | null = null;
   let draggingTabId: string | null = null;
@@ -1124,9 +1117,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     savePending = null;
     if (!mounted || restoring) return;
     const tabs: TabState[] = [];
-    for (const id of tabOrder) {
-      const entry = tabsById.get(id);
-      if (entry) tabs.push(entry.pane.getState());
+    for (const [, entry] of tabsById) {
+      tabs.push(entry.pane.getState());
     }
     if (tabs.length === 0) return;
     const body: TabsState = { version: 1, tabs, activeTabId };
@@ -1311,6 +1303,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     entry.chip.classList.toggle("drop-after", after);
   }
 
+  function reorderTabs(ids: string[]): void {
+    const next = new Map<string, DbTabEntry>();
+    for (const id of ids) {
+      const entry = tabsById.get(id);
+      if (entry) next.set(id, entry);
+    }
+    tabsById.clear();
+    for (const [id, entry] of next) tabsById.set(id, entry);
+  }
+
   function moveTabBeforeOrAfter(
     dragId: string,
     targetId: string,
@@ -1320,16 +1322,19 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const dragEntry = tabsById.get(dragId);
     const targetEntry = tabsById.get(targetId);
     if (!dragEntry || !targetEntry) return;
-    const dragIndex = tabOrder.indexOf(dragId);
+    const orderedIds = Array.from(tabsById.keys());
+    const dragIndex = orderedIds.indexOf(dragId);
     if (dragIndex < 0) return;
-    tabOrder.splice(dragIndex, 1);
-    const targetIndex = tabOrder.indexOf(targetId);
+    orderedIds.splice(dragIndex, 1);
+    const targetIndex = orderedIds.indexOf(targetId);
     if (targetIndex < 0) {
-      tabOrder.splice(dragIndex, 0, dragId);
+      orderedIds.splice(dragIndex, 0, dragId);
+      reorderTabs(orderedIds);
       return;
     }
     const insertIndex = targetIndex + (after ? 1 : 0);
-    tabOrder.splice(insertIndex, 0, dragId);
+    orderedIds.splice(insertIndex, 0, dragId);
+    reorderTabs(orderedIds);
     tabsList.insertBefore(
       dragEntry.chip,
       after ? targetEntry.chip.nextSibling : targetEntry.chip,
@@ -1340,10 +1345,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   function moveTabToEnd(dragId: string): void {
     const dragEntry = tabsById.get(dragId);
     if (!dragEntry) return;
-    const dragIndex = tabOrder.indexOf(dragId);
-    if (dragIndex < 0 || dragIndex === tabOrder.length - 1) return;
-    tabOrder.splice(dragIndex, 1);
-    tabOrder.push(dragId);
+    const orderedIds = Array.from(tabsById.keys());
+    const dragIndex = orderedIds.indexOf(dragId);
+    if (dragIndex < 0 || dragIndex === orderedIds.length - 1) return;
+    orderedIds.splice(dragIndex, 1);
+    orderedIds.push(dragId);
+    reorderTabs(orderedIds);
     tabsList.appendChild(dragEntry.chip);
     scheduleSave();
   }
@@ -1420,7 +1427,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     initial?: Partial<TabState>,
     options: DatabaseEnterOptions = {},
   ): string {
-    const id = initial?.id || makeTabId();
+    const id = initial?.id || makeId("t");
 
     const chip = document.createElement("div");
     chip.className = "db-tabs-chip";
@@ -1491,7 +1498,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabsList.appendChild(chip);
     tabHost.appendChild(pane.el);
     tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
-    tabOrder.push(id);
 
     setActive(id);
     // initial state を反映 (DB を選んで読み込む)。dbId/table/view は enter
@@ -1526,8 +1532,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     entry.pane.el.remove();
     entry.chip.remove();
     tabsById.delete(id);
-    const orderIndex = tabOrder.indexOf(id);
-    if (orderIndex >= 0) tabOrder.splice(orderIndex, 1);
     paneReadyById.delete(id);
     closeDbIfUnused(closedDbId, closedKind);
     if (activeTabId !== id) {
@@ -1543,7 +1547,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       return;
     }
     // 残りの先頭を active 化。
-    const firstId = tabOrder[0];
+    const firstId = tabsById.keys().next().value;
     if (firstId) setActive(firstId);
   }
 
@@ -1677,7 +1681,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           const targetId =
             restored.activeTabId && tabsById.has(restored.activeTabId)
               ? restored.activeTabId
-              : tabOrder[0];
+              : tabsById.keys().next().value;
           if (targetId) setActive(targetId);
           await Promise.all(
             restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean),
@@ -1752,7 +1756,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.pane.dispose();
     }
     tabsById.clear();
-    tabOrder.length = 0;
     tabsList.innerHTML = "";
     tabHost.innerHTML = "";
     activeTabId = null;

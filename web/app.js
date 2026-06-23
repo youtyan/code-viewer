@@ -8010,6 +8010,23 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/core/id.ts
+  function bytesToHex(bytes) {
+    return Array.from(bytes, (b2) => b2.toString(16).padStart(2, "0")).join("");
+  }
+  function makeId(prefix) {
+    const cryptoApi = globalThis.crypto;
+    if (typeof cryptoApi?.randomUUID === "function") {
+      return `${prefix}-${cryptoApi.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    }
+    if (typeof cryptoApi?.getRandomValues === "function") {
+      const bytes = new Uint8Array(8);
+      cryptoApi.getRandomValues(bytes);
+      return `${prefix}-${bytesToHex(bytes)}`;
+    }
+    return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   // web-src/views/media-embed.ts
   var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
   var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
@@ -8455,7 +8472,7 @@ ${frontmatter.yaml}
     const indexListPane = document.createElement("div");
     indexListPane.className = "es-index-list-pane";
     const indexListHeader = document.createElement("div");
-    indexListHeader.className = "es-pane-header";
+    indexListHeader.className = "db-explorer-pane-header";
     indexListHeader.textContent = "Indices";
     indexListPane.appendChild(indexListHeader);
     const indexList = document.createElement("div");
@@ -8464,7 +8481,7 @@ ${frontmatter.yaml}
     const docListPane = document.createElement("div");
     docListPane.className = "es-doc-list-pane";
     const docListHeader = document.createElement("div");
-    docListHeader.className = "es-pane-header";
+    docListHeader.className = "db-explorer-pane-header";
     docListHeader.textContent = "Docs";
     docListPane.appendChild(docListHeader);
     const searchBar = document.createElement("div");
@@ -8536,14 +8553,14 @@ ${frontmatter.yaml}
     function setIndexStatus(message, isError = false) {
       indexList.innerHTML = "";
       const note = document.createElement("div");
-      note.className = isError ? "es-error" : "es-note";
+      note.className = isError ? "db-pane-error" : "db-pane-note";
       note.textContent = message;
       indexList.appendChild(note);
     }
     function setDocStatus(message, isError = false) {
       docList.innerHTML = "";
       const note = document.createElement("div");
-      note.className = isError ? "es-error" : "es-note";
+      note.className = isError ? "db-pane-error" : "db-pane-note";
       note.textContent = message;
       docList.appendChild(note);
       docMoreBtn.hidden = true;
@@ -8668,7 +8685,7 @@ ${frontmatter.yaml}
       docBody.appendChild(header);
       if (!resp.found) {
         const note = document.createElement("div");
-        note.className = "es-note";
+        note.className = "db-pane-note";
         note.textContent = "(doc not found)";
         docBody.appendChild(note);
         return;
@@ -8698,7 +8715,7 @@ ${frontmatter.yaml}
       const requestDbId = currentDbId;
       mappingBody.innerHTML = "";
       const loading = document.createElement("div");
-      loading.className = "es-note";
+      loading.className = "db-pane-note";
       loading.textContent = "Loading mapping...";
       mappingBody.appendChild(loading);
       try {
@@ -8712,7 +8729,7 @@ ${frontmatter.yaml}
           const text2 = await res.text();
           mappingBody.innerHTML = "";
           const err = document.createElement("div");
-          err.className = "es-error";
+          err.className = "db-pane-error";
           err.textContent = `Error: ${text2 || res.statusText}`;
           mappingBody.appendChild(err);
           return;
@@ -8729,7 +8746,7 @@ ${frontmatter.yaml}
           return;
         mappingBody.innerHTML = "";
         const errEl = document.createElement("div");
-        errEl.className = "es-error";
+        errEl.className = "db-pane-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         mappingBody.appendChild(errEl);
       } finally {
@@ -8822,7 +8839,7 @@ ${frontmatter.yaml}
       setDetailTab("doc");
       docBody.innerHTML = "";
       const loading = document.createElement("div");
-      loading.className = "es-note";
+      loading.className = "db-pane-note";
       loading.textContent = "Loading doc...";
       docBody.appendChild(loading);
       try {
@@ -8840,7 +8857,7 @@ ${frontmatter.yaml}
           const text2 = await res.text();
           docBody.innerHTML = "";
           const err = document.createElement("div");
-          err.className = "es-error";
+          err.className = "db-pane-error";
           err.textContent = `Error: ${text2 || res.statusText}`;
           docBody.appendChild(err);
           return;
@@ -8857,7 +8874,7 @@ ${frontmatter.yaml}
           return;
         docBody.innerHTML = "";
         const errEl = document.createElement("div");
-        errEl.className = "es-error";
+        errEl.className = "db-pane-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         docBody.appendChild(errEl);
       } finally {
@@ -10116,7 +10133,7 @@ ${frontmatter.yaml}
     const dbListPane = document.createElement("div");
     dbListPane.className = "redis-db-list-pane";
     const dbListHeader = document.createElement("div");
-    dbListHeader.className = "redis-pane-header";
+    dbListHeader.className = "db-explorer-pane-header";
     dbListHeader.textContent = "Databases";
     dbListPane.appendChild(dbListHeader);
     const dbList = document.createElement("div");
@@ -10125,7 +10142,7 @@ ${frontmatter.yaml}
     const keyListPane = document.createElement("div");
     keyListPane.className = "redis-key-list-pane";
     const keyListHeader = document.createElement("div");
-    keyListHeader.className = "redis-pane-header";
+    keyListHeader.className = "db-explorer-pane-header";
     keyListHeader.textContent = "Keys";
     keyListPane.appendChild(keyListHeader);
     const keyFilterForm = document.createElement("form");
@@ -10178,14 +10195,14 @@ ${frontmatter.yaml}
     function setDbStatus(message, isError = false) {
       dbList.innerHTML = "";
       const note = document.createElement("div");
-      note.className = isError ? "redis-error" : "redis-note";
+      note.className = isError ? "db-pane-error" : "db-pane-note";
       note.textContent = message;
       dbList.appendChild(note);
     }
     function setKeyStatus(message, isError = false) {
       keyList.innerHTML = "";
       const note = document.createElement("div");
-      note.className = isError ? "redis-error" : "redis-note";
+      note.className = isError ? "db-pane-error" : "db-pane-note";
       note.textContent = message;
       keyList.appendChild(note);
       keyMoreBtn.hidden = true;
@@ -10355,7 +10372,7 @@ ${frontmatter.yaml}
       highlightActiveKey(name);
       mainPane.innerHTML = "";
       const loading = document.createElement("div");
-      loading.className = "redis-note";
+      loading.className = "db-pane-note";
       loading.textContent = "Loading value...";
       mainPane.appendChild(loading);
       try {
@@ -10373,7 +10390,7 @@ ${frontmatter.yaml}
           const text2 = await res.text();
           mainPane.innerHTML = "";
           const err = document.createElement("div");
-          err.className = "redis-error";
+          err.className = "db-pane-error";
           err.textContent = `Error: ${text2 || res.statusText}`;
           mainPane.appendChild(err);
           return;
@@ -10390,7 +10407,7 @@ ${frontmatter.yaml}
           return;
         mainPane.innerHTML = "";
         const errEl = document.createElement("div");
-        errEl.className = "redis-error";
+        errEl.className = "db-pane-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         mainPane.appendChild(errEl);
       } finally {
@@ -12275,7 +12292,7 @@ ${frontmatter.yaml}
         cb.onStateChange();
       }
     };
-    let currentDb = null;
+    let currentDbInfo = null;
     let schemaCache = null;
     let lastFiles = [];
     let currentTable = initial.table ?? null;
@@ -12366,7 +12383,7 @@ ${frontmatter.yaml}
     });
     const grid = createTableGrid({
       fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters),
-      getDbId: () => currentDb?.id || null
+      getDbId: () => currentDbInfo?.id || null
     });
     const queryEditor = createQueryEditor({
       executeQuery: (sql) => executeQuery(sql),
@@ -12377,14 +12394,14 @@ ${frontmatter.yaml}
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
     const globalSearchView = createGlobalSearchView({
-      getDbId: () => currentDb?.id || null
+      getDbId: () => currentDbInfo?.id || null
     });
     const snapshotView = createSnapshotView({
-      getDbId: () => currentDb?.id || null,
+      getDbId: () => currentDbInfo?.id || null,
       getTables: () => schemaCache?.tables || []
     });
     const historyView = createQueryHistoryView({
-      getDbId: () => currentDb?.id || null,
+      getDbId: () => currentDbInfo?.id || null,
       copySqlToQuery: (sql) => {
         queryEditor.setSql(sql);
         setActiveTab("query");
@@ -12444,9 +12461,9 @@ ${frontmatter.yaml}
     historyToggle.textContent = "Query History";
     historyToggle.title = "Toggle query history panel";
     sidebar.appendChild(historyToggle);
-    let historyOpen = initial.historyOpen ?? true;
+    let userPrefersHistoryOpen = initial.historyOpen ?? true;
     function applyVisibility() {
-      const visibility = computeVisibility(currentDb?.kind, currentTab, historyOpen);
+      const visibility = computeVisibility(currentDbInfo?.kind, currentTab, userPrefersHistoryOpen);
       toolsSection.hidden = visibility.toolsHidden;
       historyToggle.hidden = visibility.historyToggleHidden;
       historyResizer.hidden = visibility.historyResizerHidden;
@@ -12461,13 +12478,13 @@ ${frontmatter.yaml}
       snapshotView.el.hidden = visibility.snapshotHidden;
       redisExplorer.el.hidden = visibility.redisHidden;
       esExplorer.el.hidden = visibility.esHidden;
-      historyToggle.classList.toggle("active", historyOpen);
+      historyToggle.classList.toggle("active", userPrefersHistoryOpen);
       if (!visibility.historyPaneHidden)
         historyView.refresh();
     }
     applyVisibility();
     historyToggle.addEventListener("click", () => {
-      historyOpen = !historyOpen;
+      userPrefersHistoryOpen = !userPrefersHistoryOpen;
       applyVisibility();
       cb.onStateChange();
     });
@@ -12496,7 +12513,7 @@ ${frontmatter.yaml}
     }
     function applyKindVisibility() {
       applyVisibility();
-      if (!isSqlKind(currentDb?.kind)) {
+      if (!isSqlKind(currentDbInfo?.kind)) {
         queryBtn.classList.remove("active");
         erBtn.classList.remove("active");
         searchBtn.classList.remove("active");
@@ -12504,7 +12521,7 @@ ${frontmatter.yaml}
       }
     }
     function setActiveTab(tab, updateUrl = true) {
-      currentTab = normalizeViewForDb(tab, currentDb);
+      currentTab = normalizeViewForDb(tab, currentDbInfo);
       const tableScopedTab = currentTab === "data" || currentTab === "schema";
       if (!tableScopedTab) {
         currentTable = null;
@@ -12519,10 +12536,10 @@ ${frontmatter.yaml}
       applyKindVisibility();
       if (currentTab === "query")
         queryEditor.focus();
-      if (updateUrl && currentDb) {
+      if (updateUrl && currentDbInfo) {
         deps.setRoute({
           screen: "database",
-          db: currentDb?.id,
+          db: currentDbInfo?.id,
           table: currentTable ?? undefined,
           tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange()
@@ -12550,10 +12567,10 @@ ${frontmatter.yaml}
       return await res.json();
     }
     async function fetchTablePage(table2, offset, limit, sort, filters) {
-      if (!currentDb)
+      if (!currentDbInfo)
         throw new Error("no database selected");
       const params = new URLSearchParams({
-        db: currentDb.id,
+        db: currentDbInfo.id,
         table: table2,
         offset: String(offset),
         limit: String(limit)
@@ -12571,7 +12588,7 @@ ${frontmatter.yaml}
       return await res.json();
     }
     async function executeQuery(sql) {
-      if (!currentDb)
+      if (!currentDbInfo)
         throw new Error("no database selected");
       const res = await fetch("/_db/query", {
         method: "POST",
@@ -12580,7 +12597,7 @@ ${frontmatter.yaml}
           "X-Code-Viewer-Action": "1"
         },
         body: JSON.stringify({
-          db: currentDb.id,
+          db: currentDbInfo.id,
           sql,
           saveHistory: true,
           source: "browser",
@@ -12588,15 +12605,15 @@ ${frontmatter.yaml}
         })
       });
       const result = await res.json();
-      if (historyOpen)
+      if (userPrefersHistoryOpen)
         historyView.refresh();
       return result;
     }
     async function selectDb(dbId, explorerInitial, generation = loadGeneration) {
-      if (generation !== loadGeneration || currentDb?.id !== dbId)
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;
       currentTable = null;
-      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+      if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
         currentTab = "data";
         tableList.render([]);
         grid.clear();
@@ -12604,7 +12621,7 @@ ${frontmatter.yaml}
         erDiagram.clear();
         schemaCache = null;
         applyKindVisibility();
-        if (currentDb.kind === "redis") {
+        if (currentDbInfo.kind === "redis") {
           esExplorer.el.hidden = true;
           esExplorer.clear();
           redisExplorer.el.hidden = false;
@@ -12615,7 +12632,7 @@ ${frontmatter.yaml}
           esExplorer.el.hidden = false;
           await esExplorer.load(dbId, explorerInitial?.es);
         }
-        if (generation !== loadGeneration || currentDb?.id !== dbId)
+        if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
           return;
         cb.onStateChange();
         return;
@@ -12626,7 +12643,7 @@ ${frontmatter.yaml}
       esExplorer.clear();
       applyKindVisibility();
       const schema = await fetchSchema(dbId);
-      if (generation !== loadGeneration || currentDb?.id !== dbId)
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;
       if (!schema)
         return;
@@ -12647,34 +12664,34 @@ ${frontmatter.yaml}
         return;
       currentTable = table2;
       tableList.setActive(table2);
-      if (!currentDb)
+      if (!currentDbInfo)
         return;
-      const requestDbId = currentDb.id;
+      const requestDbId = currentDbInfo.id;
       if (currentTab === "query" || currentTab === "er" || currentTab === "search" || currentTab === "snapshot") {
         setActiveTab("data", false);
       }
       deps.setRoute({
         screen: "database",
-        db: currentDb.id,
+        db: currentDbInfo.id,
         table: table2,
         tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange()
       }, true);
       try {
         const data = await deps.trackLoad(fetchTablePage(table2, 0, 200, null, []));
-        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
           return;
         }
         grid.load(table2, data);
       } catch {
-        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
           return;
         }
         grid.load(table2);
       }
       if (currentTab === "schema") {
         const columns = await fetchColumns(table2);
-        if (generation !== loadGeneration || currentDb?.id !== requestDbId || currentTable !== table2) {
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
           return;
         }
         schemaView.render(table2, columns, schemaCache?.indexes || []);
@@ -12684,9 +12701,9 @@ ${frontmatter.yaml}
       if (schemaCache?.columnsMap?.[table2]) {
         return schemaCache.columnsMap[table2];
       }
-      if (!currentDb)
+      if (!currentDbInfo)
         return [];
-      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table2)}`);
       if (!res.ok)
         return [];
       const data = await res.json();
@@ -12694,17 +12711,17 @@ ${frontmatter.yaml}
     }
     async function showSchema(table2) {
       setActiveTab("schema");
-      if (!currentDb)
+      if (!currentDbInfo)
         return;
       const columns = await fetchColumns(table2);
       schemaView.render(table2, columns, schemaCache?.indexes || []);
     }
     async function showDdl(table2) {
-      if (!currentDb)
+      if (!currentDbInfo)
         return;
       setActiveTab("schema");
       try {
-        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table2)}`);
         if (!res.ok)
           return;
         const data = await res.json();
@@ -12717,7 +12734,7 @@ ${frontmatter.yaml}
       } catch {}
     }
     async function renderErDiagram() {
-      if (!schemaCache || !currentDb)
+      if (!schemaCache || !currentDbInfo)
         return;
       const columnsMap = new Map;
       if (schemaCache.columnsMap) {
@@ -12744,7 +12761,7 @@ ${frontmatter.yaml}
       const generation = ++loadGeneration;
       const file = lastFiles.find((f2) => f2.id === dbId);
       const option = dbSelect.selectedOptions[0];
-      currentDb = {
+      currentDbInfo = {
         id: dbId,
         path: file?.path || dbId,
         name: option?.textContent || dbId,
@@ -12753,7 +12770,7 @@ ${frontmatter.yaml}
       };
       clearDockerNotice();
       await selectDb(dbId, undefined, generation);
-      if (generation !== loadGeneration || currentDb?.id !== dbId)
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;
       deps.setRoute({
         screen: "database",
@@ -12803,7 +12820,7 @@ ${frontmatter.yaml}
       const autoSelectFirst = options.autoSelectFirst ?? true;
       if (!db && !autoSelectFirst) {
         dbSelect.value = "";
-        currentDb = null;
+        currentDbInfo = null;
         currentTable = null;
         schemaCache = null;
         tableList.render([]);
@@ -12818,7 +12835,7 @@ ${frontmatter.yaml}
       }
       const target = db || files[0].id;
       dbSelect.value = target;
-      currentDb = files.find((f2) => f2.id === target) || null;
+      currentDbInfo = files.find((f2) => f2.id === target) || null;
       const explorerInitial = {
         redis: pendingRedisInitial,
         es: pendingEsInitial
@@ -12826,9 +12843,9 @@ ${frontmatter.yaml}
       pendingRedisInitial = undefined;
       pendingEsInitial = undefined;
       await selectDb(target, explorerInitial, generation);
-      if (generation !== loadGeneration || currentDb?.id !== target)
+      if (generation !== loadGeneration || currentDbInfo?.id !== target)
         return;
-      if (currentDb?.kind === "redis" || currentDb?.kind === "elasticsearch") {
+      if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
         cb.onStateChange();
         return;
       }
@@ -12837,7 +12854,7 @@ ${frontmatter.yaml}
       }
       if (generation !== loadGeneration)
         return;
-      const normalizedView = normalizeViewForDb(view, currentDb);
+      const normalizedView = normalizeViewForDb(view, currentDbInfo);
       if (normalizedView !== "data") {
         setActiveTab(normalizedView);
         if (normalizedView === "schema") {
@@ -12855,7 +12872,7 @@ ${frontmatter.yaml}
       cb.onStateChange();
     }
     function applyAnnotationTarget(target) {
-      if (!target || target.db !== currentDb?.id)
+      if (!target || target.db !== currentDbInfo?.id)
         return;
       if (target.data) {
         if (target.table && target.table !== currentTable)
@@ -12882,7 +12899,7 @@ ${frontmatter.yaml}
       }
     }
     function handleSse(event, data) {
-      if (historyOpen)
+      if (userPrefersHistoryOpen)
         historyView.refresh();
       if (event === "db-snapshot" && data) {
         snapshotView.handleSse(data);
@@ -12892,25 +12909,25 @@ ${frontmatter.yaml}
       const activeTable = tableList.el.querySelector(".db-table-item.active");
       const state = {
         id: cb.tabId,
-        dbId: currentDb?.id ?? null,
+        dbId: currentDbInfo?.id ?? null,
         table: currentTable ?? activeTable?.dataset.table ?? null,
         view: currentTab
       };
       const sqlDraft = queryEditor.getSql();
       if (sqlDraft)
         state.sqlDraft = sqlDraft;
-      if (!historyOpen)
+      if (!userPrefersHistoryOpen)
         state.historyOpen = false;
       if (historyPane.style.height)
         state.historyHeight = historyPane.style.height;
       if (sidebar.style.width)
         state.sidebarWidth = sidebar.style.width;
-      if (currentDb?.kind === "redis") {
+      if (currentDbInfo?.kind === "redis") {
         const sel = redisExplorer.getSelection();
         if (sel.dbIndex !== undefined || sel.key !== undefined || sel.keyFilter !== undefined) {
           state.redis = sel;
         }
-      } else if (currentDb?.kind === "elasticsearch") {
+      } else if (currentDbInfo?.kind === "elasticsearch") {
         const sel = esExplorer.getSelection();
         if (sel.index !== undefined || sel.query !== undefined) {
           state.es = sel;
@@ -12919,14 +12936,14 @@ ${frontmatter.yaml}
       return state;
     }
     function getDbKind() {
-      return currentDb?.kind ?? null;
+      return currentDbInfo?.kind ?? null;
     }
     function getAnnotationTarget() {
-      if (!currentDb)
+      if (!currentDbInfo)
         return null;
       const target = {
         kind: "database",
-        db: currentDb.id,
+        db: currentDbInfo.id,
         ...currentTable ? { table: currentTable } : {},
         tab: currentTab
       };
@@ -12941,14 +12958,14 @@ ${frontmatter.yaml}
       return target;
     }
     function getLabel() {
-      if (!currentDb)
+      if (!currentDbInfo)
         return "(empty)";
-      if (currentDb.id.startsWith("docker:")) {
-        const m = currentDb.name.match(/^(\S+)/);
-        return m ? m[1] : currentDb.name;
+      if (currentDbInfo.id.startsWith("docker:")) {
+        const m = currentDbInfo.name.match(/^(\S+)/);
+        return m ? m[1] : currentDbInfo.name;
       }
-      const lastSlash = currentDb.path.lastIndexOf("/");
-      return lastSlash >= 0 ? currentDb.path.slice(lastSlash + 1) : currentDb.path;
+      const lastSlash = currentDbInfo.path.lastIndexOf("/");
+      return lastSlash >= 0 ? currentDbInfo.path.slice(lastSlash + 1) : currentDbInfo.path;
     }
     function dispose() {
       loadGeneration++;
@@ -12962,7 +12979,7 @@ ${frontmatter.yaml}
       historyView.clear();
       redisExplorer.dispose();
       esExplorer.dispose();
-      currentDb = null;
+      currentDbInfo = null;
       currentTable = null;
       schemaCache = null;
     }
@@ -13001,16 +13018,9 @@ ${frontmatter.yaml}
     btn.addEventListener("click", opts.onClick);
     return btn;
   }
-  function makeTabId() {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-      return `t-${crypto.randomUUID().slice(0, 12)}`;
-    }
-    return `t-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-  }
   function createDatabaseView(deps) {
     let mounted = false;
     const tabsById = new Map;
-    const tabOrder = [];
     const paneReadyById = new Map;
     let activeTabId = null;
     let draggingTabId = null;
@@ -13034,10 +13044,8 @@ ${frontmatter.yaml}
       if (!mounted || restoring)
         return;
       const tabs = [];
-      for (const id of tabOrder) {
-        const entry = tabsById.get(id);
-        if (entry)
-          tabs.push(entry.pane.getState());
+      for (const [, entry] of tabsById) {
+        tabs.push(entry.pane.getState());
       }
       if (tabs.length === 0)
         return;
@@ -13206,6 +13214,17 @@ ${frontmatter.yaml}
       entry.chip.classList.add("drop-target");
       entry.chip.classList.toggle("drop-after", after);
     }
+    function reorderTabs(ids) {
+      const next = new Map;
+      for (const id of ids) {
+        const entry = tabsById.get(id);
+        if (entry)
+          next.set(id, entry);
+      }
+      tabsById.clear();
+      for (const [id, entry] of next)
+        tabsById.set(id, entry);
+    }
     function moveTabBeforeOrAfter(dragId, targetId, after) {
       if (dragId === targetId)
         return;
@@ -13213,17 +13232,20 @@ ${frontmatter.yaml}
       const targetEntry = tabsById.get(targetId);
       if (!dragEntry || !targetEntry)
         return;
-      const dragIndex = tabOrder.indexOf(dragId);
+      const orderedIds = Array.from(tabsById.keys());
+      const dragIndex = orderedIds.indexOf(dragId);
       if (dragIndex < 0)
         return;
-      tabOrder.splice(dragIndex, 1);
-      const targetIndex = tabOrder.indexOf(targetId);
+      orderedIds.splice(dragIndex, 1);
+      const targetIndex = orderedIds.indexOf(targetId);
       if (targetIndex < 0) {
-        tabOrder.splice(dragIndex, 0, dragId);
+        orderedIds.splice(dragIndex, 0, dragId);
+        reorderTabs(orderedIds);
         return;
       }
       const insertIndex = targetIndex + (after ? 1 : 0);
-      tabOrder.splice(insertIndex, 0, dragId);
+      orderedIds.splice(insertIndex, 0, dragId);
+      reorderTabs(orderedIds);
       tabsList.insertBefore(dragEntry.chip, after ? targetEntry.chip.nextSibling : targetEntry.chip);
       scheduleSave();
     }
@@ -13231,11 +13253,13 @@ ${frontmatter.yaml}
       const dragEntry = tabsById.get(dragId);
       if (!dragEntry)
         return;
-      const dragIndex = tabOrder.indexOf(dragId);
-      if (dragIndex < 0 || dragIndex === tabOrder.length - 1)
+      const orderedIds = Array.from(tabsById.keys());
+      const dragIndex = orderedIds.indexOf(dragId);
+      if (dragIndex < 0 || dragIndex === orderedIds.length - 1)
         return;
-      tabOrder.splice(dragIndex, 1);
-      tabOrder.push(dragId);
+      orderedIds.splice(dragIndex, 1);
+      orderedIds.push(dragId);
+      reorderTabs(orderedIds);
       tabsList.appendChild(dragEntry.chip);
       scheduleSave();
     }
@@ -13306,7 +13330,7 @@ ${frontmatter.yaml}
       clearDragState();
     });
     function openTab(initial, options = {}) {
-      const id = initial?.id || makeTabId();
+      const id = initial?.id || makeId("t");
       const chip = document.createElement("div");
       chip.className = "db-tabs-chip";
       chip.dataset.tabId = id;
@@ -13365,7 +13389,6 @@ ${frontmatter.yaml}
       tabsList.appendChild(chip);
       tabHost.appendChild(pane.el);
       tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
-      tabOrder.push(id);
       setActive(id);
       const ready = (async () => {
         if (options.annotationTarget)
@@ -13392,9 +13415,6 @@ ${frontmatter.yaml}
       entry.pane.el.remove();
       entry.chip.remove();
       tabsById.delete(id);
-      const orderIndex = tabOrder.indexOf(id);
-      if (orderIndex >= 0)
-        tabOrder.splice(orderIndex, 1);
       paneReadyById.delete(id);
       closeDbIfUnused(closedDbId, closedKind);
       if (activeTabId !== id) {
@@ -13405,7 +13425,7 @@ ${frontmatter.yaml}
         openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
         return;
       }
-      const firstId = tabOrder[0];
+      const firstId = tabsById.keys().next().value;
       if (firstId)
         setActive(firstId);
     }
@@ -13515,7 +13535,7 @@ ${frontmatter.yaml}
                 return;
               restoredIds.push(openTab(t2, { autoSelectFirst: false }));
             }
-            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabOrder[0];
+            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
             if (targetId)
               setActive(targetId);
             await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
@@ -13580,7 +13600,6 @@ ${frontmatter.yaml}
         entry.pane.dispose();
       }
       tabsById.clear();
-      tabOrder.length = 0;
       tabsList.innerHTML = "";
       tabHost.innerHTML = "";
       activeTabId = null;

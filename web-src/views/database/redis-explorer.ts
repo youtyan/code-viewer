@@ -51,7 +51,7 @@ export function createRedisExplorer(
   dbListPane.className = "redis-db-list-pane";
 
   const dbListHeader = document.createElement("div");
-  dbListHeader.className = "redis-pane-header";
+  dbListHeader.className = "db-explorer-pane-header";
   dbListHeader.textContent = "Databases";
   dbListPane.appendChild(dbListHeader);
 
@@ -63,7 +63,7 @@ export function createRedisExplorer(
   keyListPane.className = "redis-key-list-pane";
 
   const keyListHeader = document.createElement("div");
-  keyListHeader.className = "redis-pane-header";
+  keyListHeader.className = "db-explorer-pane-header";
   keyListHeader.textContent = "Keys";
   keyListPane.appendChild(keyListHeader);
 
@@ -123,7 +123,7 @@ export function createRedisExplorer(
   function setDbStatus(message: string, isError = false) {
     dbList.innerHTML = "";
     const note = document.createElement("div");
-    note.className = isError ? "redis-error" : "redis-note";
+    note.className = isError ? "db-pane-error" : "db-pane-note";
     note.textContent = message;
     dbList.appendChild(note);
   }
@@ -131,7 +131,7 @@ export function createRedisExplorer(
   function setKeyStatus(message: string, isError = false) {
     keyList.innerHTML = "";
     const note = document.createElement("div");
-    note.className = isError ? "redis-error" : "redis-note";
+    note.className = isError ? "db-pane-error" : "db-pane-note";
     note.textContent = message;
     keyList.appendChild(note);
     keyMoreBtn.hidden = true;
@@ -344,7 +344,7 @@ export function createRedisExplorer(
     highlightActiveKey(name);
     mainPane.innerHTML = "";
     const loading = document.createElement("div");
-    loading.className = "redis-note";
+    loading.className = "db-pane-note";
     loading.textContent = "Loading value...";
     mainPane.appendChild(loading);
     try {
@@ -361,7 +361,7 @@ export function createRedisExplorer(
         const text = await res.text();
         mainPane.innerHTML = "";
         const err = document.createElement("div");
-        err.className = "redis-error";
+        err.className = "db-pane-error";
         err.textContent = `Error: ${text || res.statusText}`;
         mainPane.appendChild(err);
         return;
@@ -382,7 +382,7 @@ export function createRedisExplorer(
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
       mainPane.innerHTML = "";
       const errEl = document.createElement("div");
-      errEl.className = "redis-error";
+      errEl.className = "db-pane-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       mainPane.appendChild(errEl);
     } finally {
