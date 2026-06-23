@@ -4429,6 +4429,44 @@ function detectDbKind(image) {
     return "elasticsearch";
   return null;
 }
+function detectDbKindFromEnv(env) {
+  if (env.MYSQL_DATABASE || env.MYSQL_ROOT_PASSWORD || env.MYSQL_USER || env.MARIADB_DATABASE || env.MARIADB_USER || env.MYSQL_ALLOW_EMPTY_PASSWORD) {
+    return "mysql";
+  }
+  if (env.POSTGRES_DB || env.POSTGRES_USER || env.POSTGRES_PASSWORD) {
+    return "postgresql";
+  }
+  return null;
+}
+function detectDbKindFromContainerPort(port) {
+  switch (port) {
+    case "3306":
+      return "mysql";
+    case "5432":
+      return "postgresql";
+    case "6379":
+      return "redis";
+    case "9200":
+      return "elasticsearch";
+    default:
+      return null;
+  }
+}
+function detectDbKindFromServiceName(name) {
+  const lower = name.toLowerCase();
+  if (lower === "mysql" || lower === "mariadb" || lower === "db") {
+    return "mysql";
+  }
+  if (lower === "postgres" || lower === "postgresql" || lower === "pg") {
+    return "postgresql";
+  }
+  if (lower === "redis")
+    return "redis";
+  if (lower === "elasticsearch" || lower === "opensearch" || lower === "es") {
+    return "elasticsearch";
+  }
+  return null;
+}
 function defaultPortFor(kind) {
   switch (kind) {
     case "postgresql":
@@ -4487,6 +4525,22 @@ function parseComposePorts(serviceBlock) {
   }
   return null;
 }
+function parseComposeContainerPort(serviceBlock) {
+  const portsMatch = serviceBlock.match(/^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m);
+  if (!portsMatch)
+    return null;
+  for (const line of portsMatch[1].split(`
+`)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("-"))
+      continue;
+    const value = trimmed.slice(1).trim().replace(/^["']|["']$/g, "").split(/\s+#/)[0].split("/")[0];
+    const m = value.split(":").pop()?.trim().match(/^(\d+)$/);
+    if (m)
+      return m[1];
+  }
+  return null;
+}
 function parseComposeFile(filepath, composeDir, cwd, results) {
   let content;
   try {
@@ -4517,24 +4571,24 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
     const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
     const svcBlock = servicesBlock.slice(svc.start, nextStart);
     const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
-    if (!imageMatch)
-      continue;
-    const image = imageMatch[1];
-    const kind = detectDbKind(image);
+    const image = imageMatch ? imageMatch[1] : null;
+    const env = parseComposeEnv(svcBlock);
+    const containerPort = parseComposeContainerPort(svcBlock);
+    const kind = (image ? detectDbKind(image) : null) ?? detectDbKindFromEnv(env) ?? detectDbKindFromContainerPort(containerPort) ?? detectDbKindFromServiceName(svc.name);
     if (!kind)
       continue;
-    const env = parseComposeEnv(svcBlock);
     const port = parseComposePorts(svcBlock);
     const hostPort = port || defaultPortFor(kind);
+    const imageLabel = image ?? `build:${kind}`;
     const id = isRoot ? `docker:${svc.name}` : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
     const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
     let label;
     if (kind === "redis" || kind === "elasticsearch") {
-      label = `${svc.name} (${image}, localhost:${hostPort}${labelPath})`;
+      label = `${svc.name} (${imageLabel}, localhost:${hostPort}${labelPath})`;
     } else {
       const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
       const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
-      label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
+      label = `${svc.name} (${imageLabel}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
     }
     results.push({
       id,
