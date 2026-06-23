@@ -210,7 +210,10 @@ export type DockerDbInfo = DbFileInfo & {
   env: Record<string, string>;
   database?: string;
   composeDir: string;
+  relDirSlash: string;
 };
+
+export type DockerDiscoveryResult = DockerDbInfo[] & { truncated?: boolean };
 
 // 1 ファイルから service 群を parse して結果配列に積む。
 // dbId は cwd 直下なら従来の `docker:<svc>`、サブディレクトリなら
@@ -254,6 +257,7 @@ function parseComposeFile(
   const filename = basename(filepath);
 
   for (let i = 0; i < servicePositions.length; i++) {
+    if (results.length >= MAX_DOCKER_SERVICES) return;
     const svc = servicePositions[i];
     const nextStart =
       i + 1 < servicePositions.length
@@ -303,6 +307,7 @@ function parseComposeFile(
       serviceName: svc.name,
       env,
       composeDir,
+      relDirSlash,
     });
   }
 }
@@ -315,8 +320,8 @@ const MAX_DOCKER_SERVICES = 30;
 export function discoverDockerDatabases(
   cwd: string,
   omitDirNames: string[] = [],
-): DockerDbInfo[] {
-  const results: DockerDbInfo[] = [];
+): DockerDiscoveryResult {
+  const results: DockerDiscoveryResult = [] as DockerDiscoveryResult;
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
   omitSet.add("node_modules");
@@ -357,6 +362,7 @@ export function discoverDockerDatabases(
 
   scan(cwd, 0);
   if (results.length >= MAX_DOCKER_SERVICES) {
+    results.truncated = true;
     console.warn(
       `[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`,
     );
@@ -389,12 +395,14 @@ export function parseDockerDbId(
       rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx)}`;
     }
     const [serviceName, encodedRel] = rest.split("@");
-    if (!/^[A-Za-z0-9_-]+$/.test(serviceName)) return null;
-    if (database && hasControlCharacter(database)) return null;
+    if (!isSafeDockerServiceName(serviceName)) return null;
+    if (!isSafeDockerDatabaseName(database)) return null;
     try {
+      const relDir = decodeURIComponent(encodedRel || "");
+      if (!isSafeDockerRelDir(relDir)) return null;
       return {
         serviceName,
-        relDir: decodeURIComponent(encodedRel || ""),
+        relDir,
         database,
       };
     } catch {
@@ -407,9 +415,44 @@ export function parseDockerDbId(
     database = rest.slice(colonIdx + 1);
     rest = rest.slice(0, colonIdx);
   }
-  if (!/^[A-Za-z0-9_-]+$/.test(rest)) return null;
-  if (database && hasControlCharacter(database)) return null;
+  if (!isSafeDockerServiceName(rest)) return null;
+  if (!isSafeDockerDatabaseName(database)) return null;
   return { serviceName: rest, relDir: "", database };
+}
+
+export function findDockerServiceByDbId(
+  cwd: string,
+  dbId: string,
+  kind?: DbKind,
+): DockerDbInfo | null {
+  const parsed = parseDockerDbId(dbId);
+  if (!parsed) return null;
+  return (
+    discoverDockerDatabases(cwd).find(
+      (d) =>
+        d.serviceName === parsed.serviceName &&
+        d.relDirSlash === parsed.relDir &&
+        (!kind || d.kind === kind),
+    ) || null
+  );
+}
+
+function isSafeDockerServiceName(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isSafeDockerRelDir(value: string): boolean {
+  if (value === "") return true;
+  if (!/^[A-Za-z0-9_./-]+$/.test(value)) return false;
+  const parts = value.split("/");
+  return parts.every((p) => p !== "" && p !== "." && p !== "..");
+}
+
+function isSafeDockerDatabaseName(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (value === "") return false;
+  if (hasControlCharacter(value)) return false;
+  return /^[A-Za-z0-9_$.-]+$/.test(value);
 }
 
 function hasControlCharacter(value: string): boolean {

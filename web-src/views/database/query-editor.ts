@@ -71,7 +71,7 @@ export type QueryEditorCallbacks = {
 export type QueryEditor = {
   el: HTMLElement;
   focus: () => void;
-  setSql: (sql: string) => void;
+  setSql: (sql: string, options?: { silent?: boolean }) => void;
   getSql: () => string;
   run: () => Promise<void>;
   explain: () => Promise<void>;
@@ -399,10 +399,10 @@ export function createQueryEditor(
     textarea.focus();
   }
 
-  function setSql(sql: string) {
+  function setSql(sql: string, options: { silent?: boolean } = {}) {
     textarea.value = sql;
     syncHighlight();
-    callbacks.onSqlChange?.(textarea.value);
+    if (!options.silent) callbacks.onSqlChange?.(textarea.value);
   }
 
   function getSql(): string {

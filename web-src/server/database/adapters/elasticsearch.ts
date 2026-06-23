@@ -4,15 +4,10 @@ import type {
   EsMapping,
   EsMappingProperty,
   EsQueryRequest,
+  EsQueryResult,
   EsSearchResult,
 } from "../../../core/database/types";
 import type { SnapshotItem } from "../sources/types";
-
-export type EsQueryResult = {
-  status: number;
-  body: unknown;
-  elapsedMs: number;
-};
 
 type EsConfig = {
   containerName: string;
@@ -61,15 +56,13 @@ const ES_QUERY_ALLOWED_SUBPATHS = new Set([
   "_eql",
 ]);
 
-function isReadOnlyEsPath(rawPath: string): boolean {
+export function isReadOnlyEsPath(rawPath: string): boolean {
   // path に query string が付くケースもあるので `?` で切る。
-  const path = rawPath.split("?")[0];
-  // path に含まれる各 segment のいずれかが allowlist にあれば OK。
-  // 例: `/my-index/_search`, `/_search?pretty`, `/_count`。
-  for (const seg of path.split("/")) {
-    if (ES_QUERY_ALLOWED_SUBPATHS.has(seg)) return true;
-  }
-  return false;
+  const path = rawPath.split("?")[0].replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0 || segments.length > 2) return false;
+  const apiSegment = segments[segments.length - 1];
+  return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
 }
 
 const ES_DEFAULT_SIZE = 200;

@@ -5,6 +5,7 @@ import type {
   EsIndicesResponse,
   EsMappingResponse,
 } from "../../core/database/types";
+import { formatBytes } from "../../core/source-meta";
 
 export type ElasticsearchExplorerSelection = {
   index?: string;
@@ -24,16 +25,9 @@ export type ElasticsearchExplorerView = {
     initial?: ElasticsearchExplorerSelection,
   ) => Promise<void>;
   clear: () => void;
+  dispose: () => void;
   getSelection: () => ElasticsearchExplorerSelection;
 };
-
-function formatBytes(n: number): string {
-  if (n >= 1024 * 1024 * 1024)
-    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n} B`;
-}
 
 export function createElasticsearchExplorer(
   callbacks: ElasticsearchExplorerCallbacks = {},
@@ -126,6 +120,11 @@ export function createElasticsearchExplorer(
   let docRunId = 0;
   let suppressNotify = false;
   let queryNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
+  let indexAbort: AbortController | null = null;
+  let mappingAbort: AbortController | null = null;
+  let docsAbort: AbortController | null = null;
+  let docAbort: AbortController | null = null;
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -302,7 +301,10 @@ export function createElasticsearchExplorer(
   }
 
   async function fetchMapping(index: string): Promise<void> {
-    if (!currentDbId) return;
+    if (disposed || !currentDbId) return;
+    mappingAbort?.abort();
+    const abort = new AbortController();
+    mappingAbort = abort;
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     mappingBody.innerHTML = "";
@@ -312,7 +314,10 @@ export function createElasticsearchExplorer(
     mappingBody.appendChild(loading);
     try {
       const params = new URLSearchParams({ db: requestDbId, index });
-      const res = await fetch(`/_db/elasticsearch/mapping?${params}`);
+      const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
+        signal: abort.signal,
+      });
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         mappingBody.innerHTML = "";
@@ -324,6 +329,7 @@ export function createElasticsearchExplorer(
       }
       const data = (await res.json()) as EsMappingResponse;
       if (
+        disposed ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         currentIndex !== index
@@ -332,18 +338,23 @@ export function createElasticsearchExplorer(
       }
       renderMapping(data);
     } catch (err) {
+      if (abort.signal.aborted) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       mappingBody.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "es-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       mappingBody.appendChild(errEl);
+    } finally {
+      if (mappingAbort === abort) mappingAbort = null;
     }
   }
 
   async function loadDocs(append: boolean): Promise<void> {
-    if (!currentDbId || !currentIndex) return;
-    if (loadingDocs) return;
+    if (disposed || !currentDbId || !currentIndex) return;
+    docsAbort?.abort();
+    const abort = new AbortController();
+    docsAbort = abort;
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestIndex = currentIndex;
@@ -363,7 +374,10 @@ export function createElasticsearchExplorer(
       if (requestQuery) params.set("q", requestQuery);
       if (append && lastSort)
         params.set("searchAfter", JSON.stringify(lastSort));
-      const res = await fetch(`/_db/elasticsearch/docs?${params}`);
+      const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
+        signal: abort.signal,
+      });
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         setDocStatus(`Error: ${text || res.statusText}`, true);
@@ -371,6 +385,7 @@ export function createElasticsearchExplorer(
       }
       const data = (await res.json()) as EsDocsResponse;
       if (
+        disposed ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         requestIndex !== currentIndex ||
@@ -389,18 +404,23 @@ export function createElasticsearchExplorer(
       // 続きがないか、size を満たさない返却なら more 不要。
       docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
     } catch (err) {
+      if (abort.signal.aborted) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setDocStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      loadingDocs = false;
-      docMoreBtn.disabled = false;
+      if (docsAbort === abort) docsAbort = null;
+      if (!docsAbort) {
+        loadingDocs = false;
+        docMoreBtn.disabled = false;
+      }
     }
   }
 
   async function selectIndex(name: string): Promise<void> {
+    if (disposed) return;
     currentIndex = name;
     notifySelectionChange();
     highlightActiveIndex(name);
@@ -411,7 +431,10 @@ export function createElasticsearchExplorer(
   }
 
   async function selectDoc(id: string): Promise<void> {
-    if (!currentDbId || !currentIndex) return;
+    if (disposed || !currentDbId || !currentIndex) return;
+    docAbort?.abort();
+    const abort = new AbortController();
+    docAbort = abort;
     const requestRunId = ++docRunId;
     const requestDbId = currentDbId;
     const requestIndex = currentIndex;
@@ -428,7 +451,10 @@ export function createElasticsearchExplorer(
         index: requestIndex,
         id,
       });
-      const res = await fetch(`/_db/elasticsearch/doc?${params}`);
+      const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
+        signal: abort.signal,
+      });
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         docBody.innerHTML = "";
@@ -440,6 +466,7 @@ export function createElasticsearchExplorer(
       }
       const data = (await res.json()) as EsDocResponse;
       if (
+        disposed ||
         requestRunId !== docRunId ||
         requestDbId !== currentDbId ||
         requestIndex !== currentIndex ||
@@ -449,12 +476,15 @@ export function createElasticsearchExplorer(
       }
       renderDoc(data);
     } catch (err) {
+      if (abort.signal.aborted) return;
       if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
       docBody.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "es-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       docBody.appendChild(errEl);
+    } finally {
+      if (docAbort === abort) docAbort = null;
     }
   }
 
@@ -487,11 +517,18 @@ export function createElasticsearchExplorer(
     dbId: string,
     initial?: ElasticsearchExplorerSelection,
   ): Promise<void> {
+    if (disposed) return;
     if (queryNotifyTimer) {
       clearTimeout(queryNotifyTimer);
       queryNotifyTimer = null;
     }
     if (currentDbId === dbId && !initial) return;
+    indexAbort?.abort();
+    mappingAbort?.abort();
+    docsAbort?.abort();
+    docAbort?.abort();
+    const abort = new AbortController();
+    indexAbort = abort;
     const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentIndex = null;
@@ -512,14 +549,17 @@ export function createElasticsearchExplorer(
     try {
       const res = await fetch(
         `/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`,
+        { signal: abort.signal },
       );
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         setIndexStatus(`Error: ${text || res.statusText}`, true);
         return;
       }
       const data = (await res.json()) as EsIndicesResponse;
-      if (requestRunId !== loadRunId || currentDbId !== dbId) return;
+      if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+        return;
       renderIndices(data.indices);
 
       // initial.index が指定されていて実在するなら、その index を自動選択する
@@ -537,14 +577,25 @@ export function createElasticsearchExplorer(
         notifySelectionChange();
       }
     } catch (err) {
+      if (abort.signal.aborted) return;
       setIndexStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
+    } finally {
+      if (indexAbort === abort) indexAbort = null;
     }
   }
 
   function clear(): void {
+    indexAbort?.abort();
+    mappingAbort?.abort();
+    docsAbort?.abort();
+    docAbort?.abort();
+    indexAbort = null;
+    mappingAbort = null;
+    docsAbort = null;
+    docAbort = null;
     loadRunId++;
     docRunId++;
     suppressNotify = false;
@@ -578,5 +629,10 @@ export function createElasticsearchExplorer(
     };
   }
 
-  return { el: container, load, clear, getSelection };
+  function dispose(): void {
+    disposed = true;
+    clear();
+  }
+
+  return { el: container, load, clear, dispose, getSelection };
 }

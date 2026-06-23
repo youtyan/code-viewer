@@ -1,37 +1,13 @@
-import { relative } from "node:path";
 import type {
   RedisDatabasesResponse,
   RedisKeysResponse,
   RedisValueResponse,
 } from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
-import { discoverDockerDatabases, parseDockerDbId } from "./discovery";
+import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
 
 const redisAdapterCache = new Map<string, RedisExplorer>();
-
-type DockerRedisInfo = {
-  serviceName: string;
-  env: Record<string, string>;
-  composeDir: string;
-};
-
-let cachedRedisDbs: DockerRedisInfo[] | null = null;
-let cachedRedisCwd: string | null = null;
-
-function getRedisServices(cwd: string): DockerRedisInfo[] {
-  if (cachedRedisCwd === cwd && cachedRedisDbs) return cachedRedisDbs;
-  const all = discoverDockerDatabases(cwd);
-  cachedRedisDbs = all
-    .filter((d) => d.kind === "redis")
-    .map((d) => ({
-      serviceName: d.serviceName,
-      env: d.env,
-      composeDir: d.composeDir,
-    }));
-  cachedRedisCwd = cwd;
-  return cachedRedisDbs;
-}
 
 function resolveRedis(
   cwd: string,
@@ -43,12 +19,7 @@ function resolveRedis(
   }
   const parsed = parseDockerDbId(dbParam);
   if (!parsed) return textError("invalid docker db id", 400);
-  const services = getRedisServices(cwd);
-  const info = services.find(
-    (s) =>
-      s.serviceName === parsed.serviceName &&
-      relative(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir,
-  );
+  const info = findDockerServiceByDbId(cwd, dbParam, "redis");
   if (!info) return textError("redis service not found", 404);
 
   const cached = redisAdapterCache.get(dbParam);

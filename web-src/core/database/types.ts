@@ -75,6 +75,7 @@ export type DbFileInfo = {
 
 export type DbFilesResponse = {
   files: DbFileInfo[];
+  truncated?: boolean;
 };
 
 export type DbOrderDirection = "asc" | "desc";
@@ -326,11 +327,14 @@ export type EsQueryRequest = {
   body?: unknown;
 };
 
-export type EsQueryResponse = {
-  dbId: string;
+export type EsQueryResult = {
   status: number;
   body: unknown;
   elapsedMs: number;
+};
+
+export type EsQueryResponse = EsQueryResult & {
+  dbId: string;
   error?: string;
 };
 
