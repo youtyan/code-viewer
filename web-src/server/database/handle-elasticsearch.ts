@@ -29,6 +29,7 @@ export function closeElasticsearchAdapter(dbId: string): void {
 function resolveEs(
   cwd: string,
   dbParam: string | null,
+  omitDirNames?: string[],
 ): { dbId: string; explorer: ElasticsearchExplorer } | Response {
   return resolveDockerExplorer<ElasticsearchExplorer>(
     cwd,
@@ -37,11 +38,16 @@ function resolveEs(
     esAdapterCache,
     (info) =>
       openElasticsearchAdapter(info.serviceName, info.env, info.composeDir),
+    omitDirNames,
   );
 }
 
-function handleIndices(cwd: string, url: URL): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleIndices(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   try {
     const indices = r.explorer.listIndices();
@@ -52,8 +58,8 @@ function handleIndices(cwd: string, url: URL): Response {
   }
 }
 
-function handleDocs(cwd: string, url: URL): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleDocs(cwd: string, url: URL, omitDirNames?: string[]): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   if (!index) return textError("missing index parameter", 400);
@@ -89,8 +95,9 @@ async function handleSearch(
   cwd: string,
   req: Request,
   url: URL,
+  omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
 
   // GET の場合は `?q=<lucene>` を受けて `_search?q=...` に流す簡易フォーム。
@@ -146,8 +153,8 @@ async function handleSearch(
   }
 }
 
-function handleDoc(cwd: string, url: URL): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleDoc(cwd: string, url: URL, omitDirNames?: string[]): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   const id = url.searchParams.get("id");
@@ -170,8 +177,12 @@ function handleDoc(cwd: string, url: URL): Response {
   }
 }
 
-function handleMapping(cwd: string, url: URL): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleMapping(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Response {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   if (!index) return textError("missing index parameter", 400);
@@ -189,6 +200,7 @@ export async function handleElasticsearchRoute(
   url: URL,
   cwd: string,
   sideEffectAllowed?: (req: Request) => boolean,
+  omitDirNames?: string[],
 ): Promise<Response | null> {
   const wrap = createQueryStrippedLogger("elasticsearch", req, url);
   return dispatchRoutes(
@@ -197,26 +209,26 @@ export async function handleElasticsearchRoute(
     {
       "/_db/elasticsearch/indices": {
         methods: ["GET"],
-        handler: () => handleIndices(cwd, url),
+        handler: () => handleIndices(cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/mapping": {
         methods: ["GET"],
-        handler: () => handleMapping(cwd, url),
+        handler: () => handleMapping(cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/docs": {
         methods: ["GET"],
-        handler: () => handleDocs(cwd, url),
+        handler: () => handleDocs(cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/doc": {
         methods: ["GET"],
-        handler: () => handleDoc(cwd, url),
+        handler: () => handleDoc(cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/search": {
         methods: ["GET", "POST"],
         // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
         // CSRF ガードをかける。GET は q= だけの read-only なので通す。
         sideEffect: (m) => m === "POST",
-        handler: () => handleSearch(cwd, req, url),
+        handler: () => handleSearch(cwd, req, url, omitDirNames),
       },
     },
     sideEffectAllowed,

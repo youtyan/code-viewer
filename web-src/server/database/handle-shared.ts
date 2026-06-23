@@ -120,6 +120,7 @@ export function resolveDockerExplorer<T extends CloseableDatabaseHandle>(
   kind: DbKind,
   cache: DockerAdapterCache<T>,
   openFn: (info: DockerDbInfo) => T,
+  omitDirNames?: string[],
 ): { dbId: string; explorer: T } | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (!dbParam.startsWith("docker:")) {
@@ -127,7 +128,7 @@ export function resolveDockerExplorer<T extends CloseableDatabaseHandle>(
   }
   const parsed = parseDockerDbId(dbParam);
   if (!parsed) return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, kind);
+  const info = findDockerServiceByDbId(cwd, dbParam, kind, omitDirNames);
   if (!info) return textError(`${kind} service not found`, 404);
 
   const explorer = cache.getOrOpen(dbParam, () => openFn(info));

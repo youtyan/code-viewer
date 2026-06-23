@@ -13,7 +13,7 @@ import type {
   SnapshotItem,
   SnapshotIterable,
 } from "../sources/types";
-import { resolveRunningComposeContainerName } from "./docker-utils";
+import { resolveRunningComposeContainerNameOrThrow } from "./docker-utils";
 
 type EsConfig = {
   containerName: string;
@@ -502,12 +502,10 @@ export function openElasticsearchAdapter(
   env: Record<string, string>,
   cwd: string,
 ): ElasticsearchExplorer {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(
-      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
-    );
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(
+    serviceName,
+    cwd,
+  );
   const password = env.ELASTIC_PASSWORD || "";
   return createElasticsearchAdapter({ containerName, password });
 }

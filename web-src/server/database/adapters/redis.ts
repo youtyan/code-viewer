@@ -11,7 +11,7 @@ import type {
   SnapshotItem,
   SnapshotIterable,
 } from "../sources/types";
-import { resolveRunningComposeContainerName } from "./docker-utils";
+import { resolveRunningComposeContainerNameOrThrow } from "./docker-utils";
 
 type RedisConfig = {
   containerName: string;
@@ -923,12 +923,10 @@ export function openRedisExplorer(
   env: Record<string, string>,
   cwd: string,
 ): RedisExplorer {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(
-      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
-    );
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(
+    serviceName,
+    cwd,
+  );
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }

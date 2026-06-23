@@ -8719,10 +8719,9 @@ ${frontmatter.yaml}
       header.textContent = `${resp.index} / ${resp.id}`;
       docBody.appendChild(header);
       if (!resp.found) {
-        const note = document.createElement("div");
-        note.className = "db-pane-note";
-        note.textContent = "(doc not found)";
-        docBody.appendChild(note);
+        setPaneStatus(docBody, "(doc not found)", {
+          afterClear: () => docBody.appendChild(header)
+        });
         return;
       }
       if (resp.seqNo !== undefined || resp.primaryTerm !== undefined) {
@@ -8746,11 +8745,7 @@ ${frontmatter.yaml}
       const slot = mappingGuard.start();
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
-      mappingBody.innerHTML = "";
-      const loading = document.createElement("div");
-      loading.className = "db-pane-note";
-      loading.textContent = "Loading mapping...";
-      mappingBody.appendChild(loading);
+      setPaneStatus(mappingBody, "Loading mapping...");
       try {
         const params = new URLSearchParams({ db: requestDbId, index });
         const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
@@ -8858,11 +8853,7 @@ ${frontmatter.yaml}
       const requestIndex = currentIndex;
       highlightActiveDoc(id);
       setDetailTab("doc");
-      docBody.innerHTML = "";
-      const loading = document.createElement("div");
-      loading.className = "db-pane-note";
-      loading.textContent = "Loading doc...";
-      docBody.appendChild(loading);
+      setPaneStatus(docBody, "Loading doc...");
       try {
         const params = new URLSearchParams({
           db: requestDbId,
@@ -10372,11 +10363,7 @@ ${frontmatter.yaml}
       currentKey = name;
       notifySelectionChange();
       highlightActiveKey(name);
-      mainPane.innerHTML = "";
-      const loading = document.createElement("div");
-      loading.className = "db-pane-note";
-      loading.textContent = "Loading value...";
-      mainPane.appendChild(loading);
+      setPaneStatus(mainPane, "Loading value...");
       try {
         const params = new URLSearchParams({
           db: requestDbId,

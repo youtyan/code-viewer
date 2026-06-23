@@ -92,12 +92,16 @@ function sanitizeFilename(name: string): string {
 
 type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
 
-function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
+function resolveDb(
+  cwd: string,
+  dbParam: string | null,
+  omitDirNames?: string[],
+): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, dbParam);
+    const info = findDockerServiceByDbId(cwd, dbParam, undefined, omitDirNames);
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
@@ -183,8 +187,12 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
   return json(body);
 }
 
-async function handleSchema(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleSchema(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
   try {
@@ -301,8 +309,12 @@ function parseFilters(url: URL): { column: string; value: string }[] {
   }
 }
 
-async function handleTable(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleTable(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -450,6 +462,7 @@ async function handleQuery(
   cwd: string,
   req: Request,
   sendSse?: (event: string, data?: string) => void,
+  omitDirNames?: string[],
 ): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
@@ -463,7 +476,7 @@ async function handleQuery(
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
   const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
   const start = Date.now();
@@ -610,8 +623,12 @@ function formatCsvField(value: unknown): string {
   return str;
 }
 
-async function handleExport(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleExport(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -721,8 +738,12 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
   }
 }
 
-async function handleColumns(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleColumns(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -735,8 +756,12 @@ async function handleColumns(cwd: string, url: URL): Promise<Response> {
   }
 }
 
-async function handleDdl(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleDdl(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -766,7 +791,11 @@ type SearchJob = {
 
 const searchJobs = new Map<string, SearchJob>();
 
-async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
+async function handleSearchStart(
+  cwd: string,
+  req: Request,
+  omitDirNames?: string[],
+): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
     term?: string;
@@ -776,7 +805,7 @@ async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.term) return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
 
   const jobId = makeId("search");
@@ -979,6 +1008,7 @@ async function handleSnapshotCreate(
   cwd: string,
   req: Request,
   sendSse?: (event: string, data?: string) => void,
+  omitDirNames?: string[],
 ): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
@@ -995,13 +1025,13 @@ async function handleSnapshotCreate(
   // Redis (KV) も snapshot を生成できるよう、resolveDb の SQL-only 制限を
   // 迂回して直接 source を引き出す。redis service なら RedisExplorer を、
   // それ以外 (sqlite / pg / mysql) は既存 getAdapter を使う。
-  let source: SnapshotSource;
+  let source: SnapshotSource | null = null;
   let containers = requestedTables;
   let closeSourceAfterSnapshot = false;
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
     if (!info) return textError("docker service not found", 404);
     const registeredSource = await openRegisteredDockerSnapshotSource(
       info,
@@ -1011,13 +1041,10 @@ async function handleSnapshotCreate(
       source = registeredSource.source;
       containers = registeredSource.containers;
       closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
-    } else {
-      const r = resolveDb(cwd, body.db);
-      if (r instanceof Response) return r;
-      source = await getAdapter(r, cwd);
     }
-  } else {
-    const r = resolveDb(cwd, body.db);
+  }
+  if (!source) {
+    const r = resolveDb(cwd, body.db, omitDirNames);
     if (r instanceof Response) return r;
     source = await getAdapter(r, cwd);
   }
@@ -1249,14 +1276,18 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
   }
 }
 
-async function handleClose(cwd: string, req: Request): Promise<Response> {
+async function handleClose(
+  cwd: string,
+  req: Request,
+  omitDirNames?: string[],
+): Promise<Response> {
   const body = await parsePostJsonBody<{ db?: string }>(req);
   if (body instanceof Response) return body;
   if (!body.db) return textError("missing db", 400);
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
     if (!info) {
       dockerAdapterCache.close(body.db);
       closeRedisAdapter(body.db);
@@ -1266,7 +1297,7 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
     await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
     return json({ ok: true });
   }
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
   if (r.docker) {
     dockerAdapterCache.close(r.dbId);
@@ -1287,11 +1318,17 @@ export async function handleDatabaseRoute(
   ensureInit();
   if (url.pathname.startsWith("/_db/redis/")) {
     const { handleRedisRoute } = await import("./handle-redis");
-    return handleRedisRoute(req, url, cwd, sideEffectAllowed);
+    return handleRedisRoute(req, url, cwd, sideEffectAllowed, omitDirNames);
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute } = await import("./handle-elasticsearch");
-    return handleElasticsearchRoute(req, url, cwd, sideEffectAllowed);
+    return handleElasticsearchRoute(
+      req,
+      url,
+      cwd,
+      sideEffectAllowed,
+      omitDirNames,
+    );
   }
   const path = url.pathname;
   const start = Date.now();
@@ -1315,33 +1352,33 @@ export async function handleDatabaseRoute(
       },
       "/_db/schema": {
         methods: ["GET"],
-        handler: () => handleSchema(cwd, url),
+        handler: () => handleSchema(cwd, url, omitDirNames),
       },
       "/_db/table": {
         methods: ["GET"],
-        handler: () => handleTable(cwd, url),
+        handler: () => handleTable(cwd, url, omitDirNames),
       },
       "/_db/columns": {
         methods: ["GET"],
-        handler: () => handleColumns(cwd, url),
+        handler: () => handleColumns(cwd, url, omitDirNames),
       },
       "/_db/export": {
         methods: ["GET"],
-        handler: () => handleExport(cwd, url),
+        handler: () => handleExport(cwd, url, omitDirNames),
       },
       "/_db/ddl": {
         methods: ["GET"],
-        handler: () => handleDdl(cwd, url),
+        handler: () => handleDdl(cwd, url, omitDirNames),
       },
       "/_db/query": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleQuery(cwd, req, sendSse),
+        handler: () => handleQuery(cwd, req, sendSse, omitDirNames),
       },
       "/_db/close": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleClose(cwd, req),
+        handler: () => handleClose(cwd, req, omitDirNames),
       },
       "/_db/history": {
         methods: ["GET"],
@@ -1360,7 +1397,7 @@ export async function handleDatabaseRoute(
       "/_db/search/start": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleSearchStart(cwd, req),
+        handler: () => handleSearchStart(cwd, req, omitDirNames),
       },
       "/_db/search/status": {
         methods: ["GET"],
@@ -1378,7 +1415,7 @@ export async function handleDatabaseRoute(
       "/_db/snapshot/create": {
         methods: ["POST"],
         sideEffect: true,
-        handler: () => handleSnapshotCreate(cwd, req, sendSse),
+        handler: () => handleSnapshotCreate(cwd, req, sendSse, omitDirNames),
       },
       "/_db/snapshot/cancel": {
         methods: ["POST"],
