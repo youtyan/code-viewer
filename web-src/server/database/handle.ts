@@ -309,6 +309,18 @@ function parseFilters(url: URL): { column: string; value: string }[] {
   }
 }
 
+function groupFiltersByValue(
+  filters: { column: string; value: string }[],
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const filter of filters) {
+    const existing = grouped.get(filter.value) || [];
+    existing.push(filter.column);
+    grouped.set(filter.value, existing);
+  }
+  return grouped;
+}
+
 async function handleTable(
   cwd: string,
   url: URL,
@@ -340,6 +352,51 @@ async function handleTable(
   const filters = parseFilters(url);
   try {
     const adapter = await getAdapter(r, cwd);
+    if (filters.length > 0 && adapter.getFilteredTablePageWithMeta) {
+      const meta = await adapter.getFilteredTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+        grouped: groupFiltersByValue(filters),
+      });
+      const colNames = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body: DbTableDataResponse = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows,
+      };
+      return json(body);
+    }
+    if (filters.length === 0 && adapter.getTablePageWithMeta) {
+      const meta = await adapter.getTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+      });
+      const colNames = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body: DbTableDataResponse = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows,
+      };
+      return json(body);
+    }
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
@@ -349,12 +406,7 @@ async function handleTable(
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
-        const grouped = new Map<string, string[]>();
-        for (const f of validFilters) {
-          const existing = grouped.get(f.value) || [];
-          existing.push(f.column);
-          grouped.set(f.value, existing);
-        }
+        const grouped = groupFiltersByValue(validFilters);
         const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy

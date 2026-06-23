@@ -3524,11 +3524,10 @@ function resolveRunningComposeContainerNameOrThrow(serviceName, cwd) {
 var init_docker_utils = () => {};
 
 // web-src/server/database/adapters/docker.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-function execInContainer(config, sql, timeoutMs = 1e4) {
-  let args;
+import { spawn as spawn2, spawnSync as spawnSync3 } from "node:child_process";
+function buildExecArgs(config, sql) {
   if (config.kind === "postgresql") {
-    args = [
+    return [
       "docker",
       "exec",
       "-i",
@@ -3551,25 +3550,27 @@ function execInContainer(config, sql, timeoutMs = 1e4) {
       "-c",
       sql
     ];
-  } else {
-    args = [
-      "docker",
-      "exec",
-      "-i",
-      "-e",
-      `MYSQL_PWD=${config.password}`,
-      config.containerName,
-      "mysql",
-      "-u",
-      config.user,
-      config.database,
-      "--batch",
-      "--raw",
-      "--default-character-set=utf8mb4",
-      "-e",
-      sql
-    ];
   }
+  return [
+    "docker",
+    "exec",
+    "-i",
+    "-e",
+    `MYSQL_PWD=${config.password}`,
+    config.containerName,
+    "mysql",
+    "-u",
+    config.user,
+    config.database,
+    "--batch",
+    "--raw",
+    "--default-character-set=utf8mb4",
+    "-e",
+    sql
+  ];
+}
+function execInContainer(config, sql, timeoutMs = 1e4) {
+  const args = buildExecArgs(config, sql);
   const proc = spawnSync3(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
@@ -3580,6 +3581,94 @@ function execInContainer(config, sql, timeoutMs = 1e4) {
     stderr: proc.stderr || "",
     code: proc.status ?? 1
   };
+}
+async function readStreamText(stream) {
+  if (!stream)
+    return "";
+  const reader = stream.getReader();
+  const decoder = new TextDecoder;
+  let text = "";
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      break;
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+async function execWithBunSpawn(spawnFn, args, timeoutMs) {
+  const proc = spawnFn(args, {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGKILL");
+  }, timeoutMs);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      readStreamText(proc.stdout),
+      readStreamText(proc.stderr)
+    ]);
+    return {
+      code: timedOut ? 1 : code,
+      stdout,
+      stderr: timedOut ? `${stderr}${stderr ? `
+` : ""}query timed out` : stderr
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function execWithNodeSpawn(args, timeoutMs) {
+  return new Promise((resolve2) => {
+    const proc = spawn2(args[0], args.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer;
+    const finish = (result) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      resolve2(result);
+    };
+    timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      finish({
+        code: 1,
+        stdout,
+        stderr: `${stderr}${stderr ? `
+` : ""}query timed out`
+      });
+    }, timeoutMs);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    proc.on("error", (err) => {
+      finish({ code: 1, stdout, stderr: err.message });
+    });
+    proc.on("close", (code) => {
+      finish({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+async function execInContainerAsync(config, sql, timeoutMs = 1e4) {
+  const args = buildExecArgs(config, sql);
+  const bunSpawn = globalThis.Bun?.spawn;
+  if (bunSpawn)
+    return execWithBunSpawn(bunSpawn, args, timeoutMs);
+  return execWithNodeSpawn(args, timeoutMs);
 }
 function parseTsvOutput(stdout, hasHeader) {
   const lines = stdout.trim().split(`
@@ -3605,9 +3694,36 @@ function buildOrderClause(orderBy, kind) {
   const parts = orderBy.map((o) => `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`);
   return ` ORDER BY ${parts.join(", ")}`;
 }
+function escapeSqlString(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function buildDockerFilterWhere(grouped, kind) {
+  const whereParts = [];
+  for (const [value, cols] of grouped) {
+    const likeVal = escapeSqlString(`%${value}%`);
+    if (cols.length === 1) {
+      const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier(cols[0], kind)} AS CHAR)` : `CAST(${sanitizeIdentifier(cols[0], kind)} AS TEXT)`;
+      whereParts.push(`${cast} LIKE ${likeVal}`);
+    } else {
+      const orParts = cols.map((c) => {
+        const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier(c, kind)} AS CHAR)` : `CAST(${sanitizeIdentifier(c, kind)} AS TEXT)`;
+        return `${cast} LIKE ${likeVal}`;
+      });
+      whereParts.push(`(${orParts.join(" OR ")})`);
+    }
+  }
+  return whereParts.join(" AND ");
+}
 function createDockerAdapter(config) {
   function exec(sql) {
     const result = execInContainer(config, sql);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "query failed");
+    }
+    return parseTsvOutput(result.stdout, config.kind === "mysql");
+  }
+  async function execAsync(sql) {
+    const result = await execInContainerAsync(config, sql);
     if (result.code !== 0) {
       throw new Error(result.stderr.trim() || "query failed");
     }
@@ -3619,6 +3735,44 @@ function createDockerAdapter(config) {
     return val;
   }
   const columnCache = new Map;
+  function buildColumnsSql(table) {
+    const tableLiteral = table.replace(/'/g, "''");
+    if (config.kind === "postgresql") {
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = 'public' AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = 'public' AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+    }
+    return `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
+  }
+  function columnsFromInfoRows(rows) {
+    if (config.kind === "postgresql") {
+      return rows.map((row) => ({
+        name: row[0],
+        type: row[1],
+        nullable: row[2] === "YES",
+        primaryKey: row[4] === "YES",
+        defaultValue: row[3] === "" ? null : row[3]
+      }));
+    }
+    return rows.map((row) => ({
+      name: row[0],
+      type: row[1],
+      nullable: row[2] === "YES",
+      primaryKey: row[4] === "PRI",
+      defaultValue: row[3] === "NULL" ? null : row[3]
+    }));
+  }
+  async function fetchColumnsAsyncUncached(table) {
+    const result = await execAsync(buildColumnsSql(table));
+    return columnsFromInfoRows(result.rows);
+  }
+  function tablePageMetaFromResults(columns, dataResult, countResult) {
+    const totalRows = countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
+    return {
+      columns,
+      rows: dataResult.rows.map((row) => row.map(toDbValue)),
+      rowCount: dataResult.rows.length,
+      totalRows
+    };
+  }
   function fetchColumnsUncached(table) {
     let sql;
     if (config.kind === "postgresql") {
@@ -3824,6 +3978,32 @@ function createDockerAdapter(config) {
         }
       }
       return result;
+    },
+    async getTablePageWithMeta(table, options) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
+      const [columns, dataResult, countResult] = await Promise.all([
+        fetchColumnsAsyncUncached(table),
+        execAsync(dataSql),
+        execAsync(countSql)
+      ]);
+      return tablePageMetaFromResults(columns, dataResult, countResult);
+    },
+    async getFilteredTablePageWithMeta(table, options) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const where = buildDockerFilterWhere(options.grouped, config.kind);
+      const whereClause = where ? ` WHERE ${where}` : "";
+      const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
+      const [columns, dataResult, countResult] = await Promise.all([
+        fetchColumnsAsyncUncached(table),
+        execAsync(dataSql),
+        execAsync(countSql)
+      ]);
+      return tablePageMetaFromResults(columns, dataResult, countResult);
     },
     getTablePage(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
@@ -4816,7 +4996,7 @@ function sanitizeIdentifier3(name, kind) {
     return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
-function escapeSqlString(value) {
+function escapeSqlString2(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 function isTextLikeType(type) {
@@ -4844,7 +5024,7 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
     if (kind === "sqlite") {
       sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '\\' LIMIT ${remaining}`;
     } else {
-      const likeVal = escapeSqlString(`%${escapedTerm}%`);
+      const likeVal = escapeSqlString2(`%${escapedTerm}%`);
       sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '\\' LIMIT ${remaining}`;
     }
     try {
@@ -7024,7 +7204,7 @@ function sanitizeIdentifier4(name, kind = "sqlite") {
     return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
-function escapeSqlString2(value) {
+function escapeSqlString3(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 function buildFilterWhere(grouped, kind) {
@@ -7032,7 +7212,7 @@ function buildFilterWhere(grouped, kind) {
   const params = [];
   const useParams = kind === "sqlite";
   for (const [value, cols] of grouped) {
-    const likeVal = useParams ? "?" : escapeSqlString2(`%${value}%`);
+    const likeVal = useParams ? "?" : escapeSqlString3(`%${value}%`);
     if (cols.length === 1) {
       const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier4(cols[0], kind)} AS CHAR)` : `CAST(${sanitizeIdentifier4(cols[0], kind)} AS TEXT)`;
       whereParts.push(`${cast} LIKE ${likeVal}`);
@@ -7065,6 +7245,15 @@ function parseFilters(url) {
     return [];
   }
 }
+function groupFiltersByValue(filters) {
+  const grouped = new Map;
+  for (const filter of filters) {
+    const existing = grouped.get(filter.value) || [];
+    existing.push(filter.column);
+    grouped.set(filter.value, existing);
+  }
+  return grouped;
+}
 async function handleTable(cwd, url, omitDirNames) {
   const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
@@ -7088,6 +7277,51 @@ async function handleTable(cwd, url, omitDirNames) {
   const filters = parseFilters(url);
   try {
     const adapter = await getAdapter(r, cwd);
+    if (filters.length > 0 && adapter.getFilteredTablePageWithMeta) {
+      const meta = await adapter.getFilteredTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+        grouped: groupFiltersByValue(filters)
+      });
+      const colNames2 = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames2.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body2 = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows
+      };
+      return json(body2);
+    }
+    if (filters.length === 0 && adapter.getTablePageWithMeta) {
+      const meta = await adapter.getTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy
+      });
+      const colNames2 = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames2.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body2 = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows
+      };
+      return json(body2);
+    }
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
@@ -7096,12 +7330,7 @@ async function handleTable(cwd, url, omitDirNames) {
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
-        const grouped = new Map;
-        for (const f of validFilters) {
-          const existing = grouped.get(f.value) || [];
-          existing.push(f.column);
-          grouped.set(f.value, existing);
-        }
+        const grouped = groupFiltersByValue(validFilters);
         const k = adapter.kind;
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy ? ` ORDER BY ${sanitizeIdentifier4(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}` : "";
