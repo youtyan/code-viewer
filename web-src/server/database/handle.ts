@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { relative } from "node:path";
 import type {
   DbColumn,
   DbFilesResponse,
@@ -21,6 +20,7 @@ import {
   type DockerDbInfo,
   discoverDockerDatabases,
   discoverSqliteFiles,
+  findDockerServiceByDbId,
   parseDockerDbId,
   validateDbPath,
 } from "./discovery";
@@ -162,13 +162,7 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   if (dbParam.startsWith("docker:")) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed) return textError("invalid docker db id", 400);
-    const dockerDbs = getDockerDbs(cwd);
-    // service 名だけでなく relDir も合わせて検索 (subdir compose の衝突対策)。
-    const info = dockerDbs.find(
-      (d) =>
-        d.serviceName === parsed.serviceName &&
-        relative(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir,
-    );
+    const info = findDockerServiceByDbId(cwd, dbParam);
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
@@ -208,6 +202,7 @@ function toFileInfo(entry: {
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
   const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
+  const dockerTruncated = dockerServices.truncated === true;
   const dockerEntries: typeof dockerServices = [];
   for (const svc of dockerServices) {
     if (svc.kind === "redis" || svc.kind === "elasticsearch") {
@@ -248,6 +243,7 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
       })),
       ...dockerEntries.map(toFileInfo),
     ],
+    ...(dockerTruncated ? { truncated: true } : {}),
   };
   return json(body);
 }
@@ -500,7 +496,7 @@ function unquoteSqlIdentifier(raw: string): string {
   return trimmed;
 }
 
-function parseSelectAllTable(sql: string): string | null {
+export function parseSelectAllTable(sql: string): string | null {
   const identifier =
     '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
   const match = sql
@@ -508,7 +504,7 @@ function parseSelectAllTable(sql: string): string | null {
     .replace(/;\s*$/, "")
     .match(
       new RegExp(
-        String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?(?:\s|$)`,
+        String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?\s*$`,
         "i",
       ),
     );
@@ -1055,12 +1051,7 @@ async function handleSnapshotCreate(
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
-    const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find(
-      (d) =>
-        d.serviceName === parsed.serviceName &&
-        relative(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir,
-    );
+    const info = findDockerServiceByDbId(cwd, body.db);
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =

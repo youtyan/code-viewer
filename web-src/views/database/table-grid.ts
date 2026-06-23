@@ -38,7 +38,7 @@ export type TableGridCallbacks = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
-  applyState: (state: AnnotationDatabaseDataState) => void;
+  applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
   getState: () => AnnotationDatabaseDataState;
   clear: () => void;
   destroy: () => void;
@@ -102,7 +102,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let globalSearchValue = "";
   let sort: GridSort | null = null;
   let pageCache = new Map<number, DbValue[][]>();
-  let pendingPages = new Set<number>();
+  let pendingPages = new Map<number, Promise<void>>();
   let loadGeneration = 0;
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
@@ -227,13 +227,13 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     detailPanel.innerHTML = "";
   }
 
-  function invalidateData() {
+  function invalidateData(): Promise<void> {
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     loadGeneration++;
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
-    ensurePage(0);
+    return ensurePage(0);
   }
 
   function clear() {
@@ -249,7 +249,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     filterClear.hidden = true;
     filterRow.innerHTML = "";
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     loadGeneration++;
     cancelAnimationFrame(rafId);
     if (filterTimer) clearTimeout(filterTimer);
@@ -499,22 +499,22 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       sort = { column, direction: "asc" };
     }
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     resetSelectionAndDetail();
     renderHeader();
     renderViewport();
   }
 
-  function ensurePage(pageStart: number) {
-    if (pageCache.has(pageStart) || pendingPages.has(pageStart)) return;
-    pendingPages.add(pageStart);
+  function ensurePage(pageStart: number): Promise<void> {
+    if (pageCache.has(pageStart)) return Promise.resolve();
+    const pending = pendingPages.get(pageStart);
+    if (pending) return pending;
     const gen = loadGeneration;
     const filters = collectFilters();
-    callbacks
+    const promise = callbacks
       .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters)
       .then((data) => {
         if (gen !== loadGeneration) return;
-        pendingPages.delete(pageStart);
         pageCache.set(pageStart, data.rows);
         totalRows = data.totalRows;
         spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
@@ -522,8 +522,15 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         renderViewport();
       })
       .catch(() => {
-        if (gen === loadGeneration) pendingPages.delete(pageStart);
+        /* renderViewport will retry if the page is still needed. */
       });
+    const tracked = promise.finally(() => {
+      if (pendingPages.get(pageStart) === tracked) {
+        pendingPages.delete(pageStart);
+      }
+    });
+    pendingPages.set(pageStart, tracked);
+    return tracked;
   }
 
   function renderViewport() {
@@ -698,7 +705,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
-  function applyState(state: AnnotationDatabaseDataState) {
+  async function applyState(state: AnnotationDatabaseDataState) {
     if (state.search !== undefined) {
       globalSearchValue = state.search;
       filterInput.value = state.search;
@@ -712,8 +719,9 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     sort = state.sort || null;
     const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
     renderHeader();
-    invalidateData();
+    const firstPage = invalidateData();
     if (targetRowIndex >= 0) {
+      await firstPage;
       selectedRowIndex = targetRowIndex;
       viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
       renderViewport();

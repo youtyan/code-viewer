@@ -8010,16 +8010,445 @@ ${frontmatter.yaml}
     };
   }
 
-  // web-src/views/database/elasticsearch-explorer.ts
-  function formatBytes(n2) {
-    if (n2 >= 1024 * 1024 * 1024)
-      return `${(n2 / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    if (n2 >= 1024 * 1024)
-      return `${(n2 / (1024 * 1024)).toFixed(2)} MB`;
-    if (n2 >= 1024)
-      return `${(n2 / 1024).toFixed(1)} KB`;
-    return `${n2} B`;
+  // web-src/views/media-embed.ts
+  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
+  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
+  function isMedia(p2) {
+    return MEDIA_RE.test(p2);
   }
+  function isImage(p2) {
+    return IMAGE_RE.test(p2);
+  }
+  function isVideo(p2) {
+    return VIDEO_RE.test(p2);
+  }
+  function isAudio(p2) {
+    return AUDIO_RE.test(p2);
+  }
+  function fileURL(path, ref) {
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  }
+  function mediaTag(path, ref) {
+    const url = fileURL(path, ref);
+    if (isVideo(path)) {
+      return `<video src="${url}" controls preload="metadata"></video>`;
+    }
+    if (isAudio(path)) {
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
+    }
+    return `<img src="${url}" alt="" loading="lazy">`;
+  }
+  function enhanceMediaCard(file, card) {
+    const path = file.path;
+    if (!file.media_kind && !isMedia(path))
+      return;
+    const wrapper = card.querySelector(".d2h-file-wrapper");
+    if (!wrapper)
+      return;
+    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
+    if (!body)
+      return;
+    const container = document.createElement("div");
+    container.className = "gdp-media";
+    let leftHTML;
+    let rightHTML;
+    if (file.status === "A") {
+      leftHTML = '<div class="media-empty">Not in HEAD</div>';
+      rightHTML = mediaTag(path, "worktree");
+    } else if (file.status === "D") {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = '<div class="media-empty">Deleted</div>';
+    } else {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = mediaTag(path, "worktree");
+    }
+    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+    body.replaceWith(container);
+  }
+
+  // web-src/core/source-meta.ts
+  var SOURCE_SHIKI_LANG_ALIASES = {
+    makefile: "make",
+    objectivec: "c",
+    "objective-c": "c",
+    "objective-cpp": "cpp",
+    starlark: "python"
+  };
+  function normalizeSourceShikiLang(lang) {
+    if (!lang)
+      return null;
+    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
+  }
+  function isPreviewableSource(path) {
+    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+  }
+  function sourcePreviewKind(path) {
+    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
+      return "markdown";
+    if (/\.(html|htm)$/i.test(path))
+      return "html";
+    return null;
+  }
+  var EXT_TO_LANG = {
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    py: "python",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    kt: "kotlin",
+    swift: "swift",
+    c: "c",
+    h: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    lua: "lua",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    fish: "bash",
+    sql: "sql",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    tf: "terraform",
+    tfvars: "terraform",
+    hcl: "terraform",
+    xml: "xml",
+    html: "xml",
+    vue: "xml",
+    css: "css",
+    scss: "scss",
+    md: "markdown",
+    dockerfile: "dockerfile",
+    proto: "protobuf",
+    gradle: "gradle",
+    properties: "properties",
+    patch: "diff",
+    diff: "diff",
+    nix: "nix",
+    cue: "cue",
+    rego: "rego",
+    bicep: "bicep",
+    bazel: "starlark",
+    bzl: "starlark",
+    cmake: "cmake",
+    groovy: "groovy",
+    dart: "dart",
+    scala: "scala",
+    clj: "clojure",
+    cljs: "clojure",
+    cljc: "clojure",
+    edn: "clojure",
+    ex: "elixir",
+    exs: "elixir",
+    erl: "erlang",
+    hrl: "erlang",
+    hs: "haskell",
+    lhs: "haskell",
+    ml: "ocaml",
+    mli: "ocaml",
+    jl: "julia",
+    r: "r",
+    rmd: "r",
+    pl: "perl",
+    pm: "perl",
+    tcl: "tcl",
+    vim: "vim",
+    f: "fortran",
+    f90: "fortran",
+    m: "objective-c",
+    mm: "objective-cpp",
+    tex: "tex",
+    bib: "bibtex",
+    rst: "rst"
+  };
+  var TEXT_SOURCE_EXTENSIONS = new Set([
+    ...Object.keys(EXT_TO_LANG),
+    "txt",
+    "md",
+    "markdown",
+    "mdown",
+    "mkdn",
+    "mdx",
+    "json",
+    "jsonc",
+    "csv",
+    "tsv",
+    "yaml",
+    "yml",
+    "toml",
+    "hcl",
+    "tf",
+    "tfvars",
+    "tfstate",
+    "xml",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "ts",
+    "tsx",
+    "mts",
+    "cts",
+    "vue",
+    "svelte",
+    "astro",
+    "rs",
+    "go",
+    "py",
+    "rb",
+    "php",
+    "java",
+    "kt",
+    "kts",
+    "c",
+    "cc",
+    "cpp",
+    "cxx",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "ps1",
+    "sql",
+    "graphql",
+    "graphqls",
+    "gql",
+    "ini",
+    "conf",
+    "env",
+    "properties",
+    "gitignore",
+    "dockerignore",
+    "editorconfig",
+    "lock",
+    "log",
+    "patch",
+    "diff",
+    "sum",
+    "mk",
+    "proto",
+    "thrift",
+    "prisma",
+    "gradle",
+    "cmake",
+    "nix",
+    "cue",
+    "rego",
+    "bicep",
+    "bazel",
+    "bzl",
+    "dart",
+    "scala",
+    "clj",
+    "cljs",
+    "cljc",
+    "edn",
+    "ex",
+    "exs",
+    "erl",
+    "hrl",
+    "hs",
+    "lhs",
+    "ml",
+    "mli",
+    "jl",
+    "r",
+    "rmd",
+    "pl",
+    "pm",
+    "tcl",
+    "vim",
+    "groovy",
+    "f",
+    "f90",
+    "m",
+    "mm",
+    "pas",
+    "tex",
+    "bib",
+    "rst",
+    "adoc",
+    "org",
+    "ipynb",
+    "ejs",
+    "hbs",
+    "mustache",
+    "liquid",
+    "pug"
+  ]);
+  var TEXT_SOURCE_FILENAMES = new Set([
+    "readme",
+    "license",
+    "copying",
+    "authors",
+    "contributors",
+    "notice",
+    "changelog",
+    "todo",
+    "manifest",
+    "version",
+    "codeowners",
+    "go.mod",
+    "build.bazel",
+    "workspace.bazel",
+    "module.bazel",
+    "gemfile",
+    "rakefile",
+    "procfile",
+    "brewfile",
+    "gnumakefile",
+    "bsdmakefile",
+    ".gitattributes",
+    ".gitmodules",
+    ".npmrc",
+    ".nvmrc",
+    ".yarnrc",
+    ".prettierrc",
+    ".eslintrc",
+    ".babelrc",
+    ".stylelintrc"
+  ]);
+  var FILENAME_TO_LANG = {
+    dockerfile: "dockerfile",
+    makefile: "makefile",
+    gnumakefile: "makefile",
+    bsdmakefile: "makefile",
+    "go.mod": "go",
+    "build.bazel": "starlark",
+    "workspace.bazel": "starlark",
+    "module.bazel": "starlark"
+  };
+  function sourceFileName(path) {
+    return (path.split("/").pop() || path).toLowerCase();
+  }
+  function sourceFileExtension(name) {
+    const index = name.lastIndexOf(".");
+    return index >= 0 ? name.slice(index + 1) : "";
+  }
+  function isDockerfileName(name) {
+    return /^dockerfile(?:[.-].+)?$/i.test(name);
+  }
+  function isMakefileName(name) {
+    return /^makefile(?:[.-].+)?$/i.test(name);
+  }
+  function sourceDisplayKind(path) {
+    if (isVideo(path))
+      return "video";
+    if (isAudio(path))
+      return "audio";
+    if (isImage(path))
+      return "image";
+    if (/\.pdf$/i.test(path))
+      return "pdf";
+    const name = sourceFileName(path);
+    const ext = sourceFileExtension(name);
+    if (TEXT_SOURCE_EXTENSIONS.has(ext))
+      return "text";
+    if (TEXT_SOURCE_FILENAMES.has(name))
+      return "text";
+    if (isDockerfileName(name) || isMakefileName(name))
+      return "text";
+    return "unsupported";
+  }
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0)
+      return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
+  }
+  function formatFileDate(value) {
+    if (!value)
+      return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+      return "";
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  function humanFileKind(path, mime, fallback) {
+    const ext = (path.split(".").pop() || "").toLowerCase();
+    if (ext === "png")
+      return "PNG image";
+    if (ext === "jpg" || ext === "jpeg")
+      return "JPEG image";
+    if (ext === "gif")
+      return "GIF image";
+    if (ext === "webp")
+      return "WebP image";
+    if (ext === "svg")
+      return "SVG image";
+    if (ext === "pdf")
+      return "PDF document";
+    if (ext === "zip")
+      return "ZIP archive";
+    if (ext === "mp4")
+      return "MP4 video";
+    if (ext === "webm")
+      return "WebM video";
+    if (ext === "mp3")
+      return "MP3 audio";
+    if (ext === "wav")
+      return "WAV audio";
+    if (ext === "ogg")
+      return "Ogg audio";
+    if (ext === "flac")
+      return "FLAC audio";
+    if (ext === "m4a")
+      return "M4A audio";
+    if (ext === "aac")
+      return "AAC audio";
+    if (ext === "opus")
+      return "Opus audio";
+    if (ext === "mid" || ext === "midi")
+      return "MIDI file";
+    if (mime?.startsWith("image/"))
+      return "Image";
+    if (mime?.startsWith("video/"))
+      return "Video";
+    if (mime?.startsWith("audio/"))
+      return "Audio";
+    if (mime === "application/pdf")
+      return "PDF document";
+    if (fallback === "unsupported file")
+      return "Binary file";
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+
+  // web-src/views/database/elasticsearch-explorer.ts
   function createElasticsearchExplorer(callbacks = {}) {
     const container = document.createElement("div");
     container.className = "es-explorer";
@@ -8092,6 +8521,11 @@ ${frontmatter.yaml}
     let docRunId = 0;
     let suppressNotify = false;
     let queryNotifyTimer = null;
+    let disposed = false;
+    let indexAbort = null;
+    let mappingAbort = null;
+    let docsAbort = null;
+    let docAbort = null;
     function notifySelectionChange() {
       if (suppressNotify)
         return;
@@ -8256,8 +8690,11 @@ ${frontmatter.yaml}
       docBody.appendChild(pre);
     }
     async function fetchMapping(index) {
-      if (!currentDbId)
+      if (disposed || !currentDbId)
         return;
+      mappingAbort?.abort();
+      const abort = new AbortController;
+      mappingAbort = abort;
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       mappingBody.innerHTML = "";
@@ -8267,7 +8704,11 @@ ${frontmatter.yaml}
       mappingBody.appendChild(loading);
       try {
         const params = new URLSearchParams({ db: requestDbId, index });
-        const res = await fetch(`/_db/elasticsearch/mapping?${params}`);
+        const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
+          signal: abort.signal
+        });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           mappingBody.innerHTML = "";
@@ -8278,11 +8719,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
+        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
           return;
         }
         renderMapping(data);
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
         mappingBody.innerHTML = "";
@@ -8290,13 +8733,17 @@ ${frontmatter.yaml}
         errEl.className = "es-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         mappingBody.appendChild(errEl);
+      } finally {
+        if (mappingAbort === abort)
+          mappingAbort = null;
       }
     }
     async function loadDocs(append) {
-      if (!currentDbId || !currentIndex)
+      if (disposed || !currentDbId || !currentIndex)
         return;
-      if (loadingDocs)
-        return;
+      docsAbort?.abort();
+      const abort = new AbortController;
+      docsAbort = abort;
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       const requestIndex = currentIndex;
@@ -8317,14 +8764,18 @@ ${frontmatter.yaml}
           params.set("q", requestQuery);
         if (append && lastSort)
           params.set("searchAfter", JSON.stringify(lastSort));
-        const res = await fetch(`/_db/elasticsearch/docs?${params}`);
+        const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
+          signal: abort.signal
+        });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           setDocStatus(`Error: ${text2 || res.statusText}`, true);
           return;
         }
         const data = await res.json();
-        if (requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
+        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
           return;
         }
         if (!append)
@@ -8337,15 +8788,23 @@ ${frontmatter.yaml}
         lastSort = data.lastSort;
         docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
         setDocStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        loadingDocs = false;
-        docMoreBtn.disabled = false;
+        if (docsAbort === abort)
+          docsAbort = null;
+        if (!docsAbort) {
+          loadingDocs = false;
+          docMoreBtn.disabled = false;
+        }
       }
     }
     async function selectIndex(name) {
+      if (disposed)
+        return;
       currentIndex = name;
       notifySelectionChange();
       highlightActiveIndex(name);
@@ -8355,8 +8814,11 @@ ${frontmatter.yaml}
       await Promise.all([fetchMapping(name), loadDocs(false)]);
     }
     async function selectDoc(id) {
-      if (!currentDbId || !currentIndex)
+      if (disposed || !currentDbId || !currentIndex)
         return;
+      docAbort?.abort();
+      const abort = new AbortController;
+      docAbort = abort;
       const requestRunId = ++docRunId;
       const requestDbId = currentDbId;
       const requestIndex = currentIndex;
@@ -8373,7 +8835,11 @@ ${frontmatter.yaml}
           index: requestIndex,
           id
         });
-        const res = await fetch(`/_db/elasticsearch/doc?${params}`);
+        const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
+          signal: abort.signal
+        });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           docBody.innerHTML = "";
@@ -8384,11 +8850,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
+        if (disposed || requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
           return;
         }
         renderDoc(data);
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         if (requestRunId !== docRunId || requestDbId !== currentDbId)
           return;
         docBody.innerHTML = "";
@@ -8396,6 +8864,9 @@ ${frontmatter.yaml}
         errEl.className = "es-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         docBody.appendChild(errEl);
+      } finally {
+        if (docAbort === abort)
+          docAbort = null;
       }
     }
     function runSearch() {
@@ -8423,12 +8894,20 @@ ${frontmatter.yaml}
     });
     docMoreBtn.addEventListener("click", () => loadDocs(true));
     async function load(dbId, initial) {
+      if (disposed)
+        return;
       if (queryNotifyTimer) {
         clearTimeout(queryNotifyTimer);
         queryNotifyTimer = null;
       }
       if (currentDbId === dbId && !initial)
         return;
+      indexAbort?.abort();
+      mappingAbort?.abort();
+      docsAbort?.abort();
+      docAbort?.abort();
+      const abort = new AbortController;
+      indexAbort = abort;
       const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentIndex = null;
@@ -8445,14 +8924,16 @@ ${frontmatter.yaml}
       setDetailTab("mapping");
       setIndexStatus("Loading indices...");
       try {
-        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`);
+        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`, { signal: abort.signal });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           setIndexStatus(`Error: ${text2 || res.statusText}`, true);
           return;
         }
         const data = await res.json();
-        if (requestRunId !== loadRunId || currentDbId !== dbId)
+        if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderIndices(data.indices);
         if (initial?.index && data.indices.some((ix) => ix.name === initial.index)) {
@@ -8465,10 +8946,23 @@ ${frontmatter.yaml}
           notifySelectionChange();
         }
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        if (indexAbort === abort)
+          indexAbort = null;
       }
     }
     function clear() {
+      indexAbort?.abort();
+      mappingAbort?.abort();
+      docsAbort?.abort();
+      docAbort?.abort();
+      indexAbort = null;
+      mappingAbort = null;
+      docsAbort = null;
+      docAbort = null;
       loadRunId++;
       docRunId++;
       suppressNotify = false;
@@ -8497,7 +8991,11 @@ ${frontmatter.yaml}
         query: currentQuery || undefined
       };
     }
-    return { el: container, load, clear, getSelection };
+    function dispose() {
+      disposed = true;
+      clear();
+    }
+    return { el: container, load, clear, dispose, getSelection };
   }
 
   // web-src/views/database/er-diagram.ts
@@ -9259,10 +9757,11 @@ ${frontmatter.yaml}
     function focus() {
       textarea.focus();
     }
-    function setSql(sql) {
+    function setSql(sql, options = {}) {
       textarea.value = sql;
       syncHighlight();
-      callbacks.onSqlChange?.(textarea.value);
+      if (!options.silent)
+        callbacks.onSqlChange?.(textarea.value);
     }
     function getSql() {
       return textarea.value;
@@ -9669,6 +10168,10 @@ ${frontmatter.yaml}
     let loadRunId = 0;
     let keyRunId = 0;
     let suppressNotify = false;
+    let disposed = false;
+    let dbAbort = null;
+    let keysAbort = null;
+    let valueAbort = null;
     function notifySelectionChange() {
       if (suppressNotify)
         return;
@@ -9737,13 +10240,6 @@ ${frontmatter.yaml}
         row.classList.toggle("active", row.dataset.keyName === name);
       }
     }
-    function formatBytes2(n2) {
-      if (n2 >= 1024 * 1024)
-        return `${(n2 / (1024 * 1024)).toFixed(2)} MB`;
-      if (n2 >= 1024)
-        return `${(n2 / 1024).toFixed(1)} KB`;
-      return `${n2} B`;
-    }
     function makeNotice(message, kind = "info") {
       const div = document.createElement("div");
       div.className = kind === "warn" ? "redis-value-truncation" : "redis-value-info";
@@ -9769,14 +10265,14 @@ ${frontmatter.yaml}
         body.classList.add("redis-value-empty");
       } else if (value.type === "string") {
         if (value.binaryBase64 !== undefined) {
-          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes2(value.fullSize)}${value.truncated ? `, showing first ${formatBytes2(64 * 1024)}` : ""})`, "warn"));
+          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes(value.fullSize)}${value.truncated ? `, showing first ${formatBytes(64 * 1024)}` : ""})`, "warn"));
           const pre = document.createElement("pre");
           pre.className = "redis-value-string";
           pre.textContent = value.binaryBase64;
           body.appendChild(pre);
         } else {
           if (value.truncated) {
-            body.appendChild(makeNotice(`(showing first ${formatBytes2(64 * 1024)} of ${formatBytes2(value.fullSize)})`, "warn"));
+            body.appendChild(makeNotice(`(showing first ${formatBytes(64 * 1024)} of ${formatBytes(value.fullSize)})`, "warn"));
           }
           const pre = document.createElement("pre");
           pre.className = "redis-value-string";
@@ -9852,8 +10348,11 @@ ${frontmatter.yaml}
       mainPane.appendChild(body);
     }
     async function selectKey(name) {
-      if (currentDbId === null || currentDbIndex === null)
+      if (disposed || currentDbId === null || currentDbIndex === null)
         return;
+      valueAbort?.abort();
+      const abort = new AbortController;
+      valueAbort = abort;
       const requestRunId = ++keyRunId;
       const requestDbId = currentDbId;
       const requestDbIndex = currentDbIndex;
@@ -9871,7 +10370,11 @@ ${frontmatter.yaml}
           dbIndex: String(requestDbIndex),
           key: name
         });
-        const res = await fetch(`/_db/redis/value?${params}`);
+        const res = await fetch(`/_db/redis/value?${params}`, {
+          signal: abort.signal
+        });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           mainPane.innerHTML = "";
@@ -9882,11 +10385,13 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
+        if (disposed || requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
           return;
         }
         renderValue(data.key, data.value);
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         if (requestRunId !== keyRunId || requestDbId !== currentDbId)
           return;
         mainPane.innerHTML = "";
@@ -9894,9 +10399,14 @@ ${frontmatter.yaml}
         errEl.className = "redis-error";
         errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
         mainPane.appendChild(errEl);
+      } finally {
+        if (valueAbort === abort)
+          valueAbort = null;
       }
     }
     async function selectDatabase(dbIndex) {
+      if (disposed)
+        return;
       currentDbIndex = dbIndex;
       currentKey = null;
       currentCursor = "0";
@@ -9907,10 +10417,11 @@ ${frontmatter.yaml}
       await loadKeys(false);
     }
     async function loadKeys(append) {
-      if (currentDbId === null || currentDbIndex === null)
+      if (disposed || currentDbId === null || currentDbIndex === null)
         return;
-      if (loadingKeys)
-        return;
+      keysAbort?.abort();
+      const abort = new AbortController;
+      keysAbort = abort;
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       const requestDbIndex = currentDbIndex;
@@ -9926,14 +10437,18 @@ ${frontmatter.yaml}
           cursor: currentCursor,
           count: "200"
         });
-        const res = await fetch(`/_db/redis/keys?${params}`);
+        const res = await fetch(`/_db/redis/keys?${params}`, {
+          signal: abort.signal
+        });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           setKeyStatus(`Error: ${text2 || res.statusText}`, true);
           return;
         }
         const data = await res.json();
-        if (requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
+        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
           return;
         }
         if (!append)
@@ -9946,12 +10461,18 @@ ${frontmatter.yaml}
         currentCursor = data.nextCursor;
         keyMoreBtn.hidden = currentCursor === "0";
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
         setKeyStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        loadingKeys = false;
-        keyMoreBtn.disabled = false;
+        if (keysAbort === abort)
+          keysAbort = null;
+        if (!keysAbort) {
+          loadingKeys = false;
+          keyMoreBtn.disabled = false;
+        }
       }
     }
     keyMoreBtn.addEventListener("click", () => loadKeys(true));
@@ -9968,8 +10489,15 @@ ${frontmatter.yaml}
       loadKeys(false);
     });
     async function load(dbId, initial) {
+      if (disposed)
+        return;
       if (currentDbId === dbId && !initial)
         return;
+      dbAbort?.abort();
+      keysAbort?.abort();
+      valueAbort?.abort();
+      const abort = new AbortController;
+      dbAbort = abort;
       const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentDbIndex = null;
@@ -9982,14 +10510,16 @@ ${frontmatter.yaml}
       mainPane.textContent = "Select a key to view its value.";
       setDbStatus("Loading databases...");
       try {
-        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`);
+        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`, { signal: abort.signal });
+        if (disposed || abort.signal.aborted)
+          return;
         if (!res.ok) {
           const text2 = await res.text();
           setDbStatus(`Error: ${text2 || res.statusText}`, true);
           return;
         }
         const data = await res.json();
-        if (requestRunId !== loadRunId || currentDbId !== dbId)
+        if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderDatabases(data.databases);
         if (initial?.dbIndex !== undefined && data.databases.some((d2) => d2.index === initial.dbIndex)) {
@@ -10007,10 +10537,22 @@ ${frontmatter.yaml}
           notifySelectionChange();
         }
       } catch (err) {
+        if (abort.signal.aborted)
+          return;
         setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        if (dbAbort === abort)
+          dbAbort = null;
       }
     }
     function clear() {
+      dbAbort?.abort();
+      keysAbort?.abort();
+      valueAbort?.abort();
+      dbAbort = null;
+      keysAbort = null;
+      valueAbort = null;
+      loadingKeys = false;
       loadRunId++;
       keyRunId++;
       suppressNotify = false;
@@ -10032,7 +10574,11 @@ ${frontmatter.yaml}
         keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter
       };
     }
-    return { el: container, load, clear, getSelection };
+    function dispose() {
+      disposed = true;
+      clear();
+    }
+    return { el: container, load, clear, dispose, getSelection };
   }
 
   // web-src/views/database/schema-view.ts
@@ -10830,7 +11376,7 @@ ${frontmatter.yaml}
     let globalSearchValue = "";
     let sort = null;
     let pageCache = new Map;
-    let pendingPages = new Set;
+    let pendingPages = new Map;
     let loadGeneration = 0;
     let rafId = 0;
     let statusEl = null;
@@ -10935,11 +11481,11 @@ ${frontmatter.yaml}
     }
     function invalidateData() {
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       loadGeneration++;
       viewport.scrollTop = 0;
       resetSelectionAndDetail();
-      ensurePage(0);
+      return ensurePage(0);
     }
     function clear() {
       cleanupResize();
@@ -10954,7 +11500,7 @@ ${frontmatter.yaml}
       filterClear.hidden = true;
       filterRow.innerHTML = "";
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       loadGeneration++;
       cancelAnimationFrame(rafId);
       if (filterTimer)
@@ -11170,30 +11716,35 @@ ${frontmatter.yaml}
         sort = { column, direction: "asc" };
       }
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       resetSelectionAndDetail();
       renderHeader();
       renderViewport();
     }
     function ensurePage(pageStart) {
-      if (pageCache.has(pageStart) || pendingPages.has(pageStart))
-        return;
-      pendingPages.add(pageStart);
+      if (pageCache.has(pageStart))
+        return Promise.resolve();
+      const pending = pendingPages.get(pageStart);
+      if (pending)
+        return pending;
       const gen = loadGeneration;
       const filters = collectFilters();
-      callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters).then((data) => {
+      const promise = callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters).then((data) => {
         if (gen !== loadGeneration)
           return;
-        pendingPages.delete(pageStart);
         pageCache.set(pageStart, data.rows);
         totalRows = data.totalRows;
         spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
         updateStatus();
         renderViewport();
-      }).catch(() => {
-        if (gen === loadGeneration)
+      }).catch(() => {});
+      const tracked = promise.finally(() => {
+        if (pendingPages.get(pageStart) === tracked) {
           pendingPages.delete(pageStart);
+        }
       });
+      pendingPages.set(pageStart, tracked);
+      return tracked;
     }
     function renderViewport() {
       cancelAnimationFrame(rafId);
@@ -11350,7 +11901,7 @@ ${frontmatter.yaml}
         renderViewport();
       }
     }
-    function applyState(state) {
+    async function applyState(state) {
       if (state.search !== undefined) {
         globalSearchValue = state.search;
         filterInput.value = state.search;
@@ -11364,8 +11915,9 @@ ${frontmatter.yaml}
       sort = state.sort || null;
       const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
       renderHeader();
-      invalidateData();
+      const firstPage = invalidateData();
       if (targetRowIndex >= 0) {
+        await firstPage;
         selectedRowIndex = targetRowIndex;
         viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
         renderViewport();
@@ -11810,7 +12362,7 @@ ${frontmatter.yaml}
       onSqlChange: () => cb.onStateChange()
     });
     if (initial.sqlDraft)
-      queryEditor.setSql(initial.sqlDraft);
+      queryEditor.setSql(initial.sqlDraft, { silent: true });
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
     const globalSearchView = createGlobalSearchView({
@@ -11913,6 +12465,13 @@ ${frontmatter.yaml}
       applyInnerTabBarVisibility();
       grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
     }
+    function showDockerNotice(message) {
+      clearDockerNotice();
+      const notice = document.createElement("div");
+      notice.className = "db-docker-notice";
+      notice.textContent = message;
+      mainContent.prepend(notice);
+    }
     function isTableViewTab() {
       return currentTab === "data" || currentTab === "schema";
     }
@@ -11988,9 +12547,9 @@ ${frontmatter.yaml}
     async function fetchDbFiles() {
       const res = await deps.trackLoad(fetch("/_db/files"));
       if (!res.ok)
-        return [];
+        return { files: [] };
       const data = await res.json();
-      return data.files;
+      return data;
     }
     async function fetchSchema(dbId) {
       const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`));
@@ -12217,10 +12776,16 @@ ${frontmatter.yaml}
     let pendingEsInitial = initial.es;
     async function enter(db, table2, view, options = {}) {
       const generation = ++loadGeneration;
-      const files = await fetchDbFiles();
+      const filesResponse = await fetchDbFiles();
       if (generation !== loadGeneration)
         return;
+      const files = filesResponse.files;
       lastFiles = files;
+      if (filesResponse.truncated) {
+        showDockerNotice("Docker discovery reached the service limit; some compose services may be hidden.");
+      } else {
+        clearDockerNotice();
+      }
       dbSelect.innerHTML = "";
       if (files.length === 0) {
         const opt = document.createElement("option");
@@ -12309,7 +12874,7 @@ ${frontmatter.yaml}
       if (target.query) {
         setActiveTab("query");
         if (target.query.sql)
-          queryEditor.setSql(target.query.sql);
+          queryEditor.setSql(target.query.sql, { silent: true });
         if (target.query.autoRun && target.query.sql) {
           if (!looksReadOnlySql(target.query.sql))
             return;
@@ -12361,6 +12926,9 @@ ${frontmatter.yaml}
       }
       return state;
     }
+    function getDbKind() {
+      return currentDb?.kind ?? null;
+    }
     function getAnnotationTarget() {
       if (!currentDb)
         return null;
@@ -12400,8 +12968,8 @@ ${frontmatter.yaml}
       globalSearchView.dispose();
       snapshotView.dispose();
       historyView.clear();
-      redisExplorer.clear();
-      esExplorer.clear();
+      redisExplorer.dispose();
+      esExplorer.dispose();
       currentDb = null;
       currentTable = null;
       schemaCache = null;
@@ -12411,6 +12979,7 @@ ${frontmatter.yaml}
       enter,
       handleSse,
       getState,
+      getDbKind,
       getAnnotationTarget,
       getLabel,
       dispose
@@ -12601,7 +13170,7 @@ ${frontmatter.yaml}
       }
       return false;
     }
-    function closeDbIfUnused(dbId) {
+    function closeDbIfUnused(dbId, kind) {
       if (!dbId || isDbStillOpen(dbId))
         return;
       const body = JSON.stringify({ db: dbId });
@@ -12609,13 +13178,8 @@ ${frontmatter.yaml}
         "Content-Type": "application/json",
         "X-Code-Viewer-Action": "1"
       };
-      for (const path of [
-        "/_db/close",
-        "/_db/redis/close",
-        "/_db/elasticsearch/close"
-      ]) {
-        fetch(path, { method: "POST", headers, body }).catch(() => {});
-      }
+      const path = kind === "redis" ? "/_db/redis/close" : kind === "elasticsearch" ? "/_db/elasticsearch/close" : "/_db/close";
+      fetch(path, { method: "POST", headers, body }).catch(() => {});
     }
     function clearDropTarget() {
       if (!dropTargetId)
@@ -12831,6 +13395,7 @@ ${frontmatter.yaml}
       if (!entry)
         return;
       const closedDbId = entry.pane.getState().dbId;
+      const closedKind = entry.pane.getDbKind();
       entry.pane.dispose();
       entry.pane.el.remove();
       entry.chip.remove();
@@ -12839,7 +13404,7 @@ ${frontmatter.yaml}
       if (orderIndex >= 0)
         tabOrder.splice(orderIndex, 1);
       paneReadyById.delete(id);
-      closeDbIfUnused(closedDbId);
+      closeDbIfUnused(closedDbId, closedKind);
       if (activeTabId !== id) {
         scheduleSave();
         return;
@@ -13214,64 +13779,6 @@ ${frontmatter.yaml}
         return;
       parent.replaceChild(document.createTextNode(el.textContent || ""), el);
     });
-  }
-
-  // web-src/views/media-embed.ts
-  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
-  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
-  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
-  function isMedia(p2) {
-    return MEDIA_RE.test(p2);
-  }
-  function isImage(p2) {
-    return IMAGE_RE.test(p2);
-  }
-  function isVideo(p2) {
-    return VIDEO_RE.test(p2);
-  }
-  function isAudio(p2) {
-    return AUDIO_RE.test(p2);
-  }
-  function fileURL(path, ref) {
-    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
-  }
-  function mediaTag(path, ref) {
-    const url = fileURL(path, ref);
-    if (isVideo(path)) {
-      return `<video src="${url}" controls preload="metadata"></video>`;
-    }
-    if (isAudio(path)) {
-      return `<audio src="${url}" controls preload="metadata"></audio>`;
-    }
-    return `<img src="${url}" alt="" loading="lazy">`;
-  }
-  function enhanceMediaCard(file, card) {
-    const path = file.path;
-    if (!file.media_kind && !isMedia(path))
-      return;
-    const wrapper = card.querySelector(".d2h-file-wrapper");
-    if (!wrapper)
-      return;
-    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
-    if (!body)
-      return;
-    const container = document.createElement("div");
-    container.className = "gdp-media";
-    let leftHTML;
-    let rightHTML;
-    if (file.status === "A") {
-      leftHTML = '<div class="media-empty">Not in HEAD</div>';
-      rightHTML = mediaTag(path, "worktree");
-    } else if (file.status === "D") {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = '<div class="media-empty">Deleted</div>';
-    } else {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = mediaTag(path, "worktree");
-    }
-    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
-    body.replaceWith(container);
   }
 
   // web-src/views/diff-view.ts
@@ -16688,386 +17195,6 @@ code-viewer annotate add-db --db app.db --tab query \\
     return trimmed;
   }
 
-  // web-src/core/source-meta.ts
-  var SOURCE_SHIKI_LANG_ALIASES = {
-    makefile: "make",
-    objectivec: "c",
-    "objective-c": "c",
-    "objective-cpp": "cpp",
-    starlark: "python"
-  };
-  function normalizeSourceShikiLang(lang) {
-    if (!lang)
-      return null;
-    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
-  }
-  function isPreviewableSource(path) {
-    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
-  }
-  function sourcePreviewKind(path) {
-    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
-      return "markdown";
-    if (/\.(html|htm)$/i.test(path))
-      return "html";
-    return null;
-  }
-  var EXT_TO_LANG = {
-    js: "javascript",
-    mjs: "javascript",
-    cjs: "javascript",
-    ts: "typescript",
-    tsx: "typescript",
-    jsx: "javascript",
-    py: "python",
-    rb: "ruby",
-    go: "go",
-    rs: "rust",
-    java: "java",
-    kt: "kotlin",
-    swift: "swift",
-    c: "c",
-    h: "c",
-    cc: "cpp",
-    cpp: "cpp",
-    hpp: "cpp",
-    cs: "csharp",
-    php: "php",
-    lua: "lua",
-    sh: "bash",
-    bash: "bash",
-    zsh: "bash",
-    fish: "bash",
-    sql: "sql",
-    json: "json",
-    yaml: "yaml",
-    yml: "yaml",
-    toml: "toml",
-    tf: "terraform",
-    tfvars: "terraform",
-    hcl: "terraform",
-    xml: "xml",
-    html: "xml",
-    vue: "xml",
-    css: "css",
-    scss: "scss",
-    md: "markdown",
-    dockerfile: "dockerfile",
-    proto: "protobuf",
-    gradle: "gradle",
-    properties: "properties",
-    patch: "diff",
-    diff: "diff",
-    nix: "nix",
-    cue: "cue",
-    rego: "rego",
-    bicep: "bicep",
-    bazel: "starlark",
-    bzl: "starlark",
-    cmake: "cmake",
-    groovy: "groovy",
-    dart: "dart",
-    scala: "scala",
-    clj: "clojure",
-    cljs: "clojure",
-    cljc: "clojure",
-    edn: "clojure",
-    ex: "elixir",
-    exs: "elixir",
-    erl: "erlang",
-    hrl: "erlang",
-    hs: "haskell",
-    lhs: "haskell",
-    ml: "ocaml",
-    mli: "ocaml",
-    jl: "julia",
-    r: "r",
-    rmd: "r",
-    pl: "perl",
-    pm: "perl",
-    tcl: "tcl",
-    vim: "vim",
-    f: "fortran",
-    f90: "fortran",
-    m: "objective-c",
-    mm: "objective-cpp",
-    tex: "tex",
-    bib: "bibtex",
-    rst: "rst"
-  };
-  var TEXT_SOURCE_EXTENSIONS = new Set([
-    ...Object.keys(EXT_TO_LANG),
-    "txt",
-    "md",
-    "markdown",
-    "mdown",
-    "mkdn",
-    "mdx",
-    "json",
-    "jsonc",
-    "csv",
-    "tsv",
-    "yaml",
-    "yml",
-    "toml",
-    "hcl",
-    "tf",
-    "tfvars",
-    "tfstate",
-    "xml",
-    "html",
-    "htm",
-    "css",
-    "scss",
-    "sass",
-    "less",
-    "js",
-    "jsx",
-    "mjs",
-    "cjs",
-    "ts",
-    "tsx",
-    "mts",
-    "cts",
-    "vue",
-    "svelte",
-    "astro",
-    "rs",
-    "go",
-    "py",
-    "rb",
-    "php",
-    "java",
-    "kt",
-    "kts",
-    "c",
-    "cc",
-    "cpp",
-    "cxx",
-    "h",
-    "hpp",
-    "cs",
-    "swift",
-    "sh",
-    "bash",
-    "zsh",
-    "fish",
-    "ps1",
-    "sql",
-    "graphql",
-    "graphqls",
-    "gql",
-    "ini",
-    "conf",
-    "env",
-    "properties",
-    "gitignore",
-    "dockerignore",
-    "editorconfig",
-    "lock",
-    "log",
-    "patch",
-    "diff",
-    "sum",
-    "mk",
-    "proto",
-    "thrift",
-    "prisma",
-    "gradle",
-    "cmake",
-    "nix",
-    "cue",
-    "rego",
-    "bicep",
-    "bazel",
-    "bzl",
-    "dart",
-    "scala",
-    "clj",
-    "cljs",
-    "cljc",
-    "edn",
-    "ex",
-    "exs",
-    "erl",
-    "hrl",
-    "hs",
-    "lhs",
-    "ml",
-    "mli",
-    "jl",
-    "r",
-    "rmd",
-    "pl",
-    "pm",
-    "tcl",
-    "vim",
-    "groovy",
-    "f",
-    "f90",
-    "m",
-    "mm",
-    "pas",
-    "tex",
-    "bib",
-    "rst",
-    "adoc",
-    "org",
-    "ipynb",
-    "ejs",
-    "hbs",
-    "mustache",
-    "liquid",
-    "pug"
-  ]);
-  var TEXT_SOURCE_FILENAMES = new Set([
-    "readme",
-    "license",
-    "copying",
-    "authors",
-    "contributors",
-    "notice",
-    "changelog",
-    "todo",
-    "manifest",
-    "version",
-    "codeowners",
-    "go.mod",
-    "build.bazel",
-    "workspace.bazel",
-    "module.bazel",
-    "gemfile",
-    "rakefile",
-    "procfile",
-    "brewfile",
-    "gnumakefile",
-    "bsdmakefile",
-    ".gitattributes",
-    ".gitmodules",
-    ".npmrc",
-    ".nvmrc",
-    ".yarnrc",
-    ".prettierrc",
-    ".eslintrc",
-    ".babelrc",
-    ".stylelintrc"
-  ]);
-  var FILENAME_TO_LANG = {
-    dockerfile: "dockerfile",
-    makefile: "makefile",
-    gnumakefile: "makefile",
-    bsdmakefile: "makefile",
-    "go.mod": "go",
-    "build.bazel": "starlark",
-    "workspace.bazel": "starlark",
-    "module.bazel": "starlark"
-  };
-  function sourceFileName(path) {
-    return (path.split("/").pop() || path).toLowerCase();
-  }
-  function sourceFileExtension(name) {
-    const index = name.lastIndexOf(".");
-    return index >= 0 ? name.slice(index + 1) : "";
-  }
-  function isDockerfileName(name) {
-    return /^dockerfile(?:[.-].+)?$/i.test(name);
-  }
-  function isMakefileName(name) {
-    return /^makefile(?:[.-].+)?$/i.test(name);
-  }
-  function sourceDisplayKind(path) {
-    if (isVideo(path))
-      return "video";
-    if (isAudio(path))
-      return "audio";
-    if (isImage(path))
-      return "image";
-    if (/\.pdf$/i.test(path))
-      return "pdf";
-    const name = sourceFileName(path);
-    const ext = sourceFileExtension(name);
-    if (TEXT_SOURCE_EXTENSIONS.has(ext))
-      return "text";
-    if (TEXT_SOURCE_FILENAMES.has(name))
-      return "text";
-    if (isDockerfileName(name) || isMakefileName(name))
-      return "text";
-    return "unsupported";
-  }
-  function formatBytes2(bytes) {
-    if (!Number.isFinite(bytes) || bytes < 0)
-      return "";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit++;
-    }
-    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
-  }
-  function formatFileDate(value) {
-    if (!value)
-      return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime()))
-      return "";
-    return date.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  }
-  function humanFileKind(path, mime, fallback) {
-    const ext = (path.split(".").pop() || "").toLowerCase();
-    if (ext === "png")
-      return "PNG image";
-    if (ext === "jpg" || ext === "jpeg")
-      return "JPEG image";
-    if (ext === "gif")
-      return "GIF image";
-    if (ext === "webp")
-      return "WebP image";
-    if (ext === "svg")
-      return "SVG image";
-    if (ext === "pdf")
-      return "PDF document";
-    if (ext === "zip")
-      return "ZIP archive";
-    if (ext === "mp4")
-      return "MP4 video";
-    if (ext === "webm")
-      return "WebM video";
-    if (ext === "mp3")
-      return "MP3 audio";
-    if (ext === "wav")
-      return "WAV audio";
-    if (ext === "ogg")
-      return "Ogg audio";
-    if (ext === "flac")
-      return "FLAC audio";
-    if (ext === "m4a")
-      return "M4A audio";
-    if (ext === "aac")
-      return "AAC audio";
-    if (ext === "opus")
-      return "Opus audio";
-    if (ext === "mid" || ext === "midi")
-      return "MIDI file";
-    if (mime?.startsWith("image/"))
-      return "Image";
-    if (mime?.startsWith("video/"))
-      return "Video";
-    if (mime?.startsWith("audio/"))
-      return "Audio";
-    if (mime === "application/pdf")
-      return "PDF document";
-    if (fallback === "unsupported file")
-      return "Binary file";
-    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
-  }
-
   // web-src/views/repo-view.ts
   function createRepoView(deps) {
     const {
@@ -17859,7 +17986,7 @@ code-viewer annotate add-db --db app.db --tab query \\
     function createRepoEntrySize(entry) {
       const size = document.createElement("span");
       size.className = "size";
-      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes2(entry.size) : "";
+      size.textContent = entry.type === "blob" && entry.size != null ? formatBytes(entry.size) : "";
       return size;
     }
     function repoEntryUpdatedTime(entry) {
@@ -17968,7 +18095,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         item.append(labelEl, valueEl);
         wrap.appendChild(item);
       };
-      addItem("Size", meta.size == null ? "" : formatBytes2(meta.size));
+      addItem("Size", meta.size == null ? "" : formatBytes(meta.size));
       addItem("Updated", formatFileDate(meta.updated_at || meta.commit_updated_at));
       addItem("Created", formatFileDate(meta.created_at));
       if (!wrap.childElementCount) {
@@ -20469,7 +20596,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         type.textContent = humanFileKind(target.path, meta.type, kind);
         if (meta.size != null) {
           const size = document.createElement("span");
-          size.textContent = formatBytes2(meta.size);
+          size.textContent = formatBytes(meta.size);
           info.appendChild(size);
         }
       });
@@ -20949,7 +21076,7 @@ code-viewer annotate add-db --db app.db --tab query \\
       badge.textContent = "Virtual mode";
       const summary = document.createElement("span");
       summary.className = "gdp-source-virtual-summary";
-      summary.textContent = lines.length.toLocaleString() + " lines, " + formatBytes2(textValue.length) + ". Only visible rows are rendered. Highlighting is per-line.";
+      summary.textContent = lines.length.toLocaleString() + " lines, " + formatBytes(textValue.length) + ". Only visible rows are rendered. Highlighting is per-line.";
       const actions = document.createElement("span");
       actions.className = "gdp-source-virtual-actions";
       const copy = document.createElement("button");
@@ -21128,7 +21255,7 @@ code-viewer annotate add-db --db app.db --tab query \\
       }
       const updateTotals = () => {
         SOURCE_CURSOR_TOTALS.set(sourceCursorKey(target), totalRows);
-        summary.textContent = (complete ? totalRows.toLocaleString() : `${lines.size.toLocaleString()}+`) + " lines loaded from " + formatBytes2(size) + ". More rows load as you scroll.";
+        summary.textContent = (complete ? totalRows.toLocaleString() : `${lines.size.toLocaleString()}+`) + " lines loaded from " + formatBytes(size) + ". More rows load as you scroll.";
         spacer.style.height = `${Math.max(1, totalRows * VIRTUAL_SOURCE_ROW_HEIGHT)}px`;
       };
       const loadPage = (line) => {

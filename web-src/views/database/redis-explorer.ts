@@ -5,6 +5,7 @@ import type {
   RedisValue,
   RedisValueResponse,
 } from "../../core/database/types";
+import { formatBytes } from "../../core/source-meta";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -41,6 +42,7 @@ export type RedisExplorerView = {
   el: HTMLElement;
   load: (dbId: string, initial?: RedisExplorerSelection) => Promise<void>;
   clear: () => void;
+  dispose: () => void;
   getSelection: () => RedisExplorerSelection;
 };
 
@@ -110,6 +112,10 @@ export function createRedisExplorer(
   let loadRunId = 0;
   let keyRunId = 0;
   let suppressNotify = false;
+  let disposed = false;
+  let dbAbort: AbortController | null = null;
+  let keysAbort: AbortController | null = null;
+  let valueAbort: AbortController | null = null;
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -187,12 +193,6 @@ export function createRedisExplorer(
     )) {
       row.classList.toggle("active", row.dataset.keyName === name);
     }
-  }
-
-  function formatBytes(n: number): string {
-    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-    if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${n} B`;
   }
 
   function makeNotice(message: string, kind: "info" | "warn" = "info") {
@@ -338,7 +338,10 @@ export function createRedisExplorer(
   }
 
   async function selectKey(name: string): Promise<void> {
-    if (currentDbId === null || currentDbIndex === null) return;
+    if (disposed || currentDbId === null || currentDbIndex === null) return;
+    valueAbort?.abort();
+    const abort = new AbortController();
+    valueAbort = abort;
     const requestRunId = ++keyRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
@@ -356,7 +359,10 @@ export function createRedisExplorer(
         dbIndex: String(requestDbIndex),
         key: name,
       });
-      const res = await fetch(`/_db/redis/value?${params}`);
+      const res = await fetch(`/_db/redis/value?${params}`, {
+        signal: abort.signal,
+      });
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         mainPane.innerHTML = "";
@@ -368,6 +374,7 @@ export function createRedisExplorer(
       }
       const data = (await res.json()) as RedisValueResponse;
       if (
+        disposed ||
         requestRunId !== keyRunId ||
         requestDbId !== currentDbId ||
         requestDbIndex !== currentDbIndex ||
@@ -377,16 +384,20 @@ export function createRedisExplorer(
       }
       renderValue(data.key, data.value);
     } catch (err) {
+      if (abort.signal.aborted) return;
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
       mainPane.innerHTML = "";
       const errEl = document.createElement("div");
       errEl.className = "redis-error";
       errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
       mainPane.appendChild(errEl);
+    } finally {
+      if (valueAbort === abort) valueAbort = null;
     }
   }
 
   async function selectDatabase(dbIndex: number): Promise<void> {
+    if (disposed) return;
     currentDbIndex = dbIndex;
     currentKey = null;
     currentCursor = "0";
@@ -398,8 +409,10 @@ export function createRedisExplorer(
   }
 
   async function loadKeys(append: boolean): Promise<void> {
-    if (currentDbId === null || currentDbIndex === null) return;
-    if (loadingKeys) return;
+    if (disposed || currentDbId === null || currentDbIndex === null) return;
+    keysAbort?.abort();
+    const abort = new AbortController();
+    keysAbort = abort;
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
@@ -414,7 +427,10 @@ export function createRedisExplorer(
         cursor: currentCursor,
         count: "200",
       });
-      const res = await fetch(`/_db/redis/keys?${params}`);
+      const res = await fetch(`/_db/redis/keys?${params}`, {
+        signal: abort.signal,
+      });
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         setKeyStatus(`Error: ${text || res.statusText}`, true);
@@ -422,6 +438,7 @@ export function createRedisExplorer(
       }
       const data = (await res.json()) as RedisKeysResponse;
       if (
+        disposed ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         requestDbIndex !== currentDbIndex ||
@@ -438,14 +455,18 @@ export function createRedisExplorer(
       currentCursor = data.nextCursor;
       keyMoreBtn.hidden = currentCursor === "0";
     } catch (err) {
+      if (abort.signal.aborted) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setKeyStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      loadingKeys = false;
-      keyMoreBtn.disabled = false;
+      if (keysAbort === abort) keysAbort = null;
+      if (!keysAbort) {
+        loadingKeys = false;
+        keyMoreBtn.disabled = false;
+      }
     }
   }
 
@@ -467,7 +488,13 @@ export function createRedisExplorer(
     dbId: string,
     initial?: RedisExplorerSelection,
   ): Promise<void> {
+    if (disposed) return;
     if (currentDbId === dbId && !initial) return;
+    dbAbort?.abort();
+    keysAbort?.abort();
+    valueAbort?.abort();
+    const abort = new AbortController();
+    dbAbort = abort;
     const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentDbIndex = null;
@@ -482,14 +509,17 @@ export function createRedisExplorer(
     try {
       const res = await fetch(
         `/_db/redis/databases?db=${encodeURIComponent(dbId)}`,
+        { signal: abort.signal },
       );
+      if (disposed || abort.signal.aborted) return;
       if (!res.ok) {
         const text = await res.text();
         setDbStatus(`Error: ${text || res.statusText}`, true);
         return;
       }
       const data = (await res.json()) as RedisDatabasesResponse;
-      if (requestRunId !== loadRunId || currentDbId !== dbId) return;
+      if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+        return;
       renderDatabases(data.databases);
 
       // initial.dbIndex が指定されていて、かつ実在する db index ならその db を
@@ -512,14 +542,24 @@ export function createRedisExplorer(
         notifySelectionChange();
       }
     } catch (err) {
+      if (abort.signal.aborted) return;
       setDbStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
+    } finally {
+      if (dbAbort === abort) dbAbort = null;
     }
   }
 
   function clear(): void {
+    dbAbort?.abort();
+    keysAbort?.abort();
+    valueAbort?.abort();
+    dbAbort = null;
+    keysAbort = null;
+    valueAbort = null;
+    loadingKeys = false;
     loadRunId++;
     keyRunId++;
     suppressNotify = false;
@@ -543,5 +583,10 @@ export function createRedisExplorer(
     };
   }
 
-  return { el: container, load, clear, getSelection };
+  function dispose(): void {
+    disposed = true;
+    clear();
+  }
+
+  return { el: container, load, clear, dispose, getSelection };
 }

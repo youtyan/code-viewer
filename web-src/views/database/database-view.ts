@@ -2,6 +2,7 @@ import type {
   DbColumn,
   DbFileInfo,
   DbFilesResponse,
+  DbKind,
   DbQueryResponse,
   DbSchemaResponse,
   DbTableDataResponse,
@@ -76,6 +77,7 @@ type TabPaneInternal = {
   ) => Promise<void>;
   handleSse: (event?: string, data?: string) => void;
   getState: () => TabState;
+  getDbKind: () => DbKind | null;
   getAnnotationTarget: () => DatabaseAnnotationTarget | null;
   getLabel: () => string;
   dispose: () => void;
@@ -258,7 +260,7 @@ function createTabPane(
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
   // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
-  if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft);
+  if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft, { silent: true });
 
   const schemaView = createSchemaView();
   const erDiagram = createErDiagram();
@@ -387,6 +389,14 @@ function createTabPane(
     grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
   }
 
+  function showDockerNotice(message: string) {
+    clearDockerNotice();
+    const notice = document.createElement("div");
+    notice.className = "db-docker-notice";
+    notice.textContent = message;
+    mainContent.prepend(notice);
+  }
+
   function isTableViewTab(): boolean {
     return currentTab === "data" || currentTab === "schema";
   }
@@ -475,11 +485,11 @@ function createTabPane(
     if (active?.dataset.table) showSchema(active.dataset.table);
   });
 
-  async function fetchDbFiles(): Promise<DbFileInfo[]> {
+  async function fetchDbFiles(): Promise<DbFilesResponse> {
     const res = await deps.trackLoad(fetch("/_db/files"));
-    if (!res.ok) return [];
+    if (!res.ok) return { files: [] };
     const data = (await res.json()) as DbFilesResponse;
-    return data.files;
+    return data;
   }
 
   async function fetchSchema(dbId: string): Promise<DbSchemaResponse | null> {
@@ -768,9 +778,17 @@ function createTabPane(
     options: DatabaseEnterOptions = {},
   ) {
     const generation = ++loadGeneration;
-    const files = await fetchDbFiles();
+    const filesResponse = await fetchDbFiles();
     if (generation !== loadGeneration) return;
+    const files = filesResponse.files;
     lastFiles = files;
+    if (filesResponse.truncated) {
+      showDockerNotice(
+        "Docker discovery reached the service limit; some compose services may be hidden.",
+      );
+    } else {
+      clearDockerNotice();
+    }
     dbSelect.innerHTML = "";
     if (files.length === 0) {
       const opt = document.createElement("option");
@@ -863,7 +881,8 @@ function createTabPane(
     }
     if (target.query) {
       setActiveTab("query");
-      if (target.query.sql) queryEditor.setSql(target.query.sql);
+      if (target.query.sql)
+        queryEditor.setSql(target.query.sql, { silent: true });
       if (target.query.autoRun && target.query.sql) {
         // Client-side SQL classification is only a UX hint; the server-side
         // readonly execution path is the actual protection boundary.
@@ -930,6 +949,10 @@ function createTabPane(
     return state;
   }
 
+  function getDbKind(): DbKind | null {
+    return currentDb?.kind ?? null;
+  }
+
   function getAnnotationTarget(): DatabaseAnnotationTarget | null {
     if (!currentDb) return null;
     const target: DatabaseAnnotationTarget = {
@@ -975,8 +998,8 @@ function createTabPane(
     globalSearchView.dispose();
     snapshotView.dispose();
     historyView.clear();
-    redisExplorer.clear();
-    esExplorer.clear();
+    redisExplorer.dispose();
+    esExplorer.dispose();
     currentDb = null;
     currentTable = null;
     schemaCache = null;
@@ -987,6 +1010,7 @@ function createTabPane(
     enter,
     handleSse,
     getState,
+    getDbKind,
     getAnnotationTarget,
     getLabel,
     dispose,
@@ -1221,20 +1245,20 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return false;
   }
 
-  function closeDbIfUnused(dbId: string | null): void {
+  function closeDbIfUnused(dbId: string | null, kind: DbKind | null): void {
     if (!dbId || isDbStillOpen(dbId)) return;
     const body = JSON.stringify({ db: dbId });
     const headers = {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    for (const path of [
-      "/_db/close",
-      "/_db/redis/close",
-      "/_db/elasticsearch/close",
-    ]) {
-      void fetch(path, { method: "POST", headers, body }).catch(() => {});
-    }
+    const path =
+      kind === "redis"
+        ? "/_db/redis/close"
+        : kind === "elasticsearch"
+          ? "/_db/elasticsearch/close"
+          : "/_db/close";
+    void fetch(path, { method: "POST", headers, body }).catch(() => {});
   }
 
   function clearDropTarget(): void {
@@ -1481,6 +1505,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const entry = tabsById.get(id);
     if (!entry) return;
     const closedDbId = entry.pane.getState().dbId;
+    const closedKind = entry.pane.getDbKind();
     entry.pane.dispose();
     entry.pane.el.remove();
     entry.chip.remove();
@@ -1488,7 +1513,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const orderIndex = tabOrder.indexOf(id);
     if (orderIndex >= 0) tabOrder.splice(orderIndex, 1);
     paneReadyById.delete(id);
-    closeDbIfUnused(closedDbId);
+    closeDbIfUnused(closedDbId, closedKind);
     if (activeTabId !== id) {
       scheduleSave();
       return;

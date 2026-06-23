@@ -1,4 +1,3 @@
-import { relative } from "node:path";
 import type {
   EsDocResponse,
   EsDocsResponse,
@@ -10,33 +9,10 @@ import {
   type ElasticsearchExplorer,
   openElasticsearchAdapter,
 } from "./adapters/elasticsearch";
-import { discoverDockerDatabases, parseDockerDbId } from "./discovery";
+import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
 
 const esAdapterCache = new Map<string, ElasticsearchExplorer>();
-
-type DockerEsInfo = {
-  serviceName: string;
-  env: Record<string, string>;
-  composeDir: string;
-};
-
-let cachedEsServices: DockerEsInfo[] | null = null;
-let cachedEsCwd: string | null = null;
-
-function getEsServices(cwd: string): DockerEsInfo[] {
-  if (cachedEsCwd === cwd && cachedEsServices) return cachedEsServices;
-  const all = discoverDockerDatabases(cwd);
-  cachedEsServices = all
-    .filter((d) => d.kind === "elasticsearch")
-    .map((d) => ({
-      serviceName: d.serviceName,
-      env: d.env,
-      composeDir: d.composeDir,
-    }));
-  cachedEsCwd = cwd;
-  return cachedEsServices;
-}
 
 function resolveEs(
   cwd: string,
@@ -48,12 +24,7 @@ function resolveEs(
   }
   const parsed = parseDockerDbId(dbParam);
   if (!parsed) return textError("invalid docker db id", 400);
-  const services = getEsServices(cwd);
-  const info = services.find(
-    (s) =>
-      s.serviceName === parsed.serviceName &&
-      relative(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir,
-  );
+  const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
   if (!info) return textError("elasticsearch service not found", 404);
 
   const cached = esAdapterCache.get(dbParam);
@@ -193,9 +164,7 @@ async function handleSearch(
     const result = await r.explorer.query(input);
     const body: EsQueryResponse = {
       dbId: r.dbId,
-      status: result.status,
-      body: result.body,
-      elapsedMs: result.elapsedMs,
+      ...result,
     };
     return json(body);
   } catch (err) {

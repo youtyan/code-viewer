@@ -4490,6 +4490,8 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
   const relDirSlash = relDir.replace(/\\/g, "/");
   const filename = basename2(filepath);
   for (let i = 0;i < servicePositions.length; i++) {
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
     const svc = servicePositions[i];
     const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
     const svcBlock = servicesBlock.slice(svc.start, nextStart);
@@ -4521,7 +4523,8 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
       kind,
       serviceName: svc.name,
       env,
-      composeDir
+      composeDir,
+      relDirSlash
     });
   }
 }
@@ -4570,6 +4573,7 @@ function discoverDockerDatabases(cwd, omitDirNames = []) {
   }
   scan(cwd, 0);
   if (results.length >= MAX_DOCKER_SERVICES) {
+    results.truncated = true;
     console.warn(`[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`);
   }
   return results;
@@ -4592,14 +4596,17 @@ function parseDockerDbId(dbId) {
       rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx2)}`;
     }
     const [serviceName, encodedRel] = rest.split("@");
-    if (!/^[A-Za-z0-9_-]+$/.test(serviceName))
+    if (!isSafeDockerServiceName(serviceName))
       return null;
-    if (database && hasControlCharacter(database))
+    if (!isSafeDockerDatabaseName(database))
       return null;
     try {
+      const relDir = decodeURIComponent(encodedRel || "");
+      if (!isSafeDockerRelDir(relDir))
+        return null;
       return {
         serviceName,
-        relDir: decodeURIComponent(encodedRel || ""),
+        relDir,
         database
       };
     } catch {
@@ -4611,11 +4618,37 @@ function parseDockerDbId(dbId) {
     database = rest.slice(colonIdx + 1);
     rest = rest.slice(0, colonIdx);
   }
-  if (!/^[A-Za-z0-9_-]+$/.test(rest))
+  if (!isSafeDockerServiceName(rest))
     return null;
-  if (database && hasControlCharacter(database))
+  if (!isSafeDockerDatabaseName(database))
     return null;
   return { serviceName: rest, relDir: "", database };
+}
+function findDockerServiceByDbId(cwd, dbId, kind) {
+  const parsed = parseDockerDbId(dbId);
+  if (!parsed)
+    return null;
+  return discoverDockerDatabases(cwd).find((d) => d.serviceName === parsed.serviceName && d.relDirSlash === parsed.relDir && (!kind || d.kind === kind)) || null;
+}
+function isSafeDockerServiceName(value) {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+function isSafeDockerRelDir(value) {
+  if (value === "")
+    return true;
+  if (!/^[A-Za-z0-9_./-]+$/.test(value))
+    return false;
+  const parts = value.split("/");
+  return parts.every((p) => p !== "" && p !== "." && p !== "..");
+}
+function isSafeDockerDatabaseName(value) {
+  if (value === undefined)
+    return true;
+  if (value === "")
+    return false;
+  if (hasControlCharacter(value))
+    return false;
+  return /^[A-Za-z0-9_$.-]+$/.test(value);
 }
 function hasControlCharacter(value) {
   for (const ch of value) {
@@ -5973,16 +6006,17 @@ var init_redis = __esm(() => {
 var exports_elasticsearch = {};
 __export(exports_elasticsearch, {
   openElasticsearchAdapter: () => openElasticsearchAdapter,
+  isReadOnlyEsPath: () => isReadOnlyEsPath,
   canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
 });
 import { spawnSync as spawnSync4 } from "node:child_process";
 function isReadOnlyEsPath(rawPath) {
-  const path = rawPath.split("?")[0];
-  for (const seg of path.split("/")) {
-    if (ES_QUERY_ALLOWED_SUBPATHS.has(seg))
-      return true;
-  }
-  return false;
+  const path = rawPath.split("?")[0].replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0 || segments.length > 2)
+    return false;
+  const apiSegment = segments[segments.length - 1];
+  return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
 }
 function execEsRequest(config, method, path, body, timeoutMs = 15000) {
   const hasPassword = !!config.password;
@@ -6320,19 +6354,6 @@ var exports_handle_redis = {};
 __export(exports_handle_redis, {
   handleRedisRoute: () => handleRedisRoute
 });
-import { relative as relative3 } from "node:path";
-function getRedisServices(cwd) {
-  if (cachedRedisCwd === cwd && cachedRedisDbs)
-    return cachedRedisDbs;
-  const all = discoverDockerDatabases(cwd);
-  cachedRedisDbs = all.filter((d) => d.kind === "redis").map((d) => ({
-    serviceName: d.serviceName,
-    env: d.env,
-    composeDir: d.composeDir
-  }));
-  cachedRedisCwd = cwd;
-  return cachedRedisDbs;
-}
 function resolveRedis(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
@@ -6342,8 +6363,7 @@ function resolveRedis(cwd, dbParam) {
   const parsed = parseDockerDbId(dbParam);
   if (!parsed)
     return textError("invalid docker db id", 400);
-  const services = getRedisServices(cwd);
-  const info = services.find((s) => s.serviceName === parsed.serviceName && relative3(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir);
+  const info = findDockerServiceByDbId(cwd, dbParam, "redis");
   if (!info)
     return textError("redis service not found", 404);
   const cached = redisAdapterCache.get(dbParam);
@@ -6474,7 +6494,7 @@ function handleValue(cwd, url) {
     return textError(`failed to read redis value: ${err instanceof Error ? err.message : String(err)}`, 500);
   }
 }
-var redisAdapterCache, cachedRedisDbs = null, cachedRedisCwd = null;
+var redisAdapterCache;
 var init_handle_redis = __esm(() => {
   init_redis();
   init_discovery();
@@ -6487,19 +6507,6 @@ var exports_handle_elasticsearch = {};
 __export(exports_handle_elasticsearch, {
   handleElasticsearchRoute: () => handleElasticsearchRoute
 });
-import { relative as relative4 } from "node:path";
-function getEsServices(cwd) {
-  if (cachedEsCwd === cwd && cachedEsServices)
-    return cachedEsServices;
-  const all = discoverDockerDatabases(cwd);
-  cachedEsServices = all.filter((d) => d.kind === "elasticsearch").map((d) => ({
-    serviceName: d.serviceName,
-    env: d.env,
-    composeDir: d.composeDir
-  }));
-  cachedEsCwd = cwd;
-  return cachedEsServices;
-}
 function resolveEs(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
@@ -6509,8 +6516,7 @@ function resolveEs(cwd, dbParam) {
   const parsed = parseDockerDbId(dbParam);
   if (!parsed)
     return textError("invalid docker db id", 400);
-  const services = getEsServices(cwd);
-  const info = services.find((s) => s.serviceName === parsed.serviceName && relative4(cwd, s.composeDir).replace(/\\/g, "/") === parsed.relDir);
+  const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
   if (!info)
     return textError("elasticsearch service not found", 404);
   const cached = esAdapterCache.get(dbParam);
@@ -6626,9 +6632,7 @@ async function handleSearch(cwd, req, url) {
     const result = await r.explorer.query(input);
     const body = {
       dbId: r.dbId,
-      status: result.status,
-      body: result.body,
-      elapsedMs: result.elapsedMs
+      ...result
     };
     return json(body);
   } catch (err) {
@@ -6740,7 +6744,7 @@ async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
   }
   return null;
 }
-var esAdapterCache, cachedEsServices = null, cachedEsCwd = null;
+var esAdapterCache;
 var init_handle_elasticsearch = __esm(() => {
   init_elasticsearch();
   init_discovery();
@@ -6752,11 +6756,11 @@ var init_handle_elasticsearch = __esm(() => {
 var exports_handle = {};
 __export(exports_handle, {
   textError: () => textError,
+  parseSelectAllTable: () => parseSelectAllTable,
   json: () => json,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
 import { randomBytes as randomBytes3 } from "node:crypto";
-import { relative as relative5 } from "node:path";
 function ensureInit() {
   if (initialized)
     return;
@@ -6827,13 +6831,6 @@ function textError(message, status) {
 function sanitizeFilename(name) {
   return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
 }
-function getDockerDbs(cwd) {
-  if (cachedDockerCwd === cwd && cachedDockerDbs)
-    return cachedDockerDbs;
-  cachedDockerDbs = discoverDockerDatabases(cwd);
-  cachedDockerCwd = cwd;
-  return cachedDockerDbs;
-}
 function resolveDb(cwd, dbParam) {
   if (!dbParam)
     return textError("missing db parameter", 400);
@@ -6841,8 +6838,7 @@ function resolveDb(cwd, dbParam) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed)
       return textError("invalid docker db id", 400);
-    const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === parsed.serviceName && relative5(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir);
+    const info = findDockerServiceByDbId(cwd, dbParam);
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
@@ -6871,6 +6867,7 @@ function toFileInfo(entry) {
 function handleFiles(cwd, omitDirNames) {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
   const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
+  const dockerTruncated = dockerServices.truncated === true;
   const dockerEntries = [];
   for (const svc of dockerServices) {
     if (svc.kind === "redis" || svc.kind === "elasticsearch") {
@@ -6901,7 +6898,8 @@ function handleFiles(cwd, omitDirNames) {
         kind: "sqlite"
       })),
       ...dockerEntries.map(toFileInfo)
-    ]
+    ],
+    ...dockerTruncated ? { truncated: true } : {}
   };
   return json(body);
 }
@@ -7095,7 +7093,7 @@ function unquoteSqlIdentifier(raw) {
 }
 function parseSelectAllTable(sql) {
   const identifier = '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
-  const match = sql.trim().replace(/;\s*$/, "").match(new RegExp(String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?(?:\s|$)`, "i"));
+  const match = sql.trim().replace(/;\s*$/, "").match(new RegExp(String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?\s*$`, "i"));
   if (!match)
     return null;
   return unquoteSqlIdentifier(match[2] || match[1]);
@@ -7530,8 +7528,7 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed)
       return textError("invalid docker db id", 400);
-    const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === parsed.serviceName && relative5(cwd, d.composeDir).replace(/\\/g, "/") === parsed.relDir);
+    const info = findDockerServiceByDbId(cwd, body.db);
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
@@ -7843,7 +7840,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   }
   return null;
 }
-var initialized = false, MAX_DOCKER_ADAPTER_CACHE = 8, DOCKER_ADAPTER_IDLE_MS, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs;
+var initialized = false, MAX_DOCKER_ADAPTER_CACHE = 8, DOCKER_ADAPTER_IDLE_MS, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
@@ -7878,7 +7875,7 @@ import {
   writeFileSync as writeFileSync5
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname2, extname, join as join12, relative as relative6 } from "node:path";
+import { basename as basename3, dirname as dirname2, extname, join as join12, relative as relative3 } from "node:path";
 function parseCli() {
   const rest = [];
   for (let i = 2;i < process.argv.length; i++) {
@@ -8329,7 +8326,7 @@ function safeWorktreePath(path) {
   } catch {
     return null;
   }
-  const rel = relative6(realCwd, realFull);
+  const rel = relative3(realCwd, realFull);
   if (rel === "" || rel.startsWith("..") || rel.startsWith("/") || rel.startsWith("\\"))
     return null;
   if (isGitInternalPath(rel))
@@ -9119,7 +9116,7 @@ async function handleUploadFiles(req) {
     if (total > MAX_UPLOAD_TOTAL_BYTES)
       return text("upload too large", 413);
     const target = join12(realDir, safeName);
-    if (relative6(realDir, dirname2(target)) !== "")
+    if (relative3(realDir, dirname2(target)) !== "")
       return text("invalid filename", 400);
     if (existsSync9(target))
       return text("file exists", 409);
@@ -9285,7 +9282,7 @@ function restoreTrashPath(originalPath, trashPath) {
       return { ok: false, error: "trash item not found" };
     try {
       const trashRoot = join12(homedir3(), ".Trash");
-      const trashRelative = relative6(trashRoot, trashPath);
+      const trashRelative = relative3(trashRoot, trashPath);
       if (trashRelative === "" || trashRelative.startsWith("..") || trashRelative.startsWith("/") || trashRelative.startsWith("\\"))
         return { ok: false, error: "invalid trash handle" };
       mkdirSync7(dirname2(original), { recursive: true });
