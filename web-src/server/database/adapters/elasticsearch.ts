@@ -28,27 +28,6 @@ export type ElasticsearchExplorer = DocSource &
     readonly kind: "elasticsearch";
     readonly model: "document";
     readonly capabilities: { snapshot: true; query: true };
-    listIndices(): EsIndexInfo[];
-    getMapping(index: string): EsMapping;
-    searchDocs(opts: {
-      index: string;
-      query?: string;
-      size?: number;
-      searchAfter?: unknown[];
-    }): EsSearchResult;
-    getDoc(opts: { index: string; id: string }): {
-      found: boolean;
-      source: unknown;
-      seqNo?: number;
-      primaryTerm?: number;
-    };
-    iterateForSnapshot(
-      container: string,
-      signal?: AbortSignal,
-    ): AsyncIterable<SnapshotItem>;
-    listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
-    query(input: EsQueryRequest): Promise<EsQueryResult>;
-    close(): void;
   };
 
 // read-only ガード: 任意 path に書き込み系 API を投げられたら危険なので、
