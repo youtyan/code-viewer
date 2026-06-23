@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   commitDiffRange,
   EMPTY_TREE_SHA,
@@ -6,6 +6,199 @@ import {
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
+import { renderMarkdownHtml } from "../core/markdown-preview";
+import type { AppRoute } from "../core/routes";
+import {
+  buildExpandableHistoryBody,
+  createHistoryView,
+  HISTORY_BODY_COLLAPSE_LINES,
+  HISTORY_WORKTREE_COMMIT,
+  HISTORY_WORKTREE_LABEL,
+  historyBodyLineCount,
+} from "../views/history-view";
+
+const originalDocument = globalThis.document;
+const originalFetch = globalThis.fetch;
+const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+
+afterEach(() => {
+  globalThis.document = originalDocument;
+  globalThis.fetch = originalFetch;
+  globalThis.IntersectionObserver = OriginalIntersectionObserver;
+});
+
+class FakeClassList {
+  private classes = new Set<string>();
+
+  constructor(value = "") {
+    this.set(value);
+  }
+
+  set(value: string) {
+    this.classes = new Set(value.split(/\s+/).filter(Boolean));
+  }
+
+  contains(name: string) {
+    return this.classes.has(name);
+  }
+
+  toggle(name: string, force?: boolean) {
+    const next = force ?? !this.classes.has(name);
+    if (!next) {
+      this.classes.delete(name);
+      return false;
+    }
+    this.classes.add(name);
+    return true;
+  }
+}
+
+class FakeElement {
+  children: FakeElement[] = [];
+  classList = new FakeClassList();
+  id = "";
+  textContent = "";
+  private htmlValue = "";
+  hidden = false;
+  type = "";
+  dataset: Record<string, string> = {};
+  attributes: Record<string, string> = {};
+  preventDefaultCount = 0;
+  parentElement: FakeElement | null = null;
+  private listeners: Record<string, Array<(event?: unknown) => void>> = {};
+  private classValue = "";
+
+  get innerHTML() {
+    return this.htmlValue;
+  }
+
+  set innerHTML(value: string) {
+    this.htmlValue = value;
+    if (!value.includes("<li")) return;
+    this.children = [];
+    const rowRe = /<li\s+([^>]*)>([\s\S]*?)<\/li>/g;
+    let match: RegExpExecArray | null;
+    for (;;) {
+      match = rowRe.exec(value);
+      if (!match) break;
+      const row = new FakeElement();
+      const attrs = match[1];
+      const classMatch = /\bclass="([^"]*)"/.exec(attrs);
+      if (classMatch) row.className = classMatch[1];
+      const shaMatch = /\bdata-sha="([^"]*)"/.exec(attrs);
+      if (shaMatch) row.dataset.sha = shaMatch[1];
+      row.textContent = match[2].replace(/<[^>]*>/g, "");
+      this.appendChild(row);
+    }
+  }
+
+  get className() {
+    return this.classValue;
+  }
+
+  set className(value: string) {
+    this.classValue = value;
+    this.classList.set(value);
+  }
+
+  appendChild(child: FakeElement) {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  append(...children: FakeElement[]) {
+    for (const child of children) this.appendChild(child);
+  }
+
+  addEventListener(event: string, listener: (event?: unknown) => void) {
+    this.listeners[event] = [...(this.listeners[event] || []), listener];
+  }
+
+  click() {
+    for (const listener of this.listeners.click || []) listener();
+  }
+
+  dispatch(event: string, payload: unknown) {
+    for (const listener of this.listeners[event] || []) listener(payload);
+  }
+
+  keyDown(key: string) {
+    const event = {
+      key,
+      preventDefault: () => {
+        this.preventDefaultCount++;
+      },
+    };
+    for (const listener of this.listeners.keydown || []) listener(event);
+  }
+
+  setAttribute(name: string, value: string) {
+    this.attributes[name] = value;
+    if (name === "hidden") this.hidden = true;
+  }
+
+  removeAttribute(name: string) {
+    delete this.attributes[name];
+    if (name === "hidden") this.hidden = false;
+  }
+
+  replaceChildren(...children: FakeElement[]) {
+    this.children = [];
+    this.append(...children);
+  }
+
+  matches(selector: string) {
+    const idMatch = /^#([\w-]+)$/.exec(selector);
+    if (idMatch) return this.id === idMatch[1];
+    const classDataMatch = /^\.([\w-]+)\[data-sha="([^"]+)"\]$/.exec(selector);
+    if (classDataMatch)
+      return (
+        this.classList.contains(classDataMatch[1]) &&
+        this.dataset.sha === classDataMatch[2]
+      );
+    const classMatch = /^\.([\w-]+)$/.exec(selector);
+    if (classMatch) return this.classList.contains(classMatch[1]);
+    return false;
+  }
+
+  closest(selector: string) {
+    let current: FakeElement | null = this;
+    while (current) {
+      if (current.matches(selector)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  querySelector(selector: string): FakeElement | null {
+    for (const child of this.children) {
+      if (child.matches(selector)) return child;
+      const found = child.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  querySelectorAll(selector: string): FakeElement[] {
+    const result: FakeElement[] = [];
+    for (const child of this.children) {
+      if (child.matches(selector)) result.push(child);
+      result.push(...child.querySelectorAll(selector));
+    }
+    return result;
+  }
+
+  scrollIntoView() {
+    // no-op in unit tests
+  }
+}
+
+function installFakeDocument() {
+  globalThis.document = {
+    createElement: () => new FakeElement(),
+  } as unknown as Document;
+}
 
 describe("commitDiffRange", () => {
   test("uses first parent as from", () => {
@@ -104,5 +297,340 @@ describe("historyGroupLabel", () => {
 
   test("falls back for unparsable dates", () => {
     expect(historyGroupLabel("not-a-date", now)).toBe("Unknown date");
+  });
+});
+
+describe("history commit body rendering", () => {
+  test("short commit bodies do not get an expander", () => {
+    installFakeDocument();
+    const rendered = new FakeElement();
+    const raw = Array.from(
+      { length: HISTORY_BODY_COLLAPSE_LINES },
+      (_, i) => `line ${i + 1}`,
+    ).join("\n");
+
+    expect(historyBodyLineCount(raw)).toBe(HISTORY_BODY_COLLAPSE_LINES);
+    expect(
+      buildExpandableHistoryBody(rendered as unknown as HTMLElement, raw),
+    ).toBe(rendered);
+  });
+
+  test("long commit bodies get a Japanese expand/collapse toggle", () => {
+    installFakeDocument();
+    const rendered = new FakeElement();
+    const raw = Array.from(
+      { length: HISTORY_BODY_COLLAPSE_LINES + 2 },
+      (_, i) => `line ${i + 1}`,
+    ).join("\n");
+
+    const wrapped = buildExpandableHistoryBody(
+      rendered as unknown as HTMLElement,
+      raw,
+    ) as unknown as FakeElement;
+    const collapsible = wrapped.children[0];
+    const toggle = wrapped.children[1];
+
+    expect(wrapped.className).toBe("hci-body-expandable");
+    expect(collapsible.className).toBe("hci-body-collapsible");
+    expect(collapsible.children).toEqual([rendered]);
+    expect(toggle.className).toBe("hci-body-toggle");
+    expect(toggle.attributes.role).toBe("button");
+    expect(toggle.attributes.tabindex).toBe("0");
+    expect(toggle.textContent).toBe("もっと見る (2 行)");
+    expect(toggle.attributes["aria-expanded"]).toBe("false");
+
+    toggle.click();
+    expect(collapsible.classList.contains("expanded")).toBe(true);
+    expect(toggle.textContent).toBe("閉じる");
+    expect(toggle.attributes["aria-expanded"]).toBe("true");
+
+    toggle.click();
+    expect(collapsible.classList.contains("expanded")).toBe(false);
+    expect(toggle.textContent).toBe("もっと見る (2 行)");
+    expect(toggle.attributes["aria-expanded"]).toBe("false");
+
+    toggle.keyDown("Enter");
+    expect(collapsible.classList.contains("expanded")).toBe(true);
+    expect(toggle.textContent).toBe("閉じる");
+    expect(toggle.attributes["aria-expanded"]).toBe("true");
+    expect(toggle.preventDefaultCount).toBe(1);
+
+    toggle.keyDown(" ");
+    expect(collapsible.classList.contains("expanded")).toBe(false);
+    expect(toggle.textContent).toBe("もっと見る (2 行)");
+    expect(toggle.attributes["aria-expanded"]).toBe("false");
+    expect(toggle.preventDefaultCount).toBe(2);
+
+    toggle.keyDown("Escape");
+    expect(collapsible.classList.contains("expanded")).toBe(false);
+    expect(toggle.attributes["aria-expanded"]).toBe("false");
+    expect(toggle.preventDefaultCount).toBe(2);
+  });
+
+  test("commit body markdown renders headings, bold text, and code blocks", () => {
+    const html = renderMarkdownHtml(
+      "# Heading\n\n**bold**\n\n```ts\nconst value = 1;\n```",
+      { path: "COMMIT_MSG", ref: "abc123" },
+      null,
+    );
+
+    expect(html.includes('<h1 id="heading"')).toBe(true);
+    expect(html.includes("<strong>bold</strong>")).toBe(true);
+    expect(html.includes("<pre><code>const value = 1;")).toBe(true);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function installHistoryViewDom() {
+  const panel = new FakeElement();
+  const list = new FakeElement();
+  const banner = new FakeElement();
+  const status = new FakeElement();
+  const sentinel = new FakeElement();
+  const info = new FakeElement();
+  const head = new FakeElement();
+  const sha = new FakeElement();
+  const author = new FakeElement();
+  const date = new FakeElement();
+  const subject = new FakeElement();
+  const body = new FakeElement();
+  info.id = "history-commit-info";
+  head.className = "hci-head";
+  sha.className = "hci-sha";
+  author.className = "hci-author";
+  date.className = "hci-date";
+  subject.className = "hci-subject";
+  body.className = "hci-body";
+  head.append(sha, author, date);
+  info.append(head, subject, body);
+
+  globalThis.document = {
+    querySelector: (selector: string) =>
+      selector === "#history-commit-info" ? info : null,
+    createElement: () => new FakeElement(),
+  } as unknown as Document;
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+    takeRecords() {
+      return [];
+    }
+  } as unknown as typeof IntersectionObserver;
+
+  return { panel, list, banner, status, sentinel, info, head, subject, body };
+}
+
+describe("history view lifecycle", () => {
+  test("renders a fixed worktree row and selecting it shows the worktree diff in history", async () => {
+    const { panel, list, banner, status, sentinel, head, subject, body } =
+      installHistoryViewDom();
+    const commit = {
+      sha: "abc1234567890",
+      parents: ["parent1"],
+      subject: "normal commit",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits: [commit], hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const routes: Array<{ route: AppRoute; replace?: boolean }> = [];
+    const appliedRanges: Array<{ from: string; to: string }> = [];
+    let emptyDiffRenders = 0;
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next, replace) => {
+        route = next;
+        routes.push({ route: next, replace });
+      },
+      applyCommitRange: async (range) => {
+        appliedRanges.push(range);
+      },
+      showEmptyDiffPane: () => {
+        emptyDiffRenders++;
+      },
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+
+    const rows = list.querySelectorAll(".history-item");
+    expect(rows.map((row) => row.dataset.sha)).toEqual([
+      HISTORY_WORKTREE_COMMIT,
+      commit.sha,
+    ]);
+    expect(rows[0].textContent.includes(HISTORY_WORKTREE_LABEL)).toBe(true);
+    expect(emptyDiffRenders).toBe(1);
+
+    list.dispatch("click", { target: rows[0] });
+    await Promise.resolve();
+
+    expect(view.isWorktreeSelected()).toBe(true);
+    expect(rows[0].classList.contains("active")).toBe(true);
+    expect(routes).toEqual([
+      {
+        route: {
+          screen: "history",
+          ref: "HEAD",
+          commit: HISTORY_WORKTREE_COMMIT,
+          range: { from: "HEAD", to: "worktree" },
+        },
+        replace: true,
+      },
+    ]);
+    expect(appliedRanges).toEqual([{ from: "HEAD", to: "worktree" }]);
+    expect(head.hidden).toBe(true);
+    expect(subject.textContent).toBe(HISTORY_WORKTREE_LABEL);
+    expect(body.hidden).toBe(true);
+  });
+
+  test("deep link commit=worktree restores the worktree selection", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits: [], hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      commit: HISTORY_WORKTREE_COMMIT,
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const appliedRanges: Array<{ from: string; to: string }> = [];
+    let emptyDiffRenders = 0;
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => {
+        throw new Error("worktree deep links should not rewrite the URL");
+      },
+      applyCommitRange: async (range) => {
+        appliedRanges.push(range);
+      },
+      showEmptyDiffPane: () => {
+        emptyDiffRenders++;
+      },
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+
+    const rows = list.querySelectorAll(".history-item");
+    expect(view.isWorktreeSelected()).toBe(true);
+    expect(rows[0].dataset.sha).toBe(HISTORY_WORKTREE_COMMIT);
+    expect(rows[0].classList.contains("active")).toBe(true);
+    expect(appliedRanges).toEqual([{ from: "HEAD", to: "worktree" }]);
+    expect(emptyDiffRenders).toBe(0);
+  });
+
+  test("leaveHistory prevents an in-flight enter from showing stale empty diff state", async () => {
+    const panel = new FakeElement();
+    const list = new FakeElement();
+    const banner = new FakeElement();
+    const status = new FakeElement();
+    const sentinel = new FakeElement();
+    const info = new FakeElement();
+    const body = new FakeElement();
+    info.querySelector = ((selector: string) =>
+      selector === ".hci-body" ? body : null) as typeof info.querySelector;
+    globalThis.document = {
+      querySelector: (selector: string) =>
+        selector === "#history-commit-info" ? info : null,
+      createElement: () => new FakeElement(),
+    } as unknown as Document;
+    globalThis.IntersectionObserver = class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+    const pending = deferred<Response>();
+    globalThis.fetch = (() => pending.promise) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    let emptyDiffRenders = 0;
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => {},
+      applyCommitRange: async () => {},
+      showEmptyDiffPane: () => {
+        emptyDiffRenders++;
+      },
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    const entering = view.enterHistory();
+    view.leaveHistory();
+    route = {
+      screen: "database",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    pending.resolve(
+      new Response(JSON.stringify({ commits: [], hasMore: false }), {
+        status: 200,
+      }),
+    );
+    await entering;
+
+    expect(emptyDiffRenders).toBe(0);
+    expect(info.hidden).toBe(true);
   });
 });

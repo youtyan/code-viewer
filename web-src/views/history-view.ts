@@ -10,7 +10,12 @@ import {
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
+import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
+
+export const HISTORY_BODY_COLLAPSE_LINES = 10;
+export const HISTORY_WORKTREE_COMMIT = "worktree";
+export const HISTORY_WORKTREE_LABEL = "未コミット変更 (Working tree)";
 
 export type HistoryViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -21,8 +26,57 @@ export type HistoryViewDeps = {
   applyCommitRange(range: { from: string; to: string }): Promise<void>;
   // Clears the diff pane and shows the "no commit selected" empty state.
   showEmptyDiffPane(): void;
+  getSyntaxHighlight(): boolean;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
 };
+
+export function historyBodyLineCount(rawText: string): number {
+  if (!rawText) return 0;
+  return rawText.split(/\r?\n/).length;
+}
+
+export function historyBodyToggleLabel(
+  expanded: boolean,
+  remainingLines: number,
+) {
+  return expanded ? "閉じる" : `もっと見る (${remainingLines} 行)`;
+}
+
+export function buildExpandableHistoryBody(
+  rendered: HTMLElement,
+  rawText: string,
+): HTMLElement {
+  const lineCount = historyBodyLineCount(rawText);
+  if (lineCount <= HISTORY_BODY_COLLAPSE_LINES) return rendered;
+  const wrap = document.createElement("div");
+  wrap.className = "hci-body-expandable";
+  const collapsible = document.createElement("div");
+  collapsible.className = "hci-body-collapsible";
+  collapsible.appendChild(rendered);
+  const button = document.createElement("div");
+  button.className = "hci-body-toggle";
+  button.setAttribute("role", "button");
+  button.setAttribute("tabindex", "0");
+  const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
+  const sync = () => {
+    const expanded = collapsible.classList.contains("expanded");
+    button.textContent = historyBodyToggleLabel(expanded, remainingLines);
+    button.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+  const toggle = () => {
+    collapsible.classList.toggle("expanded");
+    sync();
+  };
+  button.addEventListener("click", toggle);
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggle();
+  });
+  sync();
+  wrap.append(collapsible, button);
+  return wrap;
+}
 
 export function createHistoryView(deps: HistoryViewDeps) {
   const panel = deps.$<HTMLElement>("#history-panel");
@@ -39,6 +93,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let selectedSha = "";
   let query = "";
 
+  function worktreeDiffRange() {
+    return { from: "HEAD", to: "worktree" };
+  }
+
   function setBanner(message: string) {
     banner.textContent = message;
     banner.hidden = !message;
@@ -47,6 +105,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function setStatusText(message: string) {
     statusEl.textContent = message;
     statusEl.hidden = !message;
+  }
+
+  function clearCommitInfo() {
+    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    if (!info) return;
+    info.hidden = true;
+    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
+    info.querySelector<HTMLElement>(".hci-body")?.replaceChildren();
   }
 
   function relativeWhen(iso: string): string {
@@ -61,6 +127,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const day = Math.round(hour / 24);
     if (day < 30) return `${day}d ago`;
     return iso.slice(0, 10);
+  }
+
+  function absoluteWhen(iso: string): string {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const d = new Date(t);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function displayWhen(iso: string): string {
+    const relative = relativeWhen(iso);
+    const absolute = absoluteWhen(iso);
+    if (relative === absolute || relative === absolute.slice(0, 10))
+      return absolute;
+    return `${relative} (${absolute})`;
   }
 
   function fetchPage(skip: number): Promise<HistoryLogResponse | null> {
@@ -88,7 +170,20 @@ export function createHistoryView(deps: HistoryViewDeps) {
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` +
       `<span class="author">${deps.escapeHtml(commit.author)}</span>` +
-      `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` +
+      `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` +
+      `</span>` +
+      `</li>`
+    );
+  }
+
+  function worktreeRow(): string {
+    const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
+    return (
+      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
+      `<span class="subject" title="${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}">${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}</span>` +
+      `<span class="meta2">` +
+      `<span class="sha">HEAD..worktree</span>` +
+      `<span class="author">Working tree</span>` +
       `</span>` +
       `</li>`
     );
@@ -96,7 +191,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function renderList() {
     const now = new Date();
-    const html: string[] = [];
+    const html: string[] = [worktreeRow()];
     let lastGroup = "";
     for (const commit of commits) {
       const group = historyGroupLabel(commit.when, now);
@@ -112,17 +207,19 @@ export function createHistoryView(deps: HistoryViewDeps) {
     setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
   }
 
-  function updateCommitInfo(commit: HistoryCommit | null) {
+  async function updateCommitInfo(commit: HistoryCommit | null) {
     const info = document.querySelector<HTMLElement>("#history-commit-info");
     if (!info) return;
     if (!commit) {
-      info.hidden = true;
+      clearCommitInfo();
       return;
     }
+    const gen = generation;
     const set = (sel: string, text: string) => {
       const el = info.querySelector<HTMLElement>(sel);
       if (el) el.textContent = text;
     };
+    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
     set(".hci-sha", commit.sha);
     set(".hci-author", commit.author);
     const t = Date.parse(commit.when);
@@ -133,8 +230,33 @@ export function createHistoryView(deps: HistoryViewDeps) {
     set(".hci-subject", commit.subject);
     const body = info.querySelector<HTMLElement>(".hci-body");
     if (body) {
-      body.textContent = commit.body;
-      body.hidden = !commit.body;
+      body.replaceChildren();
+      if (!commit.body) {
+        body.hidden = true;
+      } else {
+        body.hidden = false;
+        const rendered = await renderMarkdownPreview(
+          commit.body,
+          { path: "COMMIT_MSG", ref: commit.sha },
+          { syntaxHighlight: deps.getSyntaxHighlight() },
+        );
+        if (gen !== generation || selectedSha !== commit.sha) return;
+        body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
+      }
+    }
+    info.hidden = false;
+  }
+
+  function updateWorktreeInfo() {
+    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    if (!info) return;
+    info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
+    const subject = info.querySelector<HTMLElement>(".hci-subject");
+    if (subject) subject.textContent = HISTORY_WORKTREE_LABEL;
+    const body = info.querySelector<HTMLElement>(".hci-body");
+    if (body) {
+      body.hidden = true;
+      body.replaceChildren();
     }
     info.hidden = false;
   }
@@ -182,7 +304,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const gen = generation;
     selectedSha = commit.sha;
     updateActiveRow();
-    updateCommitInfo(commit);
+    await updateCommitInfo(commit);
     if (gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
@@ -193,6 +315,23 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     if (gen !== generation) return;
     await deps.applyCommitRange(commitDiffRange(commit));
+    if (gen !== generation) return;
+  }
+
+  async function selectWorktree(options: { updateUrl?: boolean } = {}) {
+    const gen = generation;
+    selectedSha = HISTORY_WORKTREE_COMMIT;
+    updateActiveRow();
+    updateWorktreeInfo();
+    const range = worktreeDiffRange();
+    if (options.updateUrl !== false) {
+      deps.setRoute(
+        { screen: "history", ref, commit: selectedSha, range },
+        true,
+      );
+    }
+    if (gen !== generation) return;
+    await deps.applyCommitRange(range);
     if (gen !== generation) return;
   }
 
@@ -222,6 +361,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // single lookup pinned to the top of the list.
   async function resolveDeepLink(sha: string) {
     const gen = generation;
+    if (sha === HISTORY_WORKTREE_COMMIT) {
+      await selectWorktree({ updateUrl: false });
+      return;
+    }
     let pagesLoaded = 0;
     if (commits.length === 0) {
       await loadNextPage();
@@ -252,7 +395,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
           ? `failed to load commit: ${sha}`
           : `commit not found: ${sha}`,
       );
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       deps.showEmptyDiffPane();
       return;
     }
@@ -290,6 +433,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const refChanged = nextRef !== ref;
     if (refChanged || force || commits.length === 0) {
       generation++;
+      const gen = generation;
       ref = nextRef;
       commits = [];
       hasMore = false;
@@ -297,9 +441,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
       inFlight = null;
       selectedSha = "";
       setBanner("");
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       renderList();
       await loadNextPage();
+      if (gen !== generation) return;
     }
     const route2 = deps.getRoute();
     if (route2.screen !== "history") return;
@@ -308,7 +453,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     } else {
       selectedSha = "";
       updateActiveRow();
-      updateCommitInfo(null);
+      await updateCommitInfo(null);
       deps.showEmptyDiffPane();
     }
   }
@@ -327,9 +472,24 @@ export function createHistoryView(deps: HistoryViewDeps) {
     void enterHistory(true);
   }
 
+  function leaveHistory() {
+    generation++;
+    loading = false;
+    inFlight = null;
+    selectedSha = "";
+    setBanner("");
+    setStatusText("");
+    updateActiveRow();
+    clearCommitInfo();
+  }
+
   list.addEventListener("click", (e) => {
     const row = (e.target as Element).closest<HTMLElement>(".history-item");
     if (!row?.dataset.sha) return;
+    if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
+      void selectWorktree();
+      return;
+    }
     const commit = commits.find((c) => c.sha === row.dataset.sha);
     if (commit) selectCommit(commit);
   });
@@ -379,5 +539,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   );
   observer.observe(sentinel);
 
-  return { enterHistory, onRefPicked };
+  return {
+    enterHistory,
+    leaveHistory,
+    onRefPicked,
+    isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
+  };
 }

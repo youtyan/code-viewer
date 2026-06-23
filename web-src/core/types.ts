@@ -64,6 +64,7 @@ export type RepoTreeResponse = {
 
 export type SettingsResponse = {
   project: string;
+  branch?: string;
   repo_web_url: string | null;
   scope: {
     omit_dirs_effective: string[];
@@ -139,12 +140,64 @@ export type AnnotationLineRange = {
   end: number;
 };
 
+export type AnnotationDatabaseTab =
+  | "data"
+  | "query"
+  | "schema"
+  | "er"
+  | "search"
+  | "snapshot";
+
+export type AnnotationDatabaseDataState = {
+  search?: string;
+  filters?: Array<{ column: string; value: string }>;
+  sort?: { column: string; direction: "asc" | "desc" };
+  row?: number;
+};
+
+export type AnnotationDatabaseQueryState = {
+  sql?: string;
+  mode?: "run" | "explain";
+  autoRun?: boolean;
+};
+
+export type AnnotationDatabaseSearchState = {
+  term?: string;
+  includeNonText?: boolean;
+  autoRun?: boolean;
+};
+
+export type AnnotationDatabaseSnapshotState = {
+  fromSnapshotId?: string;
+  toSnapshotId?: string;
+  table?: string;
+};
+
+export type AnnotationTarget =
+  | {
+      kind: "code";
+      path: string;
+      line?: AnnotationLineRange;
+      range: { from: string; to: string };
+    }
+  | {
+      kind: "database";
+      db?: string;
+      table?: string;
+      tab?: AnnotationDatabaseTab;
+      data?: AnnotationDatabaseDataState;
+      query?: AnnotationDatabaseQueryState;
+      search?: AnnotationDatabaseSearchState;
+      snapshot?: AnnotationDatabaseSnapshotState;
+    };
+
 export type AnnotationEntry = {
   id: string;
   created_at: string;
   path: string;
   line?: AnnotationLineRange;
   range: { from: string; to: string };
+  target?: AnnotationTarget;
   title?: string;
   body: string;
 };
@@ -198,6 +251,7 @@ export type CommitMeta = {
 
 export type RefCommitResponse = {
   commits?: CommitMeta[];
+  hasMore?: boolean;
 };
 
 type Diff2HtmlGlobal = {
@@ -230,7 +284,7 @@ declare global {
     Diff2HtmlUI: Diff2HtmlGlobal;
     hljs: unknown;
     GdpExpandLogic: typeof GdpExpandLogic;
-    _lastMeta?: DiffMeta;
+    _lastMeta?: DiffMeta | null;
     __gdpScrollSpy?: EventListener;
     __gdpSidebarTouchedAt?: number;
   }

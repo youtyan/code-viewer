@@ -7,10 +7,16 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type {
+  AnnotationDatabaseDataState,
+  AnnotationDatabaseQueryState,
+  AnnotationDatabaseSearchState,
+  AnnotationDatabaseSnapshotState,
+  AnnotationDatabaseTab,
   AnnotationEntry,
   AnnotationLineRange,
   AnnotationSession,
   AnnotationsState,
+  AnnotationTarget,
 } from "../core/types";
 
 export const CODE_VIEWER_DIR = ".code-viewer";
@@ -77,21 +83,184 @@ function normalizeRange(raw: unknown): { from: string; to: string } {
   return { from, to };
 }
 
+function normalizeDatabaseTab(raw: unknown): AnnotationDatabaseTab | undefined {
+  return raw === "data" ||
+    raw === "query" ||
+    raw === "schema" ||
+    raw === "er" ||
+    raw === "search" ||
+    raw === "snapshot"
+    ? raw
+    : undefined;
+}
+
+function normalizeDatabaseDataState(
+  raw: unknown,
+): AnnotationDatabaseDataState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseDataState = {};
+  if (typeof value.search === "string" && value.search)
+    state.search = value.search;
+  if (Array.isArray(value.filters)) {
+    const filters = value.filters
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const filter = item as Record<string, unknown>;
+        return typeof filter.column === "string" &&
+          filter.column &&
+          typeof filter.value === "string" &&
+          filter.value
+          ? { column: filter.column, value: filter.value }
+          : null;
+      })
+      .filter((item): item is { column: string; value: string } => !!item);
+    if (filters.length) state.filters = filters;
+  }
+  if (value.sort && typeof value.sort === "object") {
+    const sort = value.sort as Record<string, unknown>;
+    if (
+      typeof sort.column === "string" &&
+      sort.column &&
+      (sort.direction === "asc" || sort.direction === "desc")
+    ) {
+      state.sort = { column: sort.column, direction: sort.direction };
+    }
+  }
+  if (Number.isInteger(value.row) && (value.row as number) > 0)
+    state.row = value.row as number;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseQueryState(
+  raw: unknown,
+): AnnotationDatabaseQueryState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseQueryState = {};
+  if (typeof value.sql === "string" && value.sql) state.sql = value.sql;
+  if (value.mode === "run" || value.mode === "explain") state.mode = value.mode;
+  if (typeof value.autoRun === "boolean") state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseSearchState(
+  raw: unknown,
+): AnnotationDatabaseSearchState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseSearchState = {};
+  if (typeof value.term === "string" && value.term) state.term = value.term;
+  if (typeof value.includeNonText === "boolean")
+    state.includeNonText = value.includeNonText;
+  if (typeof value.autoRun === "boolean") state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseSnapshotState(
+  raw: unknown,
+): AnnotationDatabaseSnapshotState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseSnapshotState = {};
+  if (typeof value.fromSnapshotId === "string" && value.fromSnapshotId)
+    state.fromSnapshotId = value.fromSnapshotId;
+  if (typeof value.toSnapshotId === "string" && value.toSnapshotId)
+    state.toSnapshotId = value.toSnapshotId;
+  if (typeof value.table === "string" && value.table) state.table = value.table;
+  return Object.keys(state).length ? state : undefined;
+}
+
+export function normalizeAnnotationTarget(
+  raw: unknown,
+): AnnotationTarget | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const target = raw as Record<string, unknown>;
+  if (target.kind === "database") {
+    const db =
+      typeof target.db === "string" && target.db ? target.db : undefined;
+    const table =
+      typeof target.table === "string" && target.table
+        ? target.table
+        : undefined;
+    const tab = normalizeDatabaseTab(target.tab);
+    const data = normalizeDatabaseDataState(target.data);
+    const query = normalizeDatabaseQueryState(target.query);
+    const search = normalizeDatabaseSearchState(target.search);
+    const snapshot = normalizeDatabaseSnapshotState(target.snapshot);
+    return {
+      kind: "database",
+      ...(db ? { db } : {}),
+      ...(table ? { table } : {}),
+      ...(tab ? { tab } : {}),
+      ...(data ? { data } : {}),
+      ...(query ? { query } : {}),
+      ...(search ? { search } : {}),
+      ...(snapshot ? { snapshot } : {}),
+    };
+  }
+  if (target.kind === "code") {
+    const path =
+      typeof target.path === "string"
+        ? target.path.replace(/^\/+|\/+$/g, "")
+        : "";
+    if (!path) return undefined;
+    const line = normalizeLineRange(target.line);
+    return {
+      kind: "code",
+      path,
+      range: normalizeRange(target.range),
+      ...(line ? { line } : {}),
+    };
+  }
+  return undefined;
+}
+
+function databaseTargetPath(
+  target: Extract<AnnotationTarget, { kind: "database" }>,
+): string {
+  const labelPart = (value: string, max = 48): string =>
+    value
+      .replace(/[^A-Za-z0-9._=-]+/g, "_")
+      .slice(0, max)
+      .replace(/^_+|_+$/g, "");
+  const parts = ["database"];
+  if (target.db) parts.push(labelPart(target.db));
+  if (target.table) parts.push(labelPart(target.table));
+  if (target.tab) parts.push(target.tab);
+  if (target.data?.search)
+    parts.push(`search=${labelPart(target.data.search, 32)}`);
+  if (target.query?.sql) parts.push("query");
+  if (target.search?.term)
+    parts.push(`global-search=${labelPart(target.search.term, 32)}`);
+  if (target.snapshot?.fromSnapshotId || target.snapshot?.toSnapshotId)
+    parts.push("snapshot-diff");
+  return parts.join(":");
+}
+
 function normalizeEntry(raw: unknown): AnnotationEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const entry = raw as Record<string, unknown>;
   if (typeof entry.id !== "string" || !entry.id) return null;
-  if (typeof entry.path !== "string" || !entry.path) return null;
   if (typeof entry.body !== "string" || !entry.body) return null;
+  const target = normalizeAnnotationTarget(entry.target);
+  const path =
+    typeof entry.path === "string" && entry.path
+      ? entry.path
+      : target?.kind === "database"
+        ? databaseTargetPath(target)
+        : "";
+  if (!path) return null;
   const normalized: AnnotationEntry = {
     id: entry.id,
     created_at: typeof entry.created_at === "string" ? entry.created_at : "",
-    path: entry.path,
+    path,
     range: normalizeRange(entry.range),
     body: entry.body,
   };
   const line = normalizeLineRange(entry.line);
   if (line) normalized.line = line;
+  if (target) normalized.target = target;
   if (typeof entry.title === "string" && entry.title)
     normalized.title = entry.title;
   return normalized;
@@ -174,11 +343,15 @@ export function startAnnotationSession(
 export type NewAnnotationEntryInput = {
   session_id?: string;
   session_title?: string;
-  path: string;
+  path?: string;
   line?: AnnotationLineRange;
   range?: { from?: string; to?: string };
+  target?: AnnotationTarget;
   title?: string;
   body: string;
+  before_id?: string;
+  after_id?: string;
+  position?: number;
 };
 
 export type AddAnnotationResult =
@@ -191,13 +364,74 @@ export type AddAnnotationResult =
     }
   | { ok: false; error: string };
 
+type InsertOptions = {
+  before_id?: string;
+  after_id?: string;
+  position?: number;
+};
+
+function insertOptionCount(input: InsertOptions): number {
+  return (
+    (input.before_id ? 1 : 0) +
+    (input.after_id ? 1 : 0) +
+    (input.position !== undefined ? 1 : 0)
+  );
+}
+
+function entryInsertIndex(
+  entries: AnnotationEntry[],
+  input: InsertOptions,
+): { ok: true; index: number } | { ok: false; error: string } {
+  if (insertOptionCount(input) > 1)
+    return { ok: false, error: "use only one of before, after, or position" };
+  if (input.before_id) {
+    const index = entries.findIndex((entry) => entry.id === input.before_id);
+    if (index < 0) return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index };
+  }
+  if (input.after_id) {
+    const index = entries.findIndex((entry) => entry.id === input.after_id);
+    if (index < 0) return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index: index + 1 };
+  }
+  if (input.position !== undefined) {
+    if (!Number.isInteger(input.position) || input.position < 1)
+      return { ok: false, error: "position must be a positive integer" };
+    if (input.position > entries.length + 1)
+      return { ok: false, error: "position is out of range" };
+    return { ok: true, index: input.position - 1 };
+  }
+  return { ok: true, index: entries.length };
+}
+
+function findSessionByEntryId(
+  sessions: AnnotationSession[],
+  entryId: string,
+): AnnotationSession | undefined {
+  return sessions.find((session) =>
+    session.entries.some((entry) => entry.id === entryId),
+  );
+}
+
 export function addAnnotationEntry(
   state: AnnotationsState,
   input: NewAnnotationEntryInput,
   now: string,
   makeId: (prefix: string) => string = makeAnnotationId,
 ): AddAnnotationResult {
-  const path = input.path.replace(/^\/+|\/+$/g, "");
+  const target = normalizeAnnotationTarget(input.target);
+  if (target?.kind === "database" && !target.db)
+    return { ok: false, error: "database annotation requires db" };
+  if (target?.kind === "database" && target.data && !target.table) {
+    return {
+      ok: false,
+      error: "database data annotations require table",
+    };
+  }
+  const path =
+    target?.kind === "database"
+      ? databaseTargetPath(target)
+      : (input.path || "").replace(/^\/+|\/+$/g, "");
   if (!path) return { ok: false, error: "path is required" };
   const body = input.body;
   if (!body.trim()) return { ok: false, error: "body is required" };
@@ -209,9 +443,22 @@ export function addAnnotationEntry(
   let sessions = state.sessions;
   let session: AnnotationSession | undefined;
   let createdSession = false;
+  const anchorId = input.before_id || input.after_id;
+  const anchorSession = anchorId
+    ? findSessionByEntryId(sessions, anchorId)
+    : undefined;
+  if (anchorId && !anchorSession)
+    return { ok: false, error: "anchor annotation not found" };
   if (input.session_id) {
     session = sessions.find((s) => s.id === input.session_id);
     if (!session) return { ok: false, error: "session not found" };
+    if (anchorSession && anchorSession.id !== session.id)
+      return {
+        ok: false,
+        error: "anchor annotation belongs to another session",
+      };
+  } else if (anchorSession) {
+    session = anchorSession;
   } else {
     session = sessions[sessions.length - 1];
   }
@@ -235,12 +482,18 @@ export function addAnnotationEntry(
     body,
   };
   if (line) entry.line = line;
+  if (target) entry.target = target;
   const title = (input.title || "").trim();
   if (title) entry.title = title.slice(0, ANNOTATION_TITLE_MAX_CHARS);
 
+  const insertAt = entryInsertIndex(session.entries, input);
+  if (insertAt.ok === false) return { ok: false, error: insertAt.error };
+  const entries = [...session.entries];
+  entries.splice(insertAt.index, 0, entry);
+
   const updatedSession: AnnotationSession = {
     ...session,
-    entries: [...session.entries, entry],
+    entries,
   };
   return {
     ok: true,
@@ -253,6 +506,66 @@ export function addAnnotationEntry(
     session: updatedSession,
     entry,
     created_session: createdSession,
+  };
+}
+
+export type MoveAnnotationResult =
+  | {
+      ok: true;
+      state: AnnotationsState;
+      session: AnnotationSession;
+      entry: AnnotationEntry;
+    }
+  | { ok: false; error: string };
+
+export function moveAnnotationEntry(
+  state: AnnotationsState,
+  id: string,
+  input: InsertOptions,
+): MoveAnnotationResult {
+  if (insertOptionCount(input) !== 1)
+    return { ok: false, error: "move requires before, after, or position" };
+  const sourceSession = findSessionByEntryId(state.sessions, id);
+  const entry = sourceSession?.entries.find((e) => e.id === id);
+  if (!sourceSession || !entry)
+    return { ok: false, error: "annotation not found" };
+  if (input.before_id === id || input.after_id === id)
+    return { ok: false, error: "cannot move annotation relative to itself" };
+
+  const anchorId = input.before_id || input.after_id;
+  const destinationSession = anchorId
+    ? findSessionByEntryId(state.sessions, anchorId)
+    : sourceSession;
+  if (!destinationSession)
+    return { ok: false, error: "anchor annotation not found" };
+  if (destinationSession.id !== sourceSession.id)
+    return { ok: false, error: "anchor annotation belongs to another session" };
+
+  const sessionsWithoutEntry = state.sessions.map((session) =>
+    session.id === sourceSession.id
+      ? { ...session, entries: session.entries.filter((e) => e.id !== id) }
+      : session,
+  );
+  const targetSession = sessionsWithoutEntry.find(
+    (session) => session.id === destinationSession.id,
+  );
+  if (!targetSession)
+    return { ok: false, error: "destination session not found" };
+  const insertAt = entryInsertIndex(targetSession.entries, input);
+  if (insertAt.ok === false) return { ok: false, error: insertAt.error };
+  const movedEntries = [...targetSession.entries];
+  movedEntries.splice(insertAt.index, 0, entry);
+  const updatedSession = { ...targetSession, entries: movedEntries };
+  return {
+    ok: true,
+    state: {
+      version: 1,
+      sessions: sessionsWithoutEntry.map((session) =>
+        session.id === updatedSession.id ? updatedSession : session,
+      ),
+    },
+    session: updatedSession,
+    entry,
   };
 }
 

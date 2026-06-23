@@ -155,6 +155,22 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "command",
+                title: "Insert or move a step",
+                command:
+                  'code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "This belongs here."\ncode-viewer annotate move a-999 --before a-123',
+              },
+              {
+                kind: "command",
+                title: "Annotate a database view",
+                command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "This restores the filtered failure rows."
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "This reopens the result being discussed."`,
+              },
+              {
+                kind: "command",
                 title: "Inspect posted annotations",
                 command: "code-viewer annotate list",
               },
@@ -181,6 +197,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                   [
                     "Fix in place",
                     "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable.",
+                  ],
+                  [
+                    "Place notes deliberately",
+                    "Use --before, --after, --position, or annotate move when the reading order changes.",
                   ],
                 ],
               },
@@ -508,6 +528,22 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "command",
+                title: "説明を途中に差し込む・移動する",
+                command:
+                  'code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "ここに入る補足です。"\ncode-viewer annotate move a-999 --before a-123',
+              },
+              {
+                kind: "command",
+                title: "データベース画面へ注釈を追加する",
+                command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "失敗注文で絞り込んだ調査画面を復元します。"
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "説明対象のクエリ結果を開き直します。"`,
+              },
+              {
+                kind: "command",
                 title: "投稿済み注釈を確認する",
                 command: "code-viewer annotate list",
               },
@@ -534,6 +570,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                   [
                     "間違いは edit で直す",
                     "削除して追加し直すより、注釈IDと順番を保ったまま修正します。",
+                  ],
+                  [
+                    "順番は明示的に直す",
+                    "--before、--after、--position、annotate move で読み順を整えます。",
                   ],
                 ],
               },

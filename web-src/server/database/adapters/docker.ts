@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import type {
   DbColumn,
   DbForeignKey,
@@ -7,7 +7,35 @@ import type {
   DbTableInfo,
   DbValue,
 } from "../../../core/database/types";
-import type { DatabaseAdapter, QueryResult, TriggerInfo } from "./types";
+import {
+  buildRowKeyJson,
+  computeRowHash,
+  rowToPayloadJson,
+  SQL_SNAPSHOT_BATCH_SIZE,
+} from "../sources/sql-snapshot";
+import type { SnapshotItem } from "../sources/types";
+import {
+  resolveRunningComposeContainerName,
+  resolveRunningComposeContainerNameOrThrow,
+} from "./docker-utils";
+import type {
+  DatabaseAdapter,
+  QueryResult,
+  TablePageMeta,
+  TriggerInfo,
+} from "./types";
+
+// adapters は SqlSource & SnapshotIterable を満たす形を返す。
+// DockerSource は DatabaseAdapter の上位互換なので、既存 caller の型は維持される。
+type DockerSource = DatabaseAdapter & {
+  readonly model: "sql";
+  readonly capabilities: { snapshot: true };
+  iterateForSnapshot(
+    table: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<SnapshotItem>;
+  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+};
 
 type DockerDbConfig = {
   kind: "postgresql" | "mysql";
@@ -17,14 +45,26 @@ type DockerDbConfig = {
   database: string;
 };
 
-function execInContainer(
-  config: DockerDbConfig,
-  sql: string,
-  timeoutMs = 10000,
-): { stdout: string; stderr: string; code: number } {
-  let args: string[];
+type ExecResult = { stdout: string; stderr: string; code: number };
+
+type BunSpawnResult = {
+  kill(signal?: string): void;
+  exited: Promise<number>;
+  stdout?: ReadableStream<Uint8Array>;
+  stderr?: ReadableStream<Uint8Array>;
+};
+
+type BunSpawnFn = (
+  args: string[],
+  opts?: Record<string, unknown>,
+) => BunSpawnResult;
+
+const COLUMNS_TTL_MS = 30_000;
+const ROWCOUNT_TTL_MS = 15_000;
+
+function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
   if (config.kind === "postgresql") {
-    args = [
+    return [
       "docker",
       "exec",
       "-i",
@@ -47,25 +87,32 @@ function execInContainer(
       "-c",
       sql,
     ];
-  } else {
-    args = [
-      "docker",
-      "exec",
-      "-i",
-      "-e",
-      `MYSQL_PWD=${config.password}`,
-      config.containerName,
-      "mysql",
-      "-u",
-      config.user,
-      config.database,
-      "--batch",
-      "--raw",
-      "--default-character-set=utf8mb4",
-      "-e",
-      sql,
-    ];
   }
+  return [
+    "docker",
+    "exec",
+    "-i",
+    "-e",
+    `MYSQL_PWD=${config.password}`,
+    config.containerName,
+    "mysql",
+    "-u",
+    config.user,
+    config.database,
+    "--batch",
+    "--raw",
+    "--default-character-set=utf8mb4",
+    "-e",
+    sql,
+  ];
+}
+
+function execInContainer(
+  config: DockerDbConfig,
+  sql: string,
+  timeoutMs = 10000,
+): ExecResult {
+  const args = buildExecArgs(config, sql);
   const proc = spawnSync(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
@@ -76,6 +123,108 @@ function execInContainer(
     stderr: proc.stderr || "",
     code: proc.status ?? 1,
   };
+}
+
+async function readStreamText(
+  stream?: ReadableStream<Uint8Array>,
+): Promise<string> {
+  if (!stream) return "";
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+
+async function execWithBunSpawn(
+  spawnFn: BunSpawnFn,
+  args: string[],
+  timeoutMs: number,
+): Promise<ExecResult> {
+  const proc = spawnFn(args, {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGKILL");
+  }, timeoutMs);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      readStreamText(proc.stdout),
+      readStreamText(proc.stderr),
+    ]);
+    return {
+      code: timedOut ? 1 : code,
+      stdout,
+      stderr: timedOut
+        ? `${stderr}${stderr ? "\n" : ""}query timed out`
+        : stderr,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function execWithNodeSpawn(
+  args: string[],
+  timeoutMs: number,
+): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    const proc = spawn(args[0], args.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (result: ExecResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      finish({
+        code: 1,
+        stdout,
+        stderr: `${stderr}${stderr ? "\n" : ""}query timed out`,
+      });
+    }, timeoutMs);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    proc.on("error", (err) => {
+      finish({ code: 1, stdout, stderr: err.message });
+    });
+    proc.on("close", (code) => {
+      finish({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
+async function execInContainerAsync(
+  config: DockerDbConfig,
+  sql: string,
+  timeoutMs = 10000,
+): Promise<ExecResult> {
+  const args = buildExecArgs(config, sql);
+  const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: BunSpawnFn } })
+    .Bun?.spawn;
+  if (bunSpawn) return execWithBunSpawn(bunSpawn, args, timeoutMs);
+  return execWithNodeSpawn(args, timeoutMs);
 }
 
 function parseTsvOutput(
@@ -113,9 +262,90 @@ function buildOrderClause(
   return ` ORDER BY ${parts.join(", ")}`;
 }
 
-function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
+function escapeSqlString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildDockerFilterWhere(
+  grouped: Map<string, string[]>,
+  kind: "postgresql" | "mysql",
+): string {
+  const whereParts: string[] = [];
+  for (const [value, cols] of grouped) {
+    const likeVal = escapeSqlString(`%${value}%`);
+    if (cols.length === 1) {
+      const cast =
+        kind === "mysql"
+          ? `CAST(${sanitizeIdentifier(cols[0], kind)} AS CHAR)`
+          : `CAST(${sanitizeIdentifier(cols[0], kind)} AS TEXT)`;
+      whereParts.push(`${cast} LIKE ${likeVal}`);
+    } else {
+      const orParts = cols.map((c) => {
+        const cast =
+          kind === "mysql"
+            ? `CAST(${sanitizeIdentifier(c, kind)} AS CHAR)`
+            : `CAST(${sanitizeIdentifier(c, kind)} AS TEXT)`;
+        return `${cast} LIKE ${likeVal}`;
+      });
+      whereParts.push(`(${orParts.join(" OR ")})`);
+    }
+  }
+  return whereParts.join(" AND ");
+}
+
+function createTableMetaCache(now = () => Date.now()) {
+  const columns = new Map<string, { value: DbColumn[]; expires: number }>();
+  const rowCounts = new Map<string, { value: number; expires: number }>();
+  return {
+    async getColumns(
+      table: string,
+      fetch: () => DbColumn[] | Promise<DbColumn[]>,
+    ): Promise<DbColumn[]> {
+      const cached = columns.get(table);
+      const current = now();
+      if (cached && cached.expires > current) return cached.value;
+      const value = await fetch();
+      columns.set(table, { value, expires: now() + COLUMNS_TTL_MS });
+      return value;
+    },
+
+    async getRowCount(
+      table: string,
+      fetch: () => number | Promise<number>,
+    ): Promise<number> {
+      const cached = rowCounts.get(table);
+      const current = now();
+      if (cached && cached.expires > current) return cached.value;
+      const value = await fetch();
+      rowCounts.set(table, { value, expires: now() + ROWCOUNT_TTL_MS });
+      return value;
+    },
+
+    invalidate(table?: string): void {
+      if (table) {
+        columns.delete(table);
+        rowCounts.delete(table);
+        return;
+      }
+      columns.clear();
+      rowCounts.clear();
+    },
+  };
+}
+
+export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   function exec(sql: string): { columns: string[]; rows: string[][] } {
     const result = execInContainer(config, sql);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "query failed");
+    }
+    return parseTsvOutput(result.stdout, config.kind === "mysql");
+  }
+
+  async function execAsync(
+    sql: string,
+  ): Promise<{ columns: string[]; rows: string[][] }> {
+    const result = await execInContainerAsync(config, sql);
     if (result.code !== 0) {
       throw new Error(result.stderr.trim() || "query failed");
     }
@@ -128,6 +358,58 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
   }
 
   const columnCache = new Map<string, DbColumn[]>();
+  const tableMetaCache = createTableMetaCache();
+
+  function buildColumnsSql(table: string): string {
+    const tableLiteral = table.replace(/'/g, "''");
+    if (config.kind === "postgresql") {
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = 'public' AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = 'public' AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+    }
+    return `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
+  }
+
+  function columnsFromInfoRows(rows: string[][]): DbColumn[] {
+    if (config.kind === "postgresql") {
+      return rows.map((row: string[]) => ({
+        name: row[0],
+        type: row[1],
+        nullable: row[2] === "YES",
+        primaryKey: row[4] === "YES",
+        defaultValue: row[3] === "" ? null : row[3],
+      }));
+    }
+    return rows.map((row: string[]) => ({
+      name: row[0],
+      type: row[1],
+      nullable: row[2] === "YES",
+      primaryKey: row[4] === "PRI",
+      defaultValue: row[3] === "NULL" ? null : row[3],
+    }));
+  }
+
+  async function fetchColumnsAsyncUncached(table: string): Promise<DbColumn[]> {
+    const result = await execAsync(buildColumnsSql(table));
+    return columnsFromInfoRows(result.rows);
+  }
+
+  function tablePageMetaFromResults(
+    columns: DbColumn[],
+    dataResult: { columns: string[]; rows: string[][] },
+    totalRows: number,
+  ): TablePageMeta {
+    return {
+      columns,
+      rows: dataResult.rows.map((row) => row.map(toDbValue)),
+      rowCount: dataResult.rows.length,
+      totalRows,
+    };
+  }
+
+  function rowCountFromResult(countResult: { rows: string[][] }): number {
+    return countResult.rows.length > 0
+      ? Number(countResult.rows[0][0]) || 0
+      : 0;
+  }
 
   function fetchColumnsUncached(table: string): DbColumn[] {
     let sql: string;
@@ -163,8 +445,10 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
     }));
   }
 
-  return {
+  const adapter: DockerSource = {
     kind: config.kind,
+    model: "sql",
+    capabilities: { snapshot: true },
 
     getTables(): DbTableInfo[] {
       let sql: string;
@@ -346,6 +630,55 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
       return result;
     },
 
+    async getTablePageWithMeta(
+      table: string,
+      options: { offset: number; limit: number; orderBy?: DbOrder[] },
+    ): Promise<TablePageMeta> {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
+      const [columns, dataResult, totalRows] = await Promise.all([
+        tableMetaCache.getColumns(table, () =>
+          fetchColumnsAsyncUncached(table),
+        ),
+        execAsync(dataSql),
+        tableMetaCache.getRowCount(table, async () =>
+          rowCountFromResult(await execAsync(countSql)),
+        ),
+      ]);
+      return tablePageMetaFromResults(columns, dataResult, totalRows);
+    },
+
+    async getFilteredTablePageWithMeta(
+      table: string,
+      options: {
+        offset: number;
+        limit: number;
+        orderBy?: DbOrder[];
+        grouped: Map<string, string[]>;
+      },
+    ): Promise<TablePageMeta> {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const where = buildDockerFilterWhere(options.grouped, config.kind);
+      const whereClause = where ? ` WHERE ${where}` : "";
+      const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
+      const [columns, dataResult, countResult] = await Promise.all([
+        tableMetaCache.getColumns(table, () =>
+          fetchColumnsAsyncUncached(table),
+        ),
+        execAsync(dataSql),
+        execAsync(countSql),
+      ]);
+      return tablePageMetaFromResults(
+        columns,
+        dataResult,
+        rowCountFromResult(countResult),
+      );
+    },
+
     getTablePage(
       table: string,
       options: { offset: number; limit: number; orderBy?: DbOrder[] },
@@ -430,6 +763,10 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
       };
     },
 
+    invalidateTableMetaCache(table?: string): void {
+      tableMetaCache.invalidate(table);
+    },
+
     getCreateStatement(table: string): string {
       if (config.kind === "mysql") {
         try {
@@ -471,35 +808,48 @@ function createDockerAdapter(config: DockerDbConfig): DatabaseAdapter {
 
     close(): void {
       columnCache.clear();
+      tableMetaCache.invalidate();
+    },
+
+    async *iterateForSnapshot(
+      table: string,
+      signal?: AbortSignal,
+    ): AsyncIterable<SnapshotItem> {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;;) {
+        if (signal?.aborted) return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE,
+        });
+        if (result.rows.length === 0) return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row),
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE) return;
+      }
+    },
+
+    async listSnapshotContainers(): Promise<
+      Array<{ id: string; label: string }>
+    > {
+      return adapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => ({ id: t.name, label: t.name }));
     },
   };
-}
-
-function resolveContainerName(serviceName: string, cwd: string): string | null {
-  const proc = spawnSync(
-    "docker",
-    ["compose", "ps", "--format", "json", "--status", "running"],
-    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd },
-  );
-  if (proc.status !== 0) return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers: { Service?: string; Name?: string; State?: string }[];
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-    }
-    const match = containers.find(
-      (c) => c.Service === serviceName && c.State === "running",
-    );
-    return match?.Name || null;
-  } catch {
-    return null;
-  }
+  return adapter;
 }
 
 export function listDockerDatabases(
@@ -508,7 +858,7 @@ export function listDockerDatabases(
   env: Record<string, string>,
   cwd: string,
 ): string[] {
-  const containerName = resolveContainerName(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) return [];
   const user =
     env.POSTGRES_USER ||
@@ -558,12 +908,10 @@ export function openDockerAdapter(
   cwd: string,
   overrideDatabase?: string,
 ): DatabaseAdapter {
-  const containerName = resolveContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(
-      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
-    );
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(
+    serviceName,
+    cwd,
+  );
   const user =
     env.POSTGRES_USER ||
     env.MYSQL_USER ||

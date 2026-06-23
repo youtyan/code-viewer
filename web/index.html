@@ -22,6 +22,7 @@
     <a class="brand" href="/" aria-label="Repository home">
       <img class="brand-icon" src="/favicon.png" alt="" width="20" height="20" />
       <span class="title" id="project-title">repository</span>
+      <span id="project-branch" class="project-branch" hidden></span>
     </a>
     <nav class="app-menu" aria-label="Views">
       <a class="app-menu-item active" data-route="repo" href="/">Repository</a>
@@ -31,7 +32,6 @@
     </nav>
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
-      <button id="query-history-toggle" class="global-icon-action" title="query history" aria-label="query history" hidden>📋</button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
       <button id="theme" title="toggle theme">🌗</button>
@@ -102,6 +102,7 @@
     <div id="history-sentinel" aria-hidden="true"></div>
     <div id="history-status" class="history-status" role="status" hidden></div>
   </aside>
+  <div id="history-resizer" aria-hidden="true"></div>
   <aside id="sidebar">
     <div class="sb-head">
       <span class="sb-title">Files</span>
@@ -175,6 +176,7 @@
       <label class="annotation-follow-label" title="jump to new annotations as they arrive">
         <input type="checkbox" id="annotation-follow" checked /> follow
       </label>
+      <button id="annotation-capture-db" class="annotation-icon-btn" type="button" title="pin current database view" aria-label="pin current database view" hidden></button>
       <button id="annotation-clear" type="button" title="delete all annotations">clear</button>
       <button id="annotation-panel-close" type="button">close</button>
     </div>
@@ -228,7 +230,7 @@
         <span id="hci-date" class="hci-date"></span>
       </div>
       <h2 id="hci-subject" class="hci-subject"></h2>
-      <pre id="hci-body" class="hci-body" hidden></pre>
+      <div id="hci-body" class="hci-body" hidden></div>
     </section>
     <div id="empty" class="empty hidden">
       <div class="emoji">✨</div>

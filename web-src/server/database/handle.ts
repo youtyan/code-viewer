@@ -1,12 +1,14 @@
-import { randomBytes } from "node:crypto";
 import type {
+  DbColumn,
   DbFilesResponse,
+  DbKind,
   DbOrder,
   DbQueryResponse,
   DbSchemaResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
 } from "../../core/database/types";
+import { makeId } from "../../core/id";
 import { listDockerDatabases, openDockerAdapter } from "./adapters/docker";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
@@ -19,9 +21,21 @@ import {
   type DockerDbInfo,
   discoverDockerDatabases,
   discoverSqliteFiles,
+  findDockerServiceByDbId,
+  parseDockerDbId,
   validateDbPath,
 } from "./discovery";
 import { getPrimaryKeyColumns, searchTable } from "./global-search";
+import { closeElasticsearchAdapter } from "./handle-elasticsearch";
+import { closeRedisAdapter } from "./handle-redis";
+import {
+  createDockerAdapterCache,
+  dispatchRoutes,
+  handleError,
+  json,
+  parsePostJsonBody,
+  textError,
+} from "./handle-shared";
 import {
   addQueryHistoryEntry,
   clearQueryHistory,
@@ -38,6 +52,7 @@ import {
   listSnapshots,
   updateSnapshotNote,
 } from "./snapshot-store";
+import { loadTabs, saveTabs } from "./tabs-store";
 
 let initialized = false;
 
@@ -47,47 +62,27 @@ function ensureInit() {
   initialized = true;
 }
 
-const dockerAdapterCache = new Map<string, DatabaseAdapter>();
+const dockerAdapterCache = createDockerAdapterCache<DatabaseAdapter>();
 
 async function getAdapter(
   r: ResolvedDb,
-  cwd: string,
+  _cwd: string,
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
-    const key = r.dbId;
-    const cached = dockerAdapterCache.get(key);
-    if (cached) return cached;
-    const adapter = openDockerAdapter(
-      r.docker.serviceName,
-      r.docker.kind as "postgresql" | "mysql",
-      r.docker.env,
-      cwd,
-      r.docker.database,
+    const docker = r.docker;
+    return dockerAdapterCache.getOrOpen(r.dbId, () =>
+      // recursive discovery により compose は subdir に置けるので、
+      // `docker compose ps` の cwd は r.docker.composeDir に固定する。
+      openDockerAdapter(
+        docker.serviceName,
+        docker.kind as "postgresql" | "mysql",
+        docker.env,
+        docker.composeDir,
+        docker.database,
+      ),
     );
-    dockerAdapterCache.set(key, adapter);
-    return adapter;
   }
   return getConnection(r.resolved);
-}
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-function textError(message: string, status: number): Response {
-  return new Response(message, {
-    status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function sanitizeFilename(name: string): string {
@@ -97,27 +92,29 @@ function sanitizeFilename(name: string): string {
 
 type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
 
-let cachedDockerDbs: DockerDbInfo[] | null = null;
-let cachedDockerCwd: string | null = null;
-
-function getDockerDbs(cwd: string): DockerDbInfo[] {
-  if (cachedDockerCwd === cwd && cachedDockerDbs) return cachedDockerDbs;
-  cachedDockerDbs = discoverDockerDatabases(cwd);
-  cachedDockerCwd = cwd;
-  return cachedDockerDbs;
-}
-
-function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
+function resolveDb(
+  cwd: string,
+  dbParam: string | null,
+  omitDirNames?: string[],
+): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
-    const rest = dbParam.slice(7);
-    const colonIdx = rest.indexOf(":");
-    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
-    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
-    const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    const parsed = parseDockerDbId(dbParam);
+    if (!parsed) return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, dbParam, undefined, omitDirNames);
     if (!info) return textError("docker service not found", 404);
-    const resolved = dbName ? { ...info, database: dbName } : info;
+    if (info.kind === "redis") {
+      return textError("redis services must use the /_db/redis/* routes", 400);
+    }
+    if (info.kind === "elasticsearch") {
+      return textError(
+        "elasticsearch services must use the /_db/elasticsearch/* routes",
+        400,
+      );
+    }
+    const resolved = parsed.database
+      ? { ...info, database: parsed.database }
+      : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved };
   }
   const resolved = validateDbPath(cwd, dbParam);
@@ -125,30 +122,55 @@ function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   return { resolved, dbId: dbParam };
 }
 
+function toFileInfo(entry: {
+  id: string;
+  path: string;
+  name: string;
+  sizeBytes: number;
+  kind: import("../../core/database/types").DbKind;
+}): import("../../core/database/types").DbFileInfo {
+  return {
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    sizeBytes: entry.sizeBytes,
+    kind: entry.kind,
+  };
+}
+
 function handleFiles(cwd: string, omitDirNames: string[]): Response {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
+  const dockerTruncated = dockerServices.truncated === true;
   const dockerEntries: typeof dockerServices = [];
   for (const svc of dockerServices) {
+    if (svc.kind === "redis" || svc.kind === "elasticsearch") {
+      dockerEntries.push(svc);
+      continue;
+    }
     const dbs = listDockerDatabases(
       svc.serviceName,
       svc.kind as "postgresql" | "mysql",
       svc.env,
-      cwd,
+      svc.composeDir,
     );
     if (dbs.length <= 1) {
       dockerEntries.push(svc);
     } else {
       for (const db of dbs) {
+        // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
+        // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
         dockerEntries.push({
           ...svc,
-          id: `docker:${svc.serviceName}:${db}`,
+          id: `${svc.id}:${db}`,
           name: svc.name.replace(/\)$/, ` / ${db})`),
           database: db,
         });
       }
     }
   }
+  // Strip env / serviceName / database from the response — these contain
+  // credentials and internal state that the browser must not see.
   const body: DbFilesResponse = {
     files: [
       ...sqliteFiles.map((f) => ({
@@ -158,14 +180,19 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
         sizeBytes: f.sizeBytes,
         kind: "sqlite" as const,
       })),
-      ...dockerEntries,
+      ...dockerEntries.map(toFileInfo),
     ],
+    ...(dockerTruncated ? { truncated: true } : {}),
   };
   return json(body);
 }
 
-async function handleSchema(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleSchema(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
   try {
@@ -209,14 +236,7 @@ async function handleSchema(cwd: string, url: URL): Promise<Response> {
     }
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to read schema: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "read schema", err);
   }
 }
 
@@ -289,8 +309,24 @@ function parseFilters(url: URL): { column: string; value: string }[] {
   }
 }
 
-async function handleTable(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+function groupFiltersByValue(
+  filters: { column: string; value: string }[],
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const filter of filters) {
+    const existing = grouped.get(filter.value) || [];
+    existing.push(filter.column);
+    grouped.set(filter.value, existing);
+  }
+  return grouped;
+}
+
+async function handleTable(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -316,6 +352,51 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
   const filters = parseFilters(url);
   try {
     const adapter = await getAdapter(r, cwd);
+    if (filters.length > 0 && adapter.getFilteredTablePageWithMeta) {
+      const meta = await adapter.getFilteredTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+        grouped: groupFiltersByValue(filters),
+      });
+      const colNames = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body: DbTableDataResponse = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows,
+      };
+      return json(body);
+    }
+    if (filters.length === 0 && adapter.getTablePageWithMeta) {
+      const meta = await adapter.getTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+      });
+      const colNames = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body: DbTableDataResponse = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows,
+      };
+      return json(body);
+    }
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
@@ -325,13 +406,8 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
-        const grouped = new Map<string, string[]>();
-        for (const f of validFilters) {
-          const existing = grouped.get(f.value) || [];
-          existing.push(f.column);
-          grouped.set(f.value, existing);
-        }
-        const k = adapter.kind;
+        const grouped = groupFiltersByValue(validFilters);
+        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy
           ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
@@ -383,28 +459,64 @@ async function handleTable(cwd: string, url: URL): Promise<Response> {
     };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to read table: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "read table", err);
   }
 }
 
 function makeHistoryId(): string {
-  return `qh-${randomBytes(8).toString("hex")}`;
+  return makeId("qh");
+}
+
+function unquoteSqlIdentifier(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    return trimmed.slice(1, -1).replace(/``/g, "`");
+  }
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1).replace(/]]/g, "]");
+  }
+  return trimmed;
+}
+
+export function parseSelectAllTable(sql: string): string | null {
+  const identifier =
+    '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
+  const match = sql
+    .trim()
+    .replace(/;\s*$/, "")
+    .match(
+      new RegExp(
+        String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?\s*$`,
+        "i",
+      ),
+    );
+  if (!match) return null;
+  return unquoteSqlIdentifier(match[2] || match[1]);
+}
+
+function inferEmptyQueryColumns(
+  adapter: DatabaseAdapter,
+  sql: string,
+): DbColumn[] {
+  const table = parseSelectAllTable(sql);
+  if (!table) return [];
+  try {
+    return adapter.getColumns(table);
+  } catch {
+    return [];
+  }
 }
 
 async function handleQuery(
   cwd: string,
   req: Request,
   sendSse?: (event: string, data?: string) => void,
+  omitDirNames?: string[],
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: {
+  const body = await parsePostJsonBody<{
     db?: string;
     sql?: string;
     maxRows?: number;
@@ -413,14 +525,10 @@ async function handleQuery(
     body?: string;
     executedBy?: "user" | "ai";
     source?: "cli" | "browser";
-  };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  }>(req);
+  if (body instanceof Response) return body;
   if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
   const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
   const start = Date.now();
@@ -429,10 +537,22 @@ async function handleQuery(
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
     const serializedRows = serializeDbRows(result.rows);
+    const inferredColumns =
+      result.columns.length === 0 && result.rows.length === 0
+        ? inferEmptyQueryColumns(adapter, body.sql)
+        : [];
+    const columns =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.name)
+        : result.columns;
+    const columnTypes =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.type)
+        : result.columnTypes;
     const response: DbQueryResponse = {
       dbId: body.db,
-      columns: result.columns,
-      columnTypes: result.columnTypes,
+      columns,
+      columnTypes,
       rows: serializedRows,
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
@@ -445,7 +565,7 @@ async function handleQuery(
         sql: body.sql,
         title: body.title,
         body: body.body,
-        columns: result.columns,
+        columns,
         rowsPreview: serializedRows,
         rowCount: result.rowCount,
         savedRows: serializedRows.length,
@@ -458,7 +578,10 @@ async function handleQuery(
       const state = loadQueryHistory(cwd);
       const updated = addQueryHistoryEntry(state, entry);
       saveQueryHistory(cwd, updated);
-      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+      sendSse?.(
+        "db-query",
+        JSON.stringify({ action: "add", dbId: body.db, id: entry.id }),
+      );
     }
     return json(response);
   } catch (err) {
@@ -498,18 +621,17 @@ async function handleHistoryDelete(
   req: Request,
   sendSse?: (event: string, data?: string) => void,
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody<{ id?: string }>(req);
+  if (body instanceof Response) return body;
   if (!body.id) return textError("missing id", 400);
   const state = loadQueryHistory(cwd);
+  const deleted = state.entries.find((entry) => entry.id === body.id);
   const updated = deleteQueryHistoryEntry(state, body.id);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  sendSse?.(
+    "db-query",
+    JSON.stringify({ action: "delete", dbId: deleted?.dbId, id: body.id }),
+  );
   return json({ ok: true });
 }
 
@@ -528,11 +650,14 @@ async function handleHistoryClear(
   const state = loadQueryHistory(cwd);
   const updated = clearQueryHistory(state, body.db);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  sendSse?.("db-query", JSON.stringify({ action: "clear", dbId: body.db }));
   return json({ ok: true });
 }
 
 const EXPORT_MAX_ROWS = 100_000;
+const MAX_TABS_BODY_BYTES = 1_000_000;
+const MAX_SNAPSHOT_TABLES = 512;
+const MAX_SNAPSHOT_TABLE_NAME_LEN = 1024;
 
 function formatCsvField(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -550,8 +675,12 @@ function formatCsvField(value: unknown): string {
   return str;
 }
 
-async function handleExport(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleExport(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -591,7 +720,7 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
           existing.push(f.column);
           grouped.set(f.value, existing);
         }
-        const k = adapter.kind;
+        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy
           ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
@@ -657,19 +786,16 @@ async function handleExport(cwd: string, url: URL): Promise<Response> {
       },
     });
   } catch (err) {
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to export table: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "export table", err);
   }
 }
 
-async function handleColumns(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleColumns(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -678,19 +804,16 @@ async function handleColumns(cwd: string, url: URL): Promise<Response> {
     const columns = adapter.getColumns(table);
     return json({ dbId: r.dbId, table, columns });
   } catch (err) {
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to get columns: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "get columns", err);
   }
 }
 
-async function handleDdl(cwd: string, url: URL): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleDdl(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -700,14 +823,7 @@ async function handleDdl(cwd: string, url: URL): Promise<Response> {
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });
   } catch (err) {
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to get DDL: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "get DDL", err);
   }
 }
 
@@ -727,25 +843,24 @@ type SearchJob = {
 
 const searchJobs = new Map<string, SearchJob>();
 
-async function handleSearchStart(cwd: string, req: Request): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: {
+async function handleSearchStart(
+  cwd: string,
+  req: Request,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const body = await parsePostJsonBody<{
     db?: string;
     term?: string;
     tables?: string[];
     maxHitsPerTable?: number;
     includeNonText?: boolean;
-  };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  }>(req);
+  if (body instanceof Response) return body;
   if (!body.db || !body.term) return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
 
-  const jobId = `search-${randomBytes(8).toString("hex")}`;
+  const jobId = makeId("search");
   const ac = new AbortController();
   const job: SearchJob = {
     id: jobId,
@@ -836,13 +951,8 @@ function handleSearchStatus(url: URL): Response {
 }
 
 async function handleSearchCancel(req: Request): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody<{ id?: string }>(req);
+  if (body instanceof Response) return body;
   if (!body.id) return textError("missing id", 400);
   const job = searchJobs.get(body.id);
   if (!job) return textError("job not found", 404);
@@ -853,57 +963,217 @@ async function handleSearchCancel(req: Request): Promise<Response> {
 
 // --- Snapshot ---
 
+type SnapshotSource = Parameters<typeof runSnapshot>[1];
+type SnapshotDockerSource = {
+  source: SnapshotSource;
+  containers: string[];
+  closeAfterSnapshot: boolean;
+};
+type SnapshotJob = {
+  abortController: AbortController;
+  dbId: string;
+  snapshotId?: string;
+  done: boolean;
+};
+
+type SnapshotDockerSourceFactory = (
+  info: DockerDbInfo,
+  requestedContainers: string[] | undefined,
+) => Promise<SnapshotDockerSource>;
+type DockerCloseHandler = (dbId: string) => void | Promise<void>;
+
+const snapshotJobs = new Map<string, SnapshotJob>();
+
+const DOCKER_CLOSE_REGISTRY: Partial<Record<DbKind, DockerCloseHandler>> = {
+  postgresql: (dbId) => dockerAdapterCache.close(dbId),
+  mysql: (dbId) => dockerAdapterCache.close(dbId),
+  redis: closeRedisAdapter,
+  elasticsearch: closeElasticsearchAdapter,
+};
+
+const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
+  Record<DbKind, SnapshotDockerSourceFactory>
+> = {
+  redis: async (info, requestedContainers) => {
+    const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
+      await import("./adapters/redis");
+    const containers =
+      requestedContainers && requestedContainers.length > 0
+        ? requestedContainers
+        : ["*"];
+    return {
+      source: openRedisExplorer(info.serviceName, info.env, info.composeDir),
+      containers: containers.map(canonicalizeRedisSnapshotContainer),
+      closeAfterSnapshot: true,
+    };
+  },
+  elasticsearch: async (info, requestedContainers) => {
+    const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
+      await import("./adapters/elasticsearch");
+    const containers =
+      requestedContainers && requestedContainers.length > 0
+        ? requestedContainers
+        : ["*"];
+    return {
+      source: openElasticsearchAdapter(
+        info.serviceName,
+        info.env,
+        info.composeDir,
+      ),
+      containers: containers.map(canonicalizeEsSnapshotContainer),
+      closeAfterSnapshot: true,
+    };
+  },
+};
+
+async function openRegisteredDockerSnapshotSource(
+  info: DockerDbInfo,
+  requestedContainers: string[] | undefined,
+): Promise<SnapshotDockerSource | null> {
+  const factory = SNAPSHOT_DOCKER_SOURCE_REGISTRY[info.kind];
+  return factory ? factory(info, requestedContainers) : null;
+}
+
 async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
   const dbId = url.searchParams.get("db") || undefined;
   const snapshots = await listSnapshots(cwd, dbId);
   return json({ snapshots });
 }
 
+function sanitizeSnapshotTables(tables: unknown): string[] | undefined | null {
+  if (tables === undefined || tables === null) return undefined;
+  if (!Array.isArray(tables)) return null;
+  if (tables.length === 0) return undefined;
+  const out: string[] = [];
+  for (const table of tables) {
+    if (out.length >= MAX_SNAPSHOT_TABLES) break;
+    if (typeof table !== "string") return null;
+    if (table.length === 0 || table.length > MAX_SNAPSHOT_TABLE_NAME_LEN) {
+      return null;
+    }
+    out.push(table);
+  }
+  return out;
+}
+
 async function handleSnapshotCreate(
   cwd: string,
   req: Request,
   sendSse?: (event: string, data?: string) => void,
+  omitDirNames?: string[],
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string; tables?: string[]; note?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody<{
+    db?: string;
+    tables?: string[];
+    note?: string;
+  }>(req);
+  if (body instanceof Response) return body;
   if (!body.db) return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
-  if (r instanceof Response) return r;
+  const requestedTables = sanitizeSnapshotTables(body.tables);
+  if (requestedTables === null) {
+    return textError("invalid tables", 400);
+  }
 
-  const adapter = await getAdapter(r, cwd);
-  let tables = body.tables;
-  if (!tables || tables.length === 0) {
-    tables = adapter
-      .getTables()
-      .filter((t) => t.type === "table")
-      .map((t) => t.name);
+  // Redis (KV) も snapshot を生成できるよう、resolveDb の SQL-only 制限を
+  // 迂回して直接 source を引き出す。redis service なら RedisExplorer を、
+  // それ以外 (sqlite / pg / mysql) は既存 getAdapter を使う。
+  let source: SnapshotSource | null = null;
+  let containers = requestedTables;
+  let closeSourceAfterSnapshot = false;
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed) return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    if (!info) return textError("docker service not found", 404);
+    const registeredSource = await openRegisteredDockerSnapshotSource(
+      info,
+      requestedTables,
+    );
+    if (registeredSource) {
+      source = registeredSource.source;
+      containers = registeredSource.containers;
+      closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
+    }
+  }
+  if (!source) {
+    const r = resolveDb(cwd, body.db, omitDirNames);
+    if (r instanceof Response) return r;
+    source = await getAdapter(r, cwd);
+  }
+
+  if (!containers || containers.length === 0) {
+    // SQL pass: getTables() で table 一覧を default にする。
+    const sqlAdapter = source as {
+      getTables?: () => Array<{ name: string; type: string }>;
+    };
+    if (typeof sqlAdapter.getTables === "function") {
+      containers = sqlAdapter
+        .getTables()
+        .filter((t) => t.type === "table")
+        .map((t) => t.name);
+    }
+  }
+  if (!containers || containers.length === 0) {
+    return textError(
+      "missing tables/containers (Redis requires explicit key patterns)",
+      400,
+    );
   }
 
   const note = body.note ?? "";
+  const snapshotDbId = body.db;
+  const snapshotContainers = containers;
+  const abortController = new AbortController();
+  const snapshotJob: SnapshotJob = {
+    abortController,
+    dbId: snapshotDbId,
+    done: false,
+  };
+  let activeSnapshotId: string | undefined;
 
   (async () => {
     try {
       const snapshotId = await runSnapshot(
         cwd,
-        adapter,
-        body.db!,
-        tables!,
+        source,
+        snapshotDbId,
+        snapshotContainers,
         note,
         (table, done) => {
           sendSse?.(
             "db-snapshot",
-            JSON.stringify({ action: "progress", table, done }),
+            JSON.stringify({
+              action: "progress",
+              dbId: snapshotDbId,
+              table,
+              done,
+            }),
           );
+        },
+        {
+          signal: abortController.signal,
+          onSnapshotId: (id) => {
+            activeSnapshotId = id;
+            snapshotJob.snapshotId = id;
+            snapshotJobs.set(id, snapshotJob);
+            sendSse?.(
+              "db-snapshot",
+              JSON.stringify({
+                action: "started",
+                dbId: snapshotDbId,
+                id,
+              }),
+            );
+          },
         },
       );
       sendSse?.(
         "db-snapshot",
-        JSON.stringify({ action: "created", id: snapshotId }),
+        JSON.stringify({
+          action: "created",
+          dbId: snapshotDbId,
+          id: snapshotId,
+        }),
       );
     } catch (err) {
       console.error(
@@ -914,26 +1184,50 @@ async function handleSnapshotCreate(
         "db-snapshot",
         JSON.stringify({
           action: "error",
+          dbId: snapshotDbId,
           error: err instanceof Error ? err.message : String(err),
         }),
       );
+    } finally {
+      snapshotJob.done = true;
+      if (activeSnapshotId) {
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60_000).unref();
+      }
+      if (closeSourceAfterSnapshot) {
+        try {
+          (source as { close?: () => void }).close?.();
+        } catch {
+          // ignore close errors after snapshot completion
+        }
+      }
     }
   })();
 
   return json({ ok: true, message: "snapshot started" });
 }
 
+async function handleSnapshotCancel(req: Request, url: URL): Promise<Response> {
+  let id = url.searchParams.get("id") || "";
+  if (!id) {
+    const body = await parsePostJsonBody<{ id?: string }>(req);
+    if (body instanceof Response) return body;
+    id = body.id || "";
+  }
+  if (!id) return textError("missing id", 400);
+  const job = snapshotJobs.get(id);
+  if (!job) return textError("snapshot job not found", 404);
+  if (!job.done) {
+    job.abortController.abort();
+  }
+  return json({ ok: true });
+}
+
 async function handleSnapshotUpdateNote(
   cwd: string,
   req: Request,
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string; note?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody<{ id?: string; note?: string }>(req);
+  if (body instanceof Response) return body;
   if (!body.id) return textError("missing id", 400);
   await updateSnapshotNote(cwd, body.id, body.note ?? "");
   return json({ ok: true });
@@ -943,13 +1237,8 @@ async function handleSnapshotDelete(
   cwd: string,
   req: Request,
 ): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { id?: string };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody<{ id?: string }>(req);
+  if (body instanceof Response) return body;
   if (!body.id) return textError("missing id", 400);
   await deleteSnapshot(cwd, body.id);
   return json({ ok: true });
@@ -966,10 +1255,7 @@ async function handleDiffTables(cwd: string, url: URL): Promise<Response> {
     const tables = await computeDiffTables(cwd, beforeId, afterId);
     return json({ beforeId, afterId, tables });
   } catch (err) {
-    return textError(
-      `failed to compute diff: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "compute diff", err);
   }
 }
 
@@ -998,30 +1284,75 @@ async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
     );
     return json({ beforeId, afterId, table, ...result });
   } catch (err) {
-    return textError(
-      `failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("database", "compute diff rows", err);
   }
 }
 
-async function handleClose(cwd: string, req: Request): Promise<Response> {
-  if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string };
+// --- Tabs ---
+
+function handleTabsGet(cwd: string): Response {
+  return json(loadTabs(cwd));
+}
+
+async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (contentLength > MAX_TABS_BODY_BYTES) {
+    return textError("tabs body too large", 413);
+  }
+  let body: unknown;
   try {
-    body = (await req.json()) as typeof body;
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_TABS_BODY_BYTES) {
+      return textError("tabs body too large", 413);
+    }
+    body = JSON.parse(raw);
   } catch {
     return textError("invalid JSON body", 400);
   }
+  if (
+    !body ||
+    typeof body !== "object" ||
+    (body as { version?: unknown }).version !== 1
+  ) {
+    return textError("invalid tabs version", 400);
+  }
+  try {
+    saveTabs(cwd, body as import("../../core/database/types").TabsState);
+    return json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "tabs state too large") {
+      return textError(message, 413);
+    }
+    return textError(`failed to save tabs: ${message}`, 500);
+  }
+}
+
+async function handleClose(
+  cwd: string,
+  req: Request,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const body = await parsePostJsonBody<{ db?: string }>(req);
+  if (body instanceof Response) return body;
   if (!body.db) return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed) return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    if (!info) {
+      dockerAdapterCache.close(body.db);
+      closeRedisAdapter(body.db);
+      closeElasticsearchAdapter(body.db);
+      return json({ ok: true });
+    }
+    await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
+    return json({ ok: true });
+  }
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response) return r;
   if (r.docker) {
-    const cached = dockerAdapterCache.get(r.dbId);
-    if (cached) {
-      cached.close();
-      dockerAdapterCache.delete(r.dbId);
-    }
+    dockerAdapterCache.close(r.dbId);
   } else {
     closeConnection(r.resolved);
   }
@@ -1037,6 +1368,20 @@ export async function handleDatabaseRoute(
   sendSse?: (event: string, data?: string) => void,
 ): Promise<Response | null> {
   ensureInit();
+  if (url.pathname.startsWith("/_db/redis/")) {
+    const { handleRedisRoute } = await import("./handle-redis");
+    return handleRedisRoute(req, url, cwd, sideEffectAllowed, omitDirNames);
+  }
+  if (url.pathname.startsWith("/_db/elasticsearch/")) {
+    const { handleElasticsearchRoute } = await import("./handle-elasticsearch");
+    return handleElasticsearchRoute(
+      req,
+      url,
+      cwd,
+      sideEffectAllowed,
+      omitDirNames,
+    );
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
@@ -1045,94 +1390,116 @@ export async function handleDatabaseRoute(
     const ms = Date.now() - start;
     console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
   };
-  const wrapResponse = async (
-    handler: Response | Promise<Response | null>,
-  ): Promise<Response | null> => {
-    const res = await handler;
-    if (res) log(res.status);
+  const wrapResponse = (res: Response): Response => {
+    log(res.status);
     return res;
   };
-  if (path === "/_db/files")
-    return wrapResponse(handleFiles(cwd, omitDirNames));
-  if (path === "/_db/schema") return wrapResponse(handleSchema(cwd, url));
-  if (path === "/_db/table") return wrapResponse(handleTable(cwd, url));
-  if (path === "/_db/columns") return wrapResponse(handleColumns(cwd, url));
-  if (path === "/_db/export") return wrapResponse(handleExport(cwd, url));
-  if (path === "/_db/ddl") return wrapResponse(handleDdl(cwd, url));
-  if (path === "/_db/query") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleQuery(cwd, req, sendSse));
-  }
-  if (path === "/_db/close") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleClose(cwd, req));
-  }
-  if (path === "/_db/history") return wrapResponse(handleHistory(cwd, url));
-  if (path === "/_db/history/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryDelete(cwd, req, sendSse));
-  }
-  if (path === "/_db/history/clear") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryClear(cwd, req, sendSse));
-  }
-  // --- Global Search ---
-  if (path === "/_db/search/start") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchStart(cwd, req));
-  }
-  if (path === "/_db/search/status")
-    return wrapResponse(handleSearchStatus(url));
-  if (path === "/_db/search/cancel") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchCancel(req));
-  }
-  // --- Snapshot ---
-  if (path === "/_db/snapshot/list")
-    return wrapResponse(handleSnapshotList(cwd, url));
-  if (path === "/_db/snapshot/create") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
-  }
-  if (path === "/_db/snapshot/update-note") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotUpdateNote(cwd, req));
-  }
-  if (path === "/_db/snapshot/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotDelete(cwd, req));
-  }
-  // --- Snapshot Diff (on-demand) ---
-  if (path === "/_db/snapshot/diff/tables")
-    return wrapResponse(handleDiffTables(cwd, url));
-  if (path === "/_db/snapshot/diff/rows")
-    return wrapResponse(handleDiffRows(cwd, url));
-  return null;
+  return dispatchRoutes(
+    req,
+    url,
+    {
+      "/_db/files": {
+        methods: ["GET"],
+        handler: () => handleFiles(cwd, omitDirNames),
+      },
+      "/_db/schema": {
+        methods: ["GET"],
+        handler: () => handleSchema(cwd, url, omitDirNames),
+      },
+      "/_db/table": {
+        methods: ["GET"],
+        handler: () => handleTable(cwd, url, omitDirNames),
+      },
+      "/_db/columns": {
+        methods: ["GET"],
+        handler: () => handleColumns(cwd, url, omitDirNames),
+      },
+      "/_db/export": {
+        methods: ["GET"],
+        handler: () => handleExport(cwd, url, omitDirNames),
+      },
+      "/_db/ddl": {
+        methods: ["GET"],
+        handler: () => handleDdl(cwd, url, omitDirNames),
+      },
+      "/_db/query": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleQuery(cwd, req, sendSse, omitDirNames),
+      },
+      "/_db/close": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleClose(cwd, req, omitDirNames),
+      },
+      "/_db/history": {
+        methods: ["GET"],
+        handler: () => handleHistory(cwd, url),
+      },
+      "/_db/history/delete": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleHistoryDelete(cwd, req, sendSse),
+      },
+      "/_db/history/clear": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleHistoryClear(cwd, req, sendSse),
+      },
+      "/_db/search/start": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSearchStart(cwd, req, omitDirNames),
+      },
+      "/_db/search/status": {
+        methods: ["GET"],
+        handler: () => handleSearchStatus(url),
+      },
+      "/_db/search/cancel": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSearchCancel(req),
+      },
+      "/_db/snapshot/list": {
+        methods: ["GET"],
+        handler: () => handleSnapshotList(cwd, url),
+      },
+      "/_db/snapshot/create": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSnapshotCreate(cwd, req, sendSse, omitDirNames),
+      },
+      "/_db/snapshot/cancel": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSnapshotCancel(req, url),
+      },
+      "/_db/snapshot/update-note": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSnapshotUpdateNote(cwd, req),
+      },
+      "/_db/snapshot/delete": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleSnapshotDelete(cwd, req),
+      },
+      "/_db/snapshot/diff/tables": {
+        methods: ["GET"],
+        handler: () => handleDiffTables(cwd, url),
+      },
+      "/_db/snapshot/diff/rows": {
+        methods: ["GET"],
+        handler: () => handleDiffRows(cwd, url),
+      },
+      "/_db/tabs": {
+        methods: ["GET", "PUT", "POST"],
+        sideEffect: (m) => m !== "GET",
+        handler: () =>
+          method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req),
+      },
+    },
+    sideEffectAllowed,
+    wrapResponse,
+  );
 }

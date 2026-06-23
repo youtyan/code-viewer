@@ -1,4 +1,8 @@
-import { createCatchUpGate, shouldCatchUpDiff } from "./core/catch-up";
+import {
+  createCatchUpGate,
+  shouldAutoLoadForRoute,
+  shouldCatchUpDiff,
+} from "./core/catch-up";
 import { GdpExpandLogic } from "./core/expand-logic";
 import {
   findMainScrollTarget,
@@ -45,6 +49,7 @@ import {
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
+import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -79,6 +84,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     language: ViewerLanguage;
     sbView: SidebarView;
     sbWidth: number;
+    historyWidth: number;
     sidebarHidden: boolean;
     collapsedDirs: Set<string>;
     ignoreWs: boolean;
@@ -306,6 +312,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     reloadScopedState();
   }
 
+  function setProjectBranch(branch: string) {
+    const el = document.querySelector<HTMLElement>("#project-branch");
+    if (!el) return;
+    el.hidden = !branch;
+    el.textContent = branch;
+    el.title = branch ? `Current branch: ${branch}` : "";
+  }
+
   function reloadScopedState() {
     const collapsed = readScopedStorage("gdp:collapsed-dirs");
     if (collapsed !== null) {
@@ -419,6 +433,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!res.ok) return null;
       const settings = (await res.json()) as SettingsResponse;
       setProjectName(settings.project || "");
+      setProjectBranch(settings.branch || "");
       const repoLink =
         document.querySelector<HTMLAnchorElement>("#repo-web-link");
       if (repoLink && settings.repo_web_url) {
@@ -468,6 +483,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       language: savedLanguage,
       sbView: (localStorage.getItem("gdp:sbview") as SidebarView) || "tree",
       sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+      historyWidth:
+        parseInt(localStorage.getItem("gdp:historywidth") ?? "", 10) || 320,
       sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
       collapsedDirs: new Set<string>(
         JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]"),
@@ -661,6 +678,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRepoSidebarRef: (ref: string | null) => {
       REPO_SIDEBAR_REF = ref;
     },
+    getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
     syncHeaderMenu,
     getSidebarRowByPath,
     getSidebarVirtualActivePath,
@@ -1013,13 +1031,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (annotationsToggle) {
       annotationsToggle.title = text.global.annotations;
       annotationsToggle.setAttribute("aria-label", text.global.annotations);
-    }
-    const queryHistoryToggle = document.querySelector<HTMLButtonElement>(
-      "#query-history-toggle",
-    );
-    if (queryHistoryToggle) {
-      queryHistoryToggle.title = text.global.queryHistory;
-      queryHistoryToggle.setAttribute("aria-label", text.global.queryHistory);
     }
     const viewerSettings =
       document.querySelector<HTMLButtonElement>("#viewer-settings");
@@ -1681,24 +1692,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
 
-    // Toggle header buttons: annotations vs query-history
-    const isDatabase = STATE.route.screen === "database";
-    const annotationsToggle = document.querySelector<HTMLButtonElement>(
-      "#annotations-toggle",
-    );
-    const qhToggle = document.querySelector<HTMLButtonElement>(
-      "#query-history-toggle",
-    );
-    if (annotationsToggle) annotationsToggle.hidden = isDatabase;
-    if (qhToggle) qhToggle.hidden = !isDatabase;
-
     // Close query-history panel when leaving database screen
-    if (!isDatabase) {
+    if (STATE.route.screen !== "database") {
       setQueryHistoryPanelOpen(false);
-    }
-    // Close annotation panel when entering database screen
-    if (isDatabase && ANNOTATIONS_UI) {
-      ANNOTATIONS_UI.setAnnotationPanelOpen(false);
     }
   }
 
@@ -1921,8 +1917,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     setServerGeneration: (generation: number) => {
       SERVER_GENERATION = generation;
     },
+    invalidateRepoSidebar,
   });
   const {
+    renderMeta,
     renderShell,
     rerenderLoadedDiffs,
     mountDiff,
@@ -1975,7 +1973,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#sb-collapse-all").addEventListener("click", () =>
     setAllSidebarDirsCollapsed(true),
   );
-  $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
   $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
@@ -2002,7 +1999,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     else focusMainPanel();
   });
 
-  // Sidebar resizer (drag right edge)
+  function applyHistoryWidth(w: number) {
+    const cw = Math.max(220, Math.min(640, w));
+    document.documentElement.style.setProperty("--history-w", `${cw}px`);
+    STATE.historyWidth = cw;
+    localStorage.setItem("gdp:historywidth", String(cw));
+  }
+
+  // History and sidebar resizers (drag right edge)
+  applyHistoryWidth(STATE.historyWidth);
   applySidebarWidth(STATE.sbWidth);
   // Track sidebar touch / wheel / scroll so the scrollSpy auto-scroll
   // doesn't fight against an active manual scroll. window.__gdpSidebarTouchedAt
@@ -2035,6 +2040,50 @@ window.GdpExpandLogic = GdpExpandLogic;
     const MIN = 180,
       MAX = 900;
     const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
+    const sidebarLeft = () =>
+      document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
+    let dragging = false,
+      startX = 0,
+      startW = 0,
+      startLeft = 0,
+      currentW = 0;
+
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startW = STATE.sbWidth;
+      startLeft = sidebarLeft();
+      currentW = startW;
+      document.body.classList.add("gdp-resizing");
+      preview.style.display = "block";
+      preview.style.left = `${startLeft + startW}px`;
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      currentW = clamp(startW + (e.clientX - startX));
+      preview.style.left = `${startLeft + currentW}px`;
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      preview.style.display = "none";
+      document.body.classList.remove("gdp-resizing");
+      applySidebarWidth(currentW);
+    });
+    // double-click to reset
+    handle.addEventListener("dblclick", () => applySidebarWidth(308));
+  })();
+  (function setupHistoryResizer() {
+    const handle = document.getElementById("history-resizer");
+    if (!handle) return;
+    const preview = document.createElement("div");
+    preview.id = "history-resize-preview";
+    document.body.appendChild(preview);
+
+    const MIN = 220,
+      MAX = 640;
+    const clamp = (w: number) => Math.max(MIN, Math.min(MAX, w));
     let dragging = false,
       startX = 0,
       startW = 0,
@@ -2043,9 +2092,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     handle.addEventListener("mousedown", (e) => {
       dragging = true;
       startX = e.clientX;
-      startW = STATE.sbWidth;
+      startW = STATE.historyWidth;
       currentW = startW;
-      document.body.classList.add("gdp-resizing");
+      document.body.classList.add("gdp-history-resizing");
       preview.style.display = "block";
       preview.style.left = `${startW}px`;
       e.preventDefault();
@@ -2059,11 +2108,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!dragging) return;
       dragging = false;
       preview.style.display = "none";
-      document.body.classList.remove("gdp-resizing");
-      applySidebarWidth(currentW);
+      document.body.classList.remove("gdp-history-resizing");
+      applyHistoryWidth(currentW);
     });
-    // double-click to reset
-    handle.addEventListener("dblclick", () => applySidebarWidth(308));
+    handle.addEventListener("dblclick", () => applyHistoryWidth(320));
   })();
 
   $$("#topbar .seg button").forEach((b) => {
@@ -2365,7 +2413,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return Promise.resolve(null);
     }
     if (STATE.route.screen === "database") {
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       setStatus("live");
       return Promise.resolve(null);
     }
@@ -2392,6 +2444,15 @@ window.GdpExpandLogic = GdpExpandLogic;
             : "The working tree is clean against this ref.";
       }
     }
+    const routeAtRequest = STATE.route;
+    const fromAtRequest = STATE.from;
+    const toAtRequest = STATE.to;
+    const ignoreWsAtRequest = STATE.ignoreWs;
+    const isCurrentDiffRequest = () =>
+      STATE.route === routeAtRequest &&
+      STATE.from === fromAtRequest &&
+      STATE.to === toAtRequest &&
+      STATE.ignoreWs === ignoreWsAtRequest;
     setStatus("refreshing");
     const params = new URLSearchParams();
     if (STATE.ignoreWs) params.set("ignore_ws", "1");
@@ -2401,11 +2462,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
       .then((data) => {
+        if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
         setStatus("live");
         return result;
       })
       .catch(() => {
+        if (!isCurrentDiffRequest()) return null;
         setStatus("error");
         return null;
       });
@@ -2424,7 +2487,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       HISTORY_VIEW.enterHistory();
     } else if (STATE.route.screen === "database") {
       setStatus("live");
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -2485,19 +2552,24 @@ window.GdpExpandLogic = GdpExpandLogic;
       return load().then(() => {});
     },
     showEmptyDiffPane: () => {
-      const diff = $("#diff");
-      if (diff) diff.innerHTML = "";
-      const empty = $("#empty");
-      if (empty) {
-        empty.classList.remove("hidden");
-        const h2 = empty.querySelector("h2");
-        if (h2) h2.textContent = "No commit selected";
-        const p = empty.querySelector("p");
-        if (p)
-          p.textContent = "Select a commit from the list to see its changes.";
-      }
-      setStatus("live");
+      showEmptyHistoryDiffPane({
+        diff: $("#diff"),
+        empty: $("#empty"),
+        renderSidebar,
+        setFiles: (files) => {
+          STATE.files = files;
+        },
+        clearLastMeta: () => {
+          window._lastMeta = null;
+        },
+        renderMeta,
+        invalidateRepoSidebar,
+        clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+        placeSidebarToggle,
+        setStatus,
+      });
     },
+    getSyntaxHighlight: () => STATE.syntaxHighlight,
     trackLoad,
   });
 
@@ -2534,19 +2606,14 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
   function applyRouteFromLocation() {
+    const previousRoute = STATE.route;
     // Leaving the history screen: bring back the range the user had picked
     // for the other screens before the URL fallback below reads it.
     if (
-      STATE.route.screen === "history" &&
+      previousRoute.screen === "history" &&
       window.location.pathname !== "/history"
     ) {
       restoreRangeAfterHistory();
-    }
-    if (
-      STATE.route.screen === "database" &&
-      window.location.pathname !== "/database"
-    ) {
-      DATABASE_VIEW.leave();
     }
     const parsedRoute = parseRoute(
       window.location.pathname,
@@ -2560,6 +2627,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       parsedRoute.screen === "unknown"
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
+    if (previousRoute.screen === "database" && nextRoute.screen !== "database")
+      DATABASE_VIEW.suspend();
+    if (previousRoute.screen === "history" && nextRoute.screen !== "history")
+      HISTORY_VIEW.leaveHistory();
     STATE.route =
       nextRoute.screen === "help" &&
       !new URLSearchParams(window.location.search).has("lang")
@@ -2599,7 +2670,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       cancelActiveSourceLoad("navigation");
       setPageMode();
       removeStandaloneSource();
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       setStatus("live");
       return;
     }
@@ -2731,6 +2806,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     getFiles: () => STATE.files,
     getRoute: () => STATE.route,
+    leaveDatabaseView: () => {
+      DATABASE_VIEW.suspend();
+    },
+    openDatabaseAnnotation: (target) => {
+      setStatus("live");
+      // The annotation UI redraws DB annotation strips after this promise.
+      // Keep this callback focused on mounting/navigating the database view.
+      return DATABASE_VIEW.enter(target.db, target.table, target.tab, {
+        annotationTarget: target,
+        reuseActiveTab: true,
+      });
+    },
+    captureDatabaseAnnotationTarget: () =>
+      DATABASE_VIEW.captureAnnotationTarget(),
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
@@ -2755,16 +2844,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
   });
 
-  // ---- Query History panel toggle ----
-  const qhToggleBtn = document.getElementById("query-history-toggle");
-  if (qhToggleBtn) {
-    qhToggleBtn.addEventListener("click", () => {
-      const panel = document.getElementById("query-history-panel");
-      const opening = panel ? panel.hidden : true;
-      setQueryHistoryPanelOpen(opening);
-      if (opening) DATABASE_VIEW.handleSse();
-    });
-  }
   const qhCloseBtn = document.getElementById("query-history-panel-close");
   if (qhCloseBtn) {
     qhCloseBtn.addEventListener("click", () => {
@@ -2828,6 +2907,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (bannerPendingPaths) {
         const paths = bannerPendingPaths;
         hideChangeBanner();
+        if (!shouldAutoLoadCurrentRoute()) return;
         doSseLoad(paths);
         return;
       }
@@ -2891,6 +2971,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = bannerPendingPaths;
       hideChangeBanner();
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route)) return;
       if (isRepoBlobRoute(route)) {
         renderStandaloneSource({
           path: route.path,
@@ -2910,8 +2991,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   applyAutoUpdateButton();
 
+  function shouldAutoLoadCurrentRoute(route = STATE.route): boolean {
+    return shouldAutoLoadForRoute(route, {
+      historyWorktreeSelected: HISTORY_VIEW.isWorktreeSelected(),
+    });
+  }
+
   function doSseLoad(paths: Set<string> | null) {
     const route = STATE.route;
+    if (!shouldAutoLoadCurrentRoute(route)) return;
     if (isRepoBlobRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
@@ -2924,6 +3012,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (route.screen === "repo") {
       invalidateRepoSidebar();
       void loadRepo();
+      return;
+    }
+    if (route.screen !== "diff" && route.screen !== "history") {
       return;
     }
     const savedScroll = window.scrollY;
@@ -2946,8 +3037,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSseChangedPaths: Set<string> | null = new Set();
   function scheduleSseLoad(changedPaths?: string[] | null) {
-    if (STATE.route.screen === "database" || STATE.route.screen === "help")
-      return;
+    if (!shouldAutoLoadCurrentRoute()) return;
     if (changedPaths && pendingSseChangedPaths) {
       for (const p of changedPaths) pendingSseChangedPaths.add(p);
     } else {
@@ -2991,8 +3081,8 @@ window.GdpExpandLogic = GdpExpandLogic;
   es.addEventListener("annotation", (event) => {
     ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
   });
-  es.addEventListener("db-query", () => {
-    DATABASE_VIEW.handleSse("db-query");
+  es.addEventListener("db-query", (event) => {
+    DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
   });
   es.addEventListener("db-snapshot", (event) => {
     DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
@@ -3008,7 +3098,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function catchUpDiff() {
-    if (!shouldCatchUpDiff(STATE.route)) return;
+    const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
+    if (!shouldAutoLoadCurrentRoute()) return;
+    if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected })) return;
     if (!catchUpGate()) return;
     if (!STATE.autoUpdate) {
       showChangeBanner(null);

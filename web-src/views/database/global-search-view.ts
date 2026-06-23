@@ -6,6 +6,12 @@ export type GlobalSearchViewDeps = {
 
 export type GlobalSearchView = {
   el: HTMLElement;
+  setSearch: (
+    term: string,
+    options?: { includeNonText?: boolean; autoRun?: boolean },
+  ) => void;
+  getSearch: () => { term?: string; includeNonText?: boolean };
+  dispose: () => void;
 };
 
 export function createGlobalSearchView(
@@ -54,6 +60,7 @@ export function createGlobalSearchView(
 
   let currentJobId: string | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let disposed = false;
 
   function stopPolling() {
     if (pollTimer) {
@@ -66,6 +73,7 @@ export function createGlobalSearchView(
   }
 
   async function startSearch() {
+    if (disposed) return;
     const dbId = deps.getDbId();
     if (!dbId) return;
     const term = input.value.trim();
@@ -97,6 +105,10 @@ export function createGlobalSearchView(
         return;
       }
       const data = (await res.json()) as { jobId: string };
+      if (disposed) {
+        void cancelJob(data.jobId);
+        return;
+      }
       currentJobId = data.jobId;
       pollTimer = setInterval(() => pollStatus(), 500);
     } catch (err) {
@@ -106,6 +118,7 @@ export function createGlobalSearchView(
   }
 
   async function pollStatus() {
+    if (disposed) return;
     if (!currentJobId) return;
     try {
       const res = await fetch(
@@ -123,6 +136,7 @@ export function createGlobalSearchView(
         done: boolean;
         error?: string;
       };
+      if (disposed) return;
 
       if (data.error) {
         progress.textContent = `エラー: ${data.error}`;
@@ -151,6 +165,15 @@ export function createGlobalSearchView(
 
   async function cancelSearch() {
     if (!currentJobId) return;
+    const jobId = currentJobId;
+    currentJobId = null;
+    await cancelJob(jobId);
+    stopPolling();
+    if (disposed) return;
+    progress.textContent = "検索をキャンセルしました。";
+  }
+
+  async function cancelJob(jobId: string) {
     try {
       await fetch("/_db/search/cancel", {
         method: "POST",
@@ -158,13 +181,11 @@ export function createGlobalSearchView(
           "Content-Type": "application/json",
           "X-Code-Viewer-Action": "1",
         },
-        body: JSON.stringify({ id: currentJobId }),
+        body: JSON.stringify({ id: jobId }),
       });
     } catch {
       // ignore
     }
-    stopPolling();
-    progress.textContent = "検索をキャンセルしました。";
   }
 
   function renderHits(hits: GlobalSearchHit[]) {
@@ -224,5 +245,35 @@ export function createGlobalSearchView(
   });
   cancelBtn.addEventListener("click", cancelSearch);
 
-  return { el };
+  function setSearch(
+    term: string,
+    options: { includeNonText?: boolean; autoRun?: boolean } = {},
+  ): void {
+    input.value = term;
+    nonTextCheck.checked = !!options.includeNonText;
+    if (options.autoRun && term.trim()) void startSearch();
+  }
+
+  function getSearch(): { term?: string; includeNonText?: boolean } {
+    const term = input.value.trim();
+    return {
+      ...(term ? { term } : {}),
+      ...(nonTextCheck.checked ? { includeNonText: true } : {}),
+    };
+  }
+
+  function dispose(): void {
+    disposed = true;
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (currentJobId) {
+      const jobId = currentJobId;
+      currentJobId = null;
+      void cancelJob(jobId);
+    }
+  }
+
+  return { el, setSearch, getSearch, dispose };
 }

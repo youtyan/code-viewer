@@ -64,26 +64,155 @@ function normalizeRange(raw) {
   const to = raw && typeof raw === "object" && typeof raw.to === "string" ? raw.to || "worktree" : "worktree";
   return { from, to };
 }
+function normalizeDatabaseTab(raw) {
+  return raw === "data" || raw === "query" || raw === "schema" || raw === "er" || raw === "search" || raw === "snapshot" ? raw : undefined;
+}
+function normalizeDatabaseDataState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.search === "string" && value.search)
+    state.search = value.search;
+  if (Array.isArray(value.filters)) {
+    const filters = value.filters.map((item) => {
+      if (!item || typeof item !== "object")
+        return null;
+      const filter = item;
+      return typeof filter.column === "string" && filter.column && typeof filter.value === "string" && filter.value ? { column: filter.column, value: filter.value } : null;
+    }).filter((item) => !!item);
+    if (filters.length)
+      state.filters = filters;
+  }
+  if (value.sort && typeof value.sort === "object") {
+    const sort = value.sort;
+    if (typeof sort.column === "string" && sort.column && (sort.direction === "asc" || sort.direction === "desc")) {
+      state.sort = { column: sort.column, direction: sort.direction };
+    }
+  }
+  if (Number.isInteger(value.row) && value.row > 0)
+    state.row = value.row;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseQueryState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.sql === "string" && value.sql)
+    state.sql = value.sql;
+  if (value.mode === "run" || value.mode === "explain")
+    state.mode = value.mode;
+  if (typeof value.autoRun === "boolean")
+    state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseSearchState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.term === "string" && value.term)
+    state.term = value.term;
+  if (typeof value.includeNonText === "boolean")
+    state.includeNonText = value.includeNonText;
+  if (typeof value.autoRun === "boolean")
+    state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeDatabaseSnapshotState(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const value = raw;
+  const state = {};
+  if (typeof value.fromSnapshotId === "string" && value.fromSnapshotId)
+    state.fromSnapshotId = value.fromSnapshotId;
+  if (typeof value.toSnapshotId === "string" && value.toSnapshotId)
+    state.toSnapshotId = value.toSnapshotId;
+  if (typeof value.table === "string" && value.table)
+    state.table = value.table;
+  return Object.keys(state).length ? state : undefined;
+}
+function normalizeAnnotationTarget(raw) {
+  if (!raw || typeof raw !== "object")
+    return;
+  const target = raw;
+  if (target.kind === "database") {
+    const db = typeof target.db === "string" && target.db ? target.db : undefined;
+    const table = typeof target.table === "string" && target.table ? target.table : undefined;
+    const tab = normalizeDatabaseTab(target.tab);
+    const data = normalizeDatabaseDataState(target.data);
+    const query = normalizeDatabaseQueryState(target.query);
+    const search = normalizeDatabaseSearchState(target.search);
+    const snapshot = normalizeDatabaseSnapshotState(target.snapshot);
+    return {
+      kind: "database",
+      ...db ? { db } : {},
+      ...table ? { table } : {},
+      ...tab ? { tab } : {},
+      ...data ? { data } : {},
+      ...query ? { query } : {},
+      ...search ? { search } : {},
+      ...snapshot ? { snapshot } : {}
+    };
+  }
+  if (target.kind === "code") {
+    const path = typeof target.path === "string" ? target.path.replace(/^\/+|\/+$/g, "") : "";
+    if (!path)
+      return;
+    const line = normalizeLineRange(target.line);
+    return {
+      kind: "code",
+      path,
+      range: normalizeRange(target.range),
+      ...line ? { line } : {}
+    };
+  }
+  return;
+}
+function databaseTargetPath(target) {
+  const labelPart = (value, max = 48) => value.replace(/[^A-Za-z0-9._=-]+/g, "_").slice(0, max).replace(/^_+|_+$/g, "");
+  const parts = ["database"];
+  if (target.db)
+    parts.push(labelPart(target.db));
+  if (target.table)
+    parts.push(labelPart(target.table));
+  if (target.tab)
+    parts.push(target.tab);
+  if (target.data?.search)
+    parts.push(`search=${labelPart(target.data.search, 32)}`);
+  if (target.query?.sql)
+    parts.push("query");
+  if (target.search?.term)
+    parts.push(`global-search=${labelPart(target.search.term, 32)}`);
+  if (target.snapshot?.fromSnapshotId || target.snapshot?.toSnapshotId)
+    parts.push("snapshot-diff");
+  return parts.join(":");
+}
 function normalizeEntry(raw) {
   if (!raw || typeof raw !== "object")
     return null;
   const entry = raw;
   if (typeof entry.id !== "string" || !entry.id)
     return null;
-  if (typeof entry.path !== "string" || !entry.path)
-    return null;
   if (typeof entry.body !== "string" || !entry.body)
+    return null;
+  const target = normalizeAnnotationTarget(entry.target);
+  const path = typeof entry.path === "string" && entry.path ? entry.path : target?.kind === "database" ? databaseTargetPath(target) : "";
+  if (!path)
     return null;
   const normalized = {
     id: entry.id,
     created_at: typeof entry.created_at === "string" ? entry.created_at : "",
-    path: entry.path,
+    path,
     range: normalizeRange(entry.range),
     body: entry.body
   };
   const line = normalizeLineRange(entry.line);
   if (line)
     normalized.line = line;
+  if (target)
+    normalized.target = target;
   if (typeof entry.title === "string" && entry.title)
     normalized.title = entry.title;
   return normalized;
@@ -144,8 +273,47 @@ function startAnnotationSession(state, title, now, id = makeAnnotationId("s")) {
     session
   };
 }
+function insertOptionCount(input) {
+  return (input.before_id ? 1 : 0) + (input.after_id ? 1 : 0) + (input.position !== undefined ? 1 : 0);
+}
+function entryInsertIndex(entries, input) {
+  if (insertOptionCount(input) > 1)
+    return { ok: false, error: "use only one of before, after, or position" };
+  if (input.before_id) {
+    const index = entries.findIndex((entry) => entry.id === input.before_id);
+    if (index < 0)
+      return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index };
+  }
+  if (input.after_id) {
+    const index = entries.findIndex((entry) => entry.id === input.after_id);
+    if (index < 0)
+      return { ok: false, error: "anchor annotation not found" };
+    return { ok: true, index: index + 1 };
+  }
+  if (input.position !== undefined) {
+    if (!Number.isInteger(input.position) || input.position < 1)
+      return { ok: false, error: "position must be a positive integer" };
+    if (input.position > entries.length + 1)
+      return { ok: false, error: "position is out of range" };
+    return { ok: true, index: input.position - 1 };
+  }
+  return { ok: true, index: entries.length };
+}
+function findSessionByEntryId(sessions, entryId) {
+  return sessions.find((session) => session.entries.some((entry) => entry.id === entryId));
+}
 function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
-  const path = input.path.replace(/^\/+|\/+$/g, "");
+  const target = normalizeAnnotationTarget(input.target);
+  if (target?.kind === "database" && !target.db)
+    return { ok: false, error: "database annotation requires db" };
+  if (target?.kind === "database" && target.data && !target.table) {
+    return {
+      ok: false,
+      error: "database data annotations require table"
+    };
+  }
+  const path = target?.kind === "database" ? databaseTargetPath(target) : (input.path || "").replace(/^\/+|\/+$/g, "");
   if (!path)
     return { ok: false, error: "path is required" };
   const body = input.body;
@@ -159,10 +327,21 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
   let sessions = state.sessions;
   let session;
   let createdSession = false;
+  const anchorId = input.before_id || input.after_id;
+  const anchorSession = anchorId ? findSessionByEntryId(sessions, anchorId) : undefined;
+  if (anchorId && !anchorSession)
+    return { ok: false, error: "anchor annotation not found" };
   if (input.session_id) {
     session = sessions.find((s) => s.id === input.session_id);
     if (!session)
       return { ok: false, error: "session not found" };
+    if (anchorSession && anchorSession.id !== session.id)
+      return {
+        ok: false,
+        error: "anchor annotation belongs to another session"
+      };
+  } else if (anchorSession) {
+    session = anchorSession;
   } else {
     session = sessions[sessions.length - 1];
   }
@@ -181,12 +360,19 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
   };
   if (line)
     entry.line = line;
+  if (target)
+    entry.target = target;
   const title = (input.title || "").trim();
   if (title)
     entry.title = title.slice(0, ANNOTATION_TITLE_MAX_CHARS);
+  const insertAt = entryInsertIndex(session.entries, input);
+  if (insertAt.ok === false)
+    return { ok: false, error: insertAt.error };
+  const entries = [...session.entries];
+  entries.splice(insertAt.index, 0, entry);
   const updatedSession = {
     ...session,
-    entries: [...session.entries, entry]
+    entries
   };
   return {
     ok: true,
@@ -197,6 +383,41 @@ function addAnnotationEntry(state, input, now, makeId = makeAnnotationId) {
     session: updatedSession,
     entry,
     created_session: createdSession
+  };
+}
+function moveAnnotationEntry(state, id, input) {
+  if (insertOptionCount(input) !== 1)
+    return { ok: false, error: "move requires before, after, or position" };
+  const sourceSession = findSessionByEntryId(state.sessions, id);
+  const entry = sourceSession?.entries.find((e) => e.id === id);
+  if (!sourceSession || !entry)
+    return { ok: false, error: "annotation not found" };
+  if (input.before_id === id || input.after_id === id)
+    return { ok: false, error: "cannot move annotation relative to itself" };
+  const anchorId = input.before_id || input.after_id;
+  const destinationSession = anchorId ? findSessionByEntryId(state.sessions, anchorId) : sourceSession;
+  if (!destinationSession)
+    return { ok: false, error: "anchor annotation not found" };
+  if (destinationSession.id !== sourceSession.id)
+    return { ok: false, error: "anchor annotation belongs to another session" };
+  const sessionsWithoutEntry = state.sessions.map((session) => session.id === sourceSession.id ? { ...session, entries: session.entries.filter((e) => e.id !== id) } : session);
+  const targetSession = sessionsWithoutEntry.find((session) => session.id === destinationSession.id);
+  if (!targetSession)
+    return { ok: false, error: "destination session not found" };
+  const insertAt = entryInsertIndex(targetSession.entries, input);
+  if (insertAt.ok === false)
+    return { ok: false, error: insertAt.error };
+  const movedEntries = [...targetSession.entries];
+  movedEntries.splice(insertAt.index, 0, entry);
+  const updatedSession = { ...targetSession, entries: movedEntries };
+  return {
+    ok: true,
+    state: {
+      version: 1,
+      sessions: sessionsWithoutEntry.map((session) => session.id === updatedSession.id ? updatedSession : session)
+    },
+    session: updatedSession,
+    entry
   };
 }
 function renameAnnotationSession(state, id, title) {
@@ -554,6 +775,9 @@ function refs(cwd) {
 function clampCommitLimit(max) {
   return Math.max(1, Math.min(max, MAX_REF_COMMIT_LIMIT));
 }
+function clampCommitSkip(skip) {
+  return Math.max(0, Math.floor(skip) || 0);
+}
 function parseCommitLog(stdout) {
   const parts = stdout.split("\x00");
   const commits = [];
@@ -571,8 +795,8 @@ function parseCommitLog(stdout) {
   }
   return commits;
 }
-function commitLogArgs(limit) {
-  return [
+function commitLogArgs(limit, skip = 0) {
+  const args = [
     "git",
     "log",
     "--all",
@@ -580,6 +804,9 @@ function commitLogArgs(limit) {
     `--max-count=${limit}`,
     `--format=${COMMIT_FORMAT}`
   ];
+  if (skip > 0)
+    args.splice(4, 0, `--skip=${skip}`);
+  return args;
 }
 function mergeCommitResults(limit, ...groups) {
   const seen = new Set;
@@ -601,10 +828,15 @@ function runCommitLog(cwd, args) {
   return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
 }
 function refCommits(cwd, query = "", max = DEFAULT_REF_COMMIT_LIMIT) {
-  const limit = clampCommitLimit(max);
-  const trimmed = query.trim().slice(0, 200).replace(/\0/g, "");
+  return refCommitPage(cwd, { query, max }).commits;
+}
+function refCommitPage(cwd, options = {}) {
+  const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
+  const skip = clampCommitSkip(options.skip ?? 0);
+  const fetchLimit = limit + 1;
   const hashMatches = [];
-  if (/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+  const trimmed = (options.query || "").trim().slice(0, 200).replace(/\0/g, "");
+  if (skip === 0 && /^[0-9a-f]{4,40}$/i.test(trimmed)) {
     const verified = run(["git", "rev-parse", "--verify", `${trimmed}^{commit}`], cwd);
     const single = run([
       "git",
@@ -619,21 +851,29 @@ function refCommits(cwd, query = "", max = DEFAULT_REF_COMMIT_LIMIT) {
     }
   }
   if (!trimmed) {
-    return runCommitLog(cwd, commitLogArgs(limit));
+    const commits = runCommitLog(cwd, commitLogArgs(fetchLimit, skip));
+    return {
+      commits: commits.slice(0, limit),
+      hasMore: commits.length > limit
+    };
   }
   const subjectMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--grep=${trimmed}`
   ]);
   const authorMatches = runCommitLog(cwd, [
-    ...commitLogArgs(limit),
+    ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--author=${trimmed}`
   ]);
-  return mergeCommitResults(limit, hashMatches, subjectMatches, authorMatches);
+  const merged = mergeCommitResults(fetchLimit, hashMatches, subjectMatches, authorMatches);
+  return {
+    commits: merged.slice(0, limit),
+    hasMore: merged.length > limit
+  };
 }
 function parseRemoteWebUrl(remote) {
   const raw = (remote || "").trim();
@@ -1280,11 +1520,39 @@ function takeValue(argv, index, flag) {
     return { error: `${flag} requires a value` };
   return { value, next: index + 1 };
 }
+function parsePosition(value) {
+  if (value === undefined)
+    return;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : Number.NaN;
+}
+function parseDatabaseTab(value) {
+  return value === "data" || value === "query" || value === "schema" || value === "er" || value === "search" || value === "snapshot" ? value : undefined;
+}
+function parseFilter(value) {
+  const idx = value.indexOf("=");
+  if (idx <= 0)
+    return null;
+  const column = value.slice(0, idx).trim();
+  const filterValue = value.slice(idx + 1).trim();
+  return column && filterValue ? { column, value: filterValue } : null;
+}
+function parseSort(value) {
+  if (value === undefined)
+    return;
+  const idx = value.lastIndexOf(":");
+  if (idx <= 0)
+    return null;
+  const column = value.slice(0, idx).trim();
+  const direction = value.slice(idx + 1).trim();
+  return column && (direction === "asc" || direction === "desc") ? { column, direction } : null;
+}
 function parseAnnotateArgs(argv) {
   const rest = [];
   let cwd;
   let server;
   const options = new Map;
+  const multiOptions = new Map;
   const flags = new Set;
   const valueFlags = new Set([
     "--title",
@@ -1295,7 +1563,21 @@ function parseAnnotateArgs(argv) {
     "--session",
     "--session-title",
     "--body",
-    "--body-file"
+    "--body-file",
+    "--before",
+    "--after",
+    "--position",
+    "--db",
+    "--table",
+    "--tab",
+    "--grid-search",
+    "--filter",
+    "--sort",
+    "--row",
+    "--sql",
+    "--sql-file",
+    "--query-mode",
+    "--search-term"
   ]);
   for (let i = 0;i < argv.length; i++) {
     const arg = argv[i];
@@ -1315,8 +1597,11 @@ function parseAnnotateArgs(argv) {
       if ("error" in taken)
         return { ok: false, error: taken.error };
       options.set(arg, taken.value);
+      const values = multiOptions.get(arg) || [];
+      values.push(taken.value);
+      multiOptions.set(arg, values);
       i = taken.next;
-    } else if (arg === "--json") {
+    } else if (arg === "--json" || arg === "--run-query" || arg === "--run-search" || arg === "--include-non-text") {
       flags.add(arg);
     } else if (arg.startsWith("-")) {
       return { ok: false, error: `unknown option: ${arg}` };
@@ -1355,6 +1640,9 @@ function parseAnnotateArgs(argv) {
     const bodyFile = options.get("--body-file");
     if (body !== undefined && bodyFile !== undefined)
       return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
     return {
       ok: true,
       args: {
@@ -1368,7 +1656,108 @@ function parseAnnotateArgs(argv) {
           session: options.get("--session"),
           sessionTitle: options.get("--session-title"),
           body,
-          bodyFile
+          bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "add-db") {
+    if (!options.get("--db"))
+      return { ok: false, error: "add-db requires --db <id>" };
+    const body = options.get("--body");
+    const bodyFile = options.get("--body-file");
+    if (body !== undefined && bodyFile !== undefined)
+      return { ok: false, error: "use either --body or --body-file" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    const rawTab = options.get("--tab");
+    const tab = parseDatabaseTab(rawTab);
+    if (rawTab !== undefined && tab === undefined)
+      return {
+        ok: false,
+        error: "--tab must be one of data, query, schema, er, search, snapshot"
+      };
+    const filters = [];
+    for (const raw of multiOptions.get("--filter") || []) {
+      const parsed = parseFilter(raw);
+      if (!parsed)
+        return { ok: false, error: "--filter must be <column=value>" };
+      filters.push(parsed);
+    }
+    const sort = parseSort(options.get("--sort"));
+    if (sort === null)
+      return { ok: false, error: "--sort must be <column:asc|desc>" };
+    const row = parsePosition(options.get("--row"));
+    if (Number.isNaN(row))
+      return { ok: false, error: "--row must be a positive integer" };
+    const sql = options.get("--sql");
+    const sqlFile = options.get("--sql-file");
+    if (sql !== undefined && sqlFile !== undefined)
+      return { ok: false, error: "use either --sql or --sql-file" };
+    const rawQueryMode = options.get("--query-mode");
+    const queryMode = rawQueryMode === undefined || rawQueryMode === "run" ? "run" : rawQueryMode === "explain" ? "explain" : null;
+    if (queryMode === null)
+      return { ok: false, error: "--query-mode must be run or explain" };
+    const hasDataState = options.has("--grid-search") || filters.length > 0 || sort !== undefined || row !== undefined;
+    const hasQueryState = sql !== undefined || sqlFile !== undefined || flags.has("--run-query");
+    const hasSearchState = options.has("--search-term") || flags.has("--include-non-text") || flags.has("--run-search");
+    if (hasDataState && !options.get("--table")) {
+      return {
+        ok: false,
+        error: "data grid annotations require --table"
+      };
+    }
+    if (tab === "data" && (hasQueryState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab data cannot be combined with query or search options"
+      };
+    }
+    if (tab === "query" && (hasDataState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab query cannot be combined with data or search options"
+      };
+    }
+    if (tab === "search" && (hasDataState || hasQueryState)) {
+      return {
+        ok: false,
+        error: "--tab search cannot be combined with data or query options"
+      };
+    }
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "add-db",
+          db: options.get("--db"),
+          table: options.get("--table"),
+          tab,
+          gridSearch: options.get("--grid-search"),
+          filters,
+          sort: sort || undefined,
+          row,
+          sql,
+          sqlFile,
+          queryMode,
+          queryAutoRun: flags.has("--run-query"),
+          searchTerm: options.get("--search-term"),
+          includeNonText: flags.has("--include-non-text") || undefined,
+          searchAutoRun: flags.has("--run-search"),
+          title: options.get("--title"),
+          session: options.get("--session"),
+          sessionTitle: options.get("--session-title"),
+          body,
+          bodyFile,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
         },
         cwd,
         server
@@ -1404,6 +1793,33 @@ function parseAnnotateArgs(argv) {
           title: options.get("--title"),
           body,
           bodyFile
+        },
+        cwd,
+        server
+      }
+    };
+  }
+  if (subcommand === "move") {
+    const id = rest[1];
+    if (!id)
+      return { ok: false, error: "move requires an annotation id" };
+    const position = parsePosition(options.get("--position"));
+    if (Number.isNaN(position))
+      return { ok: false, error: "--position must be a positive integer" };
+    if (!options.get("--before") && !options.get("--after") && position === undefined)
+      return {
+        ok: false,
+        error: "move requires --before, --after, or --position"
+      };
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "move",
+          id,
+          before: options.get("--before"),
+          after: options.get("--after"),
+          position
         },
         cwd,
         server
@@ -1522,6 +1938,24 @@ function printList(state) {
     });
   }
 }
+async function annotationBodyFromCommand(command) {
+  let body = command.body;
+  if (body === undefined && command.bodyFile !== undefined) {
+    try {
+      body = readFileSync4(command.bodyFile, "utf8");
+    } catch {
+      console.error(`could not read --body-file: ${command.bodyFile}`);
+      process.exit(1);
+    }
+  }
+  if (body === undefined)
+    body = await readStdin();
+  if (!body.trim()) {
+    console.error("annotation body is empty. Pass --body, --body-file, or pipe stdin.");
+    process.exit(1);
+  }
+  return body;
+}
 async function runAnnotateCli(argv) {
   const parsed = parseAnnotateArgs(argv);
   if (parsed.ok === false) {
@@ -1550,21 +1984,7 @@ async function runAnnotateCli(argv) {
     return;
   }
   if (command.kind === "add") {
-    let body = command.body;
-    if (body === undefined && command.bodyFile !== undefined) {
-      try {
-        body = readFileSync4(command.bodyFile, "utf8");
-      } catch {
-        console.error(`could not read --body-file: ${command.bodyFile}`);
-        process.exit(1);
-      }
-    }
-    if (body === undefined)
-      body = await readStdin();
-    if (!body.trim()) {
-      console.error("annotation body is empty. Pass --body, --body-file, or pipe stdin.");
-      process.exit(1);
-    }
+    const body = await annotationBodyFromCommand(command);
     const result = await request(serverUrl, "POST", {
       action: "add",
       session_id: command.session,
@@ -1573,12 +1993,69 @@ async function runAnnotateCli(argv) {
       line: command.line,
       range: { from: command.from, to: command.to },
       title: command.title,
-      body
+      body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
     });
     if (result.created_session) {
       console.error(`created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`);
     }
     console.log(`annotated ${result.entry.path}${formatLine(result.entry.line)} ` + `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`);
+    console.error(`view annotations at ${serverUrl}/ with the code annotations panel`);
+    return;
+  }
+  if (command.kind === "add-db") {
+    const body = await annotationBodyFromCommand(command);
+    let sql = command.sql;
+    if (sql === undefined && command.sqlFile !== undefined) {
+      try {
+        sql = readFileSync4(command.sqlFile, "utf8");
+      } catch {
+        console.error(`could not read --sql-file: ${command.sqlFile}`);
+        process.exit(1);
+      }
+    }
+    const dataState = command.gridSearch || command.filters && command.filters.length > 0 || command.sort || command.row ? {
+      search: command.gridSearch,
+      filters: command.filters,
+      sort: command.sort,
+      row: command.row
+    } : undefined;
+    const queryState = sql || command.queryAutoRun ? {
+      sql,
+      mode: command.queryMode,
+      autoRun: command.queryAutoRun
+    } : undefined;
+    const searchState = command.searchTerm || command.includeNonText ? {
+      term: command.searchTerm,
+      includeNonText: command.includeNonText,
+      autoRun: command.searchAutoRun
+    } : undefined;
+    const inferredTab = command.tab || (queryState ? "query" : searchState ? "search" : dataState ? "data" : undefined);
+    const result = await request(serverUrl, "POST", {
+      action: "add",
+      session_id: command.session,
+      session_title: command.sessionTitle,
+      target: {
+        kind: "database",
+        db: command.db,
+        table: command.table,
+        tab: inferredTab,
+        data: dataState,
+        query: queryState,
+        search: searchState
+      },
+      title: command.title,
+      body,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
+    });
+    if (result.created_session) {
+      console.error(`created new annotation session ${result.session_id} (${result.session_title || "Untitled session"})`);
+    }
+    console.log(`annotated ${result.entry.path} ` + `[${result.entry.id}] in session ${result.session_id} (${result.session_title || "Untitled session"})`);
     console.error(`view annotations at ${serverUrl}/ with the code annotations panel`);
     return;
   }
@@ -1621,6 +2098,17 @@ async function runAnnotateCli(argv) {
     console.log(`updated annotation ${result.entry.id} (${result.entry.path}${formatLine(result.entry.line)})`);
     return;
   }
+  if (command.kind === "move") {
+    const result = await request(serverUrl, "POST", {
+      action: "move",
+      id: command.id,
+      before_id: command.before,
+      after_id: command.after,
+      position: command.position
+    });
+    console.log(`moved annotation ${result.entry.id} to session ${result.session_id}`);
+    return;
+  }
   if (command.kind === "delete") {
     const result = await request(serverUrl, "POST", {
       action: "delete",
@@ -1650,10 +2138,19 @@ Usage:
   code-viewer annotate start [--title <text>]
   code-viewer annotate add --file <path> [--line <n>|<n>-<m>]
       [--from <ref>] [--to <ref>] [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
+      [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate add-db --db <id> [--table <name>] [--tab <tab>]
+      [--grid-search <text>] [--filter <column=value>] [--sort <column:asc|desc>]
+      [--sql <text> | --sql-file <path>] [--query-mode <run|explain>] [--run-query]
+      [--search-term <text>] [--include-non-text] [--run-search]
+      [--title <text>] [--session <id>]
+      [--before <id> | --after <id> | --position <n>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
   code-viewer annotate rename <session-id> --title <text>
   code-viewer annotate edit <id> [--title <text>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
+  code-viewer annotate move <id> [--before <id> | --after <id> | --position <n>]
   code-viewer annotate list [--json]
   code-viewer annotate delete <id>
   code-viewer annotate clear
@@ -1666,6 +2163,14 @@ Examples:
   code-viewer annotate start --title "How SSE updates work"
   code-viewer annotate add --file web-src/server/preview.ts --line 2220-2250 \\
       --body "This endpoint keeps one SSE stream per browser tab."
+  code-viewer annotate add-db --db app.db --table users --tab schema \\
+      --body "This schema note explains how users relate to orders."
+  code-viewer annotate add-db --db app.db --table orders --tab data \\
+      --grid-search failed --sort created_at:desc --body "Filtered failure rows."
+  code-viewer annotate add-db --db app.db --tab query \\
+      --sql "select * from users where role = 'admin'" --run-query \\
+      --body "This result shows the admin accounts."
+  code-viewer annotate move a-123 --before a-456
   git diff HEAD~1 | code-viewer annotate add --file src/app.ts --line 10 \\
       --from HEAD~1 --to worktree --body "The fix moves the guard up here."
 `, ANNOTATE_AGENT_HELP = `code-viewer annotate — agent guide
@@ -1696,6 +2201,10 @@ location and renders your explanation directly under the annotated lines.
    follow). Each add without --session appends to the most recent session:
      code-viewer annotate add --file src/cache.ts --line 120-145 \\
          --title "Entry point" --body "Writes land here first. ..."
+   To insert or reorder later:
+     code-viewer annotate add --after a-123 --file src/cache.ts --line 150 \\
+         --body "This follow-up belongs here."
+     code-viewer annotate move a-999 --before a-123
 3. Verify what you posted:
      code-viewer annotate list
 
@@ -1718,6 +2227,8 @@ location and renders your explanation directly under the annotated lines.
 - add (no --session) → appends to the most recent session.
 - annotate start      → begins a NEW session; later adds go there.
 - add --session <id>  → targets a specific session (ids: annotate list).
+- add --before/--after <id> → targets the anchor annotation's session.
+  If --session points at another session, the command is rejected.
 - The human can share a walkthrough as a URL; one session = one shareable
   walkthrough. Do not mix unrelated topics in one session.
 
@@ -1734,6 +2245,22 @@ location and renders your explanation directly under the annotated lines.
 - Post a follow-up answer next to the original instead of replacing it:
     code-viewer annotate add --session <session-id> --file <path> --line <n>         --title "回答: ..." --body "<markdown>"
 - Rename a session: code-viewer annotate rename <session-id> --title <text>
+- Move an annotation without changing its id:
+    code-viewer annotate move <id> --before <other-id>
+    code-viewer annotate move <id> --after <other-id>
+    code-viewer annotate move <id> --position <1-based-index>
+- Annotate the Database screen:
+    code-viewer annotate add-db --db <db-id> --table <table> --tab schema \\
+        --title "Why this table matters" --body "<markdown>"
+  Data/search/query state can be captured explicitly:
+    code-viewer annotate add-db --db app.db --table orders --tab data \\
+        --grid-search failed --filter status=failed --sort created_at:desc \\
+        --title "Failed orders" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab query \\
+        --sql "select * from orders where status = 'failed'" --run-query \\
+        --title "Query result" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab search --search-term failed \\
+        --include-non-text --run-search         --title "Global search result" --body "<markdown>"
 
 ## Cleanup
 
@@ -2883,12 +3410,124 @@ var init_worktree_watcher = __esm(() => {
   init_search();
 });
 
-// web-src/server/database/adapters/docker.ts
+// web-src/core/id.ts
+function bytesToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function makeId(prefix) {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return `${prefix}-${cryptoApi.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  }
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(8);
+    cryptoApi.getRandomValues(bytes);
+    return `${prefix}-${bytesToHex(bytes)}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// web-src/server/database/serialize.ts
+function serializeDbValue(value) {
+  if (value === null || value === undefined)
+    return null;
+  if (typeof value === "bigint") {
+    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return `<blob ${value.byteLength} bytes>`;
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return value;
+}
+function serializeDbRow(row) {
+  return row.map(serializeDbValue);
+}
+function serializeDbRows(rows) {
+  return rows.map(serializeDbRow);
+}
+var MIN_SAFE, MAX_SAFE;
+var init_serialize = __esm(() => {
+  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+});
+
+// web-src/server/database/sources/sql-snapshot.ts
+import { createHash as createHash2 } from "node:crypto";
+function normalizeRawValue(v) {
+  if (v === null)
+    return "\\N";
+  if (typeof v === "bigint")
+    return v.toString();
+  if (v instanceof Uint8Array) {
+    return `\\x${Buffer.from(v).toString("hex")}`;
+  }
+  return String(v);
+}
+function rowToPayloadJson(columns, row) {
+  const obj = {};
+  for (let i = 0;i < columns.length; i++) {
+    obj[columns[i]] = serializeDbValue(row[i]);
+  }
+  return JSON.stringify(obj);
+}
+function computeRowHash(columns, row) {
+  const parts = columns.map((_, i) => normalizeRawValue(row[i]));
+  return createHash2("sha256").update(parts.join("\t")).digest("hex");
+}
+function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
+  if (pkColumns.length === 0) {
+    return JSON.stringify({ __rowIndex: rowIndex });
+  }
+  const keyObj = {};
+  for (const pk of pkColumns) {
+    const idx = allColumns.indexOf(pk);
+    if (idx >= 0)
+      keyObj[pk] = serializeDbValue(row[idx]);
+  }
+  return JSON.stringify(keyObj);
+}
+var SQL_SNAPSHOT_BATCH_SIZE = 500;
+var init_sql_snapshot = __esm(() => {
+  init_serialize();
+});
+
+// web-src/server/database/adapters/docker-utils.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
-function execInContainer(config, sql, timeoutMs = 1e4) {
-  let args;
+function resolveRunningComposeContainerName(serviceName, cwd) {
+  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    const containers = output.startsWith("[") ? JSON.parse(output) : output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+function resolveRunningComposeContainerNameOrThrow(serviceName, cwd) {
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  return containerName;
+}
+var init_docker_utils = () => {};
+
+// web-src/server/database/adapters/docker.ts
+import { spawn as spawn2, spawnSync as spawnSync3 } from "node:child_process";
+function buildExecArgs(config, sql) {
   if (config.kind === "postgresql") {
-    args = [
+    return [
       "docker",
       "exec",
       "-i",
@@ -2911,26 +3550,28 @@ function execInContainer(config, sql, timeoutMs = 1e4) {
       "-c",
       sql
     ];
-  } else {
-    args = [
-      "docker",
-      "exec",
-      "-i",
-      "-e",
-      `MYSQL_PWD=${config.password}`,
-      config.containerName,
-      "mysql",
-      "-u",
-      config.user,
-      config.database,
-      "--batch",
-      "--raw",
-      "--default-character-set=utf8mb4",
-      "-e",
-      sql
-    ];
   }
-  const proc = spawnSync2(args[0], args.slice(1), {
+  return [
+    "docker",
+    "exec",
+    "-i",
+    "-e",
+    `MYSQL_PWD=${config.password}`,
+    config.containerName,
+    "mysql",
+    "-u",
+    config.user,
+    config.database,
+    "--batch",
+    "--raw",
+    "--default-character-set=utf8mb4",
+    "-e",
+    sql
+  ];
+}
+function execInContainer(config, sql, timeoutMs = 1e4) {
+  const args = buildExecArgs(config, sql);
+  const proc = spawnSync3(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"]
@@ -2940,6 +3581,94 @@ function execInContainer(config, sql, timeoutMs = 1e4) {
     stderr: proc.stderr || "",
     code: proc.status ?? 1
   };
+}
+async function readStreamText(stream) {
+  if (!stream)
+    return "";
+  const reader = stream.getReader();
+  const decoder = new TextDecoder;
+  let text = "";
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      break;
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return text;
+}
+async function execWithBunSpawn(spawnFn, args, timeoutMs) {
+  const proc = spawnFn(args, {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGKILL");
+  }, timeoutMs);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      readStreamText(proc.stdout),
+      readStreamText(proc.stderr)
+    ]);
+    return {
+      code: timedOut ? 1 : code,
+      stdout,
+      stderr: timedOut ? `${stderr}${stderr ? `
+` : ""}query timed out` : stderr
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function execWithNodeSpawn(args, timeoutMs) {
+  return new Promise((resolve2) => {
+    const proc = spawn2(args[0], args.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let timer;
+    const finish = (result) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      resolve2(result);
+    };
+    timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      finish({
+        code: 1,
+        stdout,
+        stderr: `${stderr}${stderr ? `
+` : ""}query timed out`
+      });
+    }, timeoutMs);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    proc.on("error", (err) => {
+      finish({ code: 1, stdout, stderr: err.message });
+    });
+    proc.on("close", (code) => {
+      finish({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+async function execInContainerAsync(config, sql, timeoutMs = 1e4) {
+  const args = buildExecArgs(config, sql);
+  const bunSpawn = globalThis.Bun?.spawn;
+  if (bunSpawn)
+    return execWithBunSpawn(bunSpawn, args, timeoutMs);
+  return execWithNodeSpawn(args, timeoutMs);
 }
 function parseTsvOutput(stdout, hasHeader) {
   const lines = stdout.trim().split(`
@@ -2965,9 +3694,69 @@ function buildOrderClause(orderBy, kind) {
   const parts = orderBy.map((o) => `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`);
   return ` ORDER BY ${parts.join(", ")}`;
 }
+function escapeSqlString(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+function buildDockerFilterWhere(grouped, kind) {
+  const whereParts = [];
+  for (const [value, cols] of grouped) {
+    const likeVal = escapeSqlString(`%${value}%`);
+    if (cols.length === 1) {
+      const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier(cols[0], kind)} AS CHAR)` : `CAST(${sanitizeIdentifier(cols[0], kind)} AS TEXT)`;
+      whereParts.push(`${cast} LIKE ${likeVal}`);
+    } else {
+      const orParts = cols.map((c) => {
+        const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier(c, kind)} AS CHAR)` : `CAST(${sanitizeIdentifier(c, kind)} AS TEXT)`;
+        return `${cast} LIKE ${likeVal}`;
+      });
+      whereParts.push(`(${orParts.join(" OR ")})`);
+    }
+  }
+  return whereParts.join(" AND ");
+}
+function createTableMetaCache(now = () => Date.now()) {
+  const columns = new Map;
+  const rowCounts = new Map;
+  return {
+    async getColumns(table, fetch2) {
+      const cached = columns.get(table);
+      const current = now();
+      if (cached && cached.expires > current)
+        return cached.value;
+      const value = await fetch2();
+      columns.set(table, { value, expires: now() + COLUMNS_TTL_MS });
+      return value;
+    },
+    async getRowCount(table, fetch2) {
+      const cached = rowCounts.get(table);
+      const current = now();
+      if (cached && cached.expires > current)
+        return cached.value;
+      const value = await fetch2();
+      rowCounts.set(table, { value, expires: now() + ROWCOUNT_TTL_MS });
+      return value;
+    },
+    invalidate(table) {
+      if (table) {
+        columns.delete(table);
+        rowCounts.delete(table);
+        return;
+      }
+      columns.clear();
+      rowCounts.clear();
+    }
+  };
+}
 function createDockerAdapter(config) {
   function exec(sql) {
     const result = execInContainer(config, sql);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "query failed");
+    }
+    return parseTsvOutput(result.stdout, config.kind === "mysql");
+  }
+  async function execAsync(sql) {
+    const result = await execInContainerAsync(config, sql);
     if (result.code !== 0) {
       throw new Error(result.stderr.trim() || "query failed");
     }
@@ -2979,6 +3768,47 @@ function createDockerAdapter(config) {
     return val;
   }
   const columnCache = new Map;
+  const tableMetaCache = createTableMetaCache();
+  function buildColumnsSql(table) {
+    const tableLiteral = table.replace(/'/g, "''");
+    if (config.kind === "postgresql") {
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = 'public' AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = 'public' AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+    }
+    return `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
+  }
+  function columnsFromInfoRows(rows) {
+    if (config.kind === "postgresql") {
+      return rows.map((row) => ({
+        name: row[0],
+        type: row[1],
+        nullable: row[2] === "YES",
+        primaryKey: row[4] === "YES",
+        defaultValue: row[3] === "" ? null : row[3]
+      }));
+    }
+    return rows.map((row) => ({
+      name: row[0],
+      type: row[1],
+      nullable: row[2] === "YES",
+      primaryKey: row[4] === "PRI",
+      defaultValue: row[3] === "NULL" ? null : row[3]
+    }));
+  }
+  async function fetchColumnsAsyncUncached(table) {
+    const result = await execAsync(buildColumnsSql(table));
+    return columnsFromInfoRows(result.rows);
+  }
+  function tablePageMetaFromResults(columns, dataResult, totalRows) {
+    return {
+      columns,
+      rows: dataResult.rows.map((row) => row.map(toDbValue)),
+      rowCount: dataResult.rows.length,
+      totalRows
+    };
+  }
+  function rowCountFromResult(countResult) {
+    return countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
+  }
   function fetchColumnsUncached(table) {
     let sql;
     if (config.kind === "postgresql") {
@@ -3012,8 +3842,10 @@ function createDockerAdapter(config) {
       defaultValue: row[3] === "NULL" ? null : row[3]
     }));
   }
-  return {
+  const adapter = {
     kind: config.kind,
+    model: "sql",
+    capabilities: { snapshot: true },
     getTables() {
       let sql;
       if (config.kind === "postgresql") {
@@ -3183,6 +4015,32 @@ function createDockerAdapter(config) {
       }
       return result;
     },
+    async getTablePageWithMeta(table, options) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
+      const [columns, dataResult, totalRows] = await Promise.all([
+        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
+        execAsync(dataSql),
+        tableMetaCache.getRowCount(table, async () => rowCountFromResult(await execAsync(countSql)))
+      ]);
+      return tablePageMetaFromResults(columns, dataResult, totalRows);
+    },
+    async getFilteredTablePageWithMeta(table, options) {
+      const id = sanitizeIdentifier(table, config.kind);
+      const order = buildOrderClause(options.orderBy, config.kind);
+      const where = buildDockerFilterWhere(options.grouped, config.kind);
+      const whereClause = where ? ` WHERE ${where}` : "";
+      const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
+      const [columns, dataResult, countResult] = await Promise.all([
+        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
+        execAsync(dataSql),
+        execAsync(countSql)
+      ]);
+      return tablePageMetaFromResults(columns, dataResult, rowCountFromResult(countResult));
+    },
     getTablePage(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
       const order = buildOrderClause(options.orderBy, config.kind);
@@ -3230,6 +4088,9 @@ function createDockerAdapter(config) {
         rowCount: Math.min(result.rows.length, maxRows)
       };
     },
+    invalidateTableMetaCache(table) {
+      tableMetaCache.invalidate(table);
+    },
     getCreateStatement(table) {
       if (config.kind === "mysql") {
         try {
@@ -3265,30 +4126,44 @@ function createDockerAdapter(config) {
     },
     close() {
       columnCache.clear();
+      tableMetaCache.invalidate();
+    },
+    async* iterateForSnapshot(table, signal) {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;; ) {
+        if (signal?.aborted)
+          return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE
+        });
+        if (result.rows.length === 0)
+          return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row)
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE)
+          return;
+      }
+    },
+    async listSnapshotContainers() {
+      return adapter.getTables().filter((t) => t.type === "table").map((t) => ({ id: t.name, label: t.name }));
     }
   };
-}
-function resolveContainerName(serviceName, cwd) {
-  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
-    return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers;
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output.split(`
-`).filter(Boolean).map((line) => JSON.parse(line));
-    }
-    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
-  } catch {
-    return null;
-  }
+  return adapter;
 }
 function listDockerDatabases(serviceName, kind, env, cwd) {
-  const containerName = resolveContainerName(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName)
     return [];
   const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
@@ -3319,10 +4194,7 @@ function listDockerDatabases(serviceName, kind, env, cwd) {
   }
 }
 function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
-  const containerName = resolveContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
   const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
   const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MYSQL_ROOT_PASSWORD || env.MARIADB_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
   const database = overrideDatabase || env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || (kind === "postgresql" ? "postgres" : "");
@@ -3334,7 +4206,11 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
     database
   });
 }
-var init_docker = () => {};
+var COLUMNS_TTL_MS = 30000, ROWCOUNT_TTL_MS = 15000;
+var init_docker = __esm(() => {
+  init_sql_snapshot();
+  init_docker_utils();
+});
 
 // web-src/server/database/adapters/sqlite.ts
 function safePrepare(db, sql) {
@@ -3381,8 +4257,10 @@ function queryColumns(db, table) {
   }));
 }
 function createSqliteAdapter(db) {
-  return {
+  const adapter = {
     kind: "sqlite",
+    model: "sql",
+    capabilities: { snapshot: true },
     getTables() {
       const rows = db.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
       return rows.map((row) => ({
@@ -3526,11 +4404,44 @@ function createSqliteAdapter(db) {
     },
     close() {
       db.close();
+    },
+    async* iterateForSnapshot(table, signal) {
+      const columns = adapter.getColumns(table);
+      const colNames = columns.map((c) => c.name);
+      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      let offset = 0;
+      let rowIndex = 0;
+      for (;; ) {
+        if (signal?.aborted)
+          return;
+        const result = adapter.getTablePage(table, {
+          offset,
+          limit: SQL_SNAPSHOT_BATCH_SIZE
+        });
+        if (result.rows.length === 0)
+          return;
+        for (const row of result.rows) {
+          yield {
+            keyJson: buildRowKeyJson(pkColumns, colNames, row, rowIndex),
+            rowHash: computeRowHash(colNames, row),
+            payloadJson: rowToPayloadJson(colNames, row)
+          };
+          rowIndex++;
+        }
+        offset += result.rows.length;
+        if (result.rows.length < SQL_SNAPSHOT_BATCH_SIZE)
+          return;
+      }
+    },
+    async listSnapshotContainers() {
+      return adapter.getTables().filter((t) => t.type === "table").map((t) => ({ id: t.name, label: t.name }));
     }
   };
+  return adapter;
 }
 var cachedDbClass = null, sqliteAdapterFactory;
 var init_sqlite = __esm(() => {
+  init_sql_snapshot();
   sqliteAdapterFactory = {
     async open(path) {
       const DbClass = await getSqliteClass();
@@ -3733,19 +4644,116 @@ function detectDbKind(image) {
     return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb"))
     return "mysql";
+  if (lower.includes("redis"))
+    return "redis";
+  if (lower.includes("elasticsearch") || lower.includes("opensearch"))
+    return "elasticsearch";
   return null;
 }
-function resolveEnvValue(raw) {
-  return raw.replace(/\$\{([^}]+)\}/g, (_, expr) => {
+function detectDbKindFromEnv(env) {
+  if (env.MYSQL_DATABASE || env.MYSQL_ROOT_PASSWORD || env.MYSQL_USER || env.MARIADB_DATABASE || env.MARIADB_USER || env.MYSQL_ALLOW_EMPTY_PASSWORD) {
+    return "mysql";
+  }
+  if (env.POSTGRES_DB || env.POSTGRES_USER || env.POSTGRES_PASSWORD) {
+    return "postgresql";
+  }
+  return null;
+}
+function detectDbKindFromContainerPort(port) {
+  switch (port) {
+    case "3306":
+      return "mysql";
+    case "5432":
+      return "postgresql";
+    case "6379":
+      return "redis";
+    case "9200":
+      return "elasticsearch";
+    default:
+      return null;
+  }
+}
+function detectDbKindFromServiceName(name) {
+  const lower = name.toLowerCase();
+  if (lower === "mysql" || lower === "mariadb" || lower === "db") {
+    return "mysql";
+  }
+  if (lower === "postgres" || lower === "postgresql" || lower === "pg") {
+    return "postgresql";
+  }
+  if (lower === "redis")
+    return "redis";
+  if (lower === "elasticsearch" || lower === "opensearch" || lower === "es") {
+    return "elasticsearch";
+  }
+  return null;
+}
+function defaultPortFor(kind) {
+  switch (kind) {
+    case "postgresql":
+      return "5432";
+    case "mysql":
+      return "3306";
+    case "redis":
+      return "6379";
+    case "elasticsearch":
+      return "9200";
+    default:
+      return "";
+  }
+}
+function lookupEnvValue(varName, composeDirEnv) {
+  return process.env[varName] ?? composeDirEnv[varName];
+}
+function stripScalarSyntax(raw) {
+  let value = raw.trim();
+  if (value.startsWith("'") || value.startsWith('"')) {
+    const quote = value[0];
+    const quoteEnd = value.lastIndexOf(quote);
+    if (quoteEnd > 0)
+      return value.slice(1, quoteEnd);
+  }
+  const hashIdx = value.indexOf(" #");
+  if (hashIdx >= 0)
+    value = value.slice(0, hashIdx).trim();
+  return value;
+}
+function resolveEnvValue(raw, composeDirEnv = {}) {
+  const value = stripScalarSyntax(raw);
+  const withBraces = value.replace(/\$\{([^}]+)\}/g, (_, expr) => {
     const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
     if (!defaultMatch)
       return "";
     const varName = defaultMatch[1];
     const fallback = defaultMatch[2] ?? "";
-    return process.env[varName] || fallback;
+    return lookupEnvValue(varName, composeDirEnv) ?? fallback;
   });
+  return withBraces.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, varName) => lookupEnvValue(varName, composeDirEnv) ?? "");
 }
-function parseComposeEnv(serviceBlock) {
+function readDotenv(composeDir) {
+  const envPath = join8(composeDir, ".env");
+  if (!existsSync6(envPath))
+    return {};
+  let content;
+  try {
+    content = readFileSync5(envPath, "utf-8");
+  } catch {
+    return {};
+  }
+  const env = {};
+  for (const rawLine of content.split(`
+`)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match)
+      continue;
+    env[match[1]] = stripScalarSyntax(match[2]);
+  }
+  return env;
+}
+function parseComposeEnv(serviceBlock, composeDirEnv = {}) {
   const env = {};
   const envMatch = serviceBlock.match(/^[ \t]+environment:\s*\n((?:[ \t]+(?:- )?[^\n]+\n?)*)/m);
   if (!envMatch)
@@ -3760,9 +4768,9 @@ function parseComposeEnv(serviceBlock) {
     const eqIdx = stripped.indexOf("=");
     const colonIdx = stripped.indexOf(": ");
     if (eqIdx > 0) {
-      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(stripped.slice(eqIdx + 1).trim());
+      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(stripped.slice(eqIdx + 1).trim(), composeDirEnv);
     } else if (colonIdx > 0) {
-      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(stripped.slice(colonIdx + 2).trim());
+      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(stripped.slice(colonIdx + 2).trim(), composeDirEnv);
     }
   }
   return env;
@@ -3779,65 +4787,239 @@ function parseComposePorts(serviceBlock) {
   }
   return null;
 }
-function discoverDockerDatabases(cwd) {
-  const results = [];
-  for (const filename of COMPOSE_FILENAMES) {
-    const filepath = join8(cwd, filename);
-    if (!existsSync6(filepath))
+function parseComposeContainerPort(serviceBlock) {
+  const portsMatch = serviceBlock.match(/^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m);
+  if (!portsMatch)
+    return null;
+  for (const line of portsMatch[1].split(`
+`)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("-"))
       continue;
-    let content;
-    try {
-      content = readFileSync5(filepath, "utf-8");
-    } catch {
+    const value = trimmed.slice(1).trim().replace(/^["']|["']$/g, "").split(/\s+#/)[0].split("/")[0];
+    const m = value.split(":").pop()?.trim().match(/^(\d+)$/);
+    if (m)
+      return m[1];
+  }
+  return null;
+}
+function parseComposeFile(filepath, composeDir, cwd, results) {
+  let content;
+  try {
+    content = readFileSync5(filepath, "utf-8");
+  } catch {
+    return;
+  }
+  const servicesMatch = content.match(/^services:\s*\n/m);
+  if (!servicesMatch || servicesMatch.index === undefined)
+    return;
+  const servicesStart = servicesMatch.index + servicesMatch[0].length;
+  const afterServices = content.slice(servicesStart);
+  const topLevelEnd = afterServices.search(/^\S/m);
+  const servicesBlock = topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
+  const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
+  const servicePositions = [];
+  for (let match = serviceRegex.exec(servicesBlock);match !== null; match = serviceRegex.exec(servicesBlock)) {
+    servicePositions.push({ name: match[1], start: match.index });
+  }
+  const relDir = relative2(cwd, composeDir);
+  const isRoot = relDir === "" || relDir === ".";
+  const relDirSlash = relDir.replace(/\\/g, "/");
+  const filename = basename2(filepath);
+  const composeDirEnv = readDotenv(composeDir);
+  for (let i = 0;i < servicePositions.length; i++) {
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
+    const svc = servicePositions[i];
+    const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
+    const svcBlock = servicesBlock.slice(svc.start, nextStart);
+    const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
+    const image = imageMatch ? imageMatch[1] : null;
+    const env = parseComposeEnv(svcBlock, composeDirEnv);
+    const containerPort = parseComposeContainerPort(svcBlock);
+    const kind = (image ? detectDbKind(image) : null) ?? detectDbKindFromEnv(env) ?? detectDbKindFromContainerPort(containerPort) ?? detectDbKindFromServiceName(svc.name);
+    if (!kind)
       continue;
-    }
-    const servicesMatch = content.match(/^services:\s*\n/m);
-    if (!servicesMatch || servicesMatch.index === undefined)
-      continue;
-    const servicesStart = servicesMatch.index + servicesMatch[0].length;
-    const afterServices = content.slice(servicesStart);
-    const topLevelEnd = afterServices.search(/^\S/m);
-    const servicesBlock = topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
-    const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
-    const servicePositions = [];
-    for (let match = serviceRegex.exec(servicesBlock);match !== null; match = serviceRegex.exec(servicesBlock)) {
-      servicePositions.push({
-        name: match[1],
-        start: match.index
-      });
-    }
-    for (let i = 0;i < servicePositions.length; i++) {
-      const svc = servicePositions[i];
-      const nextStart = i + 1 < servicePositions.length ? servicePositions[i + 1].start : servicesBlock.length;
-      const svcBlock = servicesBlock.slice(svc.start, nextStart);
-      const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
-      if (!imageMatch)
-        continue;
-      const image = imageMatch[1];
-      const kind = detectDbKind(image);
-      if (!kind)
-        continue;
-      const env = parseComposeEnv(svcBlock);
-      const port = parseComposePorts(svcBlock);
+    const port = parseComposePorts(svcBlock);
+    const hostPort = port || defaultPortFor(kind);
+    const imageLabel = image ?? `build:${kind}`;
+    const id = isRoot ? `docker:${svc.name}` : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
+    const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
+    let label;
+    if (kind === "redis" || kind === "elasticsearch") {
+      label = `${svc.name} (${imageLabel}, localhost:${hostPort}${labelPath})`;
+    } else {
       const dbName = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || svc.name;
       const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
-      const hostPort = port || (kind === "postgresql" ? "5432" : "3306");
-      const label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
-      results.push({
-        id: `docker:${svc.name}`,
-        path: filename,
-        name: label,
-        sizeBytes: 0,
-        kind,
-        serviceName: svc.name,
-        env
-      });
+      label = `${svc.name} (${imageLabel}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
     }
-    break;
+    results.push({
+      id,
+      path: isRoot ? filename : `${relDirSlash}/${filename}`,
+      name: label,
+      sizeBytes: 0,
+      kind,
+      serviceName: svc.name,
+      env,
+      composeDir,
+      relDirSlash
+    });
   }
-  return results;
 }
-var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES;
+function dockerDiscoveryCacheKey(cwd, omitDirNames) {
+  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
+  return JSON.stringify([cwd, omit]);
+}
+function cloneDockerDiscoveryResult(result) {
+  const cloned = result.map((entry) => ({
+    ...entry,
+    env: { ...entry.env }
+  }));
+  if (result.truncated)
+    cloned.truncated = true;
+  return cloned;
+}
+function discoverDockerDatabases(cwd, omitDirNames = []) {
+  const cacheKey = dockerDiscoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = dockerDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneDockerDiscoveryResult(cached.result);
+  }
+  const results = [];
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+  function scan(dir, depth) {
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
+    if (depth > MAX_SCAN_DEPTH)
+      return;
+    for (const filename of COMPOSE_FILENAMES) {
+      const filepath = join8(dir, filename);
+      if (existsSync6(filepath)) {
+        parseComposeFile(filepath, dir, cwd, results);
+        break;
+      }
+    }
+    if (results.length >= MAX_DOCKER_SERVICES)
+      return;
+    let entries;
+    try {
+      entries = readdirSync2(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= MAX_DOCKER_SERVICES)
+        return;
+      if (omitSet.has(entry.toLowerCase()))
+        continue;
+      const full = join8(dir, entry);
+      let stat;
+      try {
+        stat = lstatSync4(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink())
+        continue;
+      if (stat.isDirectory())
+        scan(full, depth + 1);
+    }
+  }
+  scan(cwd, 0);
+  if (results.length >= MAX_DOCKER_SERVICES) {
+    results.truncated = true;
+    console.warn(`[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`);
+  }
+  dockerDiscoveryCache.set(cacheKey, {
+    expiresAt: now + DOCKER_DISCOVERY_TTL_MS,
+    result: cloneDockerDiscoveryResult(results)
+  });
+  return cloneDockerDiscoveryResult(results);
+}
+function parseDockerDbId(dbId) {
+  if (!dbId.startsWith("docker:"))
+    return null;
+  let rest = dbId.slice(7);
+  if (!rest)
+    return null;
+  let database;
+  const atIdx = rest.indexOf("@");
+  if (atIdx >= 0) {
+    if (rest.indexOf("@", atIdx + 1) >= 0)
+      return null;
+    const afterAt = rest.slice(atIdx + 1);
+    const colonIdx2 = afterAt.indexOf(":");
+    if (colonIdx2 >= 0) {
+      database = afterAt.slice(colonIdx2 + 1);
+      rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx2)}`;
+    }
+    const [serviceName, encodedRel] = rest.split("@");
+    if (!isSafeDockerServiceName(serviceName))
+      return null;
+    if (!isSafeDockerDatabaseName(database))
+      return null;
+    try {
+      const relDir = decodeURIComponent(encodedRel || "");
+      if (!isSafeDockerRelDir(relDir))
+        return null;
+      return {
+        serviceName,
+        relDir,
+        database
+      };
+    } catch {
+      return null;
+    }
+  }
+  const colonIdx = rest.indexOf(":");
+  if (colonIdx >= 0) {
+    database = rest.slice(colonIdx + 1);
+    rest = rest.slice(0, colonIdx);
+  }
+  if (!isSafeDockerServiceName(rest))
+    return null;
+  if (!isSafeDockerDatabaseName(database))
+    return null;
+  return { serviceName: rest, relDir: "", database };
+}
+function findDockerServiceByDbId(cwd, dbId, kind, omitDirNames) {
+  const parsed = parseDockerDbId(dbId);
+  if (!parsed)
+    return null;
+  return discoverDockerDatabases(cwd, omitDirNames).find((d) => d.serviceName === parsed.serviceName && d.relDirSlash === parsed.relDir && (!kind || d.kind === kind)) || null;
+}
+function isSafeDockerServiceName(value) {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+function isSafeDockerRelDir(value) {
+  if (value === "")
+    return true;
+  if (!/^[A-Za-z0-9_./-]+$/.test(value))
+    return false;
+  const parts = value.split("/");
+  return parts.every((p) => p !== "" && p !== "." && p !== "..");
+}
+function isSafeDockerDatabaseName(value) {
+  if (value === undefined)
+    return true;
+  if (value === "")
+    return false;
+  if (hasControlCharacter(value))
+    return false;
+  return /^[A-Za-z0-9_$.-]+$/.test(value);
+}
+function hasControlCharacter(value) {
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127)
+      return true;
+  }
+  return false;
+}
+var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, DOCKER_DISCOVERY_TTL_MS = 5000, COMPOSE_FILENAMES, MAX_DOCKER_SERVICES = 30, dockerDiscoveryCache;
 var init_discovery = __esm(() => {
   SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
   COMPOSE_FILENAMES = [
@@ -3846,37 +5028,7 @@ var init_discovery = __esm(() => {
     "compose.yml",
     "compose.yaml"
   ];
-});
-
-// web-src/server/database/serialize.ts
-function serializeDbValue(value) {
-  if (value === null || value === undefined)
-    return null;
-  if (typeof value === "bigint") {
-    return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
-  }
-  if (value instanceof Uint8Array) {
-    return `<blob ${value.byteLength} bytes>`;
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return value;
-}
-function serializeDbRow(row) {
-  return row.map(serializeDbValue);
-}
-function serializeDbRows(rows) {
-  return rows.map(serializeDbRow);
-}
-var MIN_SAFE, MAX_SAFE;
-var init_serialize = __esm(() => {
-  MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
-  MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+  dockerDiscoveryCache = new Map;
 });
 
 // web-src/server/database/global-search.ts
@@ -3885,7 +5037,7 @@ function sanitizeIdentifier3(name, kind) {
     return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
-function escapeSqlString(value) {
+function escapeSqlString2(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 function isTextLikeType(type) {
@@ -3913,7 +5065,7 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
     if (kind === "sqlite") {
       sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '\\' LIMIT ${remaining}`;
     } else {
-      const likeVal = escapeSqlString(`%${escapedTerm}%`);
+      const likeVal = escapeSqlString2(`%${escapedTerm}%`);
       sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '\\' LIMIT ${remaining}`;
     }
     try {
@@ -3951,6 +5103,1404 @@ function getPrimaryKeyColumns(adapter, table) {
 }
 var init_global_search = __esm(() => {
   init_serialize();
+});
+
+// web-src/server/database/adapters/elasticsearch.ts
+var exports_elasticsearch = {};
+__export(exports_elasticsearch, {
+  quoteCurlConfigString: () => quoteCurlConfigString,
+  openElasticsearchAdapter: () => openElasticsearchAdapter,
+  isReadOnlyEsPath: () => isReadOnlyEsPath,
+  canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
+});
+import { spawnSync as spawnSync4 } from "node:child_process";
+function isReadOnlyEsPath(rawPath) {
+  const path = rawPath.split("?")[0].replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0 || segments.length > 2)
+    return false;
+  const apiSegment = segments[segments.length - 1];
+  return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
+}
+function quoteCurlConfigString(value) {
+  for (let i = 0;i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      throw new Error("curl config value must not contain control characters");
+    }
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+function execEsRequest(config, method, path, body, timeoutMs = 15000) {
+  const hasPassword = !!config.password;
+  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const curlConfig = hasPassword ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}
+` : undefined;
+  const args = [
+    "exec",
+    "-i",
+    config.containerName,
+    "curl",
+    "-s",
+    "-S",
+    "-X",
+    method,
+    url,
+    "-w",
+    `
+__ES_STATUS__:%{http_code}
+`,
+    "-H",
+    "Content-Type: application/json",
+    ...hasPassword ? ["-K", "-"] : [],
+    ...body !== undefined ? ["--data-binary", JSON.stringify(body)] : []
+  ];
+  const proc = spawnSync4("docker", args, {
+    encoding: "utf8",
+    env: process.env,
+    timeout: timeoutMs,
+    input: curlConfig,
+    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
+  });
+  return {
+    code: proc.status ?? 1,
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || ""
+  };
+}
+function parseEsResponse(stdout) {
+  const marker = "__ES_STATUS__:";
+  const idx = stdout.lastIndexOf(marker);
+  if (idx < 0)
+    return { status: 0, body: stdout };
+  const statusPart = stdout.slice(idx + marker.length).trim();
+  const status = Number(statusPart) || 0;
+  let body = stdout.slice(0, idx);
+  if (body.endsWith(`
+`))
+    body = body.slice(0, -1);
+  return { status, body };
+}
+function safeJsonParse(stdout, label) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function createElasticsearchAdapter(config) {
+  function callJson(method, path, body, label) {
+    const r = execEsRequest(config, method, path, body);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status < 200 || status >= 300) {
+      throw new Error(`${label}: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    if (!text.trim())
+      return {};
+    return safeJsonParse(text, label);
+  }
+  function listIndices() {
+    const raw = callJson("GET", "/_cat/indices?format=json&expand_wildcards=open", undefined, "_cat/indices");
+    const result = [];
+    for (const row of raw) {
+      const name = row.index;
+      if (!name || name.startsWith("."))
+        continue;
+      result.push({
+        name,
+        docCount: Number(row["docs.count"]) || 0,
+        sizeBytes: parseEsSize(row["store.size"]),
+        health: row.health,
+        status: row.status
+      });
+    }
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    return result;
+  }
+  function getMapping(index) {
+    if (!index || index.includes("/") || index.includes("?")) {
+      throw new Error(`invalid index name: ${index}`);
+    }
+    const raw = callJson("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
+    const keys = Object.keys(raw);
+    if (keys.length === 0) {
+      return { index, properties: {} };
+    }
+    const realIndex = keys[0];
+    const props = raw[realIndex]?.mappings?.properties ?? {};
+    return { index: realIndex, properties: props };
+  }
+  function searchDocs(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
+    const body = {
+      size,
+      track_total_hits: true,
+      seq_no_primary_term: true,
+      sort: [{ _doc: "asc" }],
+      query: opts.query ? { query_string: { query: opts.query } } : { match_all: {} }
+    };
+    if (opts.searchAfter && opts.searchAfter.length > 0) {
+      body.search_after = opts.searchAfter;
+    }
+    const raw = callJson("POST", `/${encodeURIComponent(opts.index)}/_search`, body, "_search");
+    const rawHits = raw.hits?.hits ?? [];
+    const hits = rawHits.map((h) => ({
+      _index: h._index ?? opts.index,
+      _id: h._id ?? "",
+      _score: h._score ?? null,
+      _source: h._source,
+      sort: h.sort,
+      _seq_no: h._seq_no,
+      _primary_term: h._primary_term
+    }));
+    let totalHits = 0;
+    const t = raw.hits?.total;
+    if (typeof t === "number")
+      totalHits = t;
+    else if (t && typeof t.value === "number")
+      totalHits = t.value;
+    const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
+    return { totalHits, hits, lastSort };
+  }
+  function getDoc(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    if (!opts.id) {
+      throw new Error("missing doc id");
+    }
+    const r = execEsRequest(config, "GET", `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status === 404) {
+      try {
+        const parsed2 = text ? JSON.parse(text) : { found: false };
+        return { found: parsed2.found === true, source: parsed2._source };
+      } catch {
+        return { found: false, source: undefined };
+      }
+    }
+    if (status < 200 || status >= 300) {
+      throw new Error(`_doc: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    const parsed = safeJsonParse(text, "_doc");
+    return {
+      found: parsed.found === true,
+      source: parsed._source,
+      seqNo: parsed._seq_no,
+      primaryTerm: parsed._primary_term
+    };
+  }
+  async function* iterateForSnapshot(container, signal) {
+    const { index, query: query2 } = parseEsSnapshotContainer(container);
+    const PAGE = 1000;
+    let searchAfter;
+    for (;; ) {
+      if (signal?.aborted)
+        return;
+      const result = searchDocs({
+        index,
+        query: query2,
+        size: PAGE,
+        searchAfter
+      });
+      if (result.hits.length === 0)
+        return;
+      for (const hit of result.hits) {
+        if (signal?.aborted)
+          return;
+        const keyJson = JSON.stringify({ _index: hit._index, _id: hit._id });
+        const payloadJson = JSON.stringify({ _source: hit._source });
+        const rowHash = hit._seq_no !== undefined && hit._primary_term !== undefined ? `${hit._seq_no}-${hit._primary_term}` : payloadJson;
+        yield { keyJson, payloadJson, rowHash };
+      }
+      if (result.hits.length < PAGE)
+        return;
+      searchAfter = result.lastSort;
+      if (!searchAfter || searchAfter.length === 0)
+        return;
+    }
+  }
+  async function query(input) {
+    if (input.method !== "GET" && input.method !== "POST") {
+      throw new Error(`method not allowed: ${input.method}`);
+    }
+    if (!input.path || typeof input.path !== "string") {
+      throw new Error("missing path");
+    }
+    if (!isReadOnlyEsPath(input.path)) {
+      throw new Error(`path is not in the read-only allowlist: ${input.path.split("?")[0]}`);
+    }
+    const start = Date.now();
+    const r = execEsRequest(config, input.method, input.path, input.body);
+    const elapsedMs = Date.now() - start;
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    let body = text;
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text);
+      } catch {}
+    } else {
+      body = null;
+    }
+    return { status, body, elapsedMs };
+  }
+  async function listSnapshotContainers() {
+    const indices = listIndices();
+    return indices.map((ix) => ({
+      id: JSON.stringify({ index: ix.name }),
+      label: ix.name
+    }));
+  }
+  return {
+    kind: "elasticsearch",
+    model: "document",
+    capabilities: { snapshot: true, query: true },
+    listIndices,
+    getMapping,
+    searchDocs,
+    getDoc,
+    iterateForSnapshot,
+    listSnapshotContainers,
+    query,
+    close() {}
+  };
+}
+function parseEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" && obj.query.length > 0 ? obj.query : undefined;
+      return { index, query };
+    } catch {}
+  }
+  return { index: container || "*" };
+}
+function parseEsSize(raw) {
+  if (!raw)
+    return 0;
+  const m = raw.trim().toLowerCase().match(/^([\d.]+)\s*(b|kb|mb|gb|tb|pb)?$/);
+  if (!m)
+    return 0;
+  const n = Number.parseFloat(m[1]);
+  if (!Number.isFinite(n))
+    return 0;
+  const unit = m[2] || "b";
+  const mult = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+    tb: 1024 ** 4,
+    pb: 1024 ** 5
+  };
+  return Math.round(n * (mult[unit] || 1));
+}
+function canonicalizeEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" ? obj.query : undefined;
+      const out = { index };
+      if (query !== undefined)
+        out.query = query;
+      return JSON.stringify(out);
+    } catch {}
+  }
+  return JSON.stringify({ index: container || "*" });
+}
+function openElasticsearchAdapter(serviceName, env, cwd) {
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
+  const password = env.ELASTIC_PASSWORD || "";
+  return createElasticsearchAdapter({ containerName, password });
+}
+var ES_QUERY_ALLOWED_SUBPATHS, ES_DEFAULT_SIZE = 200;
+var init_elasticsearch = __esm(() => {
+  init_docker_utils();
+  ES_QUERY_ALLOWED_SUBPATHS = new Set([
+    "_search",
+    "_count",
+    "_msearch",
+    "_explain",
+    "_validate",
+    "_field_caps",
+    "_eql"
+  ]);
+});
+
+// web-src/server/database/handle-shared.ts
+function createDockerAdapterCache(maxEntries = DEFAULT_MAX_DOCKER_ADAPTER_CACHE, idleMs = DEFAULT_DOCKER_ADAPTER_IDLE_MS) {
+  const cache = new Map;
+  function closeEntry(key, entry) {
+    try {
+      entry.adapter.close();
+    } finally {
+      cache.delete(key);
+    }
+  }
+  function prune(now = Date.now()) {
+    for (const [key, entry] of cache) {
+      if (now - entry.lastUsed > idleMs) {
+        closeEntry(key, entry);
+      }
+    }
+    while (cache.size > maxEntries) {
+      let oldestKey = null;
+      let oldestEntry = null;
+      for (const [key, entry] of cache) {
+        if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
+          oldestKey = key;
+          oldestEntry = entry;
+        }
+      }
+      if (!oldestKey || !oldestEntry)
+        break;
+      closeEntry(oldestKey, oldestEntry);
+    }
+  }
+  return {
+    getOrOpen(key, open) {
+      prune();
+      const cached = cache.get(key);
+      if (cached) {
+        cached.lastUsed = Date.now();
+        return cached.adapter;
+      }
+      const adapter = open();
+      cache.set(key, { adapter, lastUsed: Date.now() });
+      prune();
+      return adapter;
+    },
+    close(key) {
+      const cached = cache.get(key);
+      if (cached)
+        closeEntry(key, cached);
+    }
+  };
+}
+function createQueryStrippedLogger(prefix, req, url) {
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  return (res) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${prefix} ${method} ${path} ${res.status} ${ms}ms`);
+    return res;
+  };
+}
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function textError(message, status) {
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn, omitDirNames) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError(`${kind} requires docker: prefix`, 400);
+  }
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed)
+    return textError("invalid docker db id", 400);
+  const info = findDockerServiceByDbId(cwd, dbParam, kind, omitDirNames);
+  if (!info)
+    return textError(`${kind} service not found`, 404);
+  const explorer = cache.getOrOpen(dbParam, () => openFn(info));
+  return { dbId: dbParam, explorer };
+}
+async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res) {
+  if (!Object.prototype.hasOwnProperty.call(routes, url.pathname))
+    return null;
+  const route = routes[url.pathname];
+  if (!route.methods.includes(req.method)) {
+    return wrap(textError("method not allowed", 405));
+  }
+  const requiresSideEffect = typeof route.sideEffect === "function" ? route.sideEffect(req.method) : route.sideEffect === true;
+  if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textError("forbidden", 403));
+  }
+  return wrap(await route.handler());
+}
+async function parsePostJsonBody(req) {
+  if (req.method !== "POST") {
+    return textError("method not allowed", 405);
+  }
+  try {
+    return await req.json();
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+}
+function handleError(prefix, action, err) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[code-viewer] ${prefix} error:`, message);
+  return textError(`failed to ${action}: ${message}`, 500);
+}
+var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
+var init_handle_shared = __esm(() => {
+  init_discovery();
+  DEFAULT_DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
+});
+
+// web-src/server/database/handle-elasticsearch.ts
+var exports_handle_elasticsearch = {};
+__export(exports_handle_elasticsearch, {
+  handleElasticsearchRoute: () => handleElasticsearchRoute,
+  closeElasticsearchAdapter: () => closeElasticsearchAdapter
+});
+function closeElasticsearchAdapter(dbId) {
+  esAdapterCache.close(dbId);
+}
+function resolveEs(cwd, dbParam, omitDirNames) {
+  return resolveDockerExplorer(cwd, dbParam, "elasticsearch", esAdapterCache, (info) => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir), omitDirNames);
+}
+function handleIndices(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  try {
+    const indices = r.explorer.listIndices();
+    const body = { dbId: r.dbId, indices };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "list elasticsearch indices", err);
+  }
+}
+function handleDocs(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  const query = url.searchParams.get("q") || undefined;
+  const sizeRaw = url.searchParams.get("size");
+  const size = sizeRaw ? Number(sizeRaw) : undefined;
+  const sa = url.searchParams.get("searchAfter");
+  let searchAfter;
+  if (sa) {
+    try {
+      const parsed = JSON.parse(sa);
+      if (Array.isArray(parsed))
+        searchAfter = parsed;
+    } catch {
+      return textError("invalid searchAfter (must be JSON array)", 400);
+    }
+  }
+  try {
+    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
+    const body = {
+      dbId: r.dbId,
+      index,
+      hits: result.hits,
+      totalHits: result.totalHits,
+      lastSort: result.lastSort
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "search elasticsearch docs", err);
+  }
+}
+async function handleSearch(cwd, req, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  let input;
+  if (req.method === "GET") {
+    const q = url.searchParams.get("q");
+    if (!q)
+      return textError("missing q parameter", 400);
+    const index = url.searchParams.get("index");
+    const pathPrefix = index ? `/${encodeURIComponent(index)}` : "";
+    input = {
+      method: "GET",
+      path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`
+    };
+  } else if (req.method === "POST") {
+    const body = await parsePostJsonBody(req);
+    if (body instanceof Response)
+      return body;
+    if (body.method !== "GET" && body.method !== "POST") {
+      return textError("method must be GET or POST", 400);
+    }
+    if (!body.path || typeof body.path !== "string") {
+      return textError("missing path", 400);
+    }
+    input = { method: body.method, path: body.path, body: body.body };
+  } else {
+    return textError("method not allowed", 405);
+  }
+  try {
+    const result = await r.explorer.query(input);
+    const body = {
+      dbId: r.dbId,
+      ...result
+    };
+    return json(body);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[code-viewer] elasticsearch error:", msg);
+    const body = {
+      dbId: r.dbId,
+      status: 0,
+      body: null,
+      elapsedMs: 0,
+      error: msg
+    };
+    return json(body, 400);
+  }
+}
+function handleDoc(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  const id = url.searchParams.get("id");
+  if (!index)
+    return textError("missing index parameter", 400);
+  if (!id)
+    return textError("missing id parameter", 400);
+  try {
+    const doc = r.explorer.getDoc({ index, id });
+    const body = {
+      dbId: r.dbId,
+      index,
+      id,
+      found: doc.found,
+      source: doc.source,
+      seqNo: doc.seqNo,
+      primaryTerm: doc.primaryTerm
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "get elasticsearch doc", err);
+  }
+}
+function handleMapping(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  try {
+    const mapping = r.explorer.getMapping(index);
+    const body = { dbId: r.dbId, mapping };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "read elasticsearch mapping", err);
+  }
+}
+async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed, omitDirNames) {
+  const wrap = createQueryStrippedLogger("elasticsearch", req, url);
+  return dispatchRoutes(req, url, {
+    "/_db/elasticsearch/indices": {
+      methods: ["GET"],
+      handler: () => handleIndices(cwd, url, omitDirNames)
+    },
+    "/_db/elasticsearch/mapping": {
+      methods: ["GET"],
+      handler: () => handleMapping(cwd, url, omitDirNames)
+    },
+    "/_db/elasticsearch/docs": {
+      methods: ["GET"],
+      handler: () => handleDocs(cwd, url, omitDirNames)
+    },
+    "/_db/elasticsearch/doc": {
+      methods: ["GET"],
+      handler: () => handleDoc(cwd, url, omitDirNames)
+    },
+    "/_db/elasticsearch/search": {
+      methods: ["GET", "POST"],
+      sideEffect: (m) => m === "POST",
+      handler: () => handleSearch(cwd, req, url, omitDirNames)
+    }
+  }, sideEffectAllowed, wrap);
+}
+var esAdapterCache;
+var init_handle_elasticsearch = __esm(() => {
+  init_elasticsearch();
+  init_handle_shared();
+  esAdapterCache = createDockerAdapterCache();
+});
+
+// web-src/server/database/adapters/redis.ts
+var exports_redis = {};
+__export(exports_redis, {
+  openRedisExplorer: () => openRedisExplorer,
+  canonicalizeRedisSnapshotContainer: () => canonicalizeRedisSnapshotContainer
+});
+import { spawnSync as spawnSync5 } from "node:child_process";
+import { createHash as createHash3 } from "node:crypto";
+function canonicalizeRedisSnapshotContainer(container) {
+  const { db, pattern } = parseSnapshotContainer(container);
+  return JSON.stringify({ db, pattern });
+}
+function parseSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const db = typeof obj.db === "number" ? obj.db : 0;
+      const pattern = typeof obj.pattern === "string" && obj.pattern.length > 0 ? obj.pattern : "*";
+      return { db, pattern };
+    } catch {}
+  }
+  return { db: 0, pattern: container || "*" };
+}
+function execRedisCli(config, args, timeoutMs = 1e4) {
+  const hasPassword = !!config.password;
+  const dockerArgs = [
+    "exec",
+    "-i",
+    ...hasPassword ? ["-e", "REDISCLI_AUTH"] : [],
+    config.containerName,
+    "redis-cli",
+    "-3",
+    ...args
+  ];
+  const spawnEnv = hasPassword ? { ...process.env, REDISCLI_AUTH: config.password } : process.env;
+  const proc = spawnSync5("docker", dockerArgs, {
+    encoding: "utf8",
+    env: spawnEnv,
+    timeout: timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || "",
+    code: proc.status ?? 1
+  };
+}
+function parseInfoKeyspace(stdout) {
+  const counts = new Map;
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = line.match(/^db(\d+):keys=(\d+)/);
+    if (m)
+      counts.set(Number(m[1]), Number(m[2]));
+  }
+  return counts;
+}
+function isValidRedisType(t) {
+  return t === "string" || t === "list" || t === "set" || t === "zset" || t === "hash" || t === "stream" || t === "none";
+}
+function safeJsonParse2(stdout, command) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${command} 返却 JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function decodeQuotedRedisBytes(output) {
+  const trimmed = output.replace(/\r?\n$/, "");
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
+    return {
+      bytes: Buffer.from(trimmed, "utf8"),
+      sawBinaryEscape: false
+    };
+  }
+  const inner = trimmed.slice(1, -1);
+  const bytes = [];
+  let sawBinaryEscape = false;
+  let i = 0;
+  while (i < inner.length) {
+    const ch = inner.charCodeAt(i);
+    if (ch === 92 && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (next === "x" && i + 3 < inner.length) {
+        const b = parseInt(inner.slice(i + 2, i + 4), 16);
+        if (Number.isFinite(b)) {
+          bytes.push(b);
+          if (b < 32 || b >= 127)
+            sawBinaryEscape = true;
+          i += 4;
+          continue;
+        }
+      }
+      if (next === "n") {
+        bytes.push(10);
+        i += 2;
+        continue;
+      }
+      if (next === "r") {
+        bytes.push(13);
+        i += 2;
+        continue;
+      }
+      if (next === "t") {
+        bytes.push(9);
+        i += 2;
+        continue;
+      }
+      if (next === "a") {
+        bytes.push(7);
+        i += 2;
+        continue;
+      }
+      if (next === "b") {
+        bytes.push(8);
+        i += 2;
+        continue;
+      }
+      if (next === "\\") {
+        bytes.push(92);
+        i += 2;
+        continue;
+      }
+      if (next === '"') {
+        bytes.push(34);
+        i += 2;
+        continue;
+      }
+      bytes.push(92);
+      i += 1;
+      continue;
+    }
+    if (ch > 127)
+      sawBinaryEscape = true;
+    bytes.push(ch & 255);
+    i += 1;
+  }
+  return { bytes: Buffer.from(bytes), sawBinaryEscape };
+}
+function isValidUtf8(buf) {
+  try {
+    const decoded = buf.toString("utf8");
+    return Buffer.from(decoded, "utf8").equals(buf);
+  } catch {
+    return false;
+  }
+}
+function decodeHexItem(hex) {
+  const buf = Buffer.from(hex, "hex");
+  if (isValidUtf8(buf))
+    return buf.toString("utf8");
+  return { binaryBase64: buf.toString("base64") };
+}
+function createRedisAdapter(config) {
+  function listDatabases() {
+    const result = execRedisCli(config, ["INFO", "keyspace"]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "INFO keyspace failed");
+    }
+    const counts = parseInfoKeyspace(result.stdout);
+    const dbs = [];
+    for (let i = 0;i < DEFAULT_DATABASES; i++) {
+      dbs.push({ index: i, keyCount: counts.get(i) ?? 0 });
+    }
+    return dbs;
+  }
+  function listKeys(opts) {
+    const pattern = opts.pattern || "*";
+    const cursor = opts.cursor || "0";
+    const count = String(opts.count ?? 200);
+    const result = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "EVAL",
+      SCAN_WITH_TYPES_LUA,
+      "0",
+      cursor,
+      pattern,
+      count
+    ]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "SCAN failed");
+    }
+    const stdout = result.stdout.trim();
+    if (!stdout)
+      return { keys: [], nextCursor: "0" };
+    const parsed = safeJsonParse2(stdout, "SCAN");
+    const keys = [];
+    for (let i = 0;i < parsed.keys.length; i++) {
+      const rawType = parsed.types[i] || "none";
+      const type = isValidRedisType(rawType) ? rawType : "none";
+      keys.push({ name: parsed.keys[i], type });
+    }
+    return { keys, nextCursor: parsed.cursor };
+  }
+  function getValue(opts) {
+    const dbArg = ["-n", String(opts.db)];
+    const typeResult = execRedisCli(config, [...dbArg, "TYPE", opts.key]);
+    if (typeResult.code !== 0) {
+      throw new Error(typeResult.stderr.trim() || "TYPE failed");
+    }
+    const rawType = typeResult.stdout.trim();
+    if (rawType === "none" || !isValidRedisType(rawType)) {
+      return { type: "none" };
+    }
+    if (rawType === "string") {
+      const lenR = execRedisCli(config, [...dbArg, "STRLEN", opts.key]);
+      if (lenR.code !== 0) {
+        throw new Error(lenR.stderr.trim() || "STRLEN failed");
+      }
+      const fullSize = Number(lenR.stdout.trim()) || 0;
+      const lastIndex = REDIS_STRING_BYTE_LIMIT - 1;
+      const r = execRedisCli(config, [
+        "--no-raw",
+        ...dbArg,
+        "GETRANGE",
+        opts.key,
+        "0",
+        String(lastIndex)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "GETRANGE failed");
+      }
+      const { bytes, sawBinaryEscape } = decodeQuotedRedisBytes(r.stdout);
+      const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+      if (sawBinaryEscape || !isValidUtf8(bytes)) {
+        return {
+          type: "string",
+          value: "",
+          binaryBase64: bytes.toString("base64"),
+          truncated,
+          fullSize
+        };
+      }
+      return {
+        type: "string",
+        value: bytes.toString("utf8"),
+        truncated,
+        fullSize
+      };
+    }
+    if (rawType === "list") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('LLEN', KEYS[1]) local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1) local hex_items = {} for i, v in ipairs(items) do hex_items[i] = tohex(v) end return cjson.encode({total = total, items = hex_items})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "LRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "LRANGE") : { total: 0, items: [] };
+      const items = parsed.items.map(decodeHexItem);
+      return {
+        type: "list",
+        items,
+        total: parsed.total,
+        truncated: items.length < parsed.total
+      };
+    }
+    if (rawType === "hash") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('HLEN', KEYS[1]) local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local raw = result[2] local pairs_arr = {} local limit = tonumber(ARGV[1]) local count = 0 for i = 1, #raw, 2 do if count >= limit then break end table.insert(pairs_arr, {field = tohex(raw[i]), value = tohex(raw[i+1])}) count = count + 1 end return cjson.encode({total = total, fields = pairs_arr, count = count, cursor = result[1]})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "HSCAN failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "HSCAN") : { total: 0, fields: [], count: 0, cursor: "0" };
+      const fields = parsed.fields.map((p) => ({
+        field: decodeHexItem(p.field),
+        value: decodeHexItem(p.value)
+      }));
+      const truncated = parsed.count < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "hash",
+        fields,
+        total: parsed.total,
+        truncated
+      };
+    }
+    if (rawType === "set") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('SCARD', KEYS[1]) local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local members = {} local limit = tonumber(ARGV[1]) for i = 1, math.min(#result[2], limit) do members[i] = tohex(result[2][i]) end return cjson.encode({total = total, members = members, cursor = result[1]})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "SSCAN failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "SSCAN") : { total: 0, members: [], cursor: "0" };
+      const members = parsed.members.map(decodeHexItem);
+      const truncated = members.length < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "set",
+        members,
+        total: parsed.total,
+        truncated
+      };
+    }
+    if (rawType === "zset") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('ZCARD', KEYS[1]) local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {member = tohex(r[i]), score = tonumber(r[i+1])}) end return cjson.encode({total = total, members = arr})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "ZRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "ZRANGE") : { total: 0, members: [] };
+      const members = parsed.members.map((m) => ({
+        member: decodeHexItem(m.member),
+        score: m.score
+      }));
+      return {
+        type: "zset",
+        members,
+        total: parsed.total,
+        truncated: members.length < parsed.total
+      };
+    }
+    if (rawType === "stream") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('XLEN', KEYS[1]) local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])) local arr = {} for _, entry in ipairs(r) do local pairs_arr = {} for i = 1, #entry[2], 2 do table.insert(pairs_arr, {field = tohex(entry[2][i]), value = tohex(entry[2][i+1])}) end table.insert(arr, {id = entry[1], fields = pairs_arr}) end return cjson.encode({total = total, entries = arr})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "XRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "XRANGE") : { total: 0, entries: [] };
+      const entries = parsed.entries.map((e) => ({
+        id: e.id,
+        fields: e.fields.map((p) => ({
+          field: decodeHexItem(p.field),
+          value: decodeHexItem(p.value)
+        }))
+      }));
+      return {
+        type: "stream",
+        entries,
+        total: parsed.total,
+        truncated: entries.length < parsed.total
+      };
+    }
+    return { type: "none" };
+  }
+  function snapshotFetch(db, hexKey, type) {
+    if (type === "none") {
+      return {
+        payload: { type: "none" },
+        fullHash: createHash3("sha256").update("").digest("hex")
+      };
+    }
+    if (type === "string")
+      return snapshotFetchString(db, hexKey);
+    if (type === "list")
+      return snapshotFetchList(db, hexKey);
+    if (type === "hash")
+      return snapshotFetchHash(db, hexKey);
+    if (type === "set")
+      return snapshotFetchSet(db, hexKey);
+    if (type === "zset")
+      return snapshotFetchZset(db, hexKey);
+    if (type === "stream")
+      return snapshotFetchStream(db, hexKey);
+    return {
+      payload: { type: "none" },
+      fullHash: createHash3("sha256").update("").digest("hex")
+    };
+  }
+  function evalHex(db, luaBody, extraArgv, label) {
+    const r = execRedisCli(config, [
+      "-n",
+      String(db),
+      "EVAL",
+      luaBody,
+      "0",
+      ...extraArgv
+    ]);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label} failed`);
+    }
+    return r.stdout.replace(/\r?\n$/, "");
+  }
+  function snapshotFetchString(db, hexKey) {
+    const fullSize = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('STRLEN', fromhex(ARGV[1]))`, [hexKey], "STRLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewBytes = Buffer.alloc(0);
+    for (let offset = 0;offset < fullSize; offset += REDIS_STRING_BYTE_LIMIT) {
+      const end = Math.min(offset + REDIS_STRING_BYTE_LIMIT - 1, fullSize - 1);
+      const hexChunk = evalHex(db, `${LUA_HEX_KEY_PRELUDE} return tohex(redis.call('GETRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])))`, [hexKey, String(offset), String(end)], "GETRANGE");
+      const bytes = Buffer.from(hexChunk, "hex");
+      hasher.update(bytes);
+      if (offset === 0)
+        previewBytes = bytes;
+    }
+    const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+    const payload = isValidUtf8(previewBytes) ? {
+      type: "string",
+      value: previewBytes.toString("utf8"),
+      truncated,
+      fullSize
+    } : {
+      type: "string",
+      value: "",
+      binaryBase64: previewBytes.toString("base64"),
+      truncated,
+      fullSize
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function hashHexItem(hasher, hex) {
+    hasher.update(`${hex.length.toString(16)}:${hex}
+`);
+  }
+  function snapshotFetchList(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('LLEN', fromhex(ARGV[1]))`, [hexKey], "LLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewItems = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local items = redis.call('LRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])) local hex = {} for i, v in ipairs(items) do hex[i] = tohex(v) end return cjson.encode(hex)`, [hexKey, String(offset), String(end)], "LRANGE");
+      const chunk = safeJsonParse2(stdout, "LRANGE");
+      for (const hex of chunk)
+        hashHexItem(hasher, hex);
+      if (offset === 0)
+        previewItems = chunk.map(decodeHexItem);
+    }
+    const payload = {
+      type: "list",
+      items: previewItems,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchHash(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('HLEN', fromhex(ARGV[1]))`, [hexKey], "HLEN")) || 0;
+    const allPairs = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('HSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local raw = r[2] local pairs_arr = {} for i = 1, #raw, 2 do table.insert(pairs_arr, {tohex(raw[i]), tohex(raw[i+1])}) end return cjson.encode({cursor=r[1], pairs=pairs_arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "HSCAN");
+      const parsed = safeJsonParse2(stdout, "HSCAN");
+      allPairs.push(...parsed.pairs);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const seenField = new Set;
+    const uniquePairs = [];
+    for (const p of allPairs) {
+      if (seenField.has(p[0]))
+        continue;
+      seenField.add(p[0]);
+      uniquePairs.push(p);
+    }
+    uniquePairs.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    const hasher = createHash3("sha256");
+    for (const [f, v] of uniquePairs) {
+      hashHexItem(hasher, f);
+      hashHexItem(hasher, v);
+    }
+    const previewFields = uniquePairs.slice(0, REDIS_COLLECTION_LIMIT).map(([f, v]) => ({ field: decodeHexItem(f), value: decodeHexItem(v) }));
+    const payload = {
+      type: "hash",
+      fields: previewFields,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchSet(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('SCARD', fromhex(ARGV[1]))`, [hexKey], "SCARD")) || 0;
+    const allMembers = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('SSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local arr = {} for i, v in ipairs(r[2]) do arr[i] = tohex(v) end return cjson.encode({cursor=r[1], members=arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "SSCAN");
+      const parsed = safeJsonParse2(stdout, "SSCAN");
+      allMembers.push(...parsed.members);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const dedup = Array.from(new Set(allMembers));
+    dedup.sort();
+    const hasher = createHash3("sha256");
+    for (const m of dedup)
+      hashHexItem(hasher, m);
+    const previewMembers = dedup.slice(0, REDIS_COLLECTION_LIMIT).map(decodeHexItem);
+    const payload = {
+      type: "set",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchZset(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('ZCARD', fromhex(ARGV[1]))`, [hexKey], "ZCARD")) || 0;
+    const hasher = createHash3("sha256");
+    let previewMembers = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('ZRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {tohex(r[i]), tonumber(r[i+1])}) end return cjson.encode(arr)`, [hexKey, String(offset), String(end)], "ZRANGE");
+      const chunk = safeJsonParse2(stdout, "ZRANGE");
+      for (const [hex, score] of chunk) {
+        hashHexItem(hasher, hex);
+        hasher.update(`${score}
+`);
+      }
+      if (offset === 0) {
+        previewMembers = chunk.map(([h, s]) => ({
+          member: decodeHexItem(h),
+          score: s
+        }));
+      }
+    }
+    const payload = {
+      type: "zset",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchStream(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('XLEN', fromhex(ARGV[1]))`, [hexKey], "XLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewEntries = [];
+    let startId = "-";
+    const seenIds = new Set;
+    let first = true;
+    for (;; ) {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('XRANGE', fromhex(ARGV[1]), ARGV[2], '+', 'COUNT', tonumber(ARGV[3])) local arr = {} for _, e in ipairs(r) do local fs = {} for i = 1, #e[2], 2 do fs[#fs+1] = tohex(e[2][i]) fs[#fs+1] = tohex(e[2][i+1]) end arr[#arr+1] = {id=e[1], fs=fs} end return cjson.encode(arr)`, [hexKey, startId, String(REDIS_COLLECTION_LIMIT)], "XRANGE");
+      const chunk = safeJsonParse2(stdout, "XRANGE");
+      if (chunk.length === 0)
+        break;
+      const newEntries = [];
+      for (const e of chunk) {
+        if (seenIds.has(e.id))
+          continue;
+        seenIds.add(e.id);
+        newEntries.push(e);
+      }
+      for (const e of newEntries) {
+        hasher.update(`${e.id}
+`);
+        for (const hex of e.fs)
+          hashHexItem(hasher, hex);
+      }
+      if (first) {
+        previewEntries = newEntries.slice(0, REDIS_COLLECTION_LIMIT).map((e) => {
+          const fields = [];
+          for (let i = 0;i < e.fs.length; i += 2) {
+            fields.push({
+              field: decodeHexItem(e.fs[i]),
+              value: decodeHexItem(e.fs[i + 1])
+            });
+          }
+          return { id: e.id, fields };
+        });
+        first = false;
+      }
+      if (chunk.length < REDIS_COLLECTION_LIMIT)
+        break;
+      startId = chunk[chunk.length - 1].id;
+    }
+    const payload = {
+      type: "stream",
+      entries: previewEntries,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  async function* iterateForSnapshot(container, signal) {
+    const { db, pattern } = parseSnapshotContainer(container);
+    const seen = new Set;
+    let cursor = "0";
+    do {
+      if (signal?.aborted)
+        return;
+      const stdout = evalHex(db, SCAN_HEX_KEYS_LUA, [cursor, pattern, String(REDIS_COLLECTION_LIMIT)], "SCAN");
+      const parsed = safeJsonParse2(stdout, "SCAN");
+      for (let i = 0;i < parsed.keys.length; i++) {
+        if (signal?.aborted)
+          return;
+        const hexKey = parsed.keys[i];
+        if (seen.has(hexKey))
+          continue;
+        seen.add(hexKey);
+        const rawType = parsed.types[i] || "none";
+        const type = isValidRedisType(rawType) ? rawType : "none";
+        const { payload, fullHash } = snapshotFetch(db, hexKey, type);
+        const keyBytes = Buffer.from(hexKey, "hex");
+        const keyName = isValidUtf8(keyBytes) ? keyBytes.toString("utf8") : { binaryBase64: keyBytes.toString("base64") };
+        const keyJson = JSON.stringify({ db, key: keyName });
+        const payloadJson = JSON.stringify({ type, value: payload });
+        yield { keyJson, payloadJson, rowHash: fullHash };
+      }
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+  }
+  async function listSnapshotContainers() {
+    return [];
+  }
+  return {
+    kind: "redis",
+    model: "kv",
+    capabilities: { snapshot: true },
+    listDatabases,
+    listKeys,
+    getValue,
+    iterateForSnapshot,
+    listSnapshotContainers,
+    close() {}
+  };
+}
+function openRedisExplorer(serviceName, env, cwd) {
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
+  const password = env.REDIS_PASSWORD || "";
+  return createRedisAdapter({ containerName, password });
+}
+var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`, LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`, SCAN_HEX_KEYS_LUA;
+var init_redis = __esm(() => {
+  init_docker_utils();
+  SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
+});
+
+// web-src/server/database/handle-redis.ts
+var exports_handle_redis = {};
+__export(exports_handle_redis, {
+  handleRedisRoute: () => handleRedisRoute,
+  closeRedisAdapter: () => closeRedisAdapter
+});
+function closeRedisAdapter(dbId) {
+  redisAdapterCache.close(dbId);
+}
+function resolveRedis(cwd, dbParam, omitDirNames) {
+  return resolveDockerExplorer(cwd, dbParam, "redis", redisAdapterCache, (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir), omitDirNames);
+}
+function handleDatabases(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  try {
+    const databases = r.explorer.listDatabases();
+    const body = { dbId: r.dbId, databases };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "list redis databases", err);
+  }
+}
+function handleKeys(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const pattern = url.searchParams.get("pattern") || "*";
+  const cursor = url.searchParams.get("cursor") || "0";
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
+  try {
+    const { keys, nextCursor } = r.explorer.listKeys({
+      db: dbIndex,
+      pattern,
+      cursor,
+      count
+    });
+    const body = {
+      dbId: r.dbId,
+      dbIndex,
+      keys,
+      nextCursor
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "list redis keys", err);
+  }
+}
+async function handleRedisRoute(req, url, cwd, sideEffectAllowed, omitDirNames) {
+  const wrap = createQueryStrippedLogger("redis", req, url);
+  return dispatchRoutes(req, url, {
+    "/_db/redis/databases": {
+      methods: ["GET"],
+      handler: () => handleDatabases(cwd, url, omitDirNames)
+    },
+    "/_db/redis/keys": {
+      methods: ["GET"],
+      handler: () => handleKeys(cwd, url, omitDirNames)
+    },
+    "/_db/redis/value": {
+      methods: ["GET"],
+      handler: () => handleValue(cwd, url, omitDirNames)
+    }
+  }, sideEffectAllowed, wrap);
+}
+function handleValue(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const key = url.searchParams.get("key");
+  if (!key)
+    return textError("missing key", 400);
+  try {
+    const value = r.explorer.getValue({ db: dbIndex, key });
+    const body = { dbId: r.dbId, dbIndex, key, value };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "read redis value", err);
+  }
+}
+var redisAdapterCache;
+var init_handle_redis = __esm(() => {
+  init_redis();
+  init_handle_shared();
+  redisAdapterCache = createDockerAdapterCache();
 });
 
 // web-src/server/database/query-history.ts
@@ -4032,7 +6582,7 @@ var CODE_VIEWER_DIR2 = ".code-viewer", HISTORY_FILE_NAME = "query-history.json",
 var init_query_history = () => {};
 
 // web-src/server/database/snapshot-store.ts
-import { createHash as createHash2, randomBytes } from "node:crypto";
+import { createHash as createHash4, randomBytes } from "node:crypto";
 import { mkdirSync as mkdirSync5 } from "node:fs";
 import { join as join10 } from "node:path";
 async function getSqliteClass2() {
@@ -4068,15 +6618,15 @@ async function getStoreDb(cwd) {
   storeDb.exec(SCHEMA_SQL);
   return storeDb;
 }
-function makeId(prefix) {
+function makeId2(prefix) {
   return `${prefix}-${randomBytes(8).toString("hex")}`;
 }
 function hashPayload(payloadJson) {
-  return createHash2("sha256").update(payloadJson).digest("hex");
+  return createHash4("sha256").update(payloadJson).digest("hex");
 }
 async function createSnapshot(cwd, dbId, kind, tables, note) {
   const db = await getStoreDb(cwd);
-  const id = makeId("snap");
+  const id = makeId2("snap");
   db.prepare("INSERT INTO snapshots (id, db_id, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)").run(id, dbId, kind, note, new Date().toISOString(), "running");
   for (const t of tables) {
     db.prepare("INSERT INTO snapshot_tables (snapshot_id, table_name) VALUES (?, ?)").run(id, t);
@@ -4085,11 +6635,11 @@ async function createSnapshot(cwd, dbId, kind, tables, note) {
 }
 async function addSnapshotTableData(cwd, snapshotId, tableName, pkColumns, rows) {
   const db = await getStoreDb(cwd);
-  const tableHasher = createHash2("sha256");
+  const tableHasher = createHash4("sha256");
   const insertRow = db.prepare("INSERT OR IGNORE INTO snapshot_rows (snapshot_id, table_name, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?, ?)");
   const insertPayload = db.prepare("INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)");
   for (const row of rows) {
-    const rowKeyHash = createHash2("sha256").update(row.rowKeyJson).digest("hex");
+    const rowKeyHash = createHash4("sha256").update(row.rowKeyJson).digest("hex");
     const payloadHash = hashPayload(row.payloadJson);
     tableHasher.update(row.rowHash);
     insertRow.run(snapshotId, tableName, rowKeyHash, row.rowKeyJson, row.rowHash, payloadHash);
@@ -4321,71 +6871,48 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
 `, storeDb = null, storeDbPath = null;
 var init_snapshot_store = () => {};
 
+// web-src/server/database/sources/types.ts
+function hasSnapshotCapability(source) {
+  const caps = source.capabilities;
+  return !!caps?.snapshot;
+}
+
 // web-src/server/database/snapshot-runner.ts
-import { createHash as createHash3 } from "node:crypto";
-function normalizeValue(v) {
-  if (v === null)
-    return "\\N";
-  if (typeof v === "bigint")
-    return v.toString();
-  if (v instanceof Uint8Array) {
-    return `\\x${Buffer.from(v).toString("hex")}`;
+function throwIfSnapshotAborted(signal) {
+  if (signal?.aborted) {
+    throw new Error("snapshot cancelled");
   }
-  return String(v);
 }
-function rowToPayloadJson(columns, row) {
-  const obj = {};
-  for (let i = 0;i < columns.length; i++) {
-    obj[columns[i]] = serializeDbValue(row[i]);
+async function runSnapshot(cwd, source, dbId, containers, note, onProgress, options = {}) {
+  if (!hasSnapshotCapability(source)) {
+    throw new Error("data source does not support snapshot (missing SnapshotIterable capability)");
   }
-  return JSON.stringify(obj);
-}
-function computeRowHash(columns, row) {
-  const parts = columns.map((_, i) => normalizeValue(row[i]));
-  return createHash3("sha256").update(parts.join("\t")).digest("hex");
-}
-function buildRowKeyJson(pkColumns, allColumns, row, rowIndex) {
-  if (pkColumns.length === 0) {
-    return JSON.stringify({ __rowIndex: rowIndex });
-  }
-  const keyObj = {};
-  for (const pk of pkColumns) {
-    const idx = allColumns.indexOf(pk);
-    if (idx >= 0)
-      keyObj[pk] = serializeDbValue(row[idx]);
-  }
-  return JSON.stringify(keyObj);
-}
-async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
-  const snapshotId = await createSnapshot(cwd, dbId, adapter.kind, tables, note);
+  const snapshotSource = source;
+  const snapshotId = await createSnapshot(cwd, dbId, snapshotSource.kind, containers, note);
   try {
-    for (const table of tables) {
-      onProgress?.(table, false);
-      const columns = adapter.getColumns(table);
-      const colNames = columns.map((c) => c.name);
-      const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
-      let offset = 0;
-      let rowIndex = 0;
-      const allRows = [];
-      for (;; ) {
-        const result = adapter.getTablePage(table, {
-          offset,
-          limit: BATCH_SIZE
-        });
-        if (result.rows.length === 0)
-          break;
-        for (const row of result.rows) {
-          const rowKeyJson = buildRowKeyJson(pkColumns, colNames, row, rowIndex);
-          const rowHash = computeRowHash(colNames, row);
-          const payloadJson = rowToPayloadJson(colNames, row);
-          allRows.push({ rowKeyJson, rowHash, payloadJson });
-          rowIndex++;
+    options.onSnapshotId?.(snapshotId);
+    for (const container of containers) {
+      throwIfSnapshotAborted(options.signal);
+      onProgress?.(container, false);
+      const collected = [];
+      let pkColumns = [];
+      try {
+        const adapterAny = snapshotSource;
+        if (typeof adapterAny.getColumns === "function") {
+          const cols = adapterAny.getColumns(container);
+          pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
         }
-        offset += result.rows.length;
-        if (result.rows.length < BATCH_SIZE)
-          break;
+      } catch {}
+      for await (const item of snapshotSource.iterateForSnapshot(container, options.signal)) {
+        throwIfSnapshotAborted(options.signal);
+        collected.push({
+          rowKeyJson: item.keyJson,
+          rowHash: item.rowHash,
+          payloadJson: item.payloadJson
+        });
       }
-      await addSnapshotTableData(cwd, snapshotId, table, pkColumns, allRows);
+      throwIfSnapshotAborted(options.signal);
+      await addSnapshotTableData(cwd, snapshotId, container, pkColumns, collected);
     }
     await finalizeSnapshot(cwd, snapshotId);
     onProgress?.("", true);
@@ -4396,77 +6923,221 @@ async function runSnapshot(cwd, adapter, dbId, tables, note, onProgress) {
     throw err;
   }
 }
-var BATCH_SIZE = 500;
+var SNAPSHOT_FLUSH_THRESHOLD = 500;
 var init_snapshot_runner = __esm(() => {
-  init_serialize();
   init_snapshot_store();
+});
+
+// web-src/server/database/tabs-store.ts
+import {
+  existsSync as existsSync8,
+  mkdirSync as mkdirSync6,
+  readFileSync as readFileSync7,
+  renameSync as renameSync3,
+  writeFileSync as writeFileSync4
+} from "node:fs";
+import { join as join11 } from "node:path";
+function tabsFilePath(root) {
+  return join11(root, CODE_VIEWER_DIR4, TABS_FILE_NAME);
+}
+function emptyState2() {
+  return { version: 1, tabs: [], activeTabId: null };
+}
+function isValidCssSize(s) {
+  if (s.length === 0 || s.length > MAX_CSS_SIZE_LEN)
+    return false;
+  const match = /^(\d+(?:\.\d+)?)(px|%)$/.exec(s);
+  if (!match)
+    return false;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value))
+    return false;
+  return match[2] === "%" ? value >= 0 && value <= 100 : value >= 80 && value <= 2000;
+}
+function sanitizeOptionalString(v, maxLen) {
+  if (typeof v !== "string")
+    return;
+  if (v.length === 0)
+    return;
+  if (v.length > maxLen)
+    return v.slice(0, maxLen);
+  return v;
+}
+function sanitizeCssSize(v) {
+  if (typeof v !== "string")
+    return;
+  return isValidCssSize(v) ? v : undefined;
+}
+function sanitizeRedis(v) {
+  if (!v || typeof v !== "object")
+    return;
+  const r = v;
+  const out = {};
+  if (typeof r.dbIndex === "number" && Number.isInteger(r.dbIndex) && r.dbIndex >= 0 && r.dbIndex < 256) {
+    out.dbIndex = r.dbIndex;
+  }
+  const key = sanitizeOptionalString(r.key, MAX_REDIS_KEY_LEN);
+  if (key !== undefined)
+    out.key = key;
+  const keyFilter = sanitizeOptionalString(r.keyFilter, MAX_REDIS_KEY_FILTER_LEN);
+  if (keyFilter !== undefined)
+    out.keyFilter = keyFilter;
+  if (out.dbIndex === undefined && out.key === undefined && out.keyFilter === undefined)
+    return;
+  return out;
+}
+function sanitizeEs(v) {
+  if (!v || typeof v !== "object")
+    return;
+  const r = v;
+  const out = {};
+  const index = sanitizeOptionalString(r.index, MAX_INDEX_NAME_LEN);
+  if (index !== undefined)
+    out.index = index;
+  const query = sanitizeOptionalString(r.query, MAX_ES_QUERY_LEN);
+  if (query !== undefined)
+    out.query = query;
+  if (out.index === undefined && out.query === undefined)
+    return;
+  return out;
+}
+function sanitize(input) {
+  if (!input || typeof input !== "object")
+    return emptyState2();
+  const obj = input;
+  if (obj.version !== 1)
+    return emptyState2();
+  const rawTabs = Array.isArray(obj.tabs) ? obj.tabs : [];
+  const seenIds = new Set;
+  const tabs = [];
+  for (const t of rawTabs) {
+    if (tabs.length >= MAX_TABS)
+      break;
+    if (!t || typeof t !== "object")
+      continue;
+    const tab = t;
+    const id = sanitizeOptionalString(tab.id, MAX_TAB_ID_LEN);
+    if (!id)
+      continue;
+    if (seenIds.has(id))
+      continue;
+    seenIds.add(id);
+    const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
+    const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
+    const view = typeof tab.view === "string" && VALID_VIEWS.has(tab.view) ? tab.view : "data";
+    const out = { id, dbId, table, view };
+    const sqlDraft = sanitizeOptionalString(tab.sqlDraft, MAX_SQL_DRAFT_LEN);
+    if (sqlDraft !== undefined)
+      out.sqlDraft = sqlDraft;
+    if (typeof tab.historyOpen === "boolean")
+      out.historyOpen = tab.historyOpen;
+    const historyHeight = sanitizeCssSize(tab.historyHeight);
+    if (historyHeight !== undefined)
+      out.historyHeight = historyHeight;
+    const sidebarWidth = sanitizeCssSize(tab.sidebarWidth);
+    if (sidebarWidth !== undefined)
+      out.sidebarWidth = sidebarWidth;
+    const redis = sanitizeRedis(tab.redis);
+    if (redis !== undefined)
+      out.redis = redis;
+    const es = sanitizeEs(tab.es);
+    if (es !== undefined)
+      out.es = es;
+    tabs.push(out);
+  }
+  let activeTabId = sanitizeOptionalString(obj.activeTabId, MAX_TAB_ID_LEN) ?? null;
+  if (activeTabId && !tabs.find((t) => t.id === activeTabId)) {
+    activeTabId = tabs.length > 0 ? tabs[0].id : null;
+  }
+  return { version: 1, tabs, activeTabId };
+}
+function loadTabs(cwd) {
+  const file = tabsFilePath(cwd);
+  if (!existsSync8(file))
+    return emptyState2();
+  try {
+    const raw = readFileSync7(file, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || parsed.version !== 1) {
+      backupInvalidTabsFile(file);
+      return emptyState2();
+    }
+    return sanitize(parsed);
+  } catch {
+    backupInvalidTabsFile(file);
+    return emptyState2();
+  }
+}
+function backupInvalidTabsFile(file) {
+  try {
+    renameSync3(file, `${file}.bak-${Date.now()}`);
+  } catch {}
+}
+function saveTabs(cwd, state) {
+  const normalized = sanitize(state);
+  const dir = join11(cwd, CODE_VIEWER_DIR4);
+  mkdirSync6(dir, { recursive: true });
+  const file = tabsFilePath(cwd);
+  const tmp = `${file}.${makeId(`tmp-${process.pid}`)}`;
+  const content = `${JSON.stringify(normalized, null, 2)}
+`;
+  if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES2) {
+    throw new Error("tabs state too large");
+  }
+  writeFileSync4(tmp, content, "utf8");
+  renameSync3(tmp, file);
+}
+var CODE_VIEWER_DIR4 = ".code-viewer", TABS_FILE_NAME = "tabs.json", MAX_TABS = 64, MAX_JSON_BYTES2 = 1e6, MAX_SQL_DRAFT_LEN = 16000, MAX_ES_QUERY_LEN = 16000, MAX_TAB_ID_LEN = 128, MAX_DB_ID_LEN = 2048, MAX_TABLE_NAME_LEN = 512, MAX_REDIS_KEY_LEN = 1024, MAX_REDIS_KEY_FILTER_LEN = 512, MAX_INDEX_NAME_LEN = 256, MAX_CSS_SIZE_LEN = 16, VALID_VIEWS;
+var init_tabs_store = __esm(() => {
+  VALID_VIEWS = new Set([
+    "data",
+    "query",
+    "schema",
+    "er",
+    "search",
+    "snapshot"
+  ]);
 });
 
 // web-src/server/database/handle.ts
 var exports_handle = {};
 __export(exports_handle, {
+  parseSelectAllTable: () => parseSelectAllTable,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
-import { randomBytes as randomBytes2 } from "node:crypto";
 function ensureInit() {
   if (initialized)
     return;
   setAdapterFactory(sqliteAdapterFactory);
   initialized = true;
 }
-async function getAdapter(r, cwd) {
+async function getAdapter(r, _cwd) {
   if (r.docker) {
-    const key = r.dbId;
-    const cached = dockerAdapterCache.get(key);
-    if (cached)
-      return cached;
-    const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, cwd, r.docker.database);
-    dockerAdapterCache.set(key, adapter);
-    return adapter;
+    const docker = r.docker;
+    return dockerAdapterCache.getOrOpen(r.dbId, () => openDockerAdapter(docker.serviceName, docker.kind, docker.env, docker.composeDir, docker.database));
   }
   return getConnection(r.resolved);
-}
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
-}
-function textError(message, status) {
-  return new Response(message, {
-    status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
 }
 function sanitizeFilename(name) {
   return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
 }
-function getDockerDbs(cwd) {
-  if (cachedDockerCwd === cwd && cachedDockerDbs)
-    return cachedDockerDbs;
-  cachedDockerDbs = discoverDockerDatabases(cwd);
-  cachedDockerCwd = cwd;
-  return cachedDockerDbs;
-}
-function resolveDb(cwd, dbParam) {
+function resolveDb(cwd, dbParam, omitDirNames) {
   if (!dbParam)
     return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
-    const rest = dbParam.slice(7);
-    const colonIdx = rest.indexOf(":");
-    const serviceName = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
-    const dbName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : undefined;
-    const dockerDbs = getDockerDbs(cwd);
-    const info = dockerDbs.find((d) => d.serviceName === serviceName);
+    const parsed = parseDockerDbId(dbParam);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, dbParam, undefined, omitDirNames);
     if (!info)
       return textError("docker service not found", 404);
-    const resolved2 = dbName ? { ...info, database: dbName } : info;
+    if (info.kind === "redis") {
+      return textError("redis services must use the /_db/redis/* routes", 400);
+    }
+    if (info.kind === "elasticsearch") {
+      return textError("elasticsearch services must use the /_db/elasticsearch/* routes", 400);
+    }
+    const resolved2 = parsed.database ? { ...info, database: parsed.database } : info;
     return { resolved: dbParam, dbId: dbParam, docker: resolved2 };
   }
   const resolved = validateDbPath(cwd, dbParam);
@@ -4474,19 +7145,33 @@ function resolveDb(cwd, dbParam) {
     return textError("invalid database path", 400);
   return { resolved, dbId: dbParam };
 }
+function toFileInfo(entry) {
+  return {
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    sizeBytes: entry.sizeBytes,
+    kind: entry.kind
+  };
+}
 function handleFiles(cwd, omitDirNames) {
   const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerServices = discoverDockerDatabases(cwd);
+  const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
+  const dockerTruncated = dockerServices.truncated === true;
   const dockerEntries = [];
   for (const svc of dockerServices) {
-    const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, cwd);
+    if (svc.kind === "redis" || svc.kind === "elasticsearch") {
+      dockerEntries.push(svc);
+      continue;
+    }
+    const dbs = listDockerDatabases(svc.serviceName, svc.kind, svc.env, svc.composeDir);
     if (dbs.length <= 1) {
       dockerEntries.push(svc);
     } else {
       for (const db of dbs) {
         dockerEntries.push({
           ...svc,
-          id: `docker:${svc.serviceName}:${db}`,
+          id: `${svc.id}:${db}`,
           name: svc.name.replace(/\)$/, ` / ${db})`),
           database: db
         });
@@ -4502,13 +7187,14 @@ function handleFiles(cwd, omitDirNames) {
         sizeBytes: f.sizeBytes,
         kind: "sqlite"
       })),
-      ...dockerEntries
-    ]
+      ...dockerEntries.map(toFileInfo)
+    ],
+    ...dockerTruncated ? { truncated: true } : {}
   };
   return json(body);
 }
-async function handleSchema(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleSchema(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
@@ -4551,8 +7237,7 @@ async function handleSchema(cwd, url) {
     }
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read schema: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "read schema", err);
   }
 }
 function sanitizeIdentifier4(name, kind = "sqlite") {
@@ -4560,7 +7245,7 @@ function sanitizeIdentifier4(name, kind = "sqlite") {
     return `\`${name.replace(/`/g, "``")}\``;
   return `"${name.replace(/"/g, '""')}"`;
 }
-function escapeSqlString2(value) {
+function escapeSqlString3(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 function buildFilterWhere(grouped, kind) {
@@ -4568,7 +7253,7 @@ function buildFilterWhere(grouped, kind) {
   const params = [];
   const useParams = kind === "sqlite";
   for (const [value, cols] of grouped) {
-    const likeVal = useParams ? "?" : escapeSqlString2(`%${value}%`);
+    const likeVal = useParams ? "?" : escapeSqlString3(`%${value}%`);
     if (cols.length === 1) {
       const cast = kind === "mysql" ? `CAST(${sanitizeIdentifier4(cols[0], kind)} AS CHAR)` : `CAST(${sanitizeIdentifier4(cols[0], kind)} AS TEXT)`;
       whereParts.push(`${cast} LIKE ${likeVal}`);
@@ -4601,8 +7286,17 @@ function parseFilters(url) {
     return [];
   }
 }
-async function handleTable(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+function groupFiltersByValue(filters) {
+  const grouped = new Map;
+  for (const filter of filters) {
+    const existing = grouped.get(filter.value) || [];
+    existing.push(filter.column);
+    grouped.set(filter.value, existing);
+  }
+  return grouped;
+}
+async function handleTable(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -4624,6 +7318,51 @@ async function handleTable(cwd, url) {
   const filters = parseFilters(url);
   try {
     const adapter = await getAdapter(r, cwd);
+    if (filters.length > 0 && adapter.getFilteredTablePageWithMeta) {
+      const meta = await adapter.getFilteredTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy,
+        grouped: groupFiltersByValue(filters)
+      });
+      const colNames2 = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames2.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body2 = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows
+      };
+      return json(body2);
+    }
+    if (filters.length === 0 && adapter.getTablePageWithMeta) {
+      const meta = await adapter.getTablePageWithMeta(table, {
+        offset,
+        limit,
+        orderBy
+      });
+      const colNames2 = new Set(meta.columns.map((c) => c.name));
+      if (sortCol && !colNames2.has(sortCol)) {
+        return textError(`invalid sort column: ${sortCol}`, 400);
+      }
+      const body2 = {
+        dbId: r.dbId,
+        table,
+        columns: meta.columns,
+        rows: serializeDbRows(meta.rows),
+        totalRows: meta.totalRows,
+        offset,
+        limit,
+        hasMore: offset + meta.rowCount < meta.totalRows
+      };
+      return json(body2);
+    }
     const columns = adapter.getColumns(table);
     const colNames = new Set(columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
@@ -4632,12 +7371,7 @@ async function handleTable(cwd, url) {
     if (filters.length > 0) {
       const validFilters = filters.filter((f) => colNames.has(f.column));
       if (validFilters.length > 0) {
-        const grouped = new Map;
-        for (const f of validFilters) {
-          const existing = grouped.get(f.value) || [];
-          existing.push(f.column);
-          grouped.set(f.value, existing);
-        }
+        const grouped = groupFiltersByValue(validFilters);
         const k = adapter.kind;
         const filter = buildFilterWhere(grouped, k);
         const order = orderBy ? ` ORDER BY ${sanitizeIdentifier4(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}` : "";
@@ -4675,25 +7409,49 @@ async function handleTable(cwd, url) {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read table: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "read table", err);
   }
 }
 function makeHistoryId() {
-  return `qh-${randomBytes2(8).toString("hex")}`;
+  return makeId("qh");
 }
-async function handleQuery(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
+function unquoteSqlIdentifier(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
   }
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    return trimmed.slice(1, -1).replace(/``/g, "`");
+  }
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1).replace(/]]/g, "]");
+  }
+  return trimmed;
+}
+function parseSelectAllTable(sql) {
+  const identifier = '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
+  const match = sql.trim().replace(/;\s*$/, "").match(new RegExp(String.raw`^SELECT\s+\*\s+FROM\s+(${identifier})(?:\s*\.\s*(${identifier}))?\s*$`, "i"));
+  if (!match)
+    return null;
+  return unquoteSqlIdentifier(match[2] || match[1]);
+}
+function inferEmptyQueryColumns(adapter, sql) {
+  const table = parseSelectAllTable(sql);
+  if (!table)
+    return [];
+  try {
+    return adapter.getColumns(table);
+  } catch {
+    return [];
+  }
+}
+async function handleQuery(cwd, req, sendSse, omitDirNames) {
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db || !body.sql)
     return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
   const maxRows = Math.min(1e4, Math.max(1, body.maxRows || 1000));
@@ -4703,10 +7461,13 @@ async function handleQuery(cwd, req, sendSse) {
     const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
     const elapsed = Date.now() - start;
     const serializedRows = serializeDbRows(result.rows);
+    const inferredColumns = result.columns.length === 0 && result.rows.length === 0 ? inferEmptyQueryColumns(adapter, body.sql) : [];
+    const columns = inferredColumns.length > 0 ? inferredColumns.map((col) => col.name) : result.columns;
+    const columnTypes = inferredColumns.length > 0 ? inferredColumns.map((col) => col.type) : result.columnTypes;
     const response = {
       dbId: body.db,
-      columns: result.columns,
-      columnTypes: result.columnTypes,
+      columns,
+      columnTypes,
       rows: serializedRows,
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
@@ -4719,7 +7480,7 @@ async function handleQuery(cwd, req, sendSse) {
         sql: body.sql,
         title: body.title,
         body: body.body,
-        columns: result.columns,
+        columns,
         rowsPreview: serializedRows,
         rowCount: result.rowCount,
         savedRows: serializedRows.length,
@@ -4732,7 +7493,7 @@ async function handleQuery(cwd, req, sendSse) {
       const state = loadQueryHistory(cwd);
       const updated = addQueryHistoryEntry(state, entry);
       saveQueryHistory(cwd, updated);
-      sendSse?.("db-query", JSON.stringify({ action: "add", id: entry.id }));
+      sendSse?.("db-query", JSON.stringify({ action: "add", dbId: body.db, id: entry.id }));
     }
     return json(response);
   } catch (err) {
@@ -4763,20 +7524,16 @@ function handleHistory(cwd, url) {
   return json(state);
 }
 async function handleHistoryDelete(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   const state = loadQueryHistory(cwd);
+  const deleted = state.entries.find((entry) => entry.id === body.id);
   const updated = deleteQueryHistoryEntry(state, body.id);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "delete", id: body.id }));
+  sendSse?.("db-query", JSON.stringify({ action: "delete", dbId: deleted?.dbId, id: body.id }));
   return json({ ok: true });
 }
 async function handleHistoryClear(cwd, req, sendSse) {
@@ -4791,7 +7548,7 @@ async function handleHistoryClear(cwd, req, sendSse) {
   const state = loadQueryHistory(cwd);
   const updated = clearQueryHistory(state, body.db);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "clear" }));
+  sendSse?.("db-query", JSON.stringify({ action: "clear", dbId: body.db }));
   return json({ ok: true });
 }
 function formatCsvField(value) {
@@ -4808,8 +7565,8 @@ function formatCsvField(value) {
   }
   return str;
 }
-async function handleExport(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleExport(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -4906,12 +7663,11 @@ async function handleExport(cwd, url) {
       }
     });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to export table: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "export table", err);
   }
 }
-async function handleColumns(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleColumns(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -4922,12 +7678,11 @@ async function handleColumns(cwd, url) {
     const columns = adapter.getColumns(table);
     return json({ dbId: r.dbId, table, columns });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to get columns: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "get columns", err);
   }
 }
-async function handleDdl(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleDdl(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -4939,25 +7694,19 @@ async function handleDdl(cwd, url) {
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to get DDL: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "get DDL", err);
   }
 }
-async function handleSearchStart(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+async function handleSearchStart(cwd, req, omitDirNames) {
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db || !body.term)
     return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
-  const jobId = `search-${randomBytes2(8).toString("hex")}`;
+  const jobId = makeId("search");
   const ac = new AbortController;
   const job = {
     id: jobId,
@@ -5034,14 +7783,9 @@ function handleSearchStatus(url) {
   return json(result);
 }
 async function handleSearchCancel(req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   const job = searchJobs.get(body.id);
@@ -5051,70 +7795,166 @@ async function handleSearchCancel(req) {
   job.done = true;
   return json({ ok: true });
 }
+async function openRegisteredDockerSnapshotSource(info, requestedContainers) {
+  const factory2 = SNAPSHOT_DOCKER_SOURCE_REGISTRY[info.kind];
+  return factory2 ? factory2(info, requestedContainers) : null;
+}
 async function handleSnapshotList(cwd, url) {
   const dbId = url.searchParams.get("db") || undefined;
   const snapshots = await listSnapshots(cwd, dbId);
   return json({ snapshots });
 }
-async function handleSnapshotCreate(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
+function sanitizeSnapshotTables(tables) {
+  if (tables === undefined || tables === null)
+    return;
+  if (!Array.isArray(tables))
+    return null;
+  if (tables.length === 0)
+    return;
+  const out = [];
+  for (const table of tables) {
+    if (out.length >= MAX_SNAPSHOT_TABLES)
+      break;
+    if (typeof table !== "string")
+      return null;
+    if (table.length === 0 || table.length > MAX_SNAPSHOT_TABLE_NAME_LEN) {
+      return null;
+    }
+    out.push(table);
   }
+  return out;
+}
+async function handleSnapshotCreate(cwd, req, sendSse, omitDirNames) {
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db)
     return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
-  if (r instanceof Response)
-    return r;
-  const adapter = await getAdapter(r, cwd);
-  let tables = body.tables;
-  if (!tables || tables.length === 0) {
-    tables = adapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+  const requestedTables = sanitizeSnapshotTables(body.tables);
+  if (requestedTables === null) {
+    return textError("invalid tables", 400);
+  }
+  let source = null;
+  let containers = requestedTables;
+  let closeSourceAfterSnapshot = false;
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    if (!info)
+      return textError("docker service not found", 404);
+    const registeredSource = await openRegisteredDockerSnapshotSource(info, requestedTables);
+    if (registeredSource) {
+      source = registeredSource.source;
+      containers = registeredSource.containers;
+      closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
+    }
+  }
+  if (!source) {
+    const r = resolveDb(cwd, body.db, omitDirNames);
+    if (r instanceof Response)
+      return r;
+    source = await getAdapter(r, cwd);
+  }
+  if (!containers || containers.length === 0) {
+    const sqlAdapter = source;
+    if (typeof sqlAdapter.getTables === "function") {
+      containers = sqlAdapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
+    }
+  }
+  if (!containers || containers.length === 0) {
+    return textError("missing tables/containers (Redis requires explicit key patterns)", 400);
   }
   const note = body.note ?? "";
+  const snapshotDbId = body.db;
+  const snapshotContainers = containers;
+  const abortController = new AbortController;
+  const snapshotJob = {
+    abortController,
+    dbId: snapshotDbId,
+    done: false
+  };
+  let activeSnapshotId;
   (async () => {
     try {
-      const snapshotId = await runSnapshot(cwd, adapter, body.db, tables, note, (table, done) => {
-        sendSse?.("db-snapshot", JSON.stringify({ action: "progress", table, done }));
+      const snapshotId = await runSnapshot(cwd, source, snapshotDbId, snapshotContainers, note, (table, done) => {
+        sendSse?.("db-snapshot", JSON.stringify({
+          action: "progress",
+          dbId: snapshotDbId,
+          table,
+          done
+        }));
+      }, {
+        signal: abortController.signal,
+        onSnapshotId: (id) => {
+          activeSnapshotId = id;
+          snapshotJob.snapshotId = id;
+          snapshotJobs.set(id, snapshotJob);
+          sendSse?.("db-snapshot", JSON.stringify({
+            action: "started",
+            dbId: snapshotDbId,
+            id
+          }));
+        }
       });
-      sendSse?.("db-snapshot", JSON.stringify({ action: "created", id: snapshotId }));
+      sendSse?.("db-snapshot", JSON.stringify({
+        action: "created",
+        dbId: snapshotDbId,
+        id: snapshotId
+      }));
     } catch (err) {
       console.error("[code-viewer] snapshot error:", err instanceof Error ? err.message : String(err));
       sendSse?.("db-snapshot", JSON.stringify({
         action: "error",
+        dbId: snapshotDbId,
         error: err instanceof Error ? err.message : String(err)
       }));
+    } finally {
+      snapshotJob.done = true;
+      if (activeSnapshotId) {
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60000).unref();
+      }
+      if (closeSourceAfterSnapshot) {
+        try {
+          source.close?.();
+        } catch {}
+      }
     }
   })();
   return json({ ok: true, message: "snapshot started" });
 }
-async function handleSnapshotUpdateNote(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
+async function handleSnapshotCancel(req, url) {
+  let id = url.searchParams.get("id") || "";
+  if (!id) {
+    const body = await parsePostJsonBody(req);
+    if (body instanceof Response)
+      return body;
+    id = body.id || "";
   }
+  if (!id)
+    return textError("missing id", 400);
+  const job = snapshotJobs.get(id);
+  if (!job)
+    return textError("snapshot job not found", 404);
+  if (!job.done) {
+    job.abortController.abort();
+  }
+  return json({ ok: true });
+}
+async function handleSnapshotUpdateNote(cwd, req) {
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   await updateSnapshotNote(cwd, body.id, body.note ?? "");
   return json({ ok: true });
 }
 async function handleSnapshotDelete(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   await deleteSnapshot(cwd, body.id);
@@ -5129,7 +7969,7 @@ async function handleDiffTables(cwd, url) {
     const tables = await computeDiffTables(cwd, beforeId, afterId);
     return json({ beforeId, afterId, tables });
   } catch (err) {
-    return textError(`failed to compute diff: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "compute diff", err);
   }
 }
 async function handleDiffRows(cwd, url) {
@@ -5144,29 +7984,66 @@ async function handleDiffRows(cwd, url) {
     const result = await computeDiffRows(cwd, beforeId, afterId, table, offset, limit);
     return json({ beforeId, afterId, table, ...result });
   } catch (err) {
-    return textError(`failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "compute diff rows", err);
   }
 }
-async function handleClose(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
+function handleTabsGet(cwd) {
+  return json(loadTabs(cwd));
+}
+async function handleTabsPut(cwd, req) {
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (contentLength > MAX_TABS_BODY_BYTES) {
+    return textError("tabs body too large", 413);
+  }
   let body;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, "utf8") > MAX_TABS_BODY_BYTES) {
+      return textError("tabs body too large", 413);
+    }
+    body = JSON.parse(raw);
   } catch {
     return textError("invalid JSON body", 400);
   }
+  if (!body || typeof body !== "object" || body.version !== 1) {
+    return textError("invalid tabs version", 400);
+  }
+  try {
+    saveTabs(cwd, body);
+    return json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "tabs state too large") {
+      return textError(message, 413);
+    }
+    return textError(`failed to save tabs: ${message}`, 500);
+  }
+}
+async function handleClose(cwd, req, omitDirNames) {
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db)
     return textError("missing db", 400);
-  const r = resolveDb(cwd, body.db);
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed)
+      return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    if (!info) {
+      dockerAdapterCache.close(body.db);
+      closeRedisAdapter(body.db);
+      closeElasticsearchAdapter(body.db);
+      return json({ ok: true });
+    }
+    await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
+    return json({ ok: true });
+  }
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
   if (r.docker) {
-    const cached = dockerAdapterCache.get(r.dbId);
-    if (cached) {
-      cached.close();
-      dockerAdapterCache.delete(r.dbId);
-    }
+    dockerAdapterCache.close(r.dbId);
   } else {
     closeConnection(r.resolved);
   }
@@ -5174,6 +8051,14 @@ async function handleClose(cwd, req) {
 }
 async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowed, sendSse) {
   ensureInit();
+  if (url.pathname.startsWith("/_db/redis/")) {
+    const { handleRedisRoute: handleRedisRoute2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
+    return handleRedisRoute2(req, url, cwd, sideEffectAllowed, omitDirNames);
+  }
+  if (url.pathname.startsWith("/_db/elasticsearch/")) {
+    const { handleElasticsearchRoute: handleElasticsearchRoute2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
+    return handleElasticsearchRoute2(req, url, cwd, sideEffectAllowed, omitDirNames);
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
@@ -5182,112 +8067,156 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     const ms = Date.now() - start;
     console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
   };
-  const wrapResponse = async (handler) => {
-    const res = await handler;
-    if (res)
-      log(res.status);
+  const wrapResponse = (res) => {
+    log(res.status);
     return res;
   };
-  if (path === "/_db/files")
-    return wrapResponse(handleFiles(cwd, omitDirNames));
-  if (path === "/_db/schema")
-    return wrapResponse(handleSchema(cwd, url));
-  if (path === "/_db/table")
-    return wrapResponse(handleTable(cwd, url));
-  if (path === "/_db/columns")
-    return wrapResponse(handleColumns(cwd, url));
-  if (path === "/_db/export")
-    return wrapResponse(handleExport(cwd, url));
-  if (path === "/_db/ddl")
-    return wrapResponse(handleDdl(cwd, url));
-  if (path === "/_db/query") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
+  return dispatchRoutes(req, url, {
+    "/_db/files": {
+      methods: ["GET"],
+      handler: () => handleFiles(cwd, omitDirNames)
+    },
+    "/_db/schema": {
+      methods: ["GET"],
+      handler: () => handleSchema(cwd, url, omitDirNames)
+    },
+    "/_db/table": {
+      methods: ["GET"],
+      handler: () => handleTable(cwd, url, omitDirNames)
+    },
+    "/_db/columns": {
+      methods: ["GET"],
+      handler: () => handleColumns(cwd, url, omitDirNames)
+    },
+    "/_db/export": {
+      methods: ["GET"],
+      handler: () => handleExport(cwd, url, omitDirNames)
+    },
+    "/_db/ddl": {
+      methods: ["GET"],
+      handler: () => handleDdl(cwd, url, omitDirNames)
+    },
+    "/_db/query": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleQuery(cwd, req, sendSse, omitDirNames)
+    },
+    "/_db/close": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleClose(cwd, req, omitDirNames)
+    },
+    "/_db/history": {
+      methods: ["GET"],
+      handler: () => handleHistory(cwd, url)
+    },
+    "/_db/history/delete": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleHistoryDelete(cwd, req, sendSse)
+    },
+    "/_db/history/clear": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleHistoryClear(cwd, req, sendSse)
+    },
+    "/_db/search/start": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSearchStart(cwd, req, omitDirNames)
+    },
+    "/_db/search/status": {
+      methods: ["GET"],
+      handler: () => handleSearchStatus(url)
+    },
+    "/_db/search/cancel": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSearchCancel(req)
+    },
+    "/_db/snapshot/list": {
+      methods: ["GET"],
+      handler: () => handleSnapshotList(cwd, url)
+    },
+    "/_db/snapshot/create": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotCreate(cwd, req, sendSse, omitDirNames)
+    },
+    "/_db/snapshot/cancel": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotCancel(req, url)
+    },
+    "/_db/snapshot/update-note": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotUpdateNote(cwd, req)
+    },
+    "/_db/snapshot/delete": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotDelete(cwd, req)
+    },
+    "/_db/snapshot/diff/tables": {
+      methods: ["GET"],
+      handler: () => handleDiffTables(cwd, url)
+    },
+    "/_db/snapshot/diff/rows": {
+      methods: ["GET"],
+      handler: () => handleDiffRows(cwd, url)
+    },
+    "/_db/tabs": {
+      methods: ["GET", "PUT", "POST"],
+      sideEffect: (m) => m !== "GET",
+      handler: () => method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req)
     }
-    return wrapResponse(handleQuery(cwd, req, sendSse));
-  }
-  if (path === "/_db/close") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleClose(cwd, req));
-  }
-  if (path === "/_db/history")
-    return wrapResponse(handleHistory(cwd, url));
-  if (path === "/_db/history/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryDelete(cwd, req, sendSse));
-  }
-  if (path === "/_db/history/clear") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryClear(cwd, req, sendSse));
-  }
-  if (path === "/_db/search/start") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchStart(cwd, req));
-  }
-  if (path === "/_db/search/status")
-    return wrapResponse(handleSearchStatus(url));
-  if (path === "/_db/search/cancel") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchCancel(req));
-  }
-  if (path === "/_db/snapshot/list")
-    return wrapResponse(handleSnapshotList(cwd, url));
-  if (path === "/_db/snapshot/create") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
-  }
-  if (path === "/_db/snapshot/update-note") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotUpdateNote(cwd, req));
-  }
-  if (path === "/_db/snapshot/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotDelete(cwd, req));
-  }
-  if (path === "/_db/snapshot/diff/tables")
-    return wrapResponse(handleDiffTables(cwd, url));
-  if (path === "/_db/snapshot/diff/rows")
-    return wrapResponse(handleDiffRows(cwd, url));
-  return null;
+  }, sideEffectAllowed, wrapResponse);
 }
-var initialized = false, dockerAdapterCache, cachedDockerDbs = null, cachedDockerCwd = null, EXPORT_MAX_ROWS = 1e5, searchJobs;
+var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, DOCKER_CLOSE_REGISTRY, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
   init_connection_pool();
   init_discovery();
   init_global_search();
+  init_handle_elasticsearch();
+  init_handle_redis();
+  init_handle_shared();
   init_query_history();
   init_serialize();
   init_snapshot_runner();
   init_snapshot_store();
-  dockerAdapterCache = new Map;
+  init_tabs_store();
+  dockerAdapterCache = createDockerAdapterCache();
   searchJobs = new Map;
+  snapshotJobs = new Map;
+  DOCKER_CLOSE_REGISTRY = {
+    postgresql: (dbId) => dockerAdapterCache.close(dbId),
+    mysql: (dbId) => dockerAdapterCache.close(dbId),
+    redis: closeRedisAdapter,
+    elasticsearch: closeElasticsearchAdapter
+  };
+  SNAPSHOT_DOCKER_SOURCE_REGISTRY = {
+    redis: async (info, requestedContainers) => {
+      const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
+      const containers = requestedContainers && requestedContainers.length > 0 ? requestedContainers : ["*"];
+      return {
+        source: openRedisExplorer2(info.serviceName, info.env, info.composeDir),
+        containers: containers.map(canonicalizeRedisSnapshotContainer2),
+        closeAfterSnapshot: true
+      };
+    },
+    elasticsearch: async (info, requestedContainers) => {
+      const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
+      const containers = requestedContainers && requestedContainers.length > 0 ? requestedContainers : ["*"];
+      return {
+        source: openElasticsearchAdapter2(info.serviceName, info.env, info.composeDir),
+        containers: containers.map(canonicalizeEsSnapshotContainer2),
+        closeAfterSnapshot: true
+      };
+    }
+  };
 });
 
 // web-src/server/preview.ts
@@ -5295,20 +8224,20 @@ var exports_preview = {};
 import {
   closeSync as closeSync2,
   constants,
-  existsSync as existsSync8,
+  existsSync as existsSync9,
   lstatSync as lstatSync5,
-  mkdirSync as mkdirSync6,
+  mkdirSync as mkdirSync7,
   openSync as openSync2,
-  readFileSync as readFileSync7,
+  readFileSync as readFileSync8,
   realpathSync as realpathSync4,
-  renameSync as renameSync3,
+  renameSync as renameSync4,
   statSync as statSync3,
   unlinkSync as unlinkSync2,
   watch,
-  writeFileSync as writeFileSync4
+  writeFileSync as writeFileSync5
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname2, extname, join as join11, relative as relative3 } from "node:path";
+import { basename as basename3, dirname as dirname2, extname, join as join12, relative as relative3 } from "node:path";
 function parseCli() {
   const rest = [];
   for (let i = 2;i < process.argv.length; i++) {
@@ -5338,7 +8267,9 @@ Examples:
         process.exit(1);
       }
       try {
-        cwd = repoRoot(next) || realpathSync4(next);
+        const nextReal = realpathSync4(next);
+        const candidate = repoRoot(next);
+        cwd = candidate === nextReal ? candidate : nextReal;
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);
@@ -5447,10 +8378,10 @@ function staticFile(pathname) {
   const spec = map[pathname];
   if (!spec)
     return null;
-  const full = join11(WEB_ROOT, spec[0]);
-  if (!existsSync8(full))
+  const full = join12(WEB_ROOT, spec[0]);
+  if (!existsSync9(full))
     return text("not found", 404);
-  return new Response(readFileSync7(full), {
+  return new Response(readFileSync8(full), {
     headers: { "Content-Type": spec[1], "Cache-Control": "no-store" }
   });
 }
@@ -5681,8 +8612,8 @@ function parseScopeExcludeNamesQuery(value) {
   return normalizeScopeExcludeNames(names);
 }
 function loadProjectConfig() {
-  const full = join11(cwd, ".code-viewer.json");
-  if (!existsSync8(full))
+  const full = join12(cwd, ".code-viewer.json");
+  if (!existsSync9(full))
     return null;
   let realCwd;
   let realConfig;
@@ -5695,7 +8626,7 @@ function loadProjectConfig() {
   if (dirname2(realConfig) !== realCwd || basename3(realConfig) !== ".code-viewer.json")
     return null;
   try {
-    const parsed = JSON.parse(readFileSync7(realConfig, "utf8"));
+    const parsed = JSON.parse(readFileSync8(realConfig, "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "version" in parsed && parsed.version !== 1)
       return null;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
@@ -5746,8 +8677,8 @@ function safeWorktreePath(path) {
     return null;
   if (isGitInternalPath(path))
     return null;
-  const full = join11(cwd, path);
-  if (!existsSync8(full))
+  const full = join12(cwd, path);
+  if (!existsSync9(full))
     return null;
   let realCwd;
   let realFull;
@@ -5765,7 +8696,7 @@ function safeWorktreePath(path) {
   return realFull;
 }
 function worktreePath(path) {
-  return join11(cwd, path);
+  return join12(cwd, path);
 }
 function safeOpenWorktreePath(path) {
   if (path === "") {
@@ -5858,7 +8789,7 @@ function readReadme(target, dirPath) {
       if (!full)
         continue;
       try {
-        return { path, text: readFileSync7(full, "utf8") };
+        return { path, text: readFileSync8(full, "utf8") };
       } catch {
         continue;
       }
@@ -5902,6 +8833,7 @@ function handleTree(url) {
 function handleSettings() {
   return json2({
     project: basename3(cwd),
+    branch: currentBranch(cwd) || undefined,
     repo_web_url: remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -5971,7 +8903,7 @@ function grepWorktreeFallback(query, max, paths, omitDirNames, excludeNames) {
       continue;
     let data;
     try {
-      data = readFileSync7(full);
+      data = readFileSync8(full);
     } catch {
       continue;
     }
@@ -6061,8 +8993,10 @@ function handleGrep(url) {
 function handleRefCommits(url) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
+  const parsedSkip = Number(url.searchParams.get("skip") || "0");
   const max = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
-  return json2({ commits: refCommits(cwd, query, max) });
+  const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
+  return json2(refCommitPage(cwd, { query, max, skip }));
 }
 function handleLog(url) {
   const ref = url.searchParams.get("ref") || "HEAD";
@@ -6543,10 +9477,10 @@ async function handleUploadFiles(req) {
     total += file.size;
     if (total > MAX_UPLOAD_TOTAL_BYTES)
       return text("upload too large", 413);
-    const target = join11(realDir, safeName);
+    const target = join12(realDir, safeName);
     if (relative3(realDir, dirname2(target)) !== "")
       return text("invalid filename", 400);
-    if (existsSync8(target))
+    if (existsSync9(target))
       return text("file exists", 409);
     uploads.push({ file, name: safeName, target });
   }
@@ -6555,7 +9489,7 @@ async function handleUploadFiles(req) {
     for (const upload of uploads) {
       const fd = openSync2(upload.target, uploadOpenFlags(), 420);
       try {
-        writeFileSync4(fd, new Uint8Array(await upload.file.arrayBuffer()));
+        writeFileSync5(fd, new Uint8Array(await upload.file.arrayBuffer()));
       } finally {
         closeSync2(fd);
       }
@@ -6665,12 +9599,12 @@ function triggerUpdate(changedPaths) {
   sendSse("update", data);
 }
 function moveMacPathIntoTrash(path) {
-  const trashDir = join11(homedir3(), ".Trash");
+  const trashDir = join12(homedir3(), ".Trash");
   const base = basename3(path) || "code-viewer-trash-item";
-  const target = join11(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+  const target = join12(trashDir, `${base}-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
   try {
-    mkdirSync6(trashDir, { recursive: true });
-    renameSync3(path, target);
+    mkdirSync7(trashDir, { recursive: true });
+    renameSync4(path, target);
     return { ok: true, trashPath: target };
   } catch (error) {
     return { ok: false, error: String(error) };
@@ -6701,20 +9635,20 @@ function restoreTrashPath(originalPath, trashPath) {
   if (!parentFullPath)
     return { ok: false, error: "invalid restore target" };
   const original = worktreePath(originalPath);
-  if (existsSync8(original))
+  if (existsSync9(original))
     return { ok: false, error: "restore target exists" };
   if (trashPath) {
     if (process.platform !== "darwin")
       return { ok: false, error: "invalid trash handle" };
-    if (!existsSync8(trashPath))
+    if (!existsSync9(trashPath))
       return { ok: false, error: "trash item not found" };
     try {
-      const trashRoot = join11(homedir3(), ".Trash");
+      const trashRoot = join12(homedir3(), ".Trash");
       const trashRelative = relative3(trashRoot, trashPath);
       if (trashRelative === "" || trashRelative.startsWith("..") || trashRelative.startsWith("/") || trashRelative.startsWith("\\"))
         return { ok: false, error: "invalid trash handle" };
-      mkdirSync6(dirname2(original), { recursive: true });
-      renameSync3(trashPath, original);
+      mkdirSync7(dirname2(original), { recursive: true });
+      renameSync4(trashPath, original);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };
@@ -6859,11 +9793,11 @@ async function handleCreateDirectory(req) {
   const targetPath = dir ? `${dir}/${name}` : name;
   if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
     return text("invalid target", 400);
-  const target = join11(parent, name);
-  if (existsSync8(target))
+  const target = join12(parent, name);
+  if (existsSync9(target))
     return text("already exists", 409);
   try {
-    mkdirSync6(target, { recursive: false });
+    mkdirSync7(target, { recursive: false });
   } catch (error) {
     if (error.code === "EEXIST")
       return text("already exists", 409);
@@ -6939,19 +9873,31 @@ async function handleAnnotations(req) {
     return json2({ ok: true, session: started.session });
   }
   if (action === "add") {
+    const rawTarget = body.target && typeof body.target === "object" ? body.target : null;
+    const target = rawTarget?.kind === "database" ? normalizeAnnotationTarget(rawTarget) : undefined;
+    if (target?.kind === "database" && !target.db)
+      return text("database annotation requires db", 400);
+    if (target?.kind === "database" && target.data && !target.table)
+      return text("database data annotations require table", 400);
     const path = typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
-    if (!path || !safeRepoPath(path))
-      return text("invalid path", 400);
-    if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
-      return text("forbidden", 403);
+    if (!target) {
+      if (!path || !safeRepoPath(path))
+        return text("invalid path", 400);
+      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+        return text("forbidden", 403);
+    }
     const result = addAnnotationEntry(loadAnnotationsState(cwd), {
       session_id: typeof body.session_id === "string" ? body.session_id : undefined,
       session_title: typeof body.session_title === "string" ? body.session_title : undefined,
       path,
       line: body.line && typeof body.line === "object" ? body.line : undefined,
       range: body.range && typeof body.range === "object" ? body.range : undefined,
+      target,
       title: typeof body.title === "string" ? body.title : undefined,
-      body: typeof body.body === "string" ? body.body : ""
+      body: typeof body.body === "string" ? body.body : "",
+      before_id: typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined
     }, new Date().toISOString());
     if (result.ok === false)
       return text(result.error, 400);
@@ -6962,6 +9908,25 @@ async function handleAnnotations(req) {
       session_id: result.session.id,
       session_title: result.session.title,
       created_session: result.created_session,
+      entry: result.entry
+    });
+  }
+  if (action === "move") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id)
+      return text("invalid id", 400);
+    const result = moveAnnotationEntry(loadAnnotationsState(cwd), id, {
+      before_id: typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined
+    });
+    if (result.ok === false)
+      return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", result.session.id, result.entry.id);
+    return json2({
+      ok: true,
+      session_id: result.session.id,
       entry: result.entry
     });
   }
@@ -7041,8 +10006,8 @@ var init_preview = __esm(async () => {
   init_search();
   init_server_registry();
   init_worktree_watcher();
-  WEB_ROOT = join11(ROOT, "web");
-  VERSION = JSON.parse(readFileSync7(join11(ROOT, "package.json"), "utf8")).version;
+  WEB_ROOT = join12(ROOT, "web");
+  VERSION = JSON.parse(readFileSync8(join12(ROOT, "package.json"), "utf8")).version;
   DEFAULT_ARGS = ["HEAD"];
   WATCHED_ASSET_FILES = ["index.html", "style.css", "app.js"];
   LINE_INDEX_MAX_FILE_BYTES = 256 * 1024 * 1024;

@@ -22,8 +22,15 @@
   });
 
   // web-src/core/catch-up.ts
-  function shouldCatchUpDiff(route) {
-    return route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
+  function shouldAutoLoadForRoute(route, options = {}) {
+    if (route.screen === "history")
+      return options.historyWorktreeSelected === true;
+    if (route.screen === "database" || route.screen === "help" || route.screen === "unknown")
+      return false;
+    return true;
+  }
+  function shouldCatchUpDiff(route, options = {}) {
+    return shouldAutoLoadForRoute(route, options) && route.screen !== "repo" && !(route.screen === "file" && route.view === "blob");
   }
   function createCatchUpGate(now, minIntervalMs) {
     let lastForceAt = 0;
@@ -7159,6 +7166,11 @@ ${frontmatter.yaml}
     const annotationDetail = $("#annotation-detail");
     const annotationCountEl = $("#annotations-count");
     const annotationListCountEl = $("#annotation-list-count");
+    const annotationCaptureDb = $("#annotation-capture-db");
+    annotationCaptureDb.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+    function updateDatabaseCaptureButton() {
+      annotationCaptureDb.hidden = deps.getRoute().screen !== "database";
+    }
     function setAnnotationPanelOpen(open) {
       annotationPanel.hidden = !open;
       document.body.classList.toggle("annotation-panel-open", open);
@@ -7177,6 +7189,16 @@ ${frontmatter.yaml}
       return entry.line.start === entry.line.end ? entry.line.start : { start: entry.line.start, end: entry.line.end };
     }
     function annotationLocationLabel(entry) {
+      if (entry.target?.kind === "database") {
+        const parts = ["Database"];
+        if (entry.target.db)
+          parts.push(entry.target.db);
+        if (entry.target.table)
+          parts.push(entry.target.table);
+        if (entry.target.tab)
+          parts.push(entry.target.tab);
+        return parts.join(" / ");
+      }
       if (!entry.line)
         return entry.path;
       return entry.line.start === entry.line.end ? `${entry.path}:${entry.line.start}` : `${entry.path}:${entry.line.start}-${entry.line.end}`;
@@ -7184,6 +7206,21 @@ ${frontmatter.yaml}
     function annotationRefForEntry(entry) {
       const to = entry.range.to || "worktree";
       return to === "worktree" || to === "" ? "worktree" : to;
+    }
+    function databaseAnnotationMatchesRoute(entry) {
+      if (entry.target?.kind !== "database")
+        return false;
+      const route = deps.getRoute();
+      if (route.screen !== "database")
+        return false;
+      const target = entry.target;
+      if (target.db && target.db !== route.db)
+        return false;
+      if (target.table && target.table !== route.table)
+        return false;
+      if (target.tab && target.tab !== (route.tab || "data"))
+        return false;
+      return true;
     }
     function withSessionParam(rawUrl) {
       const url = new URL(rawUrl, window.location.origin);
@@ -7217,6 +7254,51 @@ ${frontmatter.yaml}
       td.appendChild(box);
       tr.appendChild(td);
       return tr;
+    }
+    function buildDatabaseAnnotationBlock(entry) {
+      const box = document.createElement("div");
+      box.className = "gdp-db-annotation-inline";
+      box.dataset.annotationId = entry.id;
+      box.classList.toggle("active", entry.id === activeAnnotationId);
+      const head = document.createElement("div");
+      head.className = "gdp-db-annotation-inline-head";
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "gdp-db-annotation-inline-title";
+      title.textContent = entry.title || annotationLocationLabel(entry);
+      title.addEventListener("click", () => {
+        openAnnotationEntry(entry.id);
+      });
+      const location2 = document.createElement("span");
+      location2.className = "gdp-db-annotation-inline-location";
+      location2.textContent = annotationLocationLabel(entry);
+      head.append(title, location2, createCopyRefButton(entry));
+      const markdown = document.createElement("div");
+      markdown.className = "gdp-db-annotation-inline-body";
+      ensureMarkdownHighlighter();
+      markdown.innerHTML = renderMarkdownHtml(entry.body, { path: entry.path, ref: annotationRefForEntry(entry) }, mdHighlighter);
+      box.append(head, markdown);
+      return box;
+    }
+    function applyDatabaseAnnotations(session) {
+      document.querySelectorAll(".gdp-db-annotation-strip").forEach((el) => {
+        el.remove();
+      });
+      if (!session || deps.getRoute().screen !== "database")
+        return;
+      const matches = session.entries.filter(databaseAnnotationMatchesRoute);
+      if (!matches.length)
+        return;
+      const root = document.querySelector(".db-root");
+      if (!root)
+        return;
+      const strip = document.createElement("section");
+      strip.className = "gdp-db-annotation-strip";
+      strip.setAttribute("aria-label", "Database annotations");
+      for (const entry of matches) {
+        strip.appendChild(buildDatabaseAnnotationBlock(entry));
+      }
+      root.prepend(strip);
     }
     function inlineAnnotationTargetRow(entry) {
       if (!entry.line)
@@ -7260,9 +7342,12 @@ ${frontmatter.yaml}
         row.remove();
       });
       const session = ANNOTATIONS.sessions.find((s2) => s2.id === activeSessionId);
+      applyDatabaseAnnotations(session);
       if (!session)
         return;
       for (const entry of session.entries) {
+        if (entry.target?.kind === "database")
+          continue;
         const target = inlineAnnotationTargetRow(entry);
         if (!target)
           continue;
@@ -7344,6 +7429,9 @@ ${frontmatter.yaml}
     function syncInlineAnnotationActive() {
       document.querySelectorAll(".gdp-annotation-row").forEach((row) => {
         row.classList.toggle("active", row.dataset.annotationId === activeAnnotationId);
+      });
+      document.querySelectorAll(".gdp-db-annotation-inline").forEach((box) => {
+        box.classList.toggle("active", box.dataset.annotationId === activeAnnotationId);
       });
     }
     function annotationAiReference(session, entry) {
@@ -7448,7 +7536,101 @@ ${frontmatter.yaml}
 `)[0].trim();
       return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
     }
+    function databaseAnnotationTitle(target) {
+      const parts = [target.table || target.db || "Database"];
+      if (target.tab === "data" && target.data?.search)
+        parts.push(`search: ${target.data.search}`);
+      else if (target.tab === "query" && target.query?.sql)
+        parts.push("query");
+      else if (target.tab === "search" && target.search?.term)
+        parts.push(`global search: ${target.search.term}`);
+      else if (target.tab)
+        parts.push(target.tab);
+      return parts.join(" / ");
+    }
+    function openDatabaseCaptureForm(target) {
+      $("#annotation-detail-session").textContent = activeSessionId || "Database annotations";
+      $("#annotation-detail-step").textContent = "new";
+      const location2 = $("#annotation-detail-location");
+      location2.textContent = databaseAnnotationTitle(target);
+      location2.href = "#";
+      const head = annotationDetail.querySelector(".annotation-detail-head");
+      head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+        el.remove();
+      });
+      const body = $("#annotation-detail-body");
+      body.replaceChildren();
+      const form = document.createElement("div");
+      form.className = "annotation-edit-form";
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "title (optional)";
+      titleInput.value = databaseAnnotationTitle(target);
+      const bodyInput = document.createElement("textarea");
+      bodyInput.rows = 10;
+      bodyInput.placeholder = "annotation body";
+      const buttons = document.createElement("div");
+      buttons.className = "annotation-edit-buttons";
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "gdp-btn gdp-btn-sm";
+      save.textContent = "Save";
+      save.addEventListener("click", async () => {
+        if (!bodyInput.value.trim())
+          return;
+        save.disabled = true;
+        annotationCaptureDb.disabled = true;
+        try {
+          const res = await fetch("/_annotations", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Code-Viewer-Action": "1"
+            },
+            body: JSON.stringify({
+              action: "add",
+              session_id: activeSessionId || undefined,
+              session_title: activeSessionId ? undefined : "Database annotations",
+              target,
+              title: titleInput.value,
+              body: bodyInput.value
+            })
+          });
+          const result = res.ok ? await res.json() : null;
+          if (result?.session_id) {
+            activeSessionId = result.session_id;
+            syncSessionUrl();
+          }
+          await refreshAnnotations();
+          if (result?.entry?.id)
+            await openAnnotationEntry(result.entry.id);
+        } finally {
+          save.disabled = false;
+          annotationCaptureDb.disabled = false;
+        }
+      });
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "gdp-btn gdp-btn-sm";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => {
+        annotationDetail.hidden = true;
+      });
+      buttons.append(save, cancel);
+      form.append(titleInput, bodyInput, buttons);
+      body.appendChild(form);
+      annotationDetail.hidden = false;
+      setAnnotationPanelOpen(true);
+      titleInput.focus();
+    }
+    async function captureCurrentDatabaseAnnotation() {
+      const target = deps.captureDatabaseAnnotationTarget();
+      if (!target?.db)
+        return;
+      openDatabaseCaptureForm(target);
+    }
     function renderAnnotationPanel() {
+      updateDatabaseCaptureButton();
       annotationSessionsEl.replaceChildren();
       if (!ANNOTATIONS.sessions.length) {
         const empty = document.createElement("p");
@@ -7655,6 +7837,27 @@ ${frontmatter.yaml}
         notifyAnnotationsChanged();
       notifyAnnotationOpened(entry.id);
       showAnnotationDetail(session, entry, index);
+      if (entry.target?.kind === "database") {
+        const target = entry.target;
+        deps.cancelActiveSourceLoad("navigation");
+        deps.removeStandaloneSource();
+        deps.setRoute({
+          screen: "database",
+          db: target.db,
+          table: target.table,
+          tab: target.tab,
+          range: deps.currentRange()
+        });
+        deps.setPageMode();
+        await deps.openDatabaseAnnotation(target);
+        if (stale())
+          return;
+        applyInlineAnnotations();
+        const block2 = document.querySelector(`.gdp-db-annotation-inline[data-annotation-id="${CSS.escape(entryId)}"]`);
+        if (block2)
+          deps.scrollDiffElementIntoView(block2, "center");
+        return;
+      }
       const from = entry.range.from || "HEAD";
       const to = entry.range.to || "worktree";
       const range = { from, to };
@@ -7662,6 +7865,8 @@ ${frontmatter.yaml}
       const rangeChanged = current.from !== from || current.to !== to;
       const prevRoute = deps.getRoute();
       const line = annotationLineTarget(entry);
+      if (prevRoute.screen === "database")
+        deps.leaveDatabaseView();
       deps.setRange(from, to);
       deps.syncRefInputs();
       deps.cancelActiveSourceLoad("navigation");
@@ -7741,10 +7946,15 @@ ${frontmatter.yaml}
     }
     if (localStorage.getItem("gdp:annotation-panel") === "1")
       setAnnotationPanelOpen(true);
+    updateDatabaseCaptureButton();
     $("#annotations-toggle").addEventListener("click", () => {
       setAnnotationPanelOpen(annotationPanel.hidden);
+      updateDatabaseCaptureButton();
       if (!annotationPanel.hidden)
         refreshAnnotations();
+    });
+    annotationCaptureDb.addEventListener("click", () => {
+      captureCurrentDatabaseAnnotation();
     });
     $("#annotation-panel-close").addEventListener("click", () => {
       annotationPanelDismissed = true;
@@ -7798,6 +8008,1005 @@ ${frontmatter.yaml}
       },
       stepAnnotation
     };
+  }
+
+  // web-src/core/id.ts
+  function bytesToHex(bytes) {
+    return Array.from(bytes, (b2) => b2.toString(16).padStart(2, "0")).join("");
+  }
+  function makeId(prefix) {
+    const cryptoApi = globalThis.crypto;
+    if (typeof cryptoApi?.randomUUID === "function") {
+      return `${prefix}-${cryptoApi.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    }
+    if (typeof cryptoApi?.getRandomValues === "function") {
+      const bytes = new Uint8Array(8);
+      cryptoApi.getRandomValues(bytes);
+      return `${prefix}-${bytesToHex(bytes)}`;
+    }
+    return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  // web-src/views/media-embed.ts
+  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
+  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
+  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
+  function isMedia(p2) {
+    return MEDIA_RE.test(p2);
+  }
+  function isImage(p2) {
+    return IMAGE_RE.test(p2);
+  }
+  function isVideo(p2) {
+    return VIDEO_RE.test(p2);
+  }
+  function isAudio(p2) {
+    return AUDIO_RE.test(p2);
+  }
+  function fileURL(path, ref) {
+    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
+  }
+  function mediaTag(path, ref) {
+    const url = fileURL(path, ref);
+    if (isVideo(path)) {
+      return `<video src="${url}" controls preload="metadata"></video>`;
+    }
+    if (isAudio(path)) {
+      return `<audio src="${url}" controls preload="metadata"></audio>`;
+    }
+    return `<img src="${url}" alt="" loading="lazy">`;
+  }
+  function enhanceMediaCard(file, card) {
+    const path = file.path;
+    if (!file.media_kind && !isMedia(path))
+      return;
+    const wrapper = card.querySelector(".d2h-file-wrapper");
+    if (!wrapper)
+      return;
+    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
+    if (!body)
+      return;
+    const container = document.createElement("div");
+    container.className = "gdp-media";
+    let leftHTML;
+    let rightHTML;
+    if (file.status === "A") {
+      leftHTML = '<div class="media-empty">Not in HEAD</div>';
+      rightHTML = mediaTag(path, "worktree");
+    } else if (file.status === "D") {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = '<div class="media-empty">Deleted</div>';
+    } else {
+      leftHTML = mediaTag(path, "HEAD");
+      rightHTML = mediaTag(path, "worktree");
+    }
+    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
+    body.replaceWith(container);
+  }
+
+  // web-src/core/source-meta.ts
+  var SOURCE_SHIKI_LANG_ALIASES = {
+    makefile: "make",
+    objectivec: "c",
+    "objective-c": "c",
+    "objective-cpp": "cpp",
+    starlark: "python"
+  };
+  function normalizeSourceShikiLang(lang) {
+    if (!lang)
+      return null;
+    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
+  }
+  function isPreviewableSource(path) {
+    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
+  }
+  function sourcePreviewKind(path) {
+    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
+      return "markdown";
+    if (/\.(html|htm)$/i.test(path))
+      return "html";
+    return null;
+  }
+  var EXT_TO_LANG = {
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    ts: "typescript",
+    tsx: "typescript",
+    jsx: "javascript",
+    py: "python",
+    rb: "ruby",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    kt: "kotlin",
+    swift: "swift",
+    c: "c",
+    h: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    php: "php",
+    lua: "lua",
+    sh: "bash",
+    bash: "bash",
+    zsh: "bash",
+    fish: "bash",
+    sql: "sql",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    tf: "terraform",
+    tfvars: "terraform",
+    hcl: "terraform",
+    xml: "xml",
+    html: "xml",
+    vue: "xml",
+    css: "css",
+    scss: "scss",
+    md: "markdown",
+    dockerfile: "dockerfile",
+    proto: "protobuf",
+    gradle: "gradle",
+    properties: "properties",
+    patch: "diff",
+    diff: "diff",
+    nix: "nix",
+    cue: "cue",
+    rego: "rego",
+    bicep: "bicep",
+    bazel: "starlark",
+    bzl: "starlark",
+    cmake: "cmake",
+    groovy: "groovy",
+    dart: "dart",
+    scala: "scala",
+    clj: "clojure",
+    cljs: "clojure",
+    cljc: "clojure",
+    edn: "clojure",
+    ex: "elixir",
+    exs: "elixir",
+    erl: "erlang",
+    hrl: "erlang",
+    hs: "haskell",
+    lhs: "haskell",
+    ml: "ocaml",
+    mli: "ocaml",
+    jl: "julia",
+    r: "r",
+    rmd: "r",
+    pl: "perl",
+    pm: "perl",
+    tcl: "tcl",
+    vim: "vim",
+    f: "fortran",
+    f90: "fortran",
+    m: "objective-c",
+    mm: "objective-cpp",
+    tex: "tex",
+    bib: "bibtex",
+    rst: "rst"
+  };
+  var TEXT_SOURCE_EXTENSIONS = new Set([
+    ...Object.keys(EXT_TO_LANG),
+    "txt",
+    "md",
+    "markdown",
+    "mdown",
+    "mkdn",
+    "mdx",
+    "json",
+    "jsonc",
+    "csv",
+    "tsv",
+    "yaml",
+    "yml",
+    "toml",
+    "hcl",
+    "tf",
+    "tfvars",
+    "tfstate",
+    "xml",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "jsx",
+    "mjs",
+    "cjs",
+    "ts",
+    "tsx",
+    "mts",
+    "cts",
+    "vue",
+    "svelte",
+    "astro",
+    "rs",
+    "go",
+    "py",
+    "rb",
+    "php",
+    "java",
+    "kt",
+    "kts",
+    "c",
+    "cc",
+    "cpp",
+    "cxx",
+    "h",
+    "hpp",
+    "cs",
+    "swift",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "ps1",
+    "sql",
+    "graphql",
+    "graphqls",
+    "gql",
+    "ini",
+    "conf",
+    "env",
+    "properties",
+    "gitignore",
+    "dockerignore",
+    "editorconfig",
+    "lock",
+    "log",
+    "patch",
+    "diff",
+    "sum",
+    "mk",
+    "proto",
+    "thrift",
+    "prisma",
+    "gradle",
+    "cmake",
+    "nix",
+    "cue",
+    "rego",
+    "bicep",
+    "bazel",
+    "bzl",
+    "dart",
+    "scala",
+    "clj",
+    "cljs",
+    "cljc",
+    "edn",
+    "ex",
+    "exs",
+    "erl",
+    "hrl",
+    "hs",
+    "lhs",
+    "ml",
+    "mli",
+    "jl",
+    "r",
+    "rmd",
+    "pl",
+    "pm",
+    "tcl",
+    "vim",
+    "groovy",
+    "f",
+    "f90",
+    "m",
+    "mm",
+    "pas",
+    "tex",
+    "bib",
+    "rst",
+    "adoc",
+    "org",
+    "ipynb",
+    "ejs",
+    "hbs",
+    "mustache",
+    "liquid",
+    "pug"
+  ]);
+  var TEXT_SOURCE_FILENAMES = new Set([
+    "readme",
+    "license",
+    "copying",
+    "authors",
+    "contributors",
+    "notice",
+    "changelog",
+    "todo",
+    "manifest",
+    "version",
+    "codeowners",
+    "go.mod",
+    "build.bazel",
+    "workspace.bazel",
+    "module.bazel",
+    "gemfile",
+    "rakefile",
+    "procfile",
+    "brewfile",
+    "gnumakefile",
+    "bsdmakefile",
+    ".gitattributes",
+    ".gitmodules",
+    ".npmrc",
+    ".nvmrc",
+    ".yarnrc",
+    ".prettierrc",
+    ".eslintrc",
+    ".babelrc",
+    ".stylelintrc"
+  ]);
+  var FILENAME_TO_LANG = {
+    dockerfile: "dockerfile",
+    makefile: "makefile",
+    gnumakefile: "makefile",
+    bsdmakefile: "makefile",
+    "go.mod": "go",
+    "build.bazel": "starlark",
+    "workspace.bazel": "starlark",
+    "module.bazel": "starlark"
+  };
+  function sourceFileName(path) {
+    return (path.split("/").pop() || path).toLowerCase();
+  }
+  function sourceFileExtension(name) {
+    const index = name.lastIndexOf(".");
+    return index >= 0 ? name.slice(index + 1) : "";
+  }
+  function isDockerfileName(name) {
+    return /^dockerfile(?:[.-].+)?$/i.test(name);
+  }
+  function isMakefileName(name) {
+    return /^makefile(?:[.-].+)?$/i.test(name);
+  }
+  function sourceDisplayKind(path) {
+    if (isVideo(path))
+      return "video";
+    if (isAudio(path))
+      return "audio";
+    if (isImage(path))
+      return "image";
+    if (/\.pdf$/i.test(path))
+      return "pdf";
+    const name = sourceFileName(path);
+    const ext = sourceFileExtension(name);
+    if (TEXT_SOURCE_EXTENSIONS.has(ext))
+      return "text";
+    if (TEXT_SOURCE_FILENAMES.has(name))
+      return "text";
+    if (isDockerfileName(name) || isMakefileName(name))
+      return "text";
+    return "unsupported";
+  }
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0)
+      return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
+  }
+  function formatFileDate(value) {
+    if (!value)
+      return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+      return "";
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  function humanFileKind(path, mime, fallback) {
+    const ext = (path.split(".").pop() || "").toLowerCase();
+    if (ext === "png")
+      return "PNG image";
+    if (ext === "jpg" || ext === "jpeg")
+      return "JPEG image";
+    if (ext === "gif")
+      return "GIF image";
+    if (ext === "webp")
+      return "WebP image";
+    if (ext === "svg")
+      return "SVG image";
+    if (ext === "pdf")
+      return "PDF document";
+    if (ext === "zip")
+      return "ZIP archive";
+    if (ext === "mp4")
+      return "MP4 video";
+    if (ext === "webm")
+      return "WebM video";
+    if (ext === "mp3")
+      return "MP3 audio";
+    if (ext === "wav")
+      return "WAV audio";
+    if (ext === "ogg")
+      return "Ogg audio";
+    if (ext === "flac")
+      return "FLAC audio";
+    if (ext === "m4a")
+      return "M4A audio";
+    if (ext === "aac")
+      return "AAC audio";
+    if (ext === "opus")
+      return "Opus audio";
+    if (ext === "mid" || ext === "midi")
+      return "MIDI file";
+    if (mime?.startsWith("image/"))
+      return "Image";
+    if (mime?.startsWith("video/"))
+      return "Video";
+    if (mime?.startsWith("audio/"))
+      return "Audio";
+    if (mime === "application/pdf")
+      return "PDF document";
+    if (fallback === "unsupported file")
+      return "Binary file";
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }
+
+  // web-src/views/database/abort-guard.ts
+  function createAbortGuard() {
+    let active = null;
+    let runId = 0;
+    return {
+      start() {
+        active?.abort("abort-guard:start");
+        const abort = new AbortController;
+        active = abort;
+        const requestRunId = ++runId;
+        return {
+          signal: abort.signal,
+          isStale() {
+            return abort.signal.aborted || requestRunId !== runId;
+          },
+          finish() {
+            if (active === abort)
+              active = null;
+          }
+        };
+      },
+      dispose() {
+        runId++;
+        active?.abort("abort-guard:dispose");
+        active = null;
+      }
+    };
+  }
+
+  // web-src/views/database/pane-status.ts
+  function setPaneStatus(el, message, options = {}) {
+    el.innerHTML = "";
+    options.afterClear?.();
+    const note = document.createElement("div");
+    note.className = options.error ? "db-pane-error" : "db-pane-note";
+    note.textContent = message;
+    el.appendChild(note);
+  }
+
+  // web-src/views/database/elasticsearch-explorer.ts
+  function createElasticsearchExplorer(callbacks = {}) {
+    const container = document.createElement("div");
+    container.className = "es-explorer";
+    const indexListPane = document.createElement("div");
+    indexListPane.className = "es-index-list-pane";
+    const indexListHeader = document.createElement("div");
+    indexListHeader.className = "db-explorer-pane-header";
+    indexListHeader.textContent = "Indices";
+    indexListPane.appendChild(indexListHeader);
+    const indexList = document.createElement("div");
+    indexList.className = "es-index-list";
+    indexListPane.appendChild(indexList);
+    const docListPane = document.createElement("div");
+    docListPane.className = "es-doc-list-pane";
+    const docListHeader = document.createElement("div");
+    docListHeader.className = "db-explorer-pane-header";
+    docListHeader.textContent = "Docs";
+    docListPane.appendChild(docListHeader);
+    const searchBar = document.createElement("div");
+    searchBar.className = "es-search-bar";
+    const searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.placeholder = "lucene query (e.g. field:value)";
+    searchInput.className = "es-search-input";
+    const searchBtn = document.createElement("button");
+    searchBtn.type = "button";
+    searchBtn.className = "es-search-btn";
+    searchBtn.textContent = "Search";
+    searchBar.append(searchInput, searchBtn);
+    docListPane.appendChild(searchBar);
+    const docList = document.createElement("div");
+    docList.className = "es-doc-list";
+    docListPane.appendChild(docList);
+    const docMoreBtn = document.createElement("button");
+    docMoreBtn.type = "button";
+    docMoreBtn.className = "es-doc-more-btn";
+    docMoreBtn.textContent = "Load more";
+    docMoreBtn.hidden = true;
+    docListPane.appendChild(docMoreBtn);
+    const detailPane = document.createElement("div");
+    detailPane.className = "es-detail-pane";
+    const detailTabs = document.createElement("div");
+    detailTabs.className = "es-detail-tabs";
+    const tabMapping = document.createElement("button");
+    tabMapping.type = "button";
+    tabMapping.className = "es-detail-tab active";
+    tabMapping.textContent = "Mapping";
+    const tabDoc = document.createElement("button");
+    tabDoc.type = "button";
+    tabDoc.className = "es-detail-tab";
+    tabDoc.textContent = "Doc";
+    detailTabs.append(tabMapping, tabDoc);
+    detailPane.appendChild(detailTabs);
+    const mappingBody = document.createElement("div");
+    mappingBody.className = "es-mapping-body";
+    mappingBody.textContent = "Select an index to view its mapping.";
+    const docBody = document.createElement("div");
+    docBody.className = "es-doc-body";
+    docBody.hidden = true;
+    docBody.textContent = "Select a doc to view its _source.";
+    detailPane.append(mappingBody, docBody);
+    container.append(indexListPane, docListPane, detailPane);
+    let currentDbId = null;
+    let currentIndex = null;
+    let currentQuery = "";
+    let lastSort;
+    let detailTab = "mapping";
+    let loadRunId = 0;
+    let docRunId = 0;
+    let suppressNotify = false;
+    let queryNotifyTimer = null;
+    let disposed = false;
+    const indexGuard = createAbortGuard();
+    const mappingGuard = createAbortGuard();
+    const docsGuard = createAbortGuard();
+    const docGuard = createAbortGuard();
+    function notifySelectionChange() {
+      if (suppressNotify)
+        return;
+      callbacks.onSelectionChange?.({
+        index: currentIndex ?? undefined,
+        query: currentQuery || undefined
+      });
+    }
+    function setIndexStatus(message, isError = false) {
+      setPaneStatus(indexList, message, { error: isError });
+    }
+    function setDocStatus(message, isError = false) {
+      setPaneStatus(docList, message, {
+        error: isError,
+        afterClear: () => {
+          docMoreBtn.hidden = true;
+        }
+      });
+    }
+    function renderIndices(indices) {
+      indexList.innerHTML = "";
+      if (indices.length === 0) {
+        setIndexStatus("(no indices)");
+        return;
+      }
+      for (const ix of indices) {
+        const item = document.createElement("div");
+        item.className = "es-index-item";
+        item.dataset.indexName = ix.name;
+        const name = document.createElement("span");
+        name.className = "es-index-name";
+        name.textContent = ix.name;
+        name.title = ix.name;
+        const meta = document.createElement("span");
+        meta.className = "es-index-meta";
+        meta.textContent = `${ix.docCount.toLocaleString()} docs / ${formatBytes(ix.sizeBytes)}`;
+        item.append(name, meta);
+        item.addEventListener("click", () => selectIndex(ix.name));
+        indexList.appendChild(item);
+      }
+    }
+    function highlightActiveIndex(name) {
+      for (const item of indexList.querySelectorAll(".es-index-item")) {
+        item.classList.toggle("active", item.dataset.indexName === name);
+      }
+    }
+    function appendDocs(hits) {
+      for (const hit of hits) {
+        const row = document.createElement("div");
+        row.className = "es-doc-item";
+        row.dataset.docId = hit._id;
+        const id = document.createElement("span");
+        id.className = "es-doc-id";
+        id.textContent = hit._id;
+        id.title = hit._id;
+        const preview = document.createElement("span");
+        preview.className = "es-doc-preview";
+        preview.textContent = previewSource(hit._source);
+        row.append(id, preview);
+        row.addEventListener("click", () => selectDoc(hit._id));
+        docList.appendChild(row);
+      }
+    }
+    function previewSource(src) {
+      if (src === null || src === undefined)
+        return "";
+      try {
+        const s2 = JSON.stringify(src);
+        return s2.length > 200 ? `${s2.slice(0, 200)}…` : s2;
+      } catch {
+        return String(src);
+      }
+    }
+    function highlightActiveDoc(id) {
+      for (const row of docList.querySelectorAll(".es-doc-item")) {
+        row.classList.toggle("active", row.dataset.docId === id);
+      }
+    }
+    function setDetailTab(tab) {
+      detailTab = tab;
+      tabMapping.classList.toggle("active", tab === "mapping");
+      tabDoc.classList.toggle("active", tab === "doc");
+      mappingBody.hidden = tab !== "mapping";
+      docBody.hidden = tab !== "doc";
+    }
+    tabMapping.addEventListener("click", () => setDetailTab("mapping"));
+    tabDoc.addEventListener("click", () => setDetailTab("doc"));
+    function renderMapping(resp) {
+      mappingBody.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "es-mapping-header";
+      header.textContent = resp.mapping.index;
+      mappingBody.appendChild(header);
+      const table2 = document.createElement("table");
+      table2.className = "es-mapping-table";
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      for (const label of ["Field", "Type"]) {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table2.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      const props = resp.mapping.properties;
+      const keys = Object.keys(props).sort();
+      if (keys.length === 0) {
+        const row = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 2;
+        td.className = "es-value-empty";
+        td.textContent = "(no mapped fields)";
+        row.appendChild(td);
+        tbody.appendChild(row);
+      }
+      for (const key of keys) {
+        const row = document.createElement("tr");
+        const fieldTd = document.createElement("td");
+        fieldTd.className = "es-mapping-field";
+        fieldTd.textContent = key;
+        const typeTd = document.createElement("td");
+        typeTd.className = "es-mapping-type";
+        const p2 = props[key];
+        typeTd.textContent = p2.type ?? (p2.properties ? "object" : "(unknown)");
+        row.append(fieldTd, typeTd);
+        tbody.appendChild(row);
+      }
+      table2.appendChild(tbody);
+      mappingBody.appendChild(table2);
+    }
+    function renderDoc(resp) {
+      docBody.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "es-doc-detail-header";
+      header.textContent = `${resp.index} / ${resp.id}`;
+      docBody.appendChild(header);
+      if (!resp.found) {
+        setPaneStatus(docBody, "(doc not found)", {
+          afterClear: () => docBody.appendChild(header)
+        });
+        return;
+      }
+      if (resp.seqNo !== undefined || resp.primaryTerm !== undefined) {
+        const meta = document.createElement("div");
+        meta.className = "es-doc-detail-meta";
+        meta.textContent = `_seq_no=${resp.seqNo ?? "?"} _primary_term=${resp.primaryTerm ?? "?"}`;
+        docBody.appendChild(meta);
+      }
+      const pre = document.createElement("pre");
+      pre.className = "es-doc-source";
+      try {
+        pre.textContent = JSON.stringify(resp.source, null, 2);
+      } catch {
+        pre.textContent = String(resp.source);
+      }
+      docBody.appendChild(pre);
+    }
+    async function fetchMapping(index) {
+      if (disposed || !currentDbId)
+        return;
+      const slot = mappingGuard.start();
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
+      setPaneStatus(mappingBody, "Loading mapping...");
+      try {
+        const params = new URLSearchParams({ db: requestDbId, index });
+        const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
+          signal: slot.signal
+        });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setPaneStatus(mappingBody, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
+          return;
+        }
+        renderMapping(data);
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
+        setPaneStatus(mappingBody, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
+      } finally {
+        slot.finish();
+      }
+    }
+    async function loadDocs(append) {
+      if (disposed || !currentDbId || !currentIndex)
+        return;
+      const slot = docsGuard.start();
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
+      const requestIndex = currentIndex;
+      const requestQuery = currentQuery;
+      docMoreBtn.disabled = true;
+      if (!append) {
+        lastSort = undefined;
+        setDocStatus("Loading docs...");
+      }
+      try {
+        const params = new URLSearchParams({
+          db: requestDbId,
+          index: requestIndex,
+          size: "200"
+        });
+        if (requestQuery)
+          params.set("q", requestQuery);
+        if (append && lastSort)
+          params.set("searchAfter", JSON.stringify(lastSort));
+        const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
+          signal: slot.signal
+        });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setDocStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
+          return;
+        }
+        if (!append)
+          docList.innerHTML = "";
+        if (data.hits.length === 0 && !append) {
+          setDocStatus("(no docs)");
+        } else {
+          appendDocs(data.hits);
+        }
+        lastSort = data.lastSort;
+        docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
+        setDocStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        slot.finish();
+        if (!slot.isStale())
+          docMoreBtn.disabled = false;
+      }
+    }
+    async function selectIndex(name) {
+      if (disposed)
+        return;
+      currentIndex = name;
+      notifySelectionChange();
+      highlightActiveIndex(name);
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+      await Promise.all([fetchMapping(name), loadDocs(false)]);
+    }
+    async function selectDoc(id) {
+      if (disposed || !currentDbId || !currentIndex)
+        return;
+      const slot = docGuard.start();
+      const requestRunId = ++docRunId;
+      const requestDbId = currentDbId;
+      const requestIndex = currentIndex;
+      highlightActiveDoc(id);
+      setDetailTab("doc");
+      setPaneStatus(docBody, "Loading doc...");
+      try {
+        const params = new URLSearchParams({
+          db: requestDbId,
+          index: requestIndex,
+          id
+        });
+        const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
+          signal: slot.signal
+        });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setPaneStatus(docBody, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
+          return;
+        }
+        renderDoc(data);
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        if (requestRunId !== docRunId || requestDbId !== currentDbId)
+          return;
+        setPaneStatus(docBody, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
+      } finally {
+        slot.finish();
+      }
+    }
+    function runSearch() {
+      currentQuery = searchInput.value.trim();
+      notifySelectionChange();
+      if (!currentIndex)
+        return;
+      loadDocs(false);
+    }
+    searchBtn.addEventListener("click", runSearch);
+    searchInput.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        runSearch();
+      }
+    });
+    searchInput.addEventListener("input", () => {
+      currentQuery = searchInput.value.trim();
+      if (queryNotifyTimer)
+        clearTimeout(queryNotifyTimer);
+      queryNotifyTimer = setTimeout(() => {
+        queryNotifyTimer = null;
+        notifySelectionChange();
+      }, 300);
+    });
+    docMoreBtn.addEventListener("click", () => loadDocs(true));
+    async function load(dbId, initial) {
+      if (disposed)
+        return;
+      if (queryNotifyTimer) {
+        clearTimeout(queryNotifyTimer);
+        queryNotifyTimer = null;
+      }
+      if (currentDbId === dbId && !initial)
+        return;
+      indexGuard.dispose();
+      mappingGuard.dispose();
+      docsGuard.dispose();
+      docGuard.dispose();
+      const slot = indexGuard.start();
+      const requestRunId = ++loadRunId;
+      currentDbId = dbId;
+      currentIndex = null;
+      currentQuery = "";
+      lastSort = undefined;
+      searchInput.value = initial?.query ?? "";
+      currentQuery = searchInput.value.trim();
+      docList.innerHTML = "";
+      docMoreBtn.hidden = true;
+      mappingBody.innerHTML = "";
+      mappingBody.textContent = "Select an index to view its mapping.";
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+      setIndexStatus("Loading indices...");
+      try {
+        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`, { signal: slot.signal });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setIndexStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || currentDbId !== dbId)
+          return;
+        renderIndices(data.indices);
+        if (initial?.index && data.indices.some((ix) => ix.name === initial.index)) {
+          suppressNotify = true;
+          try {
+            await selectIndex(initial.index);
+          } finally {
+            suppressNotify = false;
+          }
+          notifySelectionChange();
+        }
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        slot.finish();
+      }
+    }
+    function clear() {
+      indexGuard.dispose();
+      mappingGuard.dispose();
+      docsGuard.dispose();
+      docGuard.dispose();
+      loadRunId++;
+      docRunId++;
+      suppressNotify = false;
+      if (queryNotifyTimer) {
+        clearTimeout(queryNotifyTimer);
+        queryNotifyTimer = null;
+      }
+      currentDbId = null;
+      currentIndex = null;
+      currentQuery = "";
+      lastSort = undefined;
+      searchInput.value = "";
+      indexList.innerHTML = "";
+      docList.innerHTML = "";
+      docMoreBtn.hidden = true;
+      mappingBody.innerHTML = "";
+      mappingBody.textContent = "Select an index to view its mapping.";
+      docBody.innerHTML = "";
+      docBody.textContent = "Select a doc to view its _source.";
+      setDetailTab("mapping");
+    }
+    function getSelection() {
+      return {
+        index: currentIndex ?? undefined,
+        query: currentQuery || undefined
+      };
+    }
+    function dispose() {
+      disposed = true;
+      clear();
+    }
+    return { el: container, load, clear, dispose, getSelection };
   }
 
   // web-src/views/database/er-diagram.ts
@@ -7957,18 +9166,20 @@ ${frontmatter.yaml}
       container.style.cursor = "grabbing";
       e2.preventDefault();
     });
-    window.addEventListener("mousemove", (e2) => {
+    const onWindowMouseMove = (e2) => {
       if (!dragState)
         return;
       container.scrollLeft = dragState.sl - (e2.clientX - dragState.x);
       container.scrollTop = dragState.st - (e2.clientY - dragState.y);
-    });
-    window.addEventListener("mouseup", () => {
+    };
+    const onWindowMouseUp = () => {
       if (dragState) {
         dragState = null;
         container.style.cursor = "";
       }
-    });
+    };
+    window.addEventListener("mousemove", onWindowMouseMove);
+    window.addEventListener("mouseup", onWindowMouseUp);
     container.addEventListener("wheel", (e2) => {
       if (e2.ctrlKey || e2.metaKey) {
         e2.preventDefault();
@@ -8008,8 +9219,15 @@ ${frontmatter.yaml}
       el.hidden = true;
       svgWrap.innerHTML = "";
       lastMarkup = "";
+      dragState = null;
+      container.style.cursor = "";
     }
-    return { el, render, clear };
+    function dispose() {
+      clear();
+      window.removeEventListener("mousemove", onWindowMouseMove);
+      window.removeEventListener("mouseup", onWindowMouseUp);
+    }
+    return { el, render, clear, dispose };
   }
 
   // web-src/views/database/global-search-view.ts
@@ -8047,6 +9265,7 @@ ${frontmatter.yaml}
     el.append(header, optionsRow, progress, results);
     let currentJobId = null;
     let pollTimer = null;
+    let disposed = false;
     function stopPolling() {
       if (pollTimer) {
         clearInterval(pollTimer);
@@ -8057,6 +9276,8 @@ ${frontmatter.yaml}
       input.disabled = false;
     }
     async function startSearch() {
+      if (disposed)
+        return;
       const dbId = deps.getDbId();
       if (!dbId)
         return;
@@ -8088,6 +9309,10 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
+        if (disposed) {
+          cancelJob(data.jobId);
+          return;
+        }
         currentJobId = data.jobId;
         pollTimer = setInterval(() => pollStatus(), 500);
       } catch (err) {
@@ -8096,6 +9321,8 @@ ${frontmatter.yaml}
       }
     }
     async function pollStatus() {
+      if (disposed)
+        return;
       if (!currentJobId)
         return;
       try {
@@ -8105,6 +9332,8 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
+        if (disposed)
+          return;
         if (data.error) {
           progress.textContent = `エラー: ${data.error}`;
           stopPolling();
@@ -8122,6 +9351,15 @@ ${frontmatter.yaml}
     async function cancelSearch() {
       if (!currentJobId)
         return;
+      const jobId = currentJobId;
+      currentJobId = null;
+      await cancelJob(jobId);
+      stopPolling();
+      if (disposed)
+        return;
+      progress.textContent = "検索をキャンセルしました。";
+    }
+    async function cancelJob(jobId) {
       try {
         await fetch("/_db/search/cancel", {
           method: "POST",
@@ -8129,11 +9367,9 @@ ${frontmatter.yaml}
             "Content-Type": "application/json",
             "X-Code-Viewer-Action": "1"
           },
-          body: JSON.stringify({ id: currentJobId })
+          body: JSON.stringify({ id: jobId })
         });
       } catch {}
-      stopPolling();
-      progress.textContent = "検索をキャンセルしました。";
     }
     function renderHits(hits) {
       results.innerHTML = "";
@@ -8182,7 +9418,32 @@ ${frontmatter.yaml}
         startSearch();
     });
     cancelBtn.addEventListener("click", cancelSearch);
-    return { el };
+    function setSearch(term, options = {}) {
+      input.value = term;
+      nonTextCheck.checked = !!options.includeNonText;
+      if (options.autoRun && term.trim())
+        startSearch();
+    }
+    function getSearch() {
+      const term = input.value.trim();
+      return {
+        ...term ? { term } : {},
+        ...nonTextCheck.checked ? { includeNonText: true } : {}
+      };
+    }
+    function dispose() {
+      disposed = true;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (currentJobId) {
+        const jobId = currentJobId;
+        currentJobId = null;
+        cancelJob(jobId);
+      }
+    }
+    return { el, setSearch, getSearch, dispose };
   }
 
   // web-src/views/database/query-editor.ts
@@ -8276,7 +9537,10 @@ ${frontmatter.yaml}
       }
       syncEditorHeight();
     }
-    textarea.addEventListener("input", syncHighlight);
+    textarea.addEventListener("input", () => {
+      syncHighlight();
+      callbacks.onSqlChange?.(textarea.value);
+    });
     textarea.addEventListener("scroll", () => {
       highlight.scrollTop = textarea.scrollTop;
       highlight.scrollLeft = textarea.scrollLeft;
@@ -8296,8 +9560,8 @@ ${frontmatter.yaml}
     const historyBtn = document.createElement("button");
     historyBtn.className = "db-btn db-query-history-btn";
     historyBtn.type = "button";
-    historyBtn.textContent = "History";
-    historyBtn.title = "Query history";
+    historyBtn.textContent = "Local History";
+    historyBtn.title = "Local editor history";
     const statusSpan = document.createElement("span");
     statusSpan.className = "db-query-status";
     const historyDropdown = document.createElement("div");
@@ -8359,30 +9623,46 @@ ${frontmatter.yaml}
       thNum.textContent = "#";
       thNum.className = "db-grid-rownum";
       headRow.appendChild(thNum);
-      for (const col of result.columns) {
+      for (let i2 = 0;i2 < result.columns.length; i2++) {
         const th = document.createElement("th");
-        th.textContent = col;
+        const name = document.createElement("div");
+        name.className = "db-query-header-name";
+        name.textContent = result.columns[i2];
+        const type = document.createElement("div");
+        type.className = "db-query-header-type";
+        type.textContent = result.columnTypes[i2] || "";
+        th.append(name, type);
         headRow.appendChild(th);
       }
       thead.appendChild(headRow);
       const tbody = document.createElement("tbody");
-      for (let i2 = 0;i2 < result.rows.length; i2++) {
-        const row = result.rows[i2];
+      if (result.rows.length === 0) {
         const tr = document.createElement("tr");
-        if (i2 % 2 === 1)
-          tr.classList.add("alt");
-        const tdNum = document.createElement("td");
-        tdNum.className = "db-grid-rownum";
-        tdNum.textContent = String(i2 + 1);
-        tr.appendChild(tdNum);
-        for (const value of row) {
-          const td = document.createElement("td");
-          td.textContent = formatValue(value);
-          if (value === null)
-            td.classList.add("null");
-          tr.appendChild(td);
-        }
+        const td = document.createElement("td");
+        td.className = "db-query-empty";
+        td.colSpan = result.columns.length + 1;
+        td.textContent = "No rows";
+        tr.appendChild(td);
         tbody.appendChild(tr);
+      } else {
+        for (let i2 = 0;i2 < result.rows.length; i2++) {
+          const row = result.rows[i2];
+          const tr = document.createElement("tr");
+          if (i2 % 2 === 1)
+            tr.classList.add("alt");
+          const tdNum = document.createElement("td");
+          tdNum.className = "db-grid-rownum";
+          tdNum.textContent = String(i2 + 1);
+          tr.appendChild(tdNum);
+          for (const value of row) {
+            const td = document.createElement("td");
+            td.textContent = formatValue(value);
+            if (value === null)
+              td.classList.add("null");
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
       }
       table2.append(thead, tbody);
       const wrapper = document.createElement("div");
@@ -8454,11 +9734,12 @@ ${frontmatter.yaml}
       }
       historyDropdown.hidden = false;
     });
-    document.addEventListener("click", (e2) => {
+    const onDocumentClick = (e2) => {
       if (!historyDropdown.hidden && !historyBtn.contains(e2.target) && !historyDropdown.contains(e2.target)) {
         historyDropdown.hidden = true;
       }
-    });
+    };
+    document.addEventListener("click", onDocumentClick);
     textarea.addEventListener("keydown", (e2) => {
       if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
         e2.preventDefault();
@@ -8487,11 +9768,19 @@ ${frontmatter.yaml}
     function focus() {
       textarea.focus();
     }
-    function setSql(sql) {
+    function setSql(sql, options = {}) {
       textarea.value = sql;
       syncHighlight();
+      if (!options.silent)
+        callbacks.onSqlChange?.(textarea.value);
     }
-    return { el, focus, setSql };
+    function getSql() {
+      return textarea.value;
+    }
+    function dispose() {
+      document.removeEventListener("click", onDocumentClick);
+    }
+    return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
   }
   function formatValue(value) {
     if (value === null)
@@ -8539,6 +9828,23 @@ ${frontmatter.yaml}
     el.append(toolbar, body);
     let entries = [];
     const expandedIds = new Set;
+    let clearConfirmTimer = null;
+    function armButtonConfirm(button, confirmText, defaultText) {
+      if (button.dataset.confirm === "1") {
+        button.dataset.confirm = "";
+        button.textContent = defaultText;
+        return true;
+      }
+      button.dataset.confirm = "1";
+      button.textContent = confirmText;
+      window.setTimeout(() => {
+        if (button.dataset.confirm === "1") {
+          button.dataset.confirm = "";
+          button.textContent = defaultText;
+        }
+      }, 3000);
+      return false;
+    }
     async function refresh() {
       const dbId = callbacks.getDbId();
       const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
@@ -8548,6 +9854,9 @@ ${frontmatter.yaml}
           return;
         const state = await res.json();
         entries = state.entries;
+        if (selectedEntryId && !entries.some((entry) => entry.id === selectedEntryId)) {
+          clearDetail();
+        }
         render();
       } catch {}
     }
@@ -8565,6 +9874,11 @@ ${frontmatter.yaml}
       }
     }
     let selectedEntryId = null;
+    function clearDetail() {
+      selectedEntryId = null;
+      detailCol.innerHTML = "";
+      detailCol.appendChild(detailPlaceholder);
+    }
     function selectEntry(entry) {
       selectedEntryId = entry.id;
       listEl.querySelectorAll(".db-query-history-entry").forEach((el2) => {
@@ -8598,6 +9912,8 @@ ${frontmatter.yaml}
       deleteBtn.type = "button";
       deleteBtn.textContent = "Delete";
       deleteBtn.addEventListener("click", () => {
+        if (!armButtonConfirm(deleteBtn, "Confirm delete", "Delete"))
+          return;
         deleteEntry(entry.id);
       });
       actions.append(useBtn, copyBtn, deleteBtn);
@@ -8725,6 +10041,24 @@ ${frontmatter.yaml}
     }
     clearBtn.addEventListener("click", async () => {
       const dbId = callbacks.getDbId();
+      if (clearBtn.dataset.confirm !== "1") {
+        clearBtn.dataset.confirm = "1";
+        clearBtn.textContent = "Confirm clear";
+        if (clearConfirmTimer)
+          clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = setTimeout(() => {
+          clearBtn.dataset.confirm = "";
+          clearBtn.textContent = "Clear All";
+          clearConfirmTimer = null;
+        }, 3000);
+        return;
+      }
+      clearBtn.dataset.confirm = "";
+      clearBtn.textContent = "Clear All";
+      if (clearConfirmTimer) {
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = null;
+      }
       try {
         await fetch("/_db/history/clear", {
           method: "POST",
@@ -8741,7 +10075,19 @@ ${frontmatter.yaml}
     refreshBtn.addEventListener("click", () => {
       refresh();
     });
-    return { el, refresh };
+    function clear() {
+      entries = [];
+      expandedIds.clear();
+      if (clearConfirmTimer) {
+        clearTimeout(clearConfirmTimer);
+        clearConfirmTimer = null;
+      }
+      clearBtn.dataset.confirm = "";
+      clearBtn.textContent = "Clear All";
+      clearDetail();
+      render();
+    }
+    return { el, refresh, clear };
   }
   function formatTime(iso) {
     try {
@@ -8762,6 +10108,458 @@ ${frontmatter.yaml}
     if (typeof value === "object")
       return JSON.stringify(value);
     return String(value);
+  }
+
+  // web-src/views/database/redis-explorer.ts
+  function isBinaryItem(item) {
+    return typeof item === "object" && item !== null && "binaryBase64" in item;
+  }
+  function renderItemInto(el, item) {
+    el.textContent = "";
+    if (isBinaryItem(item)) {
+      const badge = document.createElement("span");
+      badge.className = "redis-binary-badge";
+      badge.textContent = "binary, base64";
+      el.appendChild(badge);
+      el.appendChild(document.createTextNode(item.binaryBase64));
+      return;
+    }
+    el.textContent = item;
+  }
+  function createRedisExplorer(callbacks = {}) {
+    const container = document.createElement("div");
+    container.className = "redis-explorer";
+    const dbListPane = document.createElement("div");
+    dbListPane.className = "redis-db-list-pane";
+    const dbListHeader = document.createElement("div");
+    dbListHeader.className = "db-explorer-pane-header";
+    dbListHeader.textContent = "Databases";
+    dbListPane.appendChild(dbListHeader);
+    const dbList = document.createElement("div");
+    dbList.className = "redis-db-list";
+    dbListPane.appendChild(dbList);
+    const keyListPane = document.createElement("div");
+    keyListPane.className = "redis-key-list-pane";
+    const keyListHeader = document.createElement("div");
+    keyListHeader.className = "db-explorer-pane-header";
+    keyListHeader.textContent = "Keys";
+    keyListPane.appendChild(keyListHeader);
+    const keyFilterForm = document.createElement("form");
+    keyFilterForm.className = "redis-key-filter-form";
+    const keyFilterInput = document.createElement("input");
+    keyFilterInput.type = "search";
+    keyFilterInput.className = "redis-key-filter";
+    keyFilterInput.placeholder = "key pattern, e.g. user:*";
+    keyFilterInput.autocomplete = "off";
+    const keyFilterBtn = document.createElement("button");
+    keyFilterBtn.type = "submit";
+    keyFilterBtn.className = "redis-key-filter-btn";
+    keyFilterBtn.textContent = "Search";
+    keyFilterForm.append(keyFilterInput, keyFilterBtn);
+    keyListPane.appendChild(keyFilterForm);
+    const keyList = document.createElement("div");
+    keyList.className = "redis-key-list";
+    keyListPane.appendChild(keyList);
+    const keyMoreBtn = document.createElement("button");
+    keyMoreBtn.type = "button";
+    keyMoreBtn.className = "redis-key-more-btn";
+    keyMoreBtn.textContent = "Load more";
+    keyMoreBtn.hidden = true;
+    keyListPane.appendChild(keyMoreBtn);
+    const mainPane = document.createElement("div");
+    mainPane.className = "redis-main-pane";
+    mainPane.textContent = "Select a key to view its value.";
+    container.append(dbListPane, keyListPane, mainPane);
+    let currentDbId = null;
+    let currentDbIndex = null;
+    let currentKey = null;
+    let currentKeyFilter = "*";
+    let currentCursor = "0";
+    let loadRunId = 0;
+    let keyRunId = 0;
+    let suppressNotify = false;
+    let disposed = false;
+    const dbGuard = createAbortGuard();
+    const keysGuard = createAbortGuard();
+    const valueGuard = createAbortGuard();
+    function notifySelectionChange() {
+      if (suppressNotify)
+        return;
+      callbacks.onSelectionChange?.({
+        dbIndex: currentDbIndex ?? undefined,
+        key: currentKey ?? undefined,
+        keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter
+      });
+    }
+    function setDbStatus(message, isError = false) {
+      setPaneStatus(dbList, message, { error: isError });
+    }
+    function setKeyStatus(message, isError = false) {
+      setPaneStatus(keyList, message, {
+        error: isError,
+        afterClear: () => {
+          keyMoreBtn.hidden = true;
+        }
+      });
+    }
+    function renderDatabases(databases) {
+      dbList.innerHTML = "";
+      for (const db of databases) {
+        const item = document.createElement("div");
+        item.className = "redis-db-item";
+        item.dataset.dbIndex = String(db.index);
+        const name = document.createElement("span");
+        name.className = "redis-db-name";
+        name.textContent = `db${db.index}`;
+        const count = document.createElement("span");
+        count.className = "redis-db-count";
+        count.textContent = `${db.keyCount.toLocaleString()} keys`;
+        item.append(name, count);
+        item.addEventListener("click", () => selectDatabase(db.index));
+        dbList.appendChild(item);
+      }
+    }
+    function highlightActiveDb(index) {
+      for (const item of dbList.querySelectorAll(".redis-db-item")) {
+        item.classList.toggle("active", item.dataset.dbIndex === String(index));
+      }
+    }
+    function appendKeys(keys) {
+      for (const k of keys) {
+        const row = document.createElement("div");
+        row.className = "redis-key-item";
+        row.dataset.keyName = k.name;
+        const typeBadge = document.createElement("span");
+        typeBadge.className = `redis-type-badge redis-type-${k.type}`;
+        typeBadge.textContent = k.type;
+        const nameEl = document.createElement("span");
+        nameEl.className = "redis-key-name";
+        nameEl.textContent = k.name;
+        nameEl.title = k.name;
+        row.append(typeBadge, nameEl);
+        row.addEventListener("click", () => selectKey(k.name));
+        keyList.appendChild(row);
+      }
+    }
+    function highlightActiveKey(name) {
+      for (const row of keyList.querySelectorAll(".redis-key-item")) {
+        row.classList.toggle("active", row.dataset.keyName === name);
+      }
+    }
+    function makeNotice(message, kind = "info") {
+      const div = document.createElement("div");
+      div.className = kind === "warn" ? "redis-value-truncation" : "redis-value-info";
+      div.textContent = message;
+      return div;
+    }
+    function renderValue(key, value) {
+      mainPane.innerHTML = "";
+      const header = document.createElement("div");
+      header.className = "redis-value-header";
+      const typeBadge = document.createElement("span");
+      typeBadge.className = `redis-type-badge redis-type-${value.type}`;
+      typeBadge.textContent = value.type;
+      const keyEl = document.createElement("span");
+      keyEl.className = "redis-value-key-name";
+      keyEl.textContent = key;
+      header.append(typeBadge, keyEl);
+      mainPane.appendChild(header);
+      const body = document.createElement("div");
+      body.className = "redis-value-body";
+      if (value.type === "none") {
+        body.textContent = "(key does not exist or has no value)";
+        body.classList.add("redis-value-empty");
+      } else if (value.type === "string") {
+        if (value.binaryBase64 !== undefined) {
+          body.appendChild(makeNotice(`(binary, base64; full size ${formatBytes(value.fullSize)}${value.truncated ? `, showing first ${formatBytes(64 * 1024)}` : ""})`, "warn"));
+          const pre = document.createElement("pre");
+          pre.className = "redis-value-string";
+          pre.textContent = value.binaryBase64;
+          body.appendChild(pre);
+        } else {
+          if (value.truncated) {
+            body.appendChild(makeNotice(`(showing first ${formatBytes(64 * 1024)} of ${formatBytes(value.fullSize)})`, "warn"));
+          }
+          const pre = document.createElement("pre");
+          pre.className = "redis-value-string";
+          pre.textContent = value.value;
+          body.appendChild(pre);
+        }
+      } else if (value.type === "hash") {
+        if (value.truncated) {
+          body.appendChild(makeNotice(`(showing ${Object.keys(value.fields).length} of ${value.total} fields, truncated)`, "warn"));
+        }
+        const table2 = document.createElement("table");
+        table2.className = "redis-value-hash-table";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        for (const label of ["Field", "Value"]) {
+          const th = document.createElement("th");
+          th.textContent = label;
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table2.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        if (value.fields.length === 0) {
+          const row = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = 2;
+          td.className = "redis-value-empty";
+          td.textContent = "(empty hash)";
+          row.appendChild(td);
+          tbody.appendChild(row);
+        }
+        for (const pair of value.fields) {
+          const row = document.createElement("tr");
+          const fieldTd = document.createElement("td");
+          fieldTd.className = "redis-value-hash-field";
+          renderItemInto(fieldTd, pair.field);
+          const valTd = document.createElement("td");
+          valTd.className = "redis-value-hash-val";
+          renderItemInto(valTd, pair.value);
+          row.append(fieldTd, valTd);
+          tbody.appendChild(row);
+        }
+        table2.appendChild(tbody);
+        body.appendChild(table2);
+      } else if (value.type === "list") {
+        if (value.truncated) {
+          body.appendChild(makeNotice(`(showing ${value.items.length} of ${value.total} items, truncated)`, "warn"));
+        }
+        const ol = document.createElement("ol");
+        ol.className = "redis-value-list";
+        if (value.items.length === 0) {
+          const li = document.createElement("li");
+          li.className = "redis-value-empty";
+          li.textContent = "(empty list)";
+          ol.appendChild(li);
+        }
+        for (const item of value.items) {
+          const li = document.createElement("li");
+          renderItemInto(li, item);
+          ol.appendChild(li);
+        }
+        body.appendChild(ol);
+      } else {
+        if (value.truncated) {
+          const shown = value.type === "set" ? value.members.length : value.type === "zset" ? value.members.length : value.entries.length;
+          body.appendChild(makeNotice(`(showing ${shown} of ${value.total} entries, truncated)`, "warn"));
+        }
+        const pre = document.createElement("pre");
+        pre.className = "redis-value-raw-json";
+        pre.textContent = JSON.stringify(value, null, 2);
+        body.appendChild(pre);
+      }
+      mainPane.appendChild(body);
+    }
+    async function selectKey(name) {
+      if (disposed || currentDbId === null || currentDbIndex === null)
+        return;
+      const slot = valueGuard.start();
+      const requestRunId = ++keyRunId;
+      const requestDbId = currentDbId;
+      const requestDbIndex = currentDbIndex;
+      currentKey = name;
+      notifySelectionChange();
+      highlightActiveKey(name);
+      setPaneStatus(mainPane, "Loading value...");
+      try {
+        const params = new URLSearchParams({
+          db: requestDbId,
+          dbIndex: String(requestDbIndex),
+          key: name
+        });
+        const res = await fetch(`/_db/redis/value?${params}`, {
+          signal: slot.signal
+        });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setPaneStatus(mainPane, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
+          return;
+        }
+        renderValue(data.key, data.value);
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        if (requestRunId !== keyRunId || requestDbId !== currentDbId)
+          return;
+        setPaneStatus(mainPane, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
+      } finally {
+        slot.finish();
+      }
+    }
+    async function selectDatabase(dbIndex) {
+      if (disposed)
+        return;
+      currentDbIndex = dbIndex;
+      currentKey = null;
+      currentCursor = "0";
+      notifySelectionChange();
+      highlightActiveDb(dbIndex);
+      keyList.innerHTML = "";
+      mainPane.textContent = "Select a key to view its value.";
+      await loadKeys(false);
+    }
+    async function loadKeys(append) {
+      if (disposed || currentDbId === null || currentDbIndex === null)
+        return;
+      const slot = keysGuard.start();
+      const requestRunId = loadRunId;
+      const requestDbId = currentDbId;
+      const requestDbIndex = currentDbIndex;
+      keyMoreBtn.disabled = true;
+      if (!append)
+        setKeyStatus("Loading keys...");
+      try {
+        const params = new URLSearchParams({
+          db: requestDbId,
+          dbIndex: String(requestDbIndex),
+          pattern: currentKeyFilter || "*",
+          cursor: currentCursor,
+          count: "200"
+        });
+        const res = await fetch(`/_db/redis/keys?${params}`, {
+          signal: slot.signal
+        });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setKeyStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
+          return;
+        }
+        if (!append)
+          keyList.innerHTML = "";
+        if (data.keys.length === 0 && !append) {
+          setKeyStatus("(no keys)");
+        } else {
+          appendKeys(data.keys);
+        }
+        currentCursor = data.nextCursor;
+        keyMoreBtn.hidden = currentCursor === "0";
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        if (requestRunId !== loadRunId || requestDbId !== currentDbId)
+          return;
+        setKeyStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        slot.finish();
+        if (!slot.isStale())
+          keyMoreBtn.disabled = false;
+      }
+    }
+    keyMoreBtn.addEventListener("click", () => loadKeys(true));
+    keyFilterForm.addEventListener("submit", (e2) => {
+      e2.preventDefault();
+      const nextFilter = keyFilterInput.value.trim() || "*";
+      if (nextFilter === currentKeyFilter && currentCursor === "0")
+        return;
+      currentKeyFilter = nextFilter;
+      currentKey = null;
+      currentCursor = "0";
+      notifySelectionChange();
+      mainPane.textContent = "Select a key to view its value.";
+      loadKeys(false);
+    });
+    async function load(dbId, initial) {
+      if (disposed)
+        return;
+      if (currentDbId === dbId && !initial)
+        return;
+      dbGuard.dispose();
+      keysGuard.dispose();
+      valueGuard.dispose();
+      const slot = dbGuard.start();
+      const requestRunId = ++loadRunId;
+      currentDbId = dbId;
+      currentDbIndex = null;
+      currentKey = null;
+      currentKeyFilter = initial?.keyFilter?.trim() || "*";
+      keyFilterInput.value = currentKeyFilter === "*" ? "" : currentKeyFilter;
+      currentCursor = "0";
+      keyList.innerHTML = "";
+      keyMoreBtn.hidden = true;
+      mainPane.textContent = "Select a key to view its value.";
+      setDbStatus("Loading databases...");
+      try {
+        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`, { signal: slot.signal });
+        if (disposed || slot.isStale())
+          return;
+        if (!res.ok) {
+          const text2 = await res.text();
+          setDbStatus(`Error: ${text2 || res.statusText}`, true);
+          return;
+        }
+        const data = await res.json();
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || currentDbId !== dbId)
+          return;
+        renderDatabases(data.databases);
+        if (initial?.dbIndex !== undefined && data.databases.some((d2) => d2.index === initial.dbIndex)) {
+          suppressNotify = true;
+          try {
+            await selectDatabase(initial.dbIndex);
+            if (currentDbId !== dbId)
+              return;
+            if (initial.key) {
+              await selectKey(initial.key);
+            }
+          } finally {
+            suppressNotify = false;
+          }
+          notifySelectionChange();
+        }
+      } catch (err) {
+        if (slot.isStale())
+          return;
+        setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
+      } finally {
+        slot.finish();
+      }
+    }
+    function clear() {
+      dbGuard.dispose();
+      keysGuard.dispose();
+      valueGuard.dispose();
+      loadRunId++;
+      keyRunId++;
+      suppressNotify = false;
+      currentDbId = null;
+      currentDbIndex = null;
+      currentKey = null;
+      currentKeyFilter = "*";
+      keyFilterInput.value = "";
+      currentCursor = "0";
+      dbList.innerHTML = "";
+      keyList.innerHTML = "";
+      keyMoreBtn.hidden = true;
+      mainPane.textContent = "Select a database to view keys.";
+    }
+    function getSelection() {
+      return {
+        dbIndex: currentDbIndex ?? undefined,
+        key: currentKey ?? undefined,
+        keyFilter: currentKeyFilter === "*" ? undefined : currentKeyFilter
+      };
+    }
+    function dispose() {
+      disposed = true;
+      clear();
+    }
+    return { el: container, load, clear, dispose, getSelection };
   }
 
   // web-src/views/database/schema-view.ts
@@ -8965,7 +10763,13 @@ ${frontmatter.yaml}
     el.className = "db-snapshot-view";
     const guide = document.createElement("div");
     guide.className = "db-snapshot-guide";
-    guide.innerHTML = '<div class="db-snapshot-guide-title">スナップショット差分</div>' + '<div class="db-snapshot-guide-body">' + "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます" + "</div>";
+    const guideTitle = document.createElement("div");
+    guideTitle.className = "db-snapshot-guide-title";
+    guideTitle.textContent = "スナップショット差分";
+    const guideBody = document.createElement("div");
+    guideBody.className = "db-snapshot-guide-body";
+    guideBody.textContent = "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます";
+    guide.append(guideTitle, guideBody);
     const toolbar = document.createElement("div");
     toolbar.className = "db-snapshot-toolbar";
     const createBtn = document.createElement("button");
@@ -8976,7 +10780,12 @@ ${frontmatter.yaml}
     refreshBtn.type = "button";
     refreshBtn.className = "db-snapshot-refresh-btn";
     refreshBtn.textContent = "更新";
-    toolbar.append(createBtn, refreshBtn);
+    const snapshotCancelBtn = document.createElement("button");
+    snapshotCancelBtn.type = "button";
+    snapshotCancelBtn.className = "db-snapshot-job-cancel-btn";
+    snapshotCancelBtn.textContent = "キャンセル";
+    snapshotCancelBtn.hidden = true;
+    toolbar.append(createBtn, refreshBtn, snapshotCancelBtn);
     const tableSelector = document.createElement("div");
     tableSelector.className = "db-snapshot-table-selector";
     tableSelector.hidden = true;
@@ -9017,6 +10826,15 @@ ${frontmatter.yaml}
     mainArea.className = "db-snapshot-main-area";
     el.append(guide, toolbar, tableSelector, mainArea);
     let snapshots = [];
+    let activeSnapshotId = null;
+    let disposed = false;
+    const autoRefreshTimers = new Set;
+    function setActiveSnapshotId(id) {
+      activeSnapshotId = id;
+      snapshotCancelBtn.hidden = !id;
+      snapshotCancelBtn.disabled = false;
+      snapshotCancelBtn.textContent = "キャンセル";
+    }
     function showTableSelector() {
       const tables = deps.getTables();
       const lastTables = getLastTables();
@@ -9061,6 +10879,21 @@ ${frontmatter.yaml}
     cancelBtn.addEventListener("click", () => {
       tableSelector.hidden = true;
     });
+    snapshotCancelBtn.addEventListener("click", async () => {
+      if (!activeSnapshotId)
+        return;
+      const snapshotId = activeSnapshotId;
+      snapshotCancelBtn.disabled = true;
+      snapshotCancelBtn.textContent = "キャンセル中...";
+      try {
+        await postJson("/_db/snapshot/cancel", { id: snapshotId });
+      } catch {} finally {
+        if (!disposed && activeSnapshotId === snapshotId) {
+          snapshotCancelBtn.disabled = false;
+          snapshotCancelBtn.textContent = "キャンセル";
+        }
+      }
+    });
     confirmBtn.addEventListener("click", async () => {
       const dbId = deps.getDbId();
       if (!dbId)
@@ -9077,12 +10910,23 @@ ${frontmatter.yaml}
           note: noteInput.value.trim()
         });
         tableSelector.hidden = true;
-        setTimeout(() => refreshAndAutoDiff(), 3000);
+        scheduleAutoRefresh(dbId);
       } catch {} finally {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "取得開始";
+        if (!disposed) {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = "取得開始";
+        }
       }
     });
+    function scheduleAutoRefresh(dbId) {
+      const timer = setTimeout(() => {
+        autoRefreshTimers.delete(timer);
+        if (disposed || deps.getDbId() !== dbId)
+          return;
+        refreshAndAutoDiff();
+      }, 3000);
+      autoRefreshTimers.add(timer);
+    }
     refreshBtn.addEventListener("click", refresh);
     async function refresh() {
       const dbId = deps.getDbId();
@@ -9092,8 +10936,12 @@ ${frontmatter.yaml}
         const snapRes = await fetch(`/_db/snapshot/list?db=${encodeURIComponent(dbId)}`);
         if (snapRes.ok) {
           const data = await snapRes.json();
+          if (disposed || deps.getDbId() !== dbId)
+            return;
           snapshots = data.snapshots;
         }
+        if (disposed || deps.getDbId() !== dbId)
+          return;
         renderMain();
       } catch {}
     }
@@ -9112,7 +10960,10 @@ ${frontmatter.yaml}
       mainArea.innerHTML = "";
       const done = snapshots.filter((s2) => s2.status === "done");
       if (snapshots.length === 0) {
-        mainArea.innerHTML = '<div class="db-snapshot-empty">まだスナップショットがありません。「スナップショット取得」で開始します。</div>';
+        const empty = document.createElement("div");
+        empty.className = "db-snapshot-empty";
+        empty.textContent = "まだスナップショットがありません。「スナップショット取得」で開始します。";
+        mainArea.appendChild(empty);
         return;
       }
       const snapshotSection = document.createElement("div");
@@ -9124,9 +10975,23 @@ ${frontmatter.yaml}
       for (const snap of snapshots) {
         const item = document.createElement("div");
         item.className = "db-snapshot-item";
+        item.dataset.snapshotId = snap.id;
         const info = document.createElement("div");
         info.className = "db-snapshot-info";
-        info.innerHTML = `<span class="db-snapshot-date">${new Date(snap.createdAt).toLocaleString()}</span>` + `<span class="db-snapshot-tables-count" title="${snap.tables.join(", ")}">${snap.tables.length}テーブル</span>` + (snap.note ? `<span class="db-snapshot-note">${snap.note}</span>` : "");
+        const date = document.createElement("span");
+        date.className = "db-snapshot-date";
+        date.textContent = new Date(snap.createdAt).toLocaleString();
+        const tables = document.createElement("span");
+        tables.className = "db-snapshot-tables-count";
+        tables.title = snap.tables.join(", ");
+        tables.textContent = `${snap.tables.length}テーブル`;
+        info.append(date, tables);
+        if (snap.note) {
+          const note = document.createElement("span");
+          note.className = "db-snapshot-note";
+          note.textContent = snap.note;
+          info.appendChild(note);
+        }
         const actions = document.createElement("div");
         actions.className = "db-snapshot-actions";
         const noteBtn = document.createElement("button");
@@ -9136,7 +11001,22 @@ ${frontmatter.yaml}
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.textContent = "削除";
-        deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+        deleteBtn.addEventListener("click", () => {
+          if (deleteBtn.dataset.confirm !== "1") {
+            deleteBtn.dataset.confirm = "1";
+            deleteBtn.textContent = "削除を確認";
+            window.setTimeout(() => {
+              if (deleteBtn.dataset.confirm === "1") {
+                deleteBtn.dataset.confirm = "";
+                deleteBtn.textContent = "削除";
+              }
+            }, 3000);
+            return;
+          }
+          deleteBtn.dataset.confirm = "";
+          deleteBtn.textContent = "削除";
+          deleteSnap(snap.id);
+        });
         actions.append(noteBtn, deleteBtn);
         item.append(info, actions);
         snapshotSection.appendChild(item);
@@ -9188,19 +11068,30 @@ ${frontmatter.yaml}
         existing.remove();
       const loading = document.createElement("div");
       loading.className = "db-snapshot-diff-inline";
-      loading.innerHTML = '<div class="db-snapshot-loading">差分を計算中...</div>';
+      const loadingText = document.createElement("div");
+      loadingText.className = "db-snapshot-loading";
+      loadingText.textContent = "差分を計算中...";
+      loading.appendChild(loadingText);
       mainArea.appendChild(loading);
       try {
         const res = await fetch(`/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`);
         if (!res.ok) {
-          loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+          loading.innerHTML = "";
+          const error2 = document.createElement("div");
+          error2.className = "db-snapshot-error";
+          error2.textContent = "差分の計算に失敗しました";
+          loading.appendChild(error2);
           return;
         }
         const data = await res.json();
         loading.remove();
         renderDiffInline(beforeId, afterId, data.tables);
       } catch {
-        loading.innerHTML = '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+        loading.innerHTML = "";
+        const error2 = document.createElement("div");
+        error2.className = "db-snapshot-error";
+        error2.textContent = "差分の計算に失敗しました";
+        loading.appendChild(error2);
       }
     }
     function renderDiffInline(beforeId, afterId, tables) {
@@ -9253,17 +11144,29 @@ ${frontmatter.yaml}
       mainArea.appendChild(section);
     }
     async function loadDiffRows(beforeId, afterId, table2, container) {
-      container.innerHTML = '<div class="db-snapshot-loading">読み込み中...</div>';
+      container.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "db-snapshot-loading";
+      loading.textContent = "読み込み中...";
+      container.appendChild(loading);
       try {
         const res = await fetch(`/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table2)}&limit=200`);
         if (!res.ok) {
-          container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+          container.innerHTML = "";
+          const error2 = document.createElement("div");
+          error2.className = "db-snapshot-error";
+          error2.textContent = "読み込みに失敗しました";
+          container.appendChild(error2);
           return;
         }
         const data = await res.json();
         renderDiffRows(container, data.rows, data.total);
       } catch {
-        container.innerHTML = '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+        container.innerHTML = "";
+        const error2 = document.createElement("div");
+        error2.className = "db-snapshot-error";
+        error2.textContent = "読み込みに失敗しました";
+        container.appendChild(error2);
       }
     }
     function renderDiffRows(container, rows, total) {
@@ -9372,10 +11275,14 @@ ${frontmatter.yaml}
       cancelDlgBtn.textContent = "キャンセル";
       cancelDlgBtn.addEventListener("click", () => dialog.remove());
       saveBtn.addEventListener("click", async () => {
+        if (disposed)
+          return;
         await postJson("/_db/snapshot/update-note", {
           id: snapshotId,
           note: input.value
         });
+        if (disposed)
+          return;
         dialog.remove();
         refresh();
       });
@@ -9386,7 +11293,7 @@ ${frontmatter.yaml}
           dialog.remove();
       });
       dialog.append(input, saveBtn, cancelDlgBtn);
-      const item = el.querySelector(`.db-snapshot-item [title="${snapshotId}"]`)?.closest(".db-snapshot-item");
+      const item = Array.from(el.querySelectorAll(".db-snapshot-item")).find((node) => node.dataset.snapshotId === snapshotId);
       if (item) {
         item.after(dialog);
       } else {
@@ -9395,18 +11302,36 @@ ${frontmatter.yaml}
       input.focus();
     }
     async function deleteSnap(snapshotId) {
+      if (disposed)
+        return;
       await postJson("/_db/snapshot/delete", { id: snapshotId });
+      if (disposed)
+        return;
       refresh();
     }
     function handleSse(data) {
       try {
         const parsed = JSON.parse(data);
+        const dbId = deps.getDbId();
+        if (parsed.dbId && dbId && parsed.dbId !== dbId)
+          return;
+        if (parsed.action === "started" && parsed.id) {
+          setActiveSnapshotId(parsed.id);
+        }
         if (parsed.action === "created" || parsed.action === "error") {
+          setActiveSnapshotId(null);
           refreshAndAutoDiff();
         }
       } catch {}
     }
-    return { el, refresh, handleSse };
+    function dispose() {
+      disposed = true;
+      setActiveSnapshotId(null);
+      for (const timer of autoRefreshTimers)
+        clearTimeout(timer);
+      autoRefreshTimers.clear();
+    }
+    return { el, refresh, handleSse, dispose };
   }
 
   // web-src/views/database/table-grid.ts
@@ -9464,18 +11389,22 @@ ${frontmatter.yaml}
     let globalSearchValue = "";
     let sort = null;
     let pageCache = new Map;
-    let pendingPages = new Set;
+    let pendingPages = new Map;
     let loadGeneration = 0;
     let rafId = 0;
     let statusEl = null;
     let filterTimer = null;
     let selectedRowIndex = -1;
     const colWidths = new Map;
+    let activeResize = null;
     function storageKey() {
       const project = callbacks.getProjectName?.() ?? "";
+      const dbId = callbacks.getDbId();
       if (!currentTable)
         return null;
-      return `db:col-widths:${project}:${currentTable}`;
+      if (!dbId)
+        return null;
+      return `db:col-widths:${project}:${dbId}:${currentTable}`;
     }
     function saveColWidths() {
       const key = storageKey();
@@ -9565,13 +11494,14 @@ ${frontmatter.yaml}
     }
     function invalidateData() {
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       loadGeneration++;
       viewport.scrollTop = 0;
       resetSelectionAndDetail();
-      ensurePage(0);
+      return ensurePage(0);
     }
     function clear() {
+      cleanupResize();
       currentTable = "";
       columns = [];
       columnNames = [];
@@ -9583,7 +11513,7 @@ ${frontmatter.yaml}
       filterClear.hidden = true;
       filterRow.innerHTML = "";
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       loadGeneration++;
       cancelAnimationFrame(rafId);
       if (filterTimer)
@@ -9710,6 +11640,7 @@ ${frontmatter.yaml}
       syncContentWidth();
     }
     function startResize(colIndex, startEvent) {
+      cleanupResize();
       const colName = columnNames[colIndex];
       const startX = startEvent.clientX;
       const startWidth = getColWidth(colName);
@@ -9723,13 +11654,20 @@ ${frontmatter.yaml}
         renderViewport();
       };
       const onMouseUp = () => {
-        document.body.classList.remove("db-resizing");
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
+        cleanupResize();
         saveColWidths();
       };
+      activeResize = { onMouseMove, onMouseUp };
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
+    }
+    function cleanupResize() {
+      if (!activeResize)
+        return;
+      document.body.classList.remove("db-resizing");
+      document.removeEventListener("mousemove", activeResize.onMouseMove);
+      document.removeEventListener("mouseup", activeResize.onMouseUp);
+      activeResize = null;
     }
     function renderFilterRow() {
       filterRow.innerHTML = "";
@@ -9791,30 +11729,39 @@ ${frontmatter.yaml}
         sort = { column, direction: "asc" };
       }
       pageCache = new Map;
-      pendingPages = new Set;
+      pendingPages = new Map;
       resetSelectionAndDetail();
       renderHeader();
       renderViewport();
     }
     function ensurePage(pageStart) {
-      if (pageCache.has(pageStart) || pendingPages.has(pageStart))
-        return;
-      pendingPages.add(pageStart);
+      if (pageCache.has(pageStart))
+        return Promise.resolve();
+      const pending = pendingPages.get(pageStart);
+      if (pending)
+        return pending;
       const gen = loadGeneration;
       const filters = collectFilters();
-      callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters).then((data) => {
+      const promise = callbacks.fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters).then((data) => {
         if (gen !== loadGeneration)
           return;
-        pendingPages.delete(pageStart);
         pageCache.set(pageStart, data.rows);
         totalRows = data.totalRows;
         spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
         updateStatus();
         renderViewport();
-      }).catch(() => {
-        if (gen === loadGeneration)
-          pendingPages.delete(pageStart);
+      }).catch((err) => {
+        if (gen === loadGeneration) {
+          showError(err instanceof Error ? err.message : String(err));
+        }
       });
+      const tracked = promise.finally(() => {
+        if (pendingPages.get(pageStart) === tracked) {
+          pendingPages.delete(pageStart);
+        }
+      });
+      pendingPages.set(pageStart, tracked);
+      return tracked;
     }
     function renderViewport() {
       cancelAnimationFrame(rafId);
@@ -9948,6 +11895,13 @@ ${frontmatter.yaml}
         statusEl.insertBefore(document.createTextNode(`${parts.join(" | ")} `), statusEl.firstChild);
       }
     }
+    function showError(message) {
+      clear();
+      statusEl = document.createElement("div");
+      statusEl.className = "db-grid-status db-pane-error";
+      statusEl.textContent = message;
+      el.appendChild(statusEl);
+    }
     function load(table2, initialData) {
       clear();
       currentTable = table2;
@@ -9971,6 +11925,37 @@ ${frontmatter.yaml}
         renderViewport();
       }
     }
+    async function applyState(state) {
+      if (state.search !== undefined) {
+        globalSearchValue = state.search;
+        filterInput.value = state.search;
+        filterClear.hidden = !globalSearchValue;
+      }
+      columnFilters.clear();
+      for (const filter of state.filters || []) {
+        if (filter.column && filter.value)
+          columnFilters.set(filter.column, filter.value);
+      }
+      sort = state.sort || null;
+      const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
+      renderHeader();
+      const firstPage = invalidateData();
+      if (targetRowIndex >= 0) {
+        await firstPage;
+        selectedRowIndex = targetRowIndex;
+        viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+        renderViewport();
+      }
+    }
+    function getState() {
+      const filters = collectFilters().filter((filter) => filter.value !== globalSearchValue);
+      return {
+        ...globalSearchValue ? { search: globalSearchValue } : {},
+        ...filters.length ? { filters } : {},
+        ...sort ? { sort } : {},
+        ...selectedRowIndex >= 0 ? { row: selectedRowIndex + 1 } : {}
+      };
+    }
     filterInput.addEventListener("input", () => {
       globalSearchValue = filterInput.value.trim();
       filterClear.hidden = !globalSearchValue;
@@ -9990,16 +11975,17 @@ ${frontmatter.yaml}
       filterClear.hidden = true;
       invalidateData();
     });
-    viewport.addEventListener("scroll", () => {
+    const onViewportScroll = () => {
       headerWrap.scrollLeft = viewport.scrollLeft;
       filterRowWrap.scrollLeft = viewport.scrollLeft;
       renderViewport();
-    }, { passive: true });
+    };
+    viewport.addEventListener("scroll", onViewportScroll, { passive: true });
     function destroy() {
       clear();
-      viewport.removeEventListener("scroll", renderViewport);
+      viewport.removeEventListener("scroll", onViewportScroll);
     }
-    return { el, load, clear, destroy };
+    return { el, load, showError, applyState, getState, clear, destroy };
   }
   function formatValue3(value) {
     if (value === null)
@@ -10054,7 +12040,22 @@ ${frontmatter.yaml}
     const expandedTables = new Set;
     const columnCache = new Map;
     let contextMenu = null;
+    let contextMenuClick = null;
+    let contextMenuKeyDown = null;
+    let contextMenuTimer = null;
     function closeContextMenu() {
+      if (contextMenuTimer) {
+        clearTimeout(contextMenuTimer);
+        contextMenuTimer = null;
+      }
+      if (contextMenuClick) {
+        document.removeEventListener("click", contextMenuClick, true);
+        contextMenuClick = null;
+      }
+      if (contextMenuKeyDown) {
+        document.removeEventListener("keydown", contextMenuKeyDown, true);
+        contextMenuKeyDown = null;
+      }
       if (contextMenu) {
         contextMenu.remove();
         contextMenu = null;
@@ -10110,18 +12111,17 @@ ${frontmatter.yaml}
       const onDocClick = (ev) => {
         if (!menu.contains(ev.target)) {
           closeContextMenu();
-          document.removeEventListener("click", onDocClick, true);
-          document.removeEventListener("keydown", onKeyDown, true);
         }
       };
       const onKeyDown = (ev) => {
         if (ev.key === "Escape") {
           closeContextMenu();
-          document.removeEventListener("click", onDocClick, true);
-          document.removeEventListener("keydown", onKeyDown, true);
         }
       };
-      setTimeout(() => {
+      contextMenuClick = onDocClick;
+      contextMenuKeyDown = onKeyDown;
+      contextMenuTimer = setTimeout(() => {
+        contextMenuTimer = null;
         document.addEventListener("click", onDocClick, true);
         document.addEventListener("keydown", onKeyDown, true);
       }, 0);
@@ -10230,6 +12230,10 @@ ${frontmatter.yaml}
     }
     function render(tables) {
       allTables = tables;
+      expandedTables.clear();
+      columnCache.clear();
+      activeTable = null;
+      closeContextMenu();
       filterInput.value = "";
       renderFiltered(tables, "");
     }
@@ -10242,7 +12246,14 @@ ${frontmatter.yaml}
         item.classList.toggle("active", item.dataset.table === table2);
       });
     }
-    return { el: wrapper, render, setActive };
+    function dispose() {
+      closeContextMenu();
+      allTables = [];
+      expandedTables.clear();
+      columnCache.clear();
+      activeTable = null;
+    }
+    return { el: wrapper, render, setActive, dispose };
   }
   function formatRowCount(n2) {
     if (n2 >= 1e6)
@@ -10253,11 +12264,63 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/database/database-view.ts
-  function createDatabaseView(deps) {
-    let mounted = false;
-    let currentDb = null;
+  function looksReadOnlySql(sql) {
+    const normalized = sql.replace(/^\s*(?:--.*\n|\/\*[\s\S]*?\*\/\s*)*/g, "");
+    return /^(select|with|pragma|explain)\b/i.test(normalized);
+  }
+  async function responseErrorMessage(res, fallback) {
+    const text2 = await res.text().catch(() => "");
+    return text2 || `${fallback} (${res.status})`;
+  }
+  function errorMessage(err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  function isSqlKind(kind) {
+    return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
+  }
+  function isSqlView(view) {
+    return view === "data" || view === "query" || view === "schema" || view === "er" || view === "search" || view === "snapshot";
+  }
+  function computeVisibility(kind, tab, userPrefersHistoryOpen) {
+    const sqlMode = isSqlKind(kind);
+    const tableScopedTab = tab === "data" || tab === "schema";
+    const historyVisible = sqlMode && userPrefersHistoryOpen;
+    return {
+      toolsHidden: !sqlMode,
+      historyToggleHidden: !sqlMode,
+      historyPaneHidden: !historyVisible,
+      historyResizerHidden: !historyVisible,
+      tableListHidden: !sqlMode,
+      tabBarHidden: !sqlMode || !tableScopedTab,
+      gridHidden: !sqlMode || tab !== "data",
+      queryHidden: !sqlMode || tab !== "query",
+      schemaHidden: !sqlMode || tab !== "schema",
+      erHidden: !sqlMode || tab !== "er",
+      searchHidden: !sqlMode || tab !== "search",
+      snapshotHidden: !sqlMode || tab !== "snapshot",
+      redisHidden: kind !== "redis",
+      esHidden: kind !== "elasticsearch"
+    };
+  }
+  function normalizeViewForDb(view, db) {
+    if (!db || !isSqlKind(db.kind))
+      return "data";
+    return view && isSqlView(view) ? view : "data";
+  }
+  function createTabPane(outerDeps, cb, initial = {}) {
+    const deps = {
+      ...outerDeps,
+      setRoute: (route, replace2) => {
+        if (cb.isActive())
+          outerDeps.setRoute(route, replace2);
+        cb.onStateChange();
+      }
+    };
+    let currentDbInfo = null;
     let schemaCache = null;
     let lastFiles = [];
+    let currentTable = initial.table ?? null;
+    let loadGeneration = 0;
     const dbSelect = document.createElement("select");
     dbSelect.className = "db-file-select";
     dbSelect.title = "Select database file";
@@ -10266,8 +12329,8 @@ ${frontmatter.yaml}
     dbToolbar.appendChild(dbSelect);
     const tabBar = document.createElement("div");
     tabBar.className = "db-tab-bar";
-    const tabData = createTab("Data", true);
-    const tabSchema = createTab("Schema", false);
+    const tabData = createInnerTab("Data", true);
+    const tabSchema = createInnerTab("Schema", false);
     tabBar.append(tabData, tabSchema);
     let currentTab = "data";
     const tableList = createTableList({
@@ -10279,48 +12342,45 @@ ${frontmatter.yaml}
     });
     const sidebar = document.createElement("div");
     sidebar.className = "db-sidebar";
-    const savedWidth = localStorage.getItem("db:sidebar-width");
-    if (savedWidth)
-      sidebar.style.width = savedWidth;
+    if (initial.sidebarWidth)
+      sidebar.style.width = initial.sidebarWidth;
     const toolsSection = document.createElement("div");
-    toolsSection.className = "db-tools-section";
-    const queryBtn = document.createElement("button");
-    queryBtn.className = "db-tool-btn";
-    queryBtn.type = "button";
-    queryBtn.textContent = "Query";
-    queryBtn.title = "SQL Query Editor";
-    queryBtn.addEventListener("click", () => {
-      setActiveTab("query");
+    toolsSection.className = "db-icon-toolbar";
+    toolsSection.setAttribute("role", "toolbar");
+    toolsSection.setAttribute("aria-label", "Database tools");
+    const queryBtn = makeIconButton({
+      label: "Query",
+      title: "Query Editor",
+      pathD: ICON_PATH_QUERY,
+      onClick: () => setActiveTab("query")
     });
-    const erBtn = document.createElement("button");
-    erBtn.className = "db-tool-btn";
-    erBtn.type = "button";
-    erBtn.textContent = "ER Diagram";
-    erBtn.title = "Entity Relationship Diagram";
-    erBtn.addEventListener("click", () => {
-      setActiveTab("er");
-      if (schemaCache)
-        renderErDiagram();
+    const erBtn = makeIconButton({
+      label: "ER Diagram",
+      title: "Entity Relationship Diagram",
+      pathD: ICON_PATH_ER,
+      onClick: () => {
+        setActiveTab("er");
+        if (schemaCache)
+          renderErDiagram();
+      }
     });
-    const searchBtn = document.createElement("button");
-    searchBtn.className = "db-tool-btn";
-    searchBtn.type = "button";
-    searchBtn.textContent = "Search";
-    searchBtn.title = "Search all tables";
-    searchBtn.addEventListener("click", () => {
-      setActiveTab("search");
+    const searchBtn = makeIconButton({
+      label: "Search",
+      title: "Search across tables",
+      pathD: ICON_PATH_SEARCH,
+      onClick: () => setActiveTab("search")
     });
-    const snapshotBtn = document.createElement("button");
-    snapshotBtn.className = "db-tool-btn";
-    snapshotBtn.type = "button";
-    snapshotBtn.textContent = "Snapshot";
-    snapshotBtn.title = "Snapshot & Diff";
-    snapshotBtn.addEventListener("click", () => {
-      setActiveTab("snapshot");
-      snapshotView.refresh();
+    const snapshotBtn = makeIconButton({
+      label: "Snapshot",
+      title: "Snapshot & Diff",
+      pathD: ICON_PATH_SNAPSHOT,
+      onClick: () => {
+        setActiveTab("snapshot");
+        snapshotView.refresh();
+      }
     });
     toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
-    sidebar.append(dbToolbar, tableList.el, toolsSection);
+    sidebar.append(toolsSection, dbToolbar, tableList.el);
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "db-sidebar-resize";
     sidebar.appendChild(resizeHandle);
@@ -10338,7 +12398,7 @@ ${frontmatter.yaml}
       const onUp = () => {
         resizing = false;
         resizeHandle.classList.remove("active");
-        localStorage.setItem("db:sidebar-width", sidebar.style.width);
+        cb.onStateChange();
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };
@@ -10347,30 +12407,41 @@ ${frontmatter.yaml}
     });
     const grid = createTableGrid({
       fetchPage: (table2, offset, limit, sort, filters) => fetchTablePage(table2, offset, limit, sort, filters),
-      getDbId: () => currentDb?.id || null
+      getDbId: () => currentDbInfo?.id || null
     });
     const queryEditor = createQueryEditor({
-      executeQuery: (sql) => executeQuery(sql)
+      executeQuery: (sql) => executeQuery(sql),
+      onSqlChange: () => cb.onStateChange()
     });
+    if (initial.sqlDraft)
+      queryEditor.setSql(initial.sqlDraft, { silent: true });
     const schemaView = createSchemaView();
     const erDiagram = createErDiagram();
     const globalSearchView = createGlobalSearchView({
-      getDbId: () => currentDb?.id || null
+      getDbId: () => currentDbInfo?.id || null
     });
     const snapshotView = createSnapshotView({
-      getDbId: () => currentDb?.id || null,
+      getDbId: () => currentDbInfo?.id || null,
       getTables: () => schemaCache?.tables || []
     });
     const historyView = createQueryHistoryView({
-      getDbId: () => currentDb?.id || null,
+      getDbId: () => currentDbInfo?.id || null,
       copySqlToQuery: (sql) => {
         queryEditor.setSql(sql);
         setActiveTab("query");
       }
     });
+    const redisExplorer = createRedisExplorer({
+      onSelectionChange: () => cb.onStateChange()
+    });
+    redisExplorer.el.hidden = true;
+    const esExplorer = createElasticsearchExplorer({
+      onSelectionChange: () => cb.onStateChange()
+    });
+    esExplorer.el.hidden = true;
     const mainContent = document.createElement("div");
     mainContent.className = "db-main-content";
-    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el);
+    mainContent.append(tabBar, grid.el, queryEditor.el, schemaView.el, erDiagram.el, globalSearchView.el, snapshotView.el, redisExplorer.el, esExplorer.el);
     queryEditor.el.hidden = true;
     globalSearchView.el.hidden = true;
     snapshotView.el.hidden = true;
@@ -10381,9 +12452,8 @@ ${frontmatter.yaml}
     historyResizer.className = "db-history-resizer";
     const historyPane = document.createElement("div");
     historyPane.className = "db-history-pane";
-    const savedHistoryHeight = localStorage.getItem("db:history-height");
-    if (savedHistoryHeight)
-      historyPane.style.height = savedHistoryHeight;
+    if (initial.historyHeight)
+      historyPane.style.height = initial.historyHeight;
     historyPane.appendChild(historyView.el);
     let historyResizing = false;
     historyResizer.addEventListener("mousedown", (e2) => {
@@ -10402,7 +12472,7 @@ ${frontmatter.yaml}
       const onUp = () => {
         historyResizing = false;
         historyResizer.classList.remove("active");
-        localStorage.setItem("db:history-height", historyPane.style.height);
+        cb.onStateChange();
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };
@@ -10415,24 +12485,44 @@ ${frontmatter.yaml}
     historyToggle.textContent = "Query History";
     historyToggle.title = "Toggle query history panel";
     sidebar.appendChild(historyToggle);
-    let historyOpen = localStorage.getItem("db:history-open") !== "false";
-    function applyHistoryVisibility() {
-      historyResizer.hidden = !historyOpen;
-      historyPane.hidden = !historyOpen;
-      historyToggle.classList.toggle("active", historyOpen);
-      if (historyOpen)
+    let userPrefersHistoryOpen = initial.historyOpen ?? true;
+    function applyVisibility() {
+      const sqlMode = isSqlKind(currentDbInfo?.kind);
+      const visibility = computeVisibility(currentDbInfo?.kind, currentTab, userPrefersHistoryOpen);
+      toolsSection.hidden = visibility.toolsHidden;
+      historyToggle.hidden = visibility.historyToggleHidden;
+      historyResizer.hidden = visibility.historyResizerHidden;
+      historyPane.hidden = visibility.historyPaneHidden;
+      tableList.el.hidden = visibility.tableListHidden;
+      tabBar.hidden = visibility.tabBarHidden;
+      grid.el.hidden = visibility.gridHidden;
+      queryEditor.el.hidden = visibility.queryHidden;
+      schemaView.el.hidden = visibility.schemaHidden;
+      erDiagram.el.hidden = visibility.erHidden;
+      globalSearchView.el.hidden = visibility.searchHidden;
+      snapshotView.el.hidden = visibility.snapshotHidden;
+      redisExplorer.el.hidden = visibility.redisHidden;
+      esExplorer.el.hidden = visibility.esHidden;
+      if (!sqlMode) {
+        queryBtn.classList.remove("active");
+        erBtn.classList.remove("active");
+        searchBtn.classList.remove("active");
+        snapshotBtn.classList.remove("active");
+      }
+      historyToggle.classList.toggle("active", userPrefersHistoryOpen);
+      if (!visibility.historyPaneHidden)
         historyView.refresh();
     }
-    applyHistoryVisibility();
+    applyVisibility();
     historyToggle.addEventListener("click", () => {
-      historyOpen = !historyOpen;
-      localStorage.setItem("db:history-open", String(historyOpen));
-      applyHistoryVisibility();
+      userPrefersHistoryOpen = !userPrefersHistoryOpen;
+      applyVisibility();
+      cb.onStateChange();
     });
     const container = document.createElement("div");
     container.className = "db-container";
     container.append(upperArea, historyResizer, historyPane);
-    function createTab(text2, active) {
+    function createInnerTab(text2, active) {
       const btn = document.createElement("button");
       btn.className = `db-tab${active ? " active" : ""}`;
       btn.type = "button";
@@ -10443,63 +12533,42 @@ ${frontmatter.yaml}
       const notice = mainContent.querySelector(".db-docker-notice");
       if (notice)
         notice.remove();
-      tabBar.hidden = false;
-      grid.el.hidden = false;
+      applyVisibility();
     }
-    function mount() {
-      if (mounted)
-        return;
-      const content = document.getElementById("content");
-      if (!content)
-        return;
-      const diff = document.getElementById("diff");
-      if (diff)
-        diff.hidden = true;
-      const empty = document.getElementById("empty");
-      if (empty)
-        empty.classList.add("hidden");
-      content.appendChild(container);
-      mounted = true;
-      applyHistoryVisibility();
+    function showDockerNotice(message) {
+      clearDockerNotice();
+      const notice = document.createElement("div");
+      notice.className = "db-docker-notice";
+      notice.textContent = message;
+      mainContent.prepend(notice);
     }
-    function unmount() {
-      if (!mounted)
-        return;
-      container.remove();
-      const diff = document.getElementById("diff");
-      if (diff)
-        diff.hidden = false;
-      mounted = false;
-      grid.clear();
-      schemaView.clear();
-      erDiagram.clear();
-      currentDb = null;
-      schemaCache = null;
+    function setTableListStatus(message, options) {
+      const list2 = tableList.el.querySelector(".db-table-list");
+      if (list2)
+        setPaneStatus(list2, message, options);
     }
     function setActiveTab(tab, updateUrl = true) {
-      currentTab = tab;
-      tabData.classList.toggle("active", tab === "data");
-      tabSchema.classList.toggle("active", tab === "schema");
-      queryBtn.classList.toggle("active", tab === "query");
-      erBtn.classList.toggle("active", tab === "er");
-      searchBtn.classList.toggle("active", tab === "search");
-      snapshotBtn.classList.toggle("active", tab === "snapshot");
-      tabBar.hidden = tab === "query" || tab === "er" || tab === "search" || tab === "snapshot";
-      grid.el.hidden = tab !== "data";
-      queryEditor.el.hidden = tab !== "query";
-      schemaView.el.hidden = tab !== "schema";
-      erDiagram.el.hidden = tab !== "er";
-      globalSearchView.el.hidden = tab !== "search";
-      snapshotView.el.hidden = tab !== "snapshot";
-      if (tab === "query")
+      currentTab = normalizeViewForDb(tab, currentDbInfo);
+      const tableScopedTab = currentTab === "data" || currentTab === "schema";
+      if (!tableScopedTab) {
+        currentTable = null;
+        tableList.setActive(null);
+      }
+      tabData.classList.toggle("active", currentTab === "data");
+      tabSchema.classList.toggle("active", currentTab === "schema");
+      queryBtn.classList.toggle("active", currentTab === "query");
+      erBtn.classList.toggle("active", currentTab === "er");
+      searchBtn.classList.toggle("active", currentTab === "search");
+      snapshotBtn.classList.toggle("active", currentTab === "snapshot");
+      applyVisibility();
+      if (currentTab === "query")
         queryEditor.focus();
-      if (updateUrl) {
-        const activeTable = tableList.el.querySelector(".db-table-item.active");
+      if (updateUrl && currentDbInfo) {
         deps.setRoute({
           screen: "database",
-          db: currentDb?.id,
-          table: activeTable?.dataset.table,
-          tab: tab === "data" ? undefined : tab,
+          db: currentDbInfo?.id,
+          table: currentTable ?? undefined,
+          tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange()
         }, true);
       }
@@ -10514,21 +12583,22 @@ ${frontmatter.yaml}
     async function fetchDbFiles() {
       const res = await deps.trackLoad(fetch("/_db/files"));
       if (!res.ok)
-        return [];
+        return { files: [] };
       const data = await res.json();
-      return data.files;
+      return data;
     }
     async function fetchSchema(dbId) {
       const res = await deps.trackLoad(fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`));
-      if (!res.ok)
-        return null;
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to fetch schema"));
+      }
       return await res.json();
     }
     async function fetchTablePage(table2, offset, limit, sort, filters) {
-      if (!currentDb)
+      if (!currentDbInfo)
         throw new Error("no database selected");
       const params = new URLSearchParams({
-        db: currentDb.id,
+        db: currentDbInfo.id,
         table: table2,
         offset: String(offset),
         limit: String(limit)
@@ -10541,12 +12611,13 @@ ${frontmatter.yaml}
         params.set("filters", JSON.stringify(filters));
       }
       const res = await fetch(`/_db/table?${params}`);
-      if (!res.ok)
-        throw new Error(await res.text());
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to fetch table"));
+      }
       return await res.json();
     }
     async function executeQuery(sql) {
-      if (!currentDb)
+      if (!currentDbInfo)
         throw new Error("no database selected");
       const res = await fetch("/_db/query", {
         method: "POST",
@@ -10555,17 +12626,67 @@ ${frontmatter.yaml}
           "X-Code-Viewer-Action": "1"
         },
         body: JSON.stringify({
-          db: currentDb.id,
+          db: currentDbInfo.id,
           sql,
           saveHistory: true,
           source: "browser",
           executedBy: "user"
         })
       });
-      return await res.json();
+      if (!res.ok) {
+        throw new Error(await responseErrorMessage(res, "failed to execute query"));
+      }
+      const result = await res.json();
+      if (userPrefersHistoryOpen)
+        historyView.refresh();
+      return result;
     }
-    async function selectDb(dbId) {
-      const schema = await fetchSchema(dbId);
+    async function selectDb(dbId, explorerInitial, generation = loadGeneration) {
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+        return;
+      currentTable = null;
+      if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
+        currentTab = "data";
+        tableList.render([]);
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        schemaCache = null;
+        applyVisibility();
+        if (currentDbInfo.kind === "redis") {
+          esExplorer.clear();
+          await redisExplorer.load(dbId, explorerInitial?.redis);
+        } else {
+          redisExplorer.clear();
+          await esExplorer.load(dbId, explorerInitial?.es);
+        }
+        if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+          return;
+        cb.onStateChange();
+        return;
+      }
+      redisExplorer.clear();
+      esExplorer.clear();
+      applyVisibility();
+      tableList.render([]);
+      setTableListStatus("Loading schema...");
+      grid.clear();
+      const schema = await fetchSchema(dbId).catch((err) => {
+        if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+          return;
+        const message = errorMessage(err);
+        schemaCache = null;
+        tableList.render([]);
+        setTableListStatus(message, { error: true });
+        grid.showError(message);
+        schemaView.clear();
+        erDiagram.clear();
+        setActiveTab("data", false);
+        cb.onStateChange();
+        return null;
+      });
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+        return;
       if (!schema)
         return;
       schemaCache = schema;
@@ -10573,33 +12694,48 @@ ${frontmatter.yaml}
       grid.clear();
       schemaView.clear();
       erDiagram.clear();
-      setActiveTab("data");
+      setActiveTab("data", false);
       if (schema.tables.length > 0) {
-        selectTable(schema.tables[0].name);
+        await selectTable(schema.tables[0].name, generation);
       }
+      applyVisibility();
+      cb.onStateChange();
     }
-    async function selectTable(table2) {
-      tableList.setActive(table2);
-      if (!currentDb)
+    async function selectTable(table2, generation = loadGeneration) {
+      if (generation !== loadGeneration)
         return;
-      if (currentTab === "query" || currentTab === "er") {
+      currentTable = table2;
+      tableList.setActive(table2);
+      if (!currentDbInfo)
+        return;
+      const requestDbId = currentDbInfo.id;
+      if (currentTab === "query" || currentTab === "er" || currentTab === "search" || currentTab === "snapshot") {
         setActiveTab("data", false);
       }
       deps.setRoute({
         screen: "database",
-        db: currentDb.id,
+        db: currentDbInfo.id,
         table: table2,
         tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange()
       }, true);
       try {
         const data = await deps.trackLoad(fetchTablePage(table2, 0, 200, null, []));
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
         grid.load(table2, data);
-      } catch {
-        grid.load(table2);
+      } catch (err) {
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
+        grid.showError(errorMessage(err));
       }
       if (currentTab === "schema") {
         const columns = await fetchColumns(table2);
+        if (generation !== loadGeneration || currentDbInfo?.id !== requestDbId || currentTable !== table2) {
+          return;
+        }
         schemaView.render(table2, columns, schemaCache?.indexes || []);
       }
     }
@@ -10607,9 +12743,9 @@ ${frontmatter.yaml}
       if (schemaCache?.columnsMap?.[table2]) {
         return schemaCache.columnsMap[table2];
       }
-      if (!currentDb)
+      if (!currentDbInfo)
         return [];
-      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+      const res = await fetch(`/_db/columns?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table2)}`);
       if (!res.ok)
         return [];
       const data = await res.json();
@@ -10617,17 +12753,17 @@ ${frontmatter.yaml}
     }
     async function showSchema(table2) {
       setActiveTab("schema");
-      if (!currentDb)
+      if (!currentDbInfo)
         return;
       const columns = await fetchColumns(table2);
       schemaView.render(table2, columns, schemaCache?.indexes || []);
     }
     async function showDdl(table2) {
-      if (!currentDb)
+      if (!currentDbInfo)
         return;
       setActiveTab("schema");
       try {
-        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDb.id)}&table=${encodeURIComponent(table2)}`);
+        const res = await fetch(`/_db/ddl?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table2)}`);
         if (!res.ok)
           return;
         const data = await res.json();
@@ -10640,7 +12776,7 @@ ${frontmatter.yaml}
       } catch {}
     }
     async function renderErDiagram() {
-      if (!schemaCache || !currentDb)
+      if (!schemaCache || !currentDbInfo)
         return;
       const columnsMap = new Map;
       if (schemaCache.columnsMap) {
@@ -10658,12 +12794,16 @@ ${frontmatter.yaml}
       erDiagram.render(schemaCache, columnsMap);
     }
     dbSelect.addEventListener("change", () => {
+      handleDbSelectChange();
+    });
+    async function handleDbSelectChange() {
       const dbId = dbSelect.value;
       if (!dbId)
         return;
+      const generation = ++loadGeneration;
       const file = lastFiles.find((f2) => f2.id === dbId);
       const option = dbSelect.selectedOptions[0];
-      currentDb = {
+      currentDbInfo = {
         id: dbId,
         path: file?.path || dbId,
         name: option?.textContent || dbId,
@@ -10671,16 +12811,32 @@ ${frontmatter.yaml}
         kind: file?.kind || "sqlite"
       };
       clearDockerNotice();
-      deps.setRoute({ screen: "database", db: dbId, range: deps.currentRange() }, true);
-      selectDb(dbId);
-    });
-    async function enter(db, table2, tab) {
-      mount();
-      document.body.classList.add("gdp-database-page");
-      deps.setPageMode();
-      deps.syncHeaderMenu();
-      const files = await fetchDbFiles();
+      await selectDb(dbId, undefined, generation);
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
+        return;
+      deps.setRoute({
+        screen: "database",
+        db: dbId,
+        table: currentTable ?? undefined,
+        tab: currentTab === "data" ? undefined : currentTab,
+        range: deps.currentRange()
+      }, true);
+      cb.onStateChange();
+    }
+    let pendingRedisInitial = initial.redis;
+    let pendingEsInitial = initial.es;
+    async function enter(db, table2, view, options = {}) {
+      const generation = ++loadGeneration;
+      const filesResponse = await fetchDbFiles();
+      if (generation !== loadGeneration)
+        return;
+      const files = filesResponse.files;
       lastFiles = files;
+      if (filesResponse.truncated) {
+        showDockerNotice("Docker discovery reached the service limit; some compose services may be hidden.");
+      } else {
+        clearDockerNotice();
+      }
       dbSelect.innerHTML = "";
       if (files.length === 0) {
         const opt = document.createElement("option");
@@ -10688,6 +12844,7 @@ ${frontmatter.yaml}
         opt.textContent = "No database files found";
         dbSelect.appendChild(opt);
         dbSelect.disabled = true;
+        cb.onStateChange();
         return;
       }
       dbSelect.disabled = false;
@@ -10699,41 +12856,830 @@ ${frontmatter.yaml}
         opt.textContent = label;
         dbSelect.appendChild(opt);
       }
-      const target = db && files.find((f2) => f2.id === db) ? db : files[0].id;
-      dbSelect.value = target;
-      currentDb = files.find((f2) => f2.id === target) || null;
-      await selectDb(target);
-      if (table2) {
-        await selectTable(table2);
+      if (db && !files.find((f2) => f2.id === db)) {
+        db = files[0].id;
       }
-      if (tab && tab !== "data") {
-        setActiveTab(tab);
-        if (tab === "schema") {
+      const autoSelectFirst = options.autoSelectFirst ?? true;
+      if (!db && !autoSelectFirst) {
+        dbSelect.value = "";
+        currentDbInfo = null;
+        currentTable = null;
+        schemaCache = null;
+        tableList.render([]);
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        redisExplorer.clear();
+        esExplorer.clear();
+        setActiveTab("data", false);
+        cb.onStateChange();
+        return;
+      }
+      const target = db || files[0].id;
+      dbSelect.value = target;
+      currentDbInfo = files.find((f2) => f2.id === target) || null;
+      const explorerInitial = {
+        redis: pendingRedisInitial,
+        es: pendingEsInitial
+      };
+      pendingRedisInitial = undefined;
+      pendingEsInitial = undefined;
+      await selectDb(target, explorerInitial, generation);
+      if (generation !== loadGeneration || currentDbInfo?.id !== target)
+        return;
+      if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
+        cb.onStateChange();
+        return;
+      }
+      if (!schemaCache) {
+        cb.onStateChange();
+        return;
+      }
+      if (table2) {
+        await selectTable(table2, generation);
+      }
+      if (generation !== loadGeneration)
+        return;
+      const normalizedView = normalizeViewForDb(view, currentDbInfo);
+      if (normalizedView !== "data") {
+        setActiveTab(normalizedView);
+        if (normalizedView === "schema") {
           const activeTable = tableList.el.querySelector(".db-table-item.active");
           if (activeTable?.dataset.table)
             showSchema(activeTable.dataset.table);
-        } else if (tab === "er") {
+        } else if (normalizedView === "er") {
           if (schemaCache)
             renderErDiagram();
-        } else if (tab === "snapshot") {
+        } else if (normalizedView === "snapshot") {
           snapshotView.refresh();
         }
       }
+      applyAnnotationTarget(options.annotationTarget);
+      cb.onStateChange();
     }
-    function leave() {
-      document.body.classList.remove("gdp-database-page");
-      unmount();
+    function applyAnnotationTarget(target) {
+      if (!target || target.db !== currentDbInfo?.id)
+        return;
+      if (target.data) {
+        if (target.table && target.table !== currentTable)
+          return;
+        setActiveTab("data");
+        grid.applyState(target.data);
+      }
+      if (target.query) {
+        setActiveTab("query");
+        if (target.query.sql)
+          queryEditor.setSql(target.query.sql, { silent: true });
+        if (target.query.autoRun && target.query.sql) {
+          if (!looksReadOnlySql(target.query.sql))
+            return;
+          target.query.mode === "explain" ? queryEditor.explain() : queryEditor.run();
+        }
+      }
+      if (target.search) {
+        setActiveTab("search");
+        globalSearchView.setSearch(target.search.term || "", {
+          includeNonText: target.search.includeNonText,
+          autoRun: target.search.autoRun
+        });
+      }
     }
     function handleSse(event, data) {
-      if (!mounted)
-        return;
-      if (historyOpen)
+      if (userPrefersHistoryOpen)
         historyView.refresh();
       if (event === "db-snapshot" && data) {
         snapshotView.handleSse(data);
       }
     }
-    return { enter, leave, handleSse };
+    function getState() {
+      const activeTable = tableList.el.querySelector(".db-table-item.active");
+      const state = {
+        id: cb.tabId,
+        dbId: currentDbInfo?.id ?? null,
+        table: currentTable ?? activeTable?.dataset.table ?? null,
+        view: currentTab
+      };
+      const sqlDraft = queryEditor.getSql();
+      if (sqlDraft)
+        state.sqlDraft = sqlDraft;
+      if (!userPrefersHistoryOpen)
+        state.historyOpen = false;
+      if (historyPane.style.height)
+        state.historyHeight = historyPane.style.height;
+      if (sidebar.style.width)
+        state.sidebarWidth = sidebar.style.width;
+      if (currentDbInfo?.kind === "redis") {
+        const sel = redisExplorer.getSelection();
+        if (sel.dbIndex !== undefined || sel.key !== undefined || sel.keyFilter !== undefined) {
+          state.redis = sel;
+        }
+      } else if (currentDbInfo?.kind === "elasticsearch") {
+        const sel = esExplorer.getSelection();
+        if (sel.index !== undefined || sel.query !== undefined) {
+          state.es = sel;
+        }
+      }
+      return state;
+    }
+    function getAnnotationTarget() {
+      if (!currentDbInfo)
+        return null;
+      const target = {
+        kind: "database",
+        db: currentDbInfo.id,
+        ...currentTable ? { table: currentTable } : {},
+        tab: currentTab
+      };
+      if (currentTab === "data") {
+        target.data = grid.getState();
+      } else if (currentTab === "query") {
+        const sql = queryEditor.getSql();
+        target.query = { ...sql ? { sql } : {}, mode: "run" };
+      } else if (currentTab === "search") {
+        target.search = globalSearchView.getSearch();
+      }
+      return target;
+    }
+    function getLabel() {
+      if (!currentDbInfo)
+        return "(empty)";
+      if (currentDbInfo.id.startsWith("docker:")) {
+        const m = currentDbInfo.name.match(/^(\S+)/);
+        return m ? m[1] : currentDbInfo.name;
+      }
+      const lastSlash = currentDbInfo.path.lastIndexOf("/");
+      return lastSlash >= 0 ? currentDbInfo.path.slice(lastSlash + 1) : currentDbInfo.path;
+    }
+    function dispose() {
+      loadGeneration++;
+      grid.destroy();
+      schemaView.clear();
+      erDiagram.dispose();
+      tableList.dispose();
+      queryEditor.dispose();
+      globalSearchView.dispose();
+      snapshotView.dispose();
+      historyView.clear();
+      redisExplorer.dispose();
+      esExplorer.dispose();
+      currentDbInfo = null;
+      currentTable = null;
+      schemaCache = null;
+    }
+    return {
+      el: container,
+      enter,
+      handleSse,
+      getState,
+      getAnnotationTarget,
+      getLabel,
+      dispose
+    };
+  }
+  var ICON_PATH_QUERY = "M5.72 4.22a.75.75 0 0 1 0 1.06L2.81 8l2.91 2.72a.75.75 0 1 1-1.06 1.06L1.22 8.53a.75.75 0 0 1 0-1.06l3.44-3.25a.75.75 0 0 1 1.06 0Zm4.56 0a.75.75 0 0 1 1.06 0l3.44 3.25a.75.75 0 0 1 0 1.06l-3.44 3.25a.75.75 0 1 1-1.06-1.06L13.19 8l-2.91-2.72a.75.75 0 0 1 0-1.06Z";
+  var ICON_PATH_ER = "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";
+  var ICON_PATH_SEARCH = "M10.68 11.74a6 6 0 0 1-7.917-8.984 6 6 0 0 1 8.997 7.905l3.05 3.05a.75.75 0 1 1-1.06 1.06l-3.07-3.03ZM11.5 7a4.499 4.499 0 1 1-8.997 0A4.499 4.499 0 0 1 11.5 7Z";
+  var ICON_PATH_SNAPSHOT = "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
+  function makeIconButton(opts) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "db-icon-btn";
+    btn.title = opts.title;
+    btn.setAttribute("aria-label", opts.label);
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "16");
+    svg.setAttribute("height", "16");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", opts.pathD);
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    btn.appendChild(svg);
+    btn.addEventListener("click", opts.onClick);
+    return btn;
+  }
+  function createDatabaseView(deps) {
+    let mounted = false;
+    const tabsById = new Map;
+    const paneReadyById = new Map;
+    let activeTabId = null;
+    let draggingTabId = null;
+    let dropTargetId = null;
+    let dropAfterTarget = false;
+    let restoring = false;
+    let savePending = null;
+    let saveChain = Promise.resolve();
+    let lifecycleSeq = 0;
+    let enterQueue = Promise.resolve();
+    let unloadListenerInstalled = false;
+    function scheduleSave() {
+      if (!mounted || restoring)
+        return;
+      if (savePending !== null)
+        clearTimeout(savePending);
+      savePending = setTimeout(saveNow, 500);
+    }
+    async function saveNow(options = {}) {
+      savePending = null;
+      if (!mounted || restoring)
+        return;
+      const tabs = [];
+      for (const [, entry] of tabsById) {
+        tabs.push(entry.pane.getState());
+      }
+      if (tabs.length === 0)
+        return;
+      const body = { version: 1, tabs, activeTabId };
+      const raw = JSON.stringify(body);
+      if (options.keepalive && navigator.sendBeacon) {
+        const blob = new Blob([raw], { type: "application/json" });
+        if (navigator.sendBeacon("/_db/tabs", blob))
+          return;
+      }
+      saveChain = saveChain.catch(() => {}).then(async () => {
+        try {
+          await fetch("/_db/tabs", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Code-Viewer-Action": "1"
+            },
+            body: raw,
+            keepalive: options.keepalive
+          });
+        } catch {}
+      });
+      await saveChain;
+    }
+    function flushPendingSave(options = {}) {
+      if (savePending !== null) {
+        clearTimeout(savePending);
+        savePending = null;
+      }
+      saveNow(options);
+    }
+    function handleBeforeUnload() {
+      flushPendingSave({ keepalive: true });
+    }
+    async function fetchTabs() {
+      try {
+        const res = await fetch("/_db/tabs");
+        if (!res.ok)
+          return null;
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }
+    const tabsBar = document.createElement("div");
+    tabsBar.className = "db-tabs-bar";
+    const tabsList = document.createElement("div");
+    tabsList.className = "db-tabs-list";
+    tabsList.setAttribute("role", "tablist");
+    const newTabBtn = document.createElement("button");
+    newTabBtn.type = "button";
+    newTabBtn.className = "db-tabs-new-btn";
+    newTabBtn.title = "新しいタブ";
+    newTabBtn.textContent = "+";
+    tabsBar.append(tabsList, newTabBtn);
+    const tabHost = document.createElement("div");
+    tabHost.className = "db-tab-host";
+    const root = document.createElement("div");
+    root.className = "db-root";
+    root.append(tabsBar, tabHost);
+    function setActive(id) {
+      activeTabId = id;
+      for (const [tid, entry] of tabsById) {
+        const isActive = tid === id;
+        entry.pane.el.hidden = !isActive;
+        entry.chip.classList.toggle("active", isActive);
+        entry.chip.setAttribute("aria-selected", isActive ? "true" : "false");
+        entry.chip.tabIndex = isActive ? 0 : -1;
+        entry.closeBtn.tabIndex = isActive ? 0 : -1;
+      }
+      if (!restoring)
+        syncActiveRoute();
+      scheduleSave();
+    }
+    function syncActiveRoute() {
+      if (!activeTabId)
+        return;
+      const entry = tabsById.get(activeTabId);
+      if (!entry)
+        return;
+      const s2 = entry.pane.getState();
+      deps.setRoute({
+        screen: "database",
+        db: s2.dbId ?? undefined,
+        table: s2.table ?? undefined,
+        tab: s2.view === "data" ? undefined : s2.view,
+        range: deps.currentRange()
+      }, true);
+    }
+    function refreshChipLabel(id) {
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      const label = entry.pane.getLabel();
+      entry.label.textContent = label;
+      entry.label.title = label;
+      entry.closeBtn.setAttribute("aria-label", `${label} を閉じる`);
+    }
+    function dedupeTabs(tabs) {
+      const seen = new Set;
+      const deduped = [];
+      for (const tab of tabs) {
+        const key = JSON.stringify({
+          dbId: tab.dbId,
+          table: tab.table,
+          view: tab.view,
+          redis: tab.redis ?? null,
+          es: tab.es ?? null
+        });
+        if (seen.has(key))
+          continue;
+        seen.add(key);
+        deduped.push(tab);
+      }
+      return deduped;
+    }
+    function isDbStillOpen(dbId) {
+      for (const [, entry] of tabsById) {
+        if (entry.pane.getState().dbId === dbId)
+          return true;
+      }
+      return false;
+    }
+    function closeDbIfUnused(dbId) {
+      if (!dbId || isDbStillOpen(dbId))
+        return;
+      const body = JSON.stringify({ db: dbId });
+      const headers = {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1"
+      };
+      fetch("/_db/close", { method: "POST", headers, body }).catch(() => {});
+    }
+    function clearDropTarget() {
+      if (!dropTargetId)
+        return;
+      const entry = tabsById.get(dropTargetId);
+      if (entry) {
+        entry.chip.classList.remove("drop-target", "drop-after");
+      }
+      dropTargetId = null;
+      dropAfterTarget = false;
+    }
+    function clearDragState() {
+      for (const [, entry] of tabsById) {
+        entry.chip.classList.remove("dragging", "drop-target", "drop-after");
+      }
+      draggingTabId = null;
+      dropTargetId = null;
+      dropAfterTarget = false;
+    }
+    function isDropAfter(chip, ev) {
+      const rect = chip.getBoundingClientRect();
+      return ev.clientX > rect.left + rect.width / 2;
+    }
+    function markDropTarget(id, after) {
+      if (dropTargetId !== id || dropAfterTarget !== after)
+        clearDropTarget();
+      dropTargetId = id;
+      dropAfterTarget = after;
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      entry.chip.classList.add("drop-target");
+      entry.chip.classList.toggle("drop-after", after);
+    }
+    function reorderTabs(ids) {
+      const next = new Map;
+      for (const id of ids) {
+        const entry = tabsById.get(id);
+        if (entry)
+          next.set(id, entry);
+      }
+      tabsById.clear();
+      for (const [id, entry] of next)
+        tabsById.set(id, entry);
+    }
+    function moveTabBeforeOrAfter(dragId, targetId, after) {
+      if (dragId === targetId)
+        return;
+      const dragEntry = tabsById.get(dragId);
+      const targetEntry = tabsById.get(targetId);
+      if (!dragEntry || !targetEntry)
+        return;
+      const orderedIds = Array.from(tabsById.keys());
+      const dragIndex = orderedIds.indexOf(dragId);
+      if (dragIndex < 0)
+        return;
+      orderedIds.splice(dragIndex, 1);
+      const targetIndex = orderedIds.indexOf(targetId);
+      if (targetIndex < 0) {
+        orderedIds.splice(dragIndex, 0, dragId);
+        reorderTabs(orderedIds);
+        return;
+      }
+      const insertIndex = targetIndex + (after ? 1 : 0);
+      orderedIds.splice(insertIndex, 0, dragId);
+      reorderTabs(orderedIds);
+      tabsList.insertBefore(dragEntry.chip, after ? targetEntry.chip.nextSibling : targetEntry.chip);
+      scheduleSave();
+    }
+    function moveTabToEnd(dragId) {
+      const dragEntry = tabsById.get(dragId);
+      if (!dragEntry)
+        return;
+      const orderedIds = Array.from(tabsById.keys());
+      const dragIndex = orderedIds.indexOf(dragId);
+      if (dragIndex < 0 || dragIndex === orderedIds.length - 1)
+        return;
+      orderedIds.splice(dragIndex, 1);
+      orderedIds.push(dragId);
+      reorderTabs(orderedIds);
+      tabsList.appendChild(dragEntry.chip);
+      scheduleSave();
+    }
+    function attachTabDragHandlers(chip, closeBtn, id) {
+      chip.draggable = true;
+      closeBtn.draggable = false;
+      chip.addEventListener("dragstart", (e2) => {
+        if (e2.target?.closest(".db-tabs-chip-close")) {
+          e2.preventDefault();
+          return;
+        }
+        draggingTabId = id;
+        chip.classList.add("dragging");
+        if (e2.dataTransfer) {
+          e2.dataTransfer.effectAllowed = "move";
+          e2.dataTransfer.setData("text/plain", id);
+        }
+      });
+      chip.addEventListener("dragenter", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        markDropTarget(id, isDropAfter(chip, e2));
+      });
+      chip.addEventListener("dragover", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        if (e2.dataTransfer)
+          e2.dataTransfer.dropEffect = "move";
+        markDropTarget(id, isDropAfter(chip, e2));
+      });
+      chip.addEventListener("dragleave", (e2) => {
+        const related = e2.relatedTarget;
+        if (related && chip.contains(related))
+          return;
+        if (dropTargetId === id)
+          clearDropTarget();
+      });
+      chip.addEventListener("drop", (e2) => {
+        if (!draggingTabId || draggingTabId === id)
+          return;
+        e2.preventDefault();
+        moveTabBeforeOrAfter(draggingTabId, id, isDropAfter(chip, e2));
+        clearDragState();
+      });
+      chip.addEventListener("dragend", () => clearDragState());
+    }
+    tabsList.addEventListener("dragover", (e2) => {
+      if (!draggingTabId)
+        return;
+      const target = e2.target?.closest(".db-tabs-chip");
+      if (target && tabsList.contains(target))
+        return;
+      e2.preventDefault();
+      if (e2.dataTransfer)
+        e2.dataTransfer.dropEffect = "move";
+      clearDropTarget();
+    });
+    tabsList.addEventListener("drop", (e2) => {
+      if (!draggingTabId)
+        return;
+      const target = e2.target?.closest(".db-tabs-chip");
+      if (target && tabsList.contains(target))
+        return;
+      e2.preventDefault();
+      moveTabToEnd(draggingTabId);
+      clearDragState();
+    });
+    function openTab(initial, options = {}) {
+      const id = initial?.id || makeId("t");
+      const chip = document.createElement("div");
+      chip.className = "db-tabs-chip";
+      chip.dataset.tabId = id;
+      chip.setAttribute("role", "tab");
+      chip.setAttribute("aria-selected", "false");
+      chip.tabIndex = -1;
+      const labelEl = document.createElement("span");
+      labelEl.className = "db-tabs-chip-label";
+      labelEl.textContent = "(empty)";
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.className = "db-tabs-chip-close";
+      closeBtn.title = "閉じる";
+      closeBtn.tabIndex = -1;
+      closeBtn.textContent = "×";
+      closeBtn.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        closeTab(id);
+      });
+      chip.append(labelEl, closeBtn);
+      attachTabDragHandlers(chip, closeBtn, id);
+      chip.addEventListener("click", () => setActive(id));
+      chip.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" || e2.key === " ") {
+          e2.preventDefault();
+          setActive(id);
+        }
+      });
+      chip.addEventListener("auxclick", (e2) => {
+        if (e2.button === 1) {
+          e2.preventDefault();
+          closeTab(id);
+        }
+      });
+      const pane = createTabPane(deps, {
+        tabId: id,
+        isActive: () => activeTabId === id,
+        onStateChange: () => {
+          refreshChipLabel(id);
+          if (activeTabId === id && !restoring)
+            syncActiveRoute();
+          scheduleSave();
+        }
+      }, {
+        dbId: initial?.dbId ?? null,
+        table: initial?.table ?? null,
+        view: initial?.view ?? undefined,
+        sqlDraft: initial?.sqlDraft,
+        historyOpen: initial?.historyOpen,
+        historyHeight: initial?.historyHeight,
+        sidebarWidth: initial?.sidebarWidth,
+        redis: initial?.redis,
+        es: initial?.es
+      });
+      pane.el.hidden = true;
+      tabsList.appendChild(chip);
+      tabHost.appendChild(pane.el);
+      tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
+      setActive(id);
+      const ready = (async () => {
+        if (options.annotationTarget)
+          restoring = true;
+        try {
+          await pane.enter(initial?.dbId || undefined, initial?.table || undefined, initial?.view || undefined, options);
+          refreshChipLabel(id);
+        } finally {
+          if (options.annotationTarget)
+            restoring = false;
+          paneReadyById.delete(id);
+        }
+      })();
+      paneReadyById.set(id, ready);
+      return id;
+    }
+    function closeTab(id) {
+      const entry = tabsById.get(id);
+      if (!entry)
+        return;
+      const closedDbId = entry.pane.getState().dbId;
+      entry.pane.dispose();
+      entry.pane.el.remove();
+      entry.chip.remove();
+      tabsById.delete(id);
+      paneReadyById.delete(id);
+      closeDbIfUnused(closedDbId);
+      if (activeTabId !== id) {
+        scheduleSave();
+        return;
+      }
+      if (tabsById.size === 0) {
+        openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
+        return;
+      }
+      const firstId = tabsById.keys().next().value;
+      if (firstId)
+        setActive(firstId);
+    }
+    newTabBtn.addEventListener("click", () => {
+      openTab({ dbId: null, table: null, view: "data" }, { autoSelectFirst: false });
+    });
+    function routeMatchesState(state, db, table2, view) {
+      if (!db && (table2 || view) && !state.dbId)
+        return false;
+      if (db !== undefined && state.dbId !== db)
+        return false;
+      if (table2 !== undefined && state.table !== table2)
+        return false;
+      if (view !== undefined && state.view !== view)
+        return false;
+      return true;
+    }
+    async function applyRouteToTab(db, table2, view, options = {}) {
+      async function enterPane(pane, targetDb, targetTable, targetView, enterOptions) {
+        if (!enterOptions?.annotationTarget) {
+          await pane.enter(targetDb, targetTable, targetView, enterOptions);
+          return;
+        }
+        restoring = true;
+        try {
+          await pane.enter(targetDb, targetTable, targetView, enterOptions);
+        } finally {
+          restoring = false;
+        }
+      }
+      if (options.reuseActiveTab && activeTabId) {
+        const targetId = activeTabId;
+        const active = tabsById.get(activeTabId);
+        if (active) {
+          await enterPane(active.pane, db, table2, view, options);
+          if (!mounted)
+            return;
+          refreshChipLabel(targetId);
+          return;
+        }
+      }
+      for (const [id2, entry] of tabsById) {
+        if (routeMatchesState(entry.pane.getState(), db, table2, view)) {
+          setActive(id2);
+          if (options.annotationTarget) {
+            await enterPane(entry.pane, db, table2, view, options);
+            if (!mounted)
+              return;
+          }
+          refreshChipLabel(id2);
+          return;
+        }
+      }
+      const id = openTab({
+        dbId: db ?? null,
+        table: table2 ?? null,
+        view: view ?? "data"
+      }, { autoSelectFirst: db !== undefined, ...options });
+      const ready = paneReadyById.get(id);
+      if (ready)
+        await ready;
+      refreshChipLabel(id);
+    }
+    function parseSseDbId(data) {
+      if (!data)
+        return null;
+      try {
+        const parsed = JSON.parse(data);
+        return typeof parsed.dbId === "string" ? parsed.dbId : null;
+      } catch {
+        return null;
+      }
+    }
+    async function doEnter(seq, db, table2, view, options = {}) {
+      if (seq !== lifecycleSeq)
+        return;
+      const firstMount = !mounted;
+      if (firstMount) {
+        const content = document.getElementById("content");
+        if (!content)
+          return;
+        const diff = document.getElementById("diff");
+        if (diff)
+          diff.hidden = true;
+        const empty = document.getElementById("empty");
+        if (empty)
+          empty.classList.add("hidden");
+        content.appendChild(root);
+        document.body.classList.add("gdp-database-page");
+        mounted = true;
+        if (!unloadListenerInstalled) {
+          window.addEventListener("beforeunload", handleBeforeUnload);
+          unloadListenerInstalled = true;
+        }
+        deps.setPageMode();
+        deps.syncHeaderMenu();
+        const restored = await fetchTabs();
+        if (!mounted || seq !== lifecycleSeq)
+          return;
+        if (restored && restored.tabs.length > 0) {
+          restoring = true;
+          const restoredIds = [];
+          try {
+            const restoredTabs = dedupeTabs(restored.tabs);
+            for (const t2 of restoredTabs) {
+              if (!mounted || seq !== lifecycleSeq)
+                return;
+              restoredIds.push(openTab(t2, { autoSelectFirst: false }));
+            }
+            const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
+            if (targetId)
+              setActive(targetId);
+            await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
+            if (!mounted || seq !== lifecycleSeq)
+              return;
+          } finally {
+            restoring = false;
+          }
+          if (db || table2 || view) {
+            await applyRouteToTab(db, table2, view, options);
+          } else {
+            syncActiveRoute();
+          }
+          scheduleSave();
+          return;
+        }
+      } else {
+        const diff = document.getElementById("diff");
+        if (diff)
+          diff.hidden = true;
+        const empty = document.getElementById("empty");
+        if (empty)
+          empty.classList.add("hidden");
+        root.hidden = false;
+        document.body.classList.add("gdp-database-page");
+        deps.setPageMode();
+        deps.syncHeaderMenu();
+      }
+      if (tabsById.size === 0) {
+        const id = openTab({
+          dbId: db || null,
+          table: table2 || null,
+          view: view || "data"
+        }, { autoSelectFirst: !db, ...options });
+        const ready = paneReadyById.get(id);
+        if (ready)
+          await ready;
+        if (!mounted || seq !== lifecycleSeq)
+          return;
+        return;
+      }
+      if (!activeTabId)
+        return;
+      const active = tabsById.get(activeTabId);
+      if (!active)
+        return;
+      if (db || table2 || view) {
+        await applyRouteToTab(db, table2, view, options);
+      }
+    }
+    async function enter(db, table2, view, options = {}) {
+      const seq = lifecycleSeq;
+      enterQueue = enterQueue.catch(() => {}).then(() => doEnter(seq, db, table2, view, options));
+      await enterQueue;
+    }
+    function leave() {
+      if (!mounted)
+        return;
+      lifecycleSeq++;
+      flushPendingSave();
+      for (const [, entry] of tabsById) {
+        entry.pane.dispose();
+      }
+      tabsById.clear();
+      tabsList.innerHTML = "";
+      tabHost.innerHTML = "";
+      activeTabId = null;
+      root.remove();
+      document.body.classList.remove("gdp-database-page");
+      if (unloadListenerInstalled) {
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+        unloadListenerInstalled = false;
+      }
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+      mounted = false;
+    }
+    function suspend() {
+      if (!mounted)
+        return;
+      flushPendingSave();
+      root.hidden = true;
+      document.body.classList.remove("gdp-database-page");
+      const diff = document.getElementById("diff");
+      if (diff)
+        diff.hidden = false;
+    }
+    function handleSse(event, data) {
+      if (!mounted)
+        return;
+      const dbId = parseSseDbId(data);
+      for (const [, entry] of tabsById) {
+        if (dbId && entry.pane.getState().dbId !== dbId)
+          continue;
+        entry.pane.handleSse(event, data);
+      }
+    }
+    function captureAnnotationTarget() {
+      if (!activeTabId)
+        return null;
+      return tabsById.get(activeTabId)?.pane.getAnnotationTarget() ?? null;
+    }
+    return { enter, captureAnnotationTarget, suspend, leave, handleSse };
   }
   function formatSize(bytes) {
     if (bytes >= 1024 * 1024 * 1024)
@@ -10886,65 +13832,20 @@ ${frontmatter.yaml}
     });
   }
 
-  // web-src/views/media-embed.ts
-  var MEDIA_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|mp4|webm|mov|mp3|wav|ogg|flac|m4a|aac|opus)(\?.*)?$/i;
-  var IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i;
-  var VIDEO_RE = /\.(mp4|webm|mov)$/i;
-  var AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i;
-  function isMedia(p2) {
-    return MEDIA_RE.test(p2);
-  }
-  function isImage(p2) {
-    return IMAGE_RE.test(p2);
-  }
-  function isVideo(p2) {
-    return VIDEO_RE.test(p2);
-  }
-  function isAudio(p2) {
-    return AUDIO_RE.test(p2);
-  }
-  function fileURL(path, ref) {
-    return `/_file?path=${encodeURIComponent(path)}&ref=${ref}`;
-  }
-  function mediaTag(path, ref) {
-    const url = fileURL(path, ref);
-    if (isVideo(path)) {
-      return `<video src="${url}" controls preload="metadata"></video>`;
-    }
-    if (isAudio(path)) {
-      return `<audio src="${url}" controls preload="metadata"></audio>`;
-    }
-    return `<img src="${url}" alt="" loading="lazy">`;
-  }
-  function enhanceMediaCard(file, card) {
-    const path = file.path;
-    if (!file.media_kind && !isMedia(path))
-      return;
-    const wrapper = card.querySelector(".d2h-file-wrapper");
-    if (!wrapper)
-      return;
-    const body = wrapper.querySelector(".d2h-files-diff") || wrapper.querySelector(".d2h-file-diff");
-    if (!body)
-      return;
-    const container = document.createElement("div");
-    container.className = "gdp-media";
-    let leftHTML;
-    let rightHTML;
-    if (file.status === "A") {
-      leftHTML = '<div class="media-empty">Not in HEAD</div>';
-      rightHTML = mediaTag(path, "worktree");
-    } else if (file.status === "D") {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = '<div class="media-empty">Deleted</div>';
-    } else {
-      leftHTML = mediaTag(path, "HEAD");
-      rightHTML = mediaTag(path, "worktree");
-    }
-    container.innerHTML = '<div class="media-side"><div class="media-label del">Before</div>' + leftHTML + "</div>" + '<div class="media-side"><div class="media-label add">After</div>' + rightHTML + "</div>";
-    body.replaceWith(container);
-  }
-
   // web-src/views/diff-view.ts
+  function isDiffShellDomIntact(target, expectedKeys) {
+    const children = Array.from(target.children);
+    if (children.length !== expectedKeys.length)
+      return false;
+    return children.every((child, index) => {
+      if (!child.classList.contains("gdp-file-shell"))
+        return false;
+      return child.dataset.key === expectedKeys[index];
+    });
+  }
+  function shouldRenderDiffSidebar(listSame, domIntact) {
+    return !listSame || !domIntact;
+  }
   function createDiffView(deps) {
     const {
       $,
@@ -10974,7 +13875,8 @@ ${frontmatter.yaml}
       persistViewedFiles,
       applyHideTests,
       getServerGeneration,
-      setServerGeneration
+      setServerGeneration,
+      invalidateRepoSidebar
     } = deps;
     function rerenderLoadedDiffs() {
       document.querySelectorAll(".gdp-file-shell.loaded").forEach((card) => {
@@ -11028,6 +13930,14 @@ ${frontmatter.yaml}
       button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
       button.innerHTML = expanded ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS) : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
     }
+    function setProjectBranch(branch) {
+      const el = document.querySelector("#project-branch");
+      if (!el)
+        return;
+      el.hidden = !branch;
+      el.textContent = branch;
+      el.title = branch ? `Current branch: ${branch}` : "";
+    }
     function renderMeta(meta) {
       const el = $("#meta");
       if (!meta) {
@@ -11035,13 +13945,8 @@ ${frontmatter.yaml}
         return;
       }
       setProjectName(meta.project || "");
+      setProjectBranch(meta.branch || "");
       el.innerHTML = "";
-      if (meta.branch) {
-        const b2 = document.createElement("span");
-        b2.className = "ref";
-        b2.textContent = `⎇ ${meta.branch}`;
-        el.appendChild(b2);
-      }
       if (meta.totals) {
         const t2 = document.createElement("span");
         t2.className = "num";
@@ -11239,15 +14144,19 @@ ${frontmatter.yaml}
       const newListSig = computeListSignature(newFiles);
       const listSame = newListSig === prevListSignature && prevListSignature !== "";
       STATE.files = newFiles;
+      invalidateRepoSidebar();
       setServerGeneration(meta.generation || 0);
       window._lastMeta = meta;
       renderMeta(meta);
       const target = $("#diff");
       const empty = $("#empty");
+      const expectedKeys = newFiles.map(fileKey);
+      const domIntact = isDiffShellDomIntact(target, expectedKeys);
+      const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
       if (!newFiles.length) {
         prevListSignature = newListSig;
         prevCardSignatures.clear();
-        if (!listSame)
+        if (sidebarNeedsRender)
           renderSidebar(newFiles);
         if (STATE.route.screen === "file") {
           empty.classList.add("hidden");
@@ -11258,9 +14167,9 @@ ${frontmatter.yaml}
         }
         LOAD_QUEUE.length = 0;
         return {
-          structureChanged: !listSame,
+          structureChanged: sidebarNeedsRender,
           invalidatedCards: 0,
-          preservedDom: listSame
+          preservedDom: listSame && domIntact
         };
       }
       empty.classList.add("hidden");
@@ -11269,7 +14178,7 @@ ${frontmatter.yaml}
         newCardSigs.set(fileKey(f2), computeCardSignature(f2));
       }
       let invalidatedCards = 0;
-      if (listSame) {
+      if (listSame && domIntact) {
         const pathsUnknown = !changedPaths;
         let sidebarNeedsStatsUpdate = false;
         for (const f2 of newFiles) {
@@ -11332,7 +14241,7 @@ ${frontmatter.yaml}
           preservedDom: invalidatedCards === 0
         };
       }
-      if (!listSame)
+      if (sidebarNeedsRender)
         renderSidebar(newFiles);
       const oldByKey = new Map;
       document.querySelectorAll(".gdp-file-shell").forEach((c2) => {
@@ -12146,6 +15055,29 @@ ${frontmatter.yaml}
     };
   }
 
+  // web-src/views/empty-diff-pane.ts
+  function showEmptyHistoryDiffPane(deps) {
+    if (deps.diff)
+      deps.diff.innerHTML = "";
+    deps.placeSidebarToggle();
+    deps.renderSidebar([], undefined);
+    deps.setFiles([]);
+    deps.clearLastMeta();
+    deps.renderMeta(null);
+    deps.invalidateRepoSidebar();
+    deps.clearLoadQueue();
+    if (deps.empty) {
+      deps.empty.classList.remove("hidden");
+      const h2 = deps.empty.querySelector("h2");
+      if (h2)
+        h2.textContent = "No commit selected";
+      const p2 = deps.empty.querySelector("p");
+      if (p2)
+        p2.textContent = "Select a commit from the list to see its changes.";
+    }
+    deps.setStatus("live");
+  }
+
   // web-src/views/help-page.ts
   var HELP_LANGUAGES = ["en", "ja"];
   var HELP_SECTIONS = [
@@ -12251,6 +15183,22 @@ ${frontmatter.yaml}
                 },
                 {
                   kind: "command",
+                  title: "Insert or move a step",
+                  command: `code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "This belongs here."
+code-viewer annotate move a-999 --before a-123`
+                },
+                {
+                  kind: "command",
+                  title: "Annotate a database view",
+                  command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "This restores the filtered failure rows."
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "This reopens the result being discussed."`
+                },
+                {
+                  kind: "command",
                   title: "Inspect posted annotations",
                   command: "code-viewer annotate list"
                 }
@@ -12277,6 +15225,10 @@ ${frontmatter.yaml}
                     [
                       "Fix in place",
                       "Use annotate edit when a note is wrong so the walkthrough order and IDs remain stable."
+                    ],
+                    [
+                      "Place notes deliberately",
+                      "Use --before, --after, --position, or annotate move when the reading order changes."
                     ]
                   ]
                 }
@@ -12594,6 +15546,22 @@ ${frontmatter.yaml}
                 },
                 {
                   kind: "command",
+                  title: "説明を途中に差し込む・移動する",
+                  command: `code-viewer annotate add --after a-123 --file src/cache.ts --line 150 --body "ここに入る補足です。"
+code-viewer annotate move a-999 --before a-123`
+                },
+                {
+                  kind: "command",
+                  title: "データベース画面へ注釈を追加する",
+                  command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
+  --grid-search failed --filter status=failed --sort created_at:desc \\
+  --body "失敗注文で絞り込んだ調査画面を復元します。"
+code-viewer annotate add-db --db app.db --tab query \\
+  --sql "select * from orders where status = 'failed'" --run-query \\
+  --body "説明対象のクエリ結果を開き直します。"`
+                },
+                {
+                  kind: "command",
                   title: "投稿済み注釈を確認する",
                   command: "code-viewer annotate list"
                 }
@@ -12620,6 +15588,10 @@ ${frontmatter.yaml}
                     [
                       "間違いは edit で直す",
                       "削除して追加し直すより、注釈IDと順番を保ったまま修正します。"
+                    ],
+                    [
+                      "順番は明示的に直す",
+                      "--before、--after、--position、annotate move で読み順を整えます。"
                     ]
                   ]
                 }
@@ -13031,6 +16003,51 @@ ${frontmatter.yaml}
   }
 
   // web-src/views/history-view.ts
+  var HISTORY_BODY_COLLAPSE_LINES = 10;
+  var HISTORY_WORKTREE_COMMIT = "worktree";
+  var HISTORY_WORKTREE_LABEL = "未コミット変更 (Working tree)";
+  function historyBodyLineCount(rawText) {
+    if (!rawText)
+      return 0;
+    return rawText.split(/\r?\n/).length;
+  }
+  function historyBodyToggleLabel(expanded, remainingLines) {
+    return expanded ? "閉じる" : `もっと見る (${remainingLines} 行)`;
+  }
+  function buildExpandableHistoryBody(rendered, rawText) {
+    const lineCount = historyBodyLineCount(rawText);
+    if (lineCount <= HISTORY_BODY_COLLAPSE_LINES)
+      return rendered;
+    const wrap = document.createElement("div");
+    wrap.className = "hci-body-expandable";
+    const collapsible = document.createElement("div");
+    collapsible.className = "hci-body-collapsible";
+    collapsible.appendChild(rendered);
+    const button = document.createElement("div");
+    button.className = "hci-body-toggle";
+    button.setAttribute("role", "button");
+    button.setAttribute("tabindex", "0");
+    const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
+    const sync = () => {
+      const expanded = collapsible.classList.contains("expanded");
+      button.textContent = historyBodyToggleLabel(expanded, remainingLines);
+      button.setAttribute("aria-expanded", expanded ? "true" : "false");
+    };
+    const toggle = () => {
+      collapsible.classList.toggle("expanded");
+      sync();
+    };
+    button.addEventListener("click", toggle);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      toggle();
+    });
+    sync();
+    wrap.append(collapsible, button);
+    return wrap;
+  }
   function createHistoryView(deps) {
     const panel = deps.$("#history-panel");
     const list2 = deps.$("#history-list");
@@ -13044,6 +16061,9 @@ ${frontmatter.yaml}
     let generation = 0;
     let selectedSha = "";
     let query = "";
+    function worktreeDiffRange() {
+      return { from: "HEAD", to: "worktree" };
+    }
     function setBanner(message) {
       banner.textContent = message;
       banner.hidden = !message;
@@ -13051,6 +16071,14 @@ ${frontmatter.yaml}
     function setStatusText(message) {
       statusEl.textContent = message;
       statusEl.hidden = !message;
+    }
+    function clearCommitInfo() {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      info.hidden = true;
+      info.querySelector(".hci-head")?.removeAttribute("hidden");
+      info.querySelector(".hci-body")?.replaceChildren();
     }
     function relativeWhen(iso) {
       const t2 = Date.parse(iso);
@@ -13070,6 +16098,21 @@ ${frontmatter.yaml}
         return `${day}d ago`;
       return iso.slice(0, 10);
     }
+    function absoluteWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const d2 = new Date(t2);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}`;
+    }
+    function displayWhen(iso) {
+      const relative = relativeWhen(iso);
+      const absolute = absoluteWhen(iso);
+      if (relative === absolute || relative === absolute.slice(0, 10))
+        return absolute;
+      return `${relative} (${absolute})`;
+    }
     function fetchPage(skip) {
       const url = `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` + (query ? `&q=${encodeURIComponent(query)}` : "");
       return deps.trackLoad(fetch(url).then(async (r2) => {
@@ -13083,11 +16126,15 @@ ${frontmatter.yaml}
     }
     function commitRow(commit) {
       const active = commit.sha === selectedSha ? " active" : "";
-      return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(relativeWhen(commit.when))}</span>` + `</span>` + `</li>`;
+      return `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` + `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` + `<span class="meta2">` + `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` + `<span class="author">${deps.escapeHtml(commit.author)}</span>` + `<span class="when">${deps.escapeHtml(displayWhen(commit.when))}</span>` + `</span>` + `</li>`;
+    }
+    function worktreeRow() {
+      const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
+      return `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` + `<span class="subject" title="${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}">${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}</span>` + `<span class="meta2">` + `<span class="sha">HEAD..worktree</span>` + `<span class="author">Working tree</span>` + `</span>` + `</li>`;
     }
     function renderList() {
       const now = new Date;
-      const html = [];
+      const html = [worktreeRow()];
       let lastGroup = "";
       for (const commit of commits) {
         const group = historyGroupLabel(commit.when, now);
@@ -13100,19 +16147,21 @@ ${frontmatter.yaml}
       list2.innerHTML = html.join("");
       setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
     }
-    function updateCommitInfo(commit) {
+    async function updateCommitInfo(commit) {
       const info = document.querySelector("#history-commit-info");
       if (!info)
         return;
       if (!commit) {
-        info.hidden = true;
+        clearCommitInfo();
         return;
       }
+      const gen = generation;
       const set2 = (sel, text2) => {
         const el = info.querySelector(sel);
         if (el)
           el.textContent = text2;
       };
+      info.querySelector(".hci-head")?.removeAttribute("hidden");
       set2(".hci-sha", commit.sha);
       set2(".hci-author", commit.author);
       const t2 = Date.parse(commit.when);
@@ -13120,8 +16169,31 @@ ${frontmatter.yaml}
       set2(".hci-subject", commit.subject);
       const body = info.querySelector(".hci-body");
       if (body) {
-        body.textContent = commit.body;
-        body.hidden = !commit.body;
+        body.replaceChildren();
+        if (!commit.body) {
+          body.hidden = true;
+        } else {
+          body.hidden = false;
+          const rendered = await renderMarkdownPreview(commit.body, { path: "COMMIT_MSG", ref: commit.sha }, { syntaxHighlight: deps.getSyntaxHighlight() });
+          if (gen !== generation || selectedSha !== commit.sha)
+            return;
+          body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
+        }
+      }
+      info.hidden = false;
+    }
+    function updateWorktreeInfo() {
+      const info = document.querySelector("#history-commit-info");
+      if (!info)
+        return;
+      info.querySelector(".hci-head")?.setAttribute("hidden", "");
+      const subject = info.querySelector(".hci-subject");
+      if (subject)
+        subject.textContent = HISTORY_WORKTREE_LABEL;
+      const body = info.querySelector(".hci-body");
+      if (body) {
+        body.hidden = true;
+        body.replaceChildren();
       }
       info.hidden = false;
     }
@@ -13162,7 +16234,7 @@ ${frontmatter.yaml}
       const gen = generation;
       selectedSha = commit.sha;
       updateActiveRow();
-      updateCommitInfo(commit);
+      await updateCommitInfo(commit);
       if (gen !== generation)
         return;
       if (options.updateUrl !== false) {
@@ -13172,6 +16244,21 @@ ${frontmatter.yaml}
       if (gen !== generation)
         return;
       await deps.applyCommitRange(commitDiffRange(commit));
+      if (gen !== generation)
+        return;
+    }
+    async function selectWorktree(options = {}) {
+      const gen = generation;
+      selectedSha = HISTORY_WORKTREE_COMMIT;
+      updateActiveRow();
+      updateWorktreeInfo();
+      const range = worktreeDiffRange();
+      if (options.updateUrl !== false) {
+        deps.setRoute({ screen: "history", ref, commit: selectedSha, range }, true);
+      }
+      if (gen !== generation)
+        return;
+      await deps.applyCommitRange(range);
       if (gen !== generation)
         return;
     }
@@ -13195,6 +16282,10 @@ ${frontmatter.yaml}
     }
     async function resolveDeepLink(sha) {
       const gen = generation;
+      if (sha === HISTORY_WORKTREE_COMMIT) {
+        await selectWorktree({ updateUrl: false });
+        return;
+      }
       let pagesLoaded = 0;
       if (commits.length === 0) {
         await loadNextPage();
@@ -13225,7 +16316,7 @@ ${frontmatter.yaml}
         return;
       if (!single) {
         setBanner(lookupFailed ? `failed to load commit: ${sha}` : `commit not found: ${sha}`);
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         deps.showEmptyDiffPane();
         return;
       }
@@ -13251,6 +16342,7 @@ ${frontmatter.yaml}
       const refChanged = nextRef !== ref;
       if (refChanged || force || commits.length === 0) {
         generation++;
+        const gen = generation;
         ref = nextRef;
         commits = [];
         hasMore = false;
@@ -13258,9 +16350,11 @@ ${frontmatter.yaml}
         inFlight = null;
         selectedSha = "";
         setBanner("");
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         renderList();
         await loadNextPage();
+        if (gen !== generation)
+          return;
       }
       const route2 = deps.getRoute();
       if (route2.screen !== "history")
@@ -13270,7 +16364,7 @@ ${frontmatter.yaml}
       } else {
         selectedSha = "";
         updateActiveRow();
-        updateCommitInfo(null);
+        await updateCommitInfo(null);
         deps.showEmptyDiffPane();
       }
     }
@@ -13283,10 +16377,24 @@ ${frontmatter.yaml}
       }, false);
       enterHistory(true);
     }
+    function leaveHistory() {
+      generation++;
+      loading = false;
+      inFlight = null;
+      selectedSha = "";
+      setBanner("");
+      setStatusText("");
+      updateActiveRow();
+      clearCommitInfo();
+    }
     list2.addEventListener("click", (e2) => {
       const row = e2.target.closest(".history-item");
       if (!row?.dataset.sha)
         return;
+      if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
+        selectWorktree();
+        return;
+      }
       const commit = commits.find((c2) => c2.sha === row.dataset.sha);
       if (commit)
         selectCommit(commit);
@@ -13331,7 +16439,12 @@ ${frontmatter.yaml}
         loadNextPage();
     }, { root: panel, rootMargin: "200px" });
     observer.observe(sentinel);
-    return { enterHistory, onRefPicked };
+    return {
+      enterHistory,
+      leaveHistory,
+      onRefPicked,
+      isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT
+    };
   }
 
   // web-src/views/hunk-expand.ts
@@ -13831,37 +16944,118 @@ ${frontmatter.yaml}
     }
     fetchRefs();
     let popTab = "commits";
+    const COMMIT_PAGE_SIZE = 50;
     let commitSearchTimer = null;
     let commitSearchSeq = 0;
     let commitSearchAbort = null;
     let commitSearchLoading = false;
-    function fetchCommitRefs(query) {
+    let commitAppendLoading = false;
+    let commitHasMore = false;
+    let commitQuery = "";
+    function appendUniqueCommits(commits) {
+      const seen = new Set(REFS.commits.map((commit) => commit.sha));
+      for (const commit of commits || []) {
+        if (!commit.sha || seen.has(commit.sha))
+          continue;
+        seen.add(commit.sha);
+        REFS.commits.push(commit);
+      }
+    }
+    function fetchCommitRefs(query, options = {}) {
+      const append = !!options.append;
+      const normalizedQuery = (query || "").trim();
       const seq = ++commitSearchSeq;
       if (commitSearchAbort)
         commitSearchAbort.abort();
       commitSearchAbort = new AbortController;
-      const url = `/_commits?max=100&q=${encodeURIComponent((query || "").trim())}`;
+      const skip = append ? REFS.commits.length : 0;
+      const previousScrollTop = popBody.scrollTop;
+      if (append)
+        commitAppendLoading = true;
+      else {
+        commitQuery = normalizedQuery;
+        commitSearchLoading = true;
+        commitAppendLoading = false;
+        commitHasMore = false;
+      }
+      const url = `/_commits?max=${COMMIT_PAGE_SIZE}&skip=${skip}` + `&q=${encodeURIComponent(normalizedQuery)}`;
       return fetch(url, { signal: commitSearchAbort.signal }).then((r2) => r2.json()).then((refs) => {
         if (seq !== commitSearchSeq)
           return;
         commitSearchLoading = false;
-        REFS.commits = refs.commits || [];
+        commitAppendLoading = false;
+        commitHasMore = !!refs.hasMore;
+        if (append)
+          appendUniqueCommits(refs.commits);
+        else
+          REFS.commits = refs.commits || [];
         if (!popover.hidden && popTab === "commits") {
           buildPopBody(popSearch.value);
+          if (append)
+            popBody.scrollTop = previousScrollTop;
         }
       }).catch(() => {
-        if (seq === commitSearchSeq)
+        if (seq === commitSearchSeq) {
           commitSearchLoading = false;
+          commitAppendLoading = false;
+        }
       });
     }
     function scheduleCommitSearch(query) {
       if (commitSearchTimer)
         clearTimeout(commitSearchTimer);
+      commitQuery = (query || "").trim();
       commitSearchLoading = true;
+      commitAppendLoading = false;
+      commitHasMore = false;
+      REFS.commits = [];
       commitSearchTimer = setTimeout(() => {
         commitSearchTimer = null;
         fetchCommitRefs(query);
       }, 150);
+    }
+    function maybeLoadMoreCommits() {
+      if (popTab !== "commits")
+        return;
+      if (!commitHasMore || commitSearchLoading || commitAppendLoading)
+        return;
+      const remaining = popBody.scrollHeight - popBody.scrollTop - popBody.clientHeight;
+      if (remaining > 96)
+        return;
+      fetchCommitRefs(commitQuery, { append: true });
+    }
+    function relativeWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const sec = Math.round((Date.now() - t2) / 1000);
+      if (sec < 60)
+        return "just now";
+      const min = Math.round(sec / 60);
+      if (min < 60)
+        return `${min}m ago`;
+      const hour = Math.round(min / 60);
+      if (hour < 24)
+        return `${hour}h ago`;
+      const day = Math.round(hour / 24);
+      if (day < 30)
+        return `${day}d ago`;
+      return iso.slice(0, 10);
+    }
+    function absoluteWhen(iso) {
+      const t2 = Date.parse(iso);
+      if (!Number.isFinite(t2))
+        return iso;
+      const d2 = new Date(t2);
+      const pad = (n2) => String(n2).padStart(2, "0");
+      return `${d2.getFullYear()}-${pad(d2.getMonth() + 1)}-${pad(d2.getDate())} ${pad(d2.getHours())}:${pad(d2.getMinutes())}`;
+    }
+    function displayWhen(iso) {
+      const relative = relativeWhen(iso);
+      const absolute = absoluteWhen(iso);
+      if (relative === absolute || relative === absolute.slice(0, 10))
+        return absolute;
+      return `${relative} (${absolute})`;
     }
     function buildPopBody(query) {
       const q = (query || "").toLowerCase().trim();
@@ -13882,7 +17076,12 @@ ${frontmatter.yaml}
           if (!commit.sha)
             continue;
           const shortSha = commit.sha.slice(0, 7);
-          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when || "") + "</span>" + "</div>" + "</div>");
+          html.push('<div class="rp-item-commit" data-val="' + escapeAttr(commit.sha) + '">' + '<div class="row1">' + '<span class="sha">' + deps.escapeHtml(shortSha) + "</span>" + '<span class="subject" title="' + escapeAttr(commit.subject || "") + '">' + deps.escapeHtml(commit.subject || "") + "</span>" + "</div>" + '<div class="row2">' + '<span class="author">' + deps.escapeHtml(commit.author || "") + "</span>" + '<span class="when">' + deps.escapeHtml(commit.when ? displayWhen(commit.when) : "") + "</span>" + "</div>" + "</div>");
+        }
+        if (commitAppendLoading) {
+          html.push('<div class="rp-empty">loading more commits...</div>');
+        } else if (commitHasMore) {
+          html.push('<div class="rp-empty">scroll for more commits...</div>');
         }
       } else if (popTab === "branches") {
         const branches = (REFS.branches || []).filter((b2) => m(b2.name));
@@ -13978,6 +17177,7 @@ ${frontmatter.yaml}
         scheduleCommitSearch(popSearch.value);
       buildPopBody(popSearch.value);
     });
+    popBody.addEventListener("scroll", maybeLoadMoreCommits, { passive: true });
     popSearch.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape") {
         closePopover();
@@ -14046,386 +17246,6 @@ ${frontmatter.yaml}
     return trimmed;
   }
 
-  // web-src/core/source-meta.ts
-  var SOURCE_SHIKI_LANG_ALIASES = {
-    makefile: "make",
-    objectivec: "c",
-    "objective-c": "c",
-    "objective-cpp": "cpp",
-    starlark: "python"
-  };
-  function normalizeSourceShikiLang(lang) {
-    if (!lang)
-      return null;
-    return SOURCE_SHIKI_LANG_ALIASES[lang] || lang;
-  }
-  function isPreviewableSource(path) {
-    return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
-  }
-  function sourcePreviewKind(path) {
-    if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path))
-      return "markdown";
-    if (/\.(html|htm)$/i.test(path))
-      return "html";
-    return null;
-  }
-  var EXT_TO_LANG = {
-    js: "javascript",
-    mjs: "javascript",
-    cjs: "javascript",
-    ts: "typescript",
-    tsx: "typescript",
-    jsx: "javascript",
-    py: "python",
-    rb: "ruby",
-    go: "go",
-    rs: "rust",
-    java: "java",
-    kt: "kotlin",
-    swift: "swift",
-    c: "c",
-    h: "c",
-    cc: "cpp",
-    cpp: "cpp",
-    hpp: "cpp",
-    cs: "csharp",
-    php: "php",
-    lua: "lua",
-    sh: "bash",
-    bash: "bash",
-    zsh: "bash",
-    fish: "bash",
-    sql: "sql",
-    json: "json",
-    yaml: "yaml",
-    yml: "yaml",
-    toml: "toml",
-    tf: "terraform",
-    tfvars: "terraform",
-    hcl: "terraform",
-    xml: "xml",
-    html: "xml",
-    vue: "xml",
-    css: "css",
-    scss: "scss",
-    md: "markdown",
-    dockerfile: "dockerfile",
-    proto: "protobuf",
-    gradle: "gradle",
-    properties: "properties",
-    patch: "diff",
-    diff: "diff",
-    nix: "nix",
-    cue: "cue",
-    rego: "rego",
-    bicep: "bicep",
-    bazel: "starlark",
-    bzl: "starlark",
-    cmake: "cmake",
-    groovy: "groovy",
-    dart: "dart",
-    scala: "scala",
-    clj: "clojure",
-    cljs: "clojure",
-    cljc: "clojure",
-    edn: "clojure",
-    ex: "elixir",
-    exs: "elixir",
-    erl: "erlang",
-    hrl: "erlang",
-    hs: "haskell",
-    lhs: "haskell",
-    ml: "ocaml",
-    mli: "ocaml",
-    jl: "julia",
-    r: "r",
-    rmd: "r",
-    pl: "perl",
-    pm: "perl",
-    tcl: "tcl",
-    vim: "vim",
-    f: "fortran",
-    f90: "fortran",
-    m: "objective-c",
-    mm: "objective-cpp",
-    tex: "tex",
-    bib: "bibtex",
-    rst: "rst"
-  };
-  var TEXT_SOURCE_EXTENSIONS = new Set([
-    ...Object.keys(EXT_TO_LANG),
-    "txt",
-    "md",
-    "markdown",
-    "mdown",
-    "mkdn",
-    "mdx",
-    "json",
-    "jsonc",
-    "csv",
-    "tsv",
-    "yaml",
-    "yml",
-    "toml",
-    "hcl",
-    "tf",
-    "tfvars",
-    "tfstate",
-    "xml",
-    "html",
-    "htm",
-    "css",
-    "scss",
-    "sass",
-    "less",
-    "js",
-    "jsx",
-    "mjs",
-    "cjs",
-    "ts",
-    "tsx",
-    "mts",
-    "cts",
-    "vue",
-    "svelte",
-    "astro",
-    "rs",
-    "go",
-    "py",
-    "rb",
-    "php",
-    "java",
-    "kt",
-    "kts",
-    "c",
-    "cc",
-    "cpp",
-    "cxx",
-    "h",
-    "hpp",
-    "cs",
-    "swift",
-    "sh",
-    "bash",
-    "zsh",
-    "fish",
-    "ps1",
-    "sql",
-    "graphql",
-    "graphqls",
-    "gql",
-    "ini",
-    "conf",
-    "env",
-    "properties",
-    "gitignore",
-    "dockerignore",
-    "editorconfig",
-    "lock",
-    "log",
-    "patch",
-    "diff",
-    "sum",
-    "mk",
-    "proto",
-    "thrift",
-    "prisma",
-    "gradle",
-    "cmake",
-    "nix",
-    "cue",
-    "rego",
-    "bicep",
-    "bazel",
-    "bzl",
-    "dart",
-    "scala",
-    "clj",
-    "cljs",
-    "cljc",
-    "edn",
-    "ex",
-    "exs",
-    "erl",
-    "hrl",
-    "hs",
-    "lhs",
-    "ml",
-    "mli",
-    "jl",
-    "r",
-    "rmd",
-    "pl",
-    "pm",
-    "tcl",
-    "vim",
-    "groovy",
-    "f",
-    "f90",
-    "m",
-    "mm",
-    "pas",
-    "tex",
-    "bib",
-    "rst",
-    "adoc",
-    "org",
-    "ipynb",
-    "ejs",
-    "hbs",
-    "mustache",
-    "liquid",
-    "pug"
-  ]);
-  var TEXT_SOURCE_FILENAMES = new Set([
-    "readme",
-    "license",
-    "copying",
-    "authors",
-    "contributors",
-    "notice",
-    "changelog",
-    "todo",
-    "manifest",
-    "version",
-    "codeowners",
-    "go.mod",
-    "build.bazel",
-    "workspace.bazel",
-    "module.bazel",
-    "gemfile",
-    "rakefile",
-    "procfile",
-    "brewfile",
-    "gnumakefile",
-    "bsdmakefile",
-    ".gitattributes",
-    ".gitmodules",
-    ".npmrc",
-    ".nvmrc",
-    ".yarnrc",
-    ".prettierrc",
-    ".eslintrc",
-    ".babelrc",
-    ".stylelintrc"
-  ]);
-  var FILENAME_TO_LANG = {
-    dockerfile: "dockerfile",
-    makefile: "makefile",
-    gnumakefile: "makefile",
-    bsdmakefile: "makefile",
-    "go.mod": "go",
-    "build.bazel": "starlark",
-    "workspace.bazel": "starlark",
-    "module.bazel": "starlark"
-  };
-  function sourceFileName(path) {
-    return (path.split("/").pop() || path).toLowerCase();
-  }
-  function sourceFileExtension(name) {
-    const index = name.lastIndexOf(".");
-    return index >= 0 ? name.slice(index + 1) : "";
-  }
-  function isDockerfileName(name) {
-    return /^dockerfile(?:[.-].+)?$/i.test(name);
-  }
-  function isMakefileName(name) {
-    return /^makefile(?:[.-].+)?$/i.test(name);
-  }
-  function sourceDisplayKind(path) {
-    if (isVideo(path))
-      return "video";
-    if (isAudio(path))
-      return "audio";
-    if (isImage(path))
-      return "image";
-    if (/\.pdf$/i.test(path))
-      return "pdf";
-    const name = sourceFileName(path);
-    const ext = sourceFileExtension(name);
-    if (TEXT_SOURCE_EXTENSIONS.has(ext))
-      return "text";
-    if (TEXT_SOURCE_FILENAMES.has(name))
-      return "text";
-    if (isDockerfileName(name) || isMakefileName(name))
-      return "text";
-    return "unsupported";
-  }
-  function formatBytes(bytes) {
-    if (!Number.isFinite(bytes) || bytes < 0)
-      return "";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit++;
-    }
-    return (unit === 0 ? String(value) : value.toFixed(value >= 10 ? 1 : 2).replace(/\.0+$/, "")) + " " + units[unit];
-  }
-  function formatFileDate(value) {
-    if (!value)
-      return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime()))
-      return "";
-    return date.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  }
-  function humanFileKind(path, mime, fallback) {
-    const ext = (path.split(".").pop() || "").toLowerCase();
-    if (ext === "png")
-      return "PNG image";
-    if (ext === "jpg" || ext === "jpeg")
-      return "JPEG image";
-    if (ext === "gif")
-      return "GIF image";
-    if (ext === "webp")
-      return "WebP image";
-    if (ext === "svg")
-      return "SVG image";
-    if (ext === "pdf")
-      return "PDF document";
-    if (ext === "zip")
-      return "ZIP archive";
-    if (ext === "mp4")
-      return "MP4 video";
-    if (ext === "webm")
-      return "WebM video";
-    if (ext === "mp3")
-      return "MP3 audio";
-    if (ext === "wav")
-      return "WAV audio";
-    if (ext === "ogg")
-      return "Ogg audio";
-    if (ext === "flac")
-      return "FLAC audio";
-    if (ext === "m4a")
-      return "M4A audio";
-    if (ext === "aac")
-      return "AAC audio";
-    if (ext === "opus")
-      return "Opus audio";
-    if (ext === "mid" || ext === "midi")
-      return "MIDI file";
-    if (mime?.startsWith("image/"))
-      return "Image";
-    if (mime?.startsWith("video/"))
-      return "Video";
-    if (mime?.startsWith("audio/"))
-      return "Audio";
-    if (mime === "application/pdf")
-      return "PDF document";
-    if (fallback === "unsupported file")
-      return "Binary file";
-    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
-  }
-
   // web-src/views/repo-view.ts
   function createRepoView(deps) {
     const {
@@ -14457,6 +17277,7 @@ ${frontmatter.yaml}
       getProjectName,
       getRepoSidebarRef,
       setRepoSidebarRef,
+      getSidebarOnFileClick,
       syncHeaderMenu,
       getSidebarRowByPath,
       getSidebarVirtualActivePath,
@@ -14467,7 +17288,13 @@ ${frontmatter.yaml}
       direction: "asc"
     };
     function isRepoSidebarReusable(ref) {
-      return getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode();
+      return getRepoSidebarRef() === (ref || "worktree") && isRepositorySidebarMode() && isRepoSidebarDomReusable();
+    }
+    function isRepoSidebarDomReusable() {
+      const filelist = document.querySelector("#filelist");
+      if (!filelist || !getSidebarOnFileClick())
+        return false;
+      return !!filelist.querySelector("[data-path], [data-dirpath]");
     }
     function syncRepoTargetInput(ref) {
       const input = document.querySelector("#repo-target");
@@ -14477,6 +17304,20 @@ ${frontmatter.yaml}
       input.value = ref || "worktree";
       wrap.hidden = !(STATE.route.screen === "file" && STATE.route.view === "blob");
       syncSidebarHeaderHeight();
+    }
+    function activeRepoTreeRef() {
+      const fileRef = repoFileTargetFromRoute();
+      if (fileRef != null)
+        return fileRef || "worktree";
+      if (STATE.route.screen === "repo")
+        return STATE.route.ref || "worktree";
+      return null;
+    }
+    function isActiveRepoTreeRef(ref) {
+      return activeRepoTreeRef() === (ref || "worktree");
+    }
+    function isActiveRepoRoute(ref, path) {
+      return STATE.route.screen === "repo" && (STATE.route.ref || "worktree") === (ref || "worktree") && (STATE.route.path || "") === path;
     }
     function fileEntryIcon() {
       return iconSvg("octicon-file", FILE_16_PATH);
@@ -15092,12 +17933,20 @@ ${frontmatter.yaml}
     function renderRepoBlobSidebar(currentPath, ref) {
       syncRepoTargetInput(ref);
       const normalizedRef = ref || "worktree";
+      if (!isActiveRepoTreeRef(normalizedRef))
+        return Promise.resolve();
       if (isRepoSidebarReusable(normalizedRef)) {
         activateRepoSidebarPath(currentPath);
         return Promise.resolve();
       }
       if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
         return REPO_SIDEBAR_LOAD.then(() => {
+          if (!isActiveRepoTreeRef(normalizedRef))
+            return;
+          if (!isRepoSidebarReusable(normalizedRef)) {
+            invalidateRepoSidebar();
+            return renderRepoBlobSidebar(currentPath, normalizedRef);
+          }
           activateRepoSidebarPath(currentPath);
         });
       }
@@ -15111,8 +17960,7 @@ ${frontmatter.yaml}
           throw new Error("failed to load repository tree");
         return r2.json();
       })).then((meta) => {
-        const activeRepoRef = repoFileTargetFromRoute() || (STATE.route.screen === "repo" ? STATE.route.ref : "");
-        if ((activeRepoRef || "worktree") !== normalizedRef)
+        if (!isActiveRepoTreeRef(normalizedRef))
           return;
         const files = meta.entries.map((entry, index) => ({
           order: index + 1,
@@ -15140,6 +17988,8 @@ ${frontmatter.yaml}
         });
         activateRepoSidebarPath(currentPath);
       }).catch(() => {
+        if (!isActiveRepoTreeRef(normalizedRef))
+          return;
         setRepoSidebarRef(null);
         renderSidebar([], undefined);
         $("#totals").textContent = "Cannot load tree";
@@ -15309,20 +18159,28 @@ ${frontmatter.yaml}
       if (STATE.route.screen !== "repo")
         return Promise.resolve();
       setStatus("refreshing");
+      const routeRef = STATE.route.ref || "worktree";
+      const routePath = STATE.route.path || "";
       const params = new URLSearchParams;
-      params.set("ref", STATE.route.ref || "worktree");
-      if (STATE.route.path)
-        params.set("path", STATE.route.path);
+      params.set("ref", routeRef);
+      if (routePath)
+        params.set("path", routePath);
       appendScopeParams(params);
       return trackLoad(fetch(`/_tree?${params.toString()}`).then((r2) => {
         if (!r2.ok)
           throw new Error("failed to load repository tree");
         return r2.json();
       })).then(async (data) => {
+        if (!isActiveRepoRoute(routeRef, routePath))
+          return;
         await renderRepo(data);
         setStatus("live");
         syncHeaderMenu();
-      }).catch(() => setStatus("error"));
+      }).catch(() => {
+        if (!isActiveRepoRoute(routeRef, routePath))
+          return;
+        setStatus("error");
+      });
     }
     let creatingDirectory = false;
     function showTrashError(message) {
@@ -16190,21 +19048,48 @@ ${frontmatter.yaml}
     }
     function setSidebarTreeActionIcons() {
       const settings = document.querySelector("#viewer-settings");
-      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      const sidebarToggle = ensureSidebarToggleButton();
       const expand = document.querySelector("#sb-expand-all");
       const collapse = document.querySelector("#sb-collapse-all");
       if (settings)
         settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
-      if (sidebarToggle)
-        sidebarToggle.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+      syncSidebarToggleIcon(sidebarToggle);
       if (expand)
         expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
       if (collapse)
         collapse.innerHTML = iconSvg("octicon-chevron-up", COLLAPSE_ALL_16_PATHS);
     }
+    function syncSidebarToggleIcon(button) {
+      button.innerHTML = iconSvg("octicon-sidebar", STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS);
+    }
+    function createSidebarToggleButton() {
+      const button = document.createElement("button");
+      button.id = "sidebar-toggle";
+      button.type = "button";
+      syncSidebarToggleIcon(button);
+      return button;
+    }
+    function bindSidebarToggleButton(button) {
+      if (button.dataset.gdpSidebarToggleBound === "1")
+        return;
+      button.dataset.gdpSidebarToggleBound = "1";
+      button.addEventListener("click", toggleSidebarHidden);
+    }
+    function ensureSidebarToggleButton() {
+      let button = document.querySelector("#sidebar-toggle");
+      if (!button)
+        button = createSidebarToggleButton();
+      bindSidebarToggleButton(button);
+      button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
+      button.title = STATE.sidebarHidden ? "show sidebar" : "hide sidebar";
+      button.setAttribute("aria-label", STATE.sidebarHidden ? "show sidebar" : "hide sidebar");
+      syncSidebarToggleIcon(button);
+      return button;
+    }
     function attachSidebarToggle(host) {
-      const button = document.querySelector("#sidebar-toggle");
-      if (!button || button.parentElement === host)
+      const button = ensureSidebarToggleButton();
+      syncSidebarToggleIcon(button);
+      if (button.parentElement === host)
         return;
       host.prepend(button);
     }
@@ -16216,6 +19101,9 @@ ${frontmatter.yaml}
         attachSidebarToggle(restoreHost);
       else if (sidebarHead)
         attachSidebarToggle(sidebarHead);
+      const sidebarToggle = document.querySelector("#sidebar-toggle");
+      if (sidebarToggle)
+        syncSidebarToggleIcon(sidebarToggle);
       placeSidebarFilter();
     }
     function placeSidebarFilter() {
@@ -16237,12 +19125,7 @@ ${frontmatter.yaml}
       STATE.sidebarHidden = hidden;
       document.body.classList.toggle("gdp-sidebar-hidden", hidden);
       localStorage.setItem("gdp:sidebar-hidden", hidden ? "1" : "0");
-      const button = document.querySelector("#sidebar-toggle");
-      if (button) {
-        button.setAttribute("aria-pressed", hidden ? "true" : "false");
-        button.title = hidden ? "show sidebar" : "hide sidebar";
-        button.setAttribute("aria-label", hidden ? "show sidebar" : "hide sidebar");
-      }
+      ensureSidebarToggleButton();
       setSidebarTreeActionIcons();
       placeSidebarToggle();
       syncSidebarHeaderHeight();
@@ -17346,6 +20229,7 @@ ${frontmatter.yaml}
       setFolderIcon,
       isRepositorySidebarMode,
       placeSidebarToggle,
+      ensureSidebarToggleButton,
       placeSidebarFilter,
       applySidebarHidden,
       toggleSidebarHidden,
@@ -19108,6 +21992,14 @@ ${frontmatter.yaml}
       }
       reloadScopedState();
     }
+    function setProjectBranch(branch) {
+      const el = document.querySelector("#project-branch");
+      if (!el)
+        return;
+      el.hidden = !branch;
+      el.textContent = branch;
+      el.title = branch ? `Current branch: ${branch}` : "";
+    }
     function reloadScopedState() {
       const collapsed = readScopedStorage("gdp:collapsed-dirs");
       if (collapsed !== null) {
@@ -19203,6 +22095,7 @@ ${frontmatter.yaml}
           return null;
         const settings = await res.json();
         setProjectName(settings.project || "");
+        setProjectBranch(settings.branch || "");
         const repoLink = document.querySelector("#repo-web-link");
         if (repoLink && settings.repo_web_url) {
           repoLink.href = settings.repo_web_url;
@@ -19231,6 +22124,7 @@ ${frontmatter.yaml}
         language: savedLanguage,
         sbView: localStorage.getItem("gdp:sbview") || "tree",
         sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
+        historyWidth: parseInt(localStorage.getItem("gdp:historywidth") ?? "", 10) || 320,
         sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
         collapsedDirs: new Set(JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]")),
         ignoreWs: igRaw === null ? true : igRaw === "1",
@@ -19397,6 +22291,7 @@ ${frontmatter.yaml}
       setRepoSidebarRef: (ref) => {
         REPO_SIDEBAR_REF = ref;
       },
+      getSidebarOnFileClick: () => SIDEBAR.getSidebarOnFileClick(),
       syncHeaderMenu,
       getSidebarRowByPath,
       getSidebarVirtualActivePath,
@@ -19643,11 +22538,6 @@ ${frontmatter.yaml}
       if (annotationsToggle) {
         annotationsToggle.title = text2.global.annotations;
         annotationsToggle.setAttribute("aria-label", text2.global.annotations);
-      }
-      const queryHistoryToggle = document.querySelector("#query-history-toggle");
-      if (queryHistoryToggle) {
-        queryHistoryToggle.title = text2.global.queryHistory;
-        queryHistoryToggle.setAttribute("aria-label", text2.global.queryHistory);
       }
       const viewerSettings = document.querySelector("#viewer-settings");
       if (viewerSettings) {
@@ -20109,18 +22999,8 @@ ${frontmatter.yaml}
           historyRefInput.value = STATE.route.ref || "HEAD";
       }
       syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
-      const isDatabase = STATE.route.screen === "database";
-      const annotationsToggle = document.querySelector("#annotations-toggle");
-      const qhToggle = document.querySelector("#query-history-toggle");
-      if (annotationsToggle)
-        annotationsToggle.hidden = isDatabase;
-      if (qhToggle)
-        qhToggle.hidden = !isDatabase;
-      if (!isDatabase) {
+      if (STATE.route.screen !== "database") {
         setQueryHistoryPanelOpen(false);
-      }
-      if (isDatabase && ANNOTATIONS_UI) {
-        ANNOTATIONS_UI.setAnnotationPanelOpen(false);
       }
     }
     function syncHeaderMenu() {
@@ -20303,9 +23183,11 @@ ${frontmatter.yaml}
       getServerGeneration: () => SERVER_GENERATION,
       setServerGeneration: (generation) => {
         SERVER_GENERATION = generation;
-      }
+      },
+      invalidateRepoSidebar
     });
     const {
+      renderMeta,
       renderShell,
       rerenderLoadedDiffs,
       mountDiff,
@@ -20336,7 +23218,6 @@ ${frontmatter.yaml}
     });
     $("#sb-expand-all").addEventListener("click", () => setAllSidebarDirsCollapsed(false));
     $("#sb-collapse-all").addEventListener("click", () => setAllSidebarDirsCollapsed(true));
-    $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
     $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
     $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
     $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
@@ -20362,6 +23243,13 @@ ${frontmatter.yaml}
       else
         focusMainPanel();
     });
+    function applyHistoryWidth(w) {
+      const cw = Math.max(220, Math.min(640, w));
+      document.documentElement.style.setProperty("--history-w", `${cw}px`);
+      STATE.historyWidth = cw;
+      localStorage.setItem("gdp:historywidth", String(cw));
+    }
+    applyHistoryWidth(STATE.historyWidth);
     applySidebarWidth(STATE.sbWidth);
     (function trackSidebarInteraction() {
       const sb = document.getElementById("sidebar");
@@ -20391,13 +23279,51 @@ ${frontmatter.yaml}
       document.body.appendChild(preview);
       const MIN = 180, MAX = 900;
       const clamp = (w) => Math.max(MIN, Math.min(MAX, w));
-      let dragging = false, startX = 0, startW = 0, currentW = 0;
+      const sidebarLeft = () => document.getElementById("sidebar")?.getBoundingClientRect().left || 0;
+      let dragging = false, startX = 0, startW = 0, startLeft = 0, currentW = 0;
       handle.addEventListener("mousedown", (e2) => {
         dragging = true;
         startX = e2.clientX;
         startW = STATE.sbWidth;
+        startLeft = sidebarLeft();
         currentW = startW;
         document.body.classList.add("gdp-resizing");
+        preview.style.display = "block";
+        preview.style.left = `${startLeft + startW}px`;
+        e2.preventDefault();
+      });
+      window.addEventListener("mousemove", (e2) => {
+        if (!dragging)
+          return;
+        currentW = clamp(startW + (e2.clientX - startX));
+        preview.style.left = `${startLeft + currentW}px`;
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging)
+          return;
+        dragging = false;
+        preview.style.display = "none";
+        document.body.classList.remove("gdp-resizing");
+        applySidebarWidth(currentW);
+      });
+      handle.addEventListener("dblclick", () => applySidebarWidth(308));
+    })();
+    (function setupHistoryResizer() {
+      const handle = document.getElementById("history-resizer");
+      if (!handle)
+        return;
+      const preview = document.createElement("div");
+      preview.id = "history-resize-preview";
+      document.body.appendChild(preview);
+      const MIN = 220, MAX = 640;
+      const clamp = (w) => Math.max(MIN, Math.min(MAX, w));
+      let dragging = false, startX = 0, startW = 0, currentW = 0;
+      handle.addEventListener("mousedown", (e2) => {
+        dragging = true;
+        startX = e2.clientX;
+        startW = STATE.historyWidth;
+        currentW = startW;
+        document.body.classList.add("gdp-history-resizing");
         preview.style.display = "block";
         preview.style.left = `${startW}px`;
         e2.preventDefault();
@@ -20413,10 +23339,10 @@ ${frontmatter.yaml}
           return;
         dragging = false;
         preview.style.display = "none";
-        document.body.classList.remove("gdp-resizing");
-        applySidebarWidth(currentW);
+        document.body.classList.remove("gdp-history-resizing");
+        applyHistoryWidth(currentW);
       });
-      handle.addEventListener("dblclick", () => applySidebarWidth(308));
+      handle.addEventListener("dblclick", () => applyHistoryWidth(320));
     })();
     $$("#topbar .seg button").forEach((b2) => {
       b2.addEventListener("click", () => setLayout(b2.dataset.layout || "side-by-side"));
@@ -20655,7 +23581,7 @@ ${frontmatter.yaml}
         return Promise.resolve(null);
       }
       if (STATE.route.screen === "database") {
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
         setStatus("live");
         return Promise.resolve(null);
       }
@@ -20682,6 +23608,11 @@ ${frontmatter.yaml}
             p2.textContent = onHistory ? "This commit has no changes against its first parent." : "The working tree is clean against this ref.";
         }
       }
+      const routeAtRequest = STATE.route;
+      const fromAtRequest = STATE.from;
+      const toAtRequest = STATE.to;
+      const ignoreWsAtRequest = STATE.ignoreWs;
+      const isCurrentDiffRequest = () => STATE.route === routeAtRequest && STATE.from === fromAtRequest && STATE.to === toAtRequest && STATE.ignoreWs === ignoreWsAtRequest;
       setStatus("refreshing");
       const params = new URLSearchParams;
       if (STATE.ignoreWs)
@@ -20694,10 +23625,14 @@ ${frontmatter.yaml}
         params.set("nocache", "1");
       const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
       return trackLoad(fetch(url).then((r2) => r2.json())).then((data) => {
+        if (!isCurrentDiffRequest())
+          return null;
         const result = renderShell(data, options.changedPaths);
         setStatus("live");
         return result;
       }).catch(() => {
+        if (!isCurrentDiffRequest())
+          return null;
         setStatus("error");
         return null;
       });
@@ -20717,7 +23652,7 @@ ${frontmatter.yaml}
         HISTORY_VIEW.enterHistory();
       } else if (STATE.route.screen === "database") {
         setStatus("live");
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       } else
         load();
       syncLineRefPill();
@@ -20767,21 +23702,24 @@ ${frontmatter.yaml}
         return load().then(() => {});
       },
       showEmptyDiffPane: () => {
-        const diff = $("#diff");
-        if (diff)
-          diff.innerHTML = "";
-        const empty = $("#empty");
-        if (empty) {
-          empty.classList.remove("hidden");
-          const h2 = empty.querySelector("h2");
-          if (h2)
-            h2.textContent = "No commit selected";
-          const p2 = empty.querySelector("p");
-          if (p2)
-            p2.textContent = "Select a commit from the list to see its changes.";
-        }
-        setStatus("live");
+        showEmptyHistoryDiffPane({
+          diff: $("#diff"),
+          empty: $("#empty"),
+          renderSidebar,
+          setFiles: (files) => {
+            STATE.files = files;
+          },
+          clearLastMeta: () => {
+            window._lastMeta = null;
+          },
+          renderMeta,
+          invalidateRepoSidebar,
+          clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+          placeSidebarToggle,
+          setStatus
+        });
       },
+      getSyntaxHighlight: () => STATE.syntaxHighlight,
       trackLoad
     });
     const DATABASE_VIEW = createDatabaseView({
@@ -20812,17 +23750,19 @@ ${frontmatter.yaml}
     }
     $("#ref-reset").addEventListener("click", () => setRange("HEAD", "worktree"));
     function applyRouteFromLocation() {
-      if (STATE.route.screen === "history" && window.location.pathname !== "/history") {
+      const previousRoute = STATE.route;
+      if (previousRoute.screen === "history" && window.location.pathname !== "/history") {
         restoreRangeAfterHistory();
-      }
-      if (STATE.route.screen === "database" && window.location.pathname !== "/database") {
-        DATABASE_VIEW.leave();
       }
       const parsedRoute = parseRoute(window.location.pathname, window.location.search, currentRange());
       const routeLanguage = viewerLanguageFromSearch(window.location.search);
       if (routeLanguage && routeLanguage !== STATE.language)
         setViewerLanguage(routeLanguage);
       const nextRoute = parsedRoute.screen === "unknown" ? { screen: "diff", range: parsedRoute.range } : parsedRoute;
+      if (previousRoute.screen === "database" && nextRoute.screen !== "database")
+        DATABASE_VIEW.suspend();
+      if (previousRoute.screen === "history" && nextRoute.screen !== "history")
+        HISTORY_VIEW.leaveHistory();
       STATE.route = nextRoute.screen === "help" && !new URLSearchParams(window.location.search).has("lang") ? { ...nextRoute, lang: STATE.language } : nextRoute;
       STATE.from = STATE.route.range.from;
       STATE.to = STATE.route.range.to;
@@ -20858,7 +23798,7 @@ ${frontmatter.yaml}
         cancelActiveSourceLoad("navigation");
         setPageMode();
         removeStandaloneSource();
-        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+        DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
         setStatus("live");
         return;
       }
@@ -20971,6 +23911,17 @@ ${frontmatter.yaml}
       currentRange,
       getFiles: () => STATE.files,
       getRoute: () => STATE.route,
+      leaveDatabaseView: () => {
+        DATABASE_VIEW.suspend();
+      },
+      openDatabaseAnnotation: (target) => {
+        setStatus("live");
+        return DATABASE_VIEW.enter(target.db, target.table, target.tab, {
+          annotationTarget: target,
+          reuseActiveTab: true
+        });
+      },
+      captureDatabaseAnnotationTarget: () => DATABASE_VIEW.captureAnnotationTarget(),
       setRange: (from, to) => {
         STATE.from = from;
         STATE.to = to;
@@ -20987,16 +23938,6 @@ ${frontmatter.yaml}
       onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
       getActiveAnnotationId: () => ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null
     });
-    const qhToggleBtn = document.getElementById("query-history-toggle");
-    if (qhToggleBtn) {
-      qhToggleBtn.addEventListener("click", () => {
-        const panel = document.getElementById("query-history-panel");
-        const opening = panel ? panel.hidden : true;
-        setQueryHistoryPanelOpen(opening);
-        if (opening)
-          DATABASE_VIEW.handleSse();
-      });
-    }
     const qhCloseBtn = document.getElementById("query-history-panel-close");
     if (qhCloseBtn) {
       qhCloseBtn.addEventListener("click", () => {
@@ -21058,6 +23999,8 @@ ${frontmatter.yaml}
         if (bannerPendingPaths) {
           const paths = bannerPendingPaths;
           hideChangeBanner();
+          if (!shouldAutoLoadCurrentRoute())
+            return;
           doSseLoad(paths);
           return;
         }
@@ -21118,6 +24061,8 @@ ${frontmatter.yaml}
       const paths = bannerPendingPaths;
       hideChangeBanner();
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route))
+        return;
       if (isRepoBlobRoute(route)) {
         renderStandaloneSource({
           path: route.path,
@@ -21134,8 +24079,15 @@ ${frontmatter.yaml}
       setAutoUpdate(!STATE.autoUpdate);
     });
     applyAutoUpdateButton();
+    function shouldAutoLoadCurrentRoute(route = STATE.route) {
+      return shouldAutoLoadForRoute(route, {
+        historyWorktreeSelected: HISTORY_VIEW.isWorktreeSelected()
+      });
+    }
     function doSseLoad(paths) {
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route))
+        return;
       if (isRepoBlobRoute(route)) {
         const viewingPath = route.path;
         if (paths && viewingPath && !paths.has(viewingPath))
@@ -21149,6 +24101,9 @@ ${frontmatter.yaml}
       if (route.screen === "repo") {
         invalidateRepoSidebar();
         loadRepo();
+        return;
+      }
+      if (route.screen !== "diff" && route.screen !== "history") {
         return;
       }
       const savedScroll = window.scrollY;
@@ -21169,7 +24124,7 @@ ${frontmatter.yaml}
     let sseTimer = null;
     let pendingSseChangedPaths = new Set;
     function scheduleSseLoad(changedPaths) {
-      if (STATE.route.screen === "database" || STATE.route.screen === "help")
+      if (!shouldAutoLoadCurrentRoute())
         return;
       if (changedPaths && pendingSseChangedPaths) {
         for (const p2 of changedPaths)
@@ -21215,8 +24170,8 @@ ${frontmatter.yaml}
     es.addEventListener("annotation", (event) => {
       ANNOTATIONS_UI?.handleSse(event.data);
     });
-    es.addEventListener("db-query", () => {
-      DATABASE_VIEW.handleSse("db-query");
+    es.addEventListener("db-query", (event) => {
+      DATABASE_VIEW.handleSse("db-query", event.data);
     });
     es.addEventListener("db-snapshot", (event) => {
       DATABASE_VIEW.handleSse("db-snapshot", event.data);
@@ -21231,7 +24186,10 @@ ${frontmatter.yaml}
       catchUpDiff();
     });
     function catchUpDiff() {
-      if (!shouldCatchUpDiff(STATE.route))
+      const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
+      if (!shouldAutoLoadCurrentRoute())
+        return;
+      if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected }))
         return;
       if (!catchUpGate())
         return;

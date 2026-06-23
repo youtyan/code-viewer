@@ -18,6 +18,7 @@ import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
+  AnnotationTarget,
   DiffMeta,
   FileDiffResponse,
   FileMeta,
@@ -35,6 +36,8 @@ import {
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
+  moveAnnotationEntry,
+  normalizeAnnotationTarget,
   renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
@@ -196,7 +199,13 @@ Examples:
         process.exit(1);
       }
       try {
-        cwd = git.repoRoot(next) || realpathSync(next);
+        // --cwd で明示された path が git repo の toplevel そのものなら
+        // それを使う。サブディレクトリ指定や非 git ディレクトリの場合は
+        // 親 repoRoot に勝手に上がらず、指定された path 自身を cwd にする
+        // (data/test/* のような独立 cwd を含めるための挙動)。
+        const nextReal = realpathSync(next);
+        const candidate = git.repoRoot(next);
+        cwd = candidate === nextReal ? candidate : nextReal;
       } catch {
         console.error("--cwd must point to an existing directory");
         process.exit(1);
@@ -928,6 +937,7 @@ function handleTree(url: URL) {
 function handleSettings() {
   return json({
     project: basename(cwd),
+    branch: git.currentBranch(cwd) || undefined,
     repo_web_url: git.remoteWebUrl(cwd),
     scope: {
       omit_dirs_effective: scopeOmitDirNames,
@@ -1186,9 +1196,12 @@ function handleGrep(url: URL) {
 function handleRefCommits(url: URL) {
   const query = url.searchParams.get("q") || "";
   const parsedMax = Number(url.searchParams.get("max") || "");
+  const parsedSkip = Number(url.searchParams.get("skip") || "0");
   const max =
     Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : undefined;
-  return json({ commits: git.refCommits(cwd, query, max) });
+  const skip =
+    Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : undefined;
+  return json(git.refCommitPage(cwd, { query, max, skip }));
 }
 
 function handleLog(url: URL) {
@@ -2242,11 +2255,25 @@ async function handleAnnotations(req: Request) {
     return json({ ok: true, session: started.session });
   }
   if (action === "add") {
+    const rawTarget =
+      body.target && typeof body.target === "object"
+        ? (body.target as Record<string, unknown>)
+        : null;
+    const target: AnnotationTarget | undefined =
+      rawTarget?.kind === "database"
+        ? normalizeAnnotationTarget(rawTarget)
+        : undefined;
+    if (target?.kind === "database" && !target.db)
+      return text("database annotation requires db", 400);
+    if (target?.kind === "database" && target.data && !target.table)
+      return text("database data annotations require table", 400);
     const path =
       typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
-    if (!path || !safeRepoPath(path)) return text("invalid path", 400);
-    if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
-      return text("forbidden", 403);
+    if (!target) {
+      if (!path || !safeRepoPath(path)) return text("invalid path", 400);
+      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+        return text("forbidden", 403);
+    }
     const result = addAnnotationEntry(
       loadAnnotationsState(cwd),
       {
@@ -2265,8 +2292,13 @@ async function handleAnnotations(req: Request) {
           body.range && typeof body.range === "object"
             ? (body.range as { from?: string; to?: string })
             : undefined,
+        target,
         title: typeof body.title === "string" ? body.title : undefined,
         body: typeof body.body === "string" ? body.body : "",
+        before_id:
+          typeof body.before_id === "string" ? body.before_id : undefined,
+        after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+        position: typeof body.position === "number" ? body.position : undefined,
       },
       new Date().toISOString(),
     );
@@ -2278,6 +2310,24 @@ async function handleAnnotations(req: Request) {
       session_id: result.session.id,
       session_title: result.session.title,
       created_session: result.created_session,
+      entry: result.entry,
+    });
+  }
+  if (action === "move") {
+    const id = typeof body.id === "string" ? body.id : "";
+    if (!id) return text("invalid id", 400);
+    const result = moveAnnotationEntry(loadAnnotationsState(cwd), id, {
+      before_id:
+        typeof body.before_id === "string" ? body.before_id : undefined,
+      after_id: typeof body.after_id === "string" ? body.after_id : undefined,
+      position: typeof body.position === "number" ? body.position : undefined,
+    });
+    if (result.ok === false) return text(result.error, 400);
+    saveAnnotationsState(cwd, result.state);
+    annotationSse("update", result.session.id, result.entry.id);
+    return json({
+      ok: true,
+      session_id: result.session.id,
       entry: result.entry,
     });
   }

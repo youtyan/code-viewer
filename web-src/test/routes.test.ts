@@ -255,6 +255,12 @@ describe("routes", () => {
       commit: "abc1234",
       range: fallback,
     });
+    expect(parseRoute("/history", "?commit=worktree", fallback)).toEqual({
+      screen: "history",
+      ref: "HEAD",
+      commit: "worktree",
+      range: fallback,
+    });
     expect(
       buildRoute({ screen: "history", ref: "HEAD", range: fallback }),
     ).toBe("/history");
@@ -266,6 +272,14 @@ describe("routes", () => {
         range: fallback,
       }),
     ).toBe("/history?ref=feature%2Fx&commit=abc1234");
+    expect(
+      buildRoute({
+        screen: "history",
+        ref: "HEAD",
+        commit: "worktree",
+        range: fallback,
+      }),
+    ).toBe("/history?commit=worktree");
   });
 
   test("builds raw file API URLs from path and ref only", () => {

@@ -54,8 +54,13 @@ describe("open path in OS action", () => {
   });
 
   test("server keeps an explicit non-git cwd as the project root", () => {
+    // --cwd で明示された path が git toplevel そのものでない場合 (非 git
+    // ディレクトリやサブディレクトリ) は、親 repoRoot に勝手に上がらず指定
+    // された path 自身を cwd にする。
+    expect(server.includes("const nextReal = realpathSync(next)")).toBe(true);
+    expect(server.includes("const candidate = git.repoRoot(next)")).toBe(true);
     expect(
-      server.includes("cwd = git.repoRoot(next) || realpathSync(next)"),
+      server.includes("cwd = candidate === nextReal ? candidate : nextReal"),
     ).toBe(true);
     expect(
       server.includes(
@@ -139,9 +144,7 @@ describe("sidebar tree bulk actions", () => {
       ),
     ).toBe(true);
     expect(
-      app.includes(
-        "const sidebarToggle = document.querySelector<HTMLButtonElement>('#sidebar-toggle')",
-      ),
+      app.includes("const sidebarToggle = ensureSidebarToggleButton()"),
     ).toBe(true);
     expect(
       app.includes(
@@ -149,10 +152,12 @@ describe("sidebar tree bulk actions", () => {
       ),
     ).toBe(true);
     expect(
-      app.includes(
-        "sidebarToggle.innerHTML = iconSvg('octicon-sidebar', STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS)",
-      ),
+      app.includes("function syncSidebarToggleIcon(button: HTMLButtonElement)"),
     ).toBe(true);
+    expect(app.includes("button.innerHTML = iconSvg('octicon-sidebar',")).toBe(
+      true,
+    );
+    expect(app.includes("syncSidebarToggleIcon(sidebarToggle)")).toBe(true);
     expect(
       app.includes(
         "expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS)",

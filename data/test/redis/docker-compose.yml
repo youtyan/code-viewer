@@ -1,0 +1,26 @@
+services:
+  redis-svc:
+    image: redis:7-alpine
+    container_name: code-viewer-test-redis
+    ports:
+      - "6390:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  # 認証ありの Redis も並べて、REDISCLI_AUTH 経由の認証パスを確認できるようにする
+  redis-auth:
+    image: redis:7-alpine
+    container_name: code-viewer-test-redis-auth
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-secret}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-secret}
+    ports:
+      - "6391:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-secret}", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10

@@ -14,7 +14,7 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot be rendered.
 - Switch the viewer UI between English and Japanese from Viewer Settings.
-- Browse SQLite, PostgreSQL, and MySQL databases with a built-in database viewer.
+- Browse SQLite, PostgreSQL, MySQL, Redis, and Elasticsearch with a built-in database viewer.
 - Read the built-in Help page for repository browsing, diffs, annotations, agent skills, and shortcuts.
 - Open repository folders in the OS file manager from localhost-only actions.
 - Upload files into worktree folders when upload is explicitly enabled.
@@ -118,14 +118,29 @@ code-viewer auto-discovers databases in your repository and provides a
 browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
-automatically by scanning the repository tree. **PostgreSQL** and **MySQL**
-databases are detected from `docker-compose.yml` and connected through
-Docker.
+automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
+**Redis**, and **Elasticsearch** services are detected from any
+`docker-compose.yml` (or `compose.yml`) found by the same recursive
+scan — both the repository root and subdirectories are considered, so a
+single `code-viewer --cwd <root>` brings up every DB defined under that
+root. `.git/` and `node_modules/` are skipped. Services whose names
+collide across subdirectories are kept distinct via `docker:<service>@<relDir>`
+ids (cwd-direct compose files keep the historical `docker:<service>` id
+for backward compatibility). Redis support is read-only: browse DB 0–15,
+SCAN keys, and view values per type (string/hash/list as dedicated
+panes, set/zset/stream as raw JSON). Elasticsearch support is read-only
+too: list indices, view mappings, paginate docs with `search_after`, run
+lucene `q=` searches, and take snapshots / diffs over `_search` iteration.
 
 ### Browser UI
 
 Open the database icon in the sidebar to access:
 
+- **Multi-DB tabs** — open multiple databases side by side (each tab has
+  its own sidebar, panes, and history). `+` adds an empty tab; `×` or
+  middle-click closes one (the last tab is reset to empty instead of
+  vanishing). Tabs persist in `.code-viewer/tabs.json` and survive
+  reloads.
 - **Table browser** — paginated data grid with column sorting, text
   filtering, and CSV/JSON export.
 - **Query editor** — execute read-only SQL with syntax highlighting.
@@ -196,11 +211,26 @@ code-viewer annotate add --file web-src/server/preview.ts --line 2330-2360 \
 code-viewer annotate add --file web-src/app.ts --line 9650 \
   --from HEAD~1 --to worktree \
   --body "After the fix, reloads preserve the scroll position here."
+code-viewer annotate add --after a-previous --file web-src/app.ts --line 9700 \
+  --body "This inserted note now appears in the middle of the walkthrough."
+code-viewer annotate move a-late --before a-early
+code-viewer annotate add-db --db app.db --table users --tab schema \
+  --body "This table is the identity root for user-facing records."
+code-viewer annotate add-db --db app.db --table orders --tab data \
+  --grid-search failed --filter status=failed --sort created_at:desc \
+  --body "This restores the filtered failure investigation view."
+code-viewer annotate add-db --db app.db --tab query \
+  --sql "select * from orders where status = 'failed'" --run-query \
+  --body "This reopens the exact query result being discussed."
 ```
 
 The body is Markdown. Long bodies can be passed with `--body-file <path>` or
 piped through stdin. `code-viewer annotate --help` shows all commands,
-including `list`, `delete <id>`, and `clear`. For AI agents,
+including `move`, `edit`, `list`, `delete <id>`, and `clear`. `add` and
+`add-db` accept `--before <id>`, `--after <id>`, or `--position <n>` when a
+note belongs somewhere other than the end. On the Database screen, the
+annotations panel also has a pin button that captures the current data grid,
+query editor, or global search state as a database annotation. For AI agents,
 `code-viewer annotate agent-help` prints a skill-style guide covering the
 workflow, conventions, and pitfalls for writing good walkthroughs.
 
@@ -225,7 +255,9 @@ than the current directory, or `--server <url>` to target a specific server.
 
 `add` appends to the most recent session (creating one when none exists);
 run `annotate start` again to begin a new session, or pass `--session <id>`
-to target a specific one.
+to target a specific one. When `--before` or `--after` is used, the target
+session is inferred from that anchor annotation; a conflicting `--session`
+is rejected.
 
 The in-app Help page includes a dedicated annotations guide for AI agents,
 covering when to start a session, how to choose focused line ranges, how to

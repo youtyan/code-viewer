@@ -4,6 +4,7 @@ import type {
   DbTableDataResponse,
   DbValue,
 } from "../../core/database/types";
+import type { AnnotationDatabaseDataState } from "../../core/types";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
@@ -37,6 +38,9 @@ export type TableGridCallbacks = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
+  showError: (message: string) => void;
+  applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
+  getState: () => AnnotationDatabaseDataState;
   clear: () => void;
   destroy: () => void;
 };
@@ -99,7 +103,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let globalSearchValue = "";
   let sort: GridSort | null = null;
   let pageCache = new Map<number, DbValue[][]>();
-  let pendingPages = new Set<number>();
+  let pendingPages = new Map<number, Promise<void>>();
   let loadGeneration = 0;
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
@@ -108,11 +112,17 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
   /* ---- Column width management ---- */
   const colWidths = new Map<string, number>();
+  let activeResize: {
+    onMouseMove: (e: MouseEvent) => void;
+    onMouseUp: () => void;
+  } | null = null;
 
   function storageKey(): string | null {
     const project = callbacks.getProjectName?.() ?? "";
+    const dbId = callbacks.getDbId();
     if (!currentTable) return null;
-    return `db:col-widths:${project}:${currentTable}`;
+    if (!dbId) return null;
+    return `db:col-widths:${project}:${dbId}:${currentTable}`;
   }
 
   function saveColWidths() {
@@ -218,16 +228,17 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     detailPanel.innerHTML = "";
   }
 
-  function invalidateData() {
+  function invalidateData(): Promise<void> {
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     loadGeneration++;
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
-    ensurePage(0);
+    return ensurePage(0);
   }
 
   function clear() {
+    cleanupResize();
     currentTable = "";
     columns = [];
     columnNames = [];
@@ -239,7 +250,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     filterClear.hidden = true;
     filterRow.innerHTML = "";
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     loadGeneration++;
     cancelAnimationFrame(rafId);
     if (filterTimer) clearTimeout(filterTimer);
@@ -392,6 +403,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   }
 
   function startResize(colIndex: number, startEvent: MouseEvent) {
+    cleanupResize();
     const colName = columnNames[colIndex];
     const startX = startEvent.clientX;
     const startWidth = getColWidth(colName);
@@ -408,14 +420,21 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     };
 
     const onMouseUp = () => {
-      document.body.classList.remove("db-resizing");
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      cleanupResize();
       saveColWidths();
     };
 
+    activeResize = { onMouseMove, onMouseUp };
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
+  }
+
+  function cleanupResize(): void {
+    if (!activeResize) return;
+    document.body.classList.remove("db-resizing");
+    document.removeEventListener("mousemove", activeResize.onMouseMove);
+    document.removeEventListener("mouseup", activeResize.onMouseUp);
+    activeResize = null;
   }
 
   function renderFilterRow() {
@@ -481,31 +500,40 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       sort = { column, direction: "asc" };
     }
     pageCache = new Map();
-    pendingPages = new Set();
+    pendingPages = new Map();
     resetSelectionAndDetail();
     renderHeader();
     renderViewport();
   }
 
-  function ensurePage(pageStart: number) {
-    if (pageCache.has(pageStart) || pendingPages.has(pageStart)) return;
-    pendingPages.add(pageStart);
+  function ensurePage(pageStart: number): Promise<void> {
+    if (pageCache.has(pageStart)) return Promise.resolve();
+    const pending = pendingPages.get(pageStart);
+    if (pending) return pending;
     const gen = loadGeneration;
     const filters = collectFilters();
-    callbacks
+    const promise = callbacks
       .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters)
       .then((data) => {
         if (gen !== loadGeneration) return;
-        pendingPages.delete(pageStart);
         pageCache.set(pageStart, data.rows);
         totalRows = data.totalRows;
         spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
         updateStatus();
         renderViewport();
       })
-      .catch(() => {
-        if (gen === loadGeneration) pendingPages.delete(pageStart);
+      .catch((err) => {
+        if (gen === loadGeneration) {
+          showError(err instanceof Error ? err.message : String(err));
+        }
       });
+    const tracked = promise.finally(() => {
+      if (pendingPages.get(pageStart) === tracked) {
+        pendingPages.delete(pageStart);
+      }
+    });
+    pendingPages.set(pageStart, tracked);
+    return tracked;
   }
 
   function renderViewport() {
@@ -656,6 +684,14 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
+  function showError(message: string) {
+    clear();
+    statusEl = document.createElement("div");
+    statusEl.className = "db-grid-status db-pane-error";
+    statusEl.textContent = message;
+    el.appendChild(statusEl);
+  }
+
   function load(table: string, initialData?: DbTableDataResponse) {
     clear();
     currentTable = table;
@@ -680,6 +716,41 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
+  async function applyState(state: AnnotationDatabaseDataState) {
+    if (state.search !== undefined) {
+      globalSearchValue = state.search;
+      filterInput.value = state.search;
+      filterClear.hidden = !globalSearchValue;
+    }
+    columnFilters.clear();
+    for (const filter of state.filters || []) {
+      if (filter.column && filter.value)
+        columnFilters.set(filter.column, filter.value);
+    }
+    sort = state.sort || null;
+    const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
+    renderHeader();
+    const firstPage = invalidateData();
+    if (targetRowIndex >= 0) {
+      await firstPage;
+      selectedRowIndex = targetRowIndex;
+      viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+      renderViewport();
+    }
+  }
+
+  function getState(): AnnotationDatabaseDataState {
+    const filters = collectFilters().filter(
+      (filter) => filter.value !== globalSearchValue,
+    );
+    return {
+      ...(globalSearchValue ? { search: globalSearchValue } : {}),
+      ...(filters.length ? { filters } : {}),
+      ...(sort ? { sort } : {}),
+      ...(selectedRowIndex >= 0 ? { row: selectedRowIndex + 1 } : {}),
+    };
+  }
+
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
     filterClear.hidden = !globalSearchValue;
@@ -700,22 +771,19 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     invalidateData();
   });
 
-  viewport.addEventListener(
-    "scroll",
-    () => {
-      headerWrap.scrollLeft = viewport.scrollLeft;
-      filterRowWrap.scrollLeft = viewport.scrollLeft;
-      renderViewport();
-    },
-    { passive: true },
-  );
+  const onViewportScroll = () => {
+    headerWrap.scrollLeft = viewport.scrollLeft;
+    filterRowWrap.scrollLeft = viewport.scrollLeft;
+    renderViewport();
+  };
+  viewport.addEventListener("scroll", onViewportScroll, { passive: true });
 
   function destroy() {
     clear();
-    viewport.removeEventListener("scroll", renderViewport);
+    viewport.removeEventListener("scroll", onViewportScroll);
   }
 
-  return { el, load, clear, destroy };
+  return { el, load, showError, applyState, getState, clear, destroy };
 }
 
 function formatValue(value: DbValue): string {

@@ -14,6 +14,7 @@ export type SnapshotView = {
   el: HTMLElement;
   refresh: () => void;
   handleSse: (data: string) => void;
+  dispose: () => void;
 };
 
 function changeTypeLabel(type: SnapshotDiffRow["changeType"]): string {
@@ -52,11 +53,14 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   const guide = document.createElement("div");
   guide.className = "db-snapshot-guide";
-  guide.innerHTML =
-    '<div class="db-snapshot-guide-title">スナップショット差分</div>' +
-    '<div class="db-snapshot-guide-body">' +
-    "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます" +
-    "</div>";
+  const guideTitle = document.createElement("div");
+  guideTitle.className = "db-snapshot-guide-title";
+  guideTitle.textContent = "スナップショット差分";
+  const guideBody = document.createElement("div");
+  guideBody.className = "db-snapshot-guide-body";
+  guideBody.textContent =
+    "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます";
+  guide.append(guideTitle, guideBody);
 
   const toolbar = document.createElement("div");
   toolbar.className = "db-snapshot-toolbar";
@@ -71,7 +75,13 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   refreshBtn.className = "db-snapshot-refresh-btn";
   refreshBtn.textContent = "更新";
 
-  toolbar.append(createBtn, refreshBtn);
+  const snapshotCancelBtn = document.createElement("button");
+  snapshotCancelBtn.type = "button";
+  snapshotCancelBtn.className = "db-snapshot-job-cancel-btn";
+  snapshotCancelBtn.textContent = "キャンセル";
+  snapshotCancelBtn.hidden = true;
+
+  toolbar.append(createBtn, refreshBtn, snapshotCancelBtn);
 
   const tableSelector = document.createElement("div");
   tableSelector.className = "db-snapshot-table-selector";
@@ -132,6 +142,16 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   el.append(guide, toolbar, tableSelector, mainArea);
 
   let snapshots: SnapshotMeta[] = [];
+  let activeSnapshotId: string | null = null;
+  let disposed = false;
+  const autoRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function setActiveSnapshotId(id: string | null): void {
+    activeSnapshotId = id;
+    snapshotCancelBtn.hidden = !id;
+    snapshotCancelBtn.disabled = false;
+    snapshotCancelBtn.textContent = "キャンセル";
+  }
 
   function showTableSelector() {
     const tables = deps.getTables();
@@ -188,6 +208,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   cancelBtn.addEventListener("click", () => {
     tableSelector.hidden = true;
   });
+  snapshotCancelBtn.addEventListener("click", async () => {
+    if (!activeSnapshotId) return;
+    const snapshotId = activeSnapshotId;
+    snapshotCancelBtn.disabled = true;
+    snapshotCancelBtn.textContent = "キャンセル中...";
+    try {
+      await postJson("/_db/snapshot/cancel", { id: snapshotId });
+    } catch {
+      // ignore
+    } finally {
+      if (!disposed && activeSnapshotId === snapshotId) {
+        snapshotCancelBtn.disabled = false;
+        snapshotCancelBtn.textContent = "キャンセル";
+      }
+    }
+  });
 
   confirmBtn.addEventListener("click", async () => {
     const dbId = deps.getDbId();
@@ -205,14 +241,25 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         note: noteInput.value.trim(),
       });
       tableSelector.hidden = true;
-      setTimeout(() => refreshAndAutoDiff(), 3000);
+      scheduleAutoRefresh(dbId);
     } catch {
       // ignore
     } finally {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "取得開始";
+      if (!disposed) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "取得開始";
+      }
     }
   });
+
+  function scheduleAutoRefresh(dbId: string): void {
+    const timer = setTimeout(() => {
+      autoRefreshTimers.delete(timer);
+      if (disposed || deps.getDbId() !== dbId) return;
+      void refreshAndAutoDiff();
+    }, 3000);
+    autoRefreshTimers.add(timer);
+  }
 
   refreshBtn.addEventListener("click", refresh);
 
@@ -226,8 +273,10 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       );
       if (snapRes.ok) {
         const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
+        if (disposed || deps.getDbId() !== dbId) return;
         snapshots = data.snapshots;
       }
+      if (disposed || deps.getDbId() !== dbId) return;
       renderMain();
     } catch {
       // ignore
@@ -253,8 +302,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     const done = snapshots.filter((s) => s.status === "done");
 
     if (snapshots.length === 0) {
-      mainArea.innerHTML =
-        '<div class="db-snapshot-empty">まだスナップショットがありません。「スナップショット取得」で開始します。</div>';
+      const empty = document.createElement("div");
+      empty.className = "db-snapshot-empty";
+      empty.textContent =
+        "まだスナップショットがありません。「スナップショット取得」で開始します。";
+      mainArea.appendChild(empty);
       return;
     }
 
@@ -269,13 +321,24 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     for (const snap of snapshots) {
       const item = document.createElement("div");
       item.className = "db-snapshot-item";
+      item.dataset.snapshotId = snap.id;
 
       const info = document.createElement("div");
       info.className = "db-snapshot-info";
-      info.innerHTML =
-        `<span class="db-snapshot-date">${new Date(snap.createdAt).toLocaleString()}</span>` +
-        `<span class="db-snapshot-tables-count" title="${snap.tables.join(", ")}">${snap.tables.length}テーブル</span>` +
-        (snap.note ? `<span class="db-snapshot-note">${snap.note}</span>` : "");
+      const date = document.createElement("span");
+      date.className = "db-snapshot-date";
+      date.textContent = new Date(snap.createdAt).toLocaleString();
+      const tables = document.createElement("span");
+      tables.className = "db-snapshot-tables-count";
+      tables.title = snap.tables.join(", ");
+      tables.textContent = `${snap.tables.length}テーブル`;
+      info.append(date, tables);
+      if (snap.note) {
+        const note = document.createElement("span");
+        note.className = "db-snapshot-note";
+        note.textContent = snap.note;
+        info.appendChild(note);
+      }
 
       const actions = document.createElement("div");
       actions.className = "db-snapshot-actions";
@@ -286,7 +349,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.textContent = "削除";
-      deleteBtn.addEventListener("click", () => deleteSnap(snap.id));
+      deleteBtn.addEventListener("click", () => {
+        if (deleteBtn.dataset.confirm !== "1") {
+          deleteBtn.dataset.confirm = "1";
+          deleteBtn.textContent = "削除を確認";
+          window.setTimeout(() => {
+            if (deleteBtn.dataset.confirm === "1") {
+              deleteBtn.dataset.confirm = "";
+              deleteBtn.textContent = "削除";
+            }
+          }, 3000);
+          return;
+        }
+        deleteBtn.dataset.confirm = "";
+        deleteBtn.textContent = "削除";
+        deleteSnap(snap.id);
+      });
       actions.append(noteBtn, deleteBtn);
 
       item.append(info, actions);
@@ -355,8 +433,10 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
     const loading = document.createElement("div");
     loading.className = "db-snapshot-diff-inline";
-    loading.innerHTML =
-      '<div class="db-snapshot-loading">差分を計算中...</div>';
+    const loadingText = document.createElement("div");
+    loadingText.className = "db-snapshot-loading";
+    loadingText.textContent = "差分を計算中...";
+    loading.appendChild(loadingText);
     mainArea.appendChild(loading);
 
     try {
@@ -364,8 +444,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         `/_db/snapshot/diff/tables?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}`,
       );
       if (!res.ok) {
-        loading.innerHTML =
-          '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+        loading.innerHTML = "";
+        const error = document.createElement("div");
+        error.className = "db-snapshot-error";
+        error.textContent = "差分の計算に失敗しました";
+        loading.appendChild(error);
         return;
       }
       const data = (await res.json()) as {
@@ -374,8 +457,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       loading.remove();
       renderDiffInline(beforeId, afterId, data.tables);
     } catch {
-      loading.innerHTML =
-        '<div class="db-snapshot-error">差分の計算に失敗しました</div>';
+      loading.innerHTML = "";
+      const error = document.createElement("div");
+      error.className = "db-snapshot-error";
+      error.textContent = "差分の計算に失敗しました";
+      loading.appendChild(error);
     }
   }
 
@@ -452,15 +538,21 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     table: string,
     container: HTMLElement,
   ) {
-    container.innerHTML =
-      '<div class="db-snapshot-loading">読み込み中...</div>';
+    container.innerHTML = "";
+    const loading = document.createElement("div");
+    loading.className = "db-snapshot-loading";
+    loading.textContent = "読み込み中...";
+    container.appendChild(loading);
     try {
       const res = await fetch(
         `/_db/snapshot/diff/rows?before=${encodeURIComponent(beforeId)}&after=${encodeURIComponent(afterId)}&table=${encodeURIComponent(table)}&limit=200`,
       );
       if (!res.ok) {
-        container.innerHTML =
-          '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+        container.innerHTML = "";
+        const error = document.createElement("div");
+        error.className = "db-snapshot-error";
+        error.textContent = "読み込みに失敗しました";
+        container.appendChild(error);
         return;
       }
       const data = (await res.json()) as {
@@ -469,8 +561,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       };
       renderDiffRows(container, data.rows, data.total);
     } catch {
-      container.innerHTML =
-        '<div class="db-snapshot-error">読み込みに失敗しました</div>';
+      container.innerHTML = "";
+      const error = document.createElement("div");
+      error.className = "db-snapshot-error";
+      error.textContent = "読み込みに失敗しました";
+      container.appendChild(error);
     }
   }
 
@@ -599,10 +694,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     cancelDlgBtn.textContent = "キャンセル";
     cancelDlgBtn.addEventListener("click", () => dialog.remove());
     saveBtn.addEventListener("click", async () => {
+      if (disposed) return;
       await postJson("/_db/snapshot/update-note", {
         id: snapshotId,
         note: input.value,
       });
+      if (disposed) return;
       dialog.remove();
       refresh();
     });
@@ -611,9 +708,9 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       if (e.key === "Escape") dialog.remove();
     });
     dialog.append(input, saveBtn, cancelDlgBtn);
-    const item = el
-      .querySelector(`.db-snapshot-item [title="${snapshotId}"]`)
-      ?.closest(".db-snapshot-item");
+    const item = Array.from(
+      el.querySelectorAll<HTMLElement>(".db-snapshot-item"),
+    ).find((node) => node.dataset.snapshotId === snapshotId);
     if (item) {
       item.after(dialog);
     } else {
@@ -623,20 +720,39 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   }
 
   async function deleteSnap(snapshotId: string) {
+    if (disposed) return;
     await postJson("/_db/snapshot/delete", { id: snapshotId });
+    if (disposed) return;
     refresh();
   }
 
   function handleSse(data: string) {
     try {
-      const parsed = JSON.parse(data) as { action: string };
+      const parsed = JSON.parse(data) as {
+        action: string;
+        dbId?: string;
+        id?: string;
+      };
+      const dbId = deps.getDbId();
+      if (parsed.dbId && dbId && parsed.dbId !== dbId) return;
+      if (parsed.action === "started" && parsed.id) {
+        setActiveSnapshotId(parsed.id);
+      }
       if (parsed.action === "created" || parsed.action === "error") {
-        refreshAndAutoDiff();
+        setActiveSnapshotId(null);
+        void refreshAndAutoDiff();
       }
     } catch {
       // ignore
     }
   }
 
-  return { el, refresh, handleSse };
+  function dispose(): void {
+    disposed = true;
+    setActiveSnapshotId(null);
+    for (const timer of autoRefreshTimers) clearTimeout(timer);
+    autoRefreshTimers.clear();
+  }
+
+  return { el, refresh, handleSse, dispose };
 }

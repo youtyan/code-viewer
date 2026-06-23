@@ -16,6 +16,7 @@ const SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
 const SQLITE_MAGIC = "SQLite format 3\0";
 const MAX_SCAN_DEPTH = 3;
 const MAX_ENTRIES = 50;
+const DOCKER_DISCOVERY_TTL_MS = 5_000;
 
 function isSqliteFile(fullPath: string): boolean {
   try {
@@ -131,20 +132,137 @@ function detectDbKind(image: string): DbKind | null {
   const lower = image.toLowerCase();
   if (lower.includes("postgres")) return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
+  if (lower.includes("redis")) return "redis";
+  if (lower.includes("elasticsearch") || lower.includes("opensearch"))
+    return "elasticsearch";
   return null;
 }
 
-function resolveEnvValue(raw: string): string {
-  return raw.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
+function detectDbKindFromEnv(env: Record<string, string>): DbKind | null {
+  if (
+    env.MYSQL_DATABASE ||
+    env.MYSQL_ROOT_PASSWORD ||
+    env.MYSQL_USER ||
+    env.MARIADB_DATABASE ||
+    env.MARIADB_USER ||
+    env.MYSQL_ALLOW_EMPTY_PASSWORD
+  ) {
+    return "mysql";
+  }
+  if (env.POSTGRES_DB || env.POSTGRES_USER || env.POSTGRES_PASSWORD) {
+    return "postgresql";
+  }
+  return null;
+}
+
+function detectDbKindFromContainerPort(port: string | null): DbKind | null {
+  switch (port) {
+    case "3306":
+      return "mysql";
+    case "5432":
+      return "postgresql";
+    case "6379":
+      return "redis";
+    case "9200":
+      return "elasticsearch";
+    default:
+      return null;
+  }
+}
+
+function detectDbKindFromServiceName(name: string): DbKind | null {
+  const lower = name.toLowerCase();
+  if (lower === "mysql" || lower === "mariadb" || lower === "db") {
+    return "mysql";
+  }
+  if (lower === "postgres" || lower === "postgresql" || lower === "pg") {
+    return "postgresql";
+  }
+  if (lower === "redis") return "redis";
+  if (lower === "elasticsearch" || lower === "opensearch" || lower === "es") {
+    return "elasticsearch";
+  }
+  return null;
+}
+
+function defaultPortFor(kind: DbKind): string {
+  switch (kind) {
+    case "postgresql":
+      return "5432";
+    case "mysql":
+      return "3306";
+    case "redis":
+      return "6379";
+    case "elasticsearch":
+      return "9200";
+    default:
+      return "";
+  }
+}
+
+function lookupEnvValue(
+  varName: string,
+  composeDirEnv: Record<string, string>,
+): string | undefined {
+  return process.env[varName] ?? composeDirEnv[varName];
+}
+
+function stripScalarSyntax(raw: string): string {
+  let value = raw.trim();
+  if (value.startsWith("'") || value.startsWith('"')) {
+    const quote = value[0];
+    const quoteEnd = value.lastIndexOf(quote);
+    if (quoteEnd > 0) return value.slice(1, quoteEnd);
+  }
+  const hashIdx = value.indexOf(" #");
+  if (hashIdx >= 0) value = value.slice(0, hashIdx).trim();
+  return value;
+}
+
+function resolveEnvValue(
+  raw: string,
+  composeDirEnv: Record<string, string> = {},
+): string {
+  const value = stripScalarSyntax(raw);
+  const withBraces = value.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
     const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
     if (!defaultMatch) return "";
     const varName = defaultMatch[1];
     const fallback = defaultMatch[2] ?? "";
-    return process.env[varName] || fallback;
+    return lookupEnvValue(varName, composeDirEnv) ?? fallback;
   });
+  return withBraces.replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (_, varName: string) => lookupEnvValue(varName, composeDirEnv) ?? "",
+  );
 }
 
-function parseComposeEnv(serviceBlock: string): Record<string, string> {
+function readDotenv(composeDir: string): Record<string, string> {
+  const envPath = join(composeDir, ".env");
+  if (!existsSync(envPath)) return {};
+  let content: string;
+  try {
+    content = readFileSync(envPath, "utf-8");
+  } catch {
+    return {};
+  }
+  const env: Record<string, string> = {};
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(
+      /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
+    );
+    if (!match) continue;
+    env[match[1]] = stripScalarSyntax(match[2]);
+  }
+  return env;
+}
+
+function parseComposeEnv(
+  serviceBlock: string,
+  composeDirEnv: Record<string, string> = {},
+): Record<string, string> {
   const env: Record<string, string> = {};
   const envMatch = serviceBlock.match(
     /^[ \t]+environment:\s*\n((?:[ \t]+(?:- )?[^\n]+\n?)*)/m,
@@ -160,10 +278,12 @@ function parseComposeEnv(serviceBlock: string): Record<string, string> {
     if (eqIdx > 0) {
       env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(
         stripped.slice(eqIdx + 1).trim(),
+        composeDirEnv,
       );
     } else if (colonIdx > 0) {
       env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(
         stripped.slice(colonIdx + 2).trim(),
+        composeDirEnv,
       );
     }
   }
@@ -182,67 +302,120 @@ function parseComposePorts(serviceBlock: string): string | null {
   return null;
 }
 
+function parseComposeContainerPort(serviceBlock: string): string | null {
+  const portsMatch = serviceBlock.match(
+    /^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m,
+  );
+  if (!portsMatch) return null;
+  for (const line of portsMatch[1].split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("-")) continue;
+    const value = trimmed
+      .slice(1)
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .split(/\s+#/)[0]
+      .split("/")[0];
+    const m = value
+      .split(":")
+      .pop()
+      ?.trim()
+      .match(/^(\d+)$/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// DockerDbInfo:
+//   composeDir: 拾った compose ファイルが置いてあるディレクトリの絶対 path。
+//     adapter 経路で `docker compose ps` を実行する cwd として使う。
+//     `/_db/files` レスポンスには漏らさない (handle.ts の toFileInfo で
+//     射影しない、Round 1 C1 思想)。
 export type DockerDbInfo = DbFileInfo & {
   serviceName: string;
   env: Record<string, string>;
   database?: string;
+  composeDir: string;
+  relDirSlash: string;
 };
 
-export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
-  const results: DockerDbInfo[] = [];
+export type DockerDiscoveryResult = DockerDbInfo[] & { truncated?: boolean };
 
-  for (const filename of COMPOSE_FILENAMES) {
-    const filepath = join(cwd, filename);
-    if (!existsSync(filepath)) continue;
+// 1 ファイルから service 群を parse して結果配列に積む。
+// dbId は cwd 直下なら従来の `docker:<svc>`、サブディレクトリなら
+// `docker:<svc>@<encodedRelDir>` で衝突回避する。
+function parseComposeFile(
+  filepath: string,
+  composeDir: string,
+  cwd: string,
+  results: DockerDbInfo[],
+): void {
+  let content: string;
+  try {
+    content = readFileSync(filepath, "utf-8");
+  } catch {
+    return;
+  }
+  const servicesMatch = content.match(/^services:\s*\n/m);
+  if (!servicesMatch || servicesMatch.index === undefined) return;
 
-    let content: string;
-    try {
-      content = readFileSync(filepath, "utf-8");
-    } catch {
-      continue;
-    }
+  const servicesStart = servicesMatch.index + servicesMatch[0].length;
+  const afterServices = content.slice(servicesStart);
+  const topLevelEnd = afterServices.search(/^\S/m);
+  const servicesBlock =
+    topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
 
-    const servicesMatch = content.match(/^services:\s*\n/m);
-    if (!servicesMatch || servicesMatch.index === undefined) continue;
+  const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
+  const servicePositions: { name: string; start: number }[] = [];
+  for (
+    let match = serviceRegex.exec(servicesBlock);
+    match !== null;
+    match = serviceRegex.exec(servicesBlock)
+  ) {
+    servicePositions.push({ name: match[1], start: match.index });
+  }
 
-    const servicesStart = servicesMatch.index + servicesMatch[0].length;
-    const afterServices = content.slice(servicesStart);
+  const relDir = relative(cwd, composeDir);
+  // cwd 直下と一致する場合は relDir === "" になる。
+  const isRoot = relDir === "" || relDir === ".";
+  // path / id / label に乗せる relDir 表現。Windows パス区切りは `/` に揃える。
+  const relDirSlash = relDir.replace(/\\/g, "/");
+  const filename = basename(filepath);
+  const composeDirEnv = readDotenv(composeDir);
 
-    const topLevelEnd = afterServices.search(/^\S/m);
-    const servicesBlock =
-      topLevelEnd >= 0 ? afterServices.slice(0, topLevelEnd) : afterServices;
+  for (let i = 0; i < servicePositions.length; i++) {
+    if (results.length >= MAX_DOCKER_SERVICES) return;
+    const svc = servicePositions[i];
+    const nextStart =
+      i + 1 < servicePositions.length
+        ? servicePositions[i + 1].start
+        : servicesBlock.length;
+    const svcBlock = servicesBlock.slice(svc.start, nextStart);
 
-    const serviceRegex = /^ {2}(\w[\w-]*):\s*\n/gm;
-    const servicePositions: { name: string; start: number }[] = [];
-    for (
-      let match = serviceRegex.exec(servicesBlock);
-      match !== null;
-      match = serviceRegex.exec(servicesBlock)
-    ) {
-      servicePositions.push({
-        name: match[1],
-        start: match.index,
-      });
-    }
+    const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
+    const image = imageMatch ? imageMatch[1] : null;
+    const env = parseComposeEnv(svcBlock, composeDirEnv);
+    const containerPort = parseComposeContainerPort(svcBlock);
+    const kind =
+      (image ? detectDbKind(image) : null) ??
+      detectDbKindFromEnv(env) ??
+      detectDbKindFromContainerPort(containerPort) ??
+      detectDbKindFromServiceName(svc.name);
+    if (!kind) continue;
 
-    for (let i = 0; i < servicePositions.length; i++) {
-      const svc = servicePositions[i];
-      const nextStart =
-        i + 1 < servicePositions.length
-          ? servicePositions[i + 1].start
-          : servicesBlock.length;
-      const svcBlock = servicesBlock.slice(svc.start, nextStart);
+    const port = parseComposePorts(svcBlock);
+    const hostPort = port || defaultPortFor(kind);
+    const imageLabel = image ?? `build:${kind}`;
 
-      const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
-      if (!imageMatch) continue;
+    const id = isRoot
+      ? `docker:${svc.name}`
+      : `docker:${svc.name}@${encodeURIComponent(relDirSlash)}`;
+    const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
 
-      const image = imageMatch[1];
-      const kind = detectDbKind(image);
-      if (!kind) continue;
-
-      const env = parseComposeEnv(svcBlock);
-      const port = parseComposePorts(svcBlock);
-
+    let label: string;
+    if (kind === "redis" || kind === "elasticsearch") {
+      label = `${svc.name} (${imageLabel}, localhost:${hostPort}${labelPath})`;
+    } else {
       const dbName =
         env.POSTGRES_DB ||
         env.MYSQL_DATABASE ||
@@ -253,23 +426,202 @@ export function discoverDockerDatabases(cwd: string): DockerDbInfo[] {
         env.MYSQL_USER ||
         env.MARIADB_USER ||
         (kind === "postgresql" ? "postgres" : "root");
-      const hostPort = port || (kind === "postgresql" ? "5432" : "3306");
-
-      const label = `${svc.name} (${image}, ${user}@localhost:${hostPort}/${dbName})`;
-
-      results.push({
-        id: `docker:${svc.name}`,
-        path: filename,
-        name: label,
-        sizeBytes: 0,
-        kind,
-        serviceName: svc.name,
-        env,
-      });
+      label = `${svc.name} (${imageLabel}, ${user}@localhost:${hostPort}/${dbName}${labelPath})`;
     }
 
-    break;
+    results.push({
+      id,
+      path: isRoot ? filename : `${relDirSlash}/${filename}`,
+      name: label,
+      sizeBytes: 0,
+      kind,
+      serviceName: svc.name,
+      env,
+      composeDir,
+      relDirSlash,
+    });
+  }
+}
+
+// SQLite と同じ規約で MAX_SCAN_DEPTH まで再帰 walk し、各ディレクトリで
+// compose ファイル 1 つ (COMPOSE_FILENAMES の優先順) を parse する。
+// 全 service が `MAX_DOCKER_SERVICES` を超えたら truncate して warn する。
+const MAX_DOCKER_SERVICES = 30;
+const dockerDiscoveryCache = new Map<
+  string,
+  { expiresAt: number; result: DockerDiscoveryResult }
+>();
+
+function dockerDiscoveryCacheKey(cwd: string, omitDirNames: string[]): string {
+  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
+  return JSON.stringify([cwd, omit]);
+}
+
+function cloneDockerDiscoveryResult(
+  result: DockerDiscoveryResult,
+): DockerDiscoveryResult {
+  const cloned = result.map((entry) => ({
+    ...entry,
+    env: { ...entry.env },
+  })) as DockerDiscoveryResult;
+  if (result.truncated) cloned.truncated = true;
+  return cloned;
+}
+
+export function discoverDockerDatabases(
+  cwd: string,
+  omitDirNames: string[] = [],
+): DockerDiscoveryResult {
+  const cacheKey = dockerDiscoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = dockerDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneDockerDiscoveryResult(cached.result);
   }
 
-  return results;
+  const results: DockerDiscoveryResult = [] as DockerDiscoveryResult;
+  const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
+  omitSet.add(".git");
+  omitSet.add("node_modules");
+
+  function scan(dir: string, depth: number): void {
+    if (results.length >= MAX_DOCKER_SERVICES) return;
+    if (depth > MAX_SCAN_DEPTH) return;
+    // 1. このディレクトリ直下の compose を 1 つ parse する。
+    for (const filename of COMPOSE_FILENAMES) {
+      const filepath = join(dir, filename);
+      if (existsSync(filepath)) {
+        parseComposeFile(filepath, dir, cwd, results);
+        break;
+      }
+    }
+    if (results.length >= MAX_DOCKER_SERVICES) return;
+    // 2. サブディレクトリへ recurse (symlink 除外 / omitDirNames 除外)。
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= MAX_DOCKER_SERVICES) return;
+      if (omitSet.has(entry.toLowerCase())) continue;
+      const full = join(dir, entry);
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isSymbolicLink()) continue;
+      if (stat.isDirectory()) scan(full, depth + 1);
+    }
+  }
+
+  scan(cwd, 0);
+  if (results.length >= MAX_DOCKER_SERVICES) {
+    results.truncated = true;
+    console.warn(
+      `[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`,
+    );
+  }
+  dockerDiscoveryCache.set(cacheKey, {
+    expiresAt: now + DOCKER_DISCOVERY_TTL_MS,
+    result: cloneDockerDiscoveryResult(results),
+  });
+  return cloneDockerDiscoveryResult(results);
+}
+
+// `docker:<svc>` または `docker:<svc>@<encodedRelDir>` (+ optional `:<db>`) を
+// parse して `{serviceName, relDir, database}` を返す。
+// `relDir` は encodeURIComponent された slash 区切り。cwd 直下は空文字。
+// 解析失敗時は null。
+export function parseDockerDbId(
+  dbId: string,
+): { serviceName: string; relDir: string; database?: string } | null {
+  if (!dbId.startsWith("docker:")) return null;
+  let rest = dbId.slice(7);
+  if (!rest) return null;
+  // `:<db>` は最後にあるので、`@` の後に出る `:` のみ DB セパレータ。
+  // つまり @ より前の最初の `:` は DB セパレータ、@ より後の最初の `:` も DB セパレータ。
+  let database: string | undefined;
+  // 末尾の `:db` を切る前に `@` 位置を探す。`@<encoded>` の encoded には
+  // `:` は出ない (URL encode 済み = `%3A`)。
+  const atIdx = rest.indexOf("@");
+  if (atIdx >= 0) {
+    if (rest.indexOf("@", atIdx + 1) >= 0) return null;
+    const afterAt = rest.slice(atIdx + 1);
+    const colonIdx = afterAt.indexOf(":");
+    if (colonIdx >= 0) {
+      database = afterAt.slice(colonIdx + 1);
+      rest = `${rest.slice(0, atIdx)}@${afterAt.slice(0, colonIdx)}`;
+    }
+    const [serviceName, encodedRel] = rest.split("@");
+    if (!isSafeDockerServiceName(serviceName)) return null;
+    if (!isSafeDockerDatabaseName(database)) return null;
+    try {
+      const relDir = decodeURIComponent(encodedRel || "");
+      if (!isSafeDockerRelDir(relDir)) return null;
+      return {
+        serviceName,
+        relDir,
+        database,
+      };
+    } catch {
+      return null;
+    }
+  }
+  // `docker:<svc>:<db>` 形式 (cwd 直下、従来形式)。
+  const colonIdx = rest.indexOf(":");
+  if (colonIdx >= 0) {
+    database = rest.slice(colonIdx + 1);
+    rest = rest.slice(0, colonIdx);
+  }
+  if (!isSafeDockerServiceName(rest)) return null;
+  if (!isSafeDockerDatabaseName(database)) return null;
+  return { serviceName: rest, relDir: "", database };
+}
+
+export function findDockerServiceByDbId(
+  cwd: string,
+  dbId: string,
+  kind?: DbKind,
+  omitDirNames?: string[],
+): DockerDbInfo | null {
+  const parsed = parseDockerDbId(dbId);
+  if (!parsed) return null;
+  return (
+    discoverDockerDatabases(cwd, omitDirNames).find(
+      (d) =>
+        d.serviceName === parsed.serviceName &&
+        d.relDirSlash === parsed.relDir &&
+        (!kind || d.kind === kind),
+    ) || null
+  );
+}
+
+function isSafeDockerServiceName(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isSafeDockerRelDir(value: string): boolean {
+  if (value === "") return true;
+  if (!/^[A-Za-z0-9_./-]+$/.test(value)) return false;
+  const parts = value.split("/");
+  return parts.every((p) => p !== "" && p !== "." && p !== "..");
+}
+
+function isSafeDockerDatabaseName(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (value === "") return false;
+  if (hasControlCharacter(value)) return false;
+  return /^[A-Za-z0-9_$.-]+$/.test(value);
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
 }

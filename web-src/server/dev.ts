@@ -31,11 +31,35 @@ function serverArgs() {
   return firstStart ? args : withoutOpen(args);
 }
 
+function walkTsFiles(dir: string): string[] {
+  const out: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const name of entries) {
+    const full = join(dir, name);
+    let isDir = false;
+    try {
+      isDir = statSync(full).isDirectory();
+    } catch {
+      continue;
+    }
+    if (isDir) {
+      out.push(...walkTsFiles(full));
+    } else if (name.endsWith(".ts") && name !== "runtime.d.ts") {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
 function watchedFiles() {
-  return readdirSync(SERVER_ROOT)
-    .filter((name) => name.endsWith(".ts") && name !== "runtime.d.ts")
-    .map((name) => join(SERVER_ROOT, name))
-    .concat(join(ROOT, "web-src", "core", "types.ts"));
+  return walkTsFiles(SERVER_ROOT).concat(
+    walkTsFiles(join(ROOT, "web-src", "core")),
+  );
 }
 
 function fileSignature(file: string): string {

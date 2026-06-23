@@ -16,6 +16,13 @@ export type QueryResult = {
   rowCount: number;
 };
 
+export type TablePageMeta = {
+  columns: DbColumn[];
+  rows: RawDbValue[][];
+  rowCount: number;
+  totalRows: number;
+};
+
 export type TriggerInfo = {
   name: string;
   sql: string;
@@ -34,11 +41,25 @@ export type DatabaseAdapter = {
     table: string,
     options: { offset: number; limit: number; orderBy?: DbOrder[] },
   ): QueryResult;
+  getTablePageWithMeta?(
+    table: string,
+    options: { offset: number; limit: number; orderBy?: DbOrder[] },
+  ): Promise<TablePageMeta>;
+  getFilteredTablePageWithMeta?(
+    table: string,
+    options: {
+      offset: number;
+      limit: number;
+      orderBy?: DbOrder[];
+      grouped: Map<string, string[]>;
+    },
+  ): Promise<TablePageMeta>;
   executeReadonlyQuery(
     sql: string,
     params?: DbValue[],
     maxRows?: number,
   ): QueryResult;
+  invalidateTableMetaCache?(table?: string): void;
   getCreateStatement(table: string): string;
   getTriggers(table: string): TriggerInfo[];
   close(): void;

@@ -63,12 +63,19 @@ function saveToHistory(sql: string) {
 
 export type QueryEditorCallbacks = {
   executeQuery: (sql: string) => Promise<DbQueryResponse>;
+  // textarea の内容が変わった (input または setSql 経由) ことを外側に
+  // 通知する。タブごとに SQL draft を persist するために使う。
+  onSqlChange?: (sql: string) => void;
 };
 
 export type QueryEditor = {
   el: HTMLElement;
   focus: () => void;
-  setSql: (sql: string) => void;
+  setSql: (sql: string, options?: { silent?: boolean }) => void;
+  getSql: () => string;
+  run: () => Promise<void>;
+  explain: () => Promise<void>;
+  dispose: () => void;
 };
 
 export function createQueryEditor(
@@ -136,7 +143,10 @@ export function createQueryEditor(
     syncEditorHeight();
   }
 
-  textarea.addEventListener("input", syncHighlight);
+  textarea.addEventListener("input", () => {
+    syncHighlight();
+    callbacks.onSqlChange?.(textarea.value);
+  });
   textarea.addEventListener("scroll", () => {
     highlight.scrollTop = textarea.scrollTop;
     highlight.scrollLeft = textarea.scrollLeft;
@@ -160,8 +170,8 @@ export function createQueryEditor(
   const historyBtn = document.createElement("button");
   historyBtn.className = "db-btn db-query-history-btn";
   historyBtn.type = "button";
-  historyBtn.textContent = "History";
-  historyBtn.title = "Query history";
+  historyBtn.textContent = "Local History";
+  historyBtn.title = "Local editor history";
 
   const statusSpan = document.createElement("span");
   statusSpan.className = "db-query-status";
@@ -230,29 +240,45 @@ export function createQueryEditor(
     thNum.textContent = "#";
     thNum.className = "db-grid-rownum";
     headRow.appendChild(thNum);
-    for (const col of result.columns) {
+    for (let i = 0; i < result.columns.length; i++) {
       const th = document.createElement("th");
-      th.textContent = col;
+      const name = document.createElement("div");
+      name.className = "db-query-header-name";
+      name.textContent = result.columns[i];
+      const type = document.createElement("div");
+      type.className = "db-query-header-type";
+      type.textContent = result.columnTypes[i] || "";
+      th.append(name, type);
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
 
     const tbody = document.createElement("tbody");
-    for (let i = 0; i < result.rows.length; i++) {
-      const row = result.rows[i];
+    if (result.rows.length === 0) {
       const tr = document.createElement("tr");
-      if (i % 2 === 1) tr.classList.add("alt");
-      const tdNum = document.createElement("td");
-      tdNum.className = "db-grid-rownum";
-      tdNum.textContent = String(i + 1);
-      tr.appendChild(tdNum);
-      for (const value of row) {
-        const td = document.createElement("td");
-        td.textContent = formatValue(value);
-        if (value === null) td.classList.add("null");
-        tr.appendChild(td);
-      }
+      const td = document.createElement("td");
+      td.className = "db-query-empty";
+      td.colSpan = result.columns.length + 1;
+      td.textContent = "No rows";
+      tr.appendChild(td);
       tbody.appendChild(tr);
+    } else {
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows[i];
+        const tr = document.createElement("tr");
+        if (i % 2 === 1) tr.classList.add("alt");
+        const tdNum = document.createElement("td");
+        tdNum.className = "db-grid-rownum";
+        tdNum.textContent = String(i + 1);
+        tr.appendChild(tdNum);
+        for (const value of row) {
+          const td = document.createElement("td");
+          td.textContent = formatValue(value);
+          if (value === null) td.classList.add("null");
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
     }
     table.append(thead, tbody);
 
@@ -328,7 +354,7 @@ export function createQueryEditor(
     historyDropdown.hidden = false;
   });
 
-  document.addEventListener("click", (e) => {
+  const onDocumentClick = (e: MouseEvent) => {
     if (
       !historyDropdown.hidden &&
       !historyBtn.contains(e.target as Node) &&
@@ -336,7 +362,8 @@ export function createQueryEditor(
     ) {
       historyDropdown.hidden = true;
     }
-  });
+  };
+  document.addEventListener("click", onDocumentClick);
 
   textarea.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -372,12 +399,21 @@ export function createQueryEditor(
     textarea.focus();
   }
 
-  function setSql(sql: string) {
+  function setSql(sql: string, options: { silent?: boolean } = {}) {
     textarea.value = sql;
     syncHighlight();
+    if (!options.silent) callbacks.onSqlChange?.(textarea.value);
   }
 
-  return { el, focus, setSql };
+  function getSql(): string {
+    return textarea.value;
+  }
+
+  function dispose(): void {
+    document.removeEventListener("click", onDocumentClick);
+  }
+
+  return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
 }
 
 function formatValue(value: DbValue): string {
