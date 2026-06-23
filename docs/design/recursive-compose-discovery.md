@@ -28,6 +28,9 @@ capability mixin (`SnapshotIterable` / `Queryable`) も触らない。
 - 「触らない」ファイル (Round 2 / 3 共通) は引き続き触らない:
   `snapshot-store.ts` / `snapshot-runner.ts` / `query-history.ts` /
   `connection-pool.ts` / `global-search.ts`。
+- 実装追記: recursive compose 後の review fix で `snapshot-runner.ts` は
+  cancel signal 対応、`adapters/docker.ts` は docker utility 共通化のため
+  変更済み。現行の保護対象は `docs/design/post-round-deviations.md` を参照。
 - 認証・credential を `/_db/files` のレスポンスに混入させないという
   Round 1 C1 の禁則は維持。`composeDir` も漏らさない (内部状態専用)。
 
@@ -69,6 +72,9 @@ capability mixin (`SnapshotIterable` / `Queryable`) も触らない。
 `snapshot-store.ts` / `snapshot-runner.ts` / `query-history.ts` /
 `connection-pool.ts` / `global-search.ts` / `views/database/*` (UI 側は
 id を不透明な文字列として扱うので変更不要)。
+
+実装追記: この list は当初設計時の退行防止制約。現行ブランチで新規 diff を
+入れない保護対象は `docs/design/post-round-deviations.md` に集約する。
 
 ### 新規
 

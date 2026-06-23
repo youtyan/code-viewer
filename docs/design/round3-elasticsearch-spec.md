@@ -92,7 +92,8 @@ services:
 `adapters/elasticsearch.ts` の docker compose container 解決を
 `adapters/docker-utils.ts` に共通化し、`ElasticsearchExplorer` を
 `DocSource & Queryable & SnapshotIterable` 型へ接続した。`adapters/docker.ts`
-は本タスクの保護対象なので新規 diff は入れず、同 helper への移行は後続課題。
+も後続の Phase 11 修正で同 helper へ移行済み。現行ブランチでの保護対象は
+`docs/design/post-round-deviations.md` を参照。
 
 ---
 

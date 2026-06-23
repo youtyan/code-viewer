@@ -244,7 +244,8 @@ UI 側 `<RedisExplorer>`)。
 `adapters/sqlite.ts` / `adapters/docker.ts` / `snapshot-runner.ts` に
 `SnapshotIterable` 経路を追加した。これは PoC 1 周目の退行防止リストとは
 別フェーズの確定変更で、現行の保護対象は「本タスクで新規 diff を入れない」
-対象として扱う。
+対象として扱う。最新の保護対象と post-round の差分整理は
+`docs/design/post-round-deviations.md` を参照。
 
 ---
 
