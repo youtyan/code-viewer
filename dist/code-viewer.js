@@ -4545,7 +4545,26 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
     });
   }
 }
+function dockerDiscoveryCacheKey(cwd, omitDirNames) {
+  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
+  return JSON.stringify([cwd, omit]);
+}
+function cloneDockerDiscoveryResult(result) {
+  const cloned = result.map((entry) => ({
+    ...entry,
+    env: { ...entry.env }
+  }));
+  if (result.truncated)
+    cloned.truncated = true;
+  return cloned;
+}
 function discoverDockerDatabases(cwd, omitDirNames = []) {
+  const cacheKey = dockerDiscoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = dockerDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneDockerDiscoveryResult(cached.result);
+  }
   const results = [];
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
@@ -4593,7 +4612,11 @@ function discoverDockerDatabases(cwd, omitDirNames = []) {
     results.truncated = true;
     console.warn(`[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`);
   }
-  return results;
+  dockerDiscoveryCache.set(cacheKey, {
+    expiresAt: now + DOCKER_DISCOVERY_TTL_MS,
+    result: cloneDockerDiscoveryResult(results)
+  });
+  return cloneDockerDiscoveryResult(results);
 }
 function parseDockerDbId(dbId) {
   if (!dbId.startsWith("docker:"))
@@ -4675,7 +4698,7 @@ function hasControlCharacter(value) {
   }
   return false;
 }
-var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, COMPOSE_FILENAMES, MAX_DOCKER_SERVICES = 30;
+var SQLITE_EXTENSIONS, SQLITE_MAGIC = "SQLite format 3\x00", MAX_SCAN_DEPTH = 3, MAX_ENTRIES = 50, DOCKER_DISCOVERY_TTL_MS = 5000, COMPOSE_FILENAMES, MAX_DOCKER_SERVICES = 30, dockerDiscoveryCache;
 var init_discovery = __esm(() => {
   SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
   COMPOSE_FILENAMES = [
@@ -4684,6 +4707,7 @@ var init_discovery = __esm(() => {
     "compose.yml",
     "compose.yaml"
   ];
+  dockerDiscoveryCache = new Map;
 });
 
 // web-src/server/database/global-search.ts
@@ -5200,14 +5224,22 @@ function hasSnapshotCapability(source) {
 }
 
 // web-src/server/database/snapshot-runner.ts
-async function runSnapshot(cwd, source, dbId, containers, note, onProgress) {
+function throwIfSnapshotAborted(signal) {
+  if (signal?.aborted) {
+    throw new Error("snapshot cancelled");
+  }
+}
+async function runSnapshot(cwd, source, dbId, containers, note, onProgress, options = {}) {
   if (!hasSnapshotCapability(source)) {
     throw new Error("data source does not support snapshot (missing SnapshotIterable capability)");
   }
   const snapshotSource = source;
+  throwIfSnapshotAborted(options.signal);
   const snapshotId = await createSnapshot(cwd, dbId, snapshotSource.kind, containers, note);
+  options.onSnapshotId?.(snapshotId);
   try {
     for (const container of containers) {
+      throwIfSnapshotAborted(options.signal);
       onProgress?.(container, false);
       const collected = [];
       let pkColumns = [];
@@ -5218,13 +5250,15 @@ async function runSnapshot(cwd, source, dbId, containers, note, onProgress) {
           pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
         }
       } catch {}
-      for await (const item of snapshotSource.iterateForSnapshot(container)) {
+      for await (const item of snapshotSource.iterateForSnapshot(container, options.signal)) {
+        throwIfSnapshotAborted(options.signal);
         collected.push({
           rowKeyJson: item.keyJson,
           rowHash: item.rowHash,
           payloadJson: item.payloadJson
         });
       }
+      throwIfSnapshotAborted(options.signal);
       await addSnapshotTableData(cwd, snapshotId, container, pkColumns, collected);
     }
     await finalizeSnapshot(cwd, snapshotId);
@@ -7583,6 +7617,13 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   const note = body.note ?? "";
   const snapshotDbId = body.db;
   const snapshotContainers = containers;
+  const abortController = new AbortController;
+  const snapshotJob = {
+    abortController,
+    dbId: snapshotDbId,
+    done: false
+  };
+  let activeSnapshotId;
   (async () => {
     try {
       const snapshotId = await runSnapshot(cwd, source, snapshotDbId, snapshotContainers, note, (table, done) => {
@@ -7592,6 +7633,18 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
           table,
           done
         }));
+      }, {
+        signal: abortController.signal,
+        onSnapshotId: (id) => {
+          activeSnapshotId = id;
+          snapshotJob.snapshotId = id;
+          snapshotJobs.set(id, snapshotJob);
+          sendSse?.("db-snapshot", JSON.stringify({
+            action: "started",
+            dbId: snapshotDbId,
+            id
+          }));
+        }
       });
       sendSse?.("db-snapshot", JSON.stringify({
         action: "created",
@@ -7606,6 +7659,10 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
         error: err instanceof Error ? err.message : String(err)
       }));
     } finally {
+      snapshotJob.done = true;
+      if (activeSnapshotId) {
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60000);
+      }
       if (closeSourceAfterSnapshot) {
         try {
           source.close?.();
@@ -7614,6 +7671,28 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     }
   })();
   return json({ ok: true, message: "snapshot started" });
+}
+async function handleSnapshotCancel(req, url) {
+  if (req.method !== "POST")
+    return textError("method not allowed", 405);
+  let id = url.searchParams.get("id") || "";
+  if (!id) {
+    try {
+      const body = await req.json();
+      id = body.id || "";
+    } catch {
+      return textError("invalid JSON body", 400);
+    }
+  }
+  if (!id)
+    return textError("missing id", 400);
+  const job = snapshotJobs.get(id);
+  if (!job)
+    return textError("snapshot job not found", 404);
+  if (!job.done) {
+    job.abortController.abort();
+  }
+  return json({ ok: true });
 }
 async function handleSnapshotUpdateNote(cwd, req) {
   if (req.method !== "POST")
@@ -7835,6 +7914,13 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     }
     return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
   }
+  if (path === "/_db/snapshot/cancel") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotCancel(req, url));
+  }
   if (path === "/_db/snapshot/update-note") {
     if (!sideEffectAllowed(req)) {
       log(403);
@@ -7867,7 +7953,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   }
   return null;
 }
-var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
+var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
@@ -7882,6 +7968,7 @@ var init_handle = __esm(() => {
   init_tabs_store();
   dockerAdapterCache = createDockerAdapterCache();
   searchJobs = new Map;
+  snapshotJobs = new Map;
   SNAPSHOT_DOCKER_SOURCE_REGISTRY = {
     redis: async (info, requestedContainers) => {
       const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));

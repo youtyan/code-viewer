@@ -16,6 +16,7 @@ const SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
 const SQLITE_MAGIC = "SQLite format 3\0";
 const MAX_SCAN_DEPTH = 3;
 const MAX_ENTRIES = 50;
+const DOCKER_DISCOVERY_TTL_MS = 5_000;
 
 function isSqliteFile(fullPath: string): boolean {
   try {
@@ -316,11 +317,38 @@ function parseComposeFile(
 // compose ファイル 1 つ (COMPOSE_FILENAMES の優先順) を parse する。
 // 全 service が `MAX_DOCKER_SERVICES` を超えたら truncate して warn する。
 const MAX_DOCKER_SERVICES = 30;
+const dockerDiscoveryCache = new Map<
+  string,
+  { expiresAt: number; result: DockerDiscoveryResult }
+>();
+
+function dockerDiscoveryCacheKey(cwd: string, omitDirNames: string[]): string {
+  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
+  return JSON.stringify([cwd, omit]);
+}
+
+function cloneDockerDiscoveryResult(
+  result: DockerDiscoveryResult,
+): DockerDiscoveryResult {
+  const cloned = result.map((entry) => ({
+    ...entry,
+    env: { ...entry.env },
+  })) as DockerDiscoveryResult;
+  if (result.truncated) cloned.truncated = true;
+  return cloned;
+}
 
 export function discoverDockerDatabases(
   cwd: string,
   omitDirNames: string[] = [],
 ): DockerDiscoveryResult {
+  const cacheKey = dockerDiscoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = dockerDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneDockerDiscoveryResult(cached.result);
+  }
+
   const results: DockerDiscoveryResult = [] as DockerDiscoveryResult;
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
@@ -367,7 +395,11 @@ export function discoverDockerDatabases(
       `[code-viewer] docker discovery hit MAX_DOCKER_SERVICES=${MAX_DOCKER_SERVICES}; some compose services may be hidden`,
     );
   }
-  return results;
+  dockerDiscoveryCache.set(cacheKey, {
+    expiresAt: now + DOCKER_DISCOVERY_TTL_MS,
+    result: cloneDockerDiscoveryResult(results),
+  });
+  return cloneDockerDiscoveryResult(results);
 }
 
 // `docker:<svc>` または `docker:<svc>@<encodedRelDir>` (+ optional `:<db>`) を
