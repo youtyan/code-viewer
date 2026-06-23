@@ -56,4 +56,42 @@ describe("database snapshot runner", () => {
       expect(snapshots[0].errorMessage).toBe("snapshot cancelled");
     });
   });
+
+  test("finalizes the snapshot as error when onSnapshotId throws", async () => {
+    await withTempProject(async (dir) => {
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          yield {
+            keyJson: JSON.stringify({ id: 1 }),
+            payloadJson: JSON.stringify({ id: 1 }),
+            rowHash: "hash",
+          };
+        },
+        async listSnapshotContainers() {
+          return [{ id: "users", label: "users" }];
+        },
+      };
+
+      let message = "";
+      try {
+        await runSnapshot(dir, source, "db.sqlite", ["users"], "", undefined, {
+          onSnapshotId: () => {
+            throw new Error("snapshot started callback failed");
+          },
+        });
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+
+      expect(message).toBe("snapshot started callback failed");
+      const snapshots = await listSnapshots(dir);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].status).toBe("error");
+      expect(snapshots[0].errorMessage).toBe(
+        "snapshot started callback failed",
+      );
+    });
+  });
 });

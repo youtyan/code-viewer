@@ -6810,7 +6810,8 @@ body.db-resizing {
   margin-bottom: 12px;
 }
 .db-snapshot-create-btn,
-.db-snapshot-refresh-btn {
+.db-snapshot-refresh-btn,
+.db-snapshot-job-cancel-btn {
   padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -6820,7 +6821,8 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 .db-snapshot-create-btn:hover,
-.db-snapshot-refresh-btn:hover {
+.db-snapshot-refresh-btn:hover,
+.db-snapshot-job-cancel-btn:hover {
   background: var(--bg-mute);
 }
 .db-snapshot-table-selector {

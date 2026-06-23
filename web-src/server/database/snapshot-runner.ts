@@ -66,9 +66,10 @@ export async function runSnapshot(
     containers,
     note,
   );
-  options.onSnapshotId?.(snapshotId);
 
   try {
+    options.onSnapshotId?.(snapshotId);
+
     for (const container of containers) {
       throwIfSnapshotAborted(options.signal);
       onProgress?.(container, false);
