@@ -338,11 +338,7 @@ export function createRedisExplorer(
     currentKey = name;
     notifySelectionChange();
     highlightActiveKey(name);
-    mainPane.innerHTML = "";
-    const loading = document.createElement("div");
-    loading.className = "db-pane-note";
-    loading.textContent = "Loading value...";
-    mainPane.appendChild(loading);
+    setPaneStatus(mainPane, "Loading value...");
     try {
       const params = new URLSearchParams({
         db: requestDbId,

@@ -456,11 +456,12 @@ export function findDockerServiceByDbId(
   cwd: string,
   dbId: string,
   kind?: DbKind,
+  omitDirNames?: string[],
 ): DockerDbInfo | null {
   const parsed = parseDockerDbId(dbId);
   if (!parsed) return null;
   return (
-    discoverDockerDatabases(cwd).find(
+    discoverDockerDatabases(cwd, omitDirNames).find(
       (d) =>
         d.serviceName === parsed.serviceName &&
         d.relDirSlash === parsed.relDir &&

@@ -3514,6 +3514,13 @@ function resolveRunningComposeContainerName(serviceName, cwd) {
     return null;
   }
 }
+function resolveRunningComposeContainerNameOrThrow(serviceName, cwd) {
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  return containerName;
+}
 var init_docker_utils = () => {};
 
 // web-src/server/database/adapters/docker.ts
@@ -3967,10 +3974,7 @@ function listDockerDatabases(serviceName, kind, env, cwd) {
   }
 }
 function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
   const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
   const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MYSQL_ROOT_PASSWORD || env.MARIADB_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
   const database = overrideDatabase || env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || (kind === "postgresql" ? "postgres" : "");
@@ -4664,11 +4668,11 @@ function parseDockerDbId(dbId) {
     return null;
   return { serviceName: rest, relDir: "", database };
 }
-function findDockerServiceByDbId(cwd, dbId, kind) {
+function findDockerServiceByDbId(cwd, dbId, kind, omitDirNames) {
   const parsed = parseDockerDbId(dbId);
   if (!parsed)
     return null;
-  return discoverDockerDatabases(cwd).find((d) => d.serviceName === parsed.serviceName && d.relDirSlash === parsed.relDir && (!kind || d.kind === kind)) || null;
+  return discoverDockerDatabases(cwd, omitDirNames).find((d) => d.serviceName === parsed.serviceName && d.relDirSlash === parsed.relDir && (!kind || d.kind === kind)) || null;
 }
 function isSafeDockerServiceName(value) {
   return /^[A-Za-z0-9_-]+$/.test(value);
@@ -5102,10 +5106,7 @@ function canonicalizeEsSnapshotContainer(container) {
   return JSON.stringify({ index: container || "*" });
 }
 function openElasticsearchAdapter(serviceName, env, cwd) {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
   const password = env.ELASTIC_PASSWORD || "";
   return createElasticsearchAdapter({ containerName, password });
 }
@@ -5201,7 +5202,7 @@ function textError(message, status) {
     }
   });
 }
-function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn) {
+function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn, omitDirNames) {
   if (!dbParam)
     return textError("missing db parameter", 400);
   if (!dbParam.startsWith("docker:")) {
@@ -5210,7 +5211,7 @@ function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn) {
   const parsed = parseDockerDbId(dbParam);
   if (!parsed)
     return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, kind);
+  const info = findDockerServiceByDbId(cwd, dbParam, kind, omitDirNames);
   if (!info)
     return textError(`${kind} service not found`, 404);
   const explorer = cache.getOrOpen(dbParam, () => openFn(info));
@@ -5259,11 +5260,11 @@ __export(exports_handle_elasticsearch, {
 function closeElasticsearchAdapter(dbId) {
   esAdapterCache.close(dbId);
 }
-function resolveEs(cwd, dbParam) {
-  return resolveDockerExplorer(cwd, dbParam, "elasticsearch", esAdapterCache, (info) => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir));
+function resolveEs(cwd, dbParam, omitDirNames) {
+  return resolveDockerExplorer(cwd, dbParam, "elasticsearch", esAdapterCache, (info) => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir), omitDirNames);
 }
-function handleIndices(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleIndices(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   try {
@@ -5274,8 +5275,8 @@ function handleIndices(cwd, url) {
     return handleError("elasticsearch", "list elasticsearch indices", err);
   }
 }
-function handleDocs(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleDocs(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const index = url.searchParams.get("index");
@@ -5309,8 +5310,8 @@ function handleDocs(cwd, url) {
     return handleError("elasticsearch", "search elasticsearch docs", err);
   }
 }
-async function handleSearch(cwd, req, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+async function handleSearch(cwd, req, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   let input;
@@ -5358,8 +5359,8 @@ async function handleSearch(cwd, req, url) {
     return json(body, 400);
   }
 }
-function handleDoc(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleDoc(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const index = url.searchParams.get("index");
@@ -5384,8 +5385,8 @@ function handleDoc(cwd, url) {
     return handleError("elasticsearch", "get elasticsearch doc", err);
   }
 }
-function handleMapping(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
+function handleMapping(cwd, url, omitDirNames) {
+  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const index = url.searchParams.get("index");
@@ -5399,29 +5400,29 @@ function handleMapping(cwd, url) {
     return handleError("elasticsearch", "read elasticsearch mapping", err);
   }
 }
-async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
+async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed, omitDirNames) {
   const wrap = createQueryStrippedLogger("elasticsearch", req, url);
   return dispatchRoutes(req, url, {
     "/_db/elasticsearch/indices": {
       methods: ["GET"],
-      handler: () => handleIndices(cwd, url)
+      handler: () => handleIndices(cwd, url, omitDirNames)
     },
     "/_db/elasticsearch/mapping": {
       methods: ["GET"],
-      handler: () => handleMapping(cwd, url)
+      handler: () => handleMapping(cwd, url, omitDirNames)
     },
     "/_db/elasticsearch/docs": {
       methods: ["GET"],
-      handler: () => handleDocs(cwd, url)
+      handler: () => handleDocs(cwd, url, omitDirNames)
     },
     "/_db/elasticsearch/doc": {
       methods: ["GET"],
-      handler: () => handleDoc(cwd, url)
+      handler: () => handleDoc(cwd, url, omitDirNames)
     },
     "/_db/elasticsearch/search": {
       methods: ["GET", "POST"],
       sideEffect: (m) => m === "POST",
-      handler: () => handleSearch(cwd, req, url)
+      handler: () => handleSearch(cwd, req, url, omitDirNames)
     }
   }, sideEffectAllowed, wrap);
 }
@@ -6072,10 +6073,7 @@ function createRedisAdapter(config) {
   };
 }
 function openRedisExplorer(serviceName, env, cwd) {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(serviceName, cwd);
   const password = env.REDIS_PASSWORD || "";
   return createRedisAdapter({ containerName, password });
 }
@@ -6094,11 +6092,11 @@ __export(exports_handle_redis, {
 function closeRedisAdapter(dbId) {
   redisAdapterCache.close(dbId);
 }
-function resolveRedis(cwd, dbParam) {
-  return resolveDockerExplorer(cwd, dbParam, "redis", redisAdapterCache, (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir));
+function resolveRedis(cwd, dbParam, omitDirNames) {
+  return resolveDockerExplorer(cwd, dbParam, "redis", redisAdapterCache, (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir), omitDirNames);
 }
-function handleDatabases(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleDatabases(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   try {
@@ -6109,8 +6107,8 @@ function handleDatabases(cwd, url) {
     return handleError("redis", "list redis databases", err);
   }
 }
-function handleKeys(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleKeys(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
@@ -6142,25 +6140,25 @@ function handleKeys(cwd, url) {
     return handleError("redis", "list redis keys", err);
   }
 }
-async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
+async function handleRedisRoute(req, url, cwd, sideEffectAllowed, omitDirNames) {
   const wrap = createQueryStrippedLogger("redis", req, url);
   return dispatchRoutes(req, url, {
     "/_db/redis/databases": {
       methods: ["GET"],
-      handler: () => handleDatabases(cwd, url)
+      handler: () => handleDatabases(cwd, url, omitDirNames)
     },
     "/_db/redis/keys": {
       methods: ["GET"],
-      handler: () => handleKeys(cwd, url)
+      handler: () => handleKeys(cwd, url, omitDirNames)
     },
     "/_db/redis/value": {
       methods: ["GET"],
-      handler: () => handleValue(cwd, url)
+      handler: () => handleValue(cwd, url, omitDirNames)
     }
   }, sideEffectAllowed, wrap);
 }
-function handleValue(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleValue(cwd, url, omitDirNames) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
@@ -6806,14 +6804,14 @@ async function getAdapter(r, _cwd) {
 function sanitizeFilename(name) {
   return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
 }
-function resolveDb(cwd, dbParam) {
+function resolveDb(cwd, dbParam, omitDirNames) {
   if (!dbParam)
     return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed)
       return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, dbParam);
+    const info = findDockerServiceByDbId(cwd, dbParam, undefined, omitDirNames);
     if (!info)
       return textError("docker service not found", 404);
     if (info.kind === "redis") {
@@ -6878,8 +6876,8 @@ function handleFiles(cwd, omitDirNames) {
   };
   return json(body);
 }
-async function handleSchema(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleSchema(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
@@ -6971,8 +6969,8 @@ function parseFilters(url) {
     return [];
   }
 }
-async function handleTable(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleTable(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -7081,13 +7079,13 @@ function inferEmptyQueryColumns(adapter, sql) {
     return [];
   }
 }
-async function handleQuery(cwd, req, sendSse) {
+async function handleQuery(cwd, req, sendSse, omitDirNames) {
   const body = await parsePostJsonBody(req);
   if (body instanceof Response)
     return body;
   if (!body.db || !body.sql)
     return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
   const maxRows = Math.min(1e4, Math.max(1, body.maxRows || 1000));
@@ -7201,8 +7199,8 @@ function formatCsvField(value) {
   }
   return str;
 }
-async function handleExport(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleExport(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -7302,8 +7300,8 @@ async function handleExport(cwd, url) {
     return handleError("database", "export table", err);
   }
 }
-async function handleColumns(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleColumns(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -7317,8 +7315,8 @@ async function handleColumns(cwd, url) {
     return handleError("database", "get columns", err);
   }
 }
-async function handleDdl(cwd, url) {
-  const r = resolveDb(cwd, url.searchParams.get("db"));
+async function handleDdl(cwd, url, omitDirNames) {
+  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response)
     return r;
   const table = url.searchParams.get("table");
@@ -7333,13 +7331,13 @@ async function handleDdl(cwd, url) {
     return handleError("database", "get DDL", err);
   }
 }
-async function handleSearchStart(cwd, req) {
+async function handleSearchStart(cwd, req, omitDirNames) {
   const body = await parsePostJsonBody(req);
   if (body instanceof Response)
     return body;
   if (!body.db || !body.term)
     return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
   const jobId = makeId("search");
@@ -7460,7 +7458,7 @@ function sanitizeSnapshotTables(tables) {
   }
   return out;
 }
-async function handleSnapshotCreate(cwd, req, sendSse) {
+async function handleSnapshotCreate(cwd, req, sendSse, omitDirNames) {
   const body = await parsePostJsonBody(req);
   if (body instanceof Response)
     return body;
@@ -7470,14 +7468,14 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
   if (requestedTables === null) {
     return textError("invalid tables", 400);
   }
-  let source;
+  let source = null;
   let containers = requestedTables;
   let closeSourceAfterSnapshot = false;
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed)
       return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
     if (!info)
       return textError("docker service not found", 404);
     const registeredSource = await openRegisteredDockerSnapshotSource(info, requestedTables);
@@ -7485,14 +7483,10 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
       source = registeredSource.source;
       containers = registeredSource.containers;
       closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
-    } else {
-      const r = resolveDb(cwd, body.db);
-      if (r instanceof Response)
-        return r;
-      source = await getAdapter(r, cwd);
     }
-  } else {
-    const r = resolveDb(cwd, body.db);
+  }
+  if (!source) {
+    const r = resolveDb(cwd, body.db, omitDirNames);
     if (r instanceof Response)
       return r;
     source = await getAdapter(r, cwd);
@@ -7659,7 +7653,7 @@ async function handleTabsPut(cwd, req) {
     return textError(`failed to save tabs: ${message}`, 500);
   }
 }
-async function handleClose(cwd, req) {
+async function handleClose(cwd, req, omitDirNames) {
   const body = await parsePostJsonBody(req);
   if (body instanceof Response)
     return body;
@@ -7669,7 +7663,7 @@ async function handleClose(cwd, req) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed)
       return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db);
+    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
     if (!info) {
       dockerAdapterCache.close(body.db);
       closeRedisAdapter(body.db);
@@ -7679,7 +7673,7 @@ async function handleClose(cwd, req) {
     await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
     return json({ ok: true });
   }
-  const r = resolveDb(cwd, body.db);
+  const r = resolveDb(cwd, body.db, omitDirNames);
   if (r instanceof Response)
     return r;
   if (r.docker) {
@@ -7693,11 +7687,11 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   ensureInit();
   if (url.pathname.startsWith("/_db/redis/")) {
     const { handleRedisRoute: handleRedisRoute2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
-    return handleRedisRoute2(req, url, cwd, sideEffectAllowed);
+    return handleRedisRoute2(req, url, cwd, sideEffectAllowed, omitDirNames);
   }
   if (url.pathname.startsWith("/_db/elasticsearch/")) {
     const { handleElasticsearchRoute: handleElasticsearchRoute2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
-    return handleElasticsearchRoute2(req, url, cwd, sideEffectAllowed);
+    return handleElasticsearchRoute2(req, url, cwd, sideEffectAllowed, omitDirNames);
   }
   const path = url.pathname;
   const start = Date.now();
@@ -7718,33 +7712,33 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     },
     "/_db/schema": {
       methods: ["GET"],
-      handler: () => handleSchema(cwd, url)
+      handler: () => handleSchema(cwd, url, omitDirNames)
     },
     "/_db/table": {
       methods: ["GET"],
-      handler: () => handleTable(cwd, url)
+      handler: () => handleTable(cwd, url, omitDirNames)
     },
     "/_db/columns": {
       methods: ["GET"],
-      handler: () => handleColumns(cwd, url)
+      handler: () => handleColumns(cwd, url, omitDirNames)
     },
     "/_db/export": {
       methods: ["GET"],
-      handler: () => handleExport(cwd, url)
+      handler: () => handleExport(cwd, url, omitDirNames)
     },
     "/_db/ddl": {
       methods: ["GET"],
-      handler: () => handleDdl(cwd, url)
+      handler: () => handleDdl(cwd, url, omitDirNames)
     },
     "/_db/query": {
       methods: ["POST"],
       sideEffect: true,
-      handler: () => handleQuery(cwd, req, sendSse)
+      handler: () => handleQuery(cwd, req, sendSse, omitDirNames)
     },
     "/_db/close": {
       methods: ["POST"],
       sideEffect: true,
-      handler: () => handleClose(cwd, req)
+      handler: () => handleClose(cwd, req, omitDirNames)
     },
     "/_db/history": {
       methods: ["GET"],
@@ -7763,7 +7757,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     "/_db/search/start": {
       methods: ["POST"],
       sideEffect: true,
-      handler: () => handleSearchStart(cwd, req)
+      handler: () => handleSearchStart(cwd, req, omitDirNames)
     },
     "/_db/search/status": {
       methods: ["GET"],
@@ -7781,7 +7775,7 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     "/_db/snapshot/create": {
       methods: ["POST"],
       sideEffect: true,
-      handler: () => handleSnapshotCreate(cwd, req, sendSse)
+      handler: () => handleSnapshotCreate(cwd, req, sendSse, omitDirNames)
     },
     "/_db/snapshot/cancel": {
       methods: ["POST"],

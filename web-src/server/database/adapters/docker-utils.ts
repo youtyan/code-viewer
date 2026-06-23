@@ -32,3 +32,16 @@ export function resolveRunningComposeContainerName(
     return null;
   }
 }
+
+export function resolveRunningComposeContainerNameOrThrow(
+  serviceName: string,
+  cwd: string,
+): string {
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(
+      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
+    );
+  }
+  return containerName;
+}

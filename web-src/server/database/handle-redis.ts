@@ -23,6 +23,7 @@ export function closeRedisAdapter(dbId: string): void {
 function resolveRedis(
   cwd: string,
   dbParam: string | null,
+  omitDirNames?: string[],
 ): { dbId: string; explorer: RedisExplorer } | Response {
   return resolveDockerExplorer<RedisExplorer>(
     cwd,
@@ -30,11 +31,16 @@ function resolveRedis(
     "redis",
     redisAdapterCache,
     (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir),
+    omitDirNames,
   );
 }
 
-function handleDatabases(cwd: string, url: URL): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleDatabases(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Response {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   try {
     const databases = r.explorer.listDatabases();
@@ -45,8 +51,8 @@ function handleDatabases(cwd: string, url: URL): Response {
   }
 }
 
-function handleKeys(cwd: string, url: URL): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleKeys(cwd: string, url: URL, omitDirNames?: string[]): Response {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
   if (dbIndexRaw === null) return textError("missing dbIndex", 400);
@@ -84,6 +90,7 @@ export async function handleRedisRoute(
   url: URL,
   cwd: string,
   sideEffectAllowed?: (req: Request) => boolean,
+  omitDirNames?: string[],
 ): Promise<Response | null> {
   const wrap = createQueryStrippedLogger("redis", req, url);
   return dispatchRoutes(
@@ -92,15 +99,15 @@ export async function handleRedisRoute(
     {
       "/_db/redis/databases": {
         methods: ["GET"],
-        handler: () => handleDatabases(cwd, url),
+        handler: () => handleDatabases(cwd, url, omitDirNames),
       },
       "/_db/redis/keys": {
         methods: ["GET"],
-        handler: () => handleKeys(cwd, url),
+        handler: () => handleKeys(cwd, url, omitDirNames),
       },
       "/_db/redis/value": {
         methods: ["GET"],
-        handler: () => handleValue(cwd, url),
+        handler: () => handleValue(cwd, url, omitDirNames),
       },
     },
     sideEffectAllowed,
@@ -108,8 +115,8 @@ export async function handleRedisRoute(
   );
 }
 
-function handleValue(cwd: string, url: URL): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
+function handleValue(cwd: string, url: URL, omitDirNames?: string[]): Response {
+  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
   if (r instanceof Response) return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
   if (dbIndexRaw === null) return textError("missing dbIndex", 400);

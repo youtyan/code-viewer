@@ -14,7 +14,10 @@ import {
   SQL_SNAPSHOT_BATCH_SIZE,
 } from "../sources/sql-snapshot";
 import type { SnapshotItem } from "../sources/types";
-import { resolveRunningComposeContainerName } from "./docker-utils";
+import {
+  resolveRunningComposeContainerName,
+  resolveRunningComposeContainerNameOrThrow,
+} from "./docker-utils";
 import type { DatabaseAdapter, QueryResult, TriggerInfo } from "./types";
 
 // adapters は SqlSource & SnapshotIterable を満たす形を返す。
@@ -592,12 +595,10 @@ export function openDockerAdapter(
   cwd: string,
   overrideDatabase?: string,
 ): DatabaseAdapter {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(
-      `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,
-    );
-  }
+  const containerName = resolveRunningComposeContainerNameOrThrow(
+    serviceName,
+    cwd,
+  );
   const user =
     env.POSTGRES_USER ||
     env.MYSQL_USER ||
