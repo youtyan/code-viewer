@@ -38,6 +38,7 @@ export type TableGridCallbacks = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
+  showError: (message: string) => void;
   applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
   getState: () => AnnotationDatabaseDataState;
   clear: () => void;
@@ -521,8 +522,10 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         updateStatus();
         renderViewport();
       })
-      .catch(() => {
-        /* renderViewport will retry if the page is still needed. */
+      .catch((err) => {
+        if (gen === loadGeneration) {
+          showError(err instanceof Error ? err.message : String(err));
+        }
       });
     const tracked = promise.finally(() => {
       if (pendingPages.get(pageStart) === tracked) {
@@ -681,6 +684,14 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
+  function showError(message: string) {
+    clear();
+    statusEl = document.createElement("div");
+    statusEl.className = "db-grid-status db-pane-error";
+    statusEl.textContent = message;
+    el.appendChild(statusEl);
+  }
+
   function load(table: string, initialData?: DbTableDataResponse) {
     clear();
     currentTable = table;
@@ -772,7 +783,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     viewport.removeEventListener("scroll", onViewportScroll);
   }
 
-  return { el, load, applyState, getState, clear, destroy };
+  return { el, load, showError, applyState, getState, clear, destroy };
 }
 
 function formatValue(value: DbValue): string {
