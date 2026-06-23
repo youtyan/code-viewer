@@ -200,17 +200,69 @@ function defaultPortFor(kind: DbKind): string {
   }
 }
 
-function resolveEnvValue(raw: string): string {
-  return raw.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
+function lookupEnvValue(
+  varName: string,
+  composeDirEnv: Record<string, string>,
+): string | undefined {
+  return process.env[varName] ?? composeDirEnv[varName];
+}
+
+function stripScalarSyntax(raw: string): string {
+  let value = raw.trim();
+  if (value.startsWith("'") || value.startsWith('"')) {
+    const quote = value[0];
+    const quoteEnd = value.lastIndexOf(quote);
+    if (quoteEnd > 0) return value.slice(1, quoteEnd);
+  }
+  const hashIdx = value.indexOf(" #");
+  if (hashIdx >= 0) value = value.slice(0, hashIdx).trim();
+  return value;
+}
+
+function resolveEnvValue(
+  raw: string,
+  composeDirEnv: Record<string, string> = {},
+): string {
+  const value = stripScalarSyntax(raw);
+  const withBraces = value.replace(/\$\{([^}]+)\}/g, (_, expr: string) => {
     const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
     if (!defaultMatch) return "";
     const varName = defaultMatch[1];
     const fallback = defaultMatch[2] ?? "";
-    return process.env[varName] || fallback;
+    return lookupEnvValue(varName, composeDirEnv) ?? fallback;
   });
+  return withBraces.replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (_, varName: string) => lookupEnvValue(varName, composeDirEnv) ?? "",
+  );
 }
 
-function parseComposeEnv(serviceBlock: string): Record<string, string> {
+function readDotenv(composeDir: string): Record<string, string> {
+  const envPath = join(composeDir, ".env");
+  if (!existsSync(envPath)) return {};
+  let content: string;
+  try {
+    content = readFileSync(envPath, "utf-8");
+  } catch {
+    return {};
+  }
+  const env: Record<string, string> = {};
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(
+      /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
+    );
+    if (!match) continue;
+    env[match[1]] = stripScalarSyntax(match[2]);
+  }
+  return env;
+}
+
+function parseComposeEnv(
+  serviceBlock: string,
+  composeDirEnv: Record<string, string> = {},
+): Record<string, string> {
   const env: Record<string, string> = {};
   const envMatch = serviceBlock.match(
     /^[ \t]+environment:\s*\n((?:[ \t]+(?:- )?[^\n]+\n?)*)/m,
@@ -226,10 +278,12 @@ function parseComposeEnv(serviceBlock: string): Record<string, string> {
     if (eqIdx > 0) {
       env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(
         stripped.slice(eqIdx + 1).trim(),
+        composeDirEnv,
       );
     } else if (colonIdx > 0) {
       env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(
         stripped.slice(colonIdx + 2).trim(),
+        composeDirEnv,
       );
     }
   }
@@ -327,6 +381,7 @@ function parseComposeFile(
   // path / id / label に乗せる relDir 表現。Windows パス区切りは `/` に揃える。
   const relDirSlash = relDir.replace(/\\/g, "/");
   const filename = basename(filepath);
+  const composeDirEnv = readDotenv(composeDir);
 
   for (let i = 0; i < servicePositions.length; i++) {
     if (results.length >= MAX_DOCKER_SERVICES) return;
@@ -339,7 +394,7 @@ function parseComposeFile(
 
     const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
     const image = imageMatch ? imageMatch[1] : null;
-    const env = parseComposeEnv(svcBlock);
+    const env = parseComposeEnv(svcBlock, composeDirEnv);
     const containerPort = parseComposeContainerPort(svcBlock);
     const kind =
       (image ? detectDbKind(image) : null) ??
