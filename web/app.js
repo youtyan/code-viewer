@@ -8465,6 +8465,45 @@ ${frontmatter.yaml}
     return fallback.charAt(0).toUpperCase() + fallback.slice(1);
   }
 
+  // web-src/views/database/abort-guard.ts
+  function createAbortGuard() {
+    let active = null;
+    let runId = 0;
+    return {
+      start() {
+        active?.abort();
+        const abort = new AbortController;
+        active = abort;
+        const requestRunId = ++runId;
+        return {
+          signal: abort.signal,
+          isStale() {
+            return abort.signal.aborted || requestRunId !== runId;
+          },
+          finish() {
+            if (active === abort)
+              active = null;
+          }
+        };
+      },
+      dispose() {
+        runId++;
+        active?.abort();
+        active = null;
+      }
+    };
+  }
+
+  // web-src/views/database/pane-status.ts
+  function setPaneStatus(el, message, options = {}) {
+    el.innerHTML = "";
+    options.afterClear?.();
+    const note = document.createElement("div");
+    note.className = options.error ? "db-pane-error" : "db-pane-note";
+    note.textContent = message;
+    el.appendChild(note);
+  }
+
   // web-src/views/database/elasticsearch-explorer.ts
   function createElasticsearchExplorer(callbacks = {}) {
     const container = document.createElement("div");
@@ -8538,10 +8577,10 @@ ${frontmatter.yaml}
     let suppressNotify = false;
     let queryNotifyTimer = null;
     let disposed = false;
-    let indexAbort = null;
-    let mappingAbort = null;
-    let docsAbort = null;
-    let docAbort = null;
+    const indexGuard = createAbortGuard();
+    const mappingGuard = createAbortGuard();
+    const docsGuard = createAbortGuard();
+    const docGuard = createAbortGuard();
     function notifySelectionChange() {
       if (suppressNotify)
         return;
@@ -8551,19 +8590,15 @@ ${frontmatter.yaml}
       });
     }
     function setIndexStatus(message, isError = false) {
-      indexList.innerHTML = "";
-      const note = document.createElement("div");
-      note.className = isError ? "db-pane-error" : "db-pane-note";
-      note.textContent = message;
-      indexList.appendChild(note);
+      setPaneStatus(indexList, message, { error: isError });
     }
     function setDocStatus(message, isError = false) {
-      docList.innerHTML = "";
-      const note = document.createElement("div");
-      note.className = isError ? "db-pane-error" : "db-pane-note";
-      note.textContent = message;
-      docList.appendChild(note);
-      docMoreBtn.hidden = true;
+      setPaneStatus(docList, message, {
+        error: isError,
+        afterClear: () => {
+          docMoreBtn.hidden = true;
+        }
+      });
     }
     function renderIndices(indices) {
       indexList.innerHTML = "";
@@ -8708,9 +8743,7 @@ ${frontmatter.yaml}
     async function fetchMapping(index) {
       if (disposed || !currentDbId)
         return;
-      mappingAbort?.abort();
-      const abort = new AbortController;
-      mappingAbort = abort;
+      const slot = mappingGuard.start();
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       mappingBody.innerHTML = "";
@@ -8721,45 +8754,36 @@ ${frontmatter.yaml}
       try {
         const params = new URLSearchParams({ db: requestDbId, index });
         const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
-          signal: abort.signal
+          signal: slot.signal
         });
-        if (disposed || abort.signal.aborted)
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
-          mappingBody.innerHTML = "";
-          const err = document.createElement("div");
-          err.className = "db-pane-error";
-          err.textContent = `Error: ${text2 || res.statusText}`;
-          mappingBody.appendChild(err);
+          setPaneStatus(mappingBody, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || currentIndex !== index) {
           return;
         }
         renderMapping(data);
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
-        mappingBody.innerHTML = "";
-        const errEl = document.createElement("div");
-        errEl.className = "db-pane-error";
-        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-        mappingBody.appendChild(errEl);
+        setPaneStatus(mappingBody, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
       } finally {
-        if (mappingAbort === abort)
-          mappingAbort = null;
+        slot.finish();
       }
     }
     async function loadDocs(append) {
       if (disposed || !currentDbId || !currentIndex)
         return;
-      docsAbort?.abort();
-      const abort = new AbortController;
-      docsAbort = abort;
+      const slot = docsGuard.start();
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       const requestIndex = currentIndex;
@@ -8780,9 +8804,9 @@ ${frontmatter.yaml}
         if (append && lastSort)
           params.set("searchAfter", JSON.stringify(lastSort));
         const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
-          signal: abort.signal
+          signal: slot.signal
         });
-        if (disposed || abort.signal.aborted)
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
@@ -8790,7 +8814,7 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || data.index !== requestIndex || requestQuery !== currentQuery) {
           return;
         }
         if (!append)
@@ -8803,15 +8827,14 @@ ${frontmatter.yaml}
         lastSort = data.lastSort;
         docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
         setDocStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        if (docsAbort === abort)
-          docsAbort = null;
-        if (!docsAbort)
+        slot.finish();
+        if (!slot.isStale())
           docMoreBtn.disabled = false;
       }
     }
@@ -8829,9 +8852,7 @@ ${frontmatter.yaml}
     async function selectDoc(id) {
       if (disposed || !currentDbId || !currentIndex)
         return;
-      docAbort?.abort();
-      const abort = new AbortController;
-      docAbort = abort;
+      const slot = docGuard.start();
       const requestRunId = ++docRunId;
       const requestDbId = currentDbId;
       const requestIndex = currentIndex;
@@ -8849,37 +8870,30 @@ ${frontmatter.yaml}
           id
         });
         const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
-          signal: abort.signal
+          signal: slot.signal
         });
-        if (disposed || abort.signal.aborted)
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
-          docBody.innerHTML = "";
-          const err = document.createElement("div");
-          err.className = "db-pane-error";
-          err.textContent = `Error: ${text2 || res.statusText}`;
-          docBody.appendChild(err);
+          setPaneStatus(docBody, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
+        if (disposed || slot.isStale() || requestRunId !== docRunId || requestDbId !== currentDbId || requestIndex !== currentIndex || id !== data.id) {
           return;
         }
         renderDoc(data);
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         if (requestRunId !== docRunId || requestDbId !== currentDbId)
           return;
-        docBody.innerHTML = "";
-        const errEl = document.createElement("div");
-        errEl.className = "db-pane-error";
-        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-        docBody.appendChild(errEl);
+        setPaneStatus(docBody, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
       } finally {
-        if (docAbort === abort)
-          docAbort = null;
+        slot.finish();
       }
     }
     function runSearch() {
@@ -8915,12 +8929,11 @@ ${frontmatter.yaml}
       }
       if (currentDbId === dbId && !initial)
         return;
-      indexAbort?.abort();
-      mappingAbort?.abort();
-      docsAbort?.abort();
-      docAbort?.abort();
-      const abort = new AbortController;
-      indexAbort = abort;
+      indexGuard.dispose();
+      mappingGuard.dispose();
+      docsGuard.dispose();
+      docGuard.dispose();
+      const slot = indexGuard.start();
       const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentIndex = null;
@@ -8937,8 +8950,8 @@ ${frontmatter.yaml}
       setDetailTab("mapping");
       setIndexStatus("Loading indices...");
       try {
-        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`, { signal: abort.signal });
-        if (disposed || abort.signal.aborted)
+        const res = await fetch(`/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`, { signal: slot.signal });
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
@@ -8946,7 +8959,7 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderIndices(data.indices);
         if (initial?.index && data.indices.some((ix) => ix.name === initial.index)) {
@@ -8959,23 +8972,18 @@ ${frontmatter.yaml}
           notifySelectionChange();
         }
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         setIndexStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        if (indexAbort === abort)
-          indexAbort = null;
+        slot.finish();
       }
     }
     function clear() {
-      indexAbort?.abort();
-      mappingAbort?.abort();
-      docsAbort?.abort();
-      docAbort?.abort();
-      indexAbort = null;
-      mappingAbort = null;
-      docsAbort = null;
-      docAbort = null;
+      indexGuard.dispose();
+      mappingGuard.dispose();
+      docsGuard.dispose();
+      docGuard.dispose();
       loadRunId++;
       docRunId++;
       suppressNotify = false;
@@ -10180,9 +10188,9 @@ ${frontmatter.yaml}
     let keyRunId = 0;
     let suppressNotify = false;
     let disposed = false;
-    let dbAbort = null;
-    let keysAbort = null;
-    let valueAbort = null;
+    const dbGuard = createAbortGuard();
+    const keysGuard = createAbortGuard();
+    const valueGuard = createAbortGuard();
     function notifySelectionChange() {
       if (suppressNotify)
         return;
@@ -10193,19 +10201,15 @@ ${frontmatter.yaml}
       });
     }
     function setDbStatus(message, isError = false) {
-      dbList.innerHTML = "";
-      const note = document.createElement("div");
-      note.className = isError ? "db-pane-error" : "db-pane-note";
-      note.textContent = message;
-      dbList.appendChild(note);
+      setPaneStatus(dbList, message, { error: isError });
     }
     function setKeyStatus(message, isError = false) {
-      keyList.innerHTML = "";
-      const note = document.createElement("div");
-      note.className = isError ? "db-pane-error" : "db-pane-note";
-      note.textContent = message;
-      keyList.appendChild(note);
-      keyMoreBtn.hidden = true;
+      setPaneStatus(keyList, message, {
+        error: isError,
+        afterClear: () => {
+          keyMoreBtn.hidden = true;
+        }
+      });
     }
     function renderDatabases(databases) {
       dbList.innerHTML = "";
@@ -10361,9 +10365,7 @@ ${frontmatter.yaml}
     async function selectKey(name) {
       if (disposed || currentDbId === null || currentDbIndex === null)
         return;
-      valueAbort?.abort();
-      const abort = new AbortController;
-      valueAbort = abort;
+      const slot = valueGuard.start();
       const requestRunId = ++keyRunId;
       const requestDbId = currentDbId;
       const requestDbIndex = currentDbIndex;
@@ -10382,37 +10384,30 @@ ${frontmatter.yaml}
           key: name
         });
         const res = await fetch(`/_db/redis/value?${params}`, {
-          signal: abort.signal
+          signal: slot.signal
         });
-        if (disposed || abort.signal.aborted)
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
-          mainPane.innerHTML = "";
-          const err = document.createElement("div");
-          err.className = "db-pane-error";
-          err.textContent = `Error: ${text2 || res.statusText}`;
-          mainPane.appendChild(err);
+          setPaneStatus(mainPane, `Error: ${text2 || res.statusText}`, {
+            error: true
+          });
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
+        if (disposed || slot.isStale() || requestRunId !== keyRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || name !== currentKey) {
           return;
         }
         renderValue(data.key, data.value);
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         if (requestRunId !== keyRunId || requestDbId !== currentDbId)
           return;
-        mainPane.innerHTML = "";
-        const errEl = document.createElement("div");
-        errEl.className = "db-pane-error";
-        errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-        mainPane.appendChild(errEl);
+        setPaneStatus(mainPane, `Error: ${err instanceof Error ? err.message : String(err)}`, { error: true });
       } finally {
-        if (valueAbort === abort)
-          valueAbort = null;
+        slot.finish();
       }
     }
     async function selectDatabase(dbIndex) {
@@ -10430,9 +10425,7 @@ ${frontmatter.yaml}
     async function loadKeys(append) {
       if (disposed || currentDbId === null || currentDbIndex === null)
         return;
-      keysAbort?.abort();
-      const abort = new AbortController;
-      keysAbort = abort;
+      const slot = keysGuard.start();
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       const requestDbIndex = currentDbIndex;
@@ -10448,9 +10441,9 @@ ${frontmatter.yaml}
           count: "200"
         });
         const res = await fetch(`/_db/redis/keys?${params}`, {
-          signal: abort.signal
+          signal: slot.signal
         });
-        if (disposed || abort.signal.aborted)
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
@@ -10458,7 +10451,7 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || requestDbId !== currentDbId || requestDbIndex !== currentDbIndex || data.dbIndex !== requestDbIndex) {
           return;
         }
         if (!append)
@@ -10471,15 +10464,14 @@ ${frontmatter.yaml}
         currentCursor = data.nextCursor;
         keyMoreBtn.hidden = currentCursor === "0";
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         if (requestRunId !== loadRunId || requestDbId !== currentDbId)
           return;
         setKeyStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        if (keysAbort === abort)
-          keysAbort = null;
-        if (!keysAbort)
+        slot.finish();
+        if (!slot.isStale())
           keyMoreBtn.disabled = false;
       }
     }
@@ -10501,11 +10493,10 @@ ${frontmatter.yaml}
         return;
       if (currentDbId === dbId && !initial)
         return;
-      dbAbort?.abort();
-      keysAbort?.abort();
-      valueAbort?.abort();
-      const abort = new AbortController;
-      dbAbort = abort;
+      dbGuard.dispose();
+      keysGuard.dispose();
+      valueGuard.dispose();
+      const slot = dbGuard.start();
       const requestRunId = ++loadRunId;
       currentDbId = dbId;
       currentDbIndex = null;
@@ -10518,8 +10509,8 @@ ${frontmatter.yaml}
       mainPane.textContent = "Select a key to view its value.";
       setDbStatus("Loading databases...");
       try {
-        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`, { signal: abort.signal });
-        if (disposed || abort.signal.aborted)
+        const res = await fetch(`/_db/redis/databases?db=${encodeURIComponent(dbId)}`, { signal: slot.signal });
+        if (disposed || slot.isStale())
           return;
         if (!res.ok) {
           const text2 = await res.text();
@@ -10527,7 +10518,7 @@ ${frontmatter.yaml}
           return;
         }
         const data = await res.json();
-        if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+        if (disposed || slot.isStale() || requestRunId !== loadRunId || currentDbId !== dbId)
           return;
         renderDatabases(data.databases);
         if (initial?.dbIndex !== undefined && data.databases.some((d2) => d2.index === initial.dbIndex)) {
@@ -10545,21 +10536,17 @@ ${frontmatter.yaml}
           notifySelectionChange();
         }
       } catch (err) {
-        if (abort.signal.aborted)
+        if (slot.isStale())
           return;
         setDbStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, true);
       } finally {
-        if (dbAbort === abort)
-          dbAbort = null;
+        slot.finish();
       }
     }
     function clear() {
-      dbAbort?.abort();
-      keysAbort?.abort();
-      valueAbort?.abort();
-      dbAbort = null;
-      keysAbort = null;
-      valueAbort = null;
+      dbGuard.dispose();
+      keysGuard.dispose();
+      valueGuard.dispose();
       loadRunId++;
       keyRunId++;
       suppressNotify = false;
@@ -12463,6 +12450,7 @@ ${frontmatter.yaml}
     sidebar.appendChild(historyToggle);
     let userPrefersHistoryOpen = initial.historyOpen ?? true;
     function applyVisibility() {
+      const sqlMode = isSqlKind(currentDbInfo?.kind);
       const visibility = computeVisibility(currentDbInfo?.kind, currentTab, userPrefersHistoryOpen);
       toolsSection.hidden = visibility.toolsHidden;
       historyToggle.hidden = visibility.historyToggleHidden;
@@ -12478,6 +12466,12 @@ ${frontmatter.yaml}
       snapshotView.el.hidden = visibility.snapshotHidden;
       redisExplorer.el.hidden = visibility.redisHidden;
       esExplorer.el.hidden = visibility.esHidden;
+      if (!sqlMode) {
+        queryBtn.classList.remove("active");
+        erBtn.classList.remove("active");
+        searchBtn.classList.remove("active");
+        snapshotBtn.classList.remove("active");
+      }
       historyToggle.classList.toggle("active", userPrefersHistoryOpen);
       if (!visibility.historyPaneHidden)
         historyView.refresh();
@@ -12511,15 +12505,6 @@ ${frontmatter.yaml}
       notice.textContent = message;
       mainContent.prepend(notice);
     }
-    function applyKindVisibility() {
-      applyVisibility();
-      if (!isSqlKind(currentDbInfo?.kind)) {
-        queryBtn.classList.remove("active");
-        erBtn.classList.remove("active");
-        searchBtn.classList.remove("active");
-        snapshotBtn.classList.remove("active");
-      }
-    }
     function setActiveTab(tab, updateUrl = true) {
       currentTab = normalizeViewForDb(tab, currentDbInfo);
       const tableScopedTab = currentTab === "data" || currentTab === "schema";
@@ -12533,7 +12518,7 @@ ${frontmatter.yaml}
       erBtn.classList.toggle("active", currentTab === "er");
       searchBtn.classList.toggle("active", currentTab === "search");
       snapshotBtn.classList.toggle("active", currentTab === "snapshot");
-      applyKindVisibility();
+      applyVisibility();
       if (currentTab === "query")
         queryEditor.focus();
       if (updateUrl && currentDbInfo) {
@@ -12620,16 +12605,12 @@ ${frontmatter.yaml}
         schemaView.clear();
         erDiagram.clear();
         schemaCache = null;
-        applyKindVisibility();
+        applyVisibility();
         if (currentDbInfo.kind === "redis") {
-          esExplorer.el.hidden = true;
           esExplorer.clear();
-          redisExplorer.el.hidden = false;
           await redisExplorer.load(dbId, explorerInitial?.redis);
         } else {
-          redisExplorer.el.hidden = true;
           redisExplorer.clear();
-          esExplorer.el.hidden = false;
           await esExplorer.load(dbId, explorerInitial?.es);
         }
         if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
@@ -12637,11 +12618,9 @@ ${frontmatter.yaml}
         cb.onStateChange();
         return;
       }
-      redisExplorer.el.hidden = true;
       redisExplorer.clear();
-      esExplorer.el.hidden = true;
       esExplorer.clear();
-      applyKindVisibility();
+      applyVisibility();
       const schema = await fetchSchema(dbId);
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;

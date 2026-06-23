@@ -7,6 +7,8 @@ import type {
   EsMappingResponse,
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
+import { createAbortGuard } from "./abort-guard";
+import { setPaneStatus } from "./pane-status";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -116,10 +118,10 @@ export function createElasticsearchExplorer(
   let suppressNotify = false;
   let queryNotifyTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
-  let indexAbort: AbortController | null = null;
-  let mappingAbort: AbortController | null = null;
-  let docsAbort: AbortController | null = null;
-  let docAbort: AbortController | null = null;
+  const indexGuard = createAbortGuard();
+  const mappingGuard = createAbortGuard();
+  const docsGuard = createAbortGuard();
+  const docGuard = createAbortGuard();
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -130,20 +132,16 @@ export function createElasticsearchExplorer(
   }
 
   function setIndexStatus(message: string, isError = false) {
-    indexList.innerHTML = "";
-    const note = document.createElement("div");
-    note.className = isError ? "db-pane-error" : "db-pane-note";
-    note.textContent = message;
-    indexList.appendChild(note);
+    setPaneStatus(indexList, message, { error: isError });
   }
 
   function setDocStatus(message: string, isError = false) {
-    docList.innerHTML = "";
-    const note = document.createElement("div");
-    note.className = isError ? "db-pane-error" : "db-pane-note";
-    note.textContent = message;
-    docList.appendChild(note);
-    docMoreBtn.hidden = true;
+    setPaneStatus(docList, message, {
+      error: isError,
+      afterClear: () => {
+        docMoreBtn.hidden = true;
+      },
+    });
   }
 
   function renderIndices(indices: EsIndicesResponse["indices"]): void {
@@ -297,9 +295,7 @@ export function createElasticsearchExplorer(
 
   async function fetchMapping(index: string): Promise<void> {
     if (disposed || !currentDbId) return;
-    mappingAbort?.abort();
-    const abort = new AbortController();
-    mappingAbort = abort;
+    const slot = mappingGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     mappingBody.innerHTML = "";
@@ -310,21 +306,20 @@ export function createElasticsearchExplorer(
     try {
       const params = new URLSearchParams({ db: requestDbId, index });
       const res = await fetch(`/_db/elasticsearch/mapping?${params}`, {
-        signal: abort.signal,
+        signal: slot.signal,
       });
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
-        mappingBody.innerHTML = "";
-        const err = document.createElement("div");
-        err.className = "db-pane-error";
-        err.textContent = `Error: ${text || res.statusText}`;
-        mappingBody.appendChild(err);
+        setPaneStatus(mappingBody, `Error: ${text || res.statusText}`, {
+          error: true,
+        });
         return;
       }
       const data = (await res.json()) as EsMappingResponse;
       if (
         disposed ||
+        slot.isStale() ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         currentIndex !== index
@@ -333,23 +328,21 @@ export function createElasticsearchExplorer(
       }
       renderMapping(data);
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
-      mappingBody.innerHTML = "";
-      const errEl = document.createElement("div");
-      errEl.className = "db-pane-error";
-      errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      mappingBody.appendChild(errEl);
+      setPaneStatus(
+        mappingBody,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        { error: true },
+      );
     } finally {
-      if (mappingAbort === abort) mappingAbort = null;
+      slot.finish();
     }
   }
 
   async function loadDocs(append: boolean): Promise<void> {
     if (disposed || !currentDbId || !currentIndex) return;
-    docsAbort?.abort();
-    const abort = new AbortController();
-    docsAbort = abort;
+    const slot = docsGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestIndex = currentIndex;
@@ -369,9 +362,9 @@ export function createElasticsearchExplorer(
       if (append && lastSort)
         params.set("searchAfter", JSON.stringify(lastSort));
       const res = await fetch(`/_db/elasticsearch/docs?${params}`, {
-        signal: abort.signal,
+        signal: slot.signal,
       });
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
         setDocStatus(`Error: ${text || res.statusText}`, true);
@@ -380,6 +373,7 @@ export function createElasticsearchExplorer(
       const data = (await res.json()) as EsDocsResponse;
       if (
         disposed ||
+        slot.isStale() ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         requestIndex !== currentIndex ||
@@ -398,15 +392,15 @@ export function createElasticsearchExplorer(
       // 続きがないか、size を満たさない返却なら more 不要。
       docMoreBtn.hidden = data.hits.length < 200 || !lastSort;
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setDocStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      if (docsAbort === abort) docsAbort = null;
-      if (!docsAbort) docMoreBtn.disabled = false;
+      slot.finish();
+      if (!slot.isStale()) docMoreBtn.disabled = false;
     }
   }
 
@@ -423,9 +417,7 @@ export function createElasticsearchExplorer(
 
   async function selectDoc(id: string): Promise<void> {
     if (disposed || !currentDbId || !currentIndex) return;
-    docAbort?.abort();
-    const abort = new AbortController();
-    docAbort = abort;
+    const slot = docGuard.start();
     const requestRunId = ++docRunId;
     const requestDbId = currentDbId;
     const requestIndex = currentIndex;
@@ -443,21 +435,20 @@ export function createElasticsearchExplorer(
         id,
       });
       const res = await fetch(`/_db/elasticsearch/doc?${params}`, {
-        signal: abort.signal,
+        signal: slot.signal,
       });
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
-        docBody.innerHTML = "";
-        const err = document.createElement("div");
-        err.className = "db-pane-error";
-        err.textContent = `Error: ${text || res.statusText}`;
-        docBody.appendChild(err);
+        setPaneStatus(docBody, `Error: ${text || res.statusText}`, {
+          error: true,
+        });
         return;
       }
       const data = (await res.json()) as EsDocResponse;
       if (
         disposed ||
+        slot.isStale() ||
         requestRunId !== docRunId ||
         requestDbId !== currentDbId ||
         requestIndex !== currentIndex ||
@@ -467,15 +458,15 @@ export function createElasticsearchExplorer(
       }
       renderDoc(data);
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       if (requestRunId !== docRunId || requestDbId !== currentDbId) return;
-      docBody.innerHTML = "";
-      const errEl = document.createElement("div");
-      errEl.className = "db-pane-error";
-      errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      docBody.appendChild(errEl);
+      setPaneStatus(
+        docBody,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        { error: true },
+      );
     } finally {
-      if (docAbort === abort) docAbort = null;
+      slot.finish();
     }
   }
 
@@ -514,12 +505,11 @@ export function createElasticsearchExplorer(
       queryNotifyTimer = null;
     }
     if (currentDbId === dbId && !initial) return;
-    indexAbort?.abort();
-    mappingAbort?.abort();
-    docsAbort?.abort();
-    docAbort?.abort();
-    const abort = new AbortController();
-    indexAbort = abort;
+    indexGuard.dispose();
+    mappingGuard.dispose();
+    docsGuard.dispose();
+    docGuard.dispose();
+    const slot = indexGuard.start();
     const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentIndex = null;
@@ -540,16 +530,21 @@ export function createElasticsearchExplorer(
     try {
       const res = await fetch(
         `/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`,
-        { signal: abort.signal },
+        { signal: slot.signal },
       );
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
         setIndexStatus(`Error: ${text || res.statusText}`, true);
         return;
       }
       const data = (await res.json()) as EsIndicesResponse;
-      if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+      if (
+        disposed ||
+        slot.isStale() ||
+        requestRunId !== loadRunId ||
+        currentDbId !== dbId
+      )
         return;
       renderIndices(data.indices);
 
@@ -568,25 +563,21 @@ export function createElasticsearchExplorer(
         notifySelectionChange();
       }
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       setIndexStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      if (indexAbort === abort) indexAbort = null;
+      slot.finish();
     }
   }
 
   function clear(): void {
-    indexAbort?.abort();
-    mappingAbort?.abort();
-    docsAbort?.abort();
-    docAbort?.abort();
-    indexAbort = null;
-    mappingAbort = null;
-    docsAbort = null;
-    docAbort = null;
+    indexGuard.dispose();
+    mappingGuard.dispose();
+    docsGuard.dispose();
+    docGuard.dispose();
     loadRunId++;
     docRunId++;
     suppressNotify = false;

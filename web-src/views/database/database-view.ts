@@ -215,7 +215,7 @@ function createTabPane(
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
   // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
   // 最上端に集約する。kind === redis / elasticsearch ではこのツールバーごと
-  // 隠す (applyKindVisibility が toolsSection.hidden を制御)。
+  // 隠す (applyVisibility が toolsSection.hidden を制御)。
   const toolsSection = document.createElement("div");
   toolsSection.className = "db-icon-toolbar";
   toolsSection.setAttribute("role", "toolbar");
@@ -394,6 +394,7 @@ function createTabPane(
   let userPrefersHistoryOpen = initial.historyOpen ?? true;
 
   function applyVisibility() {
+    const sqlMode = isSqlKind(currentDbInfo?.kind);
     const visibility = computeVisibility(
       currentDbInfo?.kind,
       currentTab,
@@ -413,6 +414,12 @@ function createTabPane(
     snapshotView.el.hidden = visibility.snapshotHidden;
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
+    if (!sqlMode) {
+      queryBtn.classList.remove("active");
+      erBtn.classList.remove("active");
+      searchBtn.classList.remove("active");
+      snapshotBtn.classList.remove("active");
+    }
     historyToggle.classList.toggle("active", userPrefersHistoryOpen);
     if (!visibility.historyPaneHidden) historyView.refresh();
   }
@@ -451,16 +458,6 @@ function createTabPane(
     mainContent.prepend(notice);
   }
 
-  function applyKindVisibility() {
-    applyVisibility();
-    if (!isSqlKind(currentDbInfo?.kind)) {
-      queryBtn.classList.remove("active");
-      erBtn.classList.remove("active");
-      searchBtn.classList.remove("active");
-      snapshotBtn.classList.remove("active");
-    }
-  }
-
   function setActiveTab(tab: TabName, updateUrl = true) {
     currentTab = normalizeViewForDb(tab, currentDbInfo);
     // アイコン (Query / ER / Search / Snapshot) は「テーブルに紐づかない」
@@ -481,7 +478,7 @@ function createTabPane(
     snapshotBtn.classList.toggle("active", currentTab === "snapshot");
     // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
     // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
-    applyKindVisibility();
+    applyVisibility();
     if (currentTab === "query") queryEditor.focus();
     if (updateUrl && currentDbInfo) {
       deps.setRoute(
@@ -588,27 +585,21 @@ function createTabPane(
       schemaView.clear();
       erDiagram.clear();
       schemaCache = null;
-      applyKindVisibility();
+      applyVisibility();
       if (currentDbInfo.kind === "redis") {
-        esExplorer.el.hidden = true;
         esExplorer.clear();
-        redisExplorer.el.hidden = false;
         await redisExplorer.load(dbId, explorerInitial?.redis);
       } else {
-        redisExplorer.el.hidden = true;
         redisExplorer.clear();
-        esExplorer.el.hidden = false;
         await esExplorer.load(dbId, explorerInitial?.es);
       }
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
       cb.onStateChange();
       return;
     }
-    redisExplorer.el.hidden = true;
     redisExplorer.clear();
-    esExplorer.el.hidden = true;
     esExplorer.clear();
-    applyKindVisibility();
+    applyVisibility();
     const schema = await fetchSchema(dbId);
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     if (!schema) return;

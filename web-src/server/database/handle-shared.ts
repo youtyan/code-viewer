@@ -86,3 +86,64 @@ export function createQueryStrippedLogger(
     return res;
   };
 }
+
+function textErrorResponse(message: string, status: number): Response {
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+export type RouteEntry = {
+  methods: readonly string[];
+  sideEffect?: boolean | ((method: string) => boolean);
+  handler: () => Response | Promise<Response>;
+};
+
+export async function dispatchRoutes(
+  req: Request,
+  url: URL,
+  routes: Record<string, RouteEntry>,
+  sideEffectAllowed?: (req: Request) => boolean,
+  wrap: (res: Response) => Response | Promise<Response> = (res) => res,
+): Promise<Response | null> {
+  const route = routes[url.pathname];
+  if (!route) return null;
+  if (!route.methods.includes(req.method)) {
+    return wrap(textErrorResponse("method not allowed", 405));
+  }
+  const requiresSideEffect =
+    typeof route.sideEffect === "function"
+      ? route.sideEffect(req.method)
+      : route.sideEffect === true;
+  if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textErrorResponse("forbidden", 403));
+  }
+  return wrap(await route.handler());
+}
+
+export async function parsePostJsonBody<T>(
+  req: Request,
+): Promise<T | Response> {
+  if (req.method !== "POST") {
+    return textErrorResponse("method not allowed", 405);
+  }
+  try {
+    return (await req.json()) as T;
+  } catch {
+    return textErrorResponse("invalid JSON body", 400);
+  }
+}
+
+export function handleError(
+  prefix: string,
+  action: string,
+  err: unknown,
+): Response {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[code-viewer] ${prefix} error:`, message);
+  return textErrorResponse(`failed to ${action}: ${message}`, 500);
+}
