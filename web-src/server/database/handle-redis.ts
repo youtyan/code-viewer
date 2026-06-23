@@ -4,13 +4,13 @@ import type {
   RedisValueResponse,
 } from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
-import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
   dispatchRoutes,
   handleError,
   json,
+  resolveDockerExplorer,
   textError,
 } from "./handle-shared";
 
@@ -24,21 +24,13 @@ function resolveRedis(
   cwd: string,
   dbParam: string | null,
 ): { dbId: string; explorer: RedisExplorer } | Response {
-  if (!dbParam) return textError("missing db parameter", 400);
-  if (!dbParam.startsWith("docker:")) {
-    return textError("redis requires docker: prefix", 400);
-  }
-  const parsed = parseDockerDbId(dbParam);
-  if (!parsed) return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, "redis");
-  if (!info) return textError("redis service not found", 404);
-
-  const explorer = redisAdapterCache.getOrOpen(dbParam, () =>
-    // openRedisExplorer の cwd 引数は `docker compose ps` の実行 dir。
-    // recursive discovery 後は compose のあるディレクトリを渡す必要がある。
-    openRedisExplorer(info.serviceName, info.env, info.composeDir),
+  return resolveDockerExplorer<RedisExplorer>(
+    cwd,
+    dbParam,
+    "redis",
+    redisAdapterCache,
+    (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir),
   );
-  return { dbId: dbParam, explorer };
 }
 
 function handleDatabases(cwd: string, url: URL): Response {

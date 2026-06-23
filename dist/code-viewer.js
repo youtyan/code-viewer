@@ -4784,6 +4784,345 @@ var init_global_search = __esm(() => {
   init_serialize();
 });
 
+// web-src/server/database/adapters/elasticsearch.ts
+var exports_elasticsearch = {};
+__export(exports_elasticsearch, {
+  quoteCurlConfigString: () => quoteCurlConfigString,
+  openElasticsearchAdapter: () => openElasticsearchAdapter,
+  isReadOnlyEsPath: () => isReadOnlyEsPath,
+  canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
+});
+import { spawnSync as spawnSync4 } from "node:child_process";
+function isReadOnlyEsPath(rawPath) {
+  const path = rawPath.split("?")[0].replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0 || segments.length > 2)
+    return false;
+  const apiSegment = segments[segments.length - 1];
+  return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
+}
+function quoteCurlConfigString(value) {
+  for (let i = 0;i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      throw new Error("curl config value must not contain control characters");
+    }
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+function execEsRequest(config, method, path, body, timeoutMs = 15000) {
+  const hasPassword = !!config.password;
+  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
+  const curlConfig = hasPassword ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}
+` : undefined;
+  const args = [
+    "exec",
+    "-i",
+    config.containerName,
+    "curl",
+    "-s",
+    "-S",
+    "-X",
+    method,
+    url,
+    "-w",
+    `
+__ES_STATUS__:%{http_code}
+`,
+    "-H",
+    "Content-Type: application/json",
+    ...hasPassword ? ["-K", "-"] : [],
+    ...body !== undefined ? ["--data-binary", JSON.stringify(body)] : []
+  ];
+  const proc = spawnSync4("docker", args, {
+    encoding: "utf8",
+    env: process.env,
+    timeout: timeoutMs,
+    input: curlConfig,
+    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
+  });
+  return {
+    code: proc.status ?? 1,
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || ""
+  };
+}
+function parseEsResponse(stdout) {
+  const marker = "__ES_STATUS__:";
+  const idx = stdout.lastIndexOf(marker);
+  if (idx < 0)
+    return { status: 0, body: stdout };
+  const statusPart = stdout.slice(idx + marker.length).trim();
+  const status = Number(statusPart) || 0;
+  let body = stdout.slice(0, idx);
+  if (body.endsWith(`
+`))
+    body = body.slice(0, -1);
+  return { status, body };
+}
+function safeJsonParse(stdout, label) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function createElasticsearchAdapter(config) {
+  function callJson(method, path, body, label) {
+    const r = execEsRequest(config, method, path, body);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status < 200 || status >= 300) {
+      throw new Error(`${label}: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    if (!text.trim())
+      return {};
+    return safeJsonParse(text, label);
+  }
+  function listIndices() {
+    const raw = callJson("GET", "/_cat/indices?format=json&expand_wildcards=open", undefined, "_cat/indices");
+    const result = [];
+    for (const row of raw) {
+      const name = row.index;
+      if (!name || name.startsWith("."))
+        continue;
+      result.push({
+        name,
+        docCount: Number(row["docs.count"]) || 0,
+        sizeBytes: parseEsSize(row["store.size"]),
+        health: row.health,
+        status: row.status
+      });
+    }
+    result.sort((a, b) => a.name.localeCompare(b.name));
+    return result;
+  }
+  function getMapping(index) {
+    if (!index || index.includes("/") || index.includes("?")) {
+      throw new Error(`invalid index name: ${index}`);
+    }
+    const raw = callJson("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
+    const keys = Object.keys(raw);
+    if (keys.length === 0) {
+      return { index, properties: {} };
+    }
+    const realIndex = keys[0];
+    const props = raw[realIndex]?.mappings?.properties ?? {};
+    return { index: realIndex, properties: props };
+  }
+  function searchDocs(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
+    const body = {
+      size,
+      track_total_hits: true,
+      seq_no_primary_term: true,
+      sort: [{ _doc: "asc" }],
+      query: opts.query ? { query_string: { query: opts.query } } : { match_all: {} }
+    };
+    if (opts.searchAfter && opts.searchAfter.length > 0) {
+      body.search_after = opts.searchAfter;
+    }
+    const raw = callJson("POST", `/${encodeURIComponent(opts.index)}/_search`, body, "_search");
+    const rawHits = raw.hits?.hits ?? [];
+    const hits = rawHits.map((h) => ({
+      _index: h._index ?? opts.index,
+      _id: h._id ?? "",
+      _score: h._score ?? null,
+      _source: h._source,
+      sort: h.sort,
+      _seq_no: h._seq_no,
+      _primary_term: h._primary_term
+    }));
+    let totalHits = 0;
+    const t = raw.hits?.total;
+    if (typeof t === "number")
+      totalHits = t;
+    else if (t && typeof t.value === "number")
+      totalHits = t.value;
+    const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
+    return { totalHits, hits, lastSort };
+  }
+  function getDoc(opts) {
+    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
+      throw new Error(`invalid index name: ${opts.index}`);
+    }
+    if (!opts.id) {
+      throw new Error("missing doc id");
+    }
+    const r = execEsRequest(config, "GET", `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    if (status === 404) {
+      try {
+        const parsed2 = text ? JSON.parse(text) : { found: false };
+        return { found: parsed2.found === true, source: parsed2._source };
+      } catch {
+        return { found: false, source: undefined };
+      }
+    }
+    if (status < 200 || status >= 300) {
+      throw new Error(`_doc: HTTP ${status} / ${text.slice(0, 200)}`);
+    }
+    const parsed = safeJsonParse(text, "_doc");
+    return {
+      found: parsed.found === true,
+      source: parsed._source,
+      seqNo: parsed._seq_no,
+      primaryTerm: parsed._primary_term
+    };
+  }
+  async function* iterateForSnapshot(container, signal) {
+    const { index, query: query2 } = parseEsSnapshotContainer(container);
+    const PAGE = 1000;
+    let searchAfter;
+    for (;; ) {
+      if (signal?.aborted)
+        return;
+      const result = searchDocs({
+        index,
+        query: query2,
+        size: PAGE,
+        searchAfter
+      });
+      if (result.hits.length === 0)
+        return;
+      for (const hit of result.hits) {
+        if (signal?.aborted)
+          return;
+        const keyJson = JSON.stringify({ _index: hit._index, _id: hit._id });
+        const payloadJson = JSON.stringify({ _source: hit._source });
+        const rowHash = hit._seq_no !== undefined && hit._primary_term !== undefined ? `${hit._seq_no}-${hit._primary_term}` : payloadJson;
+        yield { keyJson, payloadJson, rowHash };
+      }
+      if (result.hits.length < PAGE)
+        return;
+      searchAfter = result.lastSort;
+      if (!searchAfter || searchAfter.length === 0)
+        return;
+    }
+  }
+  async function query(input) {
+    if (input.method !== "GET" && input.method !== "POST") {
+      throw new Error(`method not allowed: ${input.method}`);
+    }
+    if (!input.path || typeof input.path !== "string") {
+      throw new Error("missing path");
+    }
+    if (!isReadOnlyEsPath(input.path)) {
+      throw new Error(`path is not in the read-only allowlist: ${input.path.split("?")[0]}`);
+    }
+    const start = Date.now();
+    const r = execEsRequest(config, input.method, input.path, input.body);
+    const elapsedMs = Date.now() - start;
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
+    }
+    const { status, body: text } = parseEsResponse(r.stdout);
+    let body = text;
+    if (text.trim()) {
+      try {
+        body = JSON.parse(text);
+      } catch {}
+    } else {
+      body = null;
+    }
+    return { status, body, elapsedMs };
+  }
+  async function listSnapshotContainers() {
+    const indices = listIndices();
+    return indices.map((ix) => ({
+      id: JSON.stringify({ index: ix.name }),
+      label: ix.name
+    }));
+  }
+  return {
+    kind: "elasticsearch",
+    model: "document",
+    capabilities: { snapshot: true, query: true },
+    listIndices,
+    getMapping,
+    searchDocs,
+    getDoc,
+    iterateForSnapshot,
+    listSnapshotContainers,
+    query,
+    close() {}
+  };
+}
+function parseEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" && obj.query.length > 0 ? obj.query : undefined;
+      return { index, query };
+    } catch {}
+  }
+  return { index: container || "*" };
+}
+function parseEsSize(raw) {
+  if (!raw)
+    return 0;
+  const m = raw.trim().toLowerCase().match(/^([\d.]+)\s*(b|kb|mb|gb|tb|pb)?$/);
+  if (!m)
+    return 0;
+  const n = Number.parseFloat(m[1]);
+  if (!Number.isFinite(n))
+    return 0;
+  const unit = m[2] || "b";
+  const mult = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 ** 2,
+    gb: 1024 ** 3,
+    tb: 1024 ** 4,
+    pb: 1024 ** 5
+  };
+  return Math.round(n * (mult[unit] || 1));
+}
+function canonicalizeEsSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const index = typeof obj.index === "string" ? obj.index : "*";
+      const query = typeof obj.query === "string" ? obj.query : undefined;
+      const out = { index };
+      if (query !== undefined)
+        out.query = query;
+      return JSON.stringify(out);
+    } catch {}
+  }
+  return JSON.stringify({ index: container || "*" });
+}
+function openElasticsearchAdapter(serviceName, env, cwd) {
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  const password = env.ELASTIC_PASSWORD || "";
+  return createElasticsearchAdapter({ containerName, password });
+}
+var ES_QUERY_ALLOWED_SUBPATHS, ES_DEFAULT_SIZE = 200;
+var init_elasticsearch = __esm(() => {
+  init_docker_utils();
+  ES_QUERY_ALLOWED_SUBPATHS = new Set([
+    "_search",
+    "_count",
+    "_msearch",
+    "_explain",
+    "_validate",
+    "_field_caps",
+    "_eql"
+  ]);
+});
+
 // web-src/server/database/handle-shared.ts
 function createDockerAdapterCache(maxEntries = DEFAULT_MAX_DOCKER_ADAPTER_CACHE, idleMs = DEFAULT_DOCKER_ADAPTER_IDLE_MS) {
   const cache = new Map;
@@ -4862,6 +5201,21 @@ function textError(message, status) {
     }
   });
 }
+function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn) {
+  if (!dbParam)
+    return textError("missing db parameter", 400);
+  if (!dbParam.startsWith("docker:")) {
+    return textError(`${kind} requires docker: prefix`, 400);
+  }
+  const parsed = parseDockerDbId(dbParam);
+  if (!parsed)
+    return textError("invalid docker db id", 400);
+  const info = findDockerServiceByDbId(cwd, dbParam, kind);
+  if (!info)
+    return textError(`${kind} service not found`, 404);
+  const explorer = cache.getOrOpen(dbParam, () => openFn(info));
+  return { dbId: dbParam, explorer };
+}
 async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res) {
   if (!Object.prototype.hasOwnProperty.call(routes, url.pathname))
     return null;
@@ -4892,7 +5246,946 @@ function handleError(prefix, action, err) {
 }
 var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
 var init_handle_shared = __esm(() => {
+  init_discovery();
   DEFAULT_DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
+});
+
+// web-src/server/database/handle-elasticsearch.ts
+var exports_handle_elasticsearch = {};
+__export(exports_handle_elasticsearch, {
+  handleElasticsearchRoute: () => handleElasticsearchRoute,
+  closeElasticsearchAdapter: () => closeElasticsearchAdapter
+});
+function closeElasticsearchAdapter(dbId) {
+  esAdapterCache.close(dbId);
+}
+function resolveEs(cwd, dbParam) {
+  return resolveDockerExplorer(cwd, dbParam, "elasticsearch", esAdapterCache, (info) => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir));
+}
+function handleIndices(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  try {
+    const indices = r.explorer.listIndices();
+    const body = { dbId: r.dbId, indices };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "list elasticsearch indices", err);
+  }
+}
+function handleDocs(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  const query = url.searchParams.get("q") || undefined;
+  const sizeRaw = url.searchParams.get("size");
+  const size = sizeRaw ? Number(sizeRaw) : undefined;
+  const sa = url.searchParams.get("searchAfter");
+  let searchAfter;
+  if (sa) {
+    try {
+      const parsed = JSON.parse(sa);
+      if (Array.isArray(parsed))
+        searchAfter = parsed;
+    } catch {
+      return textError("invalid searchAfter (must be JSON array)", 400);
+    }
+  }
+  try {
+    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
+    const body = {
+      dbId: r.dbId,
+      index,
+      hits: result.hits,
+      totalHits: result.totalHits,
+      lastSort: result.lastSort
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "search elasticsearch docs", err);
+  }
+}
+async function handleSearch(cwd, req, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  let input;
+  if (req.method === "GET") {
+    const q = url.searchParams.get("q");
+    if (!q)
+      return textError("missing q parameter", 400);
+    const index = url.searchParams.get("index");
+    const pathPrefix = index ? `/${encodeURIComponent(index)}` : "";
+    input = {
+      method: "GET",
+      path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`
+    };
+  } else if (req.method === "POST") {
+    const body = await parsePostJsonBody(req);
+    if (body instanceof Response)
+      return body;
+    if (body.method !== "GET" && body.method !== "POST") {
+      return textError("method must be GET or POST", 400);
+    }
+    if (!body.path || typeof body.path !== "string") {
+      return textError("missing path", 400);
+    }
+    input = { method: body.method, path: body.path, body: body.body };
+  } else {
+    return textError("method not allowed", 405);
+  }
+  try {
+    const result = await r.explorer.query(input);
+    const body = {
+      dbId: r.dbId,
+      ...result
+    };
+    return json(body);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[code-viewer] elasticsearch error:", msg);
+    const body = {
+      dbId: r.dbId,
+      status: 0,
+      body: null,
+      elapsedMs: 0,
+      error: msg
+    };
+    return json(body, 400);
+  }
+}
+function handleDoc(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  const id = url.searchParams.get("id");
+  if (!index)
+    return textError("missing index parameter", 400);
+  if (!id)
+    return textError("missing id parameter", 400);
+  try {
+    const doc = r.explorer.getDoc({ index, id });
+    const body = {
+      dbId: r.dbId,
+      index,
+      id,
+      found: doc.found,
+      source: doc.source,
+      seqNo: doc.seqNo,
+      primaryTerm: doc.primaryTerm
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "get elasticsearch doc", err);
+  }
+}
+function handleMapping(cwd, url) {
+  const r = resolveEs(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const index = url.searchParams.get("index");
+  if (!index)
+    return textError("missing index parameter", 400);
+  try {
+    const mapping = r.explorer.getMapping(index);
+    const body = { dbId: r.dbId, mapping };
+    return json(body);
+  } catch (err) {
+    return handleError("elasticsearch", "read elasticsearch mapping", err);
+  }
+}
+async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
+  const wrap = createQueryStrippedLogger("elasticsearch", req, url);
+  return dispatchRoutes(req, url, {
+    "/_db/elasticsearch/indices": {
+      methods: ["GET"],
+      handler: () => handleIndices(cwd, url)
+    },
+    "/_db/elasticsearch/mapping": {
+      methods: ["GET"],
+      handler: () => handleMapping(cwd, url)
+    },
+    "/_db/elasticsearch/docs": {
+      methods: ["GET"],
+      handler: () => handleDocs(cwd, url)
+    },
+    "/_db/elasticsearch/doc": {
+      methods: ["GET"],
+      handler: () => handleDoc(cwd, url)
+    },
+    "/_db/elasticsearch/search": {
+      methods: ["GET", "POST"],
+      sideEffect: (m) => m === "POST",
+      handler: () => handleSearch(cwd, req, url)
+    }
+  }, sideEffectAllowed, wrap);
+}
+var esAdapterCache;
+var init_handle_elasticsearch = __esm(() => {
+  init_elasticsearch();
+  init_handle_shared();
+  esAdapterCache = createDockerAdapterCache();
+});
+
+// web-src/server/database/adapters/redis.ts
+var exports_redis = {};
+__export(exports_redis, {
+  openRedisExplorer: () => openRedisExplorer,
+  canonicalizeRedisSnapshotContainer: () => canonicalizeRedisSnapshotContainer
+});
+import { spawnSync as spawnSync5 } from "node:child_process";
+import { createHash as createHash3 } from "node:crypto";
+function canonicalizeRedisSnapshotContainer(container) {
+  const { db, pattern } = parseSnapshotContainer(container);
+  return JSON.stringify({ db, pattern });
+}
+function parseSnapshotContainer(container) {
+  if (container.startsWith("{")) {
+    try {
+      const obj = JSON.parse(container);
+      const db = typeof obj.db === "number" ? obj.db : 0;
+      const pattern = typeof obj.pattern === "string" && obj.pattern.length > 0 ? obj.pattern : "*";
+      return { db, pattern };
+    } catch {}
+  }
+  return { db: 0, pattern: container || "*" };
+}
+function execRedisCli(config, args, timeoutMs = 1e4) {
+  const hasPassword = !!config.password;
+  const dockerArgs = [
+    "exec",
+    "-i",
+    ...hasPassword ? ["-e", "REDISCLI_AUTH"] : [],
+    config.containerName,
+    "redis-cli",
+    "-3",
+    ...args
+  ];
+  const spawnEnv = hasPassword ? { ...process.env, REDISCLI_AUTH: config.password } : process.env;
+  const proc = spawnSync5("docker", dockerArgs, {
+    encoding: "utf8",
+    env: spawnEnv,
+    timeout: timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    stdout: proc.stdout || "",
+    stderr: proc.stderr || "",
+    code: proc.status ?? 1
+  };
+}
+function parseInfoKeyspace(stdout) {
+  const counts = new Map;
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = line.match(/^db(\d+):keys=(\d+)/);
+    if (m)
+      counts.set(Number(m[1]), Number(m[2]));
+  }
+  return counts;
+}
+function isValidRedisType(t) {
+  return t === "string" || t === "list" || t === "set" || t === "zset" || t === "hash" || t === "stream" || t === "none";
+}
+function safeJsonParse2(stdout, command) {
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`${command} 返却 JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
+  }
+}
+function decodeQuotedRedisBytes(output) {
+  const trimmed = output.replace(/\r?\n$/, "");
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
+    return {
+      bytes: Buffer.from(trimmed, "utf8"),
+      sawBinaryEscape: false
+    };
+  }
+  const inner = trimmed.slice(1, -1);
+  const bytes = [];
+  let sawBinaryEscape = false;
+  let i = 0;
+  while (i < inner.length) {
+    const ch = inner.charCodeAt(i);
+    if (ch === 92 && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (next === "x" && i + 3 < inner.length) {
+        const b = parseInt(inner.slice(i + 2, i + 4), 16);
+        if (Number.isFinite(b)) {
+          bytes.push(b);
+          if (b < 32 || b >= 127)
+            sawBinaryEscape = true;
+          i += 4;
+          continue;
+        }
+      }
+      if (next === "n") {
+        bytes.push(10);
+        i += 2;
+        continue;
+      }
+      if (next === "r") {
+        bytes.push(13);
+        i += 2;
+        continue;
+      }
+      if (next === "t") {
+        bytes.push(9);
+        i += 2;
+        continue;
+      }
+      if (next === "a") {
+        bytes.push(7);
+        i += 2;
+        continue;
+      }
+      if (next === "b") {
+        bytes.push(8);
+        i += 2;
+        continue;
+      }
+      if (next === "\\") {
+        bytes.push(92);
+        i += 2;
+        continue;
+      }
+      if (next === '"') {
+        bytes.push(34);
+        i += 2;
+        continue;
+      }
+      bytes.push(92);
+      i += 1;
+      continue;
+    }
+    if (ch > 127)
+      sawBinaryEscape = true;
+    bytes.push(ch & 255);
+    i += 1;
+  }
+  return { bytes: Buffer.from(bytes), sawBinaryEscape };
+}
+function isValidUtf8(buf) {
+  try {
+    const decoded = buf.toString("utf8");
+    return Buffer.from(decoded, "utf8").equals(buf);
+  } catch {
+    return false;
+  }
+}
+function decodeHexItem(hex) {
+  const buf = Buffer.from(hex, "hex");
+  if (isValidUtf8(buf))
+    return buf.toString("utf8");
+  return { binaryBase64: buf.toString("base64") };
+}
+function createRedisAdapter(config) {
+  function listDatabases() {
+    const result = execRedisCli(config, ["INFO", "keyspace"]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "INFO keyspace failed");
+    }
+    const counts = parseInfoKeyspace(result.stdout);
+    const dbs = [];
+    for (let i = 0;i < DEFAULT_DATABASES; i++) {
+      dbs.push({ index: i, keyCount: counts.get(i) ?? 0 });
+    }
+    return dbs;
+  }
+  function listKeys(opts) {
+    const pattern = opts.pattern || "*";
+    const cursor = opts.cursor || "0";
+    const count = String(opts.count ?? 200);
+    const result = execRedisCli(config, [
+      "-n",
+      String(opts.db),
+      "EVAL",
+      SCAN_WITH_TYPES_LUA,
+      "0",
+      cursor,
+      pattern,
+      count
+    ]);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "SCAN failed");
+    }
+    const stdout = result.stdout.trim();
+    if (!stdout)
+      return { keys: [], nextCursor: "0" };
+    const parsed = safeJsonParse2(stdout, "SCAN");
+    const keys = [];
+    for (let i = 0;i < parsed.keys.length; i++) {
+      const rawType = parsed.types[i] || "none";
+      const type = isValidRedisType(rawType) ? rawType : "none";
+      keys.push({ name: parsed.keys[i], type });
+    }
+    return { keys, nextCursor: parsed.cursor };
+  }
+  function getValue(opts) {
+    const dbArg = ["-n", String(opts.db)];
+    const typeResult = execRedisCli(config, [...dbArg, "TYPE", opts.key]);
+    if (typeResult.code !== 0) {
+      throw new Error(typeResult.stderr.trim() || "TYPE failed");
+    }
+    const rawType = typeResult.stdout.trim();
+    if (rawType === "none" || !isValidRedisType(rawType)) {
+      return { type: "none" };
+    }
+    if (rawType === "string") {
+      const lenR = execRedisCli(config, [...dbArg, "STRLEN", opts.key]);
+      if (lenR.code !== 0) {
+        throw new Error(lenR.stderr.trim() || "STRLEN failed");
+      }
+      const fullSize = Number(lenR.stdout.trim()) || 0;
+      const lastIndex = REDIS_STRING_BYTE_LIMIT - 1;
+      const r = execRedisCli(config, [
+        "--no-raw",
+        ...dbArg,
+        "GETRANGE",
+        opts.key,
+        "0",
+        String(lastIndex)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "GETRANGE failed");
+      }
+      const { bytes, sawBinaryEscape } = decodeQuotedRedisBytes(r.stdout);
+      const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+      if (sawBinaryEscape || !isValidUtf8(bytes)) {
+        return {
+          type: "string",
+          value: "",
+          binaryBase64: bytes.toString("base64"),
+          truncated,
+          fullSize
+        };
+      }
+      return {
+        type: "string",
+        value: bytes.toString("utf8"),
+        truncated,
+        fullSize
+      };
+    }
+    if (rawType === "list") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('LLEN', KEYS[1]) local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1) local hex_items = {} for i, v in ipairs(items) do hex_items[i] = tohex(v) end return cjson.encode({total = total, items = hex_items})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "LRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "LRANGE") : { total: 0, items: [] };
+      const items = parsed.items.map(decodeHexItem);
+      return {
+        type: "list",
+        items,
+        total: parsed.total,
+        truncated: items.length < parsed.total
+      };
+    }
+    if (rawType === "hash") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('HLEN', KEYS[1]) local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local raw = result[2] local pairs_arr = {} local limit = tonumber(ARGV[1]) local count = 0 for i = 1, #raw, 2 do if count >= limit then break end table.insert(pairs_arr, {field = tohex(raw[i]), value = tohex(raw[i+1])}) count = count + 1 end return cjson.encode({total = total, fields = pairs_arr, count = count, cursor = result[1]})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "HSCAN failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "HSCAN") : { total: 0, fields: [], count: 0, cursor: "0" };
+      const fields = parsed.fields.map((p) => ({
+        field: decodeHexItem(p.field),
+        value: decodeHexItem(p.value)
+      }));
+      const truncated = parsed.count < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "hash",
+        fields,
+        total: parsed.total,
+        truncated
+      };
+    }
+    if (rawType === "set") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('SCARD', KEYS[1]) local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local members = {} local limit = tonumber(ARGV[1]) for i = 1, math.min(#result[2], limit) do members[i] = tohex(result[2][i]) end return cjson.encode({total = total, members = members, cursor = result[1]})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "SSCAN failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "SSCAN") : { total: 0, members: [], cursor: "0" };
+      const members = parsed.members.map(decodeHexItem);
+      const truncated = members.length < parsed.total || parsed.cursor !== "0";
+      return {
+        type: "set",
+        members,
+        total: parsed.total,
+        truncated
+      };
+    }
+    if (rawType === "zset") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('ZCARD', KEYS[1]) local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {member = tohex(r[i]), score = tonumber(r[i+1])}) end return cjson.encode({total = total, members = arr})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "ZRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "ZRANGE") : { total: 0, members: [] };
+      const members = parsed.members.map((m) => ({
+        member: decodeHexItem(m.member),
+        score: m.score
+      }));
+      return {
+        type: "zset",
+        members,
+        total: parsed.total,
+        truncated: members.length < parsed.total
+      };
+    }
+    if (rawType === "stream") {
+      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('XLEN', KEYS[1]) local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])) local arr = {} for _, entry in ipairs(r) do local pairs_arr = {} for i = 1, #entry[2], 2 do table.insert(pairs_arr, {field = tohex(entry[2][i]), value = tohex(entry[2][i+1])}) end table.insert(arr, {id = entry[1], fields = pairs_arr}) end return cjson.encode({total = total, entries = arr})`;
+      const r = execRedisCli(config, [
+        ...dbArg,
+        "EVAL",
+        lua,
+        "1",
+        opts.key,
+        String(REDIS_COLLECTION_LIMIT)
+      ]);
+      if (r.code !== 0) {
+        throw new Error(r.stderr.trim() || "XRANGE failed");
+      }
+      const stdout = r.stdout.trim();
+      const parsed = stdout ? safeJsonParse2(stdout, "XRANGE") : { total: 0, entries: [] };
+      const entries = parsed.entries.map((e) => ({
+        id: e.id,
+        fields: e.fields.map((p) => ({
+          field: decodeHexItem(p.field),
+          value: decodeHexItem(p.value)
+        }))
+      }));
+      return {
+        type: "stream",
+        entries,
+        total: parsed.total,
+        truncated: entries.length < parsed.total
+      };
+    }
+    return { type: "none" };
+  }
+  function snapshotFetch(db, hexKey, type) {
+    if (type === "none") {
+      return {
+        payload: { type: "none" },
+        fullHash: createHash3("sha256").update("").digest("hex")
+      };
+    }
+    if (type === "string")
+      return snapshotFetchString(db, hexKey);
+    if (type === "list")
+      return snapshotFetchList(db, hexKey);
+    if (type === "hash")
+      return snapshotFetchHash(db, hexKey);
+    if (type === "set")
+      return snapshotFetchSet(db, hexKey);
+    if (type === "zset")
+      return snapshotFetchZset(db, hexKey);
+    if (type === "stream")
+      return snapshotFetchStream(db, hexKey);
+    return {
+      payload: { type: "none" },
+      fullHash: createHash3("sha256").update("").digest("hex")
+    };
+  }
+  function evalHex(db, luaBody, extraArgv, label) {
+    const r = execRedisCli(config, [
+      "-n",
+      String(db),
+      "EVAL",
+      luaBody,
+      "0",
+      ...extraArgv
+    ]);
+    if (r.code !== 0) {
+      throw new Error(r.stderr.trim() || `${label} failed`);
+    }
+    return r.stdout.replace(/\r?\n$/, "");
+  }
+  function snapshotFetchString(db, hexKey) {
+    const fullSize = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('STRLEN', fromhex(ARGV[1]))`, [hexKey], "STRLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewBytes = Buffer.alloc(0);
+    for (let offset = 0;offset < fullSize; offset += REDIS_STRING_BYTE_LIMIT) {
+      const end = Math.min(offset + REDIS_STRING_BYTE_LIMIT - 1, fullSize - 1);
+      const hexChunk = evalHex(db, `${LUA_HEX_KEY_PRELUDE} return tohex(redis.call('GETRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])))`, [hexKey, String(offset), String(end)], "GETRANGE");
+      const bytes = Buffer.from(hexChunk, "hex");
+      hasher.update(bytes);
+      if (offset === 0)
+        previewBytes = bytes;
+    }
+    const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
+    const payload = isValidUtf8(previewBytes) ? {
+      type: "string",
+      value: previewBytes.toString("utf8"),
+      truncated,
+      fullSize
+    } : {
+      type: "string",
+      value: "",
+      binaryBase64: previewBytes.toString("base64"),
+      truncated,
+      fullSize
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function hashHexItem(hasher, hex) {
+    hasher.update(`${hex.length.toString(16)}:${hex}
+`);
+  }
+  function snapshotFetchList(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('LLEN', fromhex(ARGV[1]))`, [hexKey], "LLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewItems = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local items = redis.call('LRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])) local hex = {} for i, v in ipairs(items) do hex[i] = tohex(v) end return cjson.encode(hex)`, [hexKey, String(offset), String(end)], "LRANGE");
+      const chunk = safeJsonParse2(stdout, "LRANGE");
+      for (const hex of chunk)
+        hashHexItem(hasher, hex);
+      if (offset === 0)
+        previewItems = chunk.map(decodeHexItem);
+    }
+    const payload = {
+      type: "list",
+      items: previewItems,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchHash(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('HLEN', fromhex(ARGV[1]))`, [hexKey], "HLEN")) || 0;
+    const allPairs = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('HSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local raw = r[2] local pairs_arr = {} for i = 1, #raw, 2 do table.insert(pairs_arr, {tohex(raw[i]), tohex(raw[i+1])}) end return cjson.encode({cursor=r[1], pairs=pairs_arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "HSCAN");
+      const parsed = safeJsonParse2(stdout, "HSCAN");
+      allPairs.push(...parsed.pairs);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const seenField = new Set;
+    const uniquePairs = [];
+    for (const p of allPairs) {
+      if (seenField.has(p[0]))
+        continue;
+      seenField.add(p[0]);
+      uniquePairs.push(p);
+    }
+    uniquePairs.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    const hasher = createHash3("sha256");
+    for (const [f, v] of uniquePairs) {
+      hashHexItem(hasher, f);
+      hashHexItem(hasher, v);
+    }
+    const previewFields = uniquePairs.slice(0, REDIS_COLLECTION_LIMIT).map(([f, v]) => ({ field: decodeHexItem(f), value: decodeHexItem(v) }));
+    const payload = {
+      type: "hash",
+      fields: previewFields,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchSet(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('SCARD', fromhex(ARGV[1]))`, [hexKey], "SCARD")) || 0;
+    const allMembers = [];
+    let cursor = "0";
+    do {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('SSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local arr = {} for i, v in ipairs(r[2]) do arr[i] = tohex(v) end return cjson.encode({cursor=r[1], members=arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "SSCAN");
+      const parsed = safeJsonParse2(stdout, "SSCAN");
+      allMembers.push(...parsed.members);
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+    const dedup = Array.from(new Set(allMembers));
+    dedup.sort();
+    const hasher = createHash3("sha256");
+    for (const m of dedup)
+      hashHexItem(hasher, m);
+    const previewMembers = dedup.slice(0, REDIS_COLLECTION_LIMIT).map(decodeHexItem);
+    const payload = {
+      type: "set",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchZset(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('ZCARD', fromhex(ARGV[1]))`, [hexKey], "ZCARD")) || 0;
+    const hasher = createHash3("sha256");
+    let previewMembers = [];
+    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
+      const end = offset + REDIS_COLLECTION_LIMIT - 1;
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('ZRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {tohex(r[i]), tonumber(r[i+1])}) end return cjson.encode(arr)`, [hexKey, String(offset), String(end)], "ZRANGE");
+      const chunk = safeJsonParse2(stdout, "ZRANGE");
+      for (const [hex, score] of chunk) {
+        hashHexItem(hasher, hex);
+        hasher.update(`${score}
+`);
+      }
+      if (offset === 0) {
+        previewMembers = chunk.map(([h, s]) => ({
+          member: decodeHexItem(h),
+          score: s
+        }));
+      }
+    }
+    const payload = {
+      type: "zset",
+      members: previewMembers,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  function snapshotFetchStream(db, hexKey) {
+    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('XLEN', fromhex(ARGV[1]))`, [hexKey], "XLEN")) || 0;
+    const hasher = createHash3("sha256");
+    let previewEntries = [];
+    let startId = "-";
+    const seenIds = new Set;
+    let first = true;
+    for (;; ) {
+      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('XRANGE', fromhex(ARGV[1]), ARGV[2], '+', 'COUNT', tonumber(ARGV[3])) local arr = {} for _, e in ipairs(r) do local fs = {} for i = 1, #e[2], 2 do fs[#fs+1] = tohex(e[2][i]) fs[#fs+1] = tohex(e[2][i+1]) end arr[#arr+1] = {id=e[1], fs=fs} end return cjson.encode(arr)`, [hexKey, startId, String(REDIS_COLLECTION_LIMIT)], "XRANGE");
+      const chunk = safeJsonParse2(stdout, "XRANGE");
+      if (chunk.length === 0)
+        break;
+      const newEntries = [];
+      for (const e of chunk) {
+        if (seenIds.has(e.id))
+          continue;
+        seenIds.add(e.id);
+        newEntries.push(e);
+      }
+      for (const e of newEntries) {
+        hasher.update(`${e.id}
+`);
+        for (const hex of e.fs)
+          hashHexItem(hasher, hex);
+      }
+      if (first) {
+        previewEntries = newEntries.slice(0, REDIS_COLLECTION_LIMIT).map((e) => {
+          const fields = [];
+          for (let i = 0;i < e.fs.length; i += 2) {
+            fields.push({
+              field: decodeHexItem(e.fs[i]),
+              value: decodeHexItem(e.fs[i + 1])
+            });
+          }
+          return { id: e.id, fields };
+        });
+        first = false;
+      }
+      if (chunk.length < REDIS_COLLECTION_LIMIT)
+        break;
+      startId = chunk[chunk.length - 1].id;
+    }
+    const payload = {
+      type: "stream",
+      entries: previewEntries,
+      total,
+      truncated: total > REDIS_COLLECTION_LIMIT
+    };
+    return { payload, fullHash: hasher.digest("hex") };
+  }
+  async function* iterateForSnapshot(container, signal) {
+    const { db, pattern } = parseSnapshotContainer(container);
+    const seen = new Set;
+    let cursor = "0";
+    do {
+      if (signal?.aborted)
+        return;
+      const stdout = evalHex(db, SCAN_HEX_KEYS_LUA, [cursor, pattern, String(REDIS_COLLECTION_LIMIT)], "SCAN");
+      const parsed = safeJsonParse2(stdout, "SCAN");
+      for (let i = 0;i < parsed.keys.length; i++) {
+        if (signal?.aborted)
+          return;
+        const hexKey = parsed.keys[i];
+        if (seen.has(hexKey))
+          continue;
+        seen.add(hexKey);
+        const rawType = parsed.types[i] || "none";
+        const type = isValidRedisType(rawType) ? rawType : "none";
+        const { payload, fullHash } = snapshotFetch(db, hexKey, type);
+        const keyBytes = Buffer.from(hexKey, "hex");
+        const keyName = isValidUtf8(keyBytes) ? keyBytes.toString("utf8") : { binaryBase64: keyBytes.toString("base64") };
+        const keyJson = JSON.stringify({ db, key: keyName });
+        const payloadJson = JSON.stringify({ type, value: payload });
+        yield { keyJson, payloadJson, rowHash: fullHash };
+      }
+      cursor = parsed.cursor;
+    } while (cursor !== "0");
+  }
+  async function listSnapshotContainers() {
+    return [];
+  }
+  return {
+    kind: "redis",
+    model: "kv",
+    capabilities: { snapshot: true },
+    listDatabases,
+    listKeys,
+    getValue,
+    iterateForSnapshot,
+    listSnapshotContainers,
+    close() {}
+  };
+}
+function openRedisExplorer(serviceName, env, cwd) {
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+  }
+  const password = env.REDIS_PASSWORD || "";
+  return createRedisAdapter({ containerName, password });
+}
+var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`, LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`, SCAN_HEX_KEYS_LUA;
+var init_redis = __esm(() => {
+  init_docker_utils();
+  SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
+});
+
+// web-src/server/database/handle-redis.ts
+var exports_handle_redis = {};
+__export(exports_handle_redis, {
+  handleRedisRoute: () => handleRedisRoute,
+  closeRedisAdapter: () => closeRedisAdapter
+});
+function closeRedisAdapter(dbId) {
+  redisAdapterCache.close(dbId);
+}
+function resolveRedis(cwd, dbParam) {
+  return resolveDockerExplorer(cwd, dbParam, "redis", redisAdapterCache, (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir));
+}
+function handleDatabases(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  try {
+    const databases = r.explorer.listDatabases();
+    const body = { dbId: r.dbId, databases };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "list redis databases", err);
+  }
+}
+function handleKeys(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const pattern = url.searchParams.get("pattern") || "*";
+  const cursor = url.searchParams.get("cursor") || "0";
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
+  try {
+    const { keys, nextCursor } = r.explorer.listKeys({
+      db: dbIndex,
+      pattern,
+      cursor,
+      count
+    });
+    const body = {
+      dbId: r.dbId,
+      dbIndex,
+      keys,
+      nextCursor
+    };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "list redis keys", err);
+  }
+}
+async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
+  const wrap = createQueryStrippedLogger("redis", req, url);
+  return dispatchRoutes(req, url, {
+    "/_db/redis/databases": {
+      methods: ["GET"],
+      handler: () => handleDatabases(cwd, url)
+    },
+    "/_db/redis/keys": {
+      methods: ["GET"],
+      handler: () => handleKeys(cwd, url)
+    },
+    "/_db/redis/value": {
+      methods: ["GET"],
+      handler: () => handleValue(cwd, url)
+    }
+  }, sideEffectAllowed, wrap);
+}
+function handleValue(cwd, url) {
+  const r = resolveRedis(cwd, url.searchParams.get("db"));
+  if (r instanceof Response)
+    return r;
+  const dbIndexRaw = url.searchParams.get("dbIndex");
+  if (dbIndexRaw === null)
+    return textError("missing dbIndex", 400);
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  const key = url.searchParams.get("key");
+  if (!key)
+    return textError("missing key", 400);
+  try {
+    const value = r.explorer.getValue({ db: dbIndex, key });
+    const body = { dbId: r.dbId, dbIndex, key, value };
+    return json(body);
+  } catch (err) {
+    return handleError("redis", "read redis value", err);
+  }
+}
+var redisAdapterCache;
+var init_handle_redis = __esm(() => {
+  init_redis();
+  init_handle_shared();
+  redisAdapterCache = createDockerAdapterCache();
 });
 
 // web-src/server/database/query-history.ts
@@ -4974,7 +6267,7 @@ var CODE_VIEWER_DIR2 = ".code-viewer", HISTORY_FILE_NAME = "query-history.json",
 var init_query_history = () => {};
 
 // web-src/server/database/snapshot-store.ts
-import { createHash as createHash3, randomBytes } from "node:crypto";
+import { createHash as createHash4, randomBytes } from "node:crypto";
 import { mkdirSync as mkdirSync5 } from "node:fs";
 import { join as join10 } from "node:path";
 async function getSqliteClass2() {
@@ -5014,7 +6307,7 @@ function makeId2(prefix) {
   return `${prefix}-${randomBytes(8).toString("hex")}`;
 }
 function hashPayload(payloadJson) {
-  return createHash3("sha256").update(payloadJson).digest("hex");
+  return createHash4("sha256").update(payloadJson).digest("hex");
 }
 async function createSnapshot(cwd, dbId, kind, tables, note) {
   const db = await getStoreDb(cwd);
@@ -5027,11 +6320,11 @@ async function createSnapshot(cwd, dbId, kind, tables, note) {
 }
 async function addSnapshotTableData(cwd, snapshotId, tableName, pkColumns, rows) {
   const db = await getStoreDb(cwd);
-  const tableHasher = createHash3("sha256");
+  const tableHasher = createHash4("sha256");
   const insertRow = db.prepare("INSERT OR IGNORE INTO snapshot_rows (snapshot_id, table_name, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?, ?)");
   const insertPayload = db.prepare("INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)");
   for (const row of rows) {
-    const rowKeyHash = createHash3("sha256").update(row.rowKeyJson).digest("hex");
+    const rowKeyHash = createHash4("sha256").update(row.rowKeyJson).digest("hex");
     const payloadHash = hashPayload(row.payloadJson);
     tableHasher.update(row.rowHash);
     insertRow.run(snapshotId, tableName, rowKeyHash, row.rowKeyJson, row.rowHash, payloadHash);
@@ -5489,1309 +6782,6 @@ var init_tabs_store = __esm(() => {
     "search",
     "snapshot"
   ]);
-});
-
-// web-src/server/database/adapters/redis.ts
-var exports_redis = {};
-__export(exports_redis, {
-  openRedisExplorer: () => openRedisExplorer,
-  canonicalizeRedisSnapshotContainer: () => canonicalizeRedisSnapshotContainer
-});
-import { spawnSync as spawnSync4 } from "node:child_process";
-import { createHash as createHash4 } from "node:crypto";
-function canonicalizeRedisSnapshotContainer(container) {
-  const { db, pattern } = parseSnapshotContainer(container);
-  return JSON.stringify({ db, pattern });
-}
-function parseSnapshotContainer(container) {
-  if (container.startsWith("{")) {
-    try {
-      const obj = JSON.parse(container);
-      const db = typeof obj.db === "number" ? obj.db : 0;
-      const pattern = typeof obj.pattern === "string" && obj.pattern.length > 0 ? obj.pattern : "*";
-      return { db, pattern };
-    } catch {}
-  }
-  return { db: 0, pattern: container || "*" };
-}
-function execRedisCli(config, args, timeoutMs = 1e4) {
-  const hasPassword = !!config.password;
-  const dockerArgs = [
-    "exec",
-    "-i",
-    ...hasPassword ? ["-e", "REDISCLI_AUTH"] : [],
-    config.containerName,
-    "redis-cli",
-    "-3",
-    ...args
-  ];
-  const spawnEnv = hasPassword ? { ...process.env, REDISCLI_AUTH: config.password } : process.env;
-  const proc = spawnSync4("docker", dockerArgs, {
-    encoding: "utf8",
-    env: spawnEnv,
-    timeout: timeoutMs,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  return {
-    stdout: proc.stdout || "",
-    stderr: proc.stderr || "",
-    code: proc.status ?? 1
-  };
-}
-function parseInfoKeyspace(stdout) {
-  const counts = new Map;
-  for (const line of stdout.split(/\r?\n/)) {
-    const m = line.match(/^db(\d+):keys=(\d+)/);
-    if (m)
-      counts.set(Number(m[1]), Number(m[2]));
-  }
-  return counts;
-}
-function isValidRedisType(t) {
-  return t === "string" || t === "list" || t === "set" || t === "zset" || t === "hash" || t === "stream" || t === "none";
-}
-function safeJsonParse(stdout, command) {
-  try {
-    return JSON.parse(stdout);
-  } catch (err) {
-    throw new Error(`${command} 返却 JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
-  }
-}
-function decodeQuotedRedisBytes(output) {
-  const trimmed = output.replace(/\r?\n$/, "");
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) {
-    return {
-      bytes: Buffer.from(trimmed, "utf8"),
-      sawBinaryEscape: false
-    };
-  }
-  const inner = trimmed.slice(1, -1);
-  const bytes = [];
-  let sawBinaryEscape = false;
-  let i = 0;
-  while (i < inner.length) {
-    const ch = inner.charCodeAt(i);
-    if (ch === 92 && i + 1 < inner.length) {
-      const next = inner[i + 1];
-      if (next === "x" && i + 3 < inner.length) {
-        const b = parseInt(inner.slice(i + 2, i + 4), 16);
-        if (Number.isFinite(b)) {
-          bytes.push(b);
-          if (b < 32 || b >= 127)
-            sawBinaryEscape = true;
-          i += 4;
-          continue;
-        }
-      }
-      if (next === "n") {
-        bytes.push(10);
-        i += 2;
-        continue;
-      }
-      if (next === "r") {
-        bytes.push(13);
-        i += 2;
-        continue;
-      }
-      if (next === "t") {
-        bytes.push(9);
-        i += 2;
-        continue;
-      }
-      if (next === "a") {
-        bytes.push(7);
-        i += 2;
-        continue;
-      }
-      if (next === "b") {
-        bytes.push(8);
-        i += 2;
-        continue;
-      }
-      if (next === "\\") {
-        bytes.push(92);
-        i += 2;
-        continue;
-      }
-      if (next === '"') {
-        bytes.push(34);
-        i += 2;
-        continue;
-      }
-      bytes.push(92);
-      i += 1;
-      continue;
-    }
-    if (ch > 127)
-      sawBinaryEscape = true;
-    bytes.push(ch & 255);
-    i += 1;
-  }
-  return { bytes: Buffer.from(bytes), sawBinaryEscape };
-}
-function isValidUtf8(buf) {
-  try {
-    const decoded = buf.toString("utf8");
-    return Buffer.from(decoded, "utf8").equals(buf);
-  } catch {
-    return false;
-  }
-}
-function decodeHexItem(hex) {
-  const buf = Buffer.from(hex, "hex");
-  if (isValidUtf8(buf))
-    return buf.toString("utf8");
-  return { binaryBase64: buf.toString("base64") };
-}
-function createRedisAdapter(config) {
-  function listDatabases() {
-    const result = execRedisCli(config, ["INFO", "keyspace"]);
-    if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || "INFO keyspace failed");
-    }
-    const counts = parseInfoKeyspace(result.stdout);
-    const dbs = [];
-    for (let i = 0;i < DEFAULT_DATABASES; i++) {
-      dbs.push({ index: i, keyCount: counts.get(i) ?? 0 });
-    }
-    return dbs;
-  }
-  function listKeys(opts) {
-    const pattern = opts.pattern || "*";
-    const cursor = opts.cursor || "0";
-    const count = String(opts.count ?? 200);
-    const result = execRedisCli(config, [
-      "-n",
-      String(opts.db),
-      "EVAL",
-      SCAN_WITH_TYPES_LUA,
-      "0",
-      cursor,
-      pattern,
-      count
-    ]);
-    if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || "SCAN failed");
-    }
-    const stdout = result.stdout.trim();
-    if (!stdout)
-      return { keys: [], nextCursor: "0" };
-    const parsed = safeJsonParse(stdout, "SCAN");
-    const keys = [];
-    for (let i = 0;i < parsed.keys.length; i++) {
-      const rawType = parsed.types[i] || "none";
-      const type = isValidRedisType(rawType) ? rawType : "none";
-      keys.push({ name: parsed.keys[i], type });
-    }
-    return { keys, nextCursor: parsed.cursor };
-  }
-  function getValue(opts) {
-    const dbArg = ["-n", String(opts.db)];
-    const typeResult = execRedisCli(config, [...dbArg, "TYPE", opts.key]);
-    if (typeResult.code !== 0) {
-      throw new Error(typeResult.stderr.trim() || "TYPE failed");
-    }
-    const rawType = typeResult.stdout.trim();
-    if (rawType === "none" || !isValidRedisType(rawType)) {
-      return { type: "none" };
-    }
-    if (rawType === "string") {
-      const lenR = execRedisCli(config, [...dbArg, "STRLEN", opts.key]);
-      if (lenR.code !== 0) {
-        throw new Error(lenR.stderr.trim() || "STRLEN failed");
-      }
-      const fullSize = Number(lenR.stdout.trim()) || 0;
-      const lastIndex = REDIS_STRING_BYTE_LIMIT - 1;
-      const r = execRedisCli(config, [
-        "--no-raw",
-        ...dbArg,
-        "GETRANGE",
-        opts.key,
-        "0",
-        String(lastIndex)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "GETRANGE failed");
-      }
-      const { bytes, sawBinaryEscape } = decodeQuotedRedisBytes(r.stdout);
-      const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
-      if (sawBinaryEscape || !isValidUtf8(bytes)) {
-        return {
-          type: "string",
-          value: "",
-          binaryBase64: bytes.toString("base64"),
-          truncated,
-          fullSize
-        };
-      }
-      return {
-        type: "string",
-        value: bytes.toString("utf8"),
-        truncated,
-        fullSize
-      };
-    }
-    if (rawType === "list") {
-      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('LLEN', KEYS[1]) local items = redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1) local hex_items = {} for i, v in ipairs(items) do hex_items[i] = tohex(v) end return cjson.encode({total = total, items = hex_items})`;
-      const r = execRedisCli(config, [
-        ...dbArg,
-        "EVAL",
-        lua,
-        "1",
-        opts.key,
-        String(REDIS_COLLECTION_LIMIT)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "LRANGE failed");
-      }
-      const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "LRANGE") : { total: 0, items: [] };
-      const items = parsed.items.map(decodeHexItem);
-      return {
-        type: "list",
-        items,
-        total: parsed.total,
-        truncated: items.length < parsed.total
-      };
-    }
-    if (rawType === "hash") {
-      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('HLEN', KEYS[1]) local result = redis.call('HSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local raw = result[2] local pairs_arr = {} local limit = tonumber(ARGV[1]) local count = 0 for i = 1, #raw, 2 do if count >= limit then break end table.insert(pairs_arr, {field = tohex(raw[i]), value = tohex(raw[i+1])}) count = count + 1 end return cjson.encode({total = total, fields = pairs_arr, count = count, cursor = result[1]})`;
-      const r = execRedisCli(config, [
-        ...dbArg,
-        "EVAL",
-        lua,
-        "1",
-        opts.key,
-        String(REDIS_COLLECTION_LIMIT)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "HSCAN failed");
-      }
-      const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "HSCAN") : { total: 0, fields: [], count: 0, cursor: "0" };
-      const fields = parsed.fields.map((p) => ({
-        field: decodeHexItem(p.field),
-        value: decodeHexItem(p.value)
-      }));
-      const truncated = parsed.count < parsed.total || parsed.cursor !== "0";
-      return {
-        type: "hash",
-        fields,
-        total: parsed.total,
-        truncated
-      };
-    }
-    if (rawType === "set") {
-      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('SCARD', KEYS[1]) local result = redis.call('SSCAN', KEYS[1], '0', 'COUNT', tonumber(ARGV[1])) local members = {} local limit = tonumber(ARGV[1]) for i = 1, math.min(#result[2], limit) do members[i] = tohex(result[2][i]) end return cjson.encode({total = total, members = members, cursor = result[1]})`;
-      const r = execRedisCli(config, [
-        ...dbArg,
-        "EVAL",
-        lua,
-        "1",
-        opts.key,
-        String(REDIS_COLLECTION_LIMIT)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "SSCAN failed");
-      }
-      const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "SSCAN") : { total: 0, members: [], cursor: "0" };
-      const members = parsed.members.map(decodeHexItem);
-      const truncated = members.length < parsed.total || parsed.cursor !== "0";
-      return {
-        type: "set",
-        members,
-        total: parsed.total,
-        truncated
-      };
-    }
-    if (rawType === "zset") {
-      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('ZCARD', KEYS[1]) local r = redis.call('ZRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {member = tohex(r[i]), score = tonumber(r[i+1])}) end return cjson.encode({total = total, members = arr})`;
-      const r = execRedisCli(config, [
-        ...dbArg,
-        "EVAL",
-        lua,
-        "1",
-        opts.key,
-        String(REDIS_COLLECTION_LIMIT)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "ZRANGE failed");
-      }
-      const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "ZRANGE") : { total: 0, members: [] };
-      const members = parsed.members.map((m) => ({
-        member: decodeHexItem(m.member),
-        score: m.score
-      }));
-      return {
-        type: "zset",
-        members,
-        total: parsed.total,
-        truncated: members.length < parsed.total
-      };
-    }
-    if (rawType === "stream") {
-      const lua = `${LUA_TOHEX_PRELUDE} local total = redis.call('XLEN', KEYS[1]) local r = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1])) local arr = {} for _, entry in ipairs(r) do local pairs_arr = {} for i = 1, #entry[2], 2 do table.insert(pairs_arr, {field = tohex(entry[2][i]), value = tohex(entry[2][i+1])}) end table.insert(arr, {id = entry[1], fields = pairs_arr}) end return cjson.encode({total = total, entries = arr})`;
-      const r = execRedisCli(config, [
-        ...dbArg,
-        "EVAL",
-        lua,
-        "1",
-        opts.key,
-        String(REDIS_COLLECTION_LIMIT)
-      ]);
-      if (r.code !== 0) {
-        throw new Error(r.stderr.trim() || "XRANGE failed");
-      }
-      const stdout = r.stdout.trim();
-      const parsed = stdout ? safeJsonParse(stdout, "XRANGE") : { total: 0, entries: [] };
-      const entries = parsed.entries.map((e) => ({
-        id: e.id,
-        fields: e.fields.map((p) => ({
-          field: decodeHexItem(p.field),
-          value: decodeHexItem(p.value)
-        }))
-      }));
-      return {
-        type: "stream",
-        entries,
-        total: parsed.total,
-        truncated: entries.length < parsed.total
-      };
-    }
-    return { type: "none" };
-  }
-  function snapshotFetch(db, hexKey, type) {
-    if (type === "none") {
-      return {
-        payload: { type: "none" },
-        fullHash: createHash4("sha256").update("").digest("hex")
-      };
-    }
-    if (type === "string")
-      return snapshotFetchString(db, hexKey);
-    if (type === "list")
-      return snapshotFetchList(db, hexKey);
-    if (type === "hash")
-      return snapshotFetchHash(db, hexKey);
-    if (type === "set")
-      return snapshotFetchSet(db, hexKey);
-    if (type === "zset")
-      return snapshotFetchZset(db, hexKey);
-    if (type === "stream")
-      return snapshotFetchStream(db, hexKey);
-    return {
-      payload: { type: "none" },
-      fullHash: createHash4("sha256").update("").digest("hex")
-    };
-  }
-  function evalHex(db, luaBody, extraArgv, label) {
-    const r = execRedisCli(config, [
-      "-n",
-      String(db),
-      "EVAL",
-      luaBody,
-      "0",
-      ...extraArgv
-    ]);
-    if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `${label} failed`);
-    }
-    return r.stdout.replace(/\r?\n$/, "");
-  }
-  function snapshotFetchString(db, hexKey) {
-    const fullSize = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('STRLEN', fromhex(ARGV[1]))`, [hexKey], "STRLEN")) || 0;
-    const hasher = createHash4("sha256");
-    let previewBytes = Buffer.alloc(0);
-    for (let offset = 0;offset < fullSize; offset += REDIS_STRING_BYTE_LIMIT) {
-      const end = Math.min(offset + REDIS_STRING_BYTE_LIMIT - 1, fullSize - 1);
-      const hexChunk = evalHex(db, `${LUA_HEX_KEY_PRELUDE} return tohex(redis.call('GETRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])))`, [hexKey, String(offset), String(end)], "GETRANGE");
-      const bytes = Buffer.from(hexChunk, "hex");
-      hasher.update(bytes);
-      if (offset === 0)
-        previewBytes = bytes;
-    }
-    const truncated = fullSize > REDIS_STRING_BYTE_LIMIT;
-    const payload = isValidUtf8(previewBytes) ? {
-      type: "string",
-      value: previewBytes.toString("utf8"),
-      truncated,
-      fullSize
-    } : {
-      type: "string",
-      value: "",
-      binaryBase64: previewBytes.toString("base64"),
-      truncated,
-      fullSize
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  function hashHexItem(hasher, hex) {
-    hasher.update(`${hex.length.toString(16)}:${hex}
-`);
-  }
-  function snapshotFetchList(db, hexKey) {
-    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('LLEN', fromhex(ARGV[1]))`, [hexKey], "LLEN")) || 0;
-    const hasher = createHash4("sha256");
-    let previewItems = [];
-    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
-      const end = offset + REDIS_COLLECTION_LIMIT - 1;
-      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local items = redis.call('LRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])) local hex = {} for i, v in ipairs(items) do hex[i] = tohex(v) end return cjson.encode(hex)`, [hexKey, String(offset), String(end)], "LRANGE");
-      const chunk = safeJsonParse(stdout, "LRANGE");
-      for (const hex of chunk)
-        hashHexItem(hasher, hex);
-      if (offset === 0)
-        previewItems = chunk.map(decodeHexItem);
-    }
-    const payload = {
-      type: "list",
-      items: previewItems,
-      total,
-      truncated: total > REDIS_COLLECTION_LIMIT
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  function snapshotFetchHash(db, hexKey) {
-    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('HLEN', fromhex(ARGV[1]))`, [hexKey], "HLEN")) || 0;
-    const allPairs = [];
-    let cursor = "0";
-    do {
-      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('HSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local raw = r[2] local pairs_arr = {} for i = 1, #raw, 2 do table.insert(pairs_arr, {tohex(raw[i]), tohex(raw[i+1])}) end return cjson.encode({cursor=r[1], pairs=pairs_arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "HSCAN");
-      const parsed = safeJsonParse(stdout, "HSCAN");
-      allPairs.push(...parsed.pairs);
-      cursor = parsed.cursor;
-    } while (cursor !== "0");
-    const seenField = new Set;
-    const uniquePairs = [];
-    for (const p of allPairs) {
-      if (seenField.has(p[0]))
-        continue;
-      seenField.add(p[0]);
-      uniquePairs.push(p);
-    }
-    uniquePairs.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-    const hasher = createHash4("sha256");
-    for (const [f, v] of uniquePairs) {
-      hashHexItem(hasher, f);
-      hashHexItem(hasher, v);
-    }
-    const previewFields = uniquePairs.slice(0, REDIS_COLLECTION_LIMIT).map(([f, v]) => ({ field: decodeHexItem(f), value: decodeHexItem(v) }));
-    const payload = {
-      type: "hash",
-      fields: previewFields,
-      total,
-      truncated: total > REDIS_COLLECTION_LIMIT
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  function snapshotFetchSet(db, hexKey) {
-    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('SCARD', fromhex(ARGV[1]))`, [hexKey], "SCARD")) || 0;
-    const allMembers = [];
-    let cursor = "0";
-    do {
-      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('SSCAN', fromhex(ARGV[1]), ARGV[2], 'COUNT', tonumber(ARGV[3])) local arr = {} for i, v in ipairs(r[2]) do arr[i] = tohex(v) end return cjson.encode({cursor=r[1], members=arr})`, [hexKey, cursor, String(REDIS_COLLECTION_LIMIT)], "SSCAN");
-      const parsed = safeJsonParse(stdout, "SSCAN");
-      allMembers.push(...parsed.members);
-      cursor = parsed.cursor;
-    } while (cursor !== "0");
-    const dedup = Array.from(new Set(allMembers));
-    dedup.sort();
-    const hasher = createHash4("sha256");
-    for (const m of dedup)
-      hashHexItem(hasher, m);
-    const previewMembers = dedup.slice(0, REDIS_COLLECTION_LIMIT).map(decodeHexItem);
-    const payload = {
-      type: "set",
-      members: previewMembers,
-      total,
-      truncated: total > REDIS_COLLECTION_LIMIT
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  function snapshotFetchZset(db, hexKey) {
-    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('ZCARD', fromhex(ARGV[1]))`, [hexKey], "ZCARD")) || 0;
-    const hasher = createHash4("sha256");
-    let previewMembers = [];
-    for (let offset = 0;offset < total; offset += REDIS_COLLECTION_LIMIT) {
-      const end = offset + REDIS_COLLECTION_LIMIT - 1;
-      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('ZRANGE', fromhex(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), 'WITHSCORES') local arr = {} for i = 1, #r, 2 do table.insert(arr, {tohex(r[i]), tonumber(r[i+1])}) end return cjson.encode(arr)`, [hexKey, String(offset), String(end)], "ZRANGE");
-      const chunk = safeJsonParse(stdout, "ZRANGE");
-      for (const [hex, score] of chunk) {
-        hashHexItem(hasher, hex);
-        hasher.update(`${score}
-`);
-      }
-      if (offset === 0) {
-        previewMembers = chunk.map(([h, s]) => ({
-          member: decodeHexItem(h),
-          score: s
-        }));
-      }
-    }
-    const payload = {
-      type: "zset",
-      members: previewMembers,
-      total,
-      truncated: total > REDIS_COLLECTION_LIMIT
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  function snapshotFetchStream(db, hexKey) {
-    const total = Number(evalHex(db, `${LUA_HEX_KEY_PRELUDE} return redis.call('XLEN', fromhex(ARGV[1]))`, [hexKey], "XLEN")) || 0;
-    const hasher = createHash4("sha256");
-    let previewEntries = [];
-    let startId = "-";
-    const seenIds = new Set;
-    let first = true;
-    for (;; ) {
-      const stdout = evalHex(db, `${LUA_HEX_KEY_PRELUDE} local r = redis.call('XRANGE', fromhex(ARGV[1]), ARGV[2], '+', 'COUNT', tonumber(ARGV[3])) local arr = {} for _, e in ipairs(r) do local fs = {} for i = 1, #e[2], 2 do fs[#fs+1] = tohex(e[2][i]) fs[#fs+1] = tohex(e[2][i+1]) end arr[#arr+1] = {id=e[1], fs=fs} end return cjson.encode(arr)`, [hexKey, startId, String(REDIS_COLLECTION_LIMIT)], "XRANGE");
-      const chunk = safeJsonParse(stdout, "XRANGE");
-      if (chunk.length === 0)
-        break;
-      const newEntries = [];
-      for (const e of chunk) {
-        if (seenIds.has(e.id))
-          continue;
-        seenIds.add(e.id);
-        newEntries.push(e);
-      }
-      for (const e of newEntries) {
-        hasher.update(`${e.id}
-`);
-        for (const hex of e.fs)
-          hashHexItem(hasher, hex);
-      }
-      if (first) {
-        previewEntries = newEntries.slice(0, REDIS_COLLECTION_LIMIT).map((e) => {
-          const fields = [];
-          for (let i = 0;i < e.fs.length; i += 2) {
-            fields.push({
-              field: decodeHexItem(e.fs[i]),
-              value: decodeHexItem(e.fs[i + 1])
-            });
-          }
-          return { id: e.id, fields };
-        });
-        first = false;
-      }
-      if (chunk.length < REDIS_COLLECTION_LIMIT)
-        break;
-      startId = chunk[chunk.length - 1].id;
-    }
-    const payload = {
-      type: "stream",
-      entries: previewEntries,
-      total,
-      truncated: total > REDIS_COLLECTION_LIMIT
-    };
-    return { payload, fullHash: hasher.digest("hex") };
-  }
-  async function* iterateForSnapshot(container, signal) {
-    const { db, pattern } = parseSnapshotContainer(container);
-    const seen = new Set;
-    let cursor = "0";
-    do {
-      if (signal?.aborted)
-        return;
-      const stdout = evalHex(db, SCAN_HEX_KEYS_LUA, [cursor, pattern, String(REDIS_COLLECTION_LIMIT)], "SCAN");
-      const parsed = safeJsonParse(stdout, "SCAN");
-      for (let i = 0;i < parsed.keys.length; i++) {
-        if (signal?.aborted)
-          return;
-        const hexKey = parsed.keys[i];
-        if (seen.has(hexKey))
-          continue;
-        seen.add(hexKey);
-        const rawType = parsed.types[i] || "none";
-        const type = isValidRedisType(rawType) ? rawType : "none";
-        const { payload, fullHash } = snapshotFetch(db, hexKey, type);
-        const keyBytes = Buffer.from(hexKey, "hex");
-        const keyName = isValidUtf8(keyBytes) ? keyBytes.toString("utf8") : { binaryBase64: keyBytes.toString("base64") };
-        const keyJson = JSON.stringify({ db, key: keyName });
-        const payloadJson = JSON.stringify({ type, value: payload });
-        yield { keyJson, payloadJson, rowHash: fullHash };
-      }
-      cursor = parsed.cursor;
-    } while (cursor !== "0");
-  }
-  async function listSnapshotContainers() {
-    return [];
-  }
-  return {
-    kind: "redis",
-    model: "kv",
-    capabilities: { snapshot: true },
-    listDatabases,
-    listKeys,
-    getValue,
-    iterateForSnapshot,
-    listSnapshotContainers,
-    close() {}
-  };
-}
-function openRedisExplorer(serviceName, env, cwd) {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
-  const password = env.REDIS_PASSWORD || "";
-  return createRedisAdapter({ containerName, password });
-}
-var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`, LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`, SCAN_HEX_KEYS_LUA;
-var init_redis = __esm(() => {
-  init_docker_utils();
-  SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
-});
-
-// web-src/server/database/adapters/elasticsearch.ts
-var exports_elasticsearch = {};
-__export(exports_elasticsearch, {
-  quoteCurlConfigString: () => quoteCurlConfigString,
-  openElasticsearchAdapter: () => openElasticsearchAdapter,
-  isReadOnlyEsPath: () => isReadOnlyEsPath,
-  canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
-});
-import { spawnSync as spawnSync5 } from "node:child_process";
-function isReadOnlyEsPath(rawPath) {
-  const path = rawPath.split("?")[0].replace(/\/+$/, "");
-  const segments = path.split("/").filter(Boolean);
-  if (segments.length === 0 || segments.length > 2)
-    return false;
-  const apiSegment = segments[segments.length - 1];
-  return ES_QUERY_ALLOWED_SUBPATHS.has(apiSegment);
-}
-function quoteCurlConfigString(value) {
-  for (let i = 0;i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code < 32 || code === 127) {
-      throw new Error("curl config value must not contain control characters");
-    }
-  }
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
-}
-function execEsRequest(config, method, path, body, timeoutMs = 15000) {
-  const hasPassword = !!config.password;
-  const url = `http://localhost:9200${path.startsWith("/") ? "" : "/"}${path}`;
-  const curlConfig = hasPassword ? `user = ${quoteCurlConfigString(`elastic:${config.password}`)}
-` : undefined;
-  const args = [
-    "exec",
-    "-i",
-    config.containerName,
-    "curl",
-    "-s",
-    "-S",
-    "-X",
-    method,
-    url,
-    "-w",
-    `
-__ES_STATUS__:%{http_code}
-`,
-    "-H",
-    "Content-Type: application/json",
-    ...hasPassword ? ["-K", "-"] : [],
-    ...body !== undefined ? ["--data-binary", JSON.stringify(body)] : []
-  ];
-  const proc = spawnSync5("docker", args, {
-    encoding: "utf8",
-    env: process.env,
-    timeout: timeoutMs,
-    input: curlConfig,
-    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"]
-  });
-  return {
-    code: proc.status ?? 1,
-    stdout: proc.stdout || "",
-    stderr: proc.stderr || ""
-  };
-}
-function parseEsResponse(stdout) {
-  const marker = "__ES_STATUS__:";
-  const idx = stdout.lastIndexOf(marker);
-  if (idx < 0)
-    return { status: 0, body: stdout };
-  const statusPart = stdout.slice(idx + marker.length).trim();
-  const status = Number(statusPart) || 0;
-  let body = stdout.slice(0, idx);
-  if (body.endsWith(`
-`))
-    body = body.slice(0, -1);
-  return { status, body };
-}
-function safeJsonParse2(stdout, label) {
-  try {
-    return JSON.parse(stdout);
-  } catch (err) {
-    throw new Error(`${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
-  }
-}
-function createElasticsearchAdapter(config) {
-  function callJson(method, path, body, label) {
-    const r = execEsRequest(config, method, path, body);
-    if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
-    }
-    const { status, body: text } = parseEsResponse(r.stdout);
-    if (status < 200 || status >= 300) {
-      throw new Error(`${label}: HTTP ${status} / ${text.slice(0, 200)}`);
-    }
-    if (!text.trim())
-      return {};
-    return safeJsonParse2(text, label);
-  }
-  function listIndices() {
-    const raw = callJson("GET", "/_cat/indices?format=json&expand_wildcards=open", undefined, "_cat/indices");
-    const result = [];
-    for (const row of raw) {
-      const name = row.index;
-      if (!name || name.startsWith("."))
-        continue;
-      result.push({
-        name,
-        docCount: Number(row["docs.count"]) || 0,
-        sizeBytes: parseEsSize(row["store.size"]),
-        health: row.health,
-        status: row.status
-      });
-    }
-    result.sort((a, b) => a.name.localeCompare(b.name));
-    return result;
-  }
-  function getMapping(index) {
-    if (!index || index.includes("/") || index.includes("?")) {
-      throw new Error(`invalid index name: ${index}`);
-    }
-    const raw = callJson("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
-    const keys = Object.keys(raw);
-    if (keys.length === 0) {
-      return { index, properties: {} };
-    }
-    const realIndex = keys[0];
-    const props = raw[realIndex]?.mappings?.properties ?? {};
-    return { index: realIndex, properties: props };
-  }
-  function searchDocs(opts) {
-    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
-      throw new Error(`invalid index name: ${opts.index}`);
-    }
-    const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
-    const body = {
-      size,
-      track_total_hits: true,
-      seq_no_primary_term: true,
-      sort: [{ _doc: "asc" }],
-      query: opts.query ? { query_string: { query: opts.query } } : { match_all: {} }
-    };
-    if (opts.searchAfter && opts.searchAfter.length > 0) {
-      body.search_after = opts.searchAfter;
-    }
-    const raw = callJson("POST", `/${encodeURIComponent(opts.index)}/_search`, body, "_search");
-    const rawHits = raw.hits?.hits ?? [];
-    const hits = rawHits.map((h) => ({
-      _index: h._index ?? opts.index,
-      _id: h._id ?? "",
-      _score: h._score ?? null,
-      _source: h._source,
-      sort: h.sort,
-      _seq_no: h._seq_no,
-      _primary_term: h._primary_term
-    }));
-    let totalHits = 0;
-    const t = raw.hits?.total;
-    if (typeof t === "number")
-      totalHits = t;
-    else if (t && typeof t.value === "number")
-      totalHits = t.value;
-    const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
-    return { totalHits, hits, lastSort };
-  }
-  function getDoc(opts) {
-    if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
-      throw new Error(`invalid index name: ${opts.index}`);
-    }
-    if (!opts.id) {
-      throw new Error("missing doc id");
-    }
-    const r = execEsRequest(config, "GET", `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`);
-    if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
-    }
-    const { status, body: text } = parseEsResponse(r.stdout);
-    if (status === 404) {
-      try {
-        const parsed2 = text ? JSON.parse(text) : { found: false };
-        return { found: parsed2.found === true, source: parsed2._source };
-      } catch {
-        return { found: false, source: undefined };
-      }
-    }
-    if (status < 200 || status >= 300) {
-      throw new Error(`_doc: HTTP ${status} / ${text.slice(0, 200)}`);
-    }
-    const parsed = safeJsonParse2(text, "_doc");
-    return {
-      found: parsed.found === true,
-      source: parsed._source,
-      seqNo: parsed._seq_no,
-      primaryTerm: parsed._primary_term
-    };
-  }
-  async function* iterateForSnapshot(container, signal) {
-    const { index, query: query2 } = parseEsSnapshotContainer(container);
-    const PAGE = 1000;
-    let searchAfter;
-    for (;; ) {
-      if (signal?.aborted)
-        return;
-      const result = searchDocs({
-        index,
-        query: query2,
-        size: PAGE,
-        searchAfter
-      });
-      if (result.hits.length === 0)
-        return;
-      for (const hit of result.hits) {
-        if (signal?.aborted)
-          return;
-        const keyJson = JSON.stringify({ _index: hit._index, _id: hit._id });
-        const payloadJson = JSON.stringify({ _source: hit._source });
-        const rowHash = hit._seq_no !== undefined && hit._primary_term !== undefined ? `${hit._seq_no}-${hit._primary_term}` : payloadJson;
-        yield { keyJson, payloadJson, rowHash };
-      }
-      if (result.hits.length < PAGE)
-        return;
-      searchAfter = result.lastSort;
-      if (!searchAfter || searchAfter.length === 0)
-        return;
-    }
-  }
-  async function query(input) {
-    if (input.method !== "GET" && input.method !== "POST") {
-      throw new Error(`method not allowed: ${input.method}`);
-    }
-    if (!input.path || typeof input.path !== "string") {
-      throw new Error("missing path");
-    }
-    if (!isReadOnlyEsPath(input.path)) {
-      throw new Error(`path is not in the read-only allowlist: ${input.path.split("?")[0]}`);
-    }
-    const start = Date.now();
-    const r = execEsRequest(config, input.method, input.path, input.body);
-    const elapsedMs = Date.now() - start;
-    if (r.code !== 0) {
-      throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
-    }
-    const { status, body: text } = parseEsResponse(r.stdout);
-    let body = text;
-    if (text.trim()) {
-      try {
-        body = JSON.parse(text);
-      } catch {}
-    } else {
-      body = null;
-    }
-    return { status, body, elapsedMs };
-  }
-  async function listSnapshotContainers() {
-    const indices = listIndices();
-    return indices.map((ix) => ({
-      id: JSON.stringify({ index: ix.name }),
-      label: ix.name
-    }));
-  }
-  return {
-    kind: "elasticsearch",
-    model: "document",
-    capabilities: { snapshot: true, query: true },
-    listIndices,
-    getMapping,
-    searchDocs,
-    getDoc,
-    iterateForSnapshot,
-    listSnapshotContainers,
-    query,
-    close() {}
-  };
-}
-function parseEsSnapshotContainer(container) {
-  if (container.startsWith("{")) {
-    try {
-      const obj = JSON.parse(container);
-      const index = typeof obj.index === "string" ? obj.index : "*";
-      const query = typeof obj.query === "string" && obj.query.length > 0 ? obj.query : undefined;
-      return { index, query };
-    } catch {}
-  }
-  return { index: container || "*" };
-}
-function parseEsSize(raw) {
-  if (!raw)
-    return 0;
-  const m = raw.trim().toLowerCase().match(/^([\d.]+)\s*(b|kb|mb|gb|tb|pb)?$/);
-  if (!m)
-    return 0;
-  const n = Number.parseFloat(m[1]);
-  if (!Number.isFinite(n))
-    return 0;
-  const unit = m[2] || "b";
-  const mult = {
-    b: 1,
-    kb: 1024,
-    mb: 1024 ** 2,
-    gb: 1024 ** 3,
-    tb: 1024 ** 4,
-    pb: 1024 ** 5
-  };
-  return Math.round(n * (mult[unit] || 1));
-}
-function canonicalizeEsSnapshotContainer(container) {
-  if (container.startsWith("{")) {
-    try {
-      const obj = JSON.parse(container);
-      const index = typeof obj.index === "string" ? obj.index : "*";
-      const query = typeof obj.query === "string" ? obj.query : undefined;
-      const out = { index };
-      if (query !== undefined)
-        out.query = query;
-      return JSON.stringify(out);
-    } catch {}
-  }
-  return JSON.stringify({ index: container || "*" });
-}
-function openElasticsearchAdapter(serviceName, env, cwd) {
-  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
-  }
-  const password = env.ELASTIC_PASSWORD || "";
-  return createElasticsearchAdapter({ containerName, password });
-}
-var ES_QUERY_ALLOWED_SUBPATHS, ES_DEFAULT_SIZE = 200;
-var init_elasticsearch = __esm(() => {
-  init_docker_utils();
-  ES_QUERY_ALLOWED_SUBPATHS = new Set([
-    "_search",
-    "_count",
-    "_msearch",
-    "_explain",
-    "_validate",
-    "_field_caps",
-    "_eql"
-  ]);
-});
-
-// web-src/server/database/handle-redis.ts
-var exports_handle_redis = {};
-__export(exports_handle_redis, {
-  handleRedisRoute: () => handleRedisRoute,
-  closeRedisAdapter: () => closeRedisAdapter
-});
-function closeRedisAdapter(dbId) {
-  redisAdapterCache.close(dbId);
-}
-function resolveRedis(cwd, dbParam) {
-  if (!dbParam)
-    return textError("missing db parameter", 400);
-  if (!dbParam.startsWith("docker:")) {
-    return textError("redis requires docker: prefix", 400);
-  }
-  const parsed = parseDockerDbId(dbParam);
-  if (!parsed)
-    return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, "redis");
-  if (!info)
-    return textError("redis service not found", 404);
-  const explorer = redisAdapterCache.getOrOpen(dbParam, () => openRedisExplorer(info.serviceName, info.env, info.composeDir));
-  return { dbId: dbParam, explorer };
-}
-function handleDatabases(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  try {
-    const databases = r.explorer.listDatabases();
-    const body = { dbId: r.dbId, databases };
-    return json(body);
-  } catch (err) {
-    return handleError("redis", "list redis databases", err);
-  }
-}
-function handleKeys(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const dbIndexRaw = url.searchParams.get("dbIndex");
-  if (dbIndexRaw === null)
-    return textError("missing dbIndex", 400);
-  const dbIndex = Number(dbIndexRaw);
-  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
-    return textError("dbIndex must be an integer in 0..15", 400);
-  }
-  const pattern = url.searchParams.get("pattern") || "*";
-  const cursor = url.searchParams.get("cursor") || "0";
-  const countRaw = url.searchParams.get("count");
-  const count = countRaw ? Math.min(1e4, Math.max(1, Number(countRaw) || 200)) : 200;
-  try {
-    const { keys, nextCursor } = r.explorer.listKeys({
-      db: dbIndex,
-      pattern,
-      cursor,
-      count
-    });
-    const body = {
-      dbId: r.dbId,
-      dbIndex,
-      keys,
-      nextCursor
-    };
-    return json(body);
-  } catch (err) {
-    return handleError("redis", "list redis keys", err);
-  }
-}
-async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
-  const wrap = createQueryStrippedLogger("redis", req, url);
-  return dispatchRoutes(req, url, {
-    "/_db/redis/databases": {
-      methods: ["GET"],
-      handler: () => handleDatabases(cwd, url)
-    },
-    "/_db/redis/keys": {
-      methods: ["GET"],
-      handler: () => handleKeys(cwd, url)
-    },
-    "/_db/redis/value": {
-      methods: ["GET"],
-      handler: () => handleValue(cwd, url)
-    }
-  }, sideEffectAllowed, wrap);
-}
-function handleValue(cwd, url) {
-  const r = resolveRedis(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const dbIndexRaw = url.searchParams.get("dbIndex");
-  if (dbIndexRaw === null)
-    return textError("missing dbIndex", 400);
-  const dbIndex = Number(dbIndexRaw);
-  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
-    return textError("dbIndex must be an integer in 0..15", 400);
-  }
-  const key = url.searchParams.get("key");
-  if (!key)
-    return textError("missing key", 400);
-  try {
-    const value = r.explorer.getValue({ db: dbIndex, key });
-    const body = { dbId: r.dbId, dbIndex, key, value };
-    return json(body);
-  } catch (err) {
-    return handleError("redis", "read redis value", err);
-  }
-}
-var redisAdapterCache;
-var init_handle_redis = __esm(() => {
-  init_redis();
-  init_discovery();
-  init_handle_shared();
-  redisAdapterCache = createDockerAdapterCache();
-});
-
-// web-src/server/database/handle-elasticsearch.ts
-var exports_handle_elasticsearch = {};
-__export(exports_handle_elasticsearch, {
-  handleElasticsearchRoute: () => handleElasticsearchRoute,
-  closeElasticsearchAdapter: () => closeElasticsearchAdapter
-});
-function closeElasticsearchAdapter(dbId) {
-  esAdapterCache.close(dbId);
-}
-function resolveEs(cwd, dbParam) {
-  if (!dbParam)
-    return textError("missing db parameter", 400);
-  if (!dbParam.startsWith("docker:")) {
-    return textError("elasticsearch requires docker: prefix", 400);
-  }
-  const parsed = parseDockerDbId(dbParam);
-  if (!parsed)
-    return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
-  if (!info)
-    return textError("elasticsearch service not found", 404);
-  const explorer = esAdapterCache.getOrOpen(dbParam, () => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir));
-  return { dbId: dbParam, explorer };
-}
-function handleIndices(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  try {
-    const indices = r.explorer.listIndices();
-    const body = { dbId: r.dbId, indices };
-    return json(body);
-  } catch (err) {
-    return handleError("elasticsearch", "list elasticsearch indices", err);
-  }
-}
-function handleDocs(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const index = url.searchParams.get("index");
-  if (!index)
-    return textError("missing index parameter", 400);
-  const query = url.searchParams.get("q") || undefined;
-  const sizeRaw = url.searchParams.get("size");
-  const size = sizeRaw ? Number(sizeRaw) : undefined;
-  const sa = url.searchParams.get("searchAfter");
-  let searchAfter;
-  if (sa) {
-    try {
-      const parsed = JSON.parse(sa);
-      if (Array.isArray(parsed))
-        searchAfter = parsed;
-    } catch {
-      return textError("invalid searchAfter (must be JSON array)", 400);
-    }
-  }
-  try {
-    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
-    const body = {
-      dbId: r.dbId,
-      index,
-      hits: result.hits,
-      totalHits: result.totalHits,
-      lastSort: result.lastSort
-    };
-    return json(body);
-  } catch (err) {
-    return handleError("elasticsearch", "search elasticsearch docs", err);
-  }
-}
-async function handleSearch(cwd, req, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  let input;
-  if (req.method === "GET") {
-    const q = url.searchParams.get("q");
-    if (!q)
-      return textError("missing q parameter", 400);
-    const index = url.searchParams.get("index");
-    const pathPrefix = index ? `/${encodeURIComponent(index)}` : "";
-    input = {
-      method: "GET",
-      path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`
-    };
-  } else if (req.method === "POST") {
-    const body = await parsePostJsonBody(req);
-    if (body instanceof Response)
-      return body;
-    if (body.method !== "GET" && body.method !== "POST") {
-      return textError("method must be GET or POST", 400);
-    }
-    if (!body.path || typeof body.path !== "string") {
-      return textError("missing path", 400);
-    }
-    input = { method: body.method, path: body.path, body: body.body };
-  } else {
-    return textError("method not allowed", 405);
-  }
-  try {
-    const result = await r.explorer.query(input);
-    const body = {
-      dbId: r.dbId,
-      ...result
-    };
-    return json(body);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[code-viewer] elasticsearch error:", msg);
-    const body = {
-      dbId: r.dbId,
-      status: 0,
-      body: null,
-      elapsedMs: 0,
-      error: msg
-    };
-    return json(body, 400);
-  }
-}
-function handleDoc(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const index = url.searchParams.get("index");
-  const id = url.searchParams.get("id");
-  if (!index)
-    return textError("missing index parameter", 400);
-  if (!id)
-    return textError("missing id parameter", 400);
-  try {
-    const doc = r.explorer.getDoc({ index, id });
-    const body = {
-      dbId: r.dbId,
-      index,
-      id,
-      found: doc.found,
-      source: doc.source,
-      seqNo: doc.seqNo,
-      primaryTerm: doc.primaryTerm
-    };
-    return json(body);
-  } catch (err) {
-    return handleError("elasticsearch", "get elasticsearch doc", err);
-  }
-}
-function handleMapping(cwd, url) {
-  const r = resolveEs(cwd, url.searchParams.get("db"));
-  if (r instanceof Response)
-    return r;
-  const index = url.searchParams.get("index");
-  if (!index)
-    return textError("missing index parameter", 400);
-  try {
-    const mapping = r.explorer.getMapping(index);
-    const body = { dbId: r.dbId, mapping };
-    return json(body);
-  } catch (err) {
-    return handleError("elasticsearch", "read elasticsearch mapping", err);
-  }
-}
-async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
-  const wrap = createQueryStrippedLogger("elasticsearch", req, url);
-  return dispatchRoutes(req, url, {
-    "/_db/elasticsearch/indices": {
-      methods: ["GET"],
-      handler: () => handleIndices(cwd, url)
-    },
-    "/_db/elasticsearch/mapping": {
-      methods: ["GET"],
-      handler: () => handleMapping(cwd, url)
-    },
-    "/_db/elasticsearch/docs": {
-      methods: ["GET"],
-      handler: () => handleDocs(cwd, url)
-    },
-    "/_db/elasticsearch/doc": {
-      methods: ["GET"],
-      handler: () => handleDoc(cwd, url)
-    },
-    "/_db/elasticsearch/search": {
-      methods: ["GET", "POST"],
-      sideEffect: (m) => m === "POST",
-      handler: () => handleSearch(cwd, req, url)
-    }
-  }, sideEffectAllowed, wrap);
-}
-var esAdapterCache;
-var init_handle_elasticsearch = __esm(() => {
-  init_elasticsearch();
-  init_discovery();
-  init_handle_shared();
-  esAdapterCache = createDockerAdapterCache();
 });
 
 // web-src/server/database/handle.ts
@@ -7680,18 +7670,14 @@ async function handleClose(cwd, req) {
     if (!parsed)
       return textError("invalid docker db id", 400);
     const info = findDockerServiceByDbId(cwd, body.db);
-    if (!info)
-      return textError("docker service not found", 404);
-    if (info.kind === "redis") {
-      const { closeRedisAdapter: closeRedisAdapter2 } = await Promise.resolve().then(() => (init_handle_redis(), exports_handle_redis));
-      closeRedisAdapter2(body.db);
+    if (!info) {
+      dockerAdapterCache.close(body.db);
+      closeRedisAdapter(body.db);
+      closeElasticsearchAdapter(body.db);
       return json({ ok: true });
     }
-    if (info.kind === "elasticsearch") {
-      const { closeElasticsearchAdapter: closeElasticsearchAdapter2 } = await Promise.resolve().then(() => (init_handle_elasticsearch(), exports_handle_elasticsearch));
-      closeElasticsearchAdapter2(body.db);
-      return json({ ok: true });
-    }
+    await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
+    return json({ ok: true });
   }
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response)
@@ -7827,13 +7813,15 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     }
   }, sideEffectAllowed, wrapResponse);
 }
-var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
+var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, DOCKER_CLOSE_REGISTRY, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
   init_connection_pool();
   init_discovery();
   init_global_search();
+  init_handle_elasticsearch();
+  init_handle_redis();
   init_handle_shared();
   init_query_history();
   init_serialize();
@@ -7843,6 +7831,12 @@ var init_handle = __esm(() => {
   dockerAdapterCache = createDockerAdapterCache();
   searchJobs = new Map;
   snapshotJobs = new Map;
+  DOCKER_CLOSE_REGISTRY = {
+    postgresql: (dbId) => dockerAdapterCache.close(dbId),
+    mysql: (dbId) => dockerAdapterCache.close(dbId),
+    redis: closeRedisAdapter,
+    elasticsearch: closeElasticsearchAdapter
+  };
   SNAPSHOT_DOCKER_SOURCE_REGISTRY = {
     redis: async (info, requestedContainers) => {
       const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));

@@ -26,6 +26,8 @@ import {
   validateDbPath,
 } from "./discovery";
 import { getPrimaryKeyColumns, searchTable } from "./global-search";
+import { closeElasticsearchAdapter } from "./handle-elasticsearch";
+import { closeRedisAdapter } from "./handle-redis";
 import {
   createDockerAdapterCache,
   dispatchRoutes,
@@ -897,8 +899,16 @@ type SnapshotDockerSourceFactory = (
   info: DockerDbInfo,
   requestedContainers: string[] | undefined,
 ) => Promise<SnapshotDockerSource>;
+type DockerCloseHandler = (dbId: string) => void | Promise<void>;
 
 const snapshotJobs = new Map<string, SnapshotJob>();
+
+const DOCKER_CLOSE_REGISTRY: Partial<Record<DbKind, DockerCloseHandler>> = {
+  postgresql: (dbId) => dockerAdapterCache.close(dbId),
+  mysql: (dbId) => dockerAdapterCache.close(dbId),
+  redis: closeRedisAdapter,
+  elasticsearch: closeElasticsearchAdapter,
+};
 
 const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
   Record<DbKind, SnapshotDockerSourceFactory>
@@ -1247,19 +1257,14 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
     const info = findDockerServiceByDbId(cwd, body.db);
-    if (!info) return textError("docker service not found", 404);
-    if (info.kind === "redis") {
-      const { closeRedisAdapter } = await import("./handle-redis");
+    if (!info) {
+      dockerAdapterCache.close(body.db);
       closeRedisAdapter(body.db);
-      return json({ ok: true });
-    }
-    if (info.kind === "elasticsearch") {
-      const { closeElasticsearchAdapter } = await import(
-        "./handle-elasticsearch"
-      );
       closeElasticsearchAdapter(body.db);
       return json({ ok: true });
     }
+    await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
+    return json({ ok: true });
   }
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response) return r;

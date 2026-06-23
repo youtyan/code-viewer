@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   canonicalizeEsSnapshotContainer,
   isReadOnlyEsPath,
@@ -6,7 +9,10 @@ import {
 } from "../server/database/adapters/elasticsearch";
 import { canonicalizeRedisSnapshotContainer } from "../server/database/adapters/redis";
 import { parseDockerDbId } from "../server/database/discovery";
-import { parseSelectAllTable } from "../server/database/handle";
+import {
+  handleDatabaseRoute,
+  parseSelectAllTable,
+} from "../server/database/handle";
 
 describe("Elasticsearch read-only path allowlist", () => {
   for (const [path, expected] of [
@@ -112,4 +118,29 @@ describe("empty query column inference parser", () => {
       expect(parseSelectAllTable(sql)).toBe(expected);
     });
   }
+});
+
+describe("database close route", () => {
+  test("closes stale docker ids without discovery info", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-close-route-"));
+    try {
+      const req = new Request("http://localhost/_db/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ db: "docker:redis" }),
+      });
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
