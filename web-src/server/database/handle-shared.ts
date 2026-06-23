@@ -87,7 +87,17 @@ export function createQueryStrippedLogger(
   };
 }
 
-function textErrorResponse(message: string, status: number): Response {
+export function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+export function textError(message: string, status: number): Response {
   return new Response(message, {
     status,
     headers: {
@@ -110,17 +120,18 @@ export async function dispatchRoutes(
   sideEffectAllowed?: (req: Request) => boolean,
   wrap: (res: Response) => Response | Promise<Response> = (res) => res,
 ): Promise<Response | null> {
+  // biome-ignore lint/suspicious/noPrototypeBuiltins: Object.hasOwn requires ES2022, but this project targets ES2020.
   if (!Object.prototype.hasOwnProperty.call(routes, url.pathname)) return null;
   const route = routes[url.pathname];
   if (!route.methods.includes(req.method)) {
-    return wrap(textErrorResponse("method not allowed", 405));
+    return wrap(textError("method not allowed", 405));
   }
   const requiresSideEffect =
     typeof route.sideEffect === "function"
       ? route.sideEffect(req.method)
       : route.sideEffect === true;
   if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
-    return wrap(textErrorResponse("forbidden", 403));
+    return wrap(textError("forbidden", 403));
   }
   return wrap(await route.handler());
 }
@@ -129,12 +140,12 @@ export async function parsePostJsonBody<T>(
   req: Request,
 ): Promise<T | Response> {
   if (req.method !== "POST") {
-    return textErrorResponse("method not allowed", 405);
+    return textError("method not allowed", 405);
   }
   try {
     return (await req.json()) as T;
   } catch {
-    return textErrorResponse("invalid JSON body", 400);
+    return textError("invalid JSON body", 400);
   }
 }
 
@@ -145,5 +156,5 @@ export function handleError(
 ): Response {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
-  return textErrorResponse(`failed to ${action}: ${message}`, 500);
+  return textError(`failed to ${action}: ${message}`, 500);
 }
