@@ -1,7 +1,26 @@
 import type { AppRoute } from "./routes";
 
-export function shouldCatchUpDiff(route: AppRoute): boolean {
+export function shouldAutoLoadForRoute(
+  route: AppRoute,
+  options: { historyWorktreeSelected?: boolean } = {},
+): boolean {
+  if (route.screen === "history")
+    return options.historyWorktreeSelected === true;
+  if (
+    route.screen === "database" ||
+    route.screen === "help" ||
+    route.screen === "unknown"
+  )
+    return false;
+  return true;
+}
+
+export function shouldCatchUpDiff(
+  route: AppRoute,
+  options: { historyWorktreeSelected?: boolean } = {},
+): boolean {
   return (
+    shouldAutoLoadForRoute(route, options) &&
     route.screen !== "repo" &&
     !(route.screen === "file" && route.view === "blob")
   );

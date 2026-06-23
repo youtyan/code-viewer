@@ -14,6 +14,8 @@ import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
+export const HISTORY_WORKTREE_COMMIT = "worktree";
+export const HISTORY_WORKTREE_LABEL = "未コミット変更 (Working tree)";
 
 export type HistoryViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -91,6 +93,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let selectedSha = "";
   let query = "";
 
+  function worktreeDiffRange() {
+    return { from: "HEAD", to: "worktree" };
+  }
+
   function setBanner(message: string) {
     banner.textContent = message;
     banner.hidden = !message;
@@ -105,6 +111,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const info = document.querySelector<HTMLElement>("#history-commit-info");
     if (!info) return;
     info.hidden = true;
+    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
     info.querySelector<HTMLElement>(".hci-body")?.replaceChildren();
   }
 
@@ -169,9 +176,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
     );
   }
 
+  function worktreeRow(): string {
+    const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
+    return (
+      `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
+      `<span class="subject" title="${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}">${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}</span>` +
+      `<span class="meta2">` +
+      `<span class="sha">HEAD..worktree</span>` +
+      `<span class="author">Working tree</span>` +
+      `</span>` +
+      `</li>`
+    );
+  }
+
   function renderList() {
     const now = new Date();
-    const html: string[] = [];
+    const html: string[] = [worktreeRow()];
     let lastGroup = "";
     for (const commit of commits) {
       const group = historyGroupLabel(commit.when, now);
@@ -199,6 +219,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       const el = info.querySelector<HTMLElement>(sel);
       if (el) el.textContent = text;
     };
+    info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
     set(".hci-sha", commit.sha);
     set(".hci-author", commit.author);
     const t = Date.parse(commit.when);
@@ -222,6 +243,20 @@ export function createHistoryView(deps: HistoryViewDeps) {
         if (gen !== generation || selectedSha !== commit.sha) return;
         body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
       }
+    }
+    info.hidden = false;
+  }
+
+  function updateWorktreeInfo() {
+    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    if (!info) return;
+    info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
+    const subject = info.querySelector<HTMLElement>(".hci-subject");
+    if (subject) subject.textContent = HISTORY_WORKTREE_LABEL;
+    const body = info.querySelector<HTMLElement>(".hci-body");
+    if (body) {
+      body.hidden = true;
+      body.replaceChildren();
     }
     info.hidden = false;
   }
@@ -283,6 +318,23 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (gen !== generation) return;
   }
 
+  async function selectWorktree(options: { updateUrl?: boolean } = {}) {
+    const gen = generation;
+    selectedSha = HISTORY_WORKTREE_COMMIT;
+    updateActiveRow();
+    updateWorktreeInfo();
+    const range = worktreeDiffRange();
+    if (options.updateUrl !== false) {
+      deps.setRoute(
+        { screen: "history", ref, commit: selectedSha, range },
+        true,
+      );
+    }
+    if (gen !== generation) return;
+    await deps.applyCommitRange(range);
+    if (gen !== generation) return;
+  }
+
   // Set when fetchSingleCommit fails for reasons other than "the server says
   // the ref does not exist" (HTTP 400) — e.g. network errors or 5xx.
   let lookupFailed = false;
@@ -309,6 +361,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // single lookup pinned to the top of the list.
   async function resolveDeepLink(sha: string) {
     const gen = generation;
+    if (sha === HISTORY_WORKTREE_COMMIT) {
+      await selectWorktree({ updateUrl: false });
+      return;
+    }
     let pagesLoaded = 0;
     if (commits.length === 0) {
       await loadNextPage();
@@ -430,6 +486,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   list.addEventListener("click", (e) => {
     const row = (e.target as Element).closest<HTMLElement>(".history-item");
     if (!row?.dataset.sha) return;
+    if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
+      void selectWorktree();
+      return;
+    }
     const commit = commits.find((c) => c.sha === row.dataset.sha);
     if (commit) selectCommit(commit);
   });
@@ -479,5 +539,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   );
   observer.observe(sentinel);
 
-  return { enterHistory, leaveHistory, onRefPicked };
+  return {
+    enterHistory,
+    leaveHistory,
+    onRefPicked,
+    isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
+  };
 }

@@ -7,6 +7,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type {
+  AnnotationDatabaseDataState,
+  AnnotationDatabaseQueryState,
+  AnnotationDatabaseSearchState,
+  AnnotationDatabaseSnapshotState,
   AnnotationDatabaseTab,
   AnnotationEntry,
   AnnotationLineRange,
@@ -90,7 +94,86 @@ function normalizeDatabaseTab(raw: unknown): AnnotationDatabaseTab | undefined {
     : undefined;
 }
 
-function normalizeAnnotationTarget(raw: unknown): AnnotationTarget | undefined {
+function normalizeDatabaseDataState(
+  raw: unknown,
+): AnnotationDatabaseDataState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseDataState = {};
+  if (typeof value.search === "string" && value.search)
+    state.search = value.search;
+  if (Array.isArray(value.filters)) {
+    const filters = value.filters
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const filter = item as Record<string, unknown>;
+        return typeof filter.column === "string" &&
+          filter.column &&
+          typeof filter.value === "string" &&
+          filter.value
+          ? { column: filter.column, value: filter.value }
+          : null;
+      })
+      .filter((item): item is { column: string; value: string } => !!item);
+    if (filters.length) state.filters = filters;
+  }
+  if (value.sort && typeof value.sort === "object") {
+    const sort = value.sort as Record<string, unknown>;
+    if (
+      typeof sort.column === "string" &&
+      sort.column &&
+      (sort.direction === "asc" || sort.direction === "desc")
+    ) {
+      state.sort = { column: sort.column, direction: sort.direction };
+    }
+  }
+  if (Number.isInteger(value.row) && (value.row as number) > 0)
+    state.row = value.row as number;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseQueryState(
+  raw: unknown,
+): AnnotationDatabaseQueryState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseQueryState = {};
+  if (typeof value.sql === "string" && value.sql) state.sql = value.sql;
+  if (value.mode === "run" || value.mode === "explain") state.mode = value.mode;
+  if (typeof value.autoRun === "boolean") state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseSearchState(
+  raw: unknown,
+): AnnotationDatabaseSearchState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseSearchState = {};
+  if (typeof value.term === "string" && value.term) state.term = value.term;
+  if (typeof value.includeNonText === "boolean")
+    state.includeNonText = value.includeNonText;
+  if (typeof value.autoRun === "boolean") state.autoRun = value.autoRun;
+  return Object.keys(state).length ? state : undefined;
+}
+
+function normalizeDatabaseSnapshotState(
+  raw: unknown,
+): AnnotationDatabaseSnapshotState | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const state: AnnotationDatabaseSnapshotState = {};
+  if (typeof value.fromSnapshotId === "string" && value.fromSnapshotId)
+    state.fromSnapshotId = value.fromSnapshotId;
+  if (typeof value.toSnapshotId === "string" && value.toSnapshotId)
+    state.toSnapshotId = value.toSnapshotId;
+  if (typeof value.table === "string" && value.table) state.table = value.table;
+  return Object.keys(state).length ? state : undefined;
+}
+
+export function normalizeAnnotationTarget(
+  raw: unknown,
+): AnnotationTarget | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const target = raw as Record<string, unknown>;
   if (target.kind === "database") {
@@ -101,11 +184,19 @@ function normalizeAnnotationTarget(raw: unknown): AnnotationTarget | undefined {
         ? target.table
         : undefined;
     const tab = normalizeDatabaseTab(target.tab);
+    const data = normalizeDatabaseDataState(target.data);
+    const query = normalizeDatabaseQueryState(target.query);
+    const search = normalizeDatabaseSearchState(target.search);
+    const snapshot = normalizeDatabaseSnapshotState(target.snapshot);
     return {
       kind: "database",
       ...(db ? { db } : {}),
       ...(table ? { table } : {}),
       ...(tab ? { tab } : {}),
+      ...(data ? { data } : {}),
+      ...(query ? { query } : {}),
+      ...(search ? { search } : {}),
+      ...(snapshot ? { snapshot } : {}),
     };
   }
   if (target.kind === "code") {
@@ -128,10 +219,22 @@ function normalizeAnnotationTarget(raw: unknown): AnnotationTarget | undefined {
 function databaseTargetPath(
   target: Extract<AnnotationTarget, { kind: "database" }>,
 ): string {
+  const labelPart = (value: string, max = 48): string =>
+    value
+      .replace(/[^A-Za-z0-9._=-]+/g, "_")
+      .slice(0, max)
+      .replace(/^_+|_+$/g, "");
   const parts = ["database"];
-  if (target.db) parts.push(target.db);
-  if (target.table) parts.push(target.table);
+  if (target.db) parts.push(labelPart(target.db));
+  if (target.table) parts.push(labelPart(target.table));
   if (target.tab) parts.push(target.tab);
+  if (target.data?.search)
+    parts.push(`search=${labelPart(target.data.search, 32)}`);
+  if (target.query?.sql) parts.push("query");
+  if (target.search?.term)
+    parts.push(`global-search=${labelPart(target.search.term, 32)}`);
+  if (target.snapshot?.fromSnapshotId || target.snapshot?.toSnapshotId)
+    parts.push("snapshot-diff");
   return parts.join(":");
 }
 
@@ -316,7 +419,15 @@ export function addAnnotationEntry(
   now: string,
   makeId: (prefix: string) => string = makeAnnotationId,
 ): AddAnnotationResult {
-  const target = input.target;
+  const target = normalizeAnnotationTarget(input.target);
+  if (target?.kind === "database" && !target.db)
+    return { ok: false, error: "database annotation requires db" };
+  if (target?.kind === "database" && target.data && !target.table) {
+    return {
+      ok: false,
+      error: "database data annotations require table",
+    };
+  }
   const path =
     target?.kind === "database"
       ? databaseTargetPath(target)
@@ -427,6 +538,8 @@ export function moveAnnotationEntry(
     : sourceSession;
   if (!destinationSession)
     return { ok: false, error: "anchor annotation not found" };
+  if (destinationSession.id !== sourceSession.id)
+    return { ok: false, error: "anchor annotation belongs to another session" };
 
   const sessionsWithoutEntry = state.sessions.map((session) =>
     session.id === sourceSession.id

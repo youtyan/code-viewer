@@ -42,6 +42,7 @@ describe("history empty diff pane", () => {
     const metaRenders: Array<DiffMeta | null> = [];
     let repoInvalidated = 0;
     let loadQueueCleared = 0;
+    let togglePlaced = 0;
     const statuses: string[] = [];
 
     showEmptyHistoryDiffPane({
@@ -65,6 +66,9 @@ describe("history empty diff pane", () => {
       clearLoadQueue() {
         loadQueueCleared++;
       },
+      placeSidebarToggle() {
+        togglePlaced++;
+      },
       setStatus(status) {
         statuses.push(status);
       },
@@ -77,6 +81,7 @@ describe("history empty diff pane", () => {
     expect(metaRenders).toEqual([null]);
     expect(repoInvalidated).toBe(1);
     expect(loadQueueCleared).toBe(1);
+    expect(togglePlaced).toBe(1);
     expect(empty.removedClasses).toEqual(["hidden"]);
     expect(empty.h2.textContent).toBe("No commit selected");
     expect(empty.p.textContent).toBe(

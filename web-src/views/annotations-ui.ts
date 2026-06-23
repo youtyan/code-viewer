@@ -16,6 +16,7 @@ import {
   COPY_16_PATHS,
   iconSvg,
   PENCIL_16_PATH,
+  PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
 import {
@@ -25,11 +26,11 @@ import {
 } from "../core/markdown-preview";
 import type { AppRoute, DiffRange, SourceLineTarget } from "../core/routes";
 import type {
-  AnnotationDatabaseTab,
   AnnotationEntry,
   AnnotationSession,
   AnnotationSseEvent,
   AnnotationsState,
+  AnnotationTarget,
   DiffCardElement,
   FileMeta,
 } from "../core/types";
@@ -61,11 +62,14 @@ export type AnnotationsUiDeps = {
   getFiles(): FileMeta[];
   getRoute(): AppRoute;
   setRange(from: string, to: string): void;
-  openDatabaseAnnotation(target: {
-    db?: string;
-    table?: string;
-    tab?: AnnotationDatabaseTab;
-  }): Promise<void>;
+  leaveDatabaseView(): void;
+  openDatabaseAnnotation(
+    target: Extract<AnnotationEntry["target"], { kind: "database" }>,
+  ): Promise<void>;
+  captureDatabaseAnnotationTarget(): Extract<
+    AnnotationEntry["target"],
+    { kind: "database" }
+  > | null;
 };
 
 export type AnnotationsUi = {
@@ -143,6 +147,12 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   const annotationDetail = $("#annotation-detail");
   const annotationCountEl = $("#annotations-count");
   const annotationListCountEl = $("#annotation-list-count");
+  const annotationCaptureDb = $<HTMLButtonElement>("#annotation-capture-db");
+  annotationCaptureDb.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+
+  function updateDatabaseCaptureButton() {
+    annotationCaptureDb.hidden = deps.getRoute().screen !== "database";
+  }
 
   function setAnnotationPanelOpen(open: boolean) {
     annotationPanel.hidden = !open;
@@ -357,6 +367,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     applyDatabaseAnnotations(session);
     if (!session) return;
     for (const entry of session.entries) {
+      if (entry.target?.kind === "database") continue;
       const target = inlineAnnotationTargetRow(entry);
       if (!target) continue;
       // Keep document order when several annotations land on the same line.
@@ -620,7 +631,111 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     return firstLine.length > 90 ? `${firstLine.slice(0, 90)}…` : firstLine;
   }
 
+  function databaseAnnotationTitle(
+    target: Extract<AnnotationEntry["target"], { kind: "database" }>,
+  ): string {
+    const parts = [target.table || target.db || "Database"];
+    if (target.tab === "data" && target.data?.search)
+      parts.push(`search: ${target.data.search}`);
+    else if (target.tab === "query" && target.query?.sql) parts.push("query");
+    else if (target.tab === "search" && target.search?.term)
+      parts.push(`global search: ${target.search.term}`);
+    else if (target.tab) parts.push(target.tab);
+    return parts.join(" / ");
+  }
+
+  function openDatabaseCaptureForm(
+    target: Extract<AnnotationTarget, { kind: "database" }>,
+  ) {
+    $("#annotation-detail-session").textContent =
+      activeSessionId || "Database annotations";
+    $("#annotation-detail-step").textContent = "new";
+    const location = $<HTMLAnchorElement>("#annotation-detail-location");
+    location.textContent = databaseAnnotationTitle(target);
+    location.href = "#";
+    const head = annotationDetail.querySelector<HTMLElement>(
+      ".annotation-detail-head",
+    );
+    head?.querySelectorAll(".annotation-detail-head-action").forEach((el) => {
+      el.remove();
+    });
+    const body = $("#annotation-detail-body");
+    body.replaceChildren();
+    const form = document.createElement("div");
+    form.className = "annotation-edit-form";
+    const titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.placeholder = "title (optional)";
+    titleInput.value = databaseAnnotationTitle(target);
+    const bodyInput = document.createElement("textarea");
+    bodyInput.rows = 10;
+    bodyInput.placeholder = "annotation body";
+    const buttons = document.createElement("div");
+    buttons.className = "annotation-edit-buttons";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "gdp-btn gdp-btn-sm";
+    save.textContent = "Save";
+    save.addEventListener("click", async () => {
+      if (!bodyInput.value.trim()) return;
+      save.disabled = true;
+      annotationCaptureDb.disabled = true;
+      try {
+        const res = await fetch("/_annotations", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1",
+          },
+          body: JSON.stringify({
+            action: "add",
+            session_id: activeSessionId || undefined,
+            session_title: activeSessionId ? undefined : "Database annotations",
+            target,
+            title: titleInput.value,
+            body: bodyInput.value,
+          }),
+        });
+        const result = res.ok
+          ? ((await res.json()) as {
+              session_id?: string;
+              entry?: { id?: string };
+            })
+          : null;
+        if (result?.session_id) {
+          activeSessionId = result.session_id;
+          syncSessionUrl();
+        }
+        await refreshAnnotations();
+        if (result?.entry?.id) await openAnnotationEntry(result.entry.id);
+      } finally {
+        save.disabled = false;
+        annotationCaptureDb.disabled = false;
+      }
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "gdp-btn gdp-btn-sm";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => {
+      annotationDetail.hidden = true;
+    });
+    buttons.append(save, cancel);
+    form.append(titleInput, bodyInput, buttons);
+    body.appendChild(form);
+    annotationDetail.hidden = false;
+    setAnnotationPanelOpen(true);
+    titleInput.focus();
+  }
+
+  async function captureCurrentDatabaseAnnotation(): Promise<void> {
+    const target = deps.captureDatabaseAnnotationTarget();
+    if (!target?.db) return;
+    openDatabaseCaptureForm(target);
+  }
+
   function renderAnnotationPanel() {
+    updateDatabaseCaptureButton();
     annotationSessionsEl.replaceChildren();
     if (!ANNOTATIONS.sessions.length) {
       const empty = document.createElement("p");
@@ -922,6 +1037,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     const prevRoute = deps.getRoute();
     const line = annotationLineTarget(entry);
 
+    if (prevRoute.screen === "database") deps.leaveDatabaseView();
     deps.setRange(from, to);
     deps.syncRefInputs();
     deps.cancelActiveSourceLoad("navigation");
@@ -1048,10 +1164,15 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   // Restore the panel open/closed state across reloads.
   if (localStorage.getItem("gdp:annotation-panel") === "1")
     setAnnotationPanelOpen(true);
+  updateDatabaseCaptureButton();
 
   $("#annotations-toggle").addEventListener("click", () => {
     setAnnotationPanelOpen(annotationPanel.hidden);
+    updateDatabaseCaptureButton();
     if (!annotationPanel.hidden) void refreshAnnotations();
+  });
+  annotationCaptureDb.addEventListener("click", () => {
+    void captureCurrentDatabaseAnnotation();
   });
   $("#annotation-panel-close").addEventListener("click", () => {
     annotationPanelDismissed = true;

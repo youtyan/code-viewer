@@ -34,6 +34,17 @@ export type AnnotateCommand =
       db?: string;
       table?: string;
       tab?: AnnotationDatabaseTab;
+      gridSearch?: string;
+      filters?: Array<{ column: string; value: string }>;
+      sort?: { column: string; direction: "asc" | "desc" };
+      row?: number;
+      sql?: string;
+      sqlFile?: string;
+      queryMode?: "run" | "explain";
+      queryAutoRun?: boolean;
+      searchTerm?: string;
+      includeNonText?: boolean;
+      searchAutoRun?: boolean;
       title?: string;
       session?: string;
       sessionTitle?: string;
@@ -88,7 +99,10 @@ Usage:
       [--from <ref>] [--to <ref>] [--title <text>] [--session <id>]
       [--before <id> | --after <id> | --position <n>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
-  code-viewer annotate add-db [--db <id>] [--table <name>] [--tab <tab>]
+  code-viewer annotate add-db --db <id> [--table <name>] [--tab <tab>]
+      [--grid-search <text>] [--filter <column=value>] [--sort <column:asc|desc>]
+      [--sql <text> | --sql-file <path>] [--query-mode <run|explain>] [--run-query]
+      [--search-term <text>] [--include-non-text] [--run-search]
       [--title <text>] [--session <id>]
       [--before <id> | --after <id> | --position <n>]
       [--body <markdown> | --body-file <path>]   (or pipe body via stdin)
@@ -110,6 +124,11 @@ Examples:
       --body "This endpoint keeps one SSE stream per browser tab."
   code-viewer annotate add-db --db app.db --table users --tab schema \\
       --body "This schema note explains how users relate to orders."
+  code-viewer annotate add-db --db app.db --table orders --tab data \\
+      --grid-search failed --sort created_at:desc --body "Filtered failure rows."
+  code-viewer annotate add-db --db app.db --tab query \\
+      --sql "select * from users where role = 'admin'" --run-query \\
+      --body "This result shows the admin accounts."
   code-viewer annotate move a-123 --before a-456
   git diff HEAD~1 | code-viewer annotate add --file src/app.ts --line 10 \\
       --from HEAD~1 --to worktree --body "The fix moves the guard up here."
@@ -169,6 +188,8 @@ location and renders your explanation directly under the annotated lines.
 - add (no --session) → appends to the most recent session.
 - annotate start      → begins a NEW session; later adds go there.
 - add --session <id>  → targets a specific session (ids: annotate list).
+- add --before/--after <id> → targets the anchor annotation's session.
+  If --session points at another session, the command is rejected.
 - The human can share a walkthrough as a URL; one session = one shareable
   walkthrough. Do not mix unrelated topics in one session.
 
@@ -193,6 +214,16 @@ location and renders your explanation directly under the annotated lines.
 - Annotate the Database screen:
     code-viewer annotate add-db --db <db-id> --table <table> --tab schema \\
         --title "Why this table matters" --body "<markdown>"
+  Data/search/query state can be captured explicitly:
+    code-viewer annotate add-db --db app.db --table orders --tab data \\
+        --grid-search failed --filter status=failed --sort created_at:desc \\
+        --title "Failed orders" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab query \\
+        --sql "select * from orders where status = 'failed'" --run-query \\
+        --title "Query result" --body "<markdown>"
+    code-viewer annotate add-db --db app.db --tab search --search-term failed \\
+        --include-non-text --run-search \
+        --title "Global search result" --body "<markdown>"
 
 ## Cleanup
 
@@ -230,11 +261,33 @@ function parseDatabaseTab(
     : undefined;
 }
 
+function parseFilter(value: string): { column: string; value: string } | null {
+  const idx = value.indexOf("=");
+  if (idx <= 0) return null;
+  const column = value.slice(0, idx).trim();
+  const filterValue = value.slice(idx + 1).trim();
+  return column && filterValue ? { column, value: filterValue } : null;
+}
+
+function parseSort(
+  value: string | undefined,
+): { column: string; direction: "asc" | "desc" } | undefined | null {
+  if (value === undefined) return undefined;
+  const idx = value.lastIndexOf(":");
+  if (idx <= 0) return null;
+  const column = value.slice(0, idx).trim();
+  const direction = value.slice(idx + 1).trim();
+  return column && (direction === "asc" || direction === "desc")
+    ? { column, direction }
+    : null;
+}
+
 export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
   const rest: string[] = [];
   let cwd: string | undefined;
   let server: string | undefined;
   const options = new Map<string, string>();
+  const multiOptions = new Map<string, string[]>();
   const flags = new Set<string>();
   const valueFlags = new Set([
     "--title",
@@ -252,6 +305,14 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     "--db",
     "--table",
     "--tab",
+    "--grid-search",
+    "--filter",
+    "--sort",
+    "--row",
+    "--sql",
+    "--sql-file",
+    "--query-mode",
+    "--search-term",
   ]);
 
   for (let i = 0; i < argv.length; i++) {
@@ -268,8 +329,16 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
       const taken = takeValue(argv, i, arg);
       if ("error" in taken) return { ok: false, error: taken.error };
       options.set(arg, taken.value);
+      const values = multiOptions.get(arg) || [];
+      values.push(taken.value);
+      multiOptions.set(arg, values);
       i = taken.next;
-    } else if (arg === "--json") {
+    } else if (
+      arg === "--json" ||
+      arg === "--run-query" ||
+      arg === "--run-search" ||
+      arg === "--include-non-text"
+    ) {
       flags.add(arg);
     } else if (arg.startsWith("-")) {
       return { ok: false, error: `unknown option: ${arg}` };
@@ -334,6 +403,8 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     };
   }
   if (subcommand === "add-db") {
+    if (!options.get("--db"))
+      return { ok: false, error: "add-db requires --db <id>" };
     const body = options.get("--body");
     const bodyFile = options.get("--body-file");
     if (body !== undefined && bodyFile !== undefined)
@@ -348,6 +419,67 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
         ok: false,
         error: "--tab must be one of data, query, schema, er, search, snapshot",
       };
+    const filters: Array<{ column: string; value: string }> = [];
+    for (const raw of multiOptions.get("--filter") || []) {
+      const parsed = parseFilter(raw);
+      if (!parsed)
+        return { ok: false, error: "--filter must be <column=value>" };
+      filters.push(parsed);
+    }
+    const sort = parseSort(options.get("--sort"));
+    if (sort === null)
+      return { ok: false, error: "--sort must be <column:asc|desc>" };
+    const row = parsePosition(options.get("--row"));
+    if (Number.isNaN(row))
+      return { ok: false, error: "--row must be a positive integer" };
+    const sql = options.get("--sql");
+    const sqlFile = options.get("--sql-file");
+    if (sql !== undefined && sqlFile !== undefined)
+      return { ok: false, error: "use either --sql or --sql-file" };
+    const rawQueryMode = options.get("--query-mode");
+    const queryMode =
+      rawQueryMode === undefined || rawQueryMode === "run"
+        ? "run"
+        : rawQueryMode === "explain"
+          ? "explain"
+          : null;
+    if (queryMode === null)
+      return { ok: false, error: "--query-mode must be run or explain" };
+    const hasDataState =
+      options.has("--grid-search") ||
+      filters.length > 0 ||
+      sort !== undefined ||
+      row !== undefined;
+    const hasQueryState =
+      sql !== undefined || sqlFile !== undefined || flags.has("--run-query");
+    const hasSearchState =
+      options.has("--search-term") ||
+      flags.has("--include-non-text") ||
+      flags.has("--run-search");
+    if (hasDataState && !options.get("--table")) {
+      return {
+        ok: false,
+        error: "data grid annotations require --table",
+      };
+    }
+    if (tab === "data" && (hasQueryState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab data cannot be combined with query or search options",
+      };
+    }
+    if (tab === "query" && (hasDataState || hasSearchState)) {
+      return {
+        ok: false,
+        error: "--tab query cannot be combined with data or search options",
+      };
+    }
+    if (tab === "search" && (hasDataState || hasQueryState)) {
+      return {
+        ok: false,
+        error: "--tab search cannot be combined with data or query options",
+      };
+    }
     return {
       ok: true,
       args: {
@@ -356,6 +488,17 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
           db: options.get("--db"),
           table: options.get("--table"),
           tab,
+          gridSearch: options.get("--grid-search"),
+          filters,
+          sort: sort || undefined,
+          row,
+          sql,
+          sqlFile,
+          queryMode,
+          queryAutoRun: flags.has("--run-query"),
+          searchTerm: options.get("--search-term"),
+          includeNonText: flags.has("--include-non-text") || undefined,
+          searchAutoRun: flags.has("--run-search"),
           title: options.get("--title"),
           session: options.get("--session"),
           sessionTitle: options.get("--session-title"),
@@ -408,6 +551,15 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     const position = parsePosition(options.get("--position"));
     if (Number.isNaN(position))
       return { ok: false, error: "--position must be a positive integer" };
+    if (
+      !options.get("--before") &&
+      !options.get("--after") &&
+      position === undefined
+    )
+      return {
+        ok: false,
+        error: "move requires --before, --after, or --position",
+      };
     return {
       ok: true,
       args: {
@@ -642,6 +794,52 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   }
   if (command.kind === "add-db") {
     const body = await annotationBodyFromCommand(command);
+    let sql = command.sql;
+    if (sql === undefined && command.sqlFile !== undefined) {
+      try {
+        sql = readFileSync(command.sqlFile, "utf8");
+      } catch {
+        console.error(`could not read --sql-file: ${command.sqlFile}`);
+        process.exit(1);
+      }
+    }
+    const dataState =
+      command.gridSearch ||
+      (command.filters && command.filters.length > 0) ||
+      command.sort ||
+      command.row
+        ? {
+            search: command.gridSearch,
+            filters: command.filters,
+            sort: command.sort,
+            row: command.row,
+          }
+        : undefined;
+    const queryState =
+      sql || command.queryAutoRun
+        ? {
+            sql,
+            mode: command.queryMode,
+            autoRun: command.queryAutoRun,
+          }
+        : undefined;
+    const searchState =
+      command.searchTerm || command.includeNonText
+        ? {
+            term: command.searchTerm,
+            includeNonText: command.includeNonText,
+            autoRun: command.searchAutoRun,
+          }
+        : undefined;
+    const inferredTab =
+      command.tab ||
+      (queryState
+        ? "query"
+        : searchState
+          ? "search"
+          : dataState
+            ? "data"
+            : undefined);
     const result = (await request(serverUrl, "POST", {
       action: "add",
       session_id: command.session,
@@ -650,7 +848,10 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
         kind: "database",
         db: command.db,
         table: command.table,
-        tab: command.tab,
+        tab: inferredTab,
+        data: dataState,
+        query: queryState,
+        search: searchState,
       },
       title: command.title,
       body,

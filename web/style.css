@@ -1186,6 +1186,14 @@ body.gdp-history-page #topbar .ref-pickers {
   background: var(--bg-mute);
   border-left-color: var(--accent);
 }
+.history-item-worktree {
+  background: color-mix(in srgb, var(--bg-soft) 72%, var(--bg-mute));
+  color: var(--fg-muted);
+  font-style: italic;
+}
+.history-item-worktree .sha {
+  font-style: normal;
+}
 .history-item .subject {
   display: block;
   font-size: 12.5px;
@@ -4647,7 +4655,8 @@ body.gdp-file-detail-page #empty {
 /* Pages without the diff topbar start the panel right below the header. */
 body.gdp-repo-page #annotation-panel,
 body.gdp-file-detail-page #annotation-panel,
-body.gdp-help-page #annotation-panel {
+body.gdp-help-page #annotation-panel,
+body.gdp-database-page #annotation-panel {
   top: var(--global-header-h);
 }
 /* Keep code readable next to the panel instead of underneath it. */
@@ -5267,6 +5276,63 @@ body.query-history-panel-open #content {
   height: 0;
 }
 
+.gdp-db-annotation-strip {
+  display: grid;
+  gap: 8px;
+  flex-shrink: 0;
+  max-height: min(40vh, 360px);
+  overflow: auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.gdp-db-annotation-inline {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+  box-shadow: var(--shadow-sm);
+}
+
+.gdp-db-annotation-inline.active {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.gdp-db-annotation-inline-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.gdp-db-annotation-inline-title {
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+}
+
+.gdp-db-annotation-inline-location {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gdp-db-annotation-inline-body {
+  padding: 6px 10px 10px;
+  color: var(--fg);
+}
+
+.gdp-db-annotation-inline-body p:last-child {
+  margin-bottom: 0;
+}
+
 /* ============================================================
    Database Viewer
    ============================================================ */
@@ -5274,9 +5340,7 @@ body.query-history-panel-open #content {
 .gdp-database-page #topbar,
 .gdp-database-page #sidebar,
 .gdp-database-page #sidebar-toggle,
-.gdp-database-page #annotation-panel,
 .gdp-database-page #sidebar-resizer,
-.gdp-database-page #annotations-toggle,
 .gdp-database-page #query-history-panel {
   display: none !important;
 }
@@ -7866,3 +7930,4 @@ body.db-resizing {
 .db-tab-host > .db-container[hidden] {
   display: none;
 }
+ 

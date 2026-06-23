@@ -6,6 +6,11 @@ export type GlobalSearchViewDeps = {
 
 export type GlobalSearchView = {
   el: HTMLElement;
+  setSearch: (
+    term: string,
+    options?: { includeNonText?: boolean; autoRun?: boolean },
+  ) => void;
+  getSearch: () => { term?: string; includeNonText?: boolean };
   dispose: () => void;
 };
 
@@ -240,6 +245,23 @@ export function createGlobalSearchView(
   });
   cancelBtn.addEventListener("click", cancelSearch);
 
+  function setSearch(
+    term: string,
+    options: { includeNonText?: boolean; autoRun?: boolean } = {},
+  ): void {
+    input.value = term;
+    nonTextCheck.checked = !!options.includeNonText;
+    if (options.autoRun && term.trim()) void startSearch();
+  }
+
+  function getSearch(): { term?: string; includeNonText?: boolean } {
+    const term = input.value.trim();
+    return {
+      ...(term ? { term } : {}),
+      ...(nonTextCheck.checked ? { includeNonText: true } : {}),
+    };
+  }
+
   function dispose(): void {
     disposed = true;
     if (pollTimer) {
@@ -253,5 +275,5 @@ export function createGlobalSearchView(
     }
   }
 
-  return { el, dispose };
+  return { el, setSearch, getSearch, dispose };
 }

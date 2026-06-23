@@ -37,6 +37,7 @@ import {
   emptyAnnotationsState,
   loadAnnotationsState,
   moveAnnotationEntry,
+  normalizeAnnotationTarget,
   renameAnnotationSession,
   saveAnnotationsState,
   startAnnotationSession,
@@ -2258,26 +2259,14 @@ async function handleAnnotations(req: Request) {
       body.target && typeof body.target === "object"
         ? (body.target as Record<string, unknown>)
         : null;
-    const rawTargetTab = rawTarget?.tab;
-    const targetTab =
-      rawTargetTab === "data" ||
-      rawTargetTab === "query" ||
-      rawTargetTab === "schema" ||
-      rawTargetTab === "er" ||
-      rawTargetTab === "search" ||
-      rawTargetTab === "snapshot"
-        ? rawTargetTab
-        : undefined;
     const target: AnnotationTarget | undefined =
       rawTarget?.kind === "database"
-        ? {
-            kind: "database" as const,
-            db: typeof rawTarget.db === "string" ? rawTarget.db : undefined,
-            table:
-              typeof rawTarget.table === "string" ? rawTarget.table : undefined,
-            tab: targetTab,
-          }
+        ? normalizeAnnotationTarget(rawTarget)
         : undefined;
+    if (target?.kind === "database" && !target.db)
+      return text("database annotation requires db", 400);
+    if (target?.kind === "database" && target.data && !target.table)
+      return text("database data annotations require table", 400);
     const path =
       typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
     if (!target) {

@@ -38,6 +38,32 @@ text-to-speech playback.
    code-viewer annotate add --file src/cache.ts --line 42-58 --body "..."
    ```
 
+3. Fix ordering without deleting stable ids:
+
+   ```sh
+   code-viewer annotate add --after a-existing --file src/cache.ts --line 80 --body "..."
+   code-viewer annotate move a-late --before a-early
+   ```
+
+4. Annotate the Database screen when the explanation is about data, schema,
+   query behavior, ER diagrams, global search, or snapshots:
+
+   ```sh
+   code-viewer annotate add-db --db app.db --table users --tab schema --body "..."
+   code-viewer annotate add-db --db app.db --table orders --tab data \
+     --grid-search failed --filter status=failed --sort created_at:desc \
+     --body "..."
+   code-viewer annotate add-db --db app.db --tab query \
+     --sql "select * from orders where status = 'failed'" --run-query \
+     --body "..."
+   code-viewer annotate add-db --db app.db --tab search --search-term failed \
+     --include-non-text --run-search --body "..."
+   ```
+
+   If the browser is already on the exact Database state, use the annotations
+   panel pin button to capture the current data grid, query editor, or global
+   search state instead of reconstructing it by hand.
+
 ## Full reference
 
 Before composing annotations, read the complete agent guide (all commands,

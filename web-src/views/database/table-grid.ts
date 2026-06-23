@@ -4,6 +4,7 @@ import type {
   DbTableDataResponse,
   DbValue,
 } from "../../core/database/types";
+import type { AnnotationDatabaseDataState } from "../../core/types";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
@@ -37,6 +38,8 @@ export type TableGridCallbacks = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
+  applyState: (state: AnnotationDatabaseDataState) => void;
+  getState: () => AnnotationDatabaseDataState;
   clear: () => void;
   destroy: () => void;
 };
@@ -695,6 +698,40 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
   }
 
+  function applyState(state: AnnotationDatabaseDataState) {
+    if (state.search !== undefined) {
+      globalSearchValue = state.search;
+      filterInput.value = state.search;
+      filterClear.hidden = !globalSearchValue;
+    }
+    columnFilters.clear();
+    for (const filter of state.filters || []) {
+      if (filter.column && filter.value)
+        columnFilters.set(filter.column, filter.value);
+    }
+    sort = state.sort || null;
+    const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
+    renderHeader();
+    invalidateData();
+    if (targetRowIndex >= 0) {
+      selectedRowIndex = targetRowIndex;
+      viewport.scrollTop = Math.max(0, targetRowIndex * ROW_HEIGHT);
+      renderViewport();
+    }
+  }
+
+  function getState(): AnnotationDatabaseDataState {
+    const filters = collectFilters().filter(
+      (filter) => filter.value !== globalSearchValue,
+    );
+    return {
+      ...(globalSearchValue ? { search: globalSearchValue } : {}),
+      ...(filters.length ? { filters } : {}),
+      ...(sort ? { sort } : {}),
+      ...(selectedRowIndex >= 0 ? { row: selectedRowIndex + 1 } : {}),
+    };
+  }
+
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
     filterClear.hidden = !globalSearchValue;
@@ -727,7 +764,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     viewport.removeEventListener("scroll", onViewportScroll);
   }
 
-  return { el, load, clear, destroy };
+  return { el, load, applyState, getState, clear, destroy };
 }
 
 function formatValue(value: DbValue): string {
