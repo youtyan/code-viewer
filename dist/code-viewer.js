@@ -4844,7 +4844,16 @@ function createQueryStrippedLogger(prefix, req, url) {
     return res;
   };
 }
-function textErrorResponse(message, status) {
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function textError(message, status) {
   return new Response(message, {
     status,
     headers: {
@@ -4858,28 +4867,28 @@ async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) 
     return null;
   const route = routes[url.pathname];
   if (!route.methods.includes(req.method)) {
-    return wrap(textErrorResponse("method not allowed", 405));
+    return wrap(textError("method not allowed", 405));
   }
   const requiresSideEffect = typeof route.sideEffect === "function" ? route.sideEffect(req.method) : route.sideEffect === true;
   if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
-    return wrap(textErrorResponse("forbidden", 403));
+    return wrap(textError("forbidden", 403));
   }
   return wrap(await route.handler());
 }
 async function parsePostJsonBody(req) {
   if (req.method !== "POST") {
-    return textErrorResponse("method not allowed", 405);
+    return textError("method not allowed", 405);
   }
   try {
     return await req.json();
   } catch {
-    return textErrorResponse("invalid JSON body", 400);
+    return textError("invalid JSON body", 400);
   }
 }
 function handleError(prefix, action, err) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
-  return textErrorResponse(`failed to ${action}: ${message}`, 500);
+  return textError(`failed to ${action}: ${message}`, 500);
 }
 var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
 var init_handle_shared = __esm(() => {
@@ -6586,7 +6595,6 @@ var redisAdapterCache;
 var init_handle_redis = __esm(() => {
   init_redis();
   init_discovery();
-  init_handle();
   init_handle_shared();
   redisAdapterCache = createDockerAdapterCache();
 });
@@ -6782,7 +6790,6 @@ var esAdapterCache;
 var init_handle_elasticsearch = __esm(() => {
   init_elasticsearch();
   init_discovery();
-  init_handle();
   init_handle_shared();
   esAdapterCache = createDockerAdapterCache();
 });
@@ -6790,9 +6797,7 @@ var init_handle_elasticsearch = __esm(() => {
 // web-src/server/database/handle.ts
 var exports_handle = {};
 __export(exports_handle, {
-  textError: () => textError,
   parseSelectAllTable: () => parseSelectAllTable,
-  json: () => json,
   handleDatabaseRoute: () => handleDatabaseRoute
 });
 function ensureInit() {
@@ -6807,24 +6812,6 @@ async function getAdapter(r, _cwd) {
     return dockerAdapterCache.getOrOpen(r.dbId, () => openDockerAdapter(docker.serviceName, docker.kind, docker.env, docker.composeDir, docker.database));
   }
   return getConnection(r.resolved);
-}
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
-}
-function textError(message, status) {
-  return new Response(message, {
-    status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
 }
 function sanitizeFilename(name) {
   return name.replace(/["\\\r\n\x00-\x1f]/g, "_");

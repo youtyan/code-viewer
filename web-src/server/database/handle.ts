@@ -30,7 +30,9 @@ import {
   createDockerAdapterCache,
   dispatchRoutes,
   handleError,
+  json,
   parsePostJsonBody,
+  textError,
 } from "./handle-shared";
 import {
   addQueryHistoryEntry,
@@ -79,26 +81,6 @@ async function getAdapter(
     );
   }
   return getConnection(r.resolved);
-}
-
-export function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-export function textError(message: string, status: number): Response {
-  return new Response(message, {
-    status,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function sanitizeFilename(name: string): string {

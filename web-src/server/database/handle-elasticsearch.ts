@@ -10,13 +10,14 @@ import {
   openElasticsearchAdapter,
 } from "./adapters/elasticsearch";
 import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
-import { json, textError } from "./handle";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
   dispatchRoutes,
   handleError,
+  json,
   parsePostJsonBody,
+  textError,
 } from "./handle-shared";
 
 const esAdapterCache = createDockerAdapterCache<ElasticsearchExplorer>();

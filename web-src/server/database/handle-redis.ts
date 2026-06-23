@@ -5,12 +5,13 @@ import type {
 } from "../../core/database/types";
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
 import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
-import { json, textError } from "./handle";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
   dispatchRoutes,
   handleError,
+  json,
+  textError,
 } from "./handle-shared";
 
 const redisAdapterCache = createDockerAdapterCache<RedisExplorer>();
