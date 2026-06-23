@@ -7,7 +7,12 @@ import type {
   EsQueryResult,
   EsSearchResult,
 } from "../../../core/database/types";
-import type { SnapshotItem } from "../sources/types";
+import type {
+  DocSource,
+  Queryable,
+  SnapshotItem,
+  SnapshotIterable,
+} from "../sources/types";
 import { resolveRunningComposeContainerName } from "./docker-utils";
 
 type EsConfig = {
@@ -17,32 +22,34 @@ type EsConfig = {
   password: string;
 };
 
-export type ElasticsearchExplorer = {
-  readonly kind: "elasticsearch";
-  readonly model: "document";
-  readonly capabilities: { snapshot: true; query: true };
-  listIndices(): EsIndexInfo[];
-  getMapping(index: string): EsMapping;
-  searchDocs(opts: {
-    index: string;
-    query?: string;
-    size?: number;
-    searchAfter?: unknown[];
-  }): EsSearchResult;
-  getDoc(opts: { index: string; id: string }): {
-    found: boolean;
-    source: unknown;
-    seqNo?: number;
-    primaryTerm?: number;
+export type ElasticsearchExplorer = Omit<DocSource, "capabilities"> &
+  Queryable<EsQueryRequest, EsQueryResult> &
+  SnapshotIterable & {
+    readonly kind: "elasticsearch";
+    readonly model: "document";
+    readonly capabilities: { snapshot: true; query: true };
+    listIndices(): EsIndexInfo[];
+    getMapping(index: string): EsMapping;
+    searchDocs(opts: {
+      index: string;
+      query?: string;
+      size?: number;
+      searchAfter?: unknown[];
+    }): EsSearchResult;
+    getDoc(opts: { index: string; id: string }): {
+      found: boolean;
+      source: unknown;
+      seqNo?: number;
+      primaryTerm?: number;
+    };
+    iterateForSnapshot(
+      container: string,
+      signal?: AbortSignal,
+    ): AsyncIterable<SnapshotItem>;
+    listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+    query(input: EsQueryRequest): Promise<EsQueryResult>;
+    close(): void;
   };
-  iterateForSnapshot(
-    container: string,
-    signal?: AbortSignal,
-  ): AsyncIterable<SnapshotItem>;
-  listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
-  query(input: EsQueryRequest): Promise<EsQueryResult>;
-  close(): void;
-};
 
 // read-only ガード: 任意 path に書き込み系 API を投げられたら危険なので、
 // query() 経由で許可する path を allowlist で限定する。最初の `/` を除いた
