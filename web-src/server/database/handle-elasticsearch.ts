@@ -11,8 +11,12 @@ import {
 } from "./adapters/elasticsearch";
 import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
+import {
+  createDockerAdapterCache,
+  createQueryStrippedLogger,
+} from "./handle-shared";
 
-const esAdapterCache = new Map<string, ElasticsearchExplorer>();
+const esAdapterCache = createDockerAdapterCache<ElasticsearchExplorer>();
 
 function resolveEs(
   cwd: string,
@@ -27,17 +31,11 @@ function resolveEs(
   const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
   if (!info) return textError("elasticsearch service not found", 404);
 
-  const cached = esAdapterCache.get(dbParam);
-  if (cached) return { dbId: dbParam, explorer: cached };
-
-  // openElasticsearchAdapter の cwd 引数は `docker compose ps` の実行 dir。
-  // recursive discovery 後は compose のあるディレクトリを渡す。
-  const explorer = openElasticsearchAdapter(
-    info.serviceName,
-    info.env,
-    info.composeDir,
+  const explorer = esAdapterCache.getOrOpen(dbParam, () =>
+    // openElasticsearchAdapter の cwd 引数は `docker compose ps` の実行 dir。
+    // recursive discovery 後は compose のあるディレクトリを渡す。
+    openElasticsearchAdapter(info.serviceName, info.env, info.composeDir),
   );
-  esAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }
 
@@ -50,14 +48,7 @@ async function handleClose(req: Request): Promise<Response> {
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
-  const cached = esAdapterCache.get(body.db);
-  if (cached) {
-    try {
-      cached.close();
-    } finally {
-      esAdapterCache.delete(body.db);
-    }
-  }
+  esAdapterCache.close(body.db);
   return json({ ok: true });
 }
 
@@ -240,58 +231,56 @@ export async function handleElasticsearchRoute(
   sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
   const path = url.pathname;
-  const start = Date.now();
   const method = req.method;
-  // クエリ文字列はログに載せない (index 名 / lucene query にユーザーデータが乗る)。
-  const log = (status: number) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
+  const wrap = createQueryStrippedLogger("elasticsearch", req, url);
+  const routes: Record<
+    string,
+    {
+      methods: readonly string[];
+      sideEffect?: (method: string) => boolean;
+      handler: () => Response | Promise<Response>;
+    }
+  > = {
+    "/_db/elasticsearch/indices": {
+      methods: ["GET"],
+      handler: () => handleIndices(cwd, url),
+    },
+    "/_db/elasticsearch/mapping": {
+      methods: ["GET"],
+      handler: () => handleMapping(cwd, url),
+    },
+    "/_db/elasticsearch/docs": {
+      methods: ["GET"],
+      handler: () => handleDocs(cwd, url),
+    },
+    "/_db/elasticsearch/doc": {
+      methods: ["GET"],
+      handler: () => handleDoc(cwd, url),
+    },
+    "/_db/elasticsearch/search": {
+      methods: ["GET", "POST"],
+      // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
+      // CSRF ガードをかける。GET は q= だけの read-only なので通す。
+      sideEffect: (m) => m === "POST",
+      handler: () => handleSearch(cwd, req, url),
+    },
+    "/_db/elasticsearch/close": {
+      methods: ["POST"],
+      sideEffect: () => true,
+      handler: () => handleClose(req),
+    },
   };
-  const wrap = (res: Response): Response => {
-    log(res.status);
-    return res;
-  };
-
-  if (path === "/_db/elasticsearch/indices") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleIndices(cwd, url));
+  const route = routes[path];
+  if (!route) return null;
+  if (!route.methods.includes(method)) {
+    return wrap(textError("method not allowed", 405));
   }
-  if (path === "/_db/elasticsearch/mapping") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleMapping(cwd, url));
+  if (
+    route.sideEffect?.(method) &&
+    sideEffectAllowed &&
+    !sideEffectAllowed(req)
+  ) {
+    return wrap(textError("forbidden", 403));
   }
-  if (path === "/_db/elasticsearch/docs") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleDocs(cwd, url));
-  }
-  if (path === "/_db/elasticsearch/doc") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleDoc(cwd, url));
-  }
-  if (path === "/_db/elasticsearch/search") {
-    if (method !== "GET" && method !== "POST") {
-      return wrap(textError("method not allowed", 405));
-    }
-    // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
-    // CSRF ガードをかける。GET は q= だけの read-only なので通す。
-    if (method === "POST" && sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
-    }
-    return wrap(await handleSearch(cwd, req, url));
-  }
-  if (path === "/_db/elasticsearch/close") {
-    if (sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
-    }
-    return wrap(await handleClose(req));
-  }
-  return null;
+  return wrap(await route.handler());
 }

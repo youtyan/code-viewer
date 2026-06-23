@@ -25,6 +25,7 @@ import {
   validateDbPath,
 } from "./discovery";
 import { getPrimaryKeyColumns, searchTable } from "./global-search";
+import { createDockerAdapterCache } from "./handle-shared";
 import {
   addQueryHistoryEntry,
   clearQueryHistory,
@@ -51,69 +52,25 @@ function ensureInit() {
   initialized = true;
 }
 
-const MAX_DOCKER_ADAPTER_CACHE = 8;
-const DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
-type DockerAdapterCacheEntry = {
-  adapter: DatabaseAdapter;
-  lastUsed: number;
-};
-const dockerAdapterCache = new Map<string, DockerAdapterCacheEntry>();
-
-function closeDockerAdapterCacheEntry(
-  key: string,
-  entry: DockerAdapterCacheEntry,
-): void {
-  try {
-    entry.adapter.close();
-  } finally {
-    dockerAdapterCache.delete(key);
-  }
-}
-
-function pruneDockerAdapterCache(now = Date.now()): void {
-  for (const [key, entry] of dockerAdapterCache) {
-    if (now - entry.lastUsed > DOCKER_ADAPTER_IDLE_MS) {
-      closeDockerAdapterCacheEntry(key, entry);
-    }
-  }
-  while (dockerAdapterCache.size > MAX_DOCKER_ADAPTER_CACHE) {
-    let oldestKey: string | null = null;
-    let oldestEntry: DockerAdapterCacheEntry | null = null;
-    for (const [key, entry] of dockerAdapterCache) {
-      if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
-        oldestKey = key;
-        oldestEntry = entry;
-      }
-    }
-    if (!oldestKey || !oldestEntry) break;
-    closeDockerAdapterCacheEntry(oldestKey, oldestEntry);
-  }
-}
+const dockerAdapterCache = createDockerAdapterCache<DatabaseAdapter>();
 
 async function getAdapter(
   r: ResolvedDb,
   _cwd: string,
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
-    pruneDockerAdapterCache();
-    const key = r.dbId;
-    const cached = dockerAdapterCache.get(key);
-    if (cached) {
-      cached.lastUsed = Date.now();
-      return cached.adapter;
-    }
-    // recursive discovery により compose は subdir に置けるので、
-    // `docker compose ps` の cwd は r.docker.composeDir に固定する。
-    const adapter = openDockerAdapter(
-      r.docker.serviceName,
-      r.docker.kind as "postgresql" | "mysql",
-      r.docker.env,
-      r.docker.composeDir,
-      r.docker.database,
+    const docker = r.docker;
+    return dockerAdapterCache.getOrOpen(r.dbId, () =>
+      // recursive discovery により compose は subdir に置けるので、
+      // `docker compose ps` の cwd は r.docker.composeDir に固定する。
+      openDockerAdapter(
+        docker.serviceName,
+        docker.kind as "postgresql" | "mysql",
+        docker.env,
+        docker.composeDir,
+        docker.database,
+      ),
     );
-    dockerAdapterCache.set(key, { adapter, lastUsed: Date.now() });
-    pruneDockerAdapterCache();
-    return adapter;
   }
   return getConnection(r.resolved);
 }
@@ -1296,10 +1253,7 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response) return r;
   if (r.docker) {
-    const cached = dockerAdapterCache.get(r.dbId);
-    if (cached) {
-      closeDockerAdapterCacheEntry(r.dbId, cached);
-    }
+    dockerAdapterCache.close(r.dbId);
   } else {
     closeConnection(r.resolved);
   }

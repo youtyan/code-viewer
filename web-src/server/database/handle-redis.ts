@@ -6,8 +6,12 @@ import type {
 import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
 import { findDockerServiceByDbId, parseDockerDbId } from "./discovery";
 import { json, textError } from "./handle";
+import {
+  createDockerAdapterCache,
+  createQueryStrippedLogger,
+} from "./handle-shared";
 
-const redisAdapterCache = new Map<string, RedisExplorer>();
+const redisAdapterCache = createDockerAdapterCache<RedisExplorer>();
 
 function resolveRedis(
   cwd: string,
@@ -22,17 +26,11 @@ function resolveRedis(
   const info = findDockerServiceByDbId(cwd, dbParam, "redis");
   if (!info) return textError("redis service not found", 404);
 
-  const cached = redisAdapterCache.get(dbParam);
-  if (cached) return { dbId: dbParam, explorer: cached };
-
-  // openRedisExplorer の cwd 引数は `docker compose ps` の実行 dir。
-  // recursive discovery 後は compose のあるディレクトリを渡す必要がある。
-  const explorer = openRedisExplorer(
-    info.serviceName,
-    info.env,
-    info.composeDir,
+  const explorer = redisAdapterCache.getOrOpen(dbParam, () =>
+    // openRedisExplorer の cwd 引数は `docker compose ps` の実行 dir。
+    // recursive discovery 後は compose のあるディレクトリを渡す必要がある。
+    openRedisExplorer(info.serviceName, info.env, info.composeDir),
   );
-  redisAdapterCache.set(dbParam, explorer);
   return { dbId: dbParam, explorer };
 }
 
@@ -45,14 +43,7 @@ async function handleClose(req: Request): Promise<Response> {
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
-  const cached = redisAdapterCache.get(body.db);
-  if (cached) {
-    try {
-      cached.close();
-    } finally {
-      redisAdapterCache.delete(body.db);
-    }
-  }
+  redisAdapterCache.close(body.db);
   return json({ ok: true });
 }
 
@@ -123,37 +114,43 @@ export async function handleRedisRoute(
   sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
   const path = url.pathname;
-  const start = Date.now();
   const method = req.method;
-  // ログには query string を含めない (key=, pattern= 等にユーザーデータが乗る)。
-  const log = (status: number) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
-  };
-  const wrap = (res: Response): Response => {
-    log(res.status);
-    return res;
-  };
-  if (
-    path !== "/_db/redis/databases" &&
-    path !== "/_db/redis/keys" &&
-    path !== "/_db/redis/value" &&
-    path !== "/_db/redis/close"
-  ) {
-    return null;
-  }
-  if (path === "/_db/redis/close") {
-    if (sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
+  const wrap = createQueryStrippedLogger("redis", req, url);
+  const routes: Record<
+    string,
+    {
+      methods: readonly string[];
+      sideEffect?: boolean;
+      handler: () => Response | Promise<Response>;
     }
-    return wrap(await handleClose(req));
-  }
-  if (method !== "GET") {
+  > = {
+    "/_db/redis/databases": {
+      methods: ["GET"],
+      handler: () => handleDatabases(cwd, url),
+    },
+    "/_db/redis/keys": {
+      methods: ["GET"],
+      handler: () => handleKeys(cwd, url),
+    },
+    "/_db/redis/value": {
+      methods: ["GET"],
+      handler: () => handleValue(cwd, url),
+    },
+    "/_db/redis/close": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleClose(req),
+    },
+  };
+  const route = routes[path];
+  if (!route) return null;
+  if (!route.methods.includes(method)) {
     return wrap(textError("method not allowed", 405));
   }
-  if (path === "/_db/redis/databases") return wrap(handleDatabases(cwd, url));
-  if (path === "/_db/redis/keys") return wrap(handleKeys(cwd, url));
-  return wrap(handleValue(cwd, url));
+  if (route.sideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textError("forbidden", 403));
+  }
+  return wrap(await route.handler());
 }
 
 function handleValue(cwd: string, url: URL): Response {
