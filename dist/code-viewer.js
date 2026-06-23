@@ -6574,8 +6574,8 @@ async function runSnapshot(cwd, source, dbId, containers, note, onProgress, opti
   }
   const snapshotSource = source;
   const snapshotId = await createSnapshot(cwd, dbId, snapshotSource.kind, containers, note);
-  options.onSnapshotId?.(snapshotId);
   try {
+    options.onSnapshotId?.(snapshotId);
     for (const container of containers) {
       throwIfSnapshotAborted(options.signal);
       onProgress?.(container, false);

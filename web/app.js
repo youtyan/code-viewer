@@ -10793,7 +10793,12 @@ ${frontmatter.yaml}
     refreshBtn.type = "button";
     refreshBtn.className = "db-snapshot-refresh-btn";
     refreshBtn.textContent = "更新";
-    toolbar.append(createBtn, refreshBtn);
+    const snapshotCancelBtn = document.createElement("button");
+    snapshotCancelBtn.type = "button";
+    snapshotCancelBtn.className = "db-snapshot-job-cancel-btn";
+    snapshotCancelBtn.textContent = "キャンセル";
+    snapshotCancelBtn.hidden = true;
+    toolbar.append(createBtn, refreshBtn, snapshotCancelBtn);
     const tableSelector = document.createElement("div");
     tableSelector.className = "db-snapshot-table-selector";
     tableSelector.hidden = true;
@@ -10834,8 +10839,15 @@ ${frontmatter.yaml}
     mainArea.className = "db-snapshot-main-area";
     el.append(guide, toolbar, tableSelector, mainArea);
     let snapshots = [];
+    let activeSnapshotId = null;
     let disposed = false;
     const autoRefreshTimers = new Set;
+    function setActiveSnapshotId(id) {
+      activeSnapshotId = id;
+      snapshotCancelBtn.hidden = !id;
+      snapshotCancelBtn.disabled = false;
+      snapshotCancelBtn.textContent = "キャンセル";
+    }
     function showTableSelector() {
       const tables = deps.getTables();
       const lastTables = getLastTables();
@@ -10879,6 +10891,21 @@ ${frontmatter.yaml}
     createBtn.addEventListener("click", showTableSelector);
     cancelBtn.addEventListener("click", () => {
       tableSelector.hidden = true;
+    });
+    snapshotCancelBtn.addEventListener("click", async () => {
+      if (!activeSnapshotId)
+        return;
+      const snapshotId = activeSnapshotId;
+      snapshotCancelBtn.disabled = true;
+      snapshotCancelBtn.textContent = "キャンセル中...";
+      try {
+        await postJson("/_db/snapshot/cancel", { id: snapshotId });
+      } catch {} finally {
+        if (!disposed && activeSnapshotId === snapshotId) {
+          snapshotCancelBtn.disabled = false;
+          snapshotCancelBtn.textContent = "キャンセル";
+        }
+      }
     });
     confirmBtn.addEventListener("click", async () => {
       const dbId = deps.getDbId();
@@ -11301,13 +11328,18 @@ ${frontmatter.yaml}
         const dbId = deps.getDbId();
         if (parsed.dbId && dbId && parsed.dbId !== dbId)
           return;
+        if (parsed.action === "started" && parsed.id) {
+          setActiveSnapshotId(parsed.id);
+        }
         if (parsed.action === "created" || parsed.action === "error") {
+          setActiveSnapshotId(null);
           refreshAndAutoDiff();
         }
       } catch {}
     }
     function dispose() {
       disposed = true;
+      setActiveSnapshotId(null);
       for (const timer of autoRefreshTimers)
         clearTimeout(timer);
       autoRefreshTimers.clear();

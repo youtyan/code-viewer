@@ -75,7 +75,13 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   refreshBtn.className = "db-snapshot-refresh-btn";
   refreshBtn.textContent = "更新";
 
-  toolbar.append(createBtn, refreshBtn);
+  const snapshotCancelBtn = document.createElement("button");
+  snapshotCancelBtn.type = "button";
+  snapshotCancelBtn.className = "db-snapshot-job-cancel-btn";
+  snapshotCancelBtn.textContent = "キャンセル";
+  snapshotCancelBtn.hidden = true;
+
+  toolbar.append(createBtn, refreshBtn, snapshotCancelBtn);
 
   const tableSelector = document.createElement("div");
   tableSelector.className = "db-snapshot-table-selector";
@@ -136,8 +142,16 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   el.append(guide, toolbar, tableSelector, mainArea);
 
   let snapshots: SnapshotMeta[] = [];
+  let activeSnapshotId: string | null = null;
   let disposed = false;
   const autoRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function setActiveSnapshotId(id: string | null): void {
+    activeSnapshotId = id;
+    snapshotCancelBtn.hidden = !id;
+    snapshotCancelBtn.disabled = false;
+    snapshotCancelBtn.textContent = "キャンセル";
+  }
 
   function showTableSelector() {
     const tables = deps.getTables();
@@ -193,6 +207,22 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   createBtn.addEventListener("click", showTableSelector);
   cancelBtn.addEventListener("click", () => {
     tableSelector.hidden = true;
+  });
+  snapshotCancelBtn.addEventListener("click", async () => {
+    if (!activeSnapshotId) return;
+    const snapshotId = activeSnapshotId;
+    snapshotCancelBtn.disabled = true;
+    snapshotCancelBtn.textContent = "キャンセル中...";
+    try {
+      await postJson("/_db/snapshot/cancel", { id: snapshotId });
+    } catch {
+      // ignore
+    } finally {
+      if (!disposed && activeSnapshotId === snapshotId) {
+        snapshotCancelBtn.disabled = false;
+        snapshotCancelBtn.textContent = "キャンセル";
+      }
+    }
   });
 
   confirmBtn.addEventListener("click", async () => {
@@ -698,10 +728,18 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   function handleSse(data: string) {
     try {
-      const parsed = JSON.parse(data) as { action: string; dbId?: string };
+      const parsed = JSON.parse(data) as {
+        action: string;
+        dbId?: string;
+        id?: string;
+      };
       const dbId = deps.getDbId();
       if (parsed.dbId && dbId && parsed.dbId !== dbId) return;
+      if (parsed.action === "started" && parsed.id) {
+        setActiveSnapshotId(parsed.id);
+      }
       if (parsed.action === "created" || parsed.action === "error") {
+        setActiveSnapshotId(null);
         void refreshAndAutoDiff();
       }
     } catch {
@@ -711,6 +749,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   function dispose(): void {
     disposed = true;
+    setActiveSnapshotId(null);
     for (const timer of autoRefreshTimers) clearTimeout(timer);
     autoRefreshTimers.clear();
   }
