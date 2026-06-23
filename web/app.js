@@ -8471,7 +8471,7 @@ ${frontmatter.yaml}
     let runId = 0;
     return {
       start() {
-        active?.abort();
+        active?.abort("abort-guard:start");
         const abort = new AbortController;
         active = abort;
         const requestRunId = ++runId;
@@ -8488,7 +8488,7 @@ ${frontmatter.yaml}
       },
       dispose() {
         runId++;
-        active?.abort();
+        active?.abort("abort-guard:dispose");
         active = null;
       }
     };

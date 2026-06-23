@@ -108,7 +108,6 @@ function execEsRequest(
   const args = [
     "exec",
     "-i",
-    ...(hasPassword ? ["-e", "ES_HTTP_PASSWORD"] : []),
     config.containerName,
     "curl",
     "-s",
@@ -125,9 +124,7 @@ function execEsRequest(
   ];
   const proc = spawnSync("docker", args, {
     encoding: "utf8",
-    env: hasPassword
-      ? { ...process.env, ES_HTTP_PASSWORD: config.password }
-      : process.env,
+    env: process.env,
     timeout: timeoutMs,
     input: curlConfig,
     stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],

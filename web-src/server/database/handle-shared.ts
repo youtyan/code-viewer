@@ -110,8 +110,8 @@ export async function dispatchRoutes(
   sideEffectAllowed?: (req: Request) => boolean,
   wrap: (res: Response) => Response | Promise<Response> = (res) => res,
 ): Promise<Response | null> {
+  if (!Object.prototype.hasOwnProperty.call(routes, url.pathname)) return null;
   const route = routes[url.pathname];
-  if (!route) return null;
   if (!route.methods.includes(req.method)) {
     return wrap(textErrorResponse("method not allowed", 405));
   }

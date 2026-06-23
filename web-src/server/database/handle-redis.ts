@@ -90,7 +90,7 @@ export async function handleRedisRoute(
   req: Request,
   url: URL,
   cwd: string,
-  _sideEffectAllowed?: (req: Request) => boolean,
+  sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
   const wrap = createQueryStrippedLogger("redis", req, url);
   return dispatchRoutes(
@@ -110,7 +110,7 @@ export async function handleRedisRoute(
         handler: () => handleValue(cwd, url),
       },
     },
-    _sideEffectAllowed,
+    sideEffectAllowed,
     wrap,
   );
 }

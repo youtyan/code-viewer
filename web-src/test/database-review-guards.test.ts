@@ -34,7 +34,7 @@ describe("Elasticsearch curl config quoting", () => {
   });
 
   for (const value of ["elastic:pw\nnext = bad", "elastic:pw\rbad"]) {
-    test("rejects control characters", () => {
+    test(`rejects control characters in ${JSON.stringify(value)}`, () => {
       let message = "";
       try {
         quoteCurlConfigString(value);

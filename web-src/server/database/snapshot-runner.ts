@@ -58,7 +58,6 @@ export async function runSnapshot(
   }
   // この時点で source は SnapshotIterable を持つことが保証されている。
   const snapshotSource = source as SnapshotSource;
-  throwIfSnapshotAborted(options.signal);
 
   const snapshotId = await createSnapshot(
     cwd,
