@@ -7,6 +7,8 @@ import type {
   RedisValueResponse,
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
+import { createAbortGuard } from "./abort-guard";
+import { setPaneStatus } from "./pane-status";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -107,9 +109,9 @@ export function createRedisExplorer(
   let keyRunId = 0;
   let suppressNotify = false;
   let disposed = false;
-  let dbAbort: AbortController | null = null;
-  let keysAbort: AbortController | null = null;
-  let valueAbort: AbortController | null = null;
+  const dbGuard = createAbortGuard();
+  const keysGuard = createAbortGuard();
+  const valueGuard = createAbortGuard();
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -121,20 +123,16 @@ export function createRedisExplorer(
   }
 
   function setDbStatus(message: string, isError = false) {
-    dbList.innerHTML = "";
-    const note = document.createElement("div");
-    note.className = isError ? "db-pane-error" : "db-pane-note";
-    note.textContent = message;
-    dbList.appendChild(note);
+    setPaneStatus(dbList, message, { error: isError });
   }
 
   function setKeyStatus(message: string, isError = false) {
-    keyList.innerHTML = "";
-    const note = document.createElement("div");
-    note.className = isError ? "db-pane-error" : "db-pane-note";
-    note.textContent = message;
-    keyList.appendChild(note);
-    keyMoreBtn.hidden = true;
+    setPaneStatus(keyList, message, {
+      error: isError,
+      afterClear: () => {
+        keyMoreBtn.hidden = true;
+      },
+    });
   }
 
   function renderDatabases(
@@ -333,9 +331,7 @@ export function createRedisExplorer(
 
   async function selectKey(name: string): Promise<void> {
     if (disposed || currentDbId === null || currentDbIndex === null) return;
-    valueAbort?.abort();
-    const abort = new AbortController();
-    valueAbort = abort;
+    const slot = valueGuard.start();
     const requestRunId = ++keyRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
@@ -354,21 +350,20 @@ export function createRedisExplorer(
         key: name,
       });
       const res = await fetch(`/_db/redis/value?${params}`, {
-        signal: abort.signal,
+        signal: slot.signal,
       });
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
-        mainPane.innerHTML = "";
-        const err = document.createElement("div");
-        err.className = "db-pane-error";
-        err.textContent = `Error: ${text || res.statusText}`;
-        mainPane.appendChild(err);
+        setPaneStatus(mainPane, `Error: ${text || res.statusText}`, {
+          error: true,
+        });
         return;
       }
       const data = (await res.json()) as RedisValueResponse;
       if (
         disposed ||
+        slot.isStale() ||
         requestRunId !== keyRunId ||
         requestDbId !== currentDbId ||
         requestDbIndex !== currentDbIndex ||
@@ -378,15 +373,15 @@ export function createRedisExplorer(
       }
       renderValue(data.key, data.value);
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       if (requestRunId !== keyRunId || requestDbId !== currentDbId) return;
-      mainPane.innerHTML = "";
-      const errEl = document.createElement("div");
-      errEl.className = "db-pane-error";
-      errEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      mainPane.appendChild(errEl);
+      setPaneStatus(
+        mainPane,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        { error: true },
+      );
     } finally {
-      if (valueAbort === abort) valueAbort = null;
+      slot.finish();
     }
   }
 
@@ -404,9 +399,7 @@ export function createRedisExplorer(
 
   async function loadKeys(append: boolean): Promise<void> {
     if (disposed || currentDbId === null || currentDbIndex === null) return;
-    keysAbort?.abort();
-    const abort = new AbortController();
-    keysAbort = abort;
+    const slot = keysGuard.start();
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
@@ -421,9 +414,9 @@ export function createRedisExplorer(
         count: "200",
       });
       const res = await fetch(`/_db/redis/keys?${params}`, {
-        signal: abort.signal,
+        signal: slot.signal,
       });
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
         setKeyStatus(`Error: ${text || res.statusText}`, true);
@@ -432,6 +425,7 @@ export function createRedisExplorer(
       const data = (await res.json()) as RedisKeysResponse;
       if (
         disposed ||
+        slot.isStale() ||
         requestRunId !== loadRunId ||
         requestDbId !== currentDbId ||
         requestDbIndex !== currentDbIndex ||
@@ -448,15 +442,15 @@ export function createRedisExplorer(
       currentCursor = data.nextCursor;
       keyMoreBtn.hidden = currentCursor === "0";
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       if (requestRunId !== loadRunId || requestDbId !== currentDbId) return;
       setKeyStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      if (keysAbort === abort) keysAbort = null;
-      if (!keysAbort) keyMoreBtn.disabled = false;
+      slot.finish();
+      if (!slot.isStale()) keyMoreBtn.disabled = false;
     }
   }
 
@@ -480,11 +474,10 @@ export function createRedisExplorer(
   ): Promise<void> {
     if (disposed) return;
     if (currentDbId === dbId && !initial) return;
-    dbAbort?.abort();
-    keysAbort?.abort();
-    valueAbort?.abort();
-    const abort = new AbortController();
-    dbAbort = abort;
+    dbGuard.dispose();
+    keysGuard.dispose();
+    valueGuard.dispose();
+    const slot = dbGuard.start();
     const requestRunId = ++loadRunId;
     currentDbId = dbId;
     currentDbIndex = null;
@@ -499,16 +492,21 @@ export function createRedisExplorer(
     try {
       const res = await fetch(
         `/_db/redis/databases?db=${encodeURIComponent(dbId)}`,
-        { signal: abort.signal },
+        { signal: slot.signal },
       );
-      if (disposed || abort.signal.aborted) return;
+      if (disposed || slot.isStale()) return;
       if (!res.ok) {
         const text = await res.text();
         setDbStatus(`Error: ${text || res.statusText}`, true);
         return;
       }
       const data = (await res.json()) as RedisDatabasesResponse;
-      if (disposed || requestRunId !== loadRunId || currentDbId !== dbId)
+      if (
+        disposed ||
+        slot.isStale() ||
+        requestRunId !== loadRunId ||
+        currentDbId !== dbId
+      )
         return;
       renderDatabases(data.databases);
 
@@ -532,23 +530,20 @@ export function createRedisExplorer(
         notifySelectionChange();
       }
     } catch (err) {
-      if (abort.signal.aborted) return;
+      if (slot.isStale()) return;
       setDbStatus(
         `Error: ${err instanceof Error ? err.message : String(err)}`,
         true,
       );
     } finally {
-      if (dbAbort === abort) dbAbort = null;
+      slot.finish();
     }
   }
 
   function clear(): void {
-    dbAbort?.abort();
-    keysAbort?.abort();
-    valueAbort?.abort();
-    dbAbort = null;
-    keysAbort = null;
-    valueAbort = null;
+    dbGuard.dispose();
+    keysGuard.dispose();
+    valueGuard.dispose();
     loadRunId++;
     keyRunId++;
     suppressNotify = false;

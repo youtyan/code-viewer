@@ -14,6 +14,9 @@ import { json, textError } from "./handle";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
+  dispatchRoutes,
+  handleError,
+  parsePostJsonBody,
 } from "./handle-shared";
 
 const esAdapterCache = createDockerAdapterCache<ElasticsearchExplorer>();
@@ -51,14 +54,7 @@ function handleIndices(cwd: string, url: URL): Response {
     const body: EsIndicesResponse = { dbId: r.dbId, indices };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] elasticsearch error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to list elasticsearch indices: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("elasticsearch", "list elasticsearch indices", err);
   }
 }
 
@@ -91,14 +87,7 @@ function handleDocs(cwd: string, url: URL): Response {
     };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] elasticsearch error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("elasticsearch", "search elasticsearch docs", err);
   }
 }
 
@@ -125,12 +114,12 @@ async function handleSearch(
       path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`,
     };
   } else if (req.method === "POST") {
-    let body: { method?: string; path?: string; body?: unknown };
-    try {
-      body = (await req.json()) as typeof body;
-    } catch {
-      return textError("invalid JSON body", 400);
-    }
+    const body = await parsePostJsonBody<{
+      method?: string;
+      path?: string;
+      body?: unknown;
+    }>(req);
+    if (body instanceof Response) return body;
     if (body.method !== "GET" && body.method !== "POST") {
       return textError("method must be GET or POST", 400);
     }
@@ -183,14 +172,7 @@ function handleDoc(cwd: string, url: URL): Response {
     };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] elasticsearch error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to get elasticsearch doc: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("elasticsearch", "get elasticsearch doc", err);
   }
 }
 
@@ -204,14 +186,7 @@ function handleMapping(cwd: string, url: URL): Response {
     const body: EsMappingResponse = { dbId: r.dbId, mapping };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] elasticsearch error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to read elasticsearch mapping: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("elasticsearch", "read elasticsearch mapping", err);
   }
 }
 
@@ -221,52 +196,36 @@ export async function handleElasticsearchRoute(
   cwd: string,
   sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
-  const path = url.pathname;
-  const method = req.method;
   const wrap = createQueryStrippedLogger("elasticsearch", req, url);
-  const routes: Record<
-    string,
+  return dispatchRoutes(
+    req,
+    url,
     {
-      methods: readonly string[];
-      sideEffect?: (method: string) => boolean;
-      handler: () => Response | Promise<Response>;
-    }
-  > = {
-    "/_db/elasticsearch/indices": {
-      methods: ["GET"],
-      handler: () => handleIndices(cwd, url),
+      "/_db/elasticsearch/indices": {
+        methods: ["GET"],
+        handler: () => handleIndices(cwd, url),
+      },
+      "/_db/elasticsearch/mapping": {
+        methods: ["GET"],
+        handler: () => handleMapping(cwd, url),
+      },
+      "/_db/elasticsearch/docs": {
+        methods: ["GET"],
+        handler: () => handleDocs(cwd, url),
+      },
+      "/_db/elasticsearch/doc": {
+        methods: ["GET"],
+        handler: () => handleDoc(cwd, url),
+      },
+      "/_db/elasticsearch/search": {
+        methods: ["GET", "POST"],
+        // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
+        // CSRF ガードをかける。GET は q= だけの read-only なので通す。
+        sideEffect: (m) => m === "POST",
+        handler: () => handleSearch(cwd, req, url),
+      },
     },
-    "/_db/elasticsearch/mapping": {
-      methods: ["GET"],
-      handler: () => handleMapping(cwd, url),
-    },
-    "/_db/elasticsearch/docs": {
-      methods: ["GET"],
-      handler: () => handleDocs(cwd, url),
-    },
-    "/_db/elasticsearch/doc": {
-      methods: ["GET"],
-      handler: () => handleDoc(cwd, url),
-    },
-    "/_db/elasticsearch/search": {
-      methods: ["GET", "POST"],
-      // POST 経由は DSL を直接受けるルートなので、SQL の /_db/query と同等の
-      // CSRF ガードをかける。GET は q= だけの read-only なので通す。
-      sideEffect: (m) => m === "POST",
-      handler: () => handleSearch(cwd, req, url),
-    },
-  };
-  const route = routes[path];
-  if (!route) return null;
-  if (!route.methods.includes(method)) {
-    return wrap(textError("method not allowed", 405));
-  }
-  if (
-    route.sideEffect?.(method) &&
-    sideEffectAllowed &&
-    !sideEffectAllowed(req)
-  ) {
-    return wrap(textError("forbidden", 403));
-  }
-  return wrap(await route.handler());
+    sideEffectAllowed,
+    wrap,
+  );
 }

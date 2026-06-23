@@ -4844,6 +4844,43 @@ function createQueryStrippedLogger(prefix, req, url) {
     return res;
   };
 }
+function textErrorResponse(message, status) {
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res) {
+  const route = routes[url.pathname];
+  if (!route)
+    return null;
+  if (!route.methods.includes(req.method)) {
+    return wrap(textErrorResponse("method not allowed", 405));
+  }
+  const requiresSideEffect = typeof route.sideEffect === "function" ? route.sideEffect(req.method) : route.sideEffect === true;
+  if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textErrorResponse("forbidden", 403));
+  }
+  return wrap(await route.handler());
+}
+async function parsePostJsonBody(req) {
+  if (req.method !== "POST") {
+    return textErrorResponse("method not allowed", 405);
+  }
+  try {
+    return await req.json();
+  } catch {
+    return textErrorResponse("invalid JSON body", 400);
+  }
+}
+function handleError(prefix, action, err) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[code-viewer] ${prefix} error:`, message);
+  return textErrorResponse(`failed to ${action}: ${message}`, 500);
+}
 var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
 var init_handle_shared = __esm(() => {
   DEFAULT_DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
@@ -6472,8 +6509,7 @@ function handleDatabases(cwd, url) {
     const body = { dbId: r.dbId, databases };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("redis", "list redis databases", err);
   }
 }
 function handleKeys(cwd, url) {
@@ -6506,15 +6542,12 @@ function handleKeys(cwd, url) {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("redis", "list redis keys", err);
   }
 }
 async function handleRedisRoute(req, url, cwd, _sideEffectAllowed) {
-  const path = url.pathname;
-  const method = req.method;
   const wrap = createQueryStrippedLogger("redis", req, url);
-  const routes = {
+  return dispatchRoutes(req, url, {
     "/_db/redis/databases": {
       methods: ["GET"],
       handler: () => handleDatabases(cwd, url)
@@ -6527,14 +6560,7 @@ async function handleRedisRoute(req, url, cwd, _sideEffectAllowed) {
       methods: ["GET"],
       handler: () => handleValue(cwd, url)
     }
-  };
-  const route = routes[path];
-  if (!route)
-    return null;
-  if (!route.methods.includes(method)) {
-    return wrap(textError("method not allowed", 405));
-  }
-  return wrap(await route.handler());
+  }, _sideEffectAllowed, wrap);
 }
 function handleValue(cwd, url) {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
@@ -6555,8 +6581,7 @@ function handleValue(cwd, url) {
     const body = { dbId: r.dbId, dbIndex, key, value };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] redis error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read redis value: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("redis", "read redis value", err);
   }
 }
 var redisAdapterCache;
@@ -6601,8 +6626,7 @@ function handleIndices(cwd, url) {
     const body = { dbId: r.dbId, indices };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to list elasticsearch indices: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("elasticsearch", "list elasticsearch indices", err);
   }
 }
 function handleDocs(cwd, url) {
@@ -6637,8 +6661,7 @@ function handleDocs(cwd, url) {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to search elasticsearch docs: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("elasticsearch", "search elasticsearch docs", err);
   }
 }
 async function handleSearch(cwd, req, url) {
@@ -6657,12 +6680,9 @@ async function handleSearch(cwd, req, url) {
       path: `${pathPrefix}/_search?q=${encodeURIComponent(q)}`
     };
   } else if (req.method === "POST") {
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return textError("invalid JSON body", 400);
-    }
+    const body = await parsePostJsonBody(req);
+    if (body instanceof Response)
+      return body;
     if (body.method !== "GET" && body.method !== "POST") {
       return textError("method must be GET or POST", 400);
     }
@@ -6716,8 +6736,7 @@ function handleDoc(cwd, url) {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to get elasticsearch doc: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("elasticsearch", "get elasticsearch doc", err);
   }
 }
 function handleMapping(cwd, url) {
@@ -6732,15 +6751,12 @@ function handleMapping(cwd, url) {
     const body = { dbId: r.dbId, mapping };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] elasticsearch error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read elasticsearch mapping: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("elasticsearch", "read elasticsearch mapping", err);
   }
 }
 async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
-  const path = url.pathname;
-  const method = req.method;
   const wrap = createQueryStrippedLogger("elasticsearch", req, url);
-  const routes = {
+  return dispatchRoutes(req, url, {
     "/_db/elasticsearch/indices": {
       methods: ["GET"],
       handler: () => handleIndices(cwd, url)
@@ -6762,17 +6778,7 @@ async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
       sideEffect: (m) => m === "POST",
       handler: () => handleSearch(cwd, req, url)
     }
-  };
-  const route = routes[path];
-  if (!route)
-    return null;
-  if (!route.methods.includes(method)) {
-    return wrap(textError("method not allowed", 405));
-  }
-  if (route.sideEffect?.(method) && sideEffectAllowed && !sideEffectAllowed(req)) {
-    return wrap(textError("forbidden", 403));
-  }
-  return wrap(await route.handler());
+  }, sideEffectAllowed, wrap);
 }
 var esAdapterCache;
 var init_handle_elasticsearch = __esm(() => {
@@ -6941,8 +6947,7 @@ async function handleSchema(cwd, url) {
     }
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read schema: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "read schema", err);
   }
 }
 function sanitizeIdentifier4(name, kind = "sqlite") {
@@ -7065,8 +7070,7 @@ async function handleTable(cwd, url) {
     };
     return json(body);
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to read table: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "read table", err);
   }
 }
 function makeHistoryId() {
@@ -7103,14 +7107,9 @@ function inferEmptyQueryColumns(adapter, sql) {
   }
 }
 async function handleQuery(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db || !body.sql)
     return textError("missing db or sql", 400);
   const r = resolveDb(cwd, body.db);
@@ -7186,14 +7185,9 @@ function handleHistory(cwd, url) {
   return json(state);
 }
 async function handleHistoryDelete(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   const state = loadQueryHistory(cwd);
@@ -7330,8 +7324,7 @@ async function handleExport(cwd, url) {
       }
     });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to export table: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "export table", err);
   }
 }
 async function handleColumns(cwd, url) {
@@ -7346,8 +7339,7 @@ async function handleColumns(cwd, url) {
     const columns = adapter.getColumns(table);
     return json({ dbId: r.dbId, table, columns });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to get columns: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "get columns", err);
   }
 }
 async function handleDdl(cwd, url) {
@@ -7363,19 +7355,13 @@ async function handleDdl(cwd, url) {
     const triggers = adapter.getTriggers(table);
     return json({ dbId: r.dbId, table, sql, triggers });
   } catch (err) {
-    console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
-    return textError(`failed to get DDL: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "get DDL", err);
   }
 }
 async function handleSearchStart(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db || !body.term)
     return textError("missing db or term", 400);
   const r = resolveDb(cwd, body.db);
@@ -7458,14 +7444,9 @@ function handleSearchStatus(url) {
   return json(result);
 }
 async function handleSearchCancel(req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   const job = searchJobs.get(body.id);
@@ -7505,14 +7486,9 @@ function sanitizeSnapshotTables(tables) {
   return out;
 }
 async function handleSnapshotCreate(cwd, req, sendSse) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db)
     return textError("missing db", 400);
   const requestedTables = sanitizeSnapshotTables(body.tables);
@@ -7618,12 +7594,10 @@ async function handleSnapshotCancel(req, url) {
     return textError("method not allowed", 405);
   let id = url.searchParams.get("id") || "";
   if (!id) {
-    try {
-      const body = await req.json();
-      id = body.id || "";
-    } catch {
-      return textError("invalid JSON body", 400);
-    }
+    const body = await parsePostJsonBody(req);
+    if (body instanceof Response)
+      return body;
+    id = body.id || "";
   }
   if (!id)
     return textError("missing id", 400);
@@ -7636,28 +7610,18 @@ async function handleSnapshotCancel(req, url) {
   return json({ ok: true });
 }
 async function handleSnapshotUpdateNote(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   await updateSnapshotNote(cwd, body.id, body.note ?? "");
   return json({ ok: true });
 }
 async function handleSnapshotDelete(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.id)
     return textError("missing id", 400);
   await deleteSnapshot(cwd, body.id);
@@ -7672,7 +7636,7 @@ async function handleDiffTables(cwd, url) {
     const tables = await computeDiffTables(cwd, beforeId, afterId);
     return json({ beforeId, afterId, tables });
   } catch (err) {
-    return textError(`failed to compute diff: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "compute diff", err);
   }
 }
 async function handleDiffRows(cwd, url) {
@@ -7687,7 +7651,7 @@ async function handleDiffRows(cwd, url) {
     const result = await computeDiffRows(cwd, beforeId, afterId, table, offset, limit);
     return json({ beforeId, afterId, table, ...result });
   } catch (err) {
-    return textError(`failed to compute diff rows: ${err instanceof Error ? err.message : String(err)}`, 500);
+    return handleError("database", "compute diff rows", err);
   }
 }
 function handleTabsGet(cwd) {
@@ -7726,14 +7690,9 @@ async function handleTabsPut(cwd, req) {
   }
 }
 async function handleClose(cwd, req) {
-  if (req.method !== "POST")
-    return textError("method not allowed", 405);
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return textError("invalid JSON body", 400);
-  }
+  const body = await parsePostJsonBody(req);
+  if (body instanceof Response)
+    return body;
   if (!body.db)
     return textError("missing db", 400);
   if (body.db.startsWith("docker:")) {
@@ -7782,117 +7741,111 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
     const ms = Date.now() - start;
     console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
   };
-  const wrapResponse = async (handler) => {
-    const res = await handler;
-    if (res)
-      log(res.status);
+  const wrapResponse = (res) => {
+    log(res.status);
     return res;
   };
-  if (path === "/_db/files")
-    return wrapResponse(handleFiles(cwd, omitDirNames));
-  if (path === "/_db/schema")
-    return wrapResponse(handleSchema(cwd, url));
-  if (path === "/_db/table")
-    return wrapResponse(handleTable(cwd, url));
-  if (path === "/_db/columns")
-    return wrapResponse(handleColumns(cwd, url));
-  if (path === "/_db/export")
-    return wrapResponse(handleExport(cwd, url));
-  if (path === "/_db/ddl")
-    return wrapResponse(handleDdl(cwd, url));
-  if (path === "/_db/query") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
+  return dispatchRoutes(req, url, {
+    "/_db/files": {
+      methods: ["GET"],
+      handler: () => handleFiles(cwd, omitDirNames)
+    },
+    "/_db/schema": {
+      methods: ["GET"],
+      handler: () => handleSchema(cwd, url)
+    },
+    "/_db/table": {
+      methods: ["GET"],
+      handler: () => handleTable(cwd, url)
+    },
+    "/_db/columns": {
+      methods: ["GET"],
+      handler: () => handleColumns(cwd, url)
+    },
+    "/_db/export": {
+      methods: ["GET"],
+      handler: () => handleExport(cwd, url)
+    },
+    "/_db/ddl": {
+      methods: ["GET"],
+      handler: () => handleDdl(cwd, url)
+    },
+    "/_db/query": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleQuery(cwd, req, sendSse)
+    },
+    "/_db/close": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleClose(cwd, req)
+    },
+    "/_db/history": {
+      methods: ["GET"],
+      handler: () => handleHistory(cwd, url)
+    },
+    "/_db/history/delete": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleHistoryDelete(cwd, req, sendSse)
+    },
+    "/_db/history/clear": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleHistoryClear(cwd, req, sendSse)
+    },
+    "/_db/search/start": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSearchStart(cwd, req)
+    },
+    "/_db/search/status": {
+      methods: ["GET"],
+      handler: () => handleSearchStatus(url)
+    },
+    "/_db/search/cancel": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSearchCancel(req)
+    },
+    "/_db/snapshot/list": {
+      methods: ["GET"],
+      handler: () => handleSnapshotList(cwd, url)
+    },
+    "/_db/snapshot/create": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotCreate(cwd, req, sendSse)
+    },
+    "/_db/snapshot/cancel": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotCancel(req, url)
+    },
+    "/_db/snapshot/update-note": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotUpdateNote(cwd, req)
+    },
+    "/_db/snapshot/delete": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleSnapshotDelete(cwd, req)
+    },
+    "/_db/snapshot/diff/tables": {
+      methods: ["GET"],
+      handler: () => handleDiffTables(cwd, url)
+    },
+    "/_db/snapshot/diff/rows": {
+      methods: ["GET"],
+      handler: () => handleDiffRows(cwd, url)
+    },
+    "/_db/tabs": {
+      methods: ["GET", "PUT", "POST"],
+      sideEffect: (m) => m !== "GET",
+      handler: () => method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req)
     }
-    return wrapResponse(handleQuery(cwd, req, sendSse));
-  }
-  if (path === "/_db/close") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleClose(cwd, req));
-  }
-  if (path === "/_db/history")
-    return wrapResponse(handleHistory(cwd, url));
-  if (path === "/_db/history/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryDelete(cwd, req, sendSse));
-  }
-  if (path === "/_db/history/clear") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleHistoryClear(cwd, req, sendSse));
-  }
-  if (path === "/_db/search/start") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchStart(cwd, req));
-  }
-  if (path === "/_db/search/status")
-    return wrapResponse(handleSearchStatus(url));
-  if (path === "/_db/search/cancel") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSearchCancel(req));
-  }
-  if (path === "/_db/snapshot/list")
-    return wrapResponse(handleSnapshotList(cwd, url));
-  if (path === "/_db/snapshot/create") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
-  }
-  if (path === "/_db/snapshot/cancel") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotCancel(req, url));
-  }
-  if (path === "/_db/snapshot/update-note") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotUpdateNote(cwd, req));
-  }
-  if (path === "/_db/snapshot/delete") {
-    if (!sideEffectAllowed(req)) {
-      log(403);
-      return textError("forbidden", 403);
-    }
-    return wrapResponse(handleSnapshotDelete(cwd, req));
-  }
-  if (path === "/_db/snapshot/diff/tables")
-    return wrapResponse(handleDiffTables(cwd, url));
-  if (path === "/_db/snapshot/diff/rows")
-    return wrapResponse(handleDiffRows(cwd, url));
-  if (path === "/_db/tabs") {
-    if (method === "GET")
-      return wrapResponse(handleTabsGet(cwd));
-    if (method === "PUT" || method === "POST") {
-      if (!sideEffectAllowed(req)) {
-        log(403);
-        return textError("forbidden", 403);
-      }
-      return wrapResponse(handleTabsPut(cwd, req));
-    }
-    return wrapResponse(textError("method not allowed", 405));
-  }
-  return null;
+  }, sideEffectAllowed, wrapResponse);
 }
 var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {

@@ -9,6 +9,8 @@ import { json, textError } from "./handle";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
+  dispatchRoutes,
+  handleError,
 } from "./handle-shared";
 
 const redisAdapterCache = createDockerAdapterCache<RedisExplorer>();
@@ -46,14 +48,7 @@ function handleDatabases(cwd: string, url: URL): Response {
     const body: RedisDatabasesResponse = { dbId: r.dbId, databases };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] redis error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to list redis databases: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("redis", "list redis databases", err);
   }
 }
 
@@ -87,14 +82,7 @@ function handleKeys(cwd: string, url: URL): Response {
     };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] redis error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to list redis keys: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("redis", "list redis keys", err);
   }
 }
 
@@ -104,35 +92,27 @@ export async function handleRedisRoute(
   cwd: string,
   _sideEffectAllowed?: (req: Request) => boolean,
 ): Promise<Response | null> {
-  const path = url.pathname;
-  const method = req.method;
   const wrap = createQueryStrippedLogger("redis", req, url);
-  const routes: Record<
-    string,
+  return dispatchRoutes(
+    req,
+    url,
     {
-      methods: readonly string[];
-      handler: () => Response | Promise<Response>;
-    }
-  > = {
-    "/_db/redis/databases": {
-      methods: ["GET"],
-      handler: () => handleDatabases(cwd, url),
+      "/_db/redis/databases": {
+        methods: ["GET"],
+        handler: () => handleDatabases(cwd, url),
+      },
+      "/_db/redis/keys": {
+        methods: ["GET"],
+        handler: () => handleKeys(cwd, url),
+      },
+      "/_db/redis/value": {
+        methods: ["GET"],
+        handler: () => handleValue(cwd, url),
+      },
     },
-    "/_db/redis/keys": {
-      methods: ["GET"],
-      handler: () => handleKeys(cwd, url),
-    },
-    "/_db/redis/value": {
-      methods: ["GET"],
-      handler: () => handleValue(cwd, url),
-    },
-  };
-  const route = routes[path];
-  if (!route) return null;
-  if (!route.methods.includes(method)) {
-    return wrap(textError("method not allowed", 405));
-  }
-  return wrap(await route.handler());
+    _sideEffectAllowed,
+    wrap,
+  );
 }
 
 function handleValue(cwd: string, url: URL): Response {
@@ -151,13 +131,6 @@ function handleValue(cwd: string, url: URL): Response {
     const body: RedisValueResponse = { dbId: r.dbId, dbIndex, key, value };
     return json(body);
   } catch (err) {
-    console.error(
-      "[code-viewer] redis error:",
-      err instanceof Error ? err.message : String(err),
-    );
-    return textError(
-      `failed to read redis value: ${err instanceof Error ? err.message : String(err)}`,
-      500,
-    );
+    return handleError("redis", "read redis value", err);
   }
 }
