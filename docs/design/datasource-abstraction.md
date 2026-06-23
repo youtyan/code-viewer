@@ -240,6 +240,12 @@ PoC 1 周目で **触る** のは `discovery.ts:130` (`detectDbKind` に redis �
 分岐) のみ。残りは新規ファイル (`adapters/redis.ts`、`handle-redis.ts`、
 UI 側 `<RedisExplorer>`)。
 
+実装追記: Round 2 以降は snapshot capability を実際に generic 化するため、
+`adapters/sqlite.ts` / `adapters/docker.ts` / `snapshot-runner.ts` に
+`SnapshotIterable` 経路を追加した。これは PoC 1 周目の退行防止リストとは
+別フェーズの確定変更で、現行の保護対象は「本タスクで新規 diff を入れない」
+対象として扱う。
+
 ---
 
 ## テストマトリクス（懸念事項）

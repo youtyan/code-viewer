@@ -88,6 +88,12 @@ services:
 - `query-history.ts` / `connection-pool.ts` / `global-search.ts`
 - 既存 UI の sql / redis 関連 (`database-view.ts` は 1 分岐のみ追加)
 
+実装追記: Round 3 後の majority fix で `adapters/redis.ts` /
+`adapters/elasticsearch.ts` の docker compose container 解決を
+`adapters/docker-utils.ts` に共通化し、`ElasticsearchExplorer` を
+`DocSource & Queryable & SnapshotIterable` 型へ接続した。`adapters/docker.ts`
+は本タスクの保護対象なので新規 diff は入れず、同 helper への移行は後続課題。
+
 ---
 
 ## 3. 接続戦略

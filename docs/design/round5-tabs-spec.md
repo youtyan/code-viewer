@@ -26,6 +26,13 @@ Database 画面が現状「`<select>` 1 個で 1 つの DB しか開けない」
   `snapshot-store.ts` / `snapshot-runner.ts` / `query-history.ts` /
   `connection-pool.ts` / `global-search.ts` /
   `adapters/{sqlite,docker,redis,elasticsearch}.ts`。
+- 実装追記: Round 5 後の UI 修正で `redis-explorer.ts` /
+  `elasticsearch-explorer.ts` は dispose/AbortController と共通 CSS class のため
+  変更済み。`adapters/redis.ts` / `adapters/elasticsearch.ts` も型接続と
+  docker utility 共通化で変更済み。`snapshot-store.ts` /
+  `snapshot-runner.ts` / `query-history.ts` / `connection-pool.ts` /
+  `global-search.ts` / `adapters/sqlite.ts` / `adapters/docker.ts` は
+  本タスクでは新規 diff を入れない保護対象として扱う。
 - サイドバーの `<select>` は **各タブ内に従来通り残す**。タブを切替えれば
   そのタブが開いている DB に戻る。同じ DB を別タブで 2 つ開ける。
 - 既存の `dockerAdapterCache` / `connection-pool` は dbId base なので、
@@ -88,6 +95,12 @@ Database 画面が現状「`<select>` 1 個で 1 つの DB しか開けない」
 table-grid,query-editor,query-history-view,schema-view,er-diagram,
 snapshot-view,global-search-view}.ts` (UI コンポーネント単位は
 TabPane 内で従来通り再利用するだけ、内部実装は変更しない)。
+
+実装追記: tab D&D、kind 別 visibility、font-size 連動、Query History refresh
+の修正により、`database-view.ts` と一部 child view (`query-editor.ts` /
+`table-grid.ts` / Redis・Elasticsearch explorer) は実装変更済み。
+この節は当初設計時の制約であり、現行のレビュー修正では上記保護対象のみを
+「新規 diff なし」として確認する。
 
 ---
 

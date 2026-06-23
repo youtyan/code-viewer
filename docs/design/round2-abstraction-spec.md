@@ -160,6 +160,11 @@ export async function runSnapshot(
 snapshot エンジンは共通化 (snapshot-store.ts / snapshot-runner.ts は触らない、
 adapter 側だけ拡張)。
 
+実装追記: 最終実装では `snapshot-runner.ts` を `SnapshotIterable` 経由に
+変更し、`adapters/sqlite.ts` / `adapters/docker.ts` も snapshot iteration
+を実装した。上の「触らない」は Round 2 着手前の方針であり、generic
+snapshot engine 確定後は実装済み差分として扱う。
+
 ---
 
 ## 4. 触るファイル
@@ -187,6 +192,8 @@ adapter 側だけ拡張)。
 - 既存 SQL の table browse / query / search / history (退行リスク回避)
 - UI 側 (`web-src/views/database/*`) は今回触らない。Round 2 では server 抽象
   だけ整えて、UI は Round 3 以降に統合。
+- `snapshot-store.ts` / `query-history.ts` / `connection-pool.ts` /
+  `global-search.ts` は引き続きスキーマ・履歴・検索の安定境界として扱う。
 
 ---
 
