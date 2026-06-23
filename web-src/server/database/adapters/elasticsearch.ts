@@ -22,7 +22,7 @@ type EsConfig = {
   password: string;
 };
 
-export type ElasticsearchExplorer = Omit<DocSource, "capabilities"> &
+export type ElasticsearchExplorer = DocSource &
   Queryable<EsQueryRequest, EsQueryResult> &
   SnapshotIterable & {
     readonly kind: "elasticsearch";
