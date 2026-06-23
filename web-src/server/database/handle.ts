@@ -954,11 +954,19 @@ type SnapshotDockerSource = {
   containers: string[];
   closeAfterSnapshot: boolean;
 };
+type SnapshotJob = {
+  abortController: AbortController;
+  dbId: string;
+  snapshotId?: string;
+  done: boolean;
+};
 
 type SnapshotDockerSourceFactory = (
   info: DockerDbInfo,
   requestedContainers: string[] | undefined,
 ) => Promise<SnapshotDockerSource>;
+
+const snapshotJobs = new Map<string, SnapshotJob>();
 
 const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
   Record<DbKind, SnapshotDockerSourceFactory>
@@ -1095,6 +1103,13 @@ async function handleSnapshotCreate(
   const note = body.note ?? "";
   const snapshotDbId = body.db;
   const snapshotContainers = containers;
+  const abortController = new AbortController();
+  const snapshotJob: SnapshotJob = {
+    abortController,
+    dbId: snapshotDbId,
+    done: false,
+  };
+  let activeSnapshotId: string | undefined;
 
   (async () => {
     try {
@@ -1114,6 +1129,22 @@ async function handleSnapshotCreate(
               done,
             }),
           );
+        },
+        {
+          signal: abortController.signal,
+          onSnapshotId: (id) => {
+            activeSnapshotId = id;
+            snapshotJob.snapshotId = id;
+            snapshotJobs.set(id, snapshotJob);
+            sendSse?.(
+              "db-snapshot",
+              JSON.stringify({
+                action: "started",
+                dbId: snapshotDbId,
+                id,
+              }),
+            );
+          },
         },
       );
       sendSse?.(
@@ -1138,6 +1169,10 @@ async function handleSnapshotCreate(
         }),
       );
     } finally {
+      snapshotJob.done = true;
+      if (activeSnapshotId) {
+        setTimeout(() => snapshotJobs.delete(activeSnapshotId), 60_000);
+      }
       if (closeSourceAfterSnapshot) {
         try {
           (source as { close?: () => void }).close?.();
@@ -1149,6 +1184,26 @@ async function handleSnapshotCreate(
   })();
 
   return json({ ok: true, message: "snapshot started" });
+}
+
+async function handleSnapshotCancel(req: Request, url: URL): Promise<Response> {
+  if (req.method !== "POST") return textError("method not allowed", 405);
+  let id = url.searchParams.get("id") || "";
+  if (!id) {
+    try {
+      const body = (await req.json()) as { id?: string };
+      id = body.id || "";
+    } catch {
+      return textError("invalid JSON body", 400);
+    }
+  }
+  if (!id) return textError("missing id", 400);
+  const job = snapshotJobs.get(id);
+  if (!job) return textError("snapshot job not found", 404);
+  if (!job.done) {
+    job.abortController.abort();
+  }
+  return json({ ok: true });
 }
 
 async function handleSnapshotUpdateNote(
@@ -1407,6 +1462,13 @@ export async function handleDatabaseRoute(
       return textError("forbidden", 403);
     }
     return wrapResponse(handleSnapshotCreate(cwd, req, sendSse));
+  }
+  if (path === "/_db/snapshot/cancel") {
+    if (!sideEffectAllowed(req)) {
+      log(403);
+      return textError("forbidden", 403);
+    }
+    return wrapResponse(handleSnapshotCancel(req, url));
   }
   if (path === "/_db/snapshot/update-note") {
     if (!sideEffectAllowed(req)) {

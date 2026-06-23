@@ -31,6 +31,17 @@ type MaybeSnapshotSource = { readonly kind: DbKind } & {
   capabilities?: unknown;
 };
 
+type RunSnapshotOptions = {
+  signal?: AbortSignal;
+  onSnapshotId?: (snapshotId: string) => void;
+};
+
+function throwIfSnapshotAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("snapshot cancelled");
+  }
+}
+
 export async function runSnapshot(
   cwd: string,
   source: MaybeSnapshotSource,
@@ -38,6 +49,7 @@ export async function runSnapshot(
   containers: string[],
   note: string,
   onProgress?: (container: string, done: boolean) => void,
+  options: RunSnapshotOptions = {},
 ): Promise<string> {
   if (!hasSnapshotCapability(source)) {
     throw new Error(
@@ -46,6 +58,7 @@ export async function runSnapshot(
   }
   // この時点で source は SnapshotIterable を持つことが保証されている。
   const snapshotSource = source as SnapshotSource;
+  throwIfSnapshotAborted(options.signal);
 
   const snapshotId = await createSnapshot(
     cwd,
@@ -54,9 +67,11 @@ export async function runSnapshot(
     containers,
     note,
   );
+  options.onSnapshotId?.(snapshotId);
 
   try {
     for (const container of containers) {
+      throwIfSnapshotAborted(options.signal);
       onProgress?.(container, false);
 
       // snapshot-store の addSnapshotTableData は historically `rowKeyJson`
@@ -88,7 +103,11 @@ export async function runSnapshot(
         // 非 SQL source や container が table ではない場合は無視。
       }
 
-      for await (const item of snapshotSource.iterateForSnapshot(container)) {
+      for await (const item of snapshotSource.iterateForSnapshot(
+        container,
+        options.signal,
+      )) {
+        throwIfSnapshotAborted(options.signal);
         collected.push({
           rowKeyJson: item.keyJson,
           rowHash: item.rowHash,
@@ -98,6 +117,7 @@ export async function runSnapshot(
         // 既存 snapshot-store は table 単位で 1 回 commit する仕様なので
         // ここではメモリに溜めてから一括書き込みする (旧実装と同じ挙動)。
       }
+      throwIfSnapshotAborted(options.signal);
 
       // SNAPSHOT_FLUSH_THRESHOLD は将来 streaming 化する際の hook。
       // 現状は単純に全件まとめて書く。
