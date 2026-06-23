@@ -8,6 +8,7 @@ import type {
   EsSearchResult,
 } from "../../../core/database/types";
 import type { SnapshotItem } from "../sources/types";
+import { resolveRunningComposeContainerName } from "./docker-utils";
 
 type EsConfig = {
   containerName: string;
@@ -139,33 +140,6 @@ function safeJsonParse<T>(stdout: string, label: string): T {
     throw new Error(
       `${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`,
     );
-  }
-}
-
-function resolveContainerName(serviceName: string, cwd: string): string | null {
-  const proc = spawnSync(
-    "docker",
-    ["compose", "ps", "--format", "json", "--status", "running"],
-    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd },
-  );
-  if (proc.status !== 0) return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers: { Service?: string; Name?: string; State?: string }[];
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-    }
-    const match = containers.find(
-      (c) => c.Service === serviceName && c.State === "running",
-    );
-    return match?.Name || null;
-  } catch {
-    return null;
   }
 }
 
@@ -532,7 +506,7 @@ export function openElasticsearchAdapter(
   env: Record<string, string>,
   cwd: string,
 ): ElasticsearchExplorer {
-  const containerName = resolveContainerName(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
     throw new Error(
       `Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`,

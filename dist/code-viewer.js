@@ -4743,6 +4743,71 @@ var init_global_search = __esm(() => {
   init_serialize();
 });
 
+// web-src/server/database/handle-shared.ts
+function createDockerAdapterCache(maxEntries = DEFAULT_MAX_DOCKER_ADAPTER_CACHE, idleMs = DEFAULT_DOCKER_ADAPTER_IDLE_MS) {
+  const cache = new Map;
+  function closeEntry(key, entry) {
+    try {
+      entry.adapter.close();
+    } finally {
+      cache.delete(key);
+    }
+  }
+  function prune(now = Date.now()) {
+    for (const [key, entry] of cache) {
+      if (now - entry.lastUsed > idleMs) {
+        closeEntry(key, entry);
+      }
+    }
+    while (cache.size > maxEntries) {
+      let oldestKey = null;
+      let oldestEntry = null;
+      for (const [key, entry] of cache) {
+        if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
+          oldestKey = key;
+          oldestEntry = entry;
+        }
+      }
+      if (!oldestKey || !oldestEntry)
+        break;
+      closeEntry(oldestKey, oldestEntry);
+    }
+  }
+  return {
+    getOrOpen(key, open) {
+      prune();
+      const cached = cache.get(key);
+      if (cached) {
+        cached.lastUsed = Date.now();
+        return cached.adapter;
+      }
+      const adapter = open();
+      cache.set(key, { adapter, lastUsed: Date.now() });
+      prune();
+      return adapter;
+    },
+    close(key) {
+      const cached = cache.get(key);
+      if (cached)
+        closeEntry(key, cached);
+    }
+  };
+}
+function createQueryStrippedLogger(prefix, req, url) {
+  const path = url.pathname;
+  const start = Date.now();
+  const method = req.method;
+  return (res) => {
+    const ms = Date.now() - start;
+    console.log(`[code-viewer] ${prefix} ${method} ${path} ${res.status} ${ms}ms`);
+    return res;
+  };
+}
+var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
+var init_handle_shared = __esm(() => {
+  DEFAULT_DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
+});
+
 // web-src/server/database/query-history.ts
 import {
   existsSync as existsSync7,
@@ -5331,13 +5396,31 @@ var init_tabs_store = __esm(() => {
   ]);
 });
 
+// web-src/server/database/adapters/docker-utils.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
+function resolveRunningComposeContainerName(serviceName, cwd) {
+  const proc = spawnSync3("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0)
+    return null;
+  try {
+    const output = proc.stdout.trim();
+    const containers = output.startsWith("[") ? JSON.parse(output) : output.split(`
+`).filter(Boolean).map((line) => JSON.parse(line));
+    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
+    return match?.Name || null;
+  } catch {
+    return null;
+  }
+}
+var init_docker_utils = () => {};
+
 // web-src/server/database/adapters/redis.ts
 var exports_redis = {};
 __export(exports_redis, {
   openRedisExplorer: () => openRedisExplorer,
   canonicalizeRedisSnapshotContainer: () => canonicalizeRedisSnapshotContainer
 });
-import { spawnSync as spawnSync3 } from "node:child_process";
+import { spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash4 } from "node:crypto";
 function canonicalizeRedisSnapshotContainer(container) {
   const { db, pattern } = parseSnapshotContainer(container);
@@ -5366,7 +5449,7 @@ function execRedisCli(config, args, timeoutMs = 1e4) {
     ...args
   ];
   const spawnEnv = hasPassword ? { ...process.env, REDISCLI_AUTH: config.password } : process.env;
-  const proc = spawnSync3("docker", dockerArgs, {
+  const proc = spawnSync4("docker", dockerArgs, {
     encoding: "utf8",
     env: spawnEnv,
     timeout: timeoutMs,
@@ -5377,25 +5460,6 @@ function execRedisCli(config, args, timeoutMs = 1e4) {
     stderr: proc.stderr || "",
     code: proc.status ?? 1
   };
-}
-function resolveContainerName2(serviceName, cwd) {
-  const proc = spawnSync3("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
-    return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers;
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output.split(`
-`).filter(Boolean).map((line) => JSON.parse(line));
-    }
-    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
-  } catch {
-    return null;
-  }
 }
 function parseInfoKeyspace(stdout) {
   const counts = new Map;
@@ -5990,7 +6054,7 @@ function createRedisAdapter(config) {
   };
 }
 function openRedisExplorer(serviceName, env, cwd) {
-  const containerName = resolveContainerName2(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
     throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
   }
@@ -5999,6 +6063,7 @@ function openRedisExplorer(serviceName, env, cwd) {
 }
 var DEFAULT_DATABASES = 16, REDIS_STRING_BYTE_LIMIT = 65536, REDIS_COLLECTION_LIMIT = 200, SCAN_WITH_TYPES_LUA = `local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]); local types = {}; for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok end; return cjson.encode({cursor=s[1], keys=s[2], types=types})`, LUA_TOHEX_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end`, LUA_HEX_KEY_PRELUDE = `local function tohex(s) local t = {} for i = 1, #s do t[i] = string.format('%02x', string.byte(s, i)) end return table.concat(t) end local function fromhex(h) local b = {} for i = 1, #h, 2 do b[#b+1] = string.char(tonumber(string.sub(h, i, i+1), 16)) end return table.concat(b) end`, SCAN_HEX_KEYS_LUA;
 var init_redis = __esm(() => {
+  init_docker_utils();
   SCAN_HEX_KEYS_LUA = `${LUA_TOHEX_PRELUDE} local s = redis.call('SCAN', ARGV[1], 'MATCH', ARGV[2], 'COUNT', ARGV[3]) local types = {} local hex_keys = {} for i, k in ipairs(s[2]) do types[i] = redis.call('TYPE', k).ok hex_keys[i] = tohex(k) end return cjson.encode({cursor=s[1], keys=hex_keys, types=types})`;
 });
 
@@ -6009,7 +6074,7 @@ __export(exports_elasticsearch, {
   isReadOnlyEsPath: () => isReadOnlyEsPath,
   canonicalizeEsSnapshotContainer: () => canonicalizeEsSnapshotContainer
 });
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 function isReadOnlyEsPath(rawPath) {
   const path = rawPath.split("?")[0].replace(/\/+$/, "");
   const segments = path.split("/").filter(Boolean);
@@ -6041,7 +6106,7 @@ __ES_STATUS__:%{http_code}
     ...hasPassword ? ["-K", "-"] : [],
     ...body !== undefined ? ["--data-binary", JSON.stringify(body)] : []
   ];
-  const proc = spawnSync4("docker", args, {
+  const proc = spawnSync5("docker", args, {
     encoding: "utf8",
     env: hasPassword ? { ...process.env, ES_HTTP_PASSWORD: config.password } : process.env,
     timeout: timeoutMs,
@@ -6073,25 +6138,6 @@ function safeJsonParse2(stdout, label) {
     return JSON.parse(stdout);
   } catch (err) {
     throw new Error(`${label} レスポンス JSON の parse に失敗: ${err instanceof Error ? err.message : String(err)} / 先頭200: ${stdout.slice(0, 200)}`);
-  }
-}
-function resolveContainerName3(serviceName, cwd) {
-  const proc = spawnSync4("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
-    return null;
-  try {
-    const output = proc.stdout.trim();
-    let containers;
-    if (output.startsWith("[")) {
-      containers = JSON.parse(output);
-    } else {
-      containers = output.split(`
-`).filter(Boolean).map((line) => JSON.parse(line));
-    }
-    const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
-  } catch {
-    return null;
   }
 }
 function createElasticsearchAdapter(config) {
@@ -6329,7 +6375,7 @@ function canonicalizeEsSnapshotContainer(container) {
   return JSON.stringify({ index: container || "*" });
 }
 function openElasticsearchAdapter(serviceName, env, cwd) {
-  const containerName = resolveContainerName3(serviceName, cwd);
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
     throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
   }
@@ -6338,6 +6384,7 @@ function openElasticsearchAdapter(serviceName, env, cwd) {
 }
 var ES_QUERY_ALLOWED_SUBPATHS, ES_DEFAULT_SIZE = 200;
 var init_elasticsearch = __esm(() => {
+  init_docker_utils();
   ES_QUERY_ALLOWED_SUBPATHS = new Set([
     "_search",
     "_count",
@@ -6366,11 +6413,7 @@ function resolveRedis(cwd, dbParam) {
   const info = findDockerServiceByDbId(cwd, dbParam, "redis");
   if (!info)
     return textError("redis service not found", 404);
-  const cached = redisAdapterCache.get(dbParam);
-  if (cached)
-    return { dbId: dbParam, explorer: cached };
-  const explorer = openRedisExplorer(info.serviceName, info.env, info.composeDir);
-  redisAdapterCache.set(dbParam, explorer);
+  const explorer = redisAdapterCache.getOrOpen(dbParam, () => openRedisExplorer(info.serviceName, info.env, info.composeDir));
   return { dbId: dbParam, explorer };
 }
 async function handleClose(req) {
@@ -6384,14 +6427,7 @@ async function handleClose(req) {
   }
   if (!body.db)
     return textError("missing db", 400);
-  const cached = redisAdapterCache.get(body.db);
-  if (cached) {
-    try {
-      cached.close();
-    } finally {
-      redisAdapterCache.delete(body.db);
-    }
-  }
+  redisAdapterCache.close(body.db);
   return json({ ok: true });
 }
 function handleDatabases(cwd, url) {
@@ -6443,33 +6479,37 @@ function handleKeys(cwd, url) {
 }
 async function handleRedisRoute(req, url, cwd, sideEffectAllowed) {
   const path = url.pathname;
-  const start = Date.now();
   const method = req.method;
-  const log = (status) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
-  };
-  const wrap = (res) => {
-    log(res.status);
-    return res;
-  };
-  if (path !== "/_db/redis/databases" && path !== "/_db/redis/keys" && path !== "/_db/redis/value" && path !== "/_db/redis/close") {
-    return null;
-  }
-  if (path === "/_db/redis/close") {
-    if (sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
+  const wrap = createQueryStrippedLogger("redis", req, url);
+  const routes = {
+    "/_db/redis/databases": {
+      methods: ["GET"],
+      handler: () => handleDatabases(cwd, url)
+    },
+    "/_db/redis/keys": {
+      methods: ["GET"],
+      handler: () => handleKeys(cwd, url)
+    },
+    "/_db/redis/value": {
+      methods: ["GET"],
+      handler: () => handleValue(cwd, url)
+    },
+    "/_db/redis/close": {
+      methods: ["POST"],
+      sideEffect: true,
+      handler: () => handleClose(req)
     }
-    return wrap(await handleClose(req));
-  }
-  if (method !== "GET") {
+  };
+  const route = routes[path];
+  if (!route)
+    return null;
+  if (!route.methods.includes(method)) {
     return wrap(textError("method not allowed", 405));
   }
-  if (path === "/_db/redis/databases")
-    return wrap(handleDatabases(cwd, url));
-  if (path === "/_db/redis/keys")
-    return wrap(handleKeys(cwd, url));
-  return wrap(handleValue(cwd, url));
+  if (route.sideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textError("forbidden", 403));
+  }
+  return wrap(await route.handler());
 }
 function handleValue(cwd, url) {
   const r = resolveRedis(cwd, url.searchParams.get("db"));
@@ -6499,7 +6539,8 @@ var init_handle_redis = __esm(() => {
   init_redis();
   init_discovery();
   init_handle();
-  redisAdapterCache = new Map;
+  init_handle_shared();
+  redisAdapterCache = createDockerAdapterCache();
 });
 
 // web-src/server/database/handle-elasticsearch.ts
@@ -6519,11 +6560,7 @@ function resolveEs(cwd, dbParam) {
   const info = findDockerServiceByDbId(cwd, dbParam, "elasticsearch");
   if (!info)
     return textError("elasticsearch service not found", 404);
-  const cached = esAdapterCache.get(dbParam);
-  if (cached)
-    return { dbId: dbParam, explorer: cached };
-  const explorer = openElasticsearchAdapter(info.serviceName, info.env, info.composeDir);
-  esAdapterCache.set(dbParam, explorer);
+  const explorer = esAdapterCache.getOrOpen(dbParam, () => openElasticsearchAdapter(info.serviceName, info.env, info.composeDir));
   return { dbId: dbParam, explorer };
 }
 async function handleClose2(req) {
@@ -6537,14 +6574,7 @@ async function handleClose2(req) {
   }
   if (!body.db)
     return textError("missing db", 400);
-  const cached = esAdapterCache.get(body.db);
-  if (cached) {
-    try {
-      cached.close();
-    } finally {
-      esAdapterCache.delete(body.db);
-    }
-  }
+  esAdapterCache.close(body.db);
   return json({ ok: true });
 }
 function handleIndices(cwd, url) {
@@ -6693,63 +6723,54 @@ function handleMapping(cwd, url) {
 }
 async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed) {
   const path = url.pathname;
-  const start = Date.now();
   const method = req.method;
-  const log = (status) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path} ${status} ${ms}ms`);
+  const wrap = createQueryStrippedLogger("elasticsearch", req, url);
+  const routes = {
+    "/_db/elasticsearch/indices": {
+      methods: ["GET"],
+      handler: () => handleIndices(cwd, url)
+    },
+    "/_db/elasticsearch/mapping": {
+      methods: ["GET"],
+      handler: () => handleMapping(cwd, url)
+    },
+    "/_db/elasticsearch/docs": {
+      methods: ["GET"],
+      handler: () => handleDocs(cwd, url)
+    },
+    "/_db/elasticsearch/doc": {
+      methods: ["GET"],
+      handler: () => handleDoc(cwd, url)
+    },
+    "/_db/elasticsearch/search": {
+      methods: ["GET", "POST"],
+      sideEffect: (m) => m === "POST",
+      handler: () => handleSearch(cwd, req, url)
+    },
+    "/_db/elasticsearch/close": {
+      methods: ["POST"],
+      sideEffect: () => true,
+      handler: () => handleClose2(req)
+    }
   };
-  const wrap = (res) => {
-    log(res.status);
-    return res;
-  };
-  if (path === "/_db/elasticsearch/indices") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleIndices(cwd, url));
+  const route = routes[path];
+  if (!route)
+    return null;
+  if (!route.methods.includes(method)) {
+    return wrap(textError("method not allowed", 405));
   }
-  if (path === "/_db/elasticsearch/mapping") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleMapping(cwd, url));
+  if (route.sideEffect?.(method) && sideEffectAllowed && !sideEffectAllowed(req)) {
+    return wrap(textError("forbidden", 403));
   }
-  if (path === "/_db/elasticsearch/docs") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleDocs(cwd, url));
-  }
-  if (path === "/_db/elasticsearch/doc") {
-    if (method !== "GET") {
-      return wrap(textError("method not allowed", 405));
-    }
-    return wrap(handleDoc(cwd, url));
-  }
-  if (path === "/_db/elasticsearch/search") {
-    if (method !== "GET" && method !== "POST") {
-      return wrap(textError("method not allowed", 405));
-    }
-    if (method === "POST" && sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
-    }
-    return wrap(await handleSearch(cwd, req, url));
-  }
-  if (path === "/_db/elasticsearch/close") {
-    if (sideEffectAllowed && !sideEffectAllowed(req)) {
-      return wrap(textError("forbidden", 403));
-    }
-    return wrap(await handleClose2(req));
-  }
-  return null;
+  return wrap(await route.handler());
 }
 var esAdapterCache;
 var init_handle_elasticsearch = __esm(() => {
   init_elasticsearch();
   init_discovery();
   init_handle();
-  esAdapterCache = new Map;
+  init_handle_shared();
+  esAdapterCache = createDockerAdapterCache();
 });
 
 // web-src/server/database/handle.ts
@@ -6767,46 +6788,10 @@ function ensureInit() {
   setAdapterFactory(sqliteAdapterFactory);
   initialized = true;
 }
-function closeDockerAdapterCacheEntry(key, entry) {
-  try {
-    entry.adapter.close();
-  } finally {
-    dockerAdapterCache.delete(key);
-  }
-}
-function pruneDockerAdapterCache(now = Date.now()) {
-  for (const [key, entry] of dockerAdapterCache) {
-    if (now - entry.lastUsed > DOCKER_ADAPTER_IDLE_MS) {
-      closeDockerAdapterCacheEntry(key, entry);
-    }
-  }
-  while (dockerAdapterCache.size > MAX_DOCKER_ADAPTER_CACHE) {
-    let oldestKey = null;
-    let oldestEntry = null;
-    for (const [key, entry] of dockerAdapterCache) {
-      if (!oldestEntry || entry.lastUsed < oldestEntry.lastUsed) {
-        oldestKey = key;
-        oldestEntry = entry;
-      }
-    }
-    if (!oldestKey || !oldestEntry)
-      break;
-    closeDockerAdapterCacheEntry(oldestKey, oldestEntry);
-  }
-}
 async function getAdapter(r, _cwd) {
   if (r.docker) {
-    pruneDockerAdapterCache();
-    const key = r.dbId;
-    const cached = dockerAdapterCache.get(key);
-    if (cached) {
-      cached.lastUsed = Date.now();
-      return cached.adapter;
-    }
-    const adapter = openDockerAdapter(r.docker.serviceName, r.docker.kind, r.docker.env, r.docker.composeDir, r.docker.database);
-    dockerAdapterCache.set(key, { adapter, lastUsed: Date.now() });
-    pruneDockerAdapterCache();
-    return adapter;
+    const docker = r.docker;
+    return dockerAdapterCache.getOrOpen(r.dbId, () => openDockerAdapter(docker.serviceName, docker.kind, docker.env, docker.composeDir, docker.database));
   }
   return getConnection(r.resolved);
 }
@@ -7481,6 +7466,10 @@ async function handleSearchCancel(req) {
   job.done = true;
   return json({ ok: true });
 }
+async function openRegisteredDockerSnapshotSource(info, requestedContainers) {
+  const factory2 = SNAPSHOT_DOCKER_SOURCE_REGISTRY[info.kind];
+  return factory2 ? factory2(info, requestedContainers) : null;
+}
 async function handleSnapshotList(cwd, url) {
   const dbId = url.searchParams.get("db") || undefined;
   const snapshots = await listSnapshots(cwd, dbId);
@@ -7531,22 +7520,11 @@ async function handleSnapshotCreate(cwd, req, sendSse) {
     const info = findDockerServiceByDbId(cwd, body.db);
     if (!info)
       return textError("docker service not found", 404);
-    if (info.kind === "redis") {
-      const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
-      source = openRedisExplorer2(info.serviceName, info.env, info.composeDir);
-      closeSourceAfterSnapshot = true;
-      if (!containers || containers.length === 0) {
-        containers = ["*"];
-      }
-      containers = containers.map(canonicalizeRedisSnapshotContainer2);
-    } else if (info.kind === "elasticsearch") {
-      const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
-      source = openElasticsearchAdapter2(info.serviceName, info.env, info.composeDir);
-      closeSourceAfterSnapshot = true;
-      if (!containers || containers.length === 0) {
-        containers = ["*"];
-      }
-      containers = containers.map(canonicalizeEsSnapshotContainer2);
+    const registeredSource = await openRegisteredDockerSnapshotSource(info, requestedTables);
+    if (registeredSource) {
+      source = registeredSource.source;
+      containers = registeredSource.containers;
+      closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response)
@@ -7708,10 +7686,7 @@ async function handleClose3(cwd, req) {
   if (r instanceof Response)
     return r;
   if (r.docker) {
-    const cached = dockerAdapterCache.get(r.dbId);
-    if (cached) {
-      closeDockerAdapterCacheEntry(r.dbId, cached);
-    }
+    dockerAdapterCache.close(r.dbId);
   } else {
     closeConnection(r.resolved);
   }
@@ -7840,21 +7815,41 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
   }
   return null;
 }
-var initialized = false, MAX_DOCKER_ADAPTER_CACHE = 8, DOCKER_ADAPTER_IDLE_MS, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs;
+var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {
   init_docker();
   init_sqlite();
   init_connection_pool();
   init_discovery();
   init_global_search();
+  init_handle_shared();
   init_query_history();
   init_serialize();
   init_snapshot_runner();
   init_snapshot_store();
   init_tabs_store();
-  DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
-  dockerAdapterCache = new Map;
+  dockerAdapterCache = createDockerAdapterCache();
   searchJobs = new Map;
+  SNAPSHOT_DOCKER_SOURCE_REGISTRY = {
+    redis: async (info, requestedContainers) => {
+      const { openRedisExplorer: openRedisExplorer2, canonicalizeRedisSnapshotContainer: canonicalizeRedisSnapshotContainer2 } = await Promise.resolve().then(() => (init_redis(), exports_redis));
+      const containers = requestedContainers && requestedContainers.length > 0 ? requestedContainers : ["*"];
+      return {
+        source: openRedisExplorer2(info.serviceName, info.env, info.composeDir),
+        containers: containers.map(canonicalizeRedisSnapshotContainer2),
+        closeAfterSnapshot: true
+      };
+    },
+    elasticsearch: async (info, requestedContainers) => {
+      const { openElasticsearchAdapter: openElasticsearchAdapter2, canonicalizeEsSnapshotContainer: canonicalizeEsSnapshotContainer2 } = await Promise.resolve().then(() => (init_elasticsearch(), exports_elasticsearch));
+      const containers = requestedContainers && requestedContainers.length > 0 ? requestedContainers : ["*"];
+      return {
+        source: openElasticsearchAdapter2(info.serviceName, info.env, info.composeDir),
+        containers: containers.map(canonicalizeEsSnapshotContainer2),
+        closeAfterSnapshot: true
+      };
+    }
+  };
 });
 
 // web-src/server/preview.ts

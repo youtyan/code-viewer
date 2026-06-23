@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type {
   DbColumn,
   DbFilesResponse,
+  DbKind,
   DbOrder,
   DbQueryResponse,
   DbSchemaResponse,
@@ -947,6 +948,61 @@ async function handleSearchCancel(req: Request): Promise<Response> {
 
 // --- Snapshot ---
 
+type SnapshotSource = Parameters<typeof runSnapshot>[1];
+type SnapshotDockerSource = {
+  source: SnapshotSource;
+  containers: string[];
+  closeAfterSnapshot: boolean;
+};
+
+type SnapshotDockerSourceFactory = (
+  info: DockerDbInfo,
+  requestedContainers: string[] | undefined,
+) => Promise<SnapshotDockerSource>;
+
+const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
+  Record<DbKind, SnapshotDockerSourceFactory>
+> = {
+  redis: async (info, requestedContainers) => {
+    const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
+      await import("./adapters/redis");
+    const containers =
+      requestedContainers && requestedContainers.length > 0
+        ? requestedContainers
+        : ["*"];
+    return {
+      source: openRedisExplorer(info.serviceName, info.env, info.composeDir),
+      containers: containers.map(canonicalizeRedisSnapshotContainer),
+      closeAfterSnapshot: true,
+    };
+  },
+  elasticsearch: async (info, requestedContainers) => {
+    const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
+      await import("./adapters/elasticsearch");
+    const containers =
+      requestedContainers && requestedContainers.length > 0
+        ? requestedContainers
+        : ["*"];
+    return {
+      source: openElasticsearchAdapter(
+        info.serviceName,
+        info.env,
+        info.composeDir,
+      ),
+      containers: containers.map(canonicalizeEsSnapshotContainer),
+      closeAfterSnapshot: true,
+    };
+  },
+};
+
+async function openRegisteredDockerSnapshotSource(
+  info: DockerDbInfo,
+  requestedContainers: string[] | undefined,
+): Promise<SnapshotDockerSource | null> {
+  const factory = SNAPSHOT_DOCKER_SOURCE_REGISTRY[info.kind];
+  return factory ? factory(info, requestedContainers) : null;
+}
+
 async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
   const dbId = url.searchParams.get("db") || undefined;
   const snapshots = await listSnapshots(cwd, dbId);
@@ -990,7 +1046,7 @@ async function handleSnapshotCreate(
   // Redis (KV) も snapshot を生成できるよう、resolveDb の SQL-only 制限を
   // 迂回して直接 source を引き出す。redis service なら RedisExplorer を、
   // それ以外 (sqlite / pg / mysql) は既存 getAdapter を使う。
-  let source: Parameters<typeof runSnapshot>[1];
+  let source: SnapshotSource;
   let containers = requestedTables;
   let closeSourceAfterSnapshot = false;
   if (body.db.startsWith("docker:")) {
@@ -998,35 +1054,14 @@ async function handleSnapshotCreate(
     if (!parsed) return textError("invalid docker db id", 400);
     const info = findDockerServiceByDbId(cwd, body.db);
     if (!info) return textError("docker service not found", 404);
-    if (info.kind === "redis") {
-      const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
-        await import("./adapters/redis");
-      source = openRedisExplorer(info.serviceName, info.env, info.composeDir);
-      closeSourceAfterSnapshot = true;
-      // Redis では UI が key pattern を渡す想定。未指定なら全 key を対象とする。
-      if (!containers || containers.length === 0) {
-        containers = ["*"];
-      }
-      // container 文字列を `{"db":N,"pattern":"P"}` の canonical form に揃える。
-      // raw pattern (`"*"`) でも JSON でも同じ snapshot メタになるので、
-      // 2 回 snapshot を取って summary 比較するときに container ID 差で
-      // 別物扱いになるのを防ぐ。
-      containers = containers.map(canonicalizeRedisSnapshotContainer);
-    } else if (info.kind === "elasticsearch") {
-      const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
-        await import("./adapters/elasticsearch");
-      source = openElasticsearchAdapter(
-        info.serviceName,
-        info.env,
-        info.composeDir,
-      );
-      closeSourceAfterSnapshot = true;
-      // ES では UI が index 名 (または `{"index":"...","query":"..."}` JSON)
-      // を渡す想定。未指定なら `*` で全 index を 1 つの container 扱い。
-      if (!containers || containers.length === 0) {
-        containers = ["*"];
-      }
-      containers = containers.map(canonicalizeEsSnapshotContainer);
+    const registeredSource = await openRegisteredDockerSnapshotSource(
+      info,
+      requestedTables,
+    );
+    if (registeredSource) {
+      source = registeredSource.source;
+      containers = registeredSource.containers;
+      closeSourceAfterSnapshot = registeredSource.closeAfterSnapshot;
     } else {
       const r = resolveDb(cwd, body.db);
       if (r instanceof Response) return r;
