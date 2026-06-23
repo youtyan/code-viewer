@@ -55,17 +55,14 @@ export type KvKeyEntry = { name: string; type: string };
 
 export type KvSource = DataSourceBase & {
   readonly model: "kv";
-  listKeyspaces(): Awaitable<Array<{ index: number; keyCount: number }>>;
+  listDatabases(): Awaitable<Array<{ index: number; keyCount: number }>>;
   listKeys(opts: {
-    keyspace: number | string;
-    pattern: string;
-    cursor: string;
+    db: number;
+    pattern?: string;
+    cursor?: string;
     count?: number;
   }): Awaitable<{ keys: KvKeyEntry[]; nextCursor: string }>;
-  getValue(opts: {
-    keyspace: number | string;
-    key: string;
-  }): Awaitable<unknown>;
+  getValue(opts: { db: number; key: string }): Awaitable<unknown>;
 };
 
 // Object store 系 (S3 / MinIO)。Round 3 で実装する。型だけ予約。
