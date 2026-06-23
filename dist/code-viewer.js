@@ -4481,17 +4481,58 @@ function defaultPortFor(kind) {
       return "";
   }
 }
-function resolveEnvValue(raw) {
-  return raw.replace(/\$\{([^}]+)\}/g, (_, expr) => {
+function lookupEnvValue(varName, composeDirEnv) {
+  return process.env[varName] ?? composeDirEnv[varName];
+}
+function stripScalarSyntax(raw) {
+  let value = raw.trim();
+  if (value.startsWith("'") || value.startsWith('"')) {
+    const quote = value[0];
+    const quoteEnd = value.lastIndexOf(quote);
+    if (quoteEnd > 0)
+      return value.slice(1, quoteEnd);
+  }
+  const hashIdx = value.indexOf(" #");
+  if (hashIdx >= 0)
+    value = value.slice(0, hashIdx).trim();
+  return value;
+}
+function resolveEnvValue(raw, composeDirEnv = {}) {
+  const value = stripScalarSyntax(raw);
+  const withBraces = value.replace(/\$\{([^}]+)\}/g, (_, expr) => {
     const defaultMatch = expr.match(/^([^:-]+)(?::?-(.*))?$/);
     if (!defaultMatch)
       return "";
     const varName = defaultMatch[1];
     const fallback = defaultMatch[2] ?? "";
-    return process.env[varName] || fallback;
+    return lookupEnvValue(varName, composeDirEnv) ?? fallback;
   });
+  return withBraces.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, varName) => lookupEnvValue(varName, composeDirEnv) ?? "");
 }
-function parseComposeEnv(serviceBlock) {
+function readDotenv(composeDir) {
+  const envPath = join8(composeDir, ".env");
+  if (!existsSync6(envPath))
+    return {};
+  let content;
+  try {
+    content = readFileSync5(envPath, "utf-8");
+  } catch {
+    return {};
+  }
+  const env = {};
+  for (const rawLine of content.split(`
+`)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match)
+      continue;
+    env[match[1]] = stripScalarSyntax(match[2]);
+  }
+  return env;
+}
+function parseComposeEnv(serviceBlock, composeDirEnv = {}) {
   const env = {};
   const envMatch = serviceBlock.match(/^[ \t]+environment:\s*\n((?:[ \t]+(?:- )?[^\n]+\n?)*)/m);
   if (!envMatch)
@@ -4506,9 +4547,9 @@ function parseComposeEnv(serviceBlock) {
     const eqIdx = stripped.indexOf("=");
     const colonIdx = stripped.indexOf(": ");
     if (eqIdx > 0) {
-      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(stripped.slice(eqIdx + 1).trim());
+      env[stripped.slice(0, eqIdx).trim()] = resolveEnvValue(stripped.slice(eqIdx + 1).trim(), composeDirEnv);
     } else if (colonIdx > 0) {
-      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(stripped.slice(colonIdx + 2).trim());
+      env[stripped.slice(0, colonIdx).trim()] = resolveEnvValue(stripped.slice(colonIdx + 2).trim(), composeDirEnv);
     }
   }
   return env;
@@ -4564,6 +4605,7 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
   const isRoot = relDir === "" || relDir === ".";
   const relDirSlash = relDir.replace(/\\/g, "/");
   const filename = basename2(filepath);
+  const composeDirEnv = readDotenv(composeDir);
   for (let i = 0;i < servicePositions.length; i++) {
     if (results.length >= MAX_DOCKER_SERVICES)
       return;
@@ -4572,7 +4614,7 @@ function parseComposeFile(filepath, composeDir, cwd, results) {
     const svcBlock = servicesBlock.slice(svc.start, nextStart);
     const imageMatch = svcBlock.match(/^\s+image:\s*["']?([^\s"'#]+)/m);
     const image = imageMatch ? imageMatch[1] : null;
-    const env = parseComposeEnv(svcBlock);
+    const env = parseComposeEnv(svcBlock, composeDirEnv);
     const containerPort = parseComposeContainerPort(svcBlock);
     const kind = (image ? detectDbKind(image) : null) ?? detectDbKindFromEnv(env) ?? detectDbKindFromContainerPort(containerPort) ?? detectDbKindFromServiceName(svc.name);
     if (!kind)
