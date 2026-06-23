@@ -148,6 +148,31 @@ export type AnnotationDatabaseTab =
   | "search"
   | "snapshot";
 
+export type AnnotationDatabaseDataState = {
+  search?: string;
+  filters?: Array<{ column: string; value: string }>;
+  sort?: { column: string; direction: "asc" | "desc" };
+  row?: number;
+};
+
+export type AnnotationDatabaseQueryState = {
+  sql?: string;
+  mode?: "run" | "explain";
+  autoRun?: boolean;
+};
+
+export type AnnotationDatabaseSearchState = {
+  term?: string;
+  includeNonText?: boolean;
+  autoRun?: boolean;
+};
+
+export type AnnotationDatabaseSnapshotState = {
+  fromSnapshotId?: string;
+  toSnapshotId?: string;
+  table?: string;
+};
+
 export type AnnotationTarget =
   | {
       kind: "code";
@@ -160,6 +185,10 @@ export type AnnotationTarget =
       db?: string;
       table?: string;
       tab?: AnnotationDatabaseTab;
+      data?: AnnotationDatabaseDataState;
+      query?: AnnotationDatabaseQueryState;
+      search?: AnnotationDatabaseSearchState;
+      snapshot?: AnnotationDatabaseSnapshotState;
     };
 
 export type AnnotationEntry = {

@@ -173,26 +173,57 @@ export function createSidebar(deps: SidebarDeps) {
   function setSidebarTreeActionIcons() {
     const settings =
       document.querySelector<HTMLButtonElement>("#viewer-settings");
-    const sidebarToggle =
-      document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    const sidebarToggle = ensureSidebarToggleButton();
     const expand = document.querySelector<HTMLButtonElement>("#sb-expand-all");
     const collapse =
       document.querySelector<HTMLButtonElement>("#sb-collapse-all");
     if (settings) settings.innerHTML = iconSvg("octicon-gear", GEAR_16_PATH);
-    if (sidebarToggle)
-      sidebarToggle.innerHTML = iconSvg(
-        "octicon-sidebar",
-        STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS,
-      );
+    syncSidebarToggleIcon(sidebarToggle);
     if (expand)
       expand.innerHTML = iconSvg("octicon-chevron-down", EXPAND_ALL_16_PATHS);
     if (collapse)
       collapse.innerHTML = iconSvg("octicon-chevron-up", COLLAPSE_ALL_16_PATHS);
   }
 
+  function syncSidebarToggleIcon(button: HTMLButtonElement) {
+    button.innerHTML = iconSvg(
+      "octicon-sidebar",
+      STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS,
+    );
+  }
+
+  function createSidebarToggleButton() {
+    const button = document.createElement("button");
+    button.id = "sidebar-toggle";
+    button.type = "button";
+    syncSidebarToggleIcon(button);
+    return button;
+  }
+
+  function bindSidebarToggleButton(button: HTMLButtonElement) {
+    if (button.dataset.gdpSidebarToggleBound === "1") return;
+    button.dataset.gdpSidebarToggleBound = "1";
+    button.addEventListener("click", toggleSidebarHidden);
+  }
+
+  function ensureSidebarToggleButton() {
+    let button = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    if (!button) button = createSidebarToggleButton();
+    bindSidebarToggleButton(button);
+    button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
+    button.title = STATE.sidebarHidden ? "show sidebar" : "hide sidebar";
+    button.setAttribute(
+      "aria-label",
+      STATE.sidebarHidden ? "show sidebar" : "hide sidebar",
+    );
+    syncSidebarToggleIcon(button);
+    return button;
+  }
+
   function attachSidebarToggle(host: HTMLElement) {
-    const button = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
-    if (!button || button.parentElement === host) return;
+    const button = ensureSidebarToggleButton();
+    syncSidebarToggleIcon(button);
+    if (button.parentElement === host) return;
     host.prepend(button);
   }
 
@@ -207,6 +238,9 @@ export function createSidebar(deps: SidebarDeps) {
       document.querySelector<HTMLElement>("#global-header");
     if (STATE.sidebarHidden && restoreHost) attachSidebarToggle(restoreHost);
     else if (sidebarHead) attachSidebarToggle(sidebarHead);
+    const sidebarToggle =
+      document.querySelector<HTMLButtonElement>("#sidebar-toggle");
+    if (sidebarToggle) syncSidebarToggleIcon(sidebarToggle);
     placeSidebarFilter();
   }
 
@@ -229,15 +263,7 @@ export function createSidebar(deps: SidebarDeps) {
     STATE.sidebarHidden = hidden;
     document.body.classList.toggle("gdp-sidebar-hidden", hidden);
     localStorage.setItem("gdp:sidebar-hidden", hidden ? "1" : "0");
-    const button = document.querySelector<HTMLButtonElement>("#sidebar-toggle");
-    if (button) {
-      button.setAttribute("aria-pressed", hidden ? "true" : "false");
-      button.title = hidden ? "show sidebar" : "hide sidebar";
-      button.setAttribute(
-        "aria-label",
-        hidden ? "show sidebar" : "hide sidebar",
-      );
-    }
+    ensureSidebarToggleButton();
     setSidebarTreeActionIcons();
     placeSidebarToggle();
     syncSidebarHeaderHeight();
@@ -1547,6 +1573,7 @@ export function createSidebar(deps: SidebarDeps) {
     setFolderIcon,
     isRepositorySidebarMode,
     placeSidebarToggle,
+    ensureSidebarToggleButton,
     placeSidebarFilter,
     applySidebarHidden,
     toggleSidebarHidden,

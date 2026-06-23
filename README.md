@@ -211,11 +211,26 @@ code-viewer annotate add --file web-src/server/preview.ts --line 2330-2360 \
 code-viewer annotate add --file web-src/app.ts --line 9650 \
   --from HEAD~1 --to worktree \
   --body "After the fix, reloads preserve the scroll position here."
+code-viewer annotate add --after a-previous --file web-src/app.ts --line 9700 \
+  --body "This inserted note now appears in the middle of the walkthrough."
+code-viewer annotate move a-late --before a-early
+code-viewer annotate add-db --db app.db --table users --tab schema \
+  --body "This table is the identity root for user-facing records."
+code-viewer annotate add-db --db app.db --table orders --tab data \
+  --grid-search failed --filter status=failed --sort created_at:desc \
+  --body "This restores the filtered failure investigation view."
+code-viewer annotate add-db --db app.db --tab query \
+  --sql "select * from orders where status = 'failed'" --run-query \
+  --body "This reopens the exact query result being discussed."
 ```
 
 The body is Markdown. Long bodies can be passed with `--body-file <path>` or
 piped through stdin. `code-viewer annotate --help` shows all commands,
-including `list`, `delete <id>`, and `clear`. For AI agents,
+including `move`, `edit`, `list`, `delete <id>`, and `clear`. `add` and
+`add-db` accept `--before <id>`, `--after <id>`, or `--position <n>` when a
+note belongs somewhere other than the end. On the Database screen, the
+annotations panel also has a pin button that captures the current data grid,
+query editor, or global search state as a database annotation. For AI agents,
 `code-viewer annotate agent-help` prints a skill-style guide covering the
 workflow, conventions, and pitfalls for writing good walkthroughs.
 
@@ -240,7 +255,9 @@ than the current directory, or `--server <url>` to target a specific server.
 
 `add` appends to the most recent session (creating one when none exists);
 run `annotate start` again to begin a new session, or pass `--session <id>`
-to target a specific one.
+to target a specific one. When `--before` or `--after` is used, the target
+session is inferred from that anchor annotation; a conflicting `--session`
+is rejected.
 
 The in-app Help page includes a dedicated annotations guide for AI agents,
 covering when to start a session, how to choose focused line ranges, how to

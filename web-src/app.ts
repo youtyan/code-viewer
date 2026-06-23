@@ -1,4 +1,8 @@
-import { createCatchUpGate, shouldCatchUpDiff } from "./core/catch-up";
+import {
+  createCatchUpGate,
+  shouldAutoLoadForRoute,
+  shouldCatchUpDiff,
+} from "./core/catch-up";
 import { GdpExpandLogic } from "./core/expand-logic";
 import {
   findMainScrollTarget,
@@ -1969,7 +1973,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#sb-collapse-all").addEventListener("click", () =>
     setAllSidebarDirsCollapsed(true),
   );
-  $("#sidebar-toggle")?.addEventListener("click", toggleSidebarHidden);
   $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
@@ -2410,7 +2413,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       return Promise.resolve(null);
     }
     if (STATE.route.screen === "database") {
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       setStatus("live");
       return Promise.resolve(null);
     }
@@ -2480,7 +2487,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       HISTORY_VIEW.enterHistory();
     } else if (STATE.route.screen === "database") {
       setStatus("live");
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
     } else load();
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
@@ -2554,6 +2565,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         renderMeta,
         invalidateRepoSidebar,
         clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
+        placeSidebarToggle,
         setStatus,
       });
     },
@@ -2616,7 +2628,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
     if (previousRoute.screen === "database" && nextRoute.screen !== "database")
-      DATABASE_VIEW.leave();
+      DATABASE_VIEW.suspend();
     if (previousRoute.screen === "history" && nextRoute.screen !== "history")
       HISTORY_VIEW.leaveHistory();
     STATE.route =
@@ -2658,7 +2670,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       cancelActiveSourceLoad("navigation");
       setPageMode();
       removeStandaloneSource();
-      DATABASE_VIEW.enter(STATE.route.db, STATE.route.table, STATE.route.tab);
+      void DATABASE_VIEW.enter(
+        STATE.route.db,
+        STATE.route.table,
+        STATE.route.tab,
+      ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
       setStatus("live");
       return;
     }
@@ -2790,11 +2806,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     getFiles: () => STATE.files,
     getRoute: () => STATE.route,
-    openDatabaseAnnotation: (target) => {
-      DATABASE_VIEW.enter(target.db, target.table, target.tab);
-      setStatus("live");
-      return Promise.resolve();
+    leaveDatabaseView: () => {
+      DATABASE_VIEW.suspend();
     },
+    openDatabaseAnnotation: (target) => {
+      setStatus("live");
+      // The annotation UI redraws DB annotation strips after this promise.
+      // Keep this callback focused on mounting/navigating the database view.
+      return DATABASE_VIEW.enter(target.db, target.table, target.tab, {
+        annotationTarget: target,
+        reuseActiveTab: true,
+      });
+    },
+    captureDatabaseAnnotationTarget: () =>
+      DATABASE_VIEW.captureAnnotationTarget(),
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
@@ -2882,6 +2907,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (bannerPendingPaths) {
         const paths = bannerPendingPaths;
         hideChangeBanner();
+        if (!shouldAutoLoadCurrentRoute()) return;
         doSseLoad(paths);
         return;
       }
@@ -2945,6 +2971,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = bannerPendingPaths;
       hideChangeBanner();
       const route = STATE.route;
+      if (!shouldAutoLoadCurrentRoute(route)) return;
       if (isRepoBlobRoute(route)) {
         renderStandaloneSource({
           path: route.path,
@@ -2964,8 +2991,15 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   applyAutoUpdateButton();
 
+  function shouldAutoLoadCurrentRoute(route = STATE.route): boolean {
+    return shouldAutoLoadForRoute(route, {
+      historyWorktreeSelected: HISTORY_VIEW.isWorktreeSelected(),
+    });
+  }
+
   function doSseLoad(paths: Set<string> | null) {
     const route = STATE.route;
+    if (!shouldAutoLoadCurrentRoute(route)) return;
     if (isRepoBlobRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
@@ -2978,6 +3012,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (route.screen === "repo") {
       invalidateRepoSidebar();
       void loadRepo();
+      return;
+    }
+    if (route.screen !== "diff" && route.screen !== "history") {
       return;
     }
     const savedScroll = window.scrollY;
@@ -3000,8 +3037,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let sseTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSseChangedPaths: Set<string> | null = new Set();
   function scheduleSseLoad(changedPaths?: string[] | null) {
-    if (STATE.route.screen === "database" || STATE.route.screen === "help")
-      return;
+    if (!shouldAutoLoadCurrentRoute()) return;
     if (changedPaths && pendingSseChangedPaths) {
       for (const p of changedPaths) pendingSseChangedPaths.add(p);
     } else {
@@ -3062,7 +3098,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   function catchUpDiff() {
-    if (!shouldCatchUpDiff(STATE.route)) return;
+    const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
+    if (!shouldAutoLoadCurrentRoute()) return;
+    if (!shouldCatchUpDiff(STATE.route, { historyWorktreeSelected })) return;
     if (!catchUpGate()) return;
     if (!STATE.autoUpdate) {
       showChangeBanner(null);

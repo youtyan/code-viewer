@@ -9,11 +9,13 @@ export type EmptyDiffPaneDeps = {
   renderMeta(meta: DiffMeta | null): void;
   invalidateRepoSidebar(): void;
   clearLoadQueue(): void;
+  placeSidebarToggle(): void;
   setStatus(status: "live"): void;
 };
 
 export function showEmptyHistoryDiffPane(deps: EmptyDiffPaneDeps) {
   if (deps.diff) deps.diff.innerHTML = "";
+  deps.placeSidebarToggle();
   deps.renderSidebar([], undefined);
   deps.setFiles([]);
   deps.clearLastMeta();

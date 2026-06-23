@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AnnotationTarget } from "../core/types";
 import {
   addAnnotationEntry,
   annotationsFilePath,
   deleteAnnotationById,
   emptyAnnotationsState,
   loadAnnotationsState,
+  moveAnnotationEntry,
   normalizeAnnotationsState,
   parseAnnotationLine,
   renameAnnotationSession,
@@ -135,6 +137,335 @@ describe("annotation sessions and entries", () => {
         makeId,
       ).ok,
     ).toBe(false);
+  });
+
+  test("add can insert before, after, or at a position", () => {
+    const started = startAnnotationSession(
+      emptyAnnotationsState(),
+      "walkthrough",
+      NOW,
+      "s-1",
+    );
+    const first = addAnnotationEntry(
+      started.state,
+      { session_id: "s-1", path: "a.ts", body: "first" },
+      NOW,
+      () => "a-1",
+    );
+    if (first.ok === false) throw new Error(first.error);
+    const third = addAnnotationEntry(
+      first.state,
+      { session_id: "s-1", path: "c.ts", body: "third" },
+      NOW,
+      () => "a-3",
+    );
+    if (third.ok === false) throw new Error(third.error);
+    const second = addAnnotationEntry(
+      third.state,
+      { path: "b.ts", body: "second", before_id: "a-3" },
+      NOW,
+      () => "a-2",
+    );
+    if (second.ok === false) throw new Error(second.error);
+    expect(second.state.sessions[0].entries.map((entry) => entry.id)).toEqual([
+      "a-1",
+      "a-2",
+      "a-3",
+    ]);
+
+    const zero = addAnnotationEntry(
+      second.state,
+      { session_id: "s-1", path: "z.ts", body: "zero", position: 1 },
+      NOW,
+      () => "a-0",
+    );
+    if (zero.ok === false) throw new Error(zero.error);
+    expect(zero.state.sessions[0].entries.map((entry) => entry.id)).toEqual([
+      "a-0",
+      "a-1",
+      "a-2",
+      "a-3",
+    ]);
+    expect(
+      addAnnotationEntry(
+        zero.state,
+        { session_id: "s-1", path: "x.ts", body: "x", after_id: "missing" },
+        NOW,
+        () => "a-x",
+      ).ok,
+    ).toBe(false);
+  });
+
+  test("add stores database targets without requiring a repo path", () => {
+    const result = addAnnotationEntry(
+      emptyAnnotationsState(),
+      {
+        target: {
+          kind: "database",
+          db: "app.db",
+          table: "users",
+          tab: "schema",
+        },
+        title: "users schema",
+        body: "The user table is the identity root.",
+      },
+      NOW,
+      makeId,
+    );
+    if (result.ok === false) throw new Error(result.error);
+    expect(result.entry.path).toBe("database:app.db:users:schema");
+    expect(result.entry.target).toEqual({
+      kind: "database",
+      db: "app.db",
+      table: "users",
+      tab: "schema",
+    });
+    expect(
+      addAnnotationEntry(
+        emptyAnnotationsState(),
+        {
+          target: { kind: "database", table: "users" },
+          body: "missing db",
+        },
+        NOW,
+        makeId,
+      ),
+    ).toEqual({ ok: false, error: "database annotation requires db" });
+  });
+
+  test("add normalizes database targets before storing them", () => {
+    const result = addAnnotationEntry(
+      emptyAnnotationsState(),
+      {
+        target: {
+          kind: "database",
+          db: "app.db",
+          table: "orders",
+          tab: "data",
+          data: {
+            search: "failed",
+            filters: [
+              { column: "status", value: "failed", ignored: "x" },
+              { column: "", value: "ignored" },
+            ],
+            sort: { column: "created_at", direction: "desc" },
+            row: 4,
+            ignored: true,
+          },
+          ignored: true,
+        } as unknown as AnnotationTarget,
+        body: "filtered rows",
+      },
+      NOW,
+      makeId,
+    );
+    if (result.ok === false) throw new Error(result.error);
+    expect(result.entry.target).toEqual({
+      kind: "database",
+      db: "app.db",
+      table: "orders",
+      tab: "data",
+      data: {
+        search: "failed",
+        filters: [{ column: "status", value: "failed" }],
+        sort: { column: "created_at", direction: "desc" },
+        row: 4,
+      },
+    });
+  });
+
+  test("add rejects data grid database targets without a table", () => {
+    expect(
+      addAnnotationEntry(
+        emptyAnnotationsState(),
+        {
+          target: {
+            kind: "database",
+            db: "app.db",
+            tab: "data",
+            data: { search: "failed" },
+          },
+          body: "missing table",
+        },
+        NOW,
+        makeId,
+      ),
+    ).toEqual({
+      ok: false,
+      error: "database data annotations require table",
+    });
+  });
+
+  test("add preserves database view state for data, query, and search annotations", () => {
+    const result = addAnnotationEntry(
+      emptyAnnotationsState(),
+      {
+        target: {
+          kind: "database",
+          db: "app.db",
+          table: "orders",
+          tab: "data",
+          data: {
+            search: "failed",
+            filters: [{ column: "status", value: "failed" }],
+            sort: { column: "created_at", direction: "desc" },
+            row: 3,
+          },
+          query: {
+            sql: "select * from orders where status = 'failed'",
+            mode: "run",
+            autoRun: true,
+          },
+          search: {
+            term: "failed",
+            includeNonText: true,
+            autoRun: true,
+          },
+        },
+        title: "failed orders",
+        body: "The filtered rows show failed orders.",
+      },
+      NOW,
+      makeId,
+    );
+    if (result.ok === false) throw new Error(result.error);
+    expect(result.entry.path).toMatch(/search=failed/);
+    expect(result.entry.target).toEqual({
+      kind: "database",
+      db: "app.db",
+      table: "orders",
+      tab: "data",
+      data: {
+        search: "failed",
+        filters: [{ column: "status", value: "failed" }],
+        sort: { column: "created_at", direction: "desc" },
+        row: 3,
+      },
+      query: {
+        sql: "select * from orders where status = 'failed'",
+        mode: "run",
+        autoRun: true,
+      },
+      search: {
+        term: "failed",
+        includeNonText: true,
+        autoRun: true,
+      },
+    });
+  });
+
+  test("add rejects explicit session when the insertion anchor belongs elsewhere", () => {
+    let state = startAnnotationSession(
+      emptyAnnotationsState(),
+      "first",
+      NOW,
+      "s-1",
+    ).state;
+    let added = addAnnotationEntry(
+      state,
+      { session_id: "s-1", path: "a.ts", body: "first" },
+      NOW,
+      () => "a-1",
+    );
+    if (added.ok === false) throw new Error(added.error);
+    state = startAnnotationSession(added.state, "second", NOW, "s-2").state;
+    added = addAnnotationEntry(
+      state,
+      { session_id: "s-2", path: "b.ts", body: "second" },
+      NOW,
+      () => "a-2",
+    );
+    if (added.ok === false) throw new Error(added.error);
+    expect(
+      addAnnotationEntry(
+        added.state,
+        {
+          session_id: "s-2",
+          path: "x.ts",
+          body: "insert",
+          before_id: "a-1",
+        },
+        NOW,
+        () => "a-x",
+      ),
+    ).toEqual({
+      ok: false,
+      error: "anchor annotation belongs to another session",
+    });
+
+    const inferred = addAnnotationEntry(
+      added.state,
+      { path: "x.ts", body: "insert", after_id: "a-1" },
+      NOW,
+      () => "a-x",
+    );
+    if (inferred.ok === false) throw new Error(inferred.error);
+    expect(inferred.session.id).toBe("s-1");
+  });
+
+  test("move reorders annotations while preserving ids and bodies", () => {
+    const started = startAnnotationSession(
+      emptyAnnotationsState(),
+      "walkthrough",
+      NOW,
+      "s-1",
+    );
+    let state = started.state;
+    for (const [id, body] of [
+      ["a-1", "first"],
+      ["a-2", "second"],
+      ["a-3", "third"],
+    ] as const) {
+      const added = addAnnotationEntry(
+        state,
+        { session_id: "s-1", path: `${id}.ts`, body },
+        NOW,
+        () => id,
+      );
+      if (added.ok === false) throw new Error(added.error);
+      state = added.state;
+    }
+    const moved = moveAnnotationEntry(state, "a-3", { before_id: "a-1" });
+    if (moved.ok === false) throw new Error(moved.error);
+    expect(moved.state.sessions[0].entries.map((entry) => entry.id)).toEqual([
+      "a-3",
+      "a-1",
+      "a-2",
+    ]);
+    expect(moved.entry.body).toBe("third");
+    expect(
+      moveAnnotationEntry(moved.state, "a-1", { after_id: "a-1" }).ok,
+    ).toBe(false);
+  });
+
+  test("move rejects anchors from another session", () => {
+    let state = startAnnotationSession(
+      emptyAnnotationsState(),
+      "first",
+      NOW,
+      "s-1",
+    ).state;
+    let added = addAnnotationEntry(
+      state,
+      { session_id: "s-1", path: "a.ts", body: "first" },
+      NOW,
+      () => "a-1",
+    );
+    if (added.ok === false) throw new Error(added.error);
+    state = startAnnotationSession(added.state, "second", NOW, "s-2").state;
+    added = addAnnotationEntry(
+      state,
+      { session_id: "s-2", path: "b.ts", body: "second" },
+      NOW,
+      () => "a-2",
+    );
+    if (added.ok === false) throw new Error(added.error);
+    expect(
+      moveAnnotationEntry(added.state, "a-1", { after_id: "a-2" }),
+    ).toEqual({
+      ok: false,
+      error: "anchor annotation belongs to another session",
+    });
   });
 
   test("delete removes an entry or a whole session by id", () => {

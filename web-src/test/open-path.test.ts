@@ -144,9 +144,7 @@ describe("sidebar tree bulk actions", () => {
       ),
     ).toBe(true);
     expect(
-      app.includes(
-        "const sidebarToggle = document.querySelector<HTMLButtonElement>('#sidebar-toggle')",
-      ),
+      app.includes("const sidebarToggle = ensureSidebarToggleButton()"),
     ).toBe(true);
     expect(
       app.includes(
@@ -154,10 +152,12 @@ describe("sidebar tree bulk actions", () => {
       ),
     ).toBe(true);
     expect(
-      app.includes(
-        "sidebarToggle.innerHTML = iconSvg('octicon-sidebar', STATE.sidebarHidden ? SIDEBAR_SHOW_16_PATHS : SIDEBAR_HIDE_16_PATHS)",
-      ),
+      app.includes("function syncSidebarToggleIcon(button: HTMLButtonElement)"),
     ).toBe(true);
+    expect(app.includes("button.innerHTML = iconSvg('octicon-sidebar',")).toBe(
+      true,
+    );
+    expect(app.includes("syncSidebarToggleIcon(sidebarToggle)")).toBe(true);
     expect(
       app.includes(
         "expand.innerHTML = iconSvg('octicon-chevron-down', EXPAND_ALL_16_PATHS)",

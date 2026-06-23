@@ -73,6 +73,8 @@ export type QueryEditor = {
   focus: () => void;
   setSql: (sql: string) => void;
   getSql: () => string;
+  run: () => Promise<void>;
+  explain: () => Promise<void>;
   dispose: () => void;
 };
 
@@ -411,7 +413,7 @@ export function createQueryEditor(
     document.removeEventListener("click", onDocumentClick);
   }
 
-  return { el, focus, setSql, getSql, dispose };
+  return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
 }
 
 function formatValue(value: DbValue): string {
