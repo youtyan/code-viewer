@@ -23,20 +23,6 @@ export type RedisExplorer = KvSource<RedisValue, RedisType> &
     readonly kind: "redis";
     readonly model: "kv";
     readonly capabilities: { snapshot: true };
-    listDatabases(): Array<{ index: number; keyCount: number }>;
-    listKeys(opts: {
-      db: number;
-      pattern?: string;
-      cursor?: string;
-      count?: number;
-    }): { keys: Array<{ name: string; type: RedisType }>; nextCursor: string };
-    getValue(opts: { db: number; key: string }): RedisValue;
-    iterateForSnapshot(
-      container: string,
-      signal?: AbortSignal,
-    ): AsyncIterable<SnapshotItem>;
-    listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
-    close(): void;
   };
 
 // iterateForSnapshot に渡される container は JSON 文字列。
