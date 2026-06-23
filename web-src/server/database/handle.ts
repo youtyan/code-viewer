@@ -145,18 +145,6 @@ function sanitizeFilename(name: string): string {
 
 type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
 
-let cachedDockerDbs: DockerDbInfo[] | null = null;
-let cachedDockerCwd: string | null = null;
-
-function getDockerDbs(cwd: string): DockerDbInfo[] {
-  if (cachedDockerCwd === cwd && cachedDockerDbs) return cachedDockerDbs;
-  // omit list は handleFiles と揃え (`.git`, `node_modules` は discovery 側
-  // で常時 omit、それ以外はユーザー指定が無いので空配列で十分)。
-  cachedDockerDbs = discoverDockerDatabases(cwd);
-  cachedDockerCwd = cwd;
-  return cachedDockerDbs;
-}
-
 function resolveDb(cwd: string, dbParam: string | null): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {

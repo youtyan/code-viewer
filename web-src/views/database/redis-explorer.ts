@@ -1,5 +1,6 @@
 import type {
   RedisDatabasesResponse,
+  RedisExplorerSelection,
   RedisItem,
   RedisKeysResponse,
   RedisValue,
@@ -25,12 +26,6 @@ function renderItemInto(el: HTMLElement, item: RedisItem): void {
   }
   el.textContent = item;
 }
-
-export type RedisExplorerSelection = {
-  dbIndex?: number;
-  key?: string;
-  keyFilter?: string;
-};
 
 export type RedisExplorerCallbacks = {
   // 選択中 (db index / key) が変わったことを外側に通知する。タブごとに
@@ -108,7 +103,6 @@ export function createRedisExplorer(
   let currentKey: string | null = null;
   let currentKeyFilter = "*";
   let currentCursor = "0";
-  let loadingKeys = false;
   let loadRunId = 0;
   let keyRunId = 0;
   let suppressNotify = false;
@@ -416,7 +410,6 @@ export function createRedisExplorer(
     const requestRunId = loadRunId;
     const requestDbId = currentDbId;
     const requestDbIndex = currentDbIndex;
-    loadingKeys = true;
     keyMoreBtn.disabled = true;
     if (!append) setKeyStatus("Loading keys...");
     try {
@@ -463,10 +456,7 @@ export function createRedisExplorer(
       );
     } finally {
       if (keysAbort === abort) keysAbort = null;
-      if (!keysAbort) {
-        loadingKeys = false;
-        keyMoreBtn.disabled = false;
-      }
+      if (!keysAbort) keyMoreBtn.disabled = false;
     }
   }
 
@@ -559,7 +549,6 @@ export function createRedisExplorer(
     dbAbort = null;
     keysAbort = null;
     valueAbort = null;
-    loadingKeys = false;
     loadRunId++;
     keyRunId++;
     suppressNotify = false;

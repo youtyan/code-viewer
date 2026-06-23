@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { TabsState } from "../../core/database/types";
+import type { TabState, TabsState } from "../../core/database/types";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const TABS_FILE_NAME = "tabs.json";
@@ -71,12 +71,10 @@ function sanitizeCssSize(v: unknown): string | undefined {
   return isValidCssSize(v) ? v : undefined;
 }
 
-function sanitizeRedis(
-  v: unknown,
-): { dbIndex?: number; key?: string; keyFilter?: string } | undefined {
+function sanitizeRedis(v: unknown): NonNullable<TabState["redis"]> | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;
-  const out: { dbIndex?: number; key?: string; keyFilter?: string } = {};
+  const out: NonNullable<TabState["redis"]> = {};
   if (
     typeof r.dbIndex === "number" &&
     Number.isInteger(r.dbIndex) &&
@@ -101,12 +99,10 @@ function sanitizeRedis(
   return out;
 }
 
-function sanitizeEs(
-  v: unknown,
-): { index?: string; query?: string } | undefined {
+function sanitizeEs(v: unknown): NonNullable<TabState["es"]> | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;
-  const out: { index?: string; query?: string } = {};
+  const out: NonNullable<TabState["es"]> = {};
   const index = sanitizeOptionalString(r.index, MAX_INDEX_NAME_LEN);
   if (index !== undefined) out.index = index;
   const query = sanitizeOptionalString(r.query, MAX_ES_QUERY_LEN);
