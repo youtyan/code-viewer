@@ -2,7 +2,6 @@ import type {
   DbColumn,
   DbFileInfo,
   DbFilesResponse,
-  DbKind,
   DbQueryResponse,
   DbSchemaResponse,
   DbTableDataResponse,
@@ -84,7 +83,6 @@ type TabPaneInternal = {
   ) => Promise<void>;
   handleSse: (event?: string, data?: string) => void;
   getState: () => TabState;
-  getDbKind: () => DbKind | null;
   getAnnotationTarget: () => DatabaseAnnotationTarget | null;
   getLabel: () => string;
   dispose: () => void;
@@ -978,10 +976,6 @@ function createTabPane(
     return state;
   }
 
-  function getDbKind(): DbKind | null {
-    return currentDbInfo?.kind ?? null;
-  }
-
   function getAnnotationTarget(): DatabaseAnnotationTarget | null {
     if (!currentDbInfo) return null;
     const target: DatabaseAnnotationTarget = {
@@ -1039,7 +1033,6 @@ function createTabPane(
     enter,
     handleSse,
     getState,
-    getDbKind,
     getAnnotationTarget,
     getLabel,
     dispose,
@@ -1253,20 +1246,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return false;
   }
 
-  function closeDbIfUnused(dbId: string | null, kind: DbKind | null): void {
+  function closeDbIfUnused(dbId: string | null): void {
     if (!dbId || isDbStillOpen(dbId)) return;
     const body = JSON.stringify({ db: dbId });
     const headers = {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    const path =
-      kind === "redis"
-        ? "/_db/redis/close"
-        : kind === "elasticsearch"
-          ? "/_db/elasticsearch/close"
-          : "/_db/close";
-    void fetch(path, { method: "POST", headers, body }).catch(() => {});
+    void fetch("/_db/close", { method: "POST", headers, body }).catch(() => {});
   }
 
   function clearDropTarget(): void {
@@ -1527,13 +1514,12 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const entry = tabsById.get(id);
     if (!entry) return;
     const closedDbId = entry.pane.getState().dbId;
-    const closedKind = entry.pane.getDbKind();
     entry.pane.dispose();
     entry.pane.el.remove();
     entry.chip.remove();
     tabsById.delete(id);
     paneReadyById.delete(id);
-    closeDbIfUnused(closedDbId, closedKind);
+    closeDbIfUnused(closedDbId);
     if (activeTabId !== id) {
       scheduleSave();
       return;

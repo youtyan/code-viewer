@@ -1285,6 +1285,24 @@ async function handleClose(cwd: string, req: Request): Promise<Response> {
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
+  if (body.db.startsWith("docker:")) {
+    const parsed = parseDockerDbId(body.db);
+    if (!parsed) return textError("invalid docker db id", 400);
+    const info = findDockerServiceByDbId(cwd, body.db);
+    if (!info) return textError("docker service not found", 404);
+    if (info.kind === "redis") {
+      const { closeRedisAdapter } = await import("./handle-redis");
+      closeRedisAdapter(body.db);
+      return json({ ok: true });
+    }
+    if (info.kind === "elasticsearch") {
+      const { closeElasticsearchAdapter } = await import(
+        "./handle-elasticsearch"
+      );
+      closeElasticsearchAdapter(body.db);
+      return json({ ok: true });
+    }
+  }
   const r = resolveDb(cwd, body.db);
   if (r instanceof Response) return r;
   if (r.docker) {

@@ -18,6 +18,10 @@ import {
 
 const esAdapterCache = createDockerAdapterCache<ElasticsearchExplorer>();
 
+export function closeElasticsearchAdapter(dbId: string): void {
+  esAdapterCache.close(dbId);
+}
+
 function resolveEs(
   cwd: string,
   dbParam: string | null,
@@ -48,7 +52,7 @@ async function handleClose(req: Request): Promise<Response> {
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
-  esAdapterCache.close(body.db);
+  closeElasticsearchAdapter(body.db);
   return json({ ok: true });
 }
 

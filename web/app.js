@@ -12935,9 +12935,6 @@ ${frontmatter.yaml}
       }
       return state;
     }
-    function getDbKind() {
-      return currentDbInfo?.kind ?? null;
-    }
     function getAnnotationTarget() {
       if (!currentDbInfo)
         return null;
@@ -12988,7 +12985,6 @@ ${frontmatter.yaml}
       enter,
       handleSse,
       getState,
-      getDbKind,
       getAnnotationTarget,
       getLabel,
       dispose
@@ -13170,7 +13166,7 @@ ${frontmatter.yaml}
       }
       return false;
     }
-    function closeDbIfUnused(dbId, kind) {
+    function closeDbIfUnused(dbId) {
       if (!dbId || isDbStillOpen(dbId))
         return;
       const body = JSON.stringify({ db: dbId });
@@ -13178,8 +13174,7 @@ ${frontmatter.yaml}
         "Content-Type": "application/json",
         "X-Code-Viewer-Action": "1"
       };
-      const path = kind === "redis" ? "/_db/redis/close" : kind === "elasticsearch" ? "/_db/elasticsearch/close" : "/_db/close";
-      fetch(path, { method: "POST", headers, body }).catch(() => {});
+      fetch("/_db/close", { method: "POST", headers, body }).catch(() => {});
     }
     function clearDropTarget() {
       if (!dropTargetId)
@@ -13410,13 +13405,12 @@ ${frontmatter.yaml}
       if (!entry)
         return;
       const closedDbId = entry.pane.getState().dbId;
-      const closedKind = entry.pane.getDbKind();
       entry.pane.dispose();
       entry.pane.el.remove();
       entry.chip.remove();
       tabsById.delete(id);
       paneReadyById.delete(id);
-      closeDbIfUnused(closedDbId, closedKind);
+      closeDbIfUnused(closedDbId);
       if (activeTabId !== id) {
         scheduleSave();
         return;

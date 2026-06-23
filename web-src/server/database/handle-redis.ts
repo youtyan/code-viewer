@@ -13,6 +13,10 @@ import {
 
 const redisAdapterCache = createDockerAdapterCache<RedisExplorer>();
 
+export function closeRedisAdapter(dbId: string): void {
+  redisAdapterCache.close(dbId);
+}
+
 function resolveRedis(
   cwd: string,
   dbParam: string | null,
@@ -43,7 +47,7 @@ async function handleClose(req: Request): Promise<Response> {
     return textError("invalid JSON body", 400);
   }
   if (!body.db) return textError("missing db", 400);
-  redisAdapterCache.close(body.db);
+  closeRedisAdapter(body.db);
   return json({ ok: true });
 }
 
