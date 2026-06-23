@@ -338,6 +338,17 @@ export type EsQueryResponse = EsQueryResult & {
   error?: string;
 };
 
+export type RedisExplorerSelection = {
+  dbIndex?: number;
+  key?: string;
+  keyFilter?: string;
+};
+
+export type ElasticsearchExplorerSelection = {
+  index?: string;
+  query?: string;
+};
+
 // ---------- Tabs ----------
 
 // 1 つの database タブ。画面全体 (サイドバー + メイン pane + 履歴 pane) の
@@ -368,18 +379,11 @@ export type TabState = {
 
   // Redis explorer の選択中 state。SQL の table を persist するのと整合的に、
   // Redis でも「選択中の db index + key」を persist する。
-  redis?: {
-    dbIndex?: number;
-    key?: string;
-    keyFilter?: string;
-  };
+  redis?: RedisExplorerSelection;
 
   // Elasticsearch explorer の選択中 state。SQL の table と整合的に、
   // 「選択中の index + lucene query 文字列」を persist する。
-  es?: {
-    index?: string;
-    query?: string;
-  };
+  es?: ElasticsearchExplorerSelection;
 };
 
 export type TabsState = {

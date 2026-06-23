@@ -1,4 +1,5 @@
 import type {
+  ElasticsearchExplorerSelection,
   EsDocHit,
   EsDocResponse,
   EsDocsResponse,
@@ -6,11 +7,6 @@ import type {
   EsMappingResponse,
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
-
-export type ElasticsearchExplorerSelection = {
-  index?: string;
-  query?: string;
-};
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -114,7 +110,6 @@ export function createElasticsearchExplorer(
   let currentIndex: string | null = null;
   let currentQuery = "";
   let lastSort: unknown[] | undefined;
-  let loadingDocs = false;
   let detailTab: "mapping" | "doc" = "mapping";
   let loadRunId = 0;
   let docRunId = 0;
@@ -359,7 +354,6 @@ export function createElasticsearchExplorer(
     const requestDbId = currentDbId;
     const requestIndex = currentIndex;
     const requestQuery = currentQuery;
-    loadingDocs = true;
     docMoreBtn.disabled = true;
     if (!append) {
       lastSort = undefined;
@@ -412,10 +406,7 @@ export function createElasticsearchExplorer(
       );
     } finally {
       if (docsAbort === abort) docsAbort = null;
-      if (!docsAbort) {
-        loadingDocs = false;
-        docMoreBtn.disabled = false;
-      }
+      if (!docsAbort) docMoreBtn.disabled = false;
     }
   }
 
@@ -607,7 +598,6 @@ export function createElasticsearchExplorer(
     currentIndex = null;
     currentQuery = "";
     lastSort = undefined;
-    loadingDocs = false;
     searchInput.value = "";
     indexList.innerHTML = "";
     docList.innerHTML = "";

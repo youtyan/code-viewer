@@ -86,17 +86,7 @@ type TabPaneInternal = {
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
 // localStorage から取るのではなく、外側 (tabs.json から復元した TabState)
 // から渡してもらう形にして、タブごとの独立性を担保する。
-type TabPaneInitial = {
-  dbId?: string | null;
-  table?: string | null;
-  view?: TabName;
-  sqlDraft?: string;
-  historyOpen?: boolean;
-  historyHeight?: string;
-  sidebarWidth?: string;
-  redis?: { dbIndex?: number; key?: string; keyFilter?: string };
-  es?: { index?: string; query?: string };
-};
+type TabPaneInitial = Partial<Omit<TabState, "id">>;
 
 function isSqlKind(kind: DbFileInfo["kind"] | undefined): boolean {
   return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
@@ -111,6 +101,49 @@ function isSqlView(view: TabName): boolean {
     view === "search" ||
     view === "snapshot"
   );
+}
+
+type DbVisibility = {
+  toolsHidden: boolean;
+  historyToggleHidden: boolean;
+  historyPaneHidden: boolean;
+  historyResizerHidden: boolean;
+  tableListHidden: boolean;
+  tabBarHidden: boolean;
+  gridHidden: boolean;
+  queryHidden: boolean;
+  schemaHidden: boolean;
+  erHidden: boolean;
+  searchHidden: boolean;
+  snapshotHidden: boolean;
+  redisHidden: boolean;
+  esHidden: boolean;
+};
+
+function computeVisibility(
+  kind: DbFileInfo["kind"] | undefined,
+  tab: TabName,
+  userPrefersHistoryOpen: boolean,
+): DbVisibility {
+  const sqlMode = isSqlKind(kind);
+  const tableScopedTab = tab === "data" || tab === "schema";
+  const historyVisible = sqlMode && userPrefersHistoryOpen;
+  return {
+    toolsHidden: !sqlMode,
+    historyToggleHidden: !sqlMode,
+    historyPaneHidden: !historyVisible,
+    historyResizerHidden: !historyVisible,
+    tableListHidden: !sqlMode,
+    tabBarHidden: !sqlMode || !tableScopedTab,
+    gridHidden: !sqlMode || tab !== "data",
+    queryHidden: !sqlMode || tab !== "query",
+    schemaHidden: !sqlMode || tab !== "schema",
+    erHidden: !sqlMode || tab !== "er",
+    searchHidden: !sqlMode || tab !== "search",
+    snapshotHidden: !sqlMode || tab !== "snapshot",
+    redisHidden: kind !== "redis",
+    esHidden: kind !== "elasticsearch",
+  };
 }
 
 function normalizeViewForDb(
@@ -354,18 +387,35 @@ function createTabPane(
   // history pane の開閉はタブごとに独立。initial が無ければ default は
   // 「開いている」状態 (= 旧 localStorage default と同じ)。
   let historyOpen = initial.historyOpen ?? true;
-  function applyHistoryVisibility() {
-    const sqlMode = isSqlKind(currentDb?.kind);
-    historyResizer.hidden = !sqlMode || !historyOpen;
-    historyPane.hidden = !sqlMode || !historyOpen;
+
+  function applyVisibility() {
+    const visibility = computeVisibility(
+      currentDb?.kind,
+      currentTab,
+      historyOpen,
+    );
+    toolsSection.hidden = visibility.toolsHidden;
+    historyToggle.hidden = visibility.historyToggleHidden;
+    historyResizer.hidden = visibility.historyResizerHidden;
+    historyPane.hidden = visibility.historyPaneHidden;
+    tableList.el.hidden = visibility.tableListHidden;
+    tabBar.hidden = visibility.tabBarHidden;
+    grid.el.hidden = visibility.gridHidden;
+    queryEditor.el.hidden = visibility.queryHidden;
+    schemaView.el.hidden = visibility.schemaHidden;
+    erDiagram.el.hidden = visibility.erHidden;
+    globalSearchView.el.hidden = visibility.searchHidden;
+    snapshotView.el.hidden = visibility.snapshotHidden;
+    redisExplorer.el.hidden = visibility.redisHidden;
+    esExplorer.el.hidden = visibility.esHidden;
     historyToggle.classList.toggle("active", historyOpen);
-    if (sqlMode && historyOpen) historyView.refresh();
+    if (!visibility.historyPaneHidden) historyView.refresh();
   }
-  applyHistoryVisibility();
+  applyVisibility();
 
   historyToggle.addEventListener("click", () => {
     historyOpen = !historyOpen;
-    applyHistoryVisibility();
+    applyVisibility();
     // タブごとに persist (localStorage ではなく tabs.json 経由)。
     cb.onStateChange();
   });
@@ -385,8 +435,7 @@ function createTabPane(
   function clearDockerNotice() {
     const notice = mainContent.querySelector<HTMLElement>(".db-docker-notice");
     if (notice) notice.remove();
-    applyInnerTabBarVisibility();
-    grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
+    applyVisibility();
   }
 
   function showDockerNotice(message: string) {
@@ -397,36 +446,13 @@ function createTabPane(
     mainContent.prepend(notice);
   }
 
-  function isTableViewTab(): boolean {
-    return currentTab === "data" || currentTab === "schema";
-  }
-
-  function applyInnerTabBarVisibility(): void {
-    tabBar.hidden = !isSqlKind(currentDb?.kind) || !isTableViewTab();
-  }
-
   function applyKindVisibility() {
-    const sqlMode = isSqlKind(currentDb?.kind);
-    toolsSection.hidden = !sqlMode;
-    historyToggle.hidden = !sqlMode;
-    historyResizer.hidden = !sqlMode || !historyOpen;
-    historyPane.hidden = !sqlMode || !historyOpen;
-    tableList.el.hidden = !sqlMode;
-    applyInnerTabBarVisibility();
-
-    if (!sqlMode) {
+    applyVisibility();
+    if (!isSqlKind(currentDb?.kind)) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
       searchBtn.classList.remove("active");
       snapshotBtn.classList.remove("active");
-      grid.el.hidden = true;
-      queryEditor.el.hidden = true;
-      schemaView.el.hidden = true;
-      erDiagram.el.hidden = true;
-      globalSearchView.el.hidden = true;
-      snapshotView.el.hidden = true;
-      redisExplorer.el.hidden = currentDb?.kind !== "redis";
-      esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
     }
   }
 
@@ -448,18 +474,8 @@ function createTabPane(
     erBtn.classList.toggle("active", currentTab === "er");
     searchBtn.classList.toggle("active", currentTab === "search");
     snapshotBtn.classList.toggle("active", currentTab === "snapshot");
-    const sqlMode = isSqlKind(currentDb?.kind);
     // Data / Schema の inner tabBar は「テーブルの中身を表示してるとき」
     // だけ表示する。Query / ER / Search / Snapshot 中は無関係なので隠す。
-    applyInnerTabBarVisibility();
-    grid.el.hidden = !sqlMode || currentTab !== "data";
-    queryEditor.el.hidden = !sqlMode || currentTab !== "query";
-    schemaView.el.hidden = !sqlMode || currentTab !== "schema";
-    erDiagram.el.hidden = !sqlMode || currentTab !== "er";
-    globalSearchView.el.hidden = !sqlMode || currentTab !== "search";
-    snapshotView.el.hidden = !sqlMode || currentTab !== "snapshot";
-    redisExplorer.el.hidden = currentDb?.kind !== "redis";
-    esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
     applyKindVisibility();
     if (currentTab === "query") queryEditor.focus();
     if (updateUrl && currentDb) {
@@ -598,10 +614,10 @@ function createTabPane(
       await selectTable(schema.tables[0].name, generation);
     }
     // currentDb が確定したので Query History pane を自動 refresh する。
-    // 構築時の applyHistoryVisibility() 呼び出し時は currentDb=null で
+    // 構築時の applyVisibility() 呼び出し時は currentDb=null で
     // refresh が skip されていた (sqlMode = false 判定) のを、ここで補う。
     // ユーザー報告: 「Refresh ボタンを押さないと History が出ない」の修正。
-    applyHistoryVisibility();
+    applyVisibility();
     cb.onStateChange();
   }
 

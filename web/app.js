@@ -8515,7 +8515,6 @@ ${frontmatter.yaml}
     let currentIndex = null;
     let currentQuery = "";
     let lastSort;
-    let loadingDocs = false;
     let detailTab = "mapping";
     let loadRunId = 0;
     let docRunId = 0;
@@ -8748,7 +8747,6 @@ ${frontmatter.yaml}
       const requestDbId = currentDbId;
       const requestIndex = currentIndex;
       const requestQuery = currentQuery;
-      loadingDocs = true;
       docMoreBtn.disabled = true;
       if (!append) {
         lastSort = undefined;
@@ -8796,10 +8794,8 @@ ${frontmatter.yaml}
       } finally {
         if (docsAbort === abort)
           docsAbort = null;
-        if (!docsAbort) {
-          loadingDocs = false;
+        if (!docsAbort)
           docMoreBtn.disabled = false;
-        }
       }
     }
     async function selectIndex(name) {
@@ -8974,7 +8970,6 @@ ${frontmatter.yaml}
       currentIndex = null;
       currentQuery = "";
       lastSort = undefined;
-      loadingDocs = false;
       searchInput.value = "";
       indexList.innerHTML = "";
       docList.innerHTML = "";
@@ -10164,7 +10159,6 @@ ${frontmatter.yaml}
     let currentKey = null;
     let currentKeyFilter = "*";
     let currentCursor = "0";
-    let loadingKeys = false;
     let loadRunId = 0;
     let keyRunId = 0;
     let suppressNotify = false;
@@ -10425,7 +10419,6 @@ ${frontmatter.yaml}
       const requestRunId = loadRunId;
       const requestDbId = currentDbId;
       const requestDbIndex = currentDbIndex;
-      loadingKeys = true;
       keyMoreBtn.disabled = true;
       if (!append)
         setKeyStatus("Loading keys...");
@@ -10469,10 +10462,8 @@ ${frontmatter.yaml}
       } finally {
         if (keysAbort === abort)
           keysAbort = null;
-        if (!keysAbort) {
-          loadingKeys = false;
+        if (!keysAbort)
           keyMoreBtn.disabled = false;
-        }
       }
     }
     keyMoreBtn.addEventListener("click", () => loadKeys(true));
@@ -10552,7 +10543,6 @@ ${frontmatter.yaml}
       dbAbort = null;
       keysAbort = null;
       valueAbort = null;
-      loadingKeys = false;
       loadRunId++;
       keyRunId++;
       suppressNotify = false;
@@ -12250,6 +12240,27 @@ ${frontmatter.yaml}
   function isSqlView(view) {
     return view === "data" || view === "query" || view === "schema" || view === "er" || view === "search" || view === "snapshot";
   }
+  function computeVisibility(kind, tab, userPrefersHistoryOpen) {
+    const sqlMode = isSqlKind(kind);
+    const tableScopedTab = tab === "data" || tab === "schema";
+    const historyVisible = sqlMode && userPrefersHistoryOpen;
+    return {
+      toolsHidden: !sqlMode,
+      historyToggleHidden: !sqlMode,
+      historyPaneHidden: !historyVisible,
+      historyResizerHidden: !historyVisible,
+      tableListHidden: !sqlMode,
+      tabBarHidden: !sqlMode || !tableScopedTab,
+      gridHidden: !sqlMode || tab !== "data",
+      queryHidden: !sqlMode || tab !== "query",
+      schemaHidden: !sqlMode || tab !== "schema",
+      erHidden: !sqlMode || tab !== "er",
+      searchHidden: !sqlMode || tab !== "search",
+      snapshotHidden: !sqlMode || tab !== "snapshot",
+      redisHidden: kind !== "redis",
+      esHidden: kind !== "elasticsearch"
+    };
+  }
   function normalizeViewForDb(view, db) {
     if (!db || !isSqlKind(db.kind))
       return "data";
@@ -12434,18 +12445,30 @@ ${frontmatter.yaml}
     historyToggle.title = "Toggle query history panel";
     sidebar.appendChild(historyToggle);
     let historyOpen = initial.historyOpen ?? true;
-    function applyHistoryVisibility() {
-      const sqlMode = isSqlKind(currentDb?.kind);
-      historyResizer.hidden = !sqlMode || !historyOpen;
-      historyPane.hidden = !sqlMode || !historyOpen;
+    function applyVisibility() {
+      const visibility = computeVisibility(currentDb?.kind, currentTab, historyOpen);
+      toolsSection.hidden = visibility.toolsHidden;
+      historyToggle.hidden = visibility.historyToggleHidden;
+      historyResizer.hidden = visibility.historyResizerHidden;
+      historyPane.hidden = visibility.historyPaneHidden;
+      tableList.el.hidden = visibility.tableListHidden;
+      tabBar.hidden = visibility.tabBarHidden;
+      grid.el.hidden = visibility.gridHidden;
+      queryEditor.el.hidden = visibility.queryHidden;
+      schemaView.el.hidden = visibility.schemaHidden;
+      erDiagram.el.hidden = visibility.erHidden;
+      globalSearchView.el.hidden = visibility.searchHidden;
+      snapshotView.el.hidden = visibility.snapshotHidden;
+      redisExplorer.el.hidden = visibility.redisHidden;
+      esExplorer.el.hidden = visibility.esHidden;
       historyToggle.classList.toggle("active", historyOpen);
-      if (sqlMode && historyOpen)
+      if (!visibility.historyPaneHidden)
         historyView.refresh();
     }
-    applyHistoryVisibility();
+    applyVisibility();
     historyToggle.addEventListener("click", () => {
       historyOpen = !historyOpen;
-      applyHistoryVisibility();
+      applyVisibility();
       cb.onStateChange();
     });
     const container = document.createElement("div");
@@ -12462,8 +12485,7 @@ ${frontmatter.yaml}
       const notice = mainContent.querySelector(".db-docker-notice");
       if (notice)
         notice.remove();
-      applyInnerTabBarVisibility();
-      grid.el.hidden = !isSqlKind(currentDb?.kind) || currentTab !== "data";
+      applyVisibility();
     }
     function showDockerNotice(message) {
       clearDockerNotice();
@@ -12472,33 +12494,13 @@ ${frontmatter.yaml}
       notice.textContent = message;
       mainContent.prepend(notice);
     }
-    function isTableViewTab() {
-      return currentTab === "data" || currentTab === "schema";
-    }
-    function applyInnerTabBarVisibility() {
-      tabBar.hidden = !isSqlKind(currentDb?.kind) || !isTableViewTab();
-    }
     function applyKindVisibility() {
-      const sqlMode = isSqlKind(currentDb?.kind);
-      toolsSection.hidden = !sqlMode;
-      historyToggle.hidden = !sqlMode;
-      historyResizer.hidden = !sqlMode || !historyOpen;
-      historyPane.hidden = !sqlMode || !historyOpen;
-      tableList.el.hidden = !sqlMode;
-      applyInnerTabBarVisibility();
-      if (!sqlMode) {
+      applyVisibility();
+      if (!isSqlKind(currentDb?.kind)) {
         queryBtn.classList.remove("active");
         erBtn.classList.remove("active");
         searchBtn.classList.remove("active");
         snapshotBtn.classList.remove("active");
-        grid.el.hidden = true;
-        queryEditor.el.hidden = true;
-        schemaView.el.hidden = true;
-        erDiagram.el.hidden = true;
-        globalSearchView.el.hidden = true;
-        snapshotView.el.hidden = true;
-        redisExplorer.el.hidden = currentDb?.kind !== "redis";
-        esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
       }
     }
     function setActiveTab(tab, updateUrl = true) {
@@ -12514,16 +12516,6 @@ ${frontmatter.yaml}
       erBtn.classList.toggle("active", currentTab === "er");
       searchBtn.classList.toggle("active", currentTab === "search");
       snapshotBtn.classList.toggle("active", currentTab === "snapshot");
-      const sqlMode = isSqlKind(currentDb?.kind);
-      applyInnerTabBarVisibility();
-      grid.el.hidden = !sqlMode || currentTab !== "data";
-      queryEditor.el.hidden = !sqlMode || currentTab !== "query";
-      schemaView.el.hidden = !sqlMode || currentTab !== "schema";
-      erDiagram.el.hidden = !sqlMode || currentTab !== "er";
-      globalSearchView.el.hidden = !sqlMode || currentTab !== "search";
-      snapshotView.el.hidden = !sqlMode || currentTab !== "snapshot";
-      redisExplorer.el.hidden = currentDb?.kind !== "redis";
-      esExplorer.el.hidden = currentDb?.kind !== "elasticsearch";
       applyKindVisibility();
       if (currentTab === "query")
         queryEditor.focus();
@@ -12647,7 +12639,7 @@ ${frontmatter.yaml}
       if (schema.tables.length > 0) {
         await selectTable(schema.tables[0].name, generation);
       }
-      applyHistoryVisibility();
+      applyVisibility();
       cb.onStateChange();
     }
     async function selectTable(table2, generation = loadGeneration) {
