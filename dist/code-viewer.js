@@ -3714,6 +3714,39 @@ function buildDockerFilterWhere(grouped, kind) {
   }
   return whereParts.join(" AND ");
 }
+function createTableMetaCache(now = () => Date.now()) {
+  const columns = new Map;
+  const rowCounts = new Map;
+  return {
+    async getColumns(table, fetch2) {
+      const cached = columns.get(table);
+      const current = now();
+      if (cached && cached.expires > current)
+        return cached.value;
+      const value = await fetch2();
+      columns.set(table, { value, expires: now() + COLUMNS_TTL_MS });
+      return value;
+    },
+    async getRowCount(table, fetch2) {
+      const cached = rowCounts.get(table);
+      const current = now();
+      if (cached && cached.expires > current)
+        return cached.value;
+      const value = await fetch2();
+      rowCounts.set(table, { value, expires: now() + ROWCOUNT_TTL_MS });
+      return value;
+    },
+    invalidate(table) {
+      if (table) {
+        columns.delete(table);
+        rowCounts.delete(table);
+        return;
+      }
+      columns.clear();
+      rowCounts.clear();
+    }
+  };
+}
 function createDockerAdapter(config) {
   function exec(sql) {
     const result = execInContainer(config, sql);
@@ -3735,6 +3768,7 @@ function createDockerAdapter(config) {
     return val;
   }
   const columnCache = new Map;
+  const tableMetaCache = createTableMetaCache();
   function buildColumnsSql(table) {
     const tableLiteral = table.replace(/'/g, "''");
     if (config.kind === "postgresql") {
@@ -3764,14 +3798,16 @@ function createDockerAdapter(config) {
     const result = await execAsync(buildColumnsSql(table));
     return columnsFromInfoRows(result.rows);
   }
-  function tablePageMetaFromResults(columns, dataResult, countResult) {
-    const totalRows = countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
+  function tablePageMetaFromResults(columns, dataResult, totalRows) {
     return {
       columns,
       rows: dataResult.rows.map((row) => row.map(toDbValue)),
       rowCount: dataResult.rows.length,
       totalRows
     };
+  }
+  function rowCountFromResult(countResult) {
+    return countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
   }
   function fetchColumnsUncached(table) {
     let sql;
@@ -3984,12 +4020,12 @@ function createDockerAdapter(config) {
       const order = buildOrderClause(options.orderBy, config.kind);
       const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
-      const [columns, dataResult, countResult] = await Promise.all([
-        fetchColumnsAsyncUncached(table),
+      const [columns, dataResult, totalRows] = await Promise.all([
+        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
         execAsync(dataSql),
-        execAsync(countSql)
+        tableMetaCache.getRowCount(table, async () => rowCountFromResult(await execAsync(countSql)))
       ]);
-      return tablePageMetaFromResults(columns, dataResult, countResult);
+      return tablePageMetaFromResults(columns, dataResult, totalRows);
     },
     async getFilteredTablePageWithMeta(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
@@ -3999,11 +4035,11 @@ function createDockerAdapter(config) {
       const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
       const [columns, dataResult, countResult] = await Promise.all([
-        fetchColumnsAsyncUncached(table),
+        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
         execAsync(dataSql),
         execAsync(countSql)
       ]);
-      return tablePageMetaFromResults(columns, dataResult, countResult);
+      return tablePageMetaFromResults(columns, dataResult, rowCountFromResult(countResult));
     },
     getTablePage(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
@@ -4052,6 +4088,9 @@ function createDockerAdapter(config) {
         rowCount: Math.min(result.rows.length, maxRows)
       };
     },
+    invalidateTableMetaCache(table) {
+      tableMetaCache.invalidate(table);
+    },
     getCreateStatement(table) {
       if (config.kind === "mysql") {
         try {
@@ -4087,6 +4126,7 @@ function createDockerAdapter(config) {
     },
     close() {
       columnCache.clear();
+      tableMetaCache.invalidate();
     },
     async* iterateForSnapshot(table, signal) {
       const columns = adapter.getColumns(table);
@@ -4166,6 +4206,7 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
     database
   });
 }
+var COLUMNS_TTL_MS = 30000, ROWCOUNT_TTL_MS = 15000;
 var init_docker = __esm(() => {
   init_sql_snapshot();
   init_docker_utils();
