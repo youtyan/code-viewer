@@ -297,6 +297,10 @@ export function isMakefileName(name: string): boolean {
   return /^makefile(?:[.-].+)?$/i.test(name);
 }
 
+export function isDotenvName(name: string): boolean {
+  return /^(?:\.?env|.*\.env)(?:[.-].+)?$/i.test(name);
+}
+
 export function sourceDisplayKind(
   path: string,
 ): "image" | "video" | "audio" | "pdf" | "text" | "unsupported" {
@@ -308,6 +312,7 @@ export function sourceDisplayKind(
   const ext = sourceFileExtension(name);
   if (TEXT_SOURCE_EXTENSIONS.has(ext)) return "text";
   if (TEXT_SOURCE_FILENAMES.has(name)) return "text";
+  if (isDotenvName(name)) return "text";
   if (isDockerfileName(name) || isMakefileName(name)) return "text";
   return "unsupported";
 }

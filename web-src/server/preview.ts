@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
+import { sourceDisplayKind } from "../core/source-meta";
 import type {
   AnnotationTarget,
   DiffMeta,
@@ -1677,7 +1678,10 @@ function rawFileHeaders(
   };
   const headers: Record<string, string> = {
     "Content-Type":
-      mime[extname(path).toLowerCase()] || "application/octet-stream",
+      mime[extname(path).toLowerCase()] ||
+      (sourceDisplayKind(path) === "text"
+        ? "text/plain; charset=utf-8"
+        : "application/octet-stream"),
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "sandbox",
