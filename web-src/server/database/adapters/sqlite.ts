@@ -76,7 +76,7 @@ async function getSqliteClass(): Promise<SqliteConstructor> {
     // not running in Bun
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // Keep this opaque to Bun's bundler; better-sqlite3 is a Node-only optional dependency.
     const mod = await (Function(
       'return import("better-sqlite3")',
     )() as Promise<{ default?: unknown }>);

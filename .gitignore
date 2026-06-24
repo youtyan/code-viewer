@@ -1,5 +1,9 @@
 node_modules/
 dist/
+web/app.js
+web/mermaid.js
+web/shiki.js
+web/vendor/THIRD_PARTY_NOTICES.txt
 .code-viewer/
 docs/superpowers/
 *.tgz
