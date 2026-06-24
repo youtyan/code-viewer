@@ -233,5 +233,6 @@ export async function handleElasticsearchRoute(
     },
     sideEffectAllowed,
     wrap,
+    (err) => handleError("elasticsearch", "handle elasticsearch request", err),
   );
 }

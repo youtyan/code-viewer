@@ -2,6 +2,7 @@
 // createRefPicker() wires the popover, the #ref-from/#ref-to inputs, and the
 // #repo-target input at construction time.
 
+import { isImeComposing } from "../core/keyboard";
 import type { AppRoute, DiffRange } from "../core/routes";
 import type { RefCommitResponse, RefResponse } from "../core/types";
 
@@ -32,6 +33,7 @@ export function createRefPicker(deps: RefPickerDeps) {
       openPopover(input);
     });
     input.addEventListener("keydown", (e) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         openPopover(input);
@@ -361,6 +363,7 @@ export function createRefPicker(deps: RefPickerDeps) {
   });
   popBody.addEventListener("scroll", maybeLoadMoreCommits, { passive: true });
   popSearch.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") {
       closePopover();
     }

@@ -14,6 +14,7 @@ import {
   PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
+import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
@@ -235,6 +236,7 @@ export function createRepoView(deps: RepoViewDeps) {
         resolve(ok);
       };
       const onKeydown = (event: KeyboardEvent) => {
+        if (isImeComposing(event)) return;
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
@@ -323,13 +325,13 @@ export function createRepoView(deps: RepoViewDeps) {
         done(name);
       };
       const onKeydown = (event: KeyboardEvent) => {
+        if (isImeComposing(event)) return;
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
           done(null);
           return;
         }
-        if (event.isComposing || event.keyCode === 229) return;
         if (event.key === "Enter") {
           event.preventDefault();
           submit();

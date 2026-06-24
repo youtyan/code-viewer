@@ -5,6 +5,7 @@
 - Treat `main` as the protected integration branch.
 - Do not push work directly to `main`.
 - Make changes on a topic branch named by purpose, for example `chore/npm-publish-procedure` or `fix/diff-rendering`.
+- Do not switch branches on your own. Running `git checkout <branch>`, `git switch <branch>`, or moving to a detached `HEAD` is allowed only when the user explicitly asks for that exact branch change.
 - Open a pull request for every change that should enter `main`.
 - Merge through GitHub after review/verification, even when the branch contains a single commit.
 - Keep commits meaningful. Avoid noisy checkpoint commits, vague messages, or unrelated file churn.

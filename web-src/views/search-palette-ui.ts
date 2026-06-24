@@ -14,6 +14,7 @@ import {
   isGlobPathQuery,
   rankPathMatches,
 } from "../core/fuzzy-search";
+import { isImeComposing } from "../core/keyboard";
 import type { AppRoute } from "../core/routes";
 import {
   limitPaletteResults,
@@ -576,6 +577,7 @@ export function createSearchPalette(deps: SearchPaletteDeps) {
   }
 
   function handlePaletteKeydown(e: KeyboardEvent, state: PaletteState) {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
       closeSearchPalette();

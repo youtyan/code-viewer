@@ -59,8 +59,54 @@ type BunSpawnFn = (
   opts?: Record<string, unknown>,
 ) => BunSpawnResult;
 
+type DockerDatabasesCacheEntry = {
+  value: string[];
+  expiresAt: number;
+};
+
 const COLUMNS_TTL_MS = 30_000;
 const ROWCOUNT_TTL_MS = 15_000;
+const DOCKER_DATABASES_POSITIVE_TTL_MS = 15_000;
+const DOCKER_DATABASES_NEGATIVE_TTL_MS = 3_000;
+const dockerDatabasesCache = new Map<string, DockerDatabasesCacheEntry>();
+
+let spawnSyncImpl = spawnSync;
+
+function dockerDatabasesCacheKey(
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  cwd: string,
+): string {
+  return `${serviceName}\0${kind}\0${cwd}`;
+}
+
+function setDockerDatabasesCache(
+  key: string,
+  value: string[],
+  ttlMs: number,
+  now = Date.now(),
+): string[] {
+  const cachedValue = [...value];
+  dockerDatabasesCache.set(key, {
+    value: cachedValue,
+    expiresAt: now + ttlMs,
+  });
+  return [...cachedValue];
+}
+
+function fallbackDockerDatabases(defaultDb: string): string[] {
+  return defaultDb ? [defaultDb] : [];
+}
+
+export function __clearDockerDatabaseListCacheForTest(): void {
+  dockerDatabasesCache.clear();
+}
+
+export function __setDockerSpawnSyncForTest(
+  spawnSyncForTest: typeof spawnSync | null,
+): void {
+  spawnSyncImpl = spawnSyncForTest ?? spawnSync;
+}
 
 function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
   if (config.kind === "postgresql") {
@@ -100,7 +146,6 @@ function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
     config.user,
     config.database,
     "--batch",
-    "--raw",
     "--default-character-set=utf8mb4",
     "-e",
     sql,
@@ -113,7 +158,7 @@ function execInContainer(
   timeoutMs = 10000,
 ): ExecResult {
   const args = buildExecArgs(config, sql);
-  const proc = spawnSync(args[0], args.slice(1), {
+  const proc = spawnSyncImpl(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"],
@@ -227,18 +272,70 @@ async function execInContainerAsync(
   return execWithNodeSpawn(args, timeoutMs);
 }
 
+function stripFinalLineBreak(text: string): string {
+  if (text.endsWith("\r\n")) return text.slice(0, -2);
+  if (text.endsWith("\n") || text.endsWith("\r")) return text.slice(0, -1);
+  return text;
+}
+
+function decodeMysqlBatchField(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch !== "\\" || i + 1 >= value.length) {
+      out += ch;
+      continue;
+    }
+    const next = value[++i];
+    switch (next) {
+      case "0":
+        out += "\0";
+        break;
+      case "b":
+        out += "\b";
+        break;
+      case "n":
+        out += "\n";
+        break;
+      case "r":
+        out += "\r";
+        break;
+      case "t":
+        out += "\t";
+        break;
+      case "Z":
+        out += "\x1a";
+        break;
+      case "\\":
+        out += "\\";
+        break;
+      default:
+        out += `\\${next}`;
+        break;
+    }
+  }
+  return out;
+}
+
+function splitTsvLine(line: string, decodeFields: boolean): string[] {
+  const fields = line.split("\t");
+  return decodeFields ? fields.map(decodeMysqlBatchField) : fields;
+}
+
 function parseTsvOutput(
   stdout: string,
   hasHeader: boolean,
 ): { columns: string[]; rows: string[][] } {
-  const lines = stdout.trim().split("\n").filter(Boolean);
+  const text = stripFinalLineBreak(stdout);
+  if (text.length === 0) return { columns: [], rows: [] };
+  const lines = text.split(/\r?\n/);
   if (lines.length === 0) return { columns: [], rows: [] };
   if (hasHeader) {
-    const columns = lines[0].split("\t");
-    const rows = lines.slice(1).map((line) => line.split("\t"));
+    const columns = splitTsvLine(lines[0], true);
+    const rows = lines.slice(1).map((line) => splitTsvLine(line, true));
     return { columns, rows };
   }
-  const rows = lines.map((line) => line.split("\t"));
+  const rows = lines.map((line) => splitTsvLine(line, false));
   return { columns: [], rows };
 }
 
@@ -260,6 +357,38 @@ function buildOrderClause(
       `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`,
   );
   return ` ORDER BY ${parts.join(", ")}`;
+}
+
+const MYSQL_SPATIAL_TYPES = new Set([
+  "geometry",
+  "point",
+  "linestring",
+  "polygon",
+  "multipoint",
+  "multilinestring",
+  "multipolygon",
+  "geometrycollection",
+  "geomcollection",
+]);
+
+function isMysqlSpatialType(type: string): boolean {
+  const baseType = type.trim().toLowerCase().split(/[\s(]/, 1)[0];
+  return MYSQL_SPATIAL_TYPES.has(baseType);
+}
+
+function buildTableSelectList(
+  columns: DbColumn[],
+  kind: "postgresql" | "mysql",
+): string {
+  if (kind !== "mysql") return "*";
+  let hasSpatialColumn = false;
+  const parts = columns.map((column) => {
+    const columnId = sanitizeIdentifier(column.name, kind);
+    if (!isMysqlSpatialType(column.type)) return columnId;
+    hasSpatialColumn = true;
+    return `ST_AsText(${columnId}) AS ${columnId}`;
+  });
+  return hasSpatialColumn ? parts.join(", ") : "*";
 }
 
 function escapeSqlString(value: string): string {
@@ -636,16 +765,19 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     ): Promise<TablePageMeta> {
       const id = sanitizeIdentifier(table, config.kind);
       const order = buildOrderClause(options.orderBy, config.kind);
-      const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
-      const [columns, dataResult, totalRows] = await Promise.all([
-        tableMetaCache.getColumns(table, () =>
-          fetchColumnsAsyncUncached(table),
-        ),
+      const columnsPromise = tableMetaCache.getColumns(table, () =>
+        fetchColumnsAsyncUncached(table),
+      );
+      const totalRowsPromise = tableMetaCache.getRowCount(table, async () =>
+        rowCountFromResult(await execAsync(countSql)),
+      );
+      const columns = await columnsPromise;
+      const selectList = buildTableSelectList(columns, config.kind);
+      const dataSql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const [dataResult, totalRows] = await Promise.all([
         execAsync(dataSql),
-        tableMetaCache.getRowCount(table, async () =>
-          rowCountFromResult(await execAsync(countSql)),
-        ),
+        totalRowsPromise,
       ]);
       return tablePageMetaFromResults(columns, dataResult, totalRows);
     },
@@ -663,14 +795,17 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const order = buildOrderClause(options.orderBy, config.kind);
       const where = buildDockerFilterWhere(options.grouped, config.kind);
       const whereClause = where ? ` WHERE ${where}` : "";
-      const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
-      const [columns, dataResult, countResult] = await Promise.all([
-        tableMetaCache.getColumns(table, () =>
-          fetchColumnsAsyncUncached(table),
-        ),
+      const columnsPromise = tableMetaCache.getColumns(table, () =>
+        fetchColumnsAsyncUncached(table),
+      );
+      const countResultPromise = execAsync(countSql);
+      const columns = await columnsPromise;
+      const selectList = buildTableSelectList(columns, config.kind);
+      const dataSql = `SELECT ${selectList} FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const [dataResult, countResult] = await Promise.all([
         execAsync(dataSql),
-        execAsync(countSql),
+        countResultPromise,
       ]);
       return tablePageMetaFromResults(
         columns,
@@ -685,9 +820,10 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     ): QueryResult {
       const id = sanitizeIdentifier(table, config.kind);
       const order = buildOrderClause(options.orderBy, config.kind);
-      const sql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
-      const result = exec(sql);
       const cols = this.getColumns(table);
+      const selectList = buildTableSelectList(cols, config.kind);
+      const sql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const result = exec(sql);
       if (result.rows.length === 0) {
         return {
           columns: cols.map((c: DbColumn) => c.name),
@@ -858,46 +994,82 @@ export function listDockerDatabases(
   env: Record<string, string>,
   cwd: string,
 ): string[] {
+  const cacheKey = dockerDatabasesCacheKey(serviceName, kind, cwd);
+  const now = Date.now();
+  const cached = dockerDatabasesCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return [...cached.value];
+
   const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName) return [];
+  if (!containerName) {
+    return setDockerDatabasesCache(
+      cacheKey,
+      [],
+      DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
+  }
   const user =
     env.POSTGRES_USER ||
     env.MYSQL_USER ||
     env.MARIADB_USER ||
-    (kind === "postgresql" ? "postgres" : "root");
+    env.POSTGRES_USERNAME ||
+    env.MYSQL_USERNAME ||
+    env.USER ||
+    "root";
   const password =
-    env.POSTGRES_PASSWORD ||
-    env.MYSQL_PASSWORD ||
-    env.MYSQL_ROOT_PASSWORD ||
-    env.MARIADB_PASSWORD ||
-    env.MARIADB_ROOT_PASSWORD ||
-    "";
+    env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MARIADB_PASSWORD || "";
   const defaultDb =
     env.POSTGRES_DB ||
     env.MYSQL_DATABASE ||
     env.MARIADB_DATABASE ||
-    (kind === "postgresql" ? "postgres" : "");
+    env.DATABASE_NAME ||
+    "";
   const config: DockerDbConfig = {
     kind,
     containerName,
     user,
     password,
-    database: defaultDb || (kind === "postgresql" ? "postgres" : "mysql"),
+    database:
+      defaultDb || (kind === "postgresql" ? user || "postgres" : "mysql"),
   };
   try {
     let sql: string;
     if (kind === "postgresql") {
-      sql = `SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true ORDER BY datname`;
+      sql = `SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname`;
     } else {
       sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys') ORDER BY schema_name`;
     }
     const result = execInContainer(config, sql);
-    if (result.code !== 0) return defaultDb ? [defaultDb] : [];
+    if (result.code !== 0) {
+      const fallback = fallbackDockerDatabases(defaultDb);
+      if (fallback.length > 0) return fallback;
+      return setDockerDatabasesCache(
+        cacheKey,
+        [],
+        DOCKER_DATABASES_NEGATIVE_TTL_MS,
+        now,
+      );
+    }
     const parsed = parseTsvOutput(result.stdout, kind === "mysql");
     const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
-    return dbs.length > 0 ? dbs : defaultDb ? [defaultDb] : [];
+    const value = dbs.length > 0 ? dbs : fallbackDockerDatabases(defaultDb);
+    return setDockerDatabasesCache(
+      cacheKey,
+      value,
+      value.length > 0
+        ? DOCKER_DATABASES_POSITIVE_TTL_MS
+        : DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
   } catch {
-    return defaultDb ? [defaultDb] : [];
+    const fallback = fallbackDockerDatabases(defaultDb);
+    if (fallback.length > 0) return fallback;
+    return setDockerDatabasesCache(
+      cacheKey,
+      [],
+      DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
   }
 }
 

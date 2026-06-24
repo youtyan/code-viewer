@@ -4,6 +4,7 @@ import type {
   DbTableDataResponse,
   DbValue,
 } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 
 const ROW_HEIGHT = 28;
@@ -186,8 +187,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
     document.body.appendChild(measure);
     const headerLabel = columns[colIndex]?.name || colName;
-    const typeLabel = columns[colIndex]?.type || "";
-    measure.textContent = `${headerLabel}  ${typeLabel}  ▲`;
+    measure.textContent = `${headerLabel}  ▲`;
     let maxW = measure.offsetWidth + 16;
     const rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
     for (const row of rows) {
@@ -358,11 +358,6 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       label.className = "db-grid-header-label";
       label.textContent = col.name;
 
-      const typeTag = document.createElement("span");
-      typeTag.className = "db-grid-header-type";
-      typeTag.textContent = col.type;
-      if (col.primaryKey) typeTag.classList.add("pk");
-
       const sortIcon = document.createElement("span");
       sortIcon.className = "db-grid-sort-icon";
       sortIcon.textContent =
@@ -378,7 +373,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         startResize(colIndex, e);
       });
 
-      cell.append(label, typeTag, sortIcon, resizeHandle);
+      cell.append(label, sortIcon, resizeHandle);
       cell.addEventListener("click", (e) => {
         // Don't sort when clicking on resize handle
         if (
@@ -464,6 +459,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         scheduleFilter();
       });
       input.addEventListener("keydown", (e) => {
+        if (isImeComposing(e)) return;
         if (e.key === "Escape") {
           input.value = "";
           columnFilters.delete(col.name);
@@ -757,6 +753,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     scheduleFilter();
   });
   filterInput.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") {
       filterInput.value = "";
       globalSearchValue = "";

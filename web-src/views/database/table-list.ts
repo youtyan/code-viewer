@@ -1,8 +1,8 @@
 import type { DbColumn, DbTableInfo } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 
 export type TableListCallbacks = {
   onSelectTable: (table: string) => void;
-  onSelectSchema: (table: string) => void;
   onViewCreateTable?: (table: string) => void;
   onViewDefinition?: (table: string) => void;
   getColumns?: (table: string) => Promise<DbColumn[]>;
@@ -129,6 +129,7 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       }
     };
     const onKeyDown = (ev: KeyboardEvent) => {
+      if (isImeComposing(ev)) return;
       if (ev.key === "Escape") {
         closeContextMenu();
       }
@@ -255,9 +256,6 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
         });
         row.addEventListener("click", () =>
           callbacks.onSelectTable(table.name),
-        );
-        row.addEventListener("dblclick", () =>
-          callbacks.onSelectSchema(table.name),
         );
         row.addEventListener("contextmenu", (e) =>
           showContextMenu(e, table.name),

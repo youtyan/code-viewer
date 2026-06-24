@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createDockerAdapter } from "../server/database/adapters/docker";
 
 type SpawnCall = {
+  args: string[];
   sql: string;
   startedAt: number;
 };
@@ -30,6 +31,20 @@ afterEach(() => {
 
 function mysqlStdout(sql: string): string {
   if (sql.includes("information_schema.columns")) {
+    if (sql.includes("table_name = 'escaped_values'")) {
+      return [
+        "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key",
+        "id\tint\tNO\tNULL\tPRI",
+        "body\ttext\tYES\tNULL\t",
+      ].join("\n");
+    }
+    if (sql.includes("table_name = 'spatial_values'")) {
+      return [
+        "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key",
+        "id\tint\tNO\tNULL\tPRI",
+        "location\tpoint\tYES\tNULL\t",
+      ].join("\n");
+    }
     return [
       "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key",
       "id\tint\tNO\tNULL\tPRI",
@@ -38,6 +53,16 @@ function mysqlStdout(sql: string): string {
   }
   if (sql.includes("COUNT(*)")) {
     return ["cnt", "7"].join("\n");
+  }
+  if (sql.includes("SELECT * FROM `escaped_values`")) {
+    return ["id\tbody", "1\tline1\\nline2\\tTabbed\\\\Path"].join("\n");
+  }
+  if (
+    sql.includes(
+      "SELECT `id`, ST_AsText(`location`) AS `location` FROM `spatial_values`",
+    )
+  ) {
+    return ["id\tlocation", "1\tPOINT(139 35)"].join("\n");
   }
   return ["id\tname", "1\tAda"].join("\n");
 }
@@ -48,7 +73,7 @@ function installSpawnHarness(): SpawnHarness {
   const calls: SpawnCall[] = [];
   bunGlobal.Bun.spawn = ((args: string[]) => {
     const sql = args[args.length - 1] || "";
-    calls.push({ sql, startedAt: performance.now() });
+    calls.push({ args, sql, startedAt: performance.now() });
     return {
       exited: new Promise<number>((resolve) => {
         setTimeout(() => resolve(0), 20);
@@ -77,7 +102,7 @@ function createMysqlAdapter() {
 }
 
 describe("docker table meta queries", () => {
-  test("starts columns, data, and count queries before awaiting table data", async () => {
+  test("starts columns and count before awaiting table data", async () => {
     activeHarness = installSpawnHarness();
     const adapter = createMysqlAdapter();
 
@@ -86,20 +111,21 @@ describe("docker table meta queries", () => {
       limit: 25,
     });
 
-    expect(activeHarness.calls).toHaveLength(3);
+    expect(activeHarness.calls).toHaveLength(2);
     const result = await pending;
     const sql = activeHarness.calls.map((call) => call.sql);
 
     expect(sql[0]).toMatch(/information_schema\.columns/);
-    expect(sql[1]).toBe("SELECT * FROM `users` LIMIT 25 OFFSET 0");
-    expect(sql[2]).toBe("SELECT COUNT(*) AS cnt FROM `users`");
+    expect(sql[1]).toBe("SELECT COUNT(*) AS cnt FROM `users`");
+    expect(sql[2]).toBe("SELECT * FROM `users` LIMIT 25 OFFSET 0");
+    expect(activeHarness.calls[2].args.includes("--raw")).toBe(false);
     expect(result.columns.map((column) => column.name)).toEqual(["id", "name"]);
     expect(result.rows).toEqual([["1", "Ada"]]);
     expect(result.rowCount).toBe(1);
     expect(result.totalRows).toBe(7);
   });
 
-  test("starts filtered columns, data, and count queries together", async () => {
+  test("starts filtered columns and count before awaiting table data", async () => {
     activeHarness = installSpawnHarness();
     const adapter = createMysqlAdapter();
 
@@ -109,13 +135,13 @@ describe("docker table meta queries", () => {
       grouped: new Map([["Ada", ["name"]]]),
     });
 
-    expect(activeHarness.calls).toHaveLength(3);
+    expect(activeHarness.calls).toHaveLength(2);
     const result = await pending;
     const sql = activeHarness.calls.map((call) => call.sql);
 
     expect(sql[1]).toMatch(/WHERE CAST\(`name` AS CHAR\) LIKE '%Ada%'/);
-    expect(sql[1]).toMatch(/LIMIT 10 OFFSET 5/);
     expect(sql[2]).toMatch(/WHERE CAST\(`name` AS CHAR\) LIKE '%Ada%'/);
+    expect(sql[2]).toMatch(/LIMIT 10 OFFSET 5/);
     expect(result.totalRows).toBe(7);
   });
 
@@ -148,10 +174,10 @@ describe("docker table meta queries", () => {
       });
       expect(activeHarness.calls).toHaveLength(6);
       expect(activeHarness.calls[4].sql).toBe(
-        "SELECT * FROM `users` LIMIT 25 OFFSET 50",
+        "SELECT COUNT(*) AS cnt FROM `users`",
       );
       expect(activeHarness.calls[5].sql).toBe(
-        "SELECT COUNT(*) AS cnt FROM `users`",
+        "SELECT * FROM `users` LIMIT 25 OFFSET 50",
       );
 
       now += 16_000;
@@ -162,13 +188,49 @@ describe("docker table meta queries", () => {
       expect(activeHarness.calls).toHaveLength(9);
       expect(activeHarness.calls[6].sql).toMatch(/information_schema\.columns/);
       expect(activeHarness.calls[7].sql).toBe(
-        "SELECT * FROM `users` LIMIT 25 OFFSET 75",
+        "SELECT COUNT(*) AS cnt FROM `users`",
       );
       expect(activeHarness.calls[8].sql).toBe(
-        "SELECT COUNT(*) AS cnt FROM `users`",
+        "SELECT * FROM `users` LIMIT 25 OFFSET 75",
       );
     } finally {
       Date.now = originalNow;
     }
+  });
+
+  test("keeps mysql text newlines and tabs inside their original columns", async () => {
+    activeHarness = installSpawnHarness();
+    const adapter = createMysqlAdapter();
+
+    const result = await adapter.getTablePageWithMeta("escaped_values", {
+      offset: 0,
+      limit: 25,
+    });
+
+    expect(result.columns.map((column) => column.name)).toEqual(["id", "body"]);
+    expect(result.rows).toEqual([["1", "line1\nline2\tTabbed\\Path"]]);
+    expect(result.rows[0]).toHaveLength(2);
+  });
+
+  test("renders mysql spatial columns as WKT text", async () => {
+    activeHarness = installSpawnHarness();
+    const adapter = createMysqlAdapter();
+
+    const result = await adapter.getTablePageWithMeta("spatial_values", {
+      offset: 0,
+      limit: 25,
+    });
+
+    const dataCall = activeHarness.calls.find((call) =>
+      call.sql.includes("ST_AsText(`location`)"),
+    );
+    expect(dataCall?.sql).toBe(
+      "SELECT `id`, ST_AsText(`location`) AS `location` FROM `spatial_values` LIMIT 25 OFFSET 0",
+    );
+    expect(result.columns.map((column) => column.name)).toEqual([
+      "id",
+      "location",
+    ]);
+    expect(result.rows).toEqual([["1", "POINT(139 35)"]]);
   });
 });

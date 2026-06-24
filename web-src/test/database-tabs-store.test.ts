@@ -124,6 +124,42 @@ describe("database tabs store", () => {
     });
   });
 
+  test("drops tabs pointing at code-viewer internal databases", () => {
+    withTempProject((dir) => {
+      saveTabs(dir, {
+        version: 1,
+        activeTabId: "internal",
+        tabs: [
+          {
+            id: "internal",
+            dbId: ".code-viewer/db-snapshots.sqlite",
+            table: "cancel_bookings",
+            view: "data",
+          },
+          {
+            id: "valid",
+            dbId: "docker:db",
+            table: "cancel_bookings",
+            view: "data",
+          },
+        ],
+      });
+
+      expect(loadTabs(dir)).toEqual({
+        version: 1,
+        activeTabId: "valid",
+        tabs: [
+          {
+            id: "valid",
+            dbId: "docker:db",
+            table: "cancel_bookings",
+            view: "data",
+          },
+        ],
+      });
+    });
+  });
+
   test("backs up invalid JSON and returns an empty state", () => {
     withTempProject((dir) => {
       const storeDir = join(dir, ".code-viewer");

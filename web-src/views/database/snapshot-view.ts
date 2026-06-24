@@ -4,6 +4,7 @@ import type {
   SnapshotDiffTableSummary,
   SnapshotMeta,
 } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 
 export type SnapshotViewDeps = {
   getDbId: () => string | null;
@@ -704,6 +705,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       refresh();
     });
     input.addEventListener("keydown", (e) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Enter") saveBtn.click();
       if (e.key === "Escape") dialog.remove();
     });

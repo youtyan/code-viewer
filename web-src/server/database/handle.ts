@@ -10,6 +10,7 @@ import type {
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
 import { listDockerDatabases, openDockerAdapter } from "./adapters/docker";
+import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
 import {
@@ -585,6 +586,9 @@ async function handleQuery(
     }
     return json(response);
   } catch (err) {
+    if (isDockerComposeServiceUnavailableError(err)) {
+      return handleError("database", "execute query", err);
+    }
     console.error(
       "[code-viewer] database error:",
       err instanceof Error ? err.message : String(err),
@@ -879,7 +883,7 @@ async function handleSearchStart(
   const includeNonText = body.includeNonText ?? false;
   const filterTables = body.tables;
 
-  (async () => {
+  const runJob = async () => {
     try {
       const adapter = await getAdapter(r, cwd);
       let tables = adapter
@@ -924,7 +928,9 @@ async function handleSearchStart(
       job.error = err instanceof Error ? err.message : String(err);
       job.done = true;
     }
-  })();
+  };
+  const timer = setTimeout(() => void runJob(), 0);
+  timer.unref?.();
 
   return json({ jobId });
 }
@@ -1501,5 +1507,6 @@ export async function handleDatabaseRoute(
     },
     sideEffectAllowed,
     wrapResponse,
+    (err) => handleError("database", "handle database request", err),
   );
 }

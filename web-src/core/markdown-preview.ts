@@ -3,6 +3,7 @@ import type Renderer from "markdown-it/lib/renderer.mjs";
 import type Token from "markdown-it/lib/token.mjs";
 import markdownItAnchor from "markdown-it-anchor";
 import markdownItFootnote from "markdown-it-footnote";
+import { isImeComposing } from "./keyboard";
 import { buildRawFileUrl, type SourceFileTarget } from "./routes";
 
 export type MarkdownPreviewOptions = {
@@ -763,6 +764,7 @@ function openMermaidLightbox(originalSvg: SVGSVGElement) {
     overlay.classList.remove("dragging");
   };
   const onKey = (e: KeyboardEvent) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") close();
     else if (e.key === "0") fit();
     else if (e.key === "+" || e.key === "=") zoomCentered(1.25);

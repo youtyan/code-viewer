@@ -61,6 +61,16 @@ describe("routes", () => {
       }),
     ).toBe("/file?path=README.md&target=main&line=12-15");
     expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "main",
+        view: "blob",
+        virtual: "off",
+        range,
+      }),
+    ).toBe("/file?path=README.md&target=main&virtual=off");
+    expect(
       buildRoute({ screen: "help", lang: "en", section: "overview", range }),
     ).toBe("/help");
     expect(
@@ -156,6 +166,20 @@ describe("routes", () => {
       ref: "main",
       view: "blob",
       line: { start: 12, end: 15 },
+      range: defaultRange,
+    });
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=main&virtual=off",
+        defaultRange,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blob",
+      virtual: "off",
       range: defaultRange,
     });
   });

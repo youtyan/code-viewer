@@ -87,4 +87,44 @@ describe("server runtime compatibility helpers", () => {
       await server?.close();
     }
   });
+
+  test("close resolves even when a streaming response is still open", async () => {
+    let server: StartedServer | undefined;
+    let streamController:
+      | ReadableStreamDefaultController<Uint8Array>
+      | undefined;
+
+    try {
+      server = await startServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch() {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+                controller.enqueue(new TextEncoder().encode("open"));
+              },
+            }),
+            { headers: { "Content-Type": "text/plain; charset=utf-8" } },
+          );
+        },
+      });
+
+      const response = await fetch(`http://127.0.0.1:${server.port}/stream`);
+      const reader = response.body?.getReader();
+      expect(response.status).toBe(200);
+      expect((await reader?.read())?.done).toBe(false);
+
+      await server.close();
+      await reader?.cancel().catch(() => undefined);
+    } finally {
+      try {
+        streamController?.close();
+      } catch {
+        /* response may have been force-closed */
+      }
+      await server?.close().catch(() => undefined);
+    }
+  });
 });

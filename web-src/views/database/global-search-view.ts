@@ -1,4 +1,5 @@
 import type { GlobalSearchHit } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 
 export type GlobalSearchViewDeps = {
   getDbId: () => string | null;
@@ -241,6 +242,7 @@ export function createGlobalSearchView(
 
   searchBtn.addEventListener("click", startSearch);
   input.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Enter") startSearch();
   });
   cancelBtn.addEventListener("click", cancelSearch);

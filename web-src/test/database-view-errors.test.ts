@@ -406,7 +406,9 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function mockFetch(handler: (url: string, init?: RequestInit) => Response) {
+function mockFetch(
+  handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+) {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     writable: true,
@@ -422,13 +424,22 @@ function mockFetch(handler: (url: string, init?: RequestInit) => Response) {
   });
 }
 
-function createViewForTest() {
+function restoredTabLabels(): string[] {
+  return Array.from(document.querySelectorAll(".db-tabs-chip-label")).map(
+    (label) => label.textContent,
+  );
+}
+
+function createViewForTest(
+  overrides: Partial<Parameters<typeof createDatabaseView>[0]> = {},
+) {
   return createDatabaseView({
     setRoute() {},
     setPageMode() {},
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     trackLoad: (promise) => promise,
     syncHeaderMenu() {},
+    ...overrides,
   });
 }
 
@@ -469,6 +480,10 @@ function baseTableResponse() {
 async function leaveView(view: ReturnType<typeof createDatabaseView>) {
   view.leave();
   await Promise.resolve();
+}
+
+async function flushMicrotasks(count = 8) {
+  for (let i = 0; i < count; i++) await Promise.resolve();
 }
 
 describe("database view SQL error rendering", () => {
@@ -517,6 +532,543 @@ describe("database view SQL error rendering", () => {
 
     expect(document.querySelector(".db-pane-error")).toBeNull();
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    await leaveView(view);
+  });
+
+  test("removes the database root from the document when suspended", async () => {
+    installDatabaseDom();
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+
+    expect(document.querySelector(".db-root")).toBeTruthy();
+
+    view.suspend();
+
+    expect(document.querySelector(".db-root")).toBeNull();
+    expect(document.body.classList.contains("gdp-database-page")).toBe(false);
+    expect(document.getElementById("diff")?.hidden).toBe(false);
+
+    await view.enter("docker:db");
+
+    const root = document.querySelector(".db-root") as unknown as FakeElement;
+    expect(root).toBeTruthy();
+    expect(root.hidden).toBe(false);
+    await leaveView(view);
+  });
+
+  test("does not remount database view after suspend while tabs are restoring", async () => {
+    installDatabaseDom();
+    let resolveTabs!: (res: Response) => void;
+    const tabsPromise = new Promise<Response>((resolve) => {
+      resolveTabs = resolve;
+    });
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return tabsPromise;
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    const entering = view.enter();
+    await flushMicrotasks();
+
+    expect(document.querySelector(".db-root")).toBeTruthy();
+
+    view.suspend();
+    resolveTabs(
+      jsonResponse({
+        version: 1,
+        activeTabId: "docker",
+        tabs: [{ id: "docker", dbId: "docker:db", table: "users" }],
+      }),
+    );
+    await entering;
+
+    expect(document.querySelector(".db-root")).toBeNull();
+    expect(document.body.classList.contains("gdp-database-page")).toBe(false);
+  });
+
+  test("does not duplicate restored tabs when re-entering after suspend", async () => {
+    installDatabaseDom();
+    let tabFetches = 0;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") {
+        tabFetches++;
+        return jsonResponse({
+          version: 1,
+          activeTabId: "docker",
+          tabs: [
+            {
+              id: "docker",
+              dbId: "docker:db",
+              table: "users",
+              view: "data",
+            },
+            {
+              id: "empty",
+              dbId: null,
+              table: null,
+              view: "data",
+            },
+          ],
+        });
+      }
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    expect(restoredTabLabels()).toEqual(["db", "(empty)"]);
+
+    view.suspend();
+    await view.enter();
+
+    expect(restoredTabLabels()).toEqual(["db", "(empty)"]);
+    expect(tabFetches).toBe(1);
+    await leaveView(view);
+  });
+
+  test("syncs a parameterless database route to the active tab on re-enter", async () => {
+    installDatabaseDom();
+    const routes: unknown[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "docker",
+          tabs: [
+            {
+              id: "docker",
+              dbId: "docker:db",
+              table: "course_categories",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "course_categories", type: "table", rowCount: 52 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            course_categories: [
+              { name: "id", type: "integer", primaryKey: true },
+            ],
+          },
+        });
+      if (url.startsWith("/_db/table"))
+        return jsonResponse({
+          ...baseTableResponse(),
+          table: "course_categories",
+        });
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest({
+      setRoute(route) {
+        routes.push(route);
+      },
+    });
+    await view.enter();
+    routes.length = 0;
+
+    view.suspend();
+    await view.enter();
+
+    expect(routes[routes.length - 1]).toEqual({
+      screen: "database",
+      db: "docker:db",
+      table: "course_categories",
+      tab: undefined,
+      range: { from: "HEAD", to: "worktree" },
+    });
+    await leaveView(view);
+  });
+
+  test("applies routed tables to the active restored tab instead of opening duplicates", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "docker",
+          tabs: [
+            {
+              id: "docker",
+              dbId: "docker:db",
+              table: "users",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            bookings: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", "bookings");
+
+    expect(document.querySelectorAll(".db-tabs-chip")).toHaveLength(1);
+    expect(fetchedTables).toEqual(["users", "bookings"]);
+    await leaveView(view);
+  });
+
+  test("routed table overrides a restored tableless search view", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    const routes: unknown[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "docker",
+          tabs: [
+            {
+              id: "docker",
+              dbId: "docker:db",
+              table: null,
+              view: "search",
+            },
+          ],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "course_categories", type: "table", rowCount: 52 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            course_categories: [
+              { name: "id", type: "integer", primaryKey: true },
+            ],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest({
+      setRoute(route) {
+        routes.push(route);
+      },
+    });
+    await view.enter("docker:db", "course_categories");
+
+    const sawRestoredSearchRoute = routes.some(
+      (route) =>
+        typeof route === "object" &&
+        route !== null &&
+        (route as { tab?: unknown }).tab === "search",
+    );
+    expect(document.querySelectorAll(".db-tabs-chip")).toHaveLength(1);
+    expect(fetchedTables.includes("course_categories")).toBe(true);
+    expect(sawRestoredSearchRoute).toBe(false);
+    expect(routes[routes.length - 1]).toEqual({
+      screen: "database",
+      db: "docker:db",
+      table: "course_categories",
+      tab: undefined,
+      range: { from: "HEAD", to: "worktree" },
+    });
+    await leaveView(view);
+  });
+
+  test("opens a routed table without fetching the first table first", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            bookings: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", "bookings");
+
+    expect(fetchedTables).toEqual(["bookings"]);
+    await leaveView(view);
+  });
+
+  test("does not fallback stale restored tabs to the first database", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "stale",
+          tabs: [
+            {
+              id: "stale",
+              dbId: ".code-viewer/db-snapshots.sqlite",
+              table: "cancel_bookings",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    expect(fetchedTables).toEqual([]);
+    await leaveView(view);
+  });
+
+  test("does not fallback an invalid routed database when restored tabs exist", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "empty",
+          tabs: [{ id: "empty", dbId: null, table: null, view: "data" }],
+        });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter(".code-viewer/db-snapshots.sqlite", "cancel_bookings");
+
+    expect(fetchedTables).toEqual([]);
+    await leaveView(view);
+  });
+
+  test("shows restored tab labels before database files finish loading", async () => {
+    installDatabaseDom();
+    let resolveFiles!: (res: Response) => void;
+    const filesPromise = new Promise<Response>((resolve) => {
+      resolveFiles = resolve;
+    });
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "sqlite",
+          tabs: [
+            {
+              id: "docker",
+              dbId: "docker:db:reraku_v2_development",
+              table: "users",
+              view: "data",
+            },
+            {
+              id: "sqlite",
+              dbId: "data/app.sqlite",
+              table: "users",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files") return filesPromise;
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    const entering = view.enter();
+    await flushMicrotasks();
+
+    expect(restoredTabLabels()).toEqual(["db", "app.sqlite"]);
+
+    resolveFiles(
+      jsonResponse({
+        files: [
+          ...baseFilesResponse().files,
+          {
+            id: "data/app.sqlite",
+            path: "data/app.sqlite",
+            name: "app.sqlite",
+            sizeBytes: 100,
+            kind: "sqlite",
+          },
+        ],
+      }),
+    );
+    await entering;
+    await leaveView(view);
+  });
+
+  test("loads the restored active tab before background tabs", async () => {
+    installDatabaseDom();
+    const events: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "analytics",
+          tabs: [
+            {
+              id: "main",
+              dbId: "docker:db",
+              table: "users",
+              view: "data",
+            },
+            {
+              id: "analytics",
+              dbId: "docker:analytics",
+              table: "bookings",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files")
+        return jsonResponse({
+          files: [
+            ...baseFilesResponse().files,
+            {
+              id: "docker:analytics",
+              path: "docker-compose.yml",
+              name: "analytics",
+              sizeBytes: 0,
+              kind: "mysql",
+            },
+          ],
+        });
+      if (url.startsWith("/_db/schema")) {
+        const db = new URL(url, "http://localhost").searchParams.get("db");
+        events.push(`schema:${db}`);
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+        });
+      }
+      if (url.startsWith("/_db/table")) {
+        const params = new URL(url, "http://localhost").searchParams;
+        events.push(`table:${params.get("db")}:${params.get("table")}`);
+        return jsonResponse({
+          ...baseTableResponse(),
+          table: params.get("table"),
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    expect(events.slice(0, 2)).toEqual([
+      "schema:docker:analytics",
+      "table:docker:analytics:bookings",
+    ]);
     await leaveView(view);
   });
 

@@ -6,6 +6,7 @@ import type {
   EsIndicesResponse,
   EsMappingResponse,
 } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
 import { setPaneStatus } from "./pane-status";
@@ -469,6 +470,7 @@ export function createElasticsearchExplorer(
   }
   searchBtn.addEventListener("click", runSearch);
   searchInput.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       runSearch();

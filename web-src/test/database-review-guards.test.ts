@@ -1,7 +1,12 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  __clearDockerComposeContainerNameCacheForTest,
+  __setDockerComposeSpawnSyncForTest,
+} from "../server/database/adapters/docker-utils";
 import {
   canonicalizeEsSnapshotContainer,
   isReadOnlyEsPath,
@@ -13,6 +18,13 @@ import {
   handleDatabaseRoute,
   parseSelectAllTable,
 } from "../server/database/handle";
+
+type SpawnSyncLike = typeof spawnSync;
+
+afterEach(() => {
+  __setDockerComposeSpawnSyncForTest(null);
+  __clearDockerComposeContainerNameCacheForTest();
+});
 
 describe("Elasticsearch read-only path allowlist", () => {
   for (const [path, expected] of [
@@ -139,6 +151,136 @@ describe("database close route", () => {
       if (!res) throw new Error("route did not match");
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("docker service unavailable route errors", () => {
+  function writeCompose(dir: string): void {
+    writeFileSync(
+      join(dir, "docker-compose.yml"),
+      [
+        "services:",
+        "  redis-svc:",
+        "    image: redis:7",
+        "  es-svc:",
+        "    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0",
+        "  pg-svc:",
+        "    image: postgres:16",
+        "    environment:",
+        "      POSTGRES_DB: app",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  function mockNoRunningComposeContainers(): void {
+    __setDockerComposeSpawnSyncForTest((() => ({
+      status: 0,
+      stdout: "[]",
+      stderr: "",
+    })) as unknown as SpawnSyncLike);
+  }
+
+  test("redis explorer routes return startup guidance instead of a generic 500", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-redis-down-"));
+    try {
+      writeCompose(dir);
+      mockNoRunningComposeContainers();
+      const req = new Request(
+        "http://localhost/_db/redis/databases?db=docker:redis-svc",
+      );
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe(
+        'Container for service "redis-svc" is not running. Start it with: docker compose up -d redis-svc',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("elasticsearch explorer routes return startup guidance instead of a generic 500", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-es-down-"));
+    try {
+      writeCompose(dir);
+      mockNoRunningComposeContainers();
+      const req = new Request(
+        "http://localhost/_db/elasticsearch/indices?db=docker:es-svc",
+      );
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe(
+        'Container for service "es-svc" is not running. Start it with: docker compose up -d es-svc',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("sql docker routes return startup guidance instead of a generic 500", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-pg-down-"));
+    try {
+      writeCompose(dir);
+      mockNoRunningComposeContainers();
+      const req = new Request(
+        "http://localhost/_db/schema?db=docker:pg-svc&includeColumns=1",
+      );
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe(
+        'Container for service "pg-svc" is not running. Start it with: docker compose up -d pg-svc',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("sql query routes return startup guidance instead of a JSON error blob", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-pg-query-down-"));
+    try {
+      writeCompose(dir);
+      mockNoRunningComposeContainers();
+      const req = new Request("http://localhost/_db/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ db: "docker:pg-svc", sql: "SELECT 1" }),
+      });
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe(
+        'Container for service "pg-svc" is not running. Start it with: docker compose up -d pg-svc',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

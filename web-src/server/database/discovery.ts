@@ -47,6 +47,7 @@ export function discoverSqliteFiles(
 ): DiscoveredDb[] {
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
+  omitSet.add(".code-viewer");
   const results: DiscoveredDb[] = [];
 
   function scan(dir: string, depth: number) {
@@ -86,12 +87,7 @@ export function discoverSqliteFiles(
   }
 
   scan(cwd, 0);
-  results.sort((a, b) => {
-    const aInternal = a.path.startsWith(".code-viewer/") ? 1 : 0;
-    const bInternal = b.path.startsWith(".code-viewer/") ? 1 : 0;
-    if (aInternal !== bInternal) return aInternal - bInternal;
-    return a.path.localeCompare(b.path);
-  });
+  results.sort((a, b) => a.path.localeCompare(b.path));
   return results;
 }
 
@@ -104,7 +100,15 @@ export function validateDbPath(cwd: string, dbPath: string): string | null {
   )
     return null;
   const parts = dbPath.split(/[\\/]+/);
-  if (parts.some((p) => p === ".." || p.toLowerCase() === ".git")) return null;
+  if (
+    parts.some(
+      (p) =>
+        p === ".." ||
+        p.toLowerCase() === ".git" ||
+        p.toLowerCase() === ".code-viewer",
+    )
+  )
+    return null;
   const full = join(cwd, dbPath);
   if (!existsSync(full)) return null;
   let realCwd: string;
