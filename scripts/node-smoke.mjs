@@ -81,6 +81,17 @@ try {
   );
   if (!files.ok) throw new Error(`/_files failed: ${files.status}`);
 
+  const snapshots = await withTimeout(
+    fetch(new URL("_db/snapshot/list", baseUrl)),
+    "/_db/snapshot/list timed out",
+  );
+  if (!snapshots.ok)
+    throw new Error(`/_db/snapshot/list failed: ${snapshots.status}`);
+  const snapshotBody = await snapshots.json();
+  if (!Array.isArray(snapshotBody.snapshots)) {
+    throw new Error("/_db/snapshot/list returned invalid JSON");
+  }
+
   const ranged = await withTimeout(
     fetch(new URL("_file?path=README.md&ref=worktree", baseUrl), {
       headers: { Range: "bytes=0-15" },
