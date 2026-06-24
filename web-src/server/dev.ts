@@ -2,6 +2,7 @@
 
 import { readdirSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
+import { terminateChild, terminateChildren } from "./dev-process";
 
 const ROOT = normalize(join(import.meta.dir, "..", ".."));
 const SERVER_ROOT = join(ROOT, "web-src", "server");
@@ -15,6 +16,7 @@ type ChildProcess = {
 let server: ChildProcess | null = null;
 let build: ChildProcess | null = null;
 let restarting = false;
+let shuttingDown = false;
 let firstStart = true;
 
 function withDefaultPort(args: string[]) {
@@ -108,26 +110,40 @@ async function restartServer() {
   const old = server;
   server = null;
   if (old) {
-    old.kill();
-    await old.exited.catch(() => 1);
+    await terminateChild(old).catch(() => 1);
   }
   startServer();
   restarting = false;
 }
 
 function killChildren() {
-  if (server) server.kill();
-  if (build) build.kill();
+  if (server) server.kill("SIGTERM");
+  if (build) build.kill("SIGTERM");
 }
 
-function shutdown() {
-  killChildren();
+function forceKillChildren() {
+  if (server) server.kill("SIGKILL");
+  if (build) build.kill("SIGKILL");
+}
+
+async function shutdown() {
+  if (shuttingDown) {
+    forceKillChildren();
+    process.exit(1);
+  }
+  shuttingDown = true;
+  const children = [server, build].filter((child): child is ChildProcess =>
+    Boolean(child),
+  );
+  server = null;
+  build = null;
+  await terminateChildren(children).catch(() => undefined);
   process.exit(0);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("SIGHUP", shutdown);
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGHUP", () => void shutdown());
 // Crash paths (uncaught exceptions and the like) bypass the signal
 // handlers; the exit hook keeps children from being orphaned there too.
 process.on("exit", killChildren);

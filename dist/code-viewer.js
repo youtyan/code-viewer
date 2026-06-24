@@ -589,12 +589,28 @@ function startServer(options) {
       resolve({
         port,
         close: () => new Promise((resolveClose, rejectClose) => {
-          server.close((error) => {
-            if (error)
+          let settled = false;
+          let forceTimer = null;
+          const settle = (error) => {
+            if (settled)
+              return;
+            settled = true;
+            if (forceTimer)
+              clearTimeout(forceTimer);
+            const code = error && "code" in error ? String(error.code) : "";
+            if (error && code !== "ERR_SERVER_NOT_RUNNING") {
               rejectClose(error);
-            else
-              resolveClose();
-          });
+              return;
+            }
+            resolveClose();
+          };
+          forceTimer = setTimeout(() => {
+            server.closeAllConnections?.();
+            settle();
+          }, 2000);
+          forceTimer.unref?.();
+          server.close(settle);
+          server.closeIdleConnections?.();
           server.closeAllConnections?.();
         })
       });
@@ -3500,31 +3516,85 @@ var init_sql_snapshot = __esm(() => {
 
 // web-src/server/database/adapters/docker-utils.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
+function isDockerComposeServiceUnavailableError(err) {
+  return err instanceof DockerComposeServiceUnavailableError;
+}
+function composeContainerNameCacheKey(serviceName, cwd) {
+  return `${cwd}\x00${serviceName}`;
+}
 function resolveRunningComposeContainerName(serviceName, cwd) {
-  const proc = spawnSync2("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
-  if (proc.status !== 0)
+  const cacheKey = composeContainerNameCacheKey(serviceName, cwd);
+  const now = Date.now();
+  const cached = composeContainerNameCache.get(cacheKey);
+  if (cached && cached.expiresAt > now)
+    return cached.value;
+  const proc = spawnSyncImpl("docker", ["compose", "ps", "--format", "json", "--status", "running"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"], cwd });
+  if (proc.status !== 0) {
+    composeContainerNameCache.set(cacheKey, {
+      value: null,
+      expiresAt: now + COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS
+    });
     return null;
+  }
   try {
     const output = proc.stdout.trim();
     const containers = output.startsWith("[") ? JSON.parse(output) : output.split(`
 `).filter(Boolean).map((line) => JSON.parse(line));
     const match = containers.find((c) => c.Service === serviceName && c.State === "running");
-    return match?.Name || null;
+    const value = match?.Name || null;
+    composeContainerNameCache.set(cacheKey, {
+      value,
+      expiresAt: now + (value ? COMPOSE_CONTAINER_NAME_POSITIVE_TTL_MS : COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS)
+    });
+    return value;
   } catch {
+    composeContainerNameCache.set(cacheKey, {
+      value: null,
+      expiresAt: now + COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS
+    });
     return null;
   }
 }
 function resolveRunningComposeContainerNameOrThrow(serviceName, cwd) {
   const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
-    throw new Error(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+    throw new DockerComposeServiceUnavailableError(serviceName, cwd);
   }
   return containerName;
 }
-var init_docker_utils = () => {};
+var COMPOSE_CONTAINER_NAME_POSITIVE_TTL_MS = 30000, COMPOSE_CONTAINER_NAME_NEGATIVE_TTL_MS = 3000, composeContainerNameCache, spawnSyncImpl, DockerComposeServiceUnavailableError;
+var init_docker_utils = __esm(() => {
+  composeContainerNameCache = new Map;
+  spawnSyncImpl = spawnSync2;
+  DockerComposeServiceUnavailableError = class DockerComposeServiceUnavailableError extends Error {
+    serviceName;
+    cwd;
+    status = 503;
+    constructor(serviceName, cwd) {
+      super(`Container for service "${serviceName}" is not running. Start it with: docker compose up -d ${serviceName}`);
+      this.name = "DockerComposeServiceUnavailableError";
+      this.serviceName = serviceName;
+      this.cwd = cwd;
+    }
+  };
+});
 
 // web-src/server/database/adapters/docker.ts
 import { spawn as spawn2, spawnSync as spawnSync3 } from "node:child_process";
+function dockerDatabasesCacheKey(serviceName, kind, cwd) {
+  return `${serviceName}\x00${kind}\x00${cwd}`;
+}
+function setDockerDatabasesCache(key, value, ttlMs, now = Date.now()) {
+  const cachedValue = [...value];
+  dockerDatabasesCache.set(key, {
+    value: cachedValue,
+    expiresAt: now + ttlMs
+  });
+  return [...cachedValue];
+}
+function fallbackDockerDatabases(defaultDb) {
+  return defaultDb ? [defaultDb] : [];
+}
 function buildExecArgs(config, sql) {
   if (config.kind === "postgresql") {
     return [
@@ -3563,7 +3633,6 @@ function buildExecArgs(config, sql) {
     config.user,
     config.database,
     "--batch",
-    "--raw",
     "--default-character-set=utf8mb4",
     "-e",
     sql
@@ -3571,7 +3640,7 @@ function buildExecArgs(config, sql) {
 }
 function execInContainer(config, sql, timeoutMs = 1e4) {
   const args = buildExecArgs(config, sql);
-  const proc = spawnSync3(args[0], args.slice(1), {
+  const proc = spawnSyncImpl2(args[0], args.slice(1), {
     encoding: "utf8",
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "pipe"]
@@ -3670,17 +3739,71 @@ async function execInContainerAsync(config, sql, timeoutMs = 1e4) {
     return execWithBunSpawn(bunSpawn, args, timeoutMs);
   return execWithNodeSpawn(args, timeoutMs);
 }
+function stripFinalLineBreak(text) {
+  if (text.endsWith(`\r
+`))
+    return text.slice(0, -2);
+  if (text.endsWith(`
+`) || text.endsWith("\r"))
+    return text.slice(0, -1);
+  return text;
+}
+function decodeMysqlBatchField(value) {
+  let out = "";
+  for (let i = 0;i < value.length; i++) {
+    const ch = value[i];
+    if (ch !== "\\" || i + 1 >= value.length) {
+      out += ch;
+      continue;
+    }
+    const next = value[++i];
+    switch (next) {
+      case "0":
+        out += "\x00";
+        break;
+      case "b":
+        out += "\b";
+        break;
+      case "n":
+        out += `
+`;
+        break;
+      case "r":
+        out += "\r";
+        break;
+      case "t":
+        out += "\t";
+        break;
+      case "Z":
+        out += "\x1A";
+        break;
+      case "\\":
+        out += "\\";
+        break;
+      default:
+        out += `\\${next}`;
+        break;
+    }
+  }
+  return out;
+}
+function splitTsvLine(line, decodeFields) {
+  const fields = line.split("\t");
+  return decodeFields ? fields.map(decodeMysqlBatchField) : fields;
+}
 function parseTsvOutput(stdout, hasHeader) {
-  const lines = stdout.trim().split(`
-`).filter(Boolean);
+  const text = stripFinalLineBreak(stdout);
+  if (text.length === 0)
+    return { columns: [], rows: [] };
+  const lines = text.split(/\r?\n/);
   if (lines.length === 0)
     return { columns: [], rows: [] };
   if (hasHeader) {
-    const columns = lines[0].split("\t");
-    const rows2 = lines.slice(1).map((line) => line.split("\t"));
+    const columns = splitTsvLine(lines[0], true);
+    const rows2 = lines.slice(1).map((line) => splitTsvLine(line, true));
     return { columns, rows: rows2 };
   }
-  const rows = lines.map((line) => line.split("\t"));
+  const rows = lines.map((line) => splitTsvLine(line, false));
   return { columns: [], rows };
 }
 function sanitizeIdentifier(name, kind) {
@@ -3693,6 +3816,23 @@ function buildOrderClause(orderBy, kind) {
     return "";
   const parts = orderBy.map((o) => `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`);
   return ` ORDER BY ${parts.join(", ")}`;
+}
+function isMysqlSpatialType(type) {
+  const baseType = type.trim().toLowerCase().split(/[\s(]/, 1)[0];
+  return MYSQL_SPATIAL_TYPES.has(baseType);
+}
+function buildTableSelectList(columns, kind) {
+  if (kind !== "mysql")
+    return "*";
+  let hasSpatialColumn = false;
+  const parts = columns.map((column) => {
+    const columnId = sanitizeIdentifier(column.name, kind);
+    if (!isMysqlSpatialType(column.type))
+      return columnId;
+    hasSpatialColumn = true;
+    return `ST_AsText(${columnId}) AS ${columnId}`;
+  });
+  return hasSpatialColumn ? parts.join(", ") : "*";
 }
 function escapeSqlString(value) {
   return `'${value.replace(/'/g, "''")}'`;
@@ -4018,12 +4158,15 @@ function createDockerAdapter(config) {
     async getTablePageWithMeta(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
       const order = buildOrderClause(options.orderBy, config.kind);
-      const dataSql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
-      const [columns, dataResult, totalRows] = await Promise.all([
-        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
+      const columnsPromise = tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table));
+      const totalRowsPromise = tableMetaCache.getRowCount(table, async () => rowCountFromResult(await execAsync(countSql)));
+      const columns = await columnsPromise;
+      const selectList = buildTableSelectList(columns, config.kind);
+      const dataSql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const [dataResult, totalRows] = await Promise.all([
         execAsync(dataSql),
-        tableMetaCache.getRowCount(table, async () => rowCountFromResult(await execAsync(countSql)))
+        totalRowsPromise
       ]);
       return tablePageMetaFromResults(columns, dataResult, totalRows);
     },
@@ -4032,21 +4175,25 @@ function createDockerAdapter(config) {
       const order = buildOrderClause(options.orderBy, config.kind);
       const where = buildDockerFilterWhere(options.grouped, config.kind);
       const whereClause = where ? ` WHERE ${where}` : "";
-      const dataSql = `SELECT * FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;
-      const [columns, dataResult, countResult] = await Promise.all([
-        tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table)),
+      const columnsPromise = tableMetaCache.getColumns(table, () => fetchColumnsAsyncUncached(table));
+      const countResultPromise = execAsync(countSql);
+      const columns = await columnsPromise;
+      const selectList = buildTableSelectList(columns, config.kind);
+      const dataSql = `SELECT ${selectList} FROM ${id}${whereClause}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const [dataResult, countResult] = await Promise.all([
         execAsync(dataSql),
-        execAsync(countSql)
+        countResultPromise
       ]);
       return tablePageMetaFromResults(columns, dataResult, rowCountFromResult(countResult));
     },
     getTablePage(table, options) {
       const id = sanitizeIdentifier(table, config.kind);
       const order = buildOrderClause(options.orderBy, config.kind);
-      const sql = `SELECT * FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
-      const result = exec(sql);
       const cols = this.getColumns(table);
+      const selectList = buildTableSelectList(cols, config.kind);
+      const sql = `SELECT ${selectList} FROM ${id}${order} LIMIT ${options.limit} OFFSET ${options.offset}`;
+      const result = exec(sql);
       if (result.rows.length === 0) {
         return {
           columns: cols.map((c) => c.name),
@@ -4163,34 +4310,48 @@ function createDockerAdapter(config) {
   return adapter;
 }
 function listDockerDatabases(serviceName, kind, env, cwd) {
+  const cacheKey = dockerDatabasesCacheKey(serviceName, kind, cwd);
+  const now = Date.now();
+  const cached = dockerDatabasesCache.get(cacheKey);
+  if (cached && cached.expiresAt > now)
+    return [...cached.value];
   const containerName = resolveRunningComposeContainerName(serviceName, cwd);
-  if (!containerName)
-    return [];
-  const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || (kind === "postgresql" ? "postgres" : "root");
-  const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MYSQL_ROOT_PASSWORD || env.MARIADB_PASSWORD || env.MARIADB_ROOT_PASSWORD || "";
-  const defaultDb = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || (kind === "postgresql" ? "postgres" : "");
+  if (!containerName) {
+    return setDockerDatabasesCache(cacheKey, [], DOCKER_DATABASES_NEGATIVE_TTL_MS, now);
+  }
+  const user = env.POSTGRES_USER || env.MYSQL_USER || env.MARIADB_USER || env.POSTGRES_USERNAME || env.MYSQL_USERNAME || env.USER || "root";
+  const password = env.POSTGRES_PASSWORD || env.MYSQL_PASSWORD || env.MARIADB_PASSWORD || "";
+  const defaultDb = env.POSTGRES_DB || env.MYSQL_DATABASE || env.MARIADB_DATABASE || env.DATABASE_NAME || "";
   const config = {
     kind,
     containerName,
     user,
     password,
-    database: defaultDb || (kind === "postgresql" ? "postgres" : "mysql")
+    database: defaultDb || (kind === "postgresql" ? user || "postgres" : "mysql")
   };
   try {
     let sql;
     if (kind === "postgresql") {
-      sql = `SELECT datname FROM pg_database WHERE datistemplate = false AND datallowconn = true ORDER BY datname`;
+      sql = `SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname`;
     } else {
       sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys') ORDER BY schema_name`;
     }
     const result = execInContainer(config, sql);
-    if (result.code !== 0)
-      return defaultDb ? [defaultDb] : [];
+    if (result.code !== 0) {
+      const fallback = fallbackDockerDatabases(defaultDb);
+      if (fallback.length > 0)
+        return fallback;
+      return setDockerDatabasesCache(cacheKey, [], DOCKER_DATABASES_NEGATIVE_TTL_MS, now);
+    }
     const parsed = parseTsvOutput(result.stdout, kind === "mysql");
     const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
-    return dbs.length > 0 ? dbs : defaultDb ? [defaultDb] : [];
+    const value = dbs.length > 0 ? dbs : fallbackDockerDatabases(defaultDb);
+    return setDockerDatabasesCache(cacheKey, value, value.length > 0 ? DOCKER_DATABASES_POSITIVE_TTL_MS : DOCKER_DATABASES_NEGATIVE_TTL_MS, now);
   } catch {
-    return defaultDb ? [defaultDb] : [];
+    const fallback = fallbackDockerDatabases(defaultDb);
+    if (fallback.length > 0)
+      return fallback;
+    return setDockerDatabasesCache(cacheKey, [], DOCKER_DATABASES_NEGATIVE_TTL_MS, now);
   }
 }
 function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
@@ -4206,10 +4367,23 @@ function openDockerAdapter(serviceName, kind, env, cwd, overrideDatabase) {
     database
   });
 }
-var COLUMNS_TTL_MS = 30000, ROWCOUNT_TTL_MS = 15000;
+var COLUMNS_TTL_MS = 30000, ROWCOUNT_TTL_MS = 15000, DOCKER_DATABASES_POSITIVE_TTL_MS = 15000, DOCKER_DATABASES_NEGATIVE_TTL_MS = 3000, dockerDatabasesCache, spawnSyncImpl2, MYSQL_SPATIAL_TYPES;
 var init_docker = __esm(() => {
   init_sql_snapshot();
   init_docker_utils();
+  dockerDatabasesCache = new Map;
+  spawnSyncImpl2 = spawnSync3;
+  MYSQL_SPATIAL_TYPES = new Set([
+    "geometry",
+    "point",
+    "linestring",
+    "polygon",
+    "multipoint",
+    "multilinestring",
+    "multipolygon",
+    "geometrycollection",
+    "geomcollection"
+  ]);
 });
 
 // web-src/server/database/adapters/sqlite.ts
@@ -4561,6 +4735,7 @@ function isSqliteFile(fullPath) {
 function discoverSqliteFiles(cwd, omitDirNames) {
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
+  omitSet.add(".code-viewer");
   const results = [];
   function scan(dir, depth) {
     if (depth > MAX_SCAN_DEPTH || results.length >= MAX_ENTRIES)
@@ -4605,20 +4780,14 @@ function discoverSqliteFiles(cwd, omitDirNames) {
     }
   }
   scan(cwd, 0);
-  results.sort((a, b) => {
-    const aInternal = a.path.startsWith(".code-viewer/") ? 1 : 0;
-    const bInternal = b.path.startsWith(".code-viewer/") ? 1 : 0;
-    if (aInternal !== bInternal)
-      return aInternal - bInternal;
-    return a.path.localeCompare(b.path);
-  });
+  results.sort((a, b) => a.path.localeCompare(b.path));
   return results;
 }
 function validateDbPath(cwd, dbPath) {
   if (!dbPath || dbPath.includes("\x00") || dbPath.startsWith("/") || dbPath.startsWith("\\"))
     return null;
   const parts = dbPath.split(/[\\/]+/);
-  if (parts.some((p) => p === ".." || p.toLowerCase() === ".git"))
+  if (parts.some((p) => p === ".." || p.toLowerCase() === ".git" || p.toLowerCase() === ".code-viewer"))
     return null;
   const full = join8(cwd, dbPath);
   if (!existsSync6(full))
@@ -5045,7 +5214,7 @@ function isTextLikeType(type) {
   return upper.includes("CHAR") || upper.includes("TEXT") || upper.includes("VARCHAR") || upper.includes("CLOB") || upper.includes("STRING") || upper === "JSON" || upper === "JSONB" || upper === "XML" || upper === "UUID";
 }
 function escapeLikeTerm(term) {
-  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+  return term.replace(/=/g, "==").replace(/%/g, "=%").replace(/_/g, "=_");
 }
 function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkColumns) {
   const kind = adapter.kind;
@@ -5063,10 +5232,10 @@ function searchTable(adapter, table, columns, term, maxHits, includeNonText, pkC
     let sql;
     const remaining = maxHits - hits.length;
     if (kind === "sqlite") {
-      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '\\' LIMIT ${remaining}`;
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '='`;
     } else {
       const likeVal = escapeSqlString2(`%${escapedTerm}%`);
-      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '\\' LIMIT ${remaining}`;
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '='`;
     }
     try {
       const result = kind === "sqlite" ? adapter.executeReadonlyQuery(sql, [`%${escapedTerm}%`], remaining) : adapter.executeReadonlyQuery(sql, undefined, remaining);
@@ -5534,7 +5703,7 @@ function resolveDockerExplorer(cwd, dbParam, kind, cache, openFn, omitDirNames) 
   const explorer = cache.getOrOpen(dbParam, () => openFn(info));
   return { dbId: dbParam, explorer };
 }
-async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res) {
+async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) => res, handleRouteError) {
   if (!Object.prototype.hasOwnProperty.call(routes, url.pathname))
     return null;
   const route = routes[url.pathname];
@@ -5545,7 +5714,13 @@ async function dispatchRoutes(req, url, routes, sideEffectAllowed, wrap = (res) 
   if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
     return wrap(textError("forbidden", 403));
   }
-  return wrap(await route.handler());
+  try {
+    return wrap(await route.handler());
+  } catch (err) {
+    if (!handleRouteError)
+      throw err;
+    return wrap(handleRouteError(err));
+  }
 }
 async function parsePostJsonBody(req) {
   if (req.method !== "POST") {
@@ -5560,10 +5735,14 @@ async function parsePostJsonBody(req) {
 function handleError(prefix, action, err) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
+  if (isDockerComposeServiceUnavailableError(err)) {
+    return textError(message, err.status);
+  }
   return textError(`failed to ${action}: ${message}`, 500);
 }
 var DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8, DEFAULT_DOCKER_ADAPTER_IDLE_MS;
 var init_handle_shared = __esm(() => {
+  init_docker_utils();
   init_discovery();
   DEFAULT_DOCKER_ADAPTER_IDLE_MS = 5 * 60 * 1000;
 });
@@ -5741,7 +5920,7 @@ async function handleElasticsearchRoute(req, url, cwd, sideEffectAllowed, omitDi
       sideEffect: (m) => m === "POST",
       handler: () => handleSearch(cwd, req, url, omitDirNames)
     }
-  }, sideEffectAllowed, wrap);
+  }, sideEffectAllowed, wrap, (err) => handleError("elasticsearch", "handle elasticsearch request", err));
 }
 var esAdapterCache;
 var init_handle_elasticsearch = __esm(() => {
@@ -6472,7 +6651,7 @@ async function handleRedisRoute(req, url, cwd, sideEffectAllowed, omitDirNames) 
       methods: ["GET"],
       handler: () => handleValue(cwd, url, omitDirNames)
     }
-  }, sideEffectAllowed, wrap);
+  }, sideEffectAllowed, wrap, (err) => handleError("redis", "handle redis request", err));
 }
 function handleValue(cwd, url, omitDirNames) {
   const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
@@ -6968,6 +7147,11 @@ function sanitizeCssSize(v) {
     return;
   return isValidCssSize(v) ? v : undefined;
 }
+function isToolInternalDbId(dbId) {
+  if (!dbId || dbId.startsWith("docker:"))
+    return false;
+  return dbId.split(/[\\/]+/).some((part) => part.toLowerCase() === ".code-viewer");
+}
 function sanitizeRedis(v) {
   if (!v || typeof v !== "object")
     return;
@@ -7023,6 +7207,8 @@ function sanitize(input) {
       continue;
     seenIds.add(id);
     const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
+    if (isToolInternalDbId(dbId))
+      continue;
     const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
     const view = typeof tab.view === "string" && VALID_VIEWS.has(tab.view) ? tab.view : "data";
     const out = { id, dbId, table, view };
@@ -7497,6 +7683,9 @@ async function handleQuery(cwd, req, sendSse, omitDirNames) {
     }
     return json(response);
   } catch (err) {
+    if (isDockerComposeServiceUnavailableError(err)) {
+      return handleError("database", "execute query", err);
+    }
     console.error("[code-viewer] database error:", err instanceof Error ? err.message : String(err));
     const elapsed = Date.now() - start;
     const response = {
@@ -7723,7 +7912,7 @@ async function handleSearchStart(cwd, req, omitDirNames) {
   const maxHitsPerTable = body.maxHitsPerTable ?? 50;
   const includeNonText = body.includeNonText ?? false;
   const filterTables = body.tables;
-  (async () => {
+  const runJob = async () => {
     try {
       const adapter = await getAdapter(r, cwd);
       let tables = adapter.getTables().filter((t) => t.type === "table").map((t) => t.name);
@@ -7757,7 +7946,9 @@ async function handleSearchStart(cwd, req, omitDirNames) {
       job.error = err instanceof Error ? err.message : String(err);
       job.done = true;
     }
-  })();
+  };
+  const timer = setTimeout(() => void runJob(), 0);
+  timer.unref?.();
   return json({ jobId });
 }
 function handleSearchStatus(url) {
@@ -8171,11 +8362,12 @@ async function handleDatabaseRoute(req, url, cwd, omitDirNames, sideEffectAllowe
       sideEffect: (m) => m !== "GET",
       handler: () => method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req)
     }
-  }, sideEffectAllowed, wrapResponse);
+  }, sideEffectAllowed, wrapResponse, (err) => handleError("database", "handle database request", err));
 }
 var initialized = false, dockerAdapterCache, EXPORT_MAX_ROWS = 1e5, MAX_TABS_BODY_BYTES = 1e6, MAX_SNAPSHOT_TABLES = 512, MAX_SNAPSHOT_TABLE_NAME_LEN = 1024, searchJobs, snapshotJobs, DOCKER_CLOSE_REGISTRY, SNAPSHOT_DOCKER_SOURCE_REGISTRY;
 var init_handle = __esm(() => {
   init_docker();
+  init_docker_utils();
   init_sqlite();
   init_connection_pool();
   init_discovery();
@@ -9986,15 +10178,45 @@ data: ${data}
     try {
       client.enqueue(payload);
     } catch {
-      sseClients.delete(client);
+      removeSseClient(client);
     }
+  }
+}
+function removeSseClient(ctrl) {
+  sseClients.delete(ctrl);
+  const keepalive = sseKeepalives.get(ctrl);
+  if (keepalive)
+    clearInterval(keepalive);
+  sseKeepalives.delete(ctrl);
+}
+function closeSseClients() {
+  for (const client of [...sseClients]) {
+    removeSseClient(client);
+    try {
+      client.close();
+    } catch {}
   }
 }
 function openBrowser(url) {
   const cmd = process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd.exe", "/c", "start", "", url] : ["xdg-open", url];
   spawnDetached(cmd);
 }
-var WEB_ROOT, VERSION, DEFAULT_ARGS, PREVIEW_HUNKS_DEFAULT = 3, PREVIEW_LINES_DEFAULT = 1200, WATCHED_ASSET_FILES, SIZE_SMALL = 2000, SIZE_MEDIUM = 8000, SIZE_LARGE = 20000, LINE_INDEX_MIN_START = 1e4, LINE_INDEX_MAX_FILE_BYTES, BLOB_LINE_CACHE_MAX_BYTES, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_FILES = 50, SAFE_UPLOAD_EXTENSIONS, generation = 1, cwd, cliArgs, listenPort = 0, openAfterStart = false, scopeOmitDirNames, scopeOmitDirCliOverride = null, scopeExcludeNames, uploadDisabledByConfig = false, rgAvailableCache = null, enc, sseClients, fileCache, metaCache, fileListCache, lineIndexCache, blobLineIndexCache, blobBytesCache, blobLineCacheBytes = 0, server;
+async function shutdown(exitCode = 0) {
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  removeServerRegistry(cwd, process.pid);
+  closeSseClients();
+  worktreeWatch?.close();
+  try {
+    await server.close();
+  } catch (error) {
+    console.warn(`code-viewer server close skipped: ${String(error)}`);
+  }
+  process.exit(exitCode);
+}
+var WEB_ROOT, VERSION, DEFAULT_ARGS, PREVIEW_HUNKS_DEFAULT = 3, PREVIEW_LINES_DEFAULT = 1200, WATCHED_ASSET_FILES, SIZE_SMALL = 2000, SIZE_MEDIUM = 8000, SIZE_LARGE = 20000, LINE_INDEX_MIN_START = 1e4, LINE_INDEX_MAX_FILE_BYTES, BLOB_LINE_CACHE_MAX_BYTES, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_FILES = 50, SAFE_UPLOAD_EXTENSIONS, generation = 1, cwd, cliArgs, listenPort = 0, openAfterStart = false, scopeOmitDirNames, scopeOmitDirCliOverride = null, scopeExcludeNames, uploadDisabledByConfig = false, rgAvailableCache = null, enc, sseClients, sseKeepalives, fileCache, metaCache, fileListCache, lineIndexCache, blobLineIndexCache, blobBytesCache, blobLineCacheBytes = 0, server, worktreeWatch = null, shuttingDown = false;
 var init_preview = __esm(async () => {
   init_routes();
   init_annotations();
@@ -10057,6 +10279,7 @@ var init_preview = __esm(async () => {
   scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
   enc = new TextEncoder;
   sseClients = new Set;
+  sseKeepalives = new Map;
   fileCache = new Map;
   metaCache = new Map;
   fileListCache = new Map;
@@ -10137,16 +10360,15 @@ data: ok
 
 `));
               } catch {
-                sseClients.delete(controller);
-                clearInterval(keepalive);
+                removeSseClient(controller);
               }
             }, 15000);
+            keepalive.unref?.();
+            sseKeepalives.set(controller, keepalive);
           },
           cancel() {
             if (ctrl)
-              sseClients.delete(ctrl);
-            if (keepalive)
-              clearInterval(keepalive);
+              removeSseClient(ctrl);
           }
         }), {
           headers: {
@@ -10167,12 +10389,13 @@ data: ok
     root: cwd,
     started_at: new Date().toISOString()
   });
-  process.on("exit", () => removeServerRegistry(cwd, process.pid));
+  process.on("exit", () => {
+    removeServerRegistry(cwd, process.pid);
+    closeSseClients();
+    worktreeWatch?.close();
+  });
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => {
-      removeServerRegistry(cwd, process.pid);
-      process.exit(0);
-    });
+    process.on(signal, () => void shutdown(0));
   }
   if (process.env.CODE_VIEWER_DEV === "1") {
     const parentPid = process.ppid;
@@ -10181,8 +10404,7 @@ data: ok
         process.kill(parentPid, 0);
       } catch {
         console.log("dev wrapper exited; shutting down preview server");
-        removeServerRegistry(cwd, process.pid);
-        process.exit(0);
+        shutdown(0);
       }
     }, 1000).unref();
   }
@@ -10193,7 +10415,7 @@ data: ok
     watch,
     sendReload: () => sendSse("reload")
   });
-  startWorktreeUpdateWatch({
+  worktreeWatch = startWorktreeUpdateWatch({
     root: cwd,
     omitDirNames: scopeOmitDirNames,
     excludeNames: scopeExcludeNames,

@@ -10,6 +10,7 @@ import {
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
+import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
 
@@ -69,6 +70,7 @@ export function buildExpandableHistoryBody(
   };
   button.addEventListener("click", toggle);
   button.addEventListener("keydown", (event) => {
+    if (isImeComposing(event)) return;
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     toggle();
@@ -522,6 +524,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }, 250);
   });
   filterInput?.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape" && filterInput.value) {
       filterInput.value = "";
       applyFilter("");

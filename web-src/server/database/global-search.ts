@@ -47,7 +47,7 @@ function isTextLikeType(type: string): boolean {
 }
 
 function escapeLikeTerm(term: string): string {
-  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+  return term.replace(/=/g, "==").replace(/%/g, "=%").replace(/_/g, "=_");
 }
 
 export function searchTable(
@@ -83,10 +83,10 @@ export function searchTable(
     let sql: string;
     const remaining = maxHits - hits.length;
     if (kind === "sqlite") {
-      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '\\' LIMIT ${remaining}`;
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ? ESCAPE '='`;
     } else {
       const likeVal = escapeSqlString(`%${escapedTerm}%`);
-      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '\\' LIMIT ${remaining}`;
+      sql = `SELECT * FROM ${tbl} WHERE ${castCol} LIKE ${likeVal} ESCAPE '='`;
     }
 
     try {

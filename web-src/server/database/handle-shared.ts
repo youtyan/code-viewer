@@ -1,4 +1,5 @@
 import type { DbKind } from "../../core/database/types";
+import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
   type DockerDbInfo,
   findDockerServiceByDbId,
@@ -147,6 +148,7 @@ export async function dispatchRoutes(
   routes: Record<string, RouteEntry>,
   sideEffectAllowed?: (req: Request) => boolean,
   wrap: (res: Response) => Response | Promise<Response> = (res) => res,
+  handleRouteError?: (err: unknown) => Response,
 ): Promise<Response | null> {
   // biome-ignore lint/suspicious/noPrototypeBuiltins: Object.hasOwn requires ES2022, but this project targets ES2020.
   if (!Object.prototype.hasOwnProperty.call(routes, url.pathname)) return null;
@@ -161,7 +163,12 @@ export async function dispatchRoutes(
   if (requiresSideEffect && sideEffectAllowed && !sideEffectAllowed(req)) {
     return wrap(textError("forbidden", 403));
   }
-  return wrap(await route.handler());
+  try {
+    return wrap(await route.handler());
+  } catch (err) {
+    if (!handleRouteError) throw err;
+    return wrap(handleRouteError(err));
+  }
 }
 
 export async function parsePostJsonBody<T>(
@@ -184,5 +191,8 @@ export function handleError(
 ): Response {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
+  if (isDockerComposeServiceUnavailableError(err)) {
+    return textError(message, err.status);
+  }
   return textError(`failed to ${action}: ${message}`, 500);
 }

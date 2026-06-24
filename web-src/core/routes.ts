@@ -25,6 +25,7 @@ export type AppRoute =
       range: DiffRange;
       view?: "blob" | "detail";
       line?: SourceLineTarget;
+      virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
   | { screen: "history"; ref: string; commit?: string; range: DiffRange }
@@ -141,6 +142,7 @@ export function parseRoute(
         range,
         view: target ? "blob" : "detail",
         ...(line ? { line } : {}),
+        ...(params.get("virtual") === "off" ? { virtual: "off" as const } : {}),
       };
     }
     case "/help":
@@ -209,7 +211,8 @@ export function buildRoute(route: AppRoute): string {
           encodeURIComponent(route.ref || "worktree") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
-            : "")
+            : "") +
+          (route.virtual === "off" ? "&virtual=off" : "")
         );
       }
       return (
@@ -223,7 +226,8 @@ export function buildRoute(route: AppRoute): string {
         encodeURIComponent(route.range.to || "worktree") +
         (route.line
           ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
-          : "")
+          : "") +
+        (route.virtual === "off" ? "&virtual=off" : "")
       );
     case "diff":
       return (

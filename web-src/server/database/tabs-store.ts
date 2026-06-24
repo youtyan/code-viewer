@@ -71,6 +71,13 @@ function sanitizeCssSize(v: unknown): string | undefined {
   return isValidCssSize(v) ? v : undefined;
 }
 
+function isToolInternalDbId(dbId: string | null): boolean {
+  if (!dbId || dbId.startsWith("docker:")) return false;
+  return dbId
+    .split(/[\\/]+/)
+    .some((part) => part.toLowerCase() === ".code-viewer");
+}
+
 function sanitizeRedis(v: unknown): NonNullable<TabState["redis"]> | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;
@@ -129,6 +136,7 @@ function sanitize(input: unknown): TabsState {
     if (seenIds.has(id)) continue;
     seenIds.add(id);
     const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
+    if (isToolInternalDbId(dbId)) continue;
     const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
     const view =
       typeof tab.view === "string" && VALID_VIEWS.has(tab.view)

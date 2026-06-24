@@ -21,11 +21,13 @@ import {
   OPEN_EXTERNAL_16_PATH,
   TRIANGLE_DOWN_16_PATH,
 } from "./core/icons";
+import { isImeComposing } from "./core/keyboard";
 import {
   type KeymapAction,
   type KeymapScope,
   resolveKeymapAction,
 } from "./core/keymap";
+import { createNetworkActivityTracker } from "./core/network-activity";
 import {
   type AppRoute,
   buildRoute,
@@ -126,6 +128,30 @@ window.GdpExpandLogic = GdpExpandLogic;
   const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
   const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
   const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+
+  const NETWORK_ACTIVITY = createNetworkActivityTracker({
+    onChange: updateNetworkActivity,
+  });
+  NETWORK_ACTIVITY.installFetch(window);
+
+  function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
+    const loadBar = document.querySelector<HTMLElement>("#load-bar");
+    if (loadBar) loadBar.classList.toggle("active", state.inFlight > 0);
+    const cancelButton =
+      document.querySelector<HTMLButtonElement>("#cancel-requests");
+    if (!cancelButton) return;
+    const cancellable = state.cancellable > 0;
+    cancelButton.disabled = !cancellable;
+    cancelButton.classList.toggle("active", cancellable);
+    cancelButton.title = cancellable
+      ? `cancel ${state.cancellable} in-flight request${state.cancellable === 1 ? "" : "s"}`
+      : "no in-flight requests";
+  }
+
+  function cancelInFlightRequests(): void {
+    NETWORK_ACTIVITY.cancelAll();
+    updateNetworkActivity();
+  }
 
   function scopedKey(base: string): string {
     return PROJECT_NAME ? `${base}:${PROJECT_NAME}` : base;
@@ -1513,30 +1539,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ============================================================
   let SERVER_GENERATION = 0;
 
-  // Top-edge loading indicator. Reflects any in-flight fetch (initial meta,
-  // per-file diff, "show next", prefetch, ref-picker etc.).
-  let IN_FLIGHT = 0;
-  function updateLoadBar() {
-    const el = $("#load-bar");
-    if (el) el.classList.toggle("active", IN_FLIGHT > 0);
-  }
+  // fetch() is wrapped once at startup, so new server calls are counted and
+  // cancellable without every feature remembering to call trackLoad.
   function trackLoad<T>(promise: Promise<T>): Promise<T> {
-    IN_FLIGHT++;
-    updateLoadBar();
-    const done = () => {
-      IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
-      updateLoadBar();
-    };
-    return Promise.resolve(promise).then(
-      (v) => {
-        done();
-        return v;
-      },
-      (e) => {
-        done();
-        throw e;
-      },
-    );
+    return NETWORK_ACTIVITY.track(promise);
   }
 
   function escapeHtml(s: unknown): string {
@@ -1611,6 +1617,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
   }
 
+  function historyStateForRoute(route: AppRoute): unknown {
+    return route.screen === "file"
+      ? {
+          screen: "file",
+          path: route.path,
+          ref: route.ref,
+          view: route.view || "detail",
+        }
+      : { view: route.screen };
+  }
+
+  function replaceUrlWithCurrentRoute(): void {
+    const url = withAnnotationSessionParam(buildRoute(STATE.route));
+    const current = window.location.pathname + window.location.search;
+    if (url !== current) {
+      history.replaceState(
+        historyStateForRoute(STATE.route),
+        "",
+        url + window.location.hash,
+      );
+    }
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute =
       route.screen === "unknown"
@@ -1626,15 +1655,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.repoRef = nextRoute.ref || "worktree";
     }
     const url = withAnnotationSessionParam(buildRoute(nextRoute));
-    const state =
-      nextRoute.screen === "file"
-        ? {
-            screen: "file",
-            path: nextRoute.path,
-            ref: nextRoute.ref,
-            view: nextRoute.view || "detail",
-          }
-        : { view: nextRoute.screen };
+    const state = historyStateForRoute(nextRoute);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
     syncHeaderMenu();
@@ -1988,6 +2009,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
   });
   $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") closeScopeSettings();
   });
   localizeViewerChrome();
@@ -2144,6 +2166,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   if (sbFilter) {
     sbFilter.addEventListener("input", () => scheduleApplyFilter());
     sbFilter.addEventListener("keydown", (e) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Enter") {
         e.preventDefault();
         flushSidebarFilter();
@@ -2357,6 +2380,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
 
   document.addEventListener("keydown", async (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape") closeRepoContextMenu();
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
@@ -2385,7 +2409,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const action = resolveKeymapAction(e, {
       scope,
       editable: isEditableKeyTarget(targetEl),
-      composing: e.isComposing,
+      composing: isImeComposing(e),
       paletteOpen: isPaletteOpen(),
       pendingG:
         PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
@@ -2508,6 +2532,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setRange(from: string, to: string) {
     // An explicit range pick supersedes whatever was parked for history.
     preHistoryRange = null;
+    const wasDatabaseRoute = STATE.route.screen === "database";
     STATE.from = from || "";
     STATE.to = to || "";
     writeScopedStorage("gdp:from", STATE.from);
@@ -2532,6 +2557,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       renderHelpPage();
     } else {
       setRoute({ screen: "diff", range }, true);
+      if (wasDatabaseRoute) DATABASE_VIEW.suspend();
       // Leaving the history screen here: drop its body class and panel layout.
       setPageMode();
       load();
@@ -2641,6 +2667,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "repo")
       STATE.repoRef = STATE.route.ref || "worktree";
     ANNOTATIONS_UI?.restoreSessionFromUrl();
+    replaceUrlWithCurrentRoute();
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();
@@ -2827,6 +2854,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       writeScopedStorage("gdp:to", to);
     },
   });
+  replaceUrlWithCurrentRoute();
 
   createAnnotationsPlayer({
     $,
@@ -2989,6 +3017,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   document.getElementById("auto-update")?.addEventListener("click", () => {
     setAutoUpdate(!STATE.autoUpdate);
   });
+  document
+    .getElementById("cancel-requests")
+    ?.addEventListener("click", cancelInFlightRequests);
   applyAutoUpdateButton();
 
   function shouldAutoLoadCurrentRoute(route = STATE.route): boolean {

@@ -160,10 +160,29 @@ export function startServer(options: {
         port,
         close: () =>
           new Promise<void>((resolveClose, rejectClose) => {
-            server.close((error) => {
-              if (error) rejectClose(error);
-              else resolveClose();
-            });
+            let settled = false;
+            let forceTimer: ReturnType<typeof setTimeout> | null = null;
+            const settle = (error?: Error | null) => {
+              if (settled) return;
+              settled = true;
+              if (forceTimer) clearTimeout(forceTimer);
+              const code =
+                error && "code" in error
+                  ? String((error as { code?: unknown }).code)
+                  : "";
+              if (error && code !== "ERR_SERVER_NOT_RUNNING") {
+                rejectClose(error);
+                return;
+              }
+              resolveClose();
+            };
+            forceTimer = setTimeout(() => {
+              server.closeAllConnections?.();
+              settle();
+            }, 2000);
+            forceTimer.unref?.();
+            server.close(settle);
+            server.closeIdleConnections?.();
             server.closeAllConnections?.();
           }),
       });

@@ -1,4 +1,5 @@
 import type { DbQueryResponse, DbValue } from "../../core/database/types";
+import { isImeComposing } from "../../core/keyboard";
 
 type ShikiHighlighter = {
   codeToHtml: (
@@ -366,6 +367,7 @@ export function createQueryEditor(
   document.addEventListener("click", onDocumentClick);
 
   textarea.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       run();

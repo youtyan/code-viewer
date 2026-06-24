@@ -9,6 +9,7 @@ import {
   isEditableKeyTarget,
 } from "../core/focus-scope";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
+import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
@@ -898,7 +899,9 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function isVirtualSourceDisabled(): boolean {
-    return new URLSearchParams(window.location.search).get("virtual") === "off";
+    return (
+      deps.STATE.route.screen === "file" && deps.STATE.route.virtual === "off"
+    );
   }
 
   function buildCurrentFileRouteWithVirtualMode(
@@ -911,11 +914,9 @@ export function createSourceView(deps: SourceViewDeps) {
       ref: target.ref,
       view: STATE.route.screen === "file" ? STATE.route.view : "blob",
       range: currentRange(),
+      ...(virtualMode === "off" ? { virtual: "off" as const } : {}),
     };
-    const url = new URL(buildRoute(route), window.location.origin);
-    if (virtualMode === "off") url.searchParams.set("virtual", "off");
-    else url.searchParams.delete("virtual");
-    return url.pathname + url.search;
+    return buildRoute(route);
   }
 
   function buildFileRangeUrl(
@@ -1214,6 +1215,7 @@ export function createSourceView(deps: SourceViewDeps) {
       scheduleSync();
     });
     input.addEventListener("keydown", (e) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Escape") {
         e.preventDefault();
         hide();
@@ -2180,7 +2182,7 @@ export function createSourceView(deps: SourceViewDeps) {
       return true;
     if (
       e.defaultPrevented ||
-      e.isComposing ||
+      isImeComposing(e) ||
       isPaletteOpen() ||
       document.querySelector(".mkdp-lightbox")
     )

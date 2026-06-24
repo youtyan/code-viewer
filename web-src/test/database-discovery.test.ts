@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverDockerDatabases } from "../server/database/discovery";
+import {
+  discoverDockerDatabases,
+  discoverSqliteFiles,
+  validateDbPath,
+} from "../server/database/discovery";
 
 function discoverFromCompose(
   compose: string,
@@ -33,6 +43,37 @@ function withProcessEnv<T>(key: string, value: string, fn: () => T): T {
     }
   }
 }
+
+function writeSqliteHeader(path: string) {
+  writeFileSync(path, `${"SQLite format 3\0"}test`, "binary");
+}
+
+describe("sqlite database discovery", () => {
+  test("ignores code-viewer internal sqlite files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-sqlite-discovery-"));
+    try {
+      mkdirSync(join(dir, ".code-viewer"));
+      writeSqliteHeader(join(dir, "app.sqlite"));
+      writeSqliteHeader(join(dir, ".code-viewer", "db-snapshots.sqlite"));
+
+      expect(discoverSqliteFiles(dir, [])).toEqual([
+        {
+          path: "app.sqlite",
+          name: "app.sqlite",
+          sizeBytes: 20,
+        },
+      ]);
+      expect(
+        validateDbPath(dir, ".code-viewer/db-snapshots.sqlite"),
+      ).toBeNull();
+      expect(validateDbPath(dir, "app.sqlite")).toBe(
+        realpathSync(join(dir, "app.sqlite")),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("docker compose database discovery", () => {
   test("detects mysql from build-only service environment", () => {

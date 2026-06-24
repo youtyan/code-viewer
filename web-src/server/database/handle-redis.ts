@@ -112,6 +112,7 @@ export async function handleRedisRoute(
     },
     sideEffectAllowed,
     wrap,
+    (err) => handleError("redis", "handle redis request", err),
   );
 }
 

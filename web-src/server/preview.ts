@@ -153,6 +153,10 @@ let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+const sseKeepalives = new Map<
+  ReadableStreamDefaultController<Uint8Array>,
+  ReturnType<typeof setInterval>
+>();
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
 const metaCache = new Map<
   string,
@@ -2387,7 +2391,25 @@ function sendSse(event: string, data = "tick") {
     try {
       client.enqueue(payload);
     } catch {
-      sseClients.delete(client);
+      removeSseClient(client);
+    }
+  }
+}
+
+function removeSseClient(ctrl: ReadableStreamDefaultController<Uint8Array>) {
+  sseClients.delete(ctrl);
+  const keepalive = sseKeepalives.get(ctrl);
+  if (keepalive) clearInterval(keepalive);
+  sseKeepalives.delete(ctrl);
+}
+
+function closeSseClients() {
+  for (const client of [...sseClients]) {
+    removeSseClient(client);
+    try {
+      client.close();
+    } catch {
+      /* client may already be closed */
     }
   }
 }
@@ -2460,14 +2482,14 @@ const server = await startServer({
               try {
                 controller.enqueue(enc.encode(": ping\n\n"));
               } catch {
-                sseClients.delete(controller);
-                clearInterval(keepalive);
+                removeSseClient(controller);
               }
             }, 15000);
+            keepalive.unref?.();
+            sseKeepalives.set(controller, keepalive);
           },
           cancel() {
-            if (ctrl) sseClients.delete(ctrl);
-            if (keepalive) clearInterval(keepalive);
+            if (ctrl) removeSseClient(ctrl);
           },
         }),
         {
@@ -2492,12 +2514,32 @@ writeServerRegistry({
   root: cwd,
   started_at: new Date().toISOString(),
 });
-process.on("exit", () => removeServerRegistry(cwd, process.pid));
+let worktreeWatch: ReturnType<typeof startWorktreeUpdateWatch> | null = null;
+let shuttingDown = false;
+
+async function shutdown(exitCode = 0) {
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  removeServerRegistry(cwd, process.pid);
+  closeSseClients();
+  worktreeWatch?.close();
+  try {
+    await server.close();
+  } catch (error) {
+    console.warn(`code-viewer server close skipped: ${String(error)}`);
+  }
+  process.exit(exitCode);
+}
+
+process.on("exit", () => {
+  removeServerRegistry(cwd, process.pid);
+  closeSseClients();
+  worktreeWatch?.close();
+});
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => {
-    removeServerRegistry(cwd, process.pid);
-    process.exit(0);
-  });
+  process.on(signal, () => void shutdown(0));
 }
 
 // Under the dev wrapper, exit when the parent dies so a crashed or
@@ -2511,8 +2553,7 @@ if (process.env.CODE_VIEWER_DEV === "1") {
       process.kill(parentPid, 0);
     } catch {
       console.log("dev wrapper exited; shutting down preview server");
-      removeServerRegistry(cwd, process.pid);
-      process.exit(0);
+      void shutdown(0);
     }
   }, 1000).unref();
 }
@@ -2525,7 +2566,7 @@ startDevAssetReload({
   sendReload: () => sendSse("reload"),
 });
 
-startWorktreeUpdateWatch({
+worktreeWatch = startWorktreeUpdateWatch({
   root: cwd,
   omitDirNames: scopeOmitDirNames,
   excludeNames: scopeExcludeNames,

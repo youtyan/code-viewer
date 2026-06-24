@@ -2,6 +2,7 @@
 // line numbers (unified: .line-num2, side-by-side: right pane) highlights the
 // rows and surfaces the line-ref copy pill with "@path#start-end".
 
+import { isImeComposing } from "../core/keyboard";
 import type { LineRefPill } from "./line-ref-pill";
 
 export type DiffLineSelectDeps = {
@@ -137,6 +138,7 @@ export function createDiffLineSelect(deps: DiffLineSelectDeps) {
   });
 
   document.addEventListener("keydown", (e) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Escape" && selection && !drag) clear();
   });
 

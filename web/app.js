@@ -291,6 +291,11 @@
   }
   var PENCIL_16_PATH = "M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.609Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z";
 
+  // web-src/core/keyboard.ts
+  function isImeComposing(event) {
+    return event.isComposing === true || event.keyCode === 229;
+  }
+
   // web-src/core/keymap.ts
   var DEFAULT_KEY_BINDINGS = [
     {
@@ -429,6 +434,108 @@
     return null;
   }
 
+  // web-src/core/network-activity.ts
+  function abortReason(message) {
+    return typeof DOMException === "function" ? new DOMException(message, "AbortError") : new Error(message);
+  }
+  function signalReason(signal) {
+    return "reason" in signal ? signal.reason : abortReason("aborted");
+  }
+  function createNetworkActivityTracker(options = {}) {
+    let inFlight = 0;
+    let nextRequestId = 0;
+    const cancellableRequests = new Map;
+    const state = () => ({
+      inFlight,
+      cancellable: cancellableRequests.size
+    });
+    const notify = () => options.onChange?.(state());
+    function begin() {
+      inFlight++;
+      notify();
+      let ended = false;
+      return () => {
+        if (ended)
+          return;
+        ended = true;
+        inFlight = Math.max(0, inFlight - 1);
+        notify();
+      };
+    }
+    function track(promise) {
+      const end = begin();
+      return Promise.resolve(promise).finally(end);
+    }
+    function linkSignal(source, target, cleanup) {
+      if (!source)
+        return;
+      if (source.aborted) {
+        target.abort(signalReason(source));
+        return;
+      }
+      const onAbort = () => target.abort(signalReason(source));
+      source.addEventListener("abort", onAbort, { once: true });
+      cleanup.push(() => source.removeEventListener("abort", onAbort));
+    }
+    function requestSignalFromInput(input) {
+      return typeof Request !== "undefined" && input instanceof Request ? input.signal : null;
+    }
+    function makeTrackedFetch(originalFetch) {
+      return (input, init) => {
+        const end = begin();
+        const requestId = ++nextRequestId;
+        const requestController = new AbortController;
+        const cleanup = [];
+        cancellableRequests.set(requestId, requestController);
+        linkSignal(requestSignalFromInput(input), requestController, cleanup);
+        linkSignal(init?.signal, requestController, cleanup);
+        notify();
+        const finish = () => {
+          cancellableRequests.delete(requestId);
+          for (const fn of cleanup)
+            fn();
+          end();
+        };
+        try {
+          const trackedInit = {
+            ...init ?? {},
+            signal: requestController.signal
+          };
+          return Promise.resolve(originalFetch(input, trackedInit)).finally(finish);
+        } catch (err) {
+          finish();
+          throw err;
+        }
+      };
+    }
+    function installFetch(target = globalThis) {
+      const originalFetch = target.fetch;
+      const trackedFetch = makeTrackedFetch(originalFetch.bind(target));
+      target.fetch = trackedFetch;
+      return () => {
+        if (target.fetch === trackedFetch)
+          target.fetch = originalFetch;
+      };
+    }
+    function cancelAll(message = "cancelled by user") {
+      const reason = abortReason(message);
+      let count = 0;
+      for (const controller of cancellableRequests.values()) {
+        if (controller.signal.aborted)
+          continue;
+        controller.abort(reason);
+        count++;
+      }
+      return count;
+    }
+    return {
+      getState: state,
+      track,
+      installFetch,
+      cancelAll
+    };
+  }
+
   // web-src/core/routes.ts
   function assertNever(value) {
     throw new Error(`unhandled route: ${JSON.stringify(value)}`);
@@ -504,7 +611,8 @@
           ref,
           range,
           view: target ? "blob" : "detail",
-          ...line ? { line } : {}
+          ...line ? { line } : {},
+          ...params.get("virtual") === "off" ? { virtual: "off" } : {}
         };
       }
       case "/help":
@@ -559,9 +667,9 @@
       }
       case "file":
         if (route.view === "blob") {
-          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+          return "/file?path=" + encodeURIComponent(route.path) + "&target=" + encodeURIComponent(route.ref || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "") + (route.virtual === "off" ? "&virtual=off" : "");
         }
-        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
+        return "/file?path=" + encodeURIComponent(route.path) + "&ref=" + encodeURIComponent(route.ref || "worktree") + "&from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "") + (route.virtual === "off" ? "&virtual=off" : "");
       case "diff":
         return "/todif?from=" + encodeURIComponent(route.range.from || "") + "&to=" + encodeURIComponent(route.range.to || "worktree") + (route.path ? `&path=${encodeURIComponent(route.path)}` : "") + (route.line ? `&line=${encodeURIComponent(formatLineTarget(route.line))}` : "");
       case "help": {
@@ -7086,6 +7194,8 @@ ${frontmatter.yaml}
       overlay.classList.remove("dragging");
     };
     const onKey = (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape")
         close();
       else if (e2.key === "0")
@@ -8896,6 +9006,8 @@ ${frontmatter.yaml}
     }
     searchBtn.addEventListener("click", runSearch);
     searchInput.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Enter") {
         e2.preventDefault();
         runSearch();
@@ -9414,6 +9526,8 @@ ${frontmatter.yaml}
     }
     searchBtn.addEventListener("click", startSearch);
     input.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Enter")
         startSearch();
     });
@@ -9741,6 +9855,8 @@ ${frontmatter.yaml}
     };
     document.addEventListener("click", onDocumentClick);
     textarea.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if ((e2.ctrlKey || e2.metaKey) && e2.key === "Enter") {
         e2.preventDefault();
         run();
@@ -11287,6 +11403,8 @@ ${frontmatter.yaml}
         refresh();
       });
       input.addEventListener("keydown", (e2) => {
+        if (isImeComposing(e2))
+          return;
         if (e2.key === "Enter")
           saveBtn.click();
         if (e2.key === "Escape")
@@ -11454,8 +11572,7 @@ ${frontmatter.yaml}
       measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 8px;";
       document.body.appendChild(measure);
       const headerLabel = columns[colIndex]?.name || colName;
-      const typeLabel = columns[colIndex]?.type || "";
-      measure.textContent = `${headerLabel}  ${typeLabel}  ▲`;
+      measure.textContent = `${headerLabel}  ▲`;
       let maxW = measure.offsetWidth + 16;
       const rows = body.querySelectorAll(".db-grid-row");
       for (const row of rows) {
@@ -11605,11 +11722,6 @@ ${frontmatter.yaml}
         const label = document.createElement("span");
         label.className = "db-grid-header-label";
         label.textContent = col.name;
-        const typeTag = document.createElement("span");
-        typeTag.className = "db-grid-header-type";
-        typeTag.textContent = col.type;
-        if (col.primaryKey)
-          typeTag.classList.add("pk");
         const sortIcon = document.createElement("span");
         sortIcon.className = "db-grid-sort-icon";
         sortIcon.textContent = sort?.column === col.name ? sort.direction === "asc" ? "▲" : "▼" : "";
@@ -11621,7 +11733,7 @@ ${frontmatter.yaml}
           e2.stopPropagation();
           startResize(colIndex, e2);
         });
-        cell.append(label, typeTag, sortIcon, resizeHandle);
+        cell.append(label, sortIcon, resizeHandle);
         cell.addEventListener("click", (e2) => {
           if (e2.target.classList.contains("db-grid-resize-handle"))
             return;
@@ -11695,6 +11807,8 @@ ${frontmatter.yaml}
           scheduleFilter();
         });
         input.addEventListener("keydown", (e2) => {
+          if (isImeComposing(e2))
+            return;
           if (e2.key === "Escape") {
             input.value = "";
             columnFilters.delete(col.name);
@@ -11962,6 +12076,8 @@ ${frontmatter.yaml}
       scheduleFilter();
     });
     filterInput.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape") {
         filterInput.value = "";
         globalSearchValue = "";
@@ -12114,6 +12230,8 @@ ${frontmatter.yaml}
         }
       };
       const onKeyDown = (ev) => {
+        if (isImeComposing(ev))
+          return;
         if (ev.key === "Escape") {
           closeContextMenu();
         }
@@ -12221,7 +12339,6 @@ ${frontmatter.yaml}
             toggleExpand(table2.name, node, arrow, children);
           });
           row.addEventListener("click", () => callbacks.onSelectTable(table2.name));
-          row.addEventListener("dblclick", () => callbacks.onSelectSchema(table2.name));
           row.addEventListener("contextmenu", (e2) => showContextMenu(e2, table2.name));
           node.append(row, children);
           el.appendChild(node);
@@ -12307,11 +12424,23 @@ ${frontmatter.yaml}
       return "data";
     return view && isSqlView(view) ? view : "data";
   }
+  function labelFromDbId(dbId) {
+    if (!dbId)
+      return "(empty)";
+    if (dbId.startsWith("docker:")) {
+      const rest = dbId.slice("docker:".length);
+      const service = rest.split(/[@:]/, 1)[0];
+      return service || "Docker";
+    }
+    const normalized = dbId.replace(/\\/g, "/");
+    const lastSlash = normalized.lastIndexOf("/");
+    return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
+  }
   function createTabPane(outerDeps, cb, initial = {}) {
     const deps = {
       ...outerDeps,
       setRoute: (route, replace2) => {
-        if (cb.isActive())
+        if (cb.isActive() && cb.canSyncRoute())
           outerDeps.setRoute(route, replace2);
         cb.onStateChange();
       }
@@ -12335,7 +12464,6 @@ ${frontmatter.yaml}
     let currentTab = "data";
     const tableList = createTableList({
       onSelectTable: (table2) => selectTable(table2),
-      onSelectSchema: (table2) => showSchema(table2),
       onViewCreateTable: (table2) => showDdl(table2),
       onViewDefinition: (table2) => showSchema(table2),
       getColumns: (table2) => fetchColumns(table2)
@@ -12641,7 +12769,7 @@ ${frontmatter.yaml}
         historyView.refresh();
       return result;
     }
-    async function selectDb(dbId, explorerInitial, generation = loadGeneration) {
+    async function selectDb(dbId, explorerInitial, generation = loadGeneration, preferredTable) {
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId)
         return;
       currentTable = null;
@@ -12695,8 +12823,9 @@ ${frontmatter.yaml}
       schemaView.clear();
       erDiagram.clear();
       setActiveTab("data", false);
-      if (schema.tables.length > 0) {
-        await selectTable(schema.tables[0].name, generation);
+      const initialTable = preferredTable || schema.tables[0]?.name;
+      if (initialTable) {
+        await selectTable(initialTable, generation);
       }
       applyVisibility();
       cb.onStateChange();
@@ -12856,10 +12985,10 @@ ${frontmatter.yaml}
         opt.textContent = label;
         dbSelect.appendChild(opt);
       }
-      if (db && !files.find((f2) => f2.id === db)) {
-        db = files[0].id;
-      }
       const autoSelectFirst = options.autoSelectFirst ?? true;
+      if (db && !files.find((f2) => f2.id === db)) {
+        db = autoSelectFirst ? files[0].id : null;
+      }
       if (!db && !autoSelectFirst) {
         dbSelect.value = "";
         currentDbInfo = null;
@@ -12884,7 +13013,7 @@ ${frontmatter.yaml}
       };
       pendingRedisInitial = undefined;
       pendingEsInitial = undefined;
-      await selectDb(target, explorerInitial, generation);
+      await selectDb(target, explorerInitial, generation, table2);
       if (generation !== loadGeneration || currentDbInfo?.id !== target)
         return;
       if (currentDbInfo?.kind === "redis" || currentDbInfo?.kind === "elasticsearch") {
@@ -12894,9 +13023,6 @@ ${frontmatter.yaml}
       if (!schemaCache) {
         cb.onStateChange();
         return;
-      }
-      if (table2) {
-        await selectTable(table2, generation);
       }
       if (generation !== loadGeneration)
         return;
@@ -13002,7 +13128,7 @@ ${frontmatter.yaml}
     }
     function getLabel() {
       if (!currentDbInfo)
-        return "(empty)";
+        return labelFromDbId(initial.dbId);
       if (currentDbInfo.id.startsWith("docker:")) {
         const m = currentDbInfo.name.match(/^(\S+)/);
         return m ? m[1] : currentDbInfo.name;
@@ -13093,11 +13219,6 @@ ${frontmatter.yaml}
         return;
       const body = { version: 1, tabs, activeTabId };
       const raw = JSON.stringify(body);
-      if (options.keepalive && navigator.sendBeacon) {
-        const blob = new Blob([raw], { type: "application/json" });
-        if (navigator.sendBeacon("/_db/tabs", blob))
-          return;
-      }
       saveChain = saveChain.catch(() => {}).then(async () => {
         try {
           await fetch("/_db/tabs", {
@@ -13380,13 +13501,16 @@ ${frontmatter.yaml}
       chip.tabIndex = -1;
       const labelEl = document.createElement("span");
       labelEl.className = "db-tabs-chip-label";
-      labelEl.textContent = "(empty)";
+      const initialLabel = labelFromDbId(initial?.dbId);
+      labelEl.textContent = initialLabel;
+      labelEl.title = initialLabel;
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "db-tabs-chip-close";
       closeBtn.title = "閉じる";
       closeBtn.tabIndex = -1;
       closeBtn.textContent = "×";
+      closeBtn.setAttribute("aria-label", `${initialLabel} を閉じる`);
       closeBtn.addEventListener("click", (e2) => {
         e2.stopPropagation();
         closeTab(id);
@@ -13395,6 +13519,8 @@ ${frontmatter.yaml}
       attachTabDragHandlers(chip, closeBtn, id);
       chip.addEventListener("click", () => setActive(id));
       chip.addEventListener("keydown", (e2) => {
+        if (isImeComposing(e2))
+          return;
         if (e2.key === "Enter" || e2.key === " ") {
           e2.preventDefault();
           setActive(id);
@@ -13409,6 +13535,7 @@ ${frontmatter.yaml}
       const pane = createTabPane(deps, {
         tabId: id,
         isActive: () => activeTabId === id,
+        canSyncRoute: () => !restoring,
         onStateChange: () => {
           refreshChipLabel(id);
           if (activeTabId === id && !restoring)
@@ -13431,6 +13558,16 @@ ${frontmatter.yaml}
       tabHost.appendChild(pane.el);
       tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
       setActive(id);
+      if (!options.deferInitialEnter) {
+        startInitialEnter(id, initial, options);
+      }
+      return id;
+    }
+    function startInitialEnter(id, initial, options = {}) {
+      const entry = tabsById.get(id);
+      if (!entry)
+        return Promise.resolve();
+      const pane = entry.pane;
       const ready = (async () => {
         if (options.annotationTarget)
           restoring = true;
@@ -13444,7 +13581,7 @@ ${frontmatter.yaml}
         }
       })();
       paneReadyById.set(id, ready);
-      return id;
+      return ready;
     }
     function closeTab(id) {
       const entry = tabsById.get(id);
@@ -13496,17 +13633,6 @@ ${frontmatter.yaml}
           restoring = false;
         }
       }
-      if (options.reuseActiveTab && activeTabId) {
-        const targetId = activeTabId;
-        const active = tabsById.get(activeTabId);
-        if (active) {
-          await enterPane(active.pane, db, table2, view, options);
-          if (!mounted)
-            return;
-          refreshChipLabel(targetId);
-          return;
-        }
-      }
       for (const [id2, entry] of tabsById) {
         if (routeMatchesState(entry.pane.getState(), db, table2, view)) {
           setActive(id2);
@@ -13519,11 +13645,22 @@ ${frontmatter.yaml}
           return;
         }
       }
+      if (options.reuseActiveTab && activeTabId) {
+        const targetId = activeTabId;
+        const active = tabsById.get(activeTabId);
+        if (active) {
+          await enterPane(active.pane, db, table2, view, options);
+          if (!mounted)
+            return;
+          refreshChipLabel(targetId);
+          return;
+        }
+      }
       const id = openTab({
         dbId: db ?? null,
         table: table2 ?? null,
         view: view ?? "data"
-      }, { autoSelectFirst: db !== undefined, ...options });
+      }, { autoSelectFirst: db === undefined, ...options });
       const ready = paneReadyById.get(id);
       if (ready)
         await ready;
@@ -13553,6 +13690,7 @@ ${frontmatter.yaml}
         const empty = document.getElementById("empty");
         if (empty)
           empty.classList.add("hidden");
+        root.hidden = false;
         content.appendChild(root);
         document.body.classList.add("gdp-database-page");
         mounted = true;
@@ -13562,30 +13700,50 @@ ${frontmatter.yaml}
         }
         deps.setPageMode();
         deps.syncHeaderMenu();
-        const restored = await fetchTabs();
+        const restored = tabsById.size === 0 ? await fetchTabs() : null;
         if (!mounted || seq !== lifecycleSeq)
           return;
         if (restored && restored.tabs.length > 0) {
           restoring = true;
           const restoredIds = [];
+          const restoredById = new Map;
           try {
             const restoredTabs = dedupeTabs(restored.tabs);
             for (const t2 of restoredTabs) {
               if (!mounted || seq !== lifecycleSeq)
                 return;
-              restoredIds.push(openTab(t2, { autoSelectFirst: false }));
+              const id = openTab(t2, {
+                autoSelectFirst: false,
+                deferInitialEnter: true
+              });
+              restoredIds.push(id);
+              restoredById.set(id, t2);
             }
             const targetId = restored.activeTabId && tabsById.has(restored.activeTabId) ? restored.activeTabId : tabsById.keys().next().value;
             if (targetId)
               setActive(targetId);
-            await Promise.all(restoredIds.map((id) => paneReadyById.get(id)).filter(Boolean));
+            if (targetId) {
+              await startInitialEnter(targetId, restoredById.get(targetId), {
+                autoSelectFirst: false
+              });
+            }
             if (!mounted || seq !== lifecycleSeq)
               return;
+            for (const id of restoredIds) {
+              if (id === targetId)
+                continue;
+              startInitialEnter(id, restoredById.get(id), {
+                autoSelectFirst: false
+              }).catch(() => {});
+            }
           } finally {
             restoring = false;
           }
           if (db || table2 || view) {
-            await applyRouteToTab(db, table2, view, options);
+            await applyRouteToTab(db, table2, view, {
+              ...options,
+              reuseActiveTab: options.reuseActiveTab ?? true
+            });
           } else {
             syncActiveRoute();
           }
@@ -13623,7 +13781,12 @@ ${frontmatter.yaml}
       if (!active)
         return;
       if (db || table2 || view) {
-        await applyRouteToTab(db, table2, view, options);
+        await applyRouteToTab(db, table2, view, {
+          ...options,
+          reuseActiveTab: options.reuseActiveTab ?? true
+        });
+      } else {
+        syncActiveRoute();
       }
     }
     async function enter(db, table2, view, options = {}) {
@@ -13655,14 +13818,24 @@ ${frontmatter.yaml}
       mounted = false;
     }
     function suspend() {
-      if (!mounted)
+      lifecycleSeq++;
+      if (!mounted) {
+        root.remove();
+        root.hidden = false;
+        document.body.classList.remove("gdp-database-page");
+        const diff2 = document.getElementById("diff");
+        if (diff2)
+          diff2.hidden = false;
         return;
+      }
       flushPendingSave();
-      root.hidden = true;
+      root.remove();
+      root.hidden = false;
       document.body.classList.remove("gdp-database-page");
       const diff = document.getElementById("diff");
       if (diff)
         diff.hidden = false;
+      mounted = false;
     }
     function handleSse(event, data) {
       if (!mounted)
@@ -13793,6 +13966,8 @@ ${frontmatter.yaml}
       drag = null;
     });
     document.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape" && selection && !drag)
         clear();
     });
@@ -16039,6 +16214,8 @@ code-viewer annotate add-db --db app.db --tab query \\
     };
     button.addEventListener("click", toggle);
     button.addEventListener("keydown", (event) => {
+      if (isImeComposing(event))
+        return;
       if (event.key !== "Enter" && event.key !== " ")
         return;
       event.preventDefault();
@@ -16424,6 +16601,8 @@ code-viewer annotate add-db --db app.db --tab query \\
       }, 250);
     });
     filterInput?.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape" && filterInput.value) {
         filterInput.value = "";
         applyFilter("");
@@ -16914,6 +17093,8 @@ code-viewer annotate add-db --db app.db --tab query \\
         openPopover(input);
       });
       input.addEventListener("keydown", (e2) => {
+        if (isImeComposing(e2))
+          return;
         if (e2.key === "Enter" || e2.key === " ") {
           e2.preventDefault();
           openPopover(input);
@@ -17179,6 +17360,8 @@ code-viewer annotate add-db --db app.db --tab query \\
     });
     popBody.addEventListener("scroll", maybeLoadMoreCommits, { passive: true });
     popSearch.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape") {
         closePopover();
       }
@@ -17374,6 +17557,8 @@ code-viewer annotate add-db --db app.db --tab query \\
           resolve(ok);
         };
         const onKeydown = (event) => {
+          if (isImeComposing(event))
+            return;
           if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
@@ -17450,14 +17635,14 @@ code-viewer annotate add-db --db app.db --tab query \\
           done(name);
         };
         const onKeydown = (event) => {
+          if (isImeComposing(event))
+            return;
           if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
             done(null);
             return;
           }
-          if (event.isComposing || event.keyCode === 229)
-            return;
           if (event.key === "Enter") {
             event.preventDefault();
             submit();
@@ -18889,6 +19074,8 @@ code-viewer annotate add-db --db app.db --tab query \\
       }
     }
     function handlePaletteKeydown(e2, state) {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape") {
         e2.preventDefault();
         closeSearchPalette();
@@ -20879,7 +21066,7 @@ code-viewer annotate add-db --db app.db --tab query \\
       return textValue.length >= VIRTUAL_SOURCE_SIZE_THRESHOLD || lines.length >= VIRTUAL_SOURCE_LINE_THRESHOLD;
     }
     function isVirtualSourceDisabled() {
-      return new URLSearchParams(window.location.search).get("virtual") === "off";
+      return deps.STATE.route.screen === "file" && deps.STATE.route.virtual === "off";
     }
     function buildCurrentFileRouteWithVirtualMode(target, virtualMode) {
       const route = {
@@ -20887,14 +21074,10 @@ code-viewer annotate add-db --db app.db --tab query \\
         path: target.path,
         ref: target.ref,
         view: STATE.route.screen === "file" ? STATE.route.view : "blob",
-        range: currentRange()
+        range: currentRange(),
+        ...virtualMode === "off" ? { virtual: "off" } : {}
       };
-      const url = new URL(buildRoute(route), window.location.origin);
-      if (virtualMode === "off")
-        url.searchParams.set("virtual", "off");
-      else
-        url.searchParams.delete("virtual");
-      return url.pathname + url.search;
+      return buildRoute(route);
     }
     function buildFileRangeUrl(target, start, end) {
       return "/file_range?path=" + encodeURIComponent(target.path) + "&ref=" + encodeURIComponent(target.ref || "worktree") + "&start=" + encodeURIComponent(String(start)) + "&end=" + encodeURIComponent(String(end));
@@ -21086,6 +21269,8 @@ code-viewer annotate add-db --db app.db --tab query \\
         scheduleSync();
       });
       input.addEventListener("keydown", (e2) => {
+        if (isImeComposing(e2))
+          return;
         if (e2.key === "Escape") {
           e2.preventDefault();
           hide();
@@ -21776,7 +21961,7 @@ code-viewer annotate add-db --db app.db --tab query \\
     function handleVirtualSourcePagingKey(e2, targetEl) {
       if (e2.__gdpVirtualSourcePagingHandled)
         return true;
-      if (e2.defaultPrevented || e2.isComposing || isPaletteOpen() || document.querySelector(".mkdp-lightbox"))
+      if (e2.defaultPrevented || isImeComposing(e2) || isPaletteOpen() || document.querySelector(".mkdp-lightbox"))
         return false;
       const editable = isEditableKeyTarget(targetEl);
       const inVirtualSearch = !!targetEl?.closest(".gdp-source-virtual-search");
@@ -21862,6 +22047,26 @@ code-viewer annotate add-db --db app.db --tab query \\
     const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
     const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
     const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+    const NETWORK_ACTIVITY = createNetworkActivityTracker({
+      onChange: updateNetworkActivity
+    });
+    NETWORK_ACTIVITY.installFetch(window);
+    function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()) {
+      const loadBar = document.querySelector("#load-bar");
+      if (loadBar)
+        loadBar.classList.toggle("active", state.inFlight > 0);
+      const cancelButton = document.querySelector("#cancel-requests");
+      if (!cancelButton)
+        return;
+      const cancellable = state.cancellable > 0;
+      cancelButton.disabled = !cancellable;
+      cancelButton.classList.toggle("active", cancellable);
+      cancelButton.title = cancellable ? `cancel ${state.cancellable} in-flight request${state.cancellable === 1 ? "" : "s"}` : "no in-flight requests";
+    }
+    function cancelInFlightRequests() {
+      NETWORK_ACTIVITY.cancelAll();
+      updateNetworkActivity();
+    }
     function scopedKey(base2) {
       return PROJECT_NAME ? `${base2}:${PROJECT_NAME}` : base2;
     }
@@ -22884,26 +23089,8 @@ code-viewer annotate add-db --db app.db --tab query \\
       });
     }
     let SERVER_GENERATION = 0;
-    let IN_FLIGHT = 0;
-    function updateLoadBar() {
-      const el = $("#load-bar");
-      if (el)
-        el.classList.toggle("active", IN_FLIGHT > 0);
-    }
     function trackLoad(promise) {
-      IN_FLIGHT++;
-      updateLoadBar();
-      const done = () => {
-        IN_FLIGHT = Math.max(0, IN_FLIGHT - 1);
-        updateLoadBar();
-      };
-      return Promise.resolve(promise).then((v) => {
-        done();
-        return v;
-      }, (e2) => {
-        done();
-        throw e2;
-      });
+      return NETWORK_ACTIVITY.track(promise);
     }
     function escapeHtml3(s2) {
       return String(s2 == null ? "" : s2).replace(/[&<>"']/g, (c2) => ({
@@ -22949,6 +23136,21 @@ code-viewer annotate add-db --db app.db --tab query \\
     function withAnnotationSessionParam(rawUrl) {
       return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
     }
+    function historyStateForRoute(route) {
+      return route.screen === "file" ? {
+        screen: "file",
+        path: route.path,
+        ref: route.ref,
+        view: route.view || "detail"
+      } : { view: route.screen };
+    }
+    function replaceUrlWithCurrentRoute() {
+      const url = withAnnotationSessionParam(buildRoute(STATE.route));
+      const current = window.location.pathname + window.location.search;
+      if (url !== current) {
+        history.replaceState(historyStateForRoute(STATE.route), "", url + window.location.hash);
+      }
+    }
     function setRoute(route, replace2 = false) {
       const nextRoute = route.screen === "unknown" ? { screen: "diff", range: route.range } : route;
       STATE.route = nextRoute;
@@ -22958,12 +23160,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         STATE.repoRef = nextRoute.ref || "worktree";
       }
       const url = withAnnotationSessionParam(buildRoute(nextRoute));
-      const state = nextRoute.screen === "file" ? {
-        screen: "file",
-        path: nextRoute.path,
-        ref: nextRoute.ref,
-        view: nextRoute.view || "detail"
-      } : { view: nextRoute.screen };
+      const state = historyStateForRoute(nextRoute);
       if (replace2)
         history.replaceState(state, "", url);
       else
@@ -23230,6 +23427,8 @@ code-viewer annotate add-db --db app.db --tab query \\
         source.textContent = uiText().settings.scopeSource(PROJECT_NAME || "default", scopeOmitSourceLabel());
     });
     $("#scope-settings-popover")?.addEventListener("keydown", (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape")
         closeScopeSettings();
     });
@@ -23371,6 +23570,8 @@ code-viewer annotate add-db --db app.db --tab query \\
     if (sbFilter) {
       sbFilter.addEventListener("input", () => scheduleApplyFilter());
       sbFilter.addEventListener("keydown", (e2) => {
+        if (isImeComposing(e2))
+          return;
         if (e2.key === "Enter") {
           e2.preventDefault();
           flushSidebarFilter();
@@ -23537,6 +23738,8 @@ code-viewer annotate add-db --db app.db --tab query \\
     document.addEventListener("click", closeRepoContextMenu);
     $("#filelist").addEventListener("contextmenu", handleSidebarContextMenu);
     document.addEventListener("keydown", async (e2) => {
+      if (isImeComposing(e2))
+        return;
       if (e2.key === "Escape")
         closeRepoContextMenu();
       if (e2.__gdpVirtualSourcePagingHandled)
@@ -23557,7 +23760,7 @@ code-viewer annotate add-db --db app.db --tab query \\
       const action = resolveKeymapAction(e2, {
         scope,
         editable: isEditableKeyTarget(targetEl),
-        composing: e2.isComposing,
+        composing: isImeComposing(e2),
         paletteOpen: isPaletteOpen(),
         pendingG: PENDING_G_SCOPE === scope && performance.now() <= PENDING_G_UNTIL,
         lightboxOpen: !!document.querySelector(".mkdp-lightbox")
@@ -23666,6 +23869,7 @@ code-viewer annotate add-db --db app.db --tab query \\
     }
     function setRange(from, to) {
       preHistoryRange = null;
+      const wasDatabaseRoute = STATE.route.screen === "database";
       STATE.from = from || "";
       STATE.to = to || "";
       writeScopedStorage("gdp:from", STATE.from);
@@ -23684,6 +23888,8 @@ code-viewer annotate add-db --db app.db --tab query \\
         renderHelpPage();
       } else {
         setRoute({ screen: "diff", range }, true);
+        if (wasDatabaseRoute)
+          DATABASE_VIEW.suspend();
         setPageMode();
         load();
       }
@@ -23769,6 +23975,7 @@ code-viewer annotate add-db --db app.db --tab query \\
       if (STATE.route.screen === "repo")
         STATE.repoRef = STATE.route.ref || "worktree";
       ANNOTATIONS_UI?.restoreSessionFromUrl();
+      replaceUrlWithCurrentRoute();
       syncRefInputs();
       syncHeaderMenu();
       syncLineRefPill();
@@ -23929,6 +24136,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         writeScopedStorage("gdp:to", to);
       }
     });
+    replaceUrlWithCurrentRoute();
     createAnnotationsPlayer({
       $,
       getActiveSessionEntries: () => ANNOTATIONS_UI?.getActiveSessionEntries() ?? [],
@@ -24078,6 +24286,7 @@ code-viewer annotate add-db --db app.db --tab query \\
     document.getElementById("auto-update")?.addEventListener("click", () => {
       setAutoUpdate(!STATE.autoUpdate);
     });
+    document.getElementById("cancel-requests")?.addEventListener("click", cancelInFlightRequests);
     applyAutoUpdateButton();
     function shouldAutoLoadCurrentRoute(route = STATE.route) {
       return shouldAutoLoadForRoute(route, {
