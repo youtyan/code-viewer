@@ -6,6 +6,7 @@ import type {
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
+  QueryHistoryState,
   TabState,
   TabsResponse,
   TabsState,
@@ -13,7 +14,7 @@ import type {
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import type { AppRoute, DiffRange } from "../../core/routes";
-import type { AnnotationTarget } from "../../core/types";
+import type { AnnotationTarget, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
@@ -35,6 +36,17 @@ export type DatabaseViewDeps = {
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   syncHeaderMenu: () => void;
   fetchDbFiles?: () => Promise<DbFilesResponse>;
+};
+
+type DatabasePaneDeps = DatabaseViewDeps & {
+  ensureDbUiState(): Promise<void>;
+  getColumnWidths(dbId: string, table: string): Record<string, number>;
+  setColumnWidths(
+    dbId: string,
+    table: string,
+    widths: Record<string, number>,
+  ): void;
+  loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
 };
 
 export type DatabaseView = {
@@ -122,7 +134,7 @@ type TabPaneInternal = {
 };
 
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
-// localStorage から取るのではなく、外側 (tabs.json から復元した TabState)
+// 直接永続化せず、外側 (tabs.json から復元した TabState)
 // から渡してもらう形にして、タブごとの独立性を担保する。
 type TabPaneInitial = Partial<Omit<TabState, "id">>;
 
@@ -134,6 +146,7 @@ function isPostgresKind(kind: DbFileInfo["kind"] | undefined): boolean {
   return kind === "postgresql";
 }
 
+// ai-dup-check: allow -- tab-name validation is intentionally local to DB UI routing.
 function isSqlView(view: TabName): boolean {
   return (
     view === "data" ||
@@ -214,7 +227,7 @@ function labelFromDbId(dbId: string | null | undefined): string {
 }
 
 function createTabPane(
-  outerDeps: DatabaseViewDeps,
+  outerDeps: DatabasePaneDeps,
   cb: TabPaneCallbacks,
   initial: TabPaneInitial = {},
 ): TabPaneInternal {
@@ -339,7 +352,7 @@ function createTabPane(
     const onUp = () => {
       resizing = false;
       resizeHandle.classList.remove("active");
-      // タブごとに persist (localStorage ではなく tabs.json 経由)。
+      // タブごとに persist (tabs.json 経由)。
       cb.onStateChange();
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -352,10 +365,15 @@ function createTabPane(
     fetchPage: (table, offset, limit, sort, filters, signal) =>
       fetchTablePage(table, offset, limit, sort, filters, signal),
     getDbId: () => currentDbInfo?.id || null,
+    getColumnWidths: (dbId, table) => outerDeps.getColumnWidths(dbId, table),
+    setColumnWidths: (dbId, table, widths) =>
+      outerDeps.setColumnWidths(dbId, table, widths),
   });
 
   const queryEditor = createQueryEditor({
     executeQuery: (sql) => executeQuery(sql),
+    loadHistory: () =>
+      outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
@@ -444,7 +462,7 @@ function createTabPane(
     const onUp = () => {
       historyResizing = false;
       historyResizer.classList.remove("active");
-      // タブごとに persist (localStorage ではなく tabs.json 経由)。
+      // タブごとに persist (tabs.json 経由)。
       cb.onStateChange();
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -461,7 +479,7 @@ function createTabPane(
   sidebar.appendChild(historyToggle);
 
   // history pane の開閉はタブごとに独立。initial が無ければ default は
-  // 「開いている」状態 (= 旧 localStorage default と同じ)。
+  // 「開いている」状態を default にする。
   let userPrefersHistoryOpen = initial.historyOpen ?? true;
 
   function applyVisibility() {
@@ -500,7 +518,7 @@ function createTabPane(
   historyToggle.addEventListener("click", () => {
     userPrefersHistoryOpen = !userPrefersHistoryOpen;
     applyVisibility();
-    // タブごとに persist (localStorage ではなく tabs.json 経由)。
+    // タブごとに persist (tabs.json 経由)。
     cb.onStateChange();
   });
 
@@ -902,6 +920,15 @@ function createTabPane(
       ) {
         return;
       }
+      await outerDeps.ensureDbUiState();
+      if (
+        slot.isStale() ||
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
       grid.load(table, data);
     } catch (err) {
       if (
@@ -1258,13 +1285,14 @@ function createTabPane(
 
   function getState(): TabState {
     const loaded = !!currentDbInfo;
+    const schema = loaded ? currentSchema : (initial.schema ?? currentSchema);
     const state: TabState = {
       id: cb.tabId,
       dbId: currentDbInfo?.id ?? initial.dbId ?? null,
-      schema: loaded ? currentSchema : (initial.schema ?? currentSchema),
       table: loaded ? currentTable : (initial.table ?? currentTable ?? null),
       view: loaded ? currentTab : (initial.view ?? currentTab),
     };
+    if (schema) state.schema = schema;
 
     // 永続化対象の per-tab UI state を載せる。空値は載せない (= tabs.json の
     // 体積を最小化、旧形式と区別しやすくする)。
@@ -1458,9 +1486,80 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         promise: Promise<DbFilesResponse>;
       }
     | null = null;
+  let dbUiState: DbUiState = { version: 1, columnWidths: {} };
+  let dbUiLoadPromise: Promise<void> | null = null;
 
   function isRestoring(): boolean {
     return restoringDepth > 0;
+  }
+
+  function actionHeaders(): HeadersInit {
+    return {
+      "Content-Type": "application/json",
+      "X-Code-Viewer-Action": "1",
+    };
+  }
+
+  async function ensureDbUiState(): Promise<void> {
+    if (dbUiLoadPromise) return dbUiLoadPromise;
+    dbUiLoadPromise = fetch("/_db/ui")
+      .then(async (res) => {
+        if (!res.ok) return;
+        dbUiState = (await res.json()) as DbUiState;
+      })
+      .catch(() => {});
+    return dbUiLoadPromise;
+  }
+
+  function getColumnWidths(
+    dbId: string,
+    table: string,
+  ): Record<string, number> {
+    return { ...(dbUiState.columnWidths[dbId]?.[table] || {}) };
+  }
+
+  function setColumnWidths(
+    dbId: string,
+    table: string,
+    widths: Record<string, number>,
+  ): void {
+    const nextDb = { ...(dbUiState.columnWidths[dbId] || {}) };
+    nextDb[table] = { ...widths };
+    dbUiState = {
+      version: 1,
+      columnWidths: { ...dbUiState.columnWidths, [dbId]: nextDb },
+    };
+    void fetch("/_db/ui", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
+    })
+      .then(async (res) => {
+        if (res.ok) dbUiState = (await res.json()) as DbUiState;
+      })
+      .catch(() => {});
+  }
+
+  async function loadSqlHistory(
+    dbId: string | null,
+    schema: string | null,
+  ): Promise<string[]> {
+    if (!dbId) return [];
+    const params = new URLSearchParams({ db: dbId });
+    if (schema) params.set("schema", schema);
+    const res = await fetch(`/_db/history?${params}`);
+    if (!res.ok) return [];
+    const state = (await res.json()) as QueryHistoryState;
+    const seen = new Set<string>();
+    const history: string[] = [];
+    for (const entry of state.entries) {
+      const sql = entry.sql.trim();
+      if (!sql || seen.has(sql)) continue;
+      seen.add(sql);
+      history.push(sql);
+      if (history.length >= 50) break;
+    }
+    return history;
   }
 
   function beginRestoring(): () => void {
@@ -1901,7 +2000,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     });
 
     const pane = createTabPane(
-      { ...deps, fetchDbFiles: fetchDbFilesCached },
+      {
+        ...deps,
+        fetchDbFiles: fetchDbFilesCached,
+        ensureDbUiState,
+        getColumnWidths,
+        setColumnWidths,
+        loadSqlHistory,
+      },
       {
         tabId: id,
         isActive: () => activeTabId === id,
@@ -1913,8 +2019,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         },
       },
       {
-        // タブ独立の永続化対象 state を全部渡す。pane 内で localStorage を
-        // 読まず、tabs.json から復元した値をここから取る。
+        // タブ独立の永続化対象 state を全部渡す。pane 内で直接永続化せず、
+        // tabs.json から復元した値をここから取る。
         dbId: initial?.dbId ?? null,
         schema: initial?.schema ?? null,
         table: initial?.table ?? null,

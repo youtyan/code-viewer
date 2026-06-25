@@ -1,24 +1,26 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   DbValue,
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
+import { createJsonFileStore } from "../json-store";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const HISTORY_FILE_NAME = "query-history.json";
 const MAX_ENTRIES = 200;
 const MAX_PREVIEW_ROWS = 100;
 const MAX_JSON_BYTES = 1_000_000;
-const historyWriteQueues = new Map<string, Promise<void>>();
+const MAX_ID_LEN = 128;
+const MAX_DB_ID_LEN = 2048;
+const MAX_SCHEMA_LEN = 512;
+const MAX_SQL_LEN = 64_000;
+const MAX_TEXT_LEN = 64_000;
+const MAX_COLUMN_LEN = 512;
+const MAX_COLUMNS = 500;
 
 function historyFilePath(root: string): string {
   return join(root, CODE_VIEWER_DIR, HISTORY_FILE_NAME);
-}
-
-function isEnoent(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }
 
 function emptyState(): QueryHistoryState {
@@ -41,68 +43,107 @@ function serializeHistoryState(state: QueryHistoryState): string {
   return content;
 }
 
-async function backupCorruptHistoryFileAsync(file: string): Promise<void> {
-  try {
-    await rename(file, `${file}.corrupt-${Date.now()}`);
-  } catch {
-    // best effort only
-  }
+function optionalString(value: unknown, maxLen: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!value || value.length > maxLen || value.includes("\0")) return undefined;
+  return value;
 }
+
+function finiteNumber(value: unknown, min = 0): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(min, Math.round(value));
+}
+
+function sanitizeDbValue(value: unknown): DbValue | null {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value as DbValue;
+  }
+  return null;
+}
+
+function sanitizeRows(raw: unknown): DbValue[][] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_PREVIEW_ROWS).map((row) => {
+    if (!Array.isArray(row)) return [];
+    return row.map(sanitizeDbValue);
+  });
+}
+
+function sanitizeEntry(raw: unknown): QueryHistoryEntry | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as Record<string, unknown>;
+  const id = optionalString(entry.id, MAX_ID_LEN);
+  const dbId = optionalString(entry.dbId, MAX_DB_ID_LEN);
+  const sql = optionalString(entry.sql, MAX_SQL_LEN);
+  if (!id || !dbId || !sql) return null;
+  const columns = Array.isArray(entry.columns)
+    ? entry.columns
+        .filter((col): col is string => typeof col === "string" && !!col)
+        .map((col) => col.slice(0, MAX_COLUMN_LEN))
+        .slice(0, MAX_COLUMNS)
+    : [];
+  const rowsPreview = sanitizeRows(entry.rowsPreview);
+  const schema = optionalString(entry.schema, MAX_SCHEMA_LEN);
+  const title = optionalString(entry.title, MAX_TEXT_LEN);
+  const body = optionalString(entry.body, MAX_TEXT_LEN);
+  return {
+    id,
+    dbId,
+    ...(schema ? { schema } : {}),
+    sql,
+    ...(title ? { title } : {}),
+    ...(body ? { body } : {}),
+    columns,
+    rowsPreview,
+    rowCount: finiteNumber(entry.rowCount) ?? rowsPreview.length,
+    savedRows: finiteNumber(entry.savedRows) ?? rowsPreview.length,
+    truncated: typeof entry.truncated === "boolean" ? entry.truncated : false,
+    elapsedMs: finiteNumber(entry.elapsedMs) ?? 0,
+    executedAt:
+      optionalString(entry.executedAt, 64) ?? new Date(0).toISOString(),
+    executedBy: entry.executedBy === "ai" ? "ai" : "user",
+    source: entry.source === "cli" ? "cli" : "browser",
+  };
+}
+
+function sanitizeHistoryState(raw: unknown): QueryHistoryState {
+  if (!raw || typeof raw !== "object") return emptyState();
+  const entriesRaw = (raw as { entries?: unknown }).entries;
+  if (!Array.isArray(entriesRaw)) return emptyState();
+  const entries: QueryHistoryEntry[] = [];
+  for (const entry of entriesRaw) {
+    if (entries.length >= MAX_ENTRIES) break;
+    const normalized = sanitizeEntry(entry);
+    if (normalized) entries.push(normalized);
+  }
+  return { version: 1, entries };
+}
+
+const historyStore = createJsonFileStore<QueryHistoryState>({
+  filePath: historyFilePath,
+  empty: emptyState,
+  sanitize: sanitizeHistoryState,
+  maxBytes: MAX_JSON_BYTES,
+  backupSuffix: "corrupt",
+  serialize: serializeHistoryState,
+});
 
 export async function loadQueryHistoryAsync(
   cwd: string,
 ): Promise<QueryHistoryState> {
-  const pendingWrite = historyWriteQueues.get(cwd);
-  if (pendingWrite) {
-    await pendingWrite.catch(() => {});
-  }
-  return loadQueryHistoryAsyncUnqueued(cwd);
-}
-
-async function loadQueryHistoryAsyncUnqueued(
-  cwd: string,
-): Promise<QueryHistoryState> {
-  const file = historyFilePath(cwd);
-  let raw: string;
-  try {
-    raw = await readFile(file, "utf8");
-  } catch (err) {
-    if (isEnoent(err)) return emptyState();
-    await backupCorruptHistoryFileAsync(file);
-    return emptyState();
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      parsed.version !== 1 ||
-      !Array.isArray(parsed.entries)
-    ) {
-      await backupCorruptHistoryFileAsync(file);
-      return emptyState();
-    }
-    return parsed as QueryHistoryState;
-  } catch (err) {
-    if (isEnoent(err)) return emptyState();
-    await backupCorruptHistoryFileAsync(file);
-    return emptyState();
-  }
+  return historyStore.load(cwd);
 }
 
 export async function saveQueryHistoryAsync(
   cwd: string,
   state: QueryHistoryState,
 ): Promise<void> {
-  const dir = join(cwd, CODE_VIEWER_DIR);
-  await mkdir(dir, { recursive: true });
-  const file = historyFilePath(cwd);
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
-  const content = serializeHistoryState(state);
-  await writeFile(tmp, content, "utf8");
-  await rename(tmp, file);
+  return historyStore.save(cwd, state);
 }
 
 export async function updateQueryHistoryAsync<T>(
@@ -113,27 +154,7 @@ export async function updateQueryHistoryAsync<T>(
     | { state: QueryHistoryState; result: T }
     | Promise<{ state: QueryHistoryState; result: T }>,
 ): Promise<T> {
-  const previous = historyWriteQueues.get(cwd) ?? Promise.resolve();
-  const run = previous
-    .catch(() => {})
-    .then(async () => {
-      const current = await loadQueryHistoryAsyncUnqueued(cwd);
-      const updated = await updater(current);
-      await saveQueryHistoryAsync(cwd, updated.state);
-      return updated.result;
-    });
-  const queued = run.then(
-    () => {},
-    () => {},
-  );
-  historyWriteQueues.set(cwd, queued);
-  try {
-    return await run;
-  } finally {
-    if (historyWriteQueues.get(cwd) === queued) {
-      historyWriteQueues.delete(cwd);
-    }
-  }
+  return historyStore.update(cwd, updater);
 }
 
 function clampPreviewRows(rows: DbValue[][]): DbValue[][] {

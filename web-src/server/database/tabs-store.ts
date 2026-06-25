@@ -1,7 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TabState, TabsState } from "../../core/database/types";
-import { makeId } from "../../core/id";
+import { createJsonFileStore } from "../json-store";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const TABS_FILE_NAME = "tabs.json";
@@ -14,11 +13,14 @@ const MAX_SQL_DRAFT_LEN = 16_000;
 const MAX_ES_QUERY_LEN = 16_000;
 const MAX_TAB_ID_LEN = 128;
 const MAX_DB_ID_LEN = 2048;
+const MAX_SCHEMA_NAME_LEN = 512;
 const MAX_TABLE_NAME_LEN = 512;
 const MAX_REDIS_KEY_LEN = 1024;
 const MAX_REDIS_KEY_FILTER_LEN = 512;
 const MAX_INDEX_NAME_LEN = 256;
-const tabsWriteQueues = new Map<string, Promise<void>>();
+const MAX_S3_BUCKET_LEN = 256;
+const MAX_S3_KEY_LEN = 2048;
+const MAX_S3_QUERY_LEN = 2048;
 // CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
 const MAX_CSS_SIZE_LEN = 16;
 const VALID_VIEWS = new Set([
@@ -32,10 +34,6 @@ const VALID_VIEWS = new Set([
 
 function tabsFilePath(root: string): string {
   return join(root, CODE_VIEWER_DIR, TABS_FILE_NAME);
-}
-
-function isEnoent(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }
 
 function emptyState(): TabsState {
@@ -117,6 +115,32 @@ function sanitizeEs(v: unknown): NonNullable<TabState["es"]> | undefined {
   return out;
 }
 
+function sanitizeS3(v: unknown): NonNullable<TabState["s3"]> | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  const out: NonNullable<TabState["s3"]> = {};
+  const bucket = sanitizeOptionalString(r.bucket, MAX_S3_BUCKET_LEN);
+  if (bucket !== undefined) out.bucket = bucket;
+  const prefix = sanitizeOptionalString(r.prefix, MAX_S3_KEY_LEN);
+  if (prefix !== undefined) out.prefix = prefix;
+  const query = sanitizeOptionalString(r.query, MAX_S3_QUERY_LEN);
+  if (query !== undefined) out.query = query;
+  if (r.mode === "prefix" || r.mode === "contains") out.mode = r.mode;
+  if (r.sort === "key-asc" || r.sort === "updated-desc") out.sort = r.sort;
+  const key = sanitizeOptionalString(r.key, MAX_S3_KEY_LEN);
+  if (key !== undefined) out.key = key;
+  if (
+    out.bucket === undefined &&
+    out.prefix === undefined &&
+    out.query === undefined &&
+    out.mode === undefined &&
+    out.sort === undefined &&
+    out.key === undefined
+  )
+    return undefined;
+  return out;
+}
+
 // 入力 JSON を厳密に検証して unknown フィールドを捨てる。tabs.json は
 // ユーザーが手で書き換える可能性もあるので、壊れた値は静かに正規化する。
 function sanitize(input: unknown): TabsState {
@@ -136,12 +160,14 @@ function sanitize(input: unknown): TabsState {
     seenIds.add(id);
     const dbId = sanitizeOptionalString(tab.dbId, MAX_DB_ID_LEN) ?? null;
     if (isToolInternalDbId(dbId)) continue;
+    const schema = sanitizeOptionalString(tab.schema, MAX_SCHEMA_NAME_LEN);
     const table = sanitizeOptionalString(tab.table, MAX_TABLE_NAME_LEN) ?? null;
     const view =
       typeof tab.view === "string" && VALID_VIEWS.has(tab.view)
         ? (tab.view as TabsState["tabs"][number]["view"])
         : "data";
     const out: TabsState["tabs"][number] = { id, dbId, table, view };
+    if (schema !== undefined) out.schema = schema;
 
     // optional 永続化 field — 値が valid なときだけ載せる。undefined のときは
     // 載せない (旧形式 tabs.json と同じ表現になる)。
@@ -156,6 +182,8 @@ function sanitize(input: unknown): TabsState {
     if (redis !== undefined) out.redis = redis;
     const es = sanitizeEs(tab.es);
     if (es !== undefined) out.es = es;
+    const s3 = sanitizeS3(tab.s3);
+    if (s3 !== undefined) out.s3 = s3;
 
     tabs.push(out);
   }
@@ -167,81 +195,22 @@ function sanitize(input: unknown): TabsState {
   return { version: 1, tabs, activeTabId };
 }
 
+const tabsStore = createJsonFileStore<TabsState>({
+  filePath: tabsFilePath,
+  empty: emptyState,
+  sanitize,
+  maxBytes: MAX_JSON_BYTES,
+  backupSuffix: "bak",
+  sizeErrorMessage: "tabs state too large",
+});
+
 export async function loadTabsAsync(cwd: string): Promise<TabsState> {
-  const pendingWrite = tabsWriteQueues.get(cwd);
-  if (pendingWrite) {
-    await pendingWrite.catch(() => {});
-  }
-  const file = tabsFilePath(cwd);
-  let raw: string;
-  try {
-    raw = await readFile(file, "utf8");
-  } catch (err) {
-    if (isEnoent(err)) return emptyState();
-    await backupInvalidTabsFileAsync(file);
-    return emptyState();
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      (parsed as { version?: unknown }).version !== 1
-    ) {
-      await backupInvalidTabsFileAsync(file);
-      return emptyState();
-    }
-    return sanitize(parsed);
-  } catch (err) {
-    if (isEnoent(err)) return emptyState();
-    await backupInvalidTabsFileAsync(file);
-    return emptyState();
-  }
-}
-
-async function backupInvalidTabsFileAsync(file: string): Promise<void> {
-  try {
-    await rename(file, `${file}.bak-${Date.now()}`);
-  } catch {
-    // best effort only
-  }
-}
-
-async function saveTabsAsyncUnqueued(
-  cwd: string,
-  state: TabsState,
-): Promise<void> {
-  const normalized = sanitize(state);
-  const dir = join(cwd, CODE_VIEWER_DIR);
-  await mkdir(dir, { recursive: true });
-  const file = tabsFilePath(cwd);
-  const tmp = `${file}.${makeId(`tmp-${process.pid}`)}`;
-  const content = `${JSON.stringify(normalized, null, 2)}\n`;
-  if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
-    throw new Error("tabs state too large");
-  }
-  await writeFile(tmp, content, "utf8");
-  await rename(tmp, file);
+  return tabsStore.load(cwd);
 }
 
 export async function saveTabsAsync(
   cwd: string,
   state: TabsState,
 ): Promise<void> {
-  const previous = tabsWriteQueues.get(cwd) ?? Promise.resolve();
-  const run = previous
-    .catch(() => {})
-    .then(() => saveTabsAsyncUnqueued(cwd, state));
-  const queued = run.then(
-    () => {},
-    () => {},
-  );
-  tabsWriteQueues.set(cwd, queued);
-  try {
-    await run;
-  } finally {
-    if (tabsWriteQueues.get(cwd) === queued) {
-      tabsWriteQueues.delete(cwd);
-    }
-  }
+  return tabsStore.save(cwd, state);
 }

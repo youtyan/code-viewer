@@ -492,10 +492,10 @@ describe("annotation sessions and entries", () => {
 });
 
 describe("annotations persistence", () => {
-  test("save/load round-trips through .code-viewer/annotations.json", () => {
+  test("save/load round-trips through .code-viewer/annotations.json", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-annotations-"));
     try {
-      expect(loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
+      expect(await loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
       const added = addAnnotationEntry(
         emptyAnnotationsState(),
         { path: "a.ts", body: "hello", line: { start: 3, end: 3 } },
@@ -503,22 +503,22 @@ describe("annotations persistence", () => {
         makeId,
       );
       if (added.ok === false) throw new Error(added.error);
-      saveAnnotationsState(dir, added.state);
-      expect(loadAnnotationsState(dir)).toEqual(added.state);
+      await saveAnnotationsState(dir, added.state);
+      expect(await loadAnnotationsState(dir)).toEqual(added.state);
       expect(annotationsFilePath(dir).endsWith("annotations.json")).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("corrupt or foreign file contents load as empty state", () => {
+  test("corrupt or foreign file contents load as empty state", async () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-annotations-"));
     try {
-      saveAnnotationsState(dir, emptyAnnotationsState());
+      await saveAnnotationsState(dir, emptyAnnotationsState());
       writeFileSync(annotationsFilePath(dir), "not json", "utf8");
-      expect(loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
+      expect(await loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
       writeFileSync(annotationsFilePath(dir), '{"sessions": 5}', "utf8");
-      expect(loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
+      expect(await loadAnnotationsState(dir)).toEqual(emptyAnnotationsState());
       expect(readFileSync(annotationsFilePath(dir), "utf8")).toBe(
         '{"sessions": 5}',
       );

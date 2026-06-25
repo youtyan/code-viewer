@@ -20,10 +20,11 @@ export type AnnotationsPlayerDeps = {
   onAnnotationsChanged(cb: () => void): void;
   onAnnotationOpened(cb: (entryId: string) => void): void;
   getActiveAnnotationId(): string | null;
+  getMuted(): boolean;
+  setMuted(muted: boolean): void;
+  getRate(): number | undefined;
+  setRate(rate: number): void;
 };
-
-const MUTE_KEY = "gdp:annotation-muted";
-const RATE_KEY = "gdp:annotation-rate";
 
 export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   const bar = deps.$<HTMLElement>("#annotation-player");
@@ -126,8 +127,8 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   });
 
   // Restore persisted settings.
-  if (localStorage.getItem(MUTE_KEY) === "1") core.setMuted(true);
-  const savedRate = Number(localStorage.getItem(RATE_KEY));
+  if (deps.getMuted()) core.setMuted(true);
+  const savedRate = deps.getRate();
   if (
     savedRate &&
     savedRate >= 0.5 &&
@@ -170,12 +171,12 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   muteBtn.addEventListener("click", () => {
     const muted = !core.getState().muted;
     core.setMuted(muted);
-    localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+    deps.setMuted(muted);
   });
   rateSel.addEventListener("change", () => {
     const rate = Number(rateSel.value) || 1;
     core.setRate(rate);
-    localStorage.setItem(RATE_KEY, String(rate));
+    deps.setRate(rate);
   });
 
   function syncVisibility() {

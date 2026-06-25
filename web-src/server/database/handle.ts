@@ -11,6 +11,7 @@ import type {
   QueryHistoryEntry,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
+import { loadDbUiState, patchDbUiState } from "../state-store";
 import { isAbortLikeError } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
 import {
@@ -46,6 +47,8 @@ import {
   dispatchRoutes,
   handleError,
   json,
+  jsonLoadResponse,
+  parseBoundedJsonBody,
   parsePostJsonBody,
   textError,
 } from "./handle-shared";
@@ -778,6 +781,7 @@ async function handleHistoryClear(
 
 const EXPORT_MAX_ROWS = 100_000;
 const MAX_TABS_BODY_BYTES = 1_000_000;
+const MAX_DB_UI_BODY_BYTES = 1_000_000;
 const MAX_SNAPSHOT_TABLES = 512;
 const MAX_SNAPSHOT_TABLE_NAME_LEN = 1024;
 
@@ -1545,6 +1549,31 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
   }
 }
 
+async function handleDbUiGet(cwd: string): Promise<Response> {
+  return jsonLoadResponse(
+    () => loadDbUiState(cwd),
+    "db UI",
+    "failed to load db UI state",
+  );
+}
+
+async function handleDbUiPatch(cwd: string, req: Request): Promise<Response> {
+  const body = await parseBoundedJsonBody(
+    req,
+    MAX_DB_UI_BODY_BYTES,
+    "db UI body too large",
+  );
+  if (body instanceof Response) return body;
+  try {
+    return json(await patchDbUiState(cwd, body));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "db UI state too large") return textError(message, 413);
+    console.error("[code-viewer] db UI error:", err);
+    return textError("failed to save db UI state", 500);
+  }
+}
+
 async function handleClose(
   cwd: string,
   req: Request,
@@ -1731,6 +1760,12 @@ export async function handleDatabaseRoute(
         sideEffect: (m) => m !== "GET",
         handler: () =>
           method === "GET" ? handleTabsGet(cwd) : handleTabsPut(cwd, req),
+      },
+      "/_db/ui": {
+        methods: ["GET", "PATCH"],
+        sideEffect: (m) => m !== "GET",
+        handler: () =>
+          method === "GET" ? handleDbUiGet(cwd) : handleDbUiPatch(cwd, req),
       },
     },
     sideEffectAllowed,

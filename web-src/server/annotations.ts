@@ -1,10 +1,3 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
 import { join } from "node:path";
 import type {
   AnnotationDatabaseDataState,
@@ -18,12 +11,15 @@ import type {
   AnnotationsState,
   AnnotationTarget,
 } from "../core/types";
+import { createJsonFileStore } from "./json-store";
 
 export const CODE_VIEWER_DIR = ".code-viewer";
 export const ANNOTATIONS_FILE_NAME = "annotations.json";
 export const ANNOTATION_BODY_MAX_BYTES = 64 * 1024;
 export const ANNOTATION_TITLE_MAX_CHARS = 300;
+const MAX_ANNOTATIONS_JSON_BYTES = 5_000_000;
 
+// ai-dup-check: allow -- exported test helper for this concrete JSON store.
 export function annotationsFilePath(root: string): string {
   return join(root, CODE_VIEWER_DIR, ANNOTATIONS_FILE_NAME);
 }
@@ -32,6 +28,7 @@ export function emptyAnnotationsState(): AnnotationsState {
   return { version: 1, sessions: [] };
 }
 
+// ai-dup-check: allow -- annotation ids keep their historical prefix/time format.
 export function makeAnnotationId(prefix: string): string {
   const random = Math.random().toString(36).slice(2, 8);
   const time = Date.now().toString(36);
@@ -299,26 +296,26 @@ export function normalizeAnnotationsState(raw: unknown): AnnotationsState {
   };
 }
 
-export function loadAnnotationsState(root: string): AnnotationsState {
-  const file = annotationsFilePath(root);
-  if (!existsSync(file)) return emptyAnnotationsState();
-  try {
-    return normalizeAnnotationsState(JSON.parse(readFileSync(file, "utf8")));
-  } catch {
-    return emptyAnnotationsState();
-  }
+const annotationsStore = createJsonFileStore<AnnotationsState>({
+  filePath: annotationsFilePath,
+  empty: emptyAnnotationsState,
+  sanitize: normalizeAnnotationsState,
+  maxBytes: MAX_ANNOTATIONS_JSON_BYTES,
+  backupSuffix: "corrupt",
+  sizeErrorMessage: "annotations state too large",
+});
+
+export async function loadAnnotationsState(
+  root: string,
+): Promise<AnnotationsState> {
+  return annotationsStore.load(root);
 }
 
-export function saveAnnotationsState(
+export async function saveAnnotationsState(
   root: string,
   state: AnnotationsState,
-): void {
-  const dir = join(root, CODE_VIEWER_DIR);
-  mkdirSync(dir, { recursive: true });
-  const file = annotationsFilePath(root);
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  renameSync(tmp, file);
+): Promise<void> {
+  return annotationsStore.save(root, state);
 }
 
 export function startAnnotationSession(

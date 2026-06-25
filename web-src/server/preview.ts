@@ -2177,7 +2177,7 @@ function annotationSse(
 }
 
 async function handleAnnotations(req: Request) {
-  if (req.method === "GET") return json(loadAnnotationsState(cwd));
+  if (req.method === "GET") return json(await loadAnnotationsState(cwd));
   if (req.method !== "POST") return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
   const contentType = req.headers.get("content-type") || "";
@@ -2200,11 +2200,11 @@ async function handleAnnotations(req: Request) {
   if (action === "start") {
     const title = typeof body.title === "string" ? body.title : "";
     const started = startAnnotationSession(
-      loadAnnotationsState(cwd),
+      await loadAnnotationsState(cwd),
       title,
       new Date().toISOString(),
     );
-    saveAnnotationsState(cwd, started.state);
+    await saveAnnotationsState(cwd, started.state);
     annotationSse("start", started.session.id);
     return json({ ok: true, session: started.session });
   }
@@ -2229,7 +2229,7 @@ async function handleAnnotations(req: Request) {
         return text("forbidden", 403);
     }
     const result = addAnnotationEntry(
-      loadAnnotationsState(cwd),
+      await loadAnnotationsState(cwd),
       {
         session_id:
           typeof body.session_id === "string" ? body.session_id : undefined,
@@ -2257,7 +2257,7 @@ async function handleAnnotations(req: Request) {
       new Date().toISOString(),
     );
     if (result.ok === false) return text(result.error, 400);
-    saveAnnotationsState(cwd, result.state);
+    await saveAnnotationsState(cwd, result.state);
     annotationSse("add", result.session.id, result.entry.id);
     return json({
       ok: true,
@@ -2270,14 +2270,14 @@ async function handleAnnotations(req: Request) {
   if (action === "move") {
     const id = typeof body.id === "string" ? body.id : "";
     if (!id) return text("invalid id", 400);
-    const result = moveAnnotationEntry(loadAnnotationsState(cwd), id, {
+    const result = moveAnnotationEntry(await loadAnnotationsState(cwd), id, {
       before_id:
         typeof body.before_id === "string" ? body.before_id : undefined,
       after_id: typeof body.after_id === "string" ? body.after_id : undefined,
       position: typeof body.position === "number" ? body.position : undefined,
     });
     if (result.ok === false) return text(result.error, 400);
-    saveAnnotationsState(cwd, result.state);
+    await saveAnnotationsState(cwd, result.state);
     annotationSse("update", result.session.id, result.entry.id);
     return json({
       ok: true,
@@ -2288,9 +2288,9 @@ async function handleAnnotations(req: Request) {
   if (action === "delete") {
     const id = typeof body.id === "string" ? body.id : "";
     if (!id) return text("invalid id", 400);
-    const result = deleteAnnotationById(loadAnnotationsState(cwd), id);
+    const result = deleteAnnotationById(await loadAnnotationsState(cwd), id);
     if (result.removed) {
-      saveAnnotationsState(cwd, result.state);
+      await saveAnnotationsState(cwd, result.state);
       annotationSse("delete");
     }
     return json({ ok: true, removed: result.removed });
@@ -2300,29 +2300,29 @@ async function handleAnnotations(req: Request) {
     const title = typeof body.title === "string" ? body.title : "";
     if (!id) return text("invalid id", 400);
     const result = renameAnnotationSession(
-      loadAnnotationsState(cwd),
+      await loadAnnotationsState(cwd),
       id,
       title,
     );
     if (!result.renamed) return text("session not found", 404);
-    saveAnnotationsState(cwd, result.state);
+    await saveAnnotationsState(cwd, result.state);
     annotationSse("update", id);
     return json({ ok: true });
   }
   if (action === "update") {
     const id = typeof body.id === "string" ? body.id : "";
     if (!id) return text("invalid id", 400);
-    const result = updateAnnotationEntry(loadAnnotationsState(cwd), id, {
+    const result = updateAnnotationEntry(await loadAnnotationsState(cwd), id, {
       title: typeof body.title === "string" ? body.title : undefined,
       body: typeof body.body === "string" ? body.body : undefined,
     });
     if (result.ok === false) return text(result.error, 400);
-    saveAnnotationsState(cwd, result.state);
+    await saveAnnotationsState(cwd, result.state);
     annotationSse("update", undefined, id);
     return json({ ok: true, entry: result.entry });
   }
   if (action === "clear") {
-    saveAnnotationsState(cwd, emptyAnnotationsState());
+    await saveAnnotationsState(cwd, emptyAnnotationsState());
     annotationSse("clear");
     return json({ ok: true });
   }
@@ -2411,6 +2411,16 @@ const server = await startServer({
         sendSse,
       );
       if (dbResponse) return dbResponse;
+    }
+    if (url.pathname.startsWith("/_state/")) {
+      const { handleStateRoute } = await import("./state-route");
+      const stateResponse = await handleStateRoute(
+        req,
+        url,
+        cwd,
+        sideEffectRequestAllowed,
+      );
+      if (stateResponse) return stateResponse;
     }
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));

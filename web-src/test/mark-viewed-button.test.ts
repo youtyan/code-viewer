@@ -28,8 +28,7 @@ describe("mark viewed toolbar button", () => {
     expect(appSource.includes("octicon-copy")).toBe(true);
   });
 
-  test("persists per-file viewed paths without dimming diff bodies", () => {
-    expect(appSource.includes('"gdp:viewed-files"')).toBe(true);
+  test("tracks per-file viewed paths without dimming diff bodies", () => {
     expect(appSource.includes("STATE.viewedFiles.add(path)")).toBe(true);
     expect(appSource.includes("STATE.viewedFiles.delete(path)")).toBe(true);
     expect(

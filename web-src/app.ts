@@ -36,12 +36,14 @@ import {
   type SourceLineTarget,
 } from "./core/routes";
 import type {
+  AppSettingsState,
   DiffCardElement,
   DiffMeta,
   FileMeta,
   HljsApi,
   SettingsResponse,
   UndoActionResponse,
+  ViewState,
 } from "./core/types";
 import { createAnnotationsPlayer } from "./views/annotations-player";
 import {
@@ -63,11 +65,7 @@ import { createLineRefPill } from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
-import {
-  createSidebar,
-  SIDEBAR_FONT_SIZE_KEY,
-  type ViewerFontSize,
-} from "./views/sidebar";
+import { createSidebar, type ViewerFontSize } from "./views/sidebar";
 import {
   createSourceView,
   type VirtualSourcePagingKeyboardEvent,
@@ -124,10 +122,12 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   let PROJECT_NAME = "";
 
-  const SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX = "gdp:scope-omit-dirs:";
-  const SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX = "gdp:scope-exclude-names:";
-  const CODE_FONT_SIZE_STORAGE_KEY = "gdp:code-font-size";
-  const VIEWER_LANGUAGE_STORAGE_KEY = "gdp:language";
+  let APP_SETTINGS: AppSettingsState = { version: 1 };
+  let VIEW_STATE: ViewState = {
+    version: 1,
+    collapsedDirs: [],
+    viewedFiles: [],
+  };
 
   const NETWORK_ACTIVITY = createNetworkActivityTracker({
     onChange: updateNetworkActivity,
@@ -151,22 +151,6 @@ window.GdpExpandLogic = GdpExpandLogic;
   function cancelInFlightRequests(): void {
     NETWORK_ACTIVITY.cancelAll();
     updateNetworkActivity();
-  }
-
-  function scopedKey(base: string): string {
-    return PROJECT_NAME ? `${base}:${PROJECT_NAME}` : base;
-  }
-
-  function readScopedStorage(base: string): string | null {
-    if (PROJECT_NAME) {
-      const v = localStorage.getItem(`${base}:${PROJECT_NAME}`);
-      if (v !== null) return v;
-    }
-    return localStorage.getItem(base);
-  }
-
-  function writeScopedStorage(base: string, value: string): void {
-    localStorage.setItem(scopedKey(base), value);
   }
 
   const VIEWER_LANGUAGES: ViewerLanguage[] = ["en", "ja"];
@@ -318,14 +302,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       .sort((a, b) => a.localeCompare(b));
   }
 
-  function scopeOmitDirsStorageKey(): string {
-    return SCOPE_OMIT_DIRS_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-  }
-
-  function scopeExcludeNamesStorageKey(): string {
-    return SCOPE_EXCLUDE_NAMES_STORAGE_KEY_PREFIX + (PROJECT_NAME || "default");
-  }
-
   function setProjectName(project: string) {
     if (!project) return;
     PROJECT_NAME = project;
@@ -335,7 +311,6 @@ window.GdpExpandLogic = GdpExpandLogic;
       projectTitle.textContent = project;
       projectTitle.title = project;
     }
-    reloadScopedState();
   }
 
   function setProjectBranch(branch: string) {
@@ -346,45 +321,161 @@ window.GdpExpandLogic = GdpExpandLogic;
     el.title = branch ? `Current branch: ${branch}` : "";
   }
 
-  function reloadScopedState() {
-    const collapsed = readScopedStorage("gdp:collapsed-dirs");
-    if (collapsed !== null) {
-      STATE.collapsedDirs = new Set<string>(JSON.parse(collapsed));
+  type SettingsPatch = Partial<Omit<AppSettingsState, "version">> &
+    Record<string, unknown>;
+  type ViewPatch = {
+    addedViewedFiles?: string[];
+    removedViewedFiles?: string[];
+    addedCollapsedDirs?: string[];
+    removedCollapsedDirs?: string[];
+  };
+
+  function mergeLocalSettings(patch: SettingsPatch): void {
+    const next = { ...APP_SETTINGS } as Record<string, unknown>;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete next[key];
+      else next[key] = value;
     }
-    const viewed = readScopedStorage("gdp:viewed-files");
-    if (viewed !== null) {
-      STATE.viewedFiles = new Set<string>(JSON.parse(viewed));
+    APP_SETTINGS = { version: 1, ...next } as AppSettingsState;
+  }
+
+  function actionHeaders(): HeadersInit {
+    return {
+      "Content-Type": "application/json",
+      "X-Code-Viewer-Action": "1",
+    };
+  }
+
+  function patchSettings(
+    patch: SettingsPatch,
+    options: { keepalive?: boolean } = {},
+  ): void {
+    mergeLocalSettings(patch);
+    const body = JSON.stringify(patch);
+    void fetch("/_state/settings", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body,
+      keepalive: options.keepalive,
+    }).catch(() => {});
+  }
+
+  let pendingViewPatch: ViewPatch | null = null;
+  let pendingViewTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function mergePathDelta(
+    next: ViewPatch,
+    base: ViewPatch | null,
+    patch: ViewPatch,
+    addKey: "addedViewedFiles" | "addedCollapsedDirs",
+    removeKey: "removedViewedFiles" | "removedCollapsedDirs",
+  ): void {
+    const added = new Set(base?.[addKey] || []);
+    const removed = new Set(base?.[removeKey] || []);
+    for (const path of patch[addKey] || []) {
+      removed.delete(path);
+      added.delete(path);
+      added.add(path);
     }
-    const igRaw = readScopedStorage("gdp:ignore-ws");
-    if (igRaw !== null) STATE.ignoreWs = igRaw === "1";
-    const from = readScopedStorage("gdp:from");
-    const to = readScopedStorage("gdp:to");
-    if (from !== null) STATE.from = from;
-    if (to !== null) STATE.to = to;
-    const ht = readScopedStorage("gdp:hide-tests");
-    if (ht !== null) STATE.hideTests = ht === "1";
+    for (const path of patch[removeKey] || []) {
+      added.delete(path);
+      removed.delete(path);
+      removed.add(path);
+    }
+    if (added.size > 0) next[addKey] = [...added];
+    else delete next[addKey];
+    if (removed.size > 0) next[removeKey] = [...removed];
+    else delete next[removeKey];
+  }
+
+  function mergeViewPatch(base: ViewPatch | null, patch: ViewPatch): ViewPatch {
+    const next: ViewPatch = { ...(base || {}), ...patch };
+    mergePathDelta(next, base, patch, "addedViewedFiles", "removedViewedFiles");
+    mergePathDelta(
+      next,
+      base,
+      patch,
+      "addedCollapsedDirs",
+      "removedCollapsedDirs",
+    );
+    return next;
+  }
+
+  function mergeLocalViewState(state: ViewState, patch: ViewPatch): ViewState {
+    const viewedFiles = new Set(state.viewedFiles);
+    for (const path of patch.addedViewedFiles || []) viewedFiles.add(path);
+    for (const path of patch.removedViewedFiles || []) viewedFiles.delete(path);
+    const collapsedDirs = new Set(state.collapsedDirs);
+    for (const path of patch.addedCollapsedDirs || []) collapsedDirs.add(path);
+    for (const path of patch.removedCollapsedDirs || [])
+      collapsedDirs.delete(path);
+    return {
+      version: 1,
+      collapsedDirs: [...collapsedDirs],
+      viewedFiles: [...viewedFiles],
+    };
+  }
+
+  function patchViewState(
+    patch: ViewPatch,
+    options: { debounce?: boolean; keepalive?: boolean } = {},
+  ): void {
+    VIEW_STATE = mergeLocalViewState(VIEW_STATE, patch);
+    pendingViewPatch = mergeViewPatch(pendingViewPatch, patch);
+    const send = (keepalive = false) => {
+      if (!pendingViewPatch) return;
+      const body = JSON.stringify(pendingViewPatch);
+      pendingViewPatch = null;
+      void fetch("/_state/view", {
+        method: "PATCH",
+        headers: actionHeaders(),
+        body,
+        keepalive,
+      }).catch(() => {});
+    };
+    if (options.keepalive) {
+      if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
+      pendingViewTimer = null;
+      send(true);
+      return;
+    }
+    if (options.debounce === false) {
+      if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
+      pendingViewTimer = null;
+      send();
+      return;
+    }
+    if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
+    pendingViewTimer = setTimeout(() => {
+      pendingViewTimer = null;
+      send();
+    }, 300);
+  }
+
+  function flushViewStatePatch(keepalive = false): void {
+    if (!pendingViewPatch) return;
+    if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
+    pendingViewTimer = null;
+    const body = JSON.stringify(pendingViewPatch);
+    pendingViewPatch = null;
+    void fetch("/_state/view", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body,
+      keepalive,
+    }).catch(() => {});
   }
 
   function savedScopeOmitDirs(): string[] | null {
-    const raw = localStorage.getItem(scopeOmitDirsStorageKey());
-    if (raw == null) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return normalizeScopeOmitDirs(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return normalizeScopeOmitDirs(raw);
-    }
+    return APP_SETTINGS.scopeOmitDirs
+      ? normalizeScopeOmitDirs(APP_SETTINGS.scopeOmitDirs)
+      : null;
   }
 
   function savedScopeExcludeNames(): string[] | null {
-    const raw = localStorage.getItem(scopeExcludeNamesStorageKey());
-    if (raw == null) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return normalizeScopeExcludeNames(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return normalizeScopeExcludeNames(raw);
-    }
+    return APP_SETTINGS.scopeExcludeNames
+      ? normalizeScopeExcludeNames(APP_SETTINGS.scopeExcludeNames)
+      : null;
   }
 
   function serverScopeOmitDirsDefault(): string[] {
@@ -427,9 +518,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function savedViewerLanguage(): ViewerLanguage {
-    return normalizeViewerLanguage(
-      localStorage.getItem(VIEWER_LANGUAGE_STORAGE_KEY),
-    );
+    return normalizeViewerLanguage(APP_SETTINGS.language);
   }
 
   function viewerLanguageFromSearch(search: string): ViewerLanguage | null {
@@ -438,13 +527,48 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function savedCodeFontSize(): ViewerFontSize {
-    return normalizeViewerFontSize(
-      localStorage.getItem(CODE_FONT_SIZE_STORAGE_KEY),
-    );
+    return normalizeViewerFontSize(APP_SETTINGS.codeFontSize);
   }
 
   function applyCodeFontSize(size: ViewerFontSize = savedCodeFontSize()) {
     document.body.dataset.codeFontSize = size;
+  }
+
+  function savedSidebarFontSizeSetting(): ViewerFontSize {
+    return normalizeViewerFontSize(APP_SETTINGS.sidebarFontSize);
+  }
+
+  function savedLayout(): LayoutMode {
+    return APP_SETTINGS.layout === "line-by-line"
+      ? "line-by-line"
+      : "side-by-side";
+  }
+
+  function savedTheme(): ThemeMode {
+    return APP_SETTINGS.theme === "light" || APP_SETTINGS.theme === "dark"
+      ? APP_SETTINGS.theme
+      : matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+  }
+
+  function savedSidebarView(): SidebarView {
+    return APP_SETTINGS.sidebarView === "flat" ? "flat" : "tree";
+  }
+
+  function savedNumber(
+    value: unknown,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    return typeof value === "number" && Number.isFinite(value)
+      ? Math.max(min, Math.min(max, Math.round(value)))
+      : fallback;
+  }
+
+  function savedRange(): DiffRange {
+    return APP_SETTINGS.range || DEFAULT_RANGE;
   }
 
   function repoFileCacheKey(ref: string): string {
@@ -478,57 +602,106 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
-  const STATE: AppState = (() => {
-    const igRaw = readScopedStorage("gdp:ignore-ws");
-    const fallbackRange = {
-      from: readScopedStorage("gdp:from") || DEFAULT_RANGE.from,
-      to: readScopedStorage("gdp:to") || DEFAULT_RANGE.to,
-    };
+  async function loadPersistedState(): Promise<void> {
+    const [settings, view] = await Promise.all([
+      fetch("/_state/settings")
+        .then((res) =>
+          res.ok ? (res.json() as Promise<AppSettingsState>) : null,
+        )
+        .catch(() => null),
+      fetch("/_state/view")
+        .then((res) => (res.ok ? (res.json() as Promise<ViewState>) : null))
+        .catch(() => null),
+    ]);
+    if (settings) APP_SETTINGS = settings;
+    if (view) VIEW_STATE = view;
+  }
+
+  function routeFromLocation(): AppRoute {
     const savedLanguage =
       viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
     const parsedRoute = parseRoute(
       window.location.pathname,
       window.location.search,
-      fallbackRange,
+      savedRange(),
     );
     const routeBase =
       parsedRoute.screen === "unknown"
         ? { screen: "diff" as const, range: parsedRoute.range }
         : parsedRoute;
-    const route =
-      routeBase.screen === "help" &&
+    return routeBase.screen === "help" &&
       !new URLSearchParams(window.location.search).has("lang")
-        ? { ...routeBase, lang: savedLanguage }
-        : routeBase;
+      ? { ...routeBase, lang: savedLanguage }
+      : routeBase;
+  }
+
+  function applyPersistedStateToState(): void {
+    const route = routeFromLocation();
+    const savedLanguage =
+      viewerLanguageFromSearch(window.location.search) || savedViewerLanguage();
+    STATE.layout = savedLayout();
+    STATE.theme = savedTheme();
+    STATE.language = savedLanguage;
+    STATE.sbView = savedSidebarView();
+    STATE.sbWidth = savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900);
+    STATE.historyWidth = savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640);
+    STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
+    STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
+    STATE.viewedFiles = new Set(VIEW_STATE.viewedFiles || []);
+    STATE.ignoreWs =
+      APP_SETTINGS.ignoreWhitespace === undefined
+        ? true
+        : APP_SETTINGS.ignoreWhitespace === true;
+    STATE.hideTests = APP_SETTINGS.hideTests === true;
+    STATE.syntaxHighlight = APP_SETTINGS.syntaxHighlight !== false;
+    STATE.autoUpdate = APP_SETTINGS.autoUpdate !== false;
+    STATE.route = route;
+    STATE.from = route.range.from;
+    STATE.to = route.range.to;
+    STATE.repoRef = route.screen === "repo" ? route.ref : "worktree";
+  }
+
+  async function loadInitialState(): Promise<void> {
+    await Promise.all([loadSettings(), loadPersistedState()]);
+    applyPersistedStateToState();
+    applySidebarFontSize();
+    applyCodeFontSize();
+    applySidebarHidden(STATE.sidebarHidden, { persist: false });
+    applyHistoryWidth(STATE.historyWidth, false);
+    applySidebarWidth(STATE.sbWidth, { persist: false });
+    setLayout(STATE.layout, false);
+    applyTheme();
+    localizeViewerChrome();
+  }
+
+  const STATE: AppState = (() => {
+    const route = routeFromLocation();
     return {
-      layout:
-        (localStorage.getItem("gdp:layout") as LayoutMode) || "side-by-side",
-      theme:
-        (localStorage.getItem("gdp:theme") as ThemeMode) ||
-        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
-      language: savedLanguage,
-      sbView: (localStorage.getItem("gdp:sbview") as SidebarView) || "tree",
-      sbWidth: parseInt(localStorage.getItem("gdp:sbwidth") ?? "", 10) || 308,
-      historyWidth:
-        parseInt(localStorage.getItem("gdp:historywidth") ?? "", 10) || 320,
-      sidebarHidden: localStorage.getItem("gdp:sidebar-hidden") === "1",
-      collapsedDirs: new Set<string>(
-        JSON.parse(readScopedStorage("gdp:collapsed-dirs") || "[]"),
-      ),
-      ignoreWs: igRaw === null ? true : igRaw === "1",
+      layout: savedLayout(),
+      theme: savedTheme(),
+      language:
+        viewerLanguageFromSearch(window.location.search) ||
+        savedViewerLanguage(),
+      sbView: savedSidebarView(),
+      sbWidth: savedNumber(APP_SETTINGS.sidebarWidth, 308, 180, 900),
+      historyWidth: savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640),
+      sidebarHidden: APP_SETTINGS.sidebarHidden === true,
+      collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
+      ignoreWs:
+        APP_SETTINGS.ignoreWhitespace === undefined
+          ? true
+          : APP_SETTINGS.ignoreWhitespace === true,
       from: route.range.from,
       to: route.range.to,
       collapsed: false,
       files: [],
       activeFile: null,
-      hideTests: readScopedStorage("gdp:hide-tests") === "1",
-      syntaxHighlight: localStorage.getItem("gdp:syntax-highlight") !== "0",
-      viewedFiles: new Set<string>(
-        JSON.parse(readScopedStorage("gdp:viewed-files") || "[]"),
-      ),
+      hideTests: APP_SETTINGS.hideTests === true,
+      syntaxHighlight: APP_SETTINGS.syntaxHighlight !== false,
+      viewedFiles: new Set<string>(VIEW_STATE.viewedFiles),
       route,
       repoRef: route.screen === "repo" ? route.ref : "worktree",
-      autoUpdate: localStorage.getItem("gdp:auto-update") !== "0",
+      autoUpdate: APP_SETTINGS.autoUpdate !== false,
     };
   })();
 
@@ -565,14 +738,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     fileBadge: (status) => DIFF_VIEW.fileBadge(status),
     fileEntryIcon: () => REPO_VIEW.fileEntryIcon(),
     applyViewedState: () => DIFF_VIEW.applyViewedState(),
-    persistCollapsedDirs: () =>
-      writeScopedStorage(
-        "gdp:collapsed-dirs",
-        JSON.stringify([...STATE.collapsedDirs]),
-      ),
+    persistCollapsedDirs: ({ added = [], removed = [] }) => {
+      if (added.length === 0 && removed.length === 0) return;
+      patchViewState({
+        addedCollapsedDirs: added,
+        removedCollapsedDirs: removed,
+      });
+    },
     appendScopeParams,
     createOpenPathButton,
     normalizeViewerFontSize,
+    getSidebarFontSize: savedSidebarFontSizeSetting,
+    persistSidebarHidden: (hidden) => patchSettings({ sidebarHidden: hidden }),
+    persistSidebarWidth: (width) => patchSettings({ sidebarWidth: width }),
     scheduleMainSurfaceFocus,
     setChevronIcon,
     trackLoad,
@@ -596,7 +774,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     isRepositorySidebarMode,
     placeSidebarToggle,
     applySidebarHidden,
-    toggleSidebarHidden,
     applySidebarWidth,
     applySidebarFontSize,
     savedSidebarFontSize,
@@ -1211,7 +1388,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
     const next = normalizeViewerLanguage(language);
     STATE.language = next;
-    if (persist) localStorage.setItem(VIEWER_LANGUAGE_STORAGE_KEY, next);
+    if (persist) patchSettings({ language: next });
     const select =
       document.querySelector<HTMLSelectElement>("#viewer-language");
     if (select) select.value = next;
@@ -1314,9 +1491,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     return highlightLoadPromise;
   }
 
-  function setLayout(layout: LayoutMode) {
+  function setLayout(layout: LayoutMode, persist = true) {
     STATE.layout = layout;
-    localStorage.setItem("gdp:layout", layout);
+    if (persist) patchSettings({ layout });
     $$("#topbar .seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.layout === layout);
     });
@@ -1435,37 +1612,49 @@ window.GdpExpandLogic = GdpExpandLogic;
       !viewerLanguage
     )
       return;
-    setViewerLanguage(normalizeViewerLanguage(viewerLanguage.value));
-    localStorage.setItem(
-      SIDEBAR_FONT_SIZE_KEY,
-      normalizeViewerFontSize(sidebarFontSize.value),
+    const nextSidebarFontSize = normalizeViewerFontSize(sidebarFontSize.value);
+    const nextCodeFontSize = normalizeViewerFontSize(codeFontSize.value);
+    const nextScopeOmitDirs = normalizeScopeOmitDirs(input.value);
+    const nextScopeExcludeNames = normalizeScopeExcludeNames(
+      excludeInput.value,
     );
-    localStorage.setItem(
-      CODE_FONT_SIZE_STORAGE_KEY,
-      normalizeViewerFontSize(codeFontSize.value),
-    );
+    setViewerLanguage(normalizeViewerLanguage(viewerLanguage.value), false);
+    mergeLocalSettings({
+      sidebarFontSize: nextSidebarFontSize,
+      codeFontSize: nextCodeFontSize,
+      scopeOmitDirs: nextScopeOmitDirs,
+      scopeExcludeNames: nextScopeExcludeNames,
+    });
     applySidebarFontSize();
     applyCodeFontSize();
-    localStorage.setItem(
-      scopeOmitDirsStorageKey(),
-      JSON.stringify(normalizeScopeOmitDirs(input.value)),
-    );
-    localStorage.setItem(
-      scopeExcludeNamesStorageKey(),
-      JSON.stringify(normalizeScopeExcludeNames(excludeInput.value)),
-    );
+    patchSettings({
+      language: STATE.language,
+      sidebarFontSize: nextSidebarFontSize,
+      codeFontSize: nextCodeFontSize,
+      scopeOmitDirs: nextScopeOmitDirs,
+      scopeExcludeNames: nextScopeExcludeNames,
+    });
     closeScopeSettings();
     refreshRepositoryTreeAfterSettings();
   }
 
   function resetScopeSettings() {
-    setViewerLanguage("en");
-    localStorage.removeItem(SIDEBAR_FONT_SIZE_KEY);
-    localStorage.removeItem(CODE_FONT_SIZE_STORAGE_KEY);
+    setViewerLanguage("en", false);
+    mergeLocalSettings({
+      sidebarFontSize: null,
+      codeFontSize: null,
+      scopeOmitDirs: null,
+      scopeExcludeNames: null,
+    });
     applySidebarFontSize("regular");
     applyCodeFontSize("regular");
-    localStorage.removeItem(scopeOmitDirsStorageKey());
-    localStorage.removeItem(scopeExcludeNamesStorageKey());
+    patchSettings({
+      language: STATE.language,
+      sidebarFontSize: null,
+      codeFontSize: null,
+      scopeOmitDirs: null,
+      scopeExcludeNames: null,
+    });
     closeScopeSettings();
     refreshRepositoryTreeAfterSettings();
   }
@@ -1928,10 +2117,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     setProjectName,
     getProjectName: () => PROJECT_NAME,
     createOpenPathButton,
-    persistViewedFiles: () =>
-      writeScopedStorage(
-        "gdp:viewed-files",
-        JSON.stringify([...STATE.viewedFiles]),
+    persistViewedFiles: (path, viewed) =>
+      patchViewState(
+        viewed ? { addedViewedFiles: [path] } : { removedViewedFiles: [path] },
       ),
     applyHideTests: () => applyHideTests(),
     getServerGeneration: () => SERVER_GENERATION,
@@ -1975,7 +2163,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
-  applySidebarHidden();
+  applySidebarHidden(STATE.sidebarHidden, { persist: false });
   observeSidebarHeaderHeight();
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
@@ -1983,7 +2171,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
       STATE.sbView = (b.dataset.view as SidebarView) || "tree";
-      localStorage.setItem("gdp:sbview", STATE.sbView);
+      patchSettings({ sidebarView: STATE.sbView });
       if (getSidebarFiles().length)
         renderSidebar(getSidebarFiles(), getSidebarOnFileClick());
     });
@@ -2021,16 +2209,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     else focusMainPanel();
   });
 
-  function applyHistoryWidth(w: number) {
+  function applyHistoryWidth(w: number, persist = true) {
     const cw = Math.max(220, Math.min(640, w));
     document.documentElement.style.setProperty("--history-w", `${cw}px`);
     STATE.historyWidth = cw;
-    localStorage.setItem("gdp:historywidth", String(cw));
+    if (persist) patchSettings({ historyWidth: cw });
   }
 
   // History and sidebar resizers (drag right edge)
-  applyHistoryWidth(STATE.historyWidth);
-  applySidebarWidth(STATE.sbWidth);
+  applyHistoryWidth(STATE.historyWidth, false);
+  applySidebarWidth(STATE.sbWidth, { persist: false });
   // Track sidebar touch / wheel / scroll so the scrollSpy auto-scroll
   // doesn't fight against an active manual scroll. window.__gdpSidebarTouchedAt
   // is read by the spy.
@@ -2143,7 +2331,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
   $("#theme").addEventListener("click", () => {
     STATE.theme = STATE.theme === "dark" ? "light" : "dark";
-    localStorage.setItem("gdp:theme", STATE.theme);
+    patchSettings({ theme: STATE.theme });
     applyTheme();
   });
 
@@ -2498,7 +2686,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         return null;
       });
   }
-  loadSettings().finally(() => {
+  loadInitialState().finally(() => {
     if (STATE.route.screen === "help") {
       setStatus("live");
       renderHelpPage();
@@ -2537,8 +2725,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const wasDatabaseRoute = STATE.route.screen === "database";
     STATE.from = from || "";
     STATE.to = to || "";
-    writeScopedStorage("gdp:from", STATE.from);
-    writeScopedStorage("gdp:to", STATE.to);
+    patchSettings({ range: currentRange() });
     syncRefInputs();
     const range = currentRange();
     if (STATE.route.screen === "file") {
@@ -2718,6 +2905,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     applySourceRouteToShell();
   }
   window.addEventListener("popstate", applyRouteFromLocation);
+  window.addEventListener("pagehide", () => flushViewStatePatch(true));
 
   // Header menu links navigate within the SPA. A full page load here
   // re-lays-out the whole app from scratch (the layout shift the menu was
@@ -2749,14 +2937,14 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyIgnoreWs();
   $("#ignore-ws").addEventListener("click", () => {
     STATE.ignoreWs = !STATE.ignoreWs;
-    writeScopedStorage("gdp:ignore-ws", STATE.ignoreWs ? "1" : "0");
+    patchSettings({ ignoreWhitespace: STATE.ignoreWs });
     applyIgnoreWs();
     load();
   });
 
-  function setSyntaxHighlight(on: boolean) {
+  function setSyntaxHighlight(on: boolean, persist = true) {
     STATE.syntaxHighlight = on;
-    localStorage.setItem("gdp:syntax-highlight", on ? "1" : "0");
+    if (persist) patchSettings({ syntaxHighlight: on });
     setHighlightButton(on && getHljs() ? "loaded" : "idle");
     if (on) {
       loadSyntaxHighlighter().then((hljsRef) => {
@@ -2772,7 +2960,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#syntax-highlight").addEventListener("click", () => {
     setSyntaxHighlight(!STATE.syntaxHighlight);
   });
-  if (STATE.syntaxHighlight) setSyntaxHighlight(true);
+  if (STATE.syntaxHighlight) setSyntaxHighlight(true, false);
 
   // Manual reload button
   // Prominent reload button (next to ref-picker)
@@ -2782,11 +2970,6 @@ window.GdpExpandLogic = GdpExpandLogic;
     load().finally(() => {
       setTimeout(() => btn.classList.remove("spinning"), 200);
     });
-  });
-
-  window.addEventListener("storage", (e) => {
-    if (e.key === "gdp:syntax-highlight")
-      setSyntaxHighlight(e.newValue !== "0");
   });
 
   // Hide-tests toggle: ファイル名に test|spec が含まれるエントリをフィルタ。
@@ -2812,7 +2995,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {
     STATE.hideTests = !STATE.hideTests;
-    writeScopedStorage("gdp:hide-tests", STATE.hideTests ? "1" : "0");
+    patchSettings({ hideTests: STATE.hideTests });
     applyHideTests();
   });
 
@@ -2836,6 +3019,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     getFiles: () => STATE.files,
     getRoute: () => STATE.route,
+    getAnnotationPanelOpen: () => APP_SETTINGS.annotationPanelOpen === true,
+    setAnnotationPanelOpenState: (open) =>
+      patchSettings({ annotationPanelOpen: open }),
+    getAnnotationFollow: () => APP_SETTINGS.annotationFollow !== false,
+    setAnnotationFollow: (follow) =>
+      patchSettings({ annotationFollow: follow }),
     leaveDatabaseView: () => {
       DATABASE_VIEW.suspend();
     },
@@ -2859,8 +3048,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRange: (from, to) => {
       STATE.from = from;
       STATE.to = to;
-      writeScopedStorage("gdp:from", from);
-      writeScopedStorage("gdp:to", to);
+      patchSettings({ range: currentRange() });
     },
   });
   replaceUrlWithCurrentRoute();
@@ -2879,6 +3067,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     onAnnotationOpened: (cb) => ANNOTATIONS_UI?.onAnnotationOpened(cb),
     getActiveAnnotationId: () =>
       ANNOTATIONS_UI ? ANNOTATIONS_UI.getActiveAnnotationId() : null,
+    getMuted: () => APP_SETTINGS.annotationMuted === true,
+    setMuted: (muted) => patchSettings({ annotationMuted: muted }),
+    getRate: () => APP_SETTINGS.annotationRate,
+    setRate: (rate) => patchSettings({ annotationRate: rate }),
   });
 
   const qhCloseBtn = document.getElementById("query-history-panel-close");
@@ -2892,12 +3084,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     const panel = document.getElementById("query-history-panel");
     const handle = document.getElementById("query-history-resizer");
     if (!panel || !handle) return;
-    const STORAGE_KEY = "gdp:qh-panel-width";
     const MIN_W = 280;
     const MAX_W = 800;
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const w = Math.max(MIN_W, Math.min(MAX_W, Number(saved) || 420));
+    const saved = APP_SETTINGS.queryHistoryPanelWidth;
+    if (typeof saved === "number") {
+      const w = Math.max(MIN_W, Math.min(MAX_W, saved || 420));
       panel.style.width = `${w}px`;
     }
     let dragging = false;
@@ -2919,7 +3110,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (!dragging) return;
       dragging = false;
       document.body.classList.remove("db-resizing");
-      localStorage.setItem(STORAGE_KEY, String(panel.offsetWidth));
+      patchSettings({ queryHistoryPanelWidth: panel.offsetWidth });
     });
   })();
 
@@ -2938,7 +3129,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function setAutoUpdate(on: boolean) {
     STATE.autoUpdate = on;
-    localStorage.setItem("gdp:auto-update", on ? "1" : "0");
+    patchSettings({ autoUpdate: on });
     applyAutoUpdateButton();
     if (on) {
       if (bannerPendingPaths) {
