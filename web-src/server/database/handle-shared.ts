@@ -18,6 +18,7 @@ type AdapterCacheEntry<T extends CloseableDatabaseHandle> = {
 export type DockerAdapterCache<T extends CloseableDatabaseHandle> = {
   getOrOpen(key: string, open: () => T): T;
   close(key: string): void;
+  closePrefix(prefix: string): void;
 };
 
 const DEFAULT_MAX_DOCKER_ADAPTER_CACHE = 8;
@@ -74,6 +75,12 @@ export function createDockerAdapterCache<T extends CloseableDatabaseHandle>(
     close(key: string): void {
       const cached = cache.get(key);
       if (cached) closeEntry(key, cached);
+    },
+
+    closePrefix(prefix: string): void {
+      for (const [key, entry] of Array.from(cache)) {
+        if (key.startsWith(prefix)) closeEntry(key, entry);
+      }
     },
   };
 }

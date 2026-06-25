@@ -86,6 +86,26 @@ describe("routes", () => {
     ).toBe("/help?lang=ja&section=annotations");
   });
 
+  test("round-trips database schema route params", () => {
+    const range = { from: "HEAD", to: "worktree" };
+    const route = parseRoute(
+      "/database",
+      "?db=docker%3Apg%3Aapp&schema=tenant_a&table=users&tab=schema",
+      defaultRange,
+    );
+    expect(route).toEqual({
+      screen: "database",
+      db: "docker:pg:app",
+      schema: "tenant_a",
+      table: "users",
+      tab: "schema",
+      range: defaultRange,
+    });
+    expect(buildRoute({ ...route, range })).toBe(
+      "/database?db=docker%3Apg%3Aapp&schema=tenant_a&table=users&tab=schema",
+    );
+  });
+
   test("parses repository routes with worktree default ref", () => {
     expect(parseRoute("/", "", defaultRange)).toEqual({
       screen: "repo",

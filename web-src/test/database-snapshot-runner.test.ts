@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSnapshot } from "../server/database/snapshot-runner";
-import { listSnapshots } from "../server/database/snapshot-store";
+import {
+  computeDiffTables,
+  listSnapshots,
+} from "../server/database/snapshot-store";
 import type { SnapshotItem } from "../server/database/sources/types";
 
 function withTempProject<T>(run: (dir: string) => Promise<T>): Promise<T> {
@@ -92,6 +95,63 @@ describe("database snapshot runner", () => {
       expect(snapshots[0].errorMessage).toBe(
         "snapshot started callback failed",
       );
+    });
+  });
+
+  test("stores schema metadata and rejects cross-schema diffs", async () => {
+    await withTempProject(async (dir) => {
+      const source = {
+        kind: "postgresql" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          yield {
+            keyJson: JSON.stringify({ id: 1 }),
+            payloadJson: JSON.stringify({ id: 1 }),
+            rowHash: "hash",
+          };
+        },
+        async listSnapshotContainers() {
+          return [{ id: "users", label: "users" }];
+        },
+      };
+
+      await runSnapshot(
+        dir,
+        source,
+        "docker:pg:app",
+        ["users"],
+        "",
+        undefined,
+        {
+          schema: "tenant_a",
+        },
+      );
+      await runSnapshot(
+        dir,
+        source,
+        "docker:pg:app",
+        ["users"],
+        "",
+        undefined,
+        {
+          schema: "tenant_b",
+        },
+      );
+
+      const tenantA = await listSnapshots(dir, "docker:pg:app", "tenant_a");
+      const tenantB = await listSnapshots(dir, "docker:pg:app", "tenant_b");
+      expect(tenantA).toHaveLength(1);
+      expect(tenantA[0].schema).toBe("tenant_a");
+      expect(tenantB).toHaveLength(1);
+      expect(tenantB[0].schema).toBe("tenant_b");
+
+      let message = "";
+      try {
+        await computeDiffTables(dir, tenantA[0].id, tenantB[0].id);
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).toMatch(/different database\/schema/);
     });
   });
 });

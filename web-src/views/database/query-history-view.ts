@@ -6,6 +6,7 @@ import type {
 
 export type QueryHistoryViewCallbacks = {
   getDbId: () => string | null;
+  getSchema: () => string | null;
   copySqlToQuery: (sql: string) => void;
 };
 
@@ -85,7 +86,11 @@ export function createQueryHistoryView(
 
   async function refresh() {
     const dbId = callbacks.getDbId();
-    const params = dbId ? `?db=${encodeURIComponent(dbId)}` : "";
+    const schema = callbacks.getSchema();
+    const searchParams = new URLSearchParams();
+    if (dbId) searchParams.set("db", dbId);
+    if (schema) searchParams.set("schema", schema);
+    const params = searchParams.toString() ? `?${searchParams.toString()}` : "";
     try {
       const res = await fetch(`/_db/history${params}`);
       if (!res.ok) return;
@@ -340,13 +345,16 @@ export function createQueryHistoryView(
       clearConfirmTimer = null;
     }
     try {
+      const schema = callbacks.getSchema();
       await fetch("/_db/history/clear", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Code-Viewer-Action": "1",
         },
-        body: JSON.stringify(dbId ? { db: dbId } : {}),
+        body: JSON.stringify(
+          dbId ? { db: dbId, ...(schema ? { schema } : {}) } : {},
+        ),
       });
       entries = [];
       render();

@@ -43,6 +43,7 @@ type DockerDbConfig = {
   user: string;
   password: string;
   database: string;
+  schema?: string;
 };
 
 type ExecResult = { stdout: string; stderr: string; code: number };
@@ -69,6 +70,7 @@ const ROWCOUNT_TTL_MS = 15_000;
 const DOCKER_DATABASES_POSITIVE_TTL_MS = 15_000;
 const DOCKER_DATABASES_NEGATIVE_TTL_MS = 3_000;
 const dockerDatabasesCache = new Map<string, DockerDatabasesCacheEntry>();
+const dockerSchemasCache = new Map<string, DockerDatabasesCacheEntry>();
 
 let spawnSyncImpl = spawnSync;
 
@@ -78,6 +80,15 @@ function dockerDatabasesCacheKey(
   cwd: string,
 ): string {
   return `${serviceName}\0${kind}\0${cwd}`;
+}
+
+function dockerSchemasCacheKey(
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  cwd: string,
+  database: string,
+): string {
+  return `${serviceName}\0${kind}\0${cwd}\0${database}`;
 }
 
 function setDockerDatabasesCache(
@@ -94,12 +105,30 @@ function setDockerDatabasesCache(
   return [...cachedValue];
 }
 
+function setDockerSchemasCache(
+  key: string,
+  value: string[],
+  ttlMs: number,
+  now = Date.now(),
+): string[] {
+  const cachedValue = [...value];
+  dockerSchemasCache.set(key, {
+    value: cachedValue,
+    expiresAt: now + ttlMs,
+  });
+  return [...cachedValue];
+}
+
 function fallbackDockerDatabases(defaultDb: string): string[] {
   return defaultDb ? [defaultDb] : [];
 }
 
 export function __clearDockerDatabaseListCacheForTest(): void {
   dockerDatabasesCache.clear();
+}
+
+export function __clearDockerSchemaListCacheForTest(): void {
+  dockerSchemasCache.clear();
 }
 
 export function __setDockerSpawnSyncForTest(
@@ -489,10 +518,32 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   const columnCache = new Map<string, DbColumn[]>();
   const tableMetaCache = createTableMetaCache();
 
+  function currentPostgresSchema(): string {
+    return config.schema || "public";
+  }
+
+  function postgresSchemaLiteral(): string {
+    return escapeSqlString(currentPostgresSchema());
+  }
+
+  function tableIdentifier(table: string): string {
+    if (config.kind === "postgresql") {
+      return `${sanitizeIdentifier(currentPostgresSchema(), config.kind)}.${sanitizeIdentifier(table, config.kind)}`;
+    }
+    return sanitizeIdentifier(table, config.kind);
+  }
+
+  function postgresRegclassLiteral(table: string): string {
+    return escapeSqlString(
+      `${sanitizeIdentifier(currentPostgresSchema(), "postgresql")}.${sanitizeIdentifier(table, "postgresql")}`,
+    );
+  }
+
   function buildColumnsSql(table: string): string {
     const tableLiteral = table.replace(/'/g, "''");
     if (config.kind === "postgresql") {
-      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = 'public' AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = 'public' AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+      const schemaLiteral = postgresSchemaLiteral();
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = ${schemaLiteral} AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = ${schemaLiteral} AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
     }
     return `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
   }
@@ -541,37 +592,8 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   }
 
   function fetchColumnsUncached(table: string): DbColumn[] {
-    let sql: string;
-    if (config.kind === "postgresql") {
-      sql = `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
-    } else {
-      sql = `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${table.replace(/'/g, "''")}' ORDER BY ordinal_position`;
-    }
-    const result = exec(sql);
-    if (config.kind === "postgresql") {
-      const pkSql = `SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = '${table.replace(/'/g, "''")}'::regclass AND i.indisprimary`;
-      let pkCols: Set<string>;
-      try {
-        const pkResult = exec(pkSql);
-        pkCols = new Set(pkResult.rows.map((r: string[]) => r[0]));
-      } catch {
-        pkCols = new Set();
-      }
-      return result.rows.map((row: string[]) => ({
-        name: row[0],
-        type: row[1],
-        nullable: row[2] === "YES",
-        primaryKey: pkCols.has(row[0]),
-        defaultValue: row[3] === "" ? null : row[3],
-      }));
-    }
-    return result.rows.map((row: string[]) => ({
-      name: row[0],
-      type: row[1],
-      nullable: row[2] === "YES",
-      primaryKey: row[4] === "PRI",
-      defaultValue: row[3] === "NULL" ? null : row[3],
-    }));
+    const result = exec(buildColumnsSql(table));
+    return columnsFromInfoRows(result.rows);
   }
 
   const adapter: DockerSource = {
@@ -582,7 +604,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     getTables(): DbTableInfo[] {
       let sql: string;
       if (config.kind === "postgresql") {
-        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`;
+        sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = ${postgresSchemaLiteral()} ORDER BY table_name`;
       } else {
         sql = `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name`;
       }
@@ -605,7 +627,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     getIndexes(): DbIndexInfo[] {
       let sql: string;
       if (config.kind === "postgresql") {
-        sql = `SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public' AND indexname NOT LIKE 'pg_%' ORDER BY indexname`;
+        sql = `SELECT indexname, tablename FROM pg_indexes WHERE schemaname = ${postgresSchemaLiteral()} AND indexname NOT LIKE 'pg_%' ORDER BY indexname`;
       } else {
         sql = `SELECT DISTINCT index_name, table_name, non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() ORDER BY index_name`;
       }
@@ -629,18 +651,29 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     getForeignKeys(): DbForeignKey[] {
       let sql: string;
       if (config.kind === "postgresql") {
-        sql = `SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`;
+        sql = `SELECT tc.table_schema, tc.table_name, kcu.column_name, ccu.table_schema, ccu.table_name, ccu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = ${postgresSchemaLiteral()}`;
       } else {
         sql = `SELECT table_name, column_name, referenced_table_name, referenced_column_name FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL`;
       }
       try {
         const result = exec(sql);
-        return result.rows.map((row) => ({
-          fromTable: row[0],
-          fromColumn: row[1],
-          toTable: row[2],
-          toColumn: row[3],
-        }));
+        return result.rows.map((row) =>
+          config.kind === "postgresql"
+            ? {
+                fromSchema: row[0],
+                fromTable: row[1],
+                fromColumn: row[2],
+                toSchema: row[3],
+                toTable: row[4],
+                toColumn: row[5],
+              }
+            : {
+                fromTable: row[0],
+                fromColumn: row[1],
+                toTable: row[2],
+                toColumn: row[3],
+              },
+        );
       } catch {
         return [];
       }
@@ -659,7 +692,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         const inList = uncached
           .map((t) => `'${t.replace(/'/g, "''")}'`)
           .join(",");
-        sql = `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+        sql = `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = ${postgresSchemaLiteral()} AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
       } else {
         const inList = uncached
           .map((t) => `'${t.replace(/'/g, "''")}'`)
@@ -682,7 +715,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
               .map((t) => `'${t.replace(/'/g, "''")}'`)
               .join(",");
             const pkResult = exec(
-              `SELECT c.relname, a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indisprimary AND c.relname IN (${pkInList})`,
+              `SELECT c.relname, a.attname FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indisprimary AND n.nspname = ${postgresSchemaLiteral()} AND c.relname IN (${pkInList})`,
             );
             for (const row of pkResult.rows) {
               const existing = pkMap.get(row[0]) || new Set<string>();
@@ -727,7 +760,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     },
 
     getTableRowCount(table: string): number {
-      const id = sanitizeIdentifier(table, config.kind);
+      const id = tableIdentifier(table);
       const result = exec(`SELECT COUNT(*) FROM ${id}`);
       return result.rows.length > 0 ? Number(result.rows[0][0]) || 0 : 0;
     },
@@ -736,7 +769,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const result = new Map<string, number>();
       if (tables.length === 0) return result;
       const parts = tables.map((t) => {
-        const id = sanitizeIdentifier(t, config.kind);
+        const id = tableIdentifier(t);
         return `SELECT '${t.replace(/'/g, "''")}' AS tbl, COUNT(*) AS cnt FROM ${id}`;
       });
       const sql = parts.join(" UNION ALL ");
@@ -747,7 +780,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         }
       } catch {
         for (const t of tables) {
-          const id = sanitizeIdentifier(t, config.kind);
+          const id = tableIdentifier(t);
           try {
             const r = exec(`SELECT COUNT(*) FROM ${id}`);
             result.set(t, r.rows.length > 0 ? Number(r.rows[0][0]) || 0 : 0);
@@ -763,7 +796,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       table: string,
       options: { offset: number; limit: number; orderBy?: DbOrder[] },
     ): Promise<TablePageMeta> {
-      const id = sanitizeIdentifier(table, config.kind);
+      const id = tableIdentifier(table);
       const order = buildOrderClause(options.orderBy, config.kind);
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}`;
       const columnsPromise = tableMetaCache.getColumns(table, () =>
@@ -791,7 +824,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         grouped: Map<string, string[]>;
       },
     ): Promise<TablePageMeta> {
-      const id = sanitizeIdentifier(table, config.kind);
+      const id = tableIdentifier(table);
       const order = buildOrderClause(options.orderBy, config.kind);
       const where = buildDockerFilterWhere(options.grouped, config.kind);
       const whereClause = where ? ` WHERE ${where}` : "";
@@ -818,7 +851,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       table: string,
       options: { offset: number; limit: number; orderBy?: DbOrder[] },
     ): QueryResult {
-      const id = sanitizeIdentifier(table, config.kind);
+      const id = tableIdentifier(table);
       const order = buildOrderClause(options.orderBy, config.kind);
       const cols = this.getColumns(table);
       const selectList = buildTableSelectList(cols, config.kind);
@@ -871,16 +904,11 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       if (BLOCKED_RE.test(upper)) {
         throw new Error("Query contains a disallowed statement keyword");
       }
-      const readOnlyPreamble =
-        config.kind === "postgresql"
-          ? "BEGIN TRANSACTION READ ONLY; "
-          : "SET SESSION TRANSACTION READ ONLY; ";
-      const readOnlyPostamble =
-        config.kind === "postgresql"
-          ? "; COMMIT"
-          : "; SET SESSION TRANSACTION READ WRITE";
       const stripped = trimmed.replace(/;\s*$/, "");
-      const limited = `${readOnlyPreamble}${stripped} LIMIT ${maxRows}${readOnlyPostamble}`;
+      const limited =
+        config.kind === "postgresql"
+          ? `BEGIN TRANSACTION READ ONLY; SET LOCAL search_path = ${sanitizeIdentifier(currentPostgresSchema(), config.kind)}; ${stripped} LIMIT ${maxRows}; COMMIT`
+          : `SET SESSION TRANSACTION READ ONLY; ${stripped} LIMIT ${maxRows}; SET SESSION TRANSACTION READ WRITE`;
       const result = exec(limited);
       const columnNames =
         config.kind === "mysql" && result.columns.length > 0
@@ -906,9 +934,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     getCreateStatement(table: string): string {
       if (config.kind === "mysql") {
         try {
-          const result = exec(
-            `SHOW CREATE TABLE ${sanitizeIdentifier(table, config.kind)}`,
-          );
+          const result = exec(`SHOW CREATE TABLE ${tableIdentifier(table)}`);
           return result.rows.length > 0 ? result.rows[0][1] || "" : "";
         } catch {
           return "";
@@ -916,7 +942,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       }
       try {
         const result = exec(
-          `SELECT 'CREATE TABLE ' || '${table.replace(/'/g, "''")}' || ' (...)' AS ddl`,
+          `SELECT 'CREATE TABLE ' || ${escapeSqlString(tableIdentifier(table))} || ' (...)' AS ddl`,
         );
         return result.rows.length > 0 ? result.rows[0][0] || "" : "";
       } catch {
@@ -929,7 +955,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       if (config.kind === "mysql") {
         sql = `SELECT trigger_name, action_statement FROM information_schema.triggers WHERE event_object_schema = DATABASE() AND event_object_table = '${table.replace(/'/g, "''")}'`;
       } else {
-        sql = `SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = '${table.replace(/'/g, "''")}'::regclass AND NOT tgisinternal`;
+        sql = `SELECT tgname, pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = ${postgresRegclassLiteral(table)}::regclass AND NOT tgisinternal`;
       }
       try {
         const result = exec(sql);
@@ -1001,7 +1027,7 @@ export function listDockerDatabases(
 
   const containerName = resolveRunningComposeContainerName(serviceName, cwd);
   if (!containerName) {
-    return setDockerDatabasesCache(
+    return setDockerSchemasCache(
       cacheKey,
       [],
       DOCKER_DATABASES_NEGATIVE_TTL_MS,
@@ -1073,12 +1099,75 @@ export function listDockerDatabases(
   }
 }
 
+export function listDockerSchemas(
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  env: Record<string, string>,
+  cwd: string,
+  overrideDatabase?: string,
+): string[] {
+  if (kind !== "postgresql") return [];
+  const user = env.POSTGRES_USER || env.POSTGRES_USERNAME || "postgres";
+  const password = env.POSTGRES_PASSWORD || "";
+  const database = overrideDatabase || env.POSTGRES_DB || "postgres";
+  const cacheKey = dockerSchemasCacheKey(serviceName, kind, cwd, database);
+  const now = Date.now();
+  const cached = dockerSchemasCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return [...cached.value];
+
+  const containerName = resolveRunningComposeContainerName(serviceName, cwd);
+  if (!containerName) {
+    return setDockerSchemasCache(
+      cacheKey,
+      [],
+      DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
+  }
+  const config: DockerDbConfig = {
+    kind,
+    containerName,
+    user,
+    password,
+    database,
+  };
+  try {
+    const sql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema') AND schema_name NOT LIKE 'pg_toast%' AND schema_name NOT LIKE 'pg_temp_%' AND schema_name NOT LIKE 'pg_toast_temp_%' AND has_schema_privilege(schema_name, 'USAGE') ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name`;
+    const result = execInContainer(config, sql);
+    if (result.code !== 0) {
+      return setDockerSchemasCache(
+        cacheKey,
+        ["public"],
+        DOCKER_DATABASES_NEGATIVE_TTL_MS,
+        now,
+      );
+    }
+    const parsed = parseTsvOutput(result.stdout, false);
+    const schemas = parsed.rows.map((r) => r[0]).filter(Boolean);
+    const value = schemas.length > 0 ? schemas : ["public"];
+    return setDockerSchemasCache(
+      cacheKey,
+      value,
+      DOCKER_DATABASES_POSITIVE_TTL_MS,
+      now,
+    );
+  } catch {
+    return setDockerSchemasCache(
+      cacheKey,
+      ["public"],
+      DOCKER_DATABASES_NEGATIVE_TTL_MS,
+      now,
+    );
+  }
+}
+
 export function openDockerAdapter(
   serviceName: string,
   kind: "postgresql" | "mysql",
   env: Record<string, string>,
   cwd: string,
   overrideDatabase?: string,
+  schema?: string,
 ): DatabaseAdapter {
   const containerName = resolveRunningComposeContainerNameOrThrow(
     serviceName,
@@ -1108,5 +1197,6 @@ export function openDockerAdapter(
     user,
     password,
     database,
+    ...(kind === "postgresql" && schema ? { schema } : {}),
   });
 }

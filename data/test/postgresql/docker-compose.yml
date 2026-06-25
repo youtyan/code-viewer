@@ -1,0 +1,23 @@
+name: code-viewer-test-postgresql
+
+services:
+  pg-svc:
+    image: postgres:17-alpine
+    container_name: code-viewer-test-postgres
+    environment:
+      POSTGRES_USER: code_viewer
+      POSTGRES_PASSWORD: code_viewer_password
+      POSTGRES_DB: app
+    ports:
+      - "54390:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U code_viewer -d app"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  pg-data:

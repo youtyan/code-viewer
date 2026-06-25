@@ -59,6 +59,7 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY,
   db_id TEXT NOT NULL,
+  schema_name TEXT,
   kind TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -114,6 +115,11 @@ async function getStoreDb(cwd: string): Promise<SqliteDb> {
   storeDb.exec("PRAGMA journal_mode=WAL");
   storeDb.exec("PRAGMA foreign_keys=ON");
   storeDb.exec(SCHEMA_SQL);
+  try {
+    storeDb.exec("ALTER TABLE snapshots ADD COLUMN schema_name TEXT");
+  } catch {
+    // Column already exists in databases created after schema support was added.
+  }
   return storeDb;
 }
 
@@ -131,12 +137,21 @@ export async function createSnapshot(
   kind: DbKind,
   tables: string[],
   note: string,
+  schema?: string,
 ): Promise<string> {
   const db = await getStoreDb(cwd);
   const id = makeId("snap");
   db.prepare(
-    "INSERT INTO snapshots (id, db_id, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, dbId, kind, note, new Date().toISOString(), "running");
+    "INSERT INTO snapshots (id, db_id, schema_name, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    id,
+    dbId,
+    schema ?? null,
+    kind,
+    note,
+    new Date().toISOString(),
+    "running",
+  );
   for (const t of tables) {
     db.prepare(
       "INSERT INTO snapshot_tables (snapshot_id, table_name) VALUES (?, ?)",
@@ -211,19 +226,26 @@ export async function finalizeSnapshot(
 export async function listSnapshots(
   cwd: string,
   dbId?: string,
+  schema?: string,
 ): Promise<SnapshotMeta[]> {
   const db = await getStoreDb(cwd);
   let rows: Record<string, unknown>[];
-  if (dbId) {
+  if (dbId && schema !== undefined) {
     rows = db
       .prepare(
-        "SELECT id, db_id, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? ORDER BY created_at DESC",
+        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? AND COALESCE(schema_name, 'public') = ? ORDER BY created_at DESC",
+      )
+      .all(dbId, schema);
+  } else if (dbId) {
+    rows = db
+      .prepare(
+        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? ORDER BY created_at DESC",
       )
       .all(dbId);
   } else {
     rows = db
       .prepare(
-        "SELECT id, db_id, kind, note, created_at, status, error_message FROM snapshots ORDER BY created_at DESC",
+        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots ORDER BY created_at DESC",
       )
       .all();
   }
@@ -234,6 +256,9 @@ export async function listSnapshots(
     return {
       id: r.id as string,
       dbId: r.db_id as string,
+      ...((r.schema_name as string | null)
+        ? { schema: r.schema_name as string }
+        : {}),
       kind: r.kind as DbKind,
       note: r.note as string,
       createdAt: r.created_at as string,
@@ -298,12 +323,40 @@ export async function deleteSnapshot(
   }
 }
 
+function getSnapshotScope(
+  db: SqliteDb,
+  snapshotId: string,
+): { dbId: string; schema: string } {
+  const row = db
+    .prepare(
+      "SELECT db_id, COALESCE(schema_name, 'public') AS schema_name FROM snapshots WHERE id = ?",
+    )
+    .get(snapshotId) as { db_id: string; schema_name: string } | undefined;
+  if (!row) throw new Error(`snapshot not found: ${snapshotId}`);
+  return { dbId: row.db_id, schema: row.schema_name };
+}
+
+function assertSameSnapshotScope(
+  db: SqliteDb,
+  beforeId: string,
+  afterId: string,
+): void {
+  const before = getSnapshotScope(db, beforeId);
+  const after = getSnapshotScope(db, afterId);
+  if (before.dbId !== after.dbId || before.schema !== after.schema) {
+    throw new Error(
+      `cannot compare snapshots from different database/schema (${before.dbId}:${before.schema} vs ${after.dbId}:${after.schema})`,
+    );
+  }
+}
+
 export async function computeDiffTables(
   cwd: string,
   beforeId: string,
   afterId: string,
 ): Promise<SnapshotDiffTableSummary[]> {
   const db = await getStoreDb(cwd);
+  assertSameSnapshotScope(db, beforeId, afterId);
 
   const beforeTables = db
     .prepare(
@@ -348,7 +401,7 @@ export async function computeDiffTables(
     if (!b) {
       results.push({
         tableName: table,
-        insertedCount: a!.row_count,
+        insertedCount: a ? a.row_count : 0,
         updatedCount: 0,
         deletedCount: 0,
         unchangedCount: 0,
@@ -430,6 +483,7 @@ export async function computeDiffRows(
   limit = 200,
 ): Promise<{ rows: SnapshotDiffRow[]; total: number }> {
   const db = await getStoreDb(cwd);
+  assertSameSnapshotScope(db, beforeId, afterId);
 
   type RawDiffRow = {
     change_type: SnapshotDiffChangeType;

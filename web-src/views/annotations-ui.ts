@@ -180,6 +180,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (entry.target?.kind === "database") {
       const parts = ["Database"];
       if (entry.target.db) parts.push(entry.target.db);
+      if (entry.target.schema) parts.push(entry.target.schema);
       if (entry.target.table) parts.push(entry.target.table);
       if (entry.target.tab) parts.push(entry.target.tab);
       return parts.join(" / ");
@@ -201,6 +202,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (route.screen !== "database") return false;
     const target = entry.target;
     if (target.db && target.db !== route.db) return false;
+    if (target.schema && target.schema !== route.schema) return false;
     if (target.table && target.table !== route.table) return false;
     if (target.tab && target.tab !== (route.tab || "data")) return false;
     return true;
@@ -634,7 +636,8 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function databaseAnnotationTitle(
     target: Extract<AnnotationEntry["target"], { kind: "database" }>,
   ): string {
-    const parts = [target.table || target.db || "Database"];
+    const parts = [target.table || target.schema || target.db || "Database"];
+    if (target.schema && target.table) parts.unshift(target.schema);
     if (target.tab === "data" && target.data?.search)
       parts.push(`search: ${target.data.search}`);
     else if (target.tab === "query" && target.query?.sql) parts.push("query");
@@ -1015,6 +1018,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       deps.setRoute({
         screen: "database",
         db: target.db,
+        schema: target.schema,
         table: target.table,
         tab: target.tab,
         range: deps.currentRange(),

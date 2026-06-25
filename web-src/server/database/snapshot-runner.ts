@@ -33,6 +33,7 @@ type MaybeSnapshotSource = { readonly kind: DbKind } & {
 
 type RunSnapshotOptions = {
   signal?: AbortSignal;
+  schema?: string;
   onSnapshotId?: (snapshotId: string) => void;
 };
 
@@ -65,6 +66,7 @@ export async function runSnapshot(
     snapshotSource.kind,
     containers,
     note,
+    options.schema,
   );
 
   try {

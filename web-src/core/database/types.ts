@@ -29,22 +29,36 @@ export type DbIndexInfo = {
 };
 
 export type DbForeignKey = {
+  fromSchema?: string;
   fromTable: string;
   fromColumn: string;
+  toSchema?: string;
   toTable: string;
   toColumn: string;
 };
 
 export type DbSchemaResponse = {
   dbId: string;
+  schema?: string;
   tables: DbTableInfo[];
   indexes: DbIndexInfo[];
   foreignKeys: DbForeignKey[];
   columnsMap?: Record<string, DbColumn[]>;
 };
 
+export type DbSchemaInfo = {
+  name: string;
+};
+
+export type DbSchemasResponse = {
+  dbId: string;
+  schemas: DbSchemaInfo[];
+  selectedSchema?: string;
+};
+
 export type DbTableDataResponse = {
   dbId: string;
+  schema?: string;
   table: string;
   columns: DbColumn[];
   rows: DbValue[][];
@@ -56,6 +70,7 @@ export type DbTableDataResponse = {
 
 export type DbQueryResponse = {
   dbId: string;
+  schema?: string;
   columns: string[];
   columnTypes: string[];
   rows: DbValue[][];
@@ -88,6 +103,7 @@ export type DbOrder = {
 export type QueryHistoryEntry = {
   id: string;
   dbId: string;
+  schema?: string;
   sql: string;
   title?: string;
   body?: string;
@@ -110,6 +126,7 @@ export type QueryHistoryState = {
 // --- Global Search ---
 
 export type GlobalSearchHit = {
+  schema?: string;
   table: string;
   column: string;
   rowKeyJson?: string;
@@ -119,6 +136,7 @@ export type GlobalSearchHit = {
 
 export type GlobalSearchOptions = {
   dbId: string;
+  schema?: string;
   term: string;
   tables?: string[];
   maxHitsPerTable?: number;
@@ -128,6 +146,7 @@ export type GlobalSearchOptions = {
 export type GlobalSearchProgress = {
   jobId: string;
   dbId: string;
+  schema?: string;
   scannedTables: number;
   totalTables: number;
   currentTable?: string;
@@ -141,6 +160,7 @@ export type GlobalSearchProgress = {
 export type SnapshotMeta = {
   id: string;
   dbId: string;
+  schema?: string;
   kind: DbKind;
   note: string;
   createdAt: string;
@@ -362,6 +382,7 @@ export type ElasticsearchExplorerSelection = {
 export type TabState = {
   id: string;
   dbId: string | null;
+  schema?: string | null;
   table: string | null;
   view: "data" | "query" | "schema" | "er" | "search" | "snapshot";
 
