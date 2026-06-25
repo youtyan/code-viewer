@@ -2439,6 +2439,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen === "database") {
       void DATABASE_VIEW.enter(
         STATE.route.db,
+        STATE.route.schema,
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
@@ -2513,6 +2514,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       void DATABASE_VIEW.enter(
         STATE.route.db,
+        STATE.route.schema,
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
@@ -2699,6 +2701,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       removeStandaloneSource();
       void DATABASE_VIEW.enter(
         STATE.route.db,
+        STATE.route.schema,
         STATE.route.table,
         STATE.route.tab,
       ).then(() => ANNOTATIONS_UI?.applyInlineAnnotations());
@@ -2840,10 +2843,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       // The annotation UI redraws DB annotation strips after this promise.
       // Keep this callback focused on mounting/navigating the database view.
-      return DATABASE_VIEW.enter(target.db, target.table, target.tab, {
-        annotationTarget: target,
-        reuseActiveTab: true,
-      });
+      return DATABASE_VIEW.enter(
+        target.db,
+        target.schema,
+        target.table,
+        target.tab,
+        {
+          annotationTarget: target,
+          reuseActiveTab: true,
+        },
+      );
     },
     captureDatabaseAnnotationTarget: () =>
       DATABASE_VIEW.captureAnnotationTarget(),

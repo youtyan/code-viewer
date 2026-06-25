@@ -3,6 +3,7 @@ import { isImeComposing } from "../../core/keyboard";
 
 export type GlobalSearchViewDeps = {
   getDbId: () => string | null;
+  getSchema: () => string | null;
 };
 
 export type GlobalSearchView = {
@@ -76,6 +77,7 @@ export function createGlobalSearchView(
   async function startSearch() {
     if (disposed) return;
     const dbId = deps.getDbId();
+    const schema = deps.getSchema();
     if (!dbId) return;
     const term = input.value.trim();
     if (!term) return;
@@ -96,6 +98,7 @@ export function createGlobalSearchView(
         },
         body: JSON.stringify({
           db: dbId,
+          ...(schema ? { schema } : {}),
           term,
           includeNonText: nonTextCheck.checked,
         }),
@@ -195,18 +198,19 @@ export function createGlobalSearchView(
 
     const grouped = new Map<string, GlobalSearchHit[]>();
     for (const h of hits) {
-      const existing = grouped.get(h.table) || [];
+      const key = h.schema ? `${h.schema}.${h.table}` : h.table;
+      const existing = grouped.get(key) || [];
       existing.push(h);
-      grouped.set(h.table, existing);
+      grouped.set(key, existing);
     }
 
-    for (const [table, tableHits] of grouped) {
+    for (const [tableLabel, tableHits] of grouped) {
       const section = document.createElement("div");
       section.className = "db-search-table-section";
 
       const tableHeader = document.createElement("div");
       tableHeader.className = "db-search-table-header";
-      tableHeader.textContent = `${table} (${tableHits.length}件)`;
+      tableHeader.textContent = `${tableLabel} (${tableHits.length}件)`;
       section.appendChild(tableHeader);
 
       const hitsList = document.createElement("div");

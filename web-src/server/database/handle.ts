@@ -5,11 +5,16 @@ import type {
   DbOrder,
   DbQueryResponse,
   DbSchemaResponse,
+  DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
-import { listDockerDatabases, openDockerAdapter } from "./adapters/docker";
+import {
+  listDockerDatabases,
+  listDockerSchemas,
+  openDockerAdapter,
+} from "./adapters/docker";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
@@ -71,7 +76,8 @@ async function getAdapter(
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
     const docker = r.docker;
-    return dockerAdapterCache.getOrOpen(r.dbId, () =>
+    const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
+    return dockerAdapterCache.getOrOpen(cacheKey, () =>
       // recursive discovery により compose は subdir に置けるので、
       // `docker compose ps` の cwd は r.docker.composeDir に固定する。
       openDockerAdapter(
@@ -80,6 +86,7 @@ async function getAdapter(
         docker.env,
         docker.composeDir,
         docker.database,
+        r.schema,
       ),
     );
   }
@@ -91,12 +98,56 @@ function sanitizeFilename(name: string): string {
   return name.replace(/["\\\r\n\x00-\x1f]/g, "_");
 }
 
-type ResolvedDb = { resolved: string; dbId: string; docker?: DockerDbInfo };
+type ResolvedDb = {
+  resolved: string;
+  dbId: string;
+  docker?: DockerDbInfo;
+  schema?: string;
+};
+
+const MAX_SCHEMA_NAME_LEN = 1024;
+
+function normalizeSchemaParam(
+  value: string | null | undefined,
+): string | Response | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value.length > MAX_SCHEMA_NAME_LEN) {
+    return textError("invalid schema parameter", 400);
+  }
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: schema names may come from URLs; reject control chars.
+  if (/[\x00-\x1f\x7f]/.test(value)) {
+    return textError("invalid schema parameter", 400);
+  }
+  return value;
+}
+
+function resolvePostgresSchema(
+  info: DockerDbInfo,
+  requestedSchema: string | undefined,
+): string | Response | undefined {
+  if (info.kind !== "postgresql") return undefined;
+  const schemas = listDockerSchemas(
+    info.serviceName,
+    "postgresql",
+    info.env,
+    info.composeDir,
+    info.database,
+  );
+  if (requestedSchema) {
+    if (!schemas.includes(requestedSchema)) {
+      return textError(`schema not found: ${requestedSchema}`, 404);
+    }
+    return requestedSchema;
+  }
+  if (schemas.includes("public")) return "public";
+  return schemas[0] || "public";
+}
 
 function resolveDb(
   cwd: string,
   dbParam: string | null,
   omitDirNames?: string[],
+  schemaParam?: string | null,
 ): ResolvedDb | Response {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
@@ -116,7 +167,16 @@ function resolveDb(
     const resolved = parsed.database
       ? { ...info, database: parsed.database }
       : info;
-    return { resolved: dbParam, dbId: dbParam, docker: resolved };
+    const requestedSchema = normalizeSchemaParam(schemaParam);
+    if (requestedSchema instanceof Response) return requestedSchema;
+    const schema = resolvePostgresSchema(resolved, requestedSchema);
+    if (schema instanceof Response) return schema;
+    return {
+      resolved: dbParam,
+      dbId: dbParam,
+      docker: resolved,
+      ...(schema ? { schema } : {}),
+    };
   }
   const resolved = validateDbPath(cwd, dbParam);
   if (!resolved) return textError("invalid database path", 400);
@@ -188,12 +248,48 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
   return json(body);
 }
 
+function handleSchemas(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Response {
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
+  if (r instanceof Response) return r;
+  if (!r.docker || r.docker.kind !== "postgresql") {
+    const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
+    return json(body);
+  }
+  const schemas = listDockerSchemas(
+    r.docker.serviceName,
+    "postgresql",
+    r.docker.env,
+    r.docker.composeDir,
+    r.docker.database,
+  );
+  const body: DbSchemasResponse = {
+    dbId: r.dbId,
+    schemas: schemas.map((name) => ({ name })),
+    selectedSchema: r.schema,
+  };
+  return json(body);
+}
+
 async function handleSchema(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
   if (r instanceof Response) return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
   try {
@@ -219,6 +315,7 @@ async function handleSchema(
     const foreignKeys = adapter.getForeignKeys();
     const body: DbSchemaResponse = {
       dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
       tables: tablesWithCount,
       indexes,
       foreignKeys,
@@ -327,7 +424,12 @@ async function handleTable(
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -366,6 +468,7 @@ async function handleTable(
       }
       const body: DbTableDataResponse = {
         dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
         table,
         columns: meta.columns,
         rows: serializeDbRows(meta.rows),
@@ -388,6 +491,7 @@ async function handleTable(
       }
       const body: DbTableDataResponse = {
         dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
         table,
         columns: meta.columns,
         rows: serializeDbRows(meta.rows),
@@ -431,6 +535,7 @@ async function handleTable(
         );
         const body: DbTableDataResponse = {
           dbId: r.dbId,
+          ...(r.schema ? { schema: r.schema } : {}),
           table,
           columns,
           rows: serializeDbRows(dataResult.rows),
@@ -450,6 +555,7 @@ async function handleTable(
         : adapter.getTableRowCount(table);
     const body: DbTableDataResponse = {
       dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
       table,
       columns,
       rows: serializeDbRows(result.rows),
@@ -519,6 +625,7 @@ async function handleQuery(
 ): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
+    schema?: string;
     sql?: string;
     maxRows?: number;
     saveHistory?: boolean;
@@ -529,7 +636,7 @@ async function handleQuery(
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db, omitDirNames);
+  const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
   if (r instanceof Response) return r;
   const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
   const start = Date.now();
@@ -552,6 +659,7 @@ async function handleQuery(
         : result.columnTypes;
     const response: DbQueryResponse = {
       dbId: body.db,
+      ...(r.schema ? { schema: r.schema } : {}),
       columns,
       columnTypes,
       rows: serializedRows,
@@ -563,6 +671,7 @@ async function handleQuery(
       const entry: QueryHistoryEntry = {
         id: makeHistoryId(),
         dbId: body.db,
+        ...(r.schema ? { schema: r.schema } : {}),
         sql: body.sql,
         title: body.title,
         body: body.body,
@@ -581,7 +690,12 @@ async function handleQuery(
       saveQueryHistory(cwd, updated);
       sendSse?.(
         "db-query",
-        JSON.stringify({ action: "add", dbId: body.db, id: entry.id }),
+        JSON.stringify({
+          action: "add",
+          dbId: body.db,
+          schema: r.schema,
+          id: entry.id,
+        }),
       );
     }
     return json(response);
@@ -596,6 +710,7 @@ async function handleQuery(
     const elapsed = Date.now() - start;
     const response: DbQueryResponse = {
       dbId: body.db,
+      ...(r.schema ? { schema: r.schema } : {}),
       columns: [],
       columnTypes: [],
       rows: [],
@@ -610,11 +725,17 @@ async function handleQuery(
 
 function handleHistory(cwd: string, url: URL): Response {
   const dbId = url.searchParams.get("db") || undefined;
+  const schema = normalizeSchemaParam(url.searchParams.get("schema"));
+  if (schema instanceof Response) return schema;
   const state = loadQueryHistory(cwd);
   if (dbId) {
     return json({
       version: 1,
-      entries: state.entries.filter((e) => e.dbId === dbId),
+      entries: state.entries.filter((e) => {
+        if (e.dbId !== dbId) return false;
+        if (schema === undefined) return true;
+        return (e.schema || "public") === schema;
+      }),
     });
   }
   return json(state);
@@ -634,7 +755,12 @@ async function handleHistoryDelete(
   saveQueryHistory(cwd, updated);
   sendSse?.(
     "db-query",
-    JSON.stringify({ action: "delete", dbId: deleted?.dbId, id: body.id }),
+    JSON.stringify({
+      action: "delete",
+      dbId: deleted?.dbId,
+      schema: deleted?.schema,
+      id: body.id,
+    }),
   );
   return json({ ok: true });
 }
@@ -645,16 +771,21 @@ async function handleHistoryClear(
   sendSse?: (event: string, data?: string) => void,
 ): Promise<Response> {
   if (req.method !== "POST") return textError("method not allowed", 405);
-  let body: { db?: string };
+  let body: { db?: string; schema?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     body = {};
   }
   const state = loadQueryHistory(cwd);
-  const updated = clearQueryHistory(state, body.db);
+  const schema = normalizeSchemaParam(body.schema);
+  if (schema instanceof Response) return schema;
+  const updated = clearQueryHistory(state, body.db, schema);
   saveQueryHistory(cwd, updated);
-  sendSse?.("db-query", JSON.stringify({ action: "clear", dbId: body.db }));
+  sendSse?.(
+    "db-query",
+    JSON.stringify({ action: "clear", dbId: body.db, schema }),
+  );
   return json({ ok: true });
 }
 
@@ -684,7 +815,12 @@ async function handleExport(
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -799,14 +935,24 @@ async function handleColumns(
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
   try {
     const adapter = await getAdapter(r, cwd);
     const columns = adapter.getColumns(table);
-    return json({ dbId: r.dbId, table, columns });
+    return json({
+      dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
+      table,
+      columns,
+    });
   } catch (err) {
     return handleError("database", "get columns", err);
   }
@@ -817,7 +963,12 @@ async function handleDdl(
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveDb(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = resolveDb(
+    cwd,
+    url.searchParams.get("db"),
+    omitDirNames,
+    url.searchParams.get("schema"),
+  );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
@@ -825,7 +976,13 @@ async function handleDdl(
     const adapter = await getAdapter(r, cwd);
     const sql = adapter.getCreateStatement(table);
     const triggers = adapter.getTriggers(table);
-    return json({ dbId: r.dbId, table, sql, triggers });
+    return json({
+      dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
+      table,
+      sql,
+      triggers,
+    });
   } catch (err) {
     return handleError("database", "get DDL", err);
   }
@@ -836,6 +993,7 @@ async function handleDdl(
 type SearchJob = {
   id: string;
   dbId: string;
+  schema?: string;
   scannedTables: number;
   totalTables: number;
   currentTable?: string;
@@ -854,6 +1012,7 @@ async function handleSearchStart(
 ): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
+    schema?: string;
     term?: string;
     tables?: string[];
     maxHitsPerTable?: number;
@@ -861,7 +1020,7 @@ async function handleSearchStart(
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.term) return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db, omitDirNames);
+  const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
   if (r instanceof Response) return r;
 
   const jobId = makeId("search");
@@ -869,6 +1028,7 @@ async function handleSearchStart(
   const job: SearchJob = {
     id: jobId,
     dbId: body.db,
+    ...(r.schema ? { schema: r.schema } : {}),
     scannedTables: 0,
     totalTables: 0,
     hits: [],
@@ -919,7 +1079,12 @@ async function handleSearchStart(
           includeNonText,
           pkCols,
         );
-        job.hits.push(...hits);
+        job.hits.push(
+          ...hits.map((hit) => ({
+            ...(r.schema ? { schema: r.schema } : {}),
+            ...hit,
+          })),
+        );
         job.scannedTables++;
       }
       job.done = true;
@@ -943,6 +1108,7 @@ function handleSearchStatus(url: URL): Response {
   const result = {
     jobId: job.id,
     dbId: job.dbId,
+    schema: job.schema,
     scannedTables: job.scannedTables,
     totalTables: job.totalTables,
     currentTable: job.currentTable,
@@ -991,8 +1157,14 @@ type DockerCloseHandler = (dbId: string) => void | Promise<void>;
 const snapshotJobs = new Map<string, SnapshotJob>();
 
 const DOCKER_CLOSE_REGISTRY: Partial<Record<DbKind, DockerCloseHandler>> = {
-  postgresql: (dbId) => dockerAdapterCache.close(dbId),
-  mysql: (dbId) => dockerAdapterCache.close(dbId),
+  postgresql: (dbId) => {
+    dockerAdapterCache.close(dbId);
+    dockerAdapterCache.closePrefix(`${dbId}\0`);
+  },
+  mysql: (dbId) => {
+    dockerAdapterCache.close(dbId);
+    dockerAdapterCache.closePrefix(`${dbId}\0`);
+  },
   redis: closeRedisAdapter,
   elasticsearch: closeElasticsearchAdapter,
 };
@@ -1042,7 +1214,9 @@ async function openRegisteredDockerSnapshotSource(
 
 async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
   const dbId = url.searchParams.get("db") || undefined;
-  const snapshots = await listSnapshots(cwd, dbId);
+  const schema = normalizeSchemaParam(url.searchParams.get("schema"));
+  if (schema instanceof Response) return schema;
+  const snapshots = await listSnapshots(cwd, dbId, schema);
   return json({ snapshots });
 }
 
@@ -1070,6 +1244,7 @@ async function handleSnapshotCreate(
 ): Promise<Response> {
   const body = await parsePostJsonBody<{
     db?: string;
+    schema?: string;
     tables?: string[];
     note?: string;
   }>(req);
@@ -1102,9 +1277,10 @@ async function handleSnapshotCreate(
     }
   }
   if (!source) {
-    const r = resolveDb(cwd, body.db, omitDirNames);
+    const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
     if (r instanceof Response) return r;
     source = await getAdapter(r, cwd);
+    body.schema = r.schema;
   }
 
   if (!containers || containers.length === 0) {
@@ -1151,6 +1327,7 @@ async function handleSnapshotCreate(
             JSON.stringify({
               action: "progress",
               dbId: snapshotDbId,
+              schema: body.schema,
               table,
               done,
             }),
@@ -1158,6 +1335,7 @@ async function handleSnapshotCreate(
         },
         {
           signal: abortController.signal,
+          schema: body.schema,
           onSnapshotId: (id) => {
             activeSnapshotId = id;
             snapshotJob.snapshotId = id;
@@ -1167,6 +1345,7 @@ async function handleSnapshotCreate(
               JSON.stringify({
                 action: "started",
                 dbId: snapshotDbId,
+                schema: body.schema,
                 id,
               }),
             );
@@ -1178,6 +1357,7 @@ async function handleSnapshotCreate(
         JSON.stringify({
           action: "created",
           dbId: snapshotDbId,
+          schema: body.schema,
           id: snapshotId,
         }),
       );
@@ -1191,6 +1371,7 @@ async function handleSnapshotCreate(
         JSON.stringify({
           action: "error",
           dbId: snapshotDbId,
+          schema: body.schema,
           error: err instanceof Error ? err.message : String(err),
         }),
       );
@@ -1348,6 +1529,7 @@ async function handleClose(
     const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
     if (!info) {
       dockerAdapterCache.close(body.db);
+      dockerAdapterCache.closePrefix(`${body.db}\0`);
       closeRedisAdapter(body.db);
       closeElasticsearchAdapter(body.db);
       return json({ ok: true });
@@ -1359,6 +1541,7 @@ async function handleClose(
   if (r instanceof Response) return r;
   if (r.docker) {
     dockerAdapterCache.close(r.dbId);
+    dockerAdapterCache.closePrefix(`${r.dbId}\0`);
   } else {
     closeConnection(r.resolved);
   }
@@ -1407,6 +1590,10 @@ export async function handleDatabaseRoute(
       "/_db/files": {
         methods: ["GET"],
         handler: () => handleFiles(cwd, omitDirNames),
+      },
+      "/_db/schemas": {
+        methods: ["GET"],
+        handler: () => handleSchemas(cwd, url, omitDirNames),
       },
       "/_db/schema": {
         methods: ["GET"],

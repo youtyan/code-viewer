@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createDockerAdapter } from "../server/database/adapters/docker";
+import {
+  __setDockerSpawnSyncForTest,
+  createDockerAdapter,
+} from "../server/database/adapters/docker";
 
 type SpawnCall = {
   args: string[];
@@ -27,6 +30,7 @@ let activeHarness: SpawnHarness | null = null;
 afterEach(() => {
   activeHarness?.restore();
   activeHarness = null;
+  __setDockerSpawnSyncForTest(null);
 });
 
 function mysqlStdout(sql: string): string {
@@ -67,7 +71,17 @@ function mysqlStdout(sql: string): string {
   return ["id\tname", "1\tAda"].join("\n");
 }
 
-function installSpawnHarness(): SpawnHarness {
+function postgresStdout(sql: string): string {
+  if (sql.includes("information_schema.columns")) {
+    return ["id\tinteger\tNO\t\tYES", "name\ttext\tYES\t\tNO"].join("\n");
+  }
+  if (sql.includes("COUNT(*)")) {
+    return "2\n";
+  }
+  return "1\tAda\n";
+}
+
+function installSpawnHarness(stdoutForSql = mysqlStdout): SpawnHarness {
   const bunGlobal = globalThis as unknown as { Bun: { spawn: SpawnLike } };
   const originalSpawn = bunGlobal.Bun.spawn;
   const calls: SpawnCall[] = [];
@@ -78,7 +92,7 @@ function installSpawnHarness(): SpawnHarness {
       exited: new Promise<number>((resolve) => {
         setTimeout(() => resolve(0), 20);
       }),
-      stdout: new Response(mysqlStdout(sql)).body,
+      stdout: new Response(stdoutForSql(sql)).body,
       stderr: new Response("").body,
       kill() {},
     };
@@ -98,6 +112,17 @@ function createMysqlAdapter() {
     user: "root",
     password: "pw",
     database: "app",
+  });
+}
+
+function createPostgresAdapter(schema = "tenant_a") {
+  return createDockerAdapter({
+    kind: "postgresql",
+    containerName: "db",
+    user: "postgres",
+    password: "pw",
+    database: "app",
+    schema,
   });
 }
 
@@ -232,5 +257,40 @@ describe("docker table meta queries", () => {
       "location",
     ]);
     expect(result.rows).toEqual([["1", "POINT(139 35)"]]);
+  });
+
+  test("queries PostgreSQL table data through the selected schema", async () => {
+    activeHarness = installSpawnHarness(postgresStdout);
+    const adapter = createPostgresAdapter("tenant_a");
+
+    const result = await adapter.getTablePageWithMeta("users", {
+      offset: 0,
+      limit: 25,
+    });
+
+    const sql = activeHarness.calls.map((call) => call.sql);
+    expect(sql[0]).toMatch(/c\.table_schema = 'tenant_a'/);
+    expect(sql[1]).toBe('SELECT COUNT(*) AS cnt FROM "tenant_a"."users"');
+    expect(sql[2]).toBe('SELECT * FROM "tenant_a"."users" LIMIT 25 OFFSET 0');
+    expect(result.columns.map((column) => column.name)).toEqual(["id", "name"]);
+    expect(result.rows).toEqual([["1", "Ada"]]);
+    expect(result.totalRows).toBe(2);
+  });
+
+  test("sets PostgreSQL search_path for readonly editor queries", () => {
+    const calls: string[] = [];
+    __setDockerSpawnSyncForTest(((_cmd: string, args: string[]) => {
+      calls.push(String(args[args.length - 1] || ""));
+      return { stdout: "1\n", stderr: "", status: 0 };
+    }) as never);
+    const adapter = createPostgresAdapter("tenant space");
+
+    const result = adapter.executeReadonlyQuery("select * from users", [], 10);
+
+    expect(result.rowCount).toBe(1);
+    expect(calls[0]).toMatch(
+      /BEGIN TRANSACTION READ ONLY; SET LOCAL search_path = "tenant space"; select \* from users LIMIT 10; COMMIT/,
+    );
+    expect(calls[0].includes("pg_catalog")).toBe(false);
   });
 });

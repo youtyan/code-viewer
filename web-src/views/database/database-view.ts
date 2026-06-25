@@ -4,6 +4,7 @@ import type {
   DbFilesResponse,
   DbQueryResponse,
   DbSchemaResponse,
+  DbSchemasResponse,
   DbTableDataResponse,
   TabState,
   TabsResponse,
@@ -36,6 +37,7 @@ export type DatabaseViewDeps = {
 export type DatabaseView = {
   enter: (
     db?: string,
+    schema?: string,
     table?: string,
     tab?: TabName,
     options?: DatabaseEnterOptions,
@@ -95,6 +97,7 @@ type TabPaneInternal = {
   el: HTMLElement;
   enter: (
     db?: string | null,
+    schema?: string | null,
     table?: string | null,
     view?: TabName,
     options?: DatabaseEnterOptions,
@@ -113,6 +116,10 @@ type TabPaneInitial = Partial<Omit<TabState, "id">>;
 
 function isSqlKind(kind: DbFileInfo["kind"] | undefined): boolean {
   return kind === "sqlite" || kind === "postgresql" || kind === "mysql";
+}
+
+function isPostgresKind(kind: DbFileInfo["kind"] | undefined): boolean {
+  return kind === "postgresql";
 }
 
 function isSqlView(view: TabName): boolean {
@@ -209,6 +216,7 @@ function createTabPane(
   let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
   let lastFiles: DbFileInfo[] = [];
+  let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
 
@@ -216,9 +224,14 @@ function createTabPane(
   dbSelect.className = "db-file-select";
   dbSelect.title = "Select database file";
 
+  const schemaSelect = document.createElement("select");
+  schemaSelect.className = "db-file-select db-schema-select";
+  schemaSelect.title = "Select PostgreSQL schema";
+  schemaSelect.hidden = true;
+
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
-  dbToolbar.appendChild(dbSelect);
+  dbToolbar.append(dbSelect, schemaSelect);
 
   const tabBar = document.createElement("div");
   tabBar.className = "db-tab-bar";
@@ -334,13 +347,16 @@ function createTabPane(
   const erDiagram = createErDiagram();
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
+    getSchema: () => currentSchema,
   });
   const snapshotView = createSnapshotView({
     getDbId: () => currentDbInfo?.id || null,
+    getSchema: () => currentSchema,
     getTables: () => schemaCache?.tables || [],
   });
   const historyView = createQueryHistoryView({
     getDbId: () => currentDbInfo?.id || null,
+    getSchema: () => currentSchema,
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
       setActiveTab("query");
@@ -520,6 +536,7 @@ function createTabPane(
         {
           screen: "database",
           db: currentDbInfo?.id,
+          schema: currentSchema ?? undefined,
           table: currentTable ?? undefined,
           tab: currentTab === "data" ? undefined : currentTab,
           range: deps.currentRange(),
@@ -545,10 +562,48 @@ function createTabPane(
     return data;
   }
 
+  function withCurrentSchema(params: URLSearchParams): URLSearchParams {
+    if (currentSchema) params.set("schema", currentSchema);
+    return params;
+  }
+
+  async function fetchSchemas(
+    dbId: string,
+    preferredSchema?: string | null,
+  ): Promise<DbSchemasResponse> {
+    const params = new URLSearchParams({ db: dbId });
+    if (preferredSchema) params.set("schema", preferredSchema);
+    const res = await deps.trackLoad(fetch(`/_db/schemas?${params}`));
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "failed to fetch schemas"),
+      );
+    }
+    return (await res.json()) as DbSchemasResponse;
+  }
+
+  function renderSchemaOptions(schemas: string[], selected?: string | null) {
+    schemaSelect.innerHTML = "";
+    for (const schema of schemas) {
+      const opt = document.createElement("option");
+      opt.value = schema;
+      opt.textContent = schema;
+      schemaSelect.appendChild(opt);
+    }
+    schemaSelect.hidden = schemas.length === 0;
+    schemaSelect.disabled = schemas.length === 0;
+    if (selected && schemas.includes(selected)) {
+      schemaSelect.value = selected;
+    } else if (schemas.length > 0) {
+      schemaSelect.value = schemas[0];
+    }
+  }
+
   async function fetchSchema(dbId: string): Promise<DbSchemaResponse> {
-    const res = await deps.trackLoad(
-      fetch(`/_db/schema?db=${encodeURIComponent(dbId)}&includeColumns=1`),
+    const params = withCurrentSchema(
+      new URLSearchParams({ db: dbId, includeColumns: "1" }),
     );
+    const res = await deps.trackLoad(fetch(`/_db/schema?${params}`));
     if (!res.ok) {
       throw new Error(
         await responseErrorMessage(res, "failed to fetch schema"),
@@ -571,6 +626,7 @@ function createTabPane(
       offset: String(offset),
       limit: String(limit),
     });
+    withCurrentSchema(params);
     if (sort) {
       params.set("sort", sort.column);
       params.set("dir", sort.direction);
@@ -595,6 +651,7 @@ function createTabPane(
       },
       body: JSON.stringify({
         db: currentDbInfo.id,
+        ...(currentSchema ? { schema: currentSchema } : {}),
         sql,
         saveHistory: true,
         source: "browser",
@@ -618,6 +675,7 @@ function createTabPane(
       es?: { index?: string; query?: string };
     },
     generation = loadGeneration,
+    preferredSchema?: string | null,
     preferredTable?: string | null,
   ) {
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
@@ -626,6 +684,8 @@ function createTabPane(
       currentDbInfo?.kind === "redis" ||
       currentDbInfo?.kind === "elasticsearch"
     ) {
+      currentSchema = null;
+      renderSchemaOptions([], null);
       currentTab = "data";
       tableList.render([]);
       grid.clear();
@@ -650,6 +710,36 @@ function createTabPane(
     tableList.render([]);
     setTableListStatus("Loading schema...");
     grid.clear();
+    if (isPostgresKind(currentDbInfo?.kind)) {
+      const desiredSchema =
+        preferredSchema !== undefined ? preferredSchema : currentSchema;
+      const schemas = await fetchSchemas(dbId, desiredSchema).catch((err) => {
+        if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+        const message = errorMessage(err);
+        currentSchema = null;
+        renderSchemaOptions([], null);
+        schemaCache = null;
+        tableList.render([]);
+        setTableListStatus(message, { error: true });
+        grid.showError(message);
+        schemaView.clear();
+        erDiagram.clear();
+        cb.onStateChange();
+        return null;
+      });
+      if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+      if (!schemas) return;
+      const schemaNames = schemas.schemas.map((s) => s.name);
+      currentSchema =
+        schemas.selectedSchema ||
+        desiredSchema ||
+        (schemaNames.includes("public") ? "public" : schemaNames[0]) ||
+        null;
+      renderSchemaOptions(schemaNames, currentSchema);
+    } else {
+      currentSchema = null;
+      renderSchemaOptions([], null);
+    }
     const schema = await fetchSchema(dbId).catch((err) => {
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
       const message = errorMessage(err);
@@ -665,6 +755,7 @@ function createTabPane(
     });
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     if (!schema) return;
+    currentSchema = schema.schema || currentSchema;
     schemaCache = schema;
     tableList.render(schema.tables);
     grid.clear();
@@ -705,6 +796,7 @@ function createTabPane(
       {
         screen: "database",
         db: currentDbInfo.id,
+        schema: currentSchema ?? undefined,
         table,
         tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange(),
@@ -752,7 +844,7 @@ function createTabPane(
     }
     if (!currentDbInfo) return [];
     const res = await fetch(
-      `/_db/columns?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table)}`,
+      `/_db/columns?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
     );
     if (!res.ok) return [];
     const data = (await res.json()) as { columns: DbColumn[] };
@@ -771,7 +863,7 @@ function createTabPane(
     setActiveTab("schema");
     try {
       const res = await fetch(
-        `/_db/ddl?db=${encodeURIComponent(currentDbInfo.id)}&table=${encodeURIComponent(table)}`,
+        `/_db/ddl?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
       );
       if (!res.ok) return;
       const data = (await res.json()) as {
@@ -814,6 +906,40 @@ function createTabPane(
     void handleDbSelectChange();
   });
 
+  schemaSelect.addEventListener("change", () => {
+    void handleSchemaSelectChange();
+  });
+
+  async function handleSchemaSelectChange(): Promise<void> {
+    if (!currentDbInfo || !isPostgresKind(currentDbInfo.kind)) return;
+    const schema = schemaSelect.value || null;
+    if (!schema || schema === currentSchema) return;
+    const dbId = currentDbInfo.id;
+    currentSchema = schema;
+    const generation = ++loadGeneration;
+    clearDockerNotice();
+    await selectDb(dbId, undefined, generation, schema, null);
+    if (
+      generation !== loadGeneration ||
+      currentDbInfo?.id !== dbId ||
+      currentSchema !== schema
+    ) {
+      return;
+    }
+    deps.setRoute(
+      {
+        screen: "database",
+        db: dbId,
+        schema,
+        table: currentTable ?? undefined,
+        tab: currentTab === "data" ? undefined : currentTab,
+        range: deps.currentRange(),
+      },
+      true,
+    );
+    cb.onStateChange();
+  }
+
   async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
@@ -827,13 +953,15 @@ function createTabPane(
       sizeBytes: file?.sizeBytes || 0,
       kind: file?.kind || "sqlite",
     };
+    currentSchema = null;
     clearDockerNotice();
-    await selectDb(dbId, undefined, generation);
+    await selectDb(dbId, undefined, generation, null);
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     deps.setRoute(
       {
         screen: "database",
         db: dbId,
+        schema: currentSchema ?? undefined,
         table: currentTable ?? undefined,
         tab: currentTab === "data" ? undefined : currentTab,
         range: deps.currentRange(),
@@ -851,6 +979,7 @@ function createTabPane(
 
   async function enter(
     db?: string | null,
+    schema?: string | null,
     table?: string | null,
     view?: TabName,
     options: DatabaseEnterOptions = {},
@@ -896,8 +1025,10 @@ function createTabPane(
     if (!db && !autoSelectFirst) {
       dbSelect.value = "";
       currentDbInfo = null;
+      currentSchema = null;
       currentTable = null;
       schemaCache = null;
+      renderSchemaOptions([], null);
       tableList.render([]);
       grid.clear();
       schemaView.clear();
@@ -919,7 +1050,13 @@ function createTabPane(
     };
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
-    await selectDb(target, explorerInitial, generation, table);
+    await selectDb(
+      target,
+      explorerInitial,
+      generation,
+      schema !== undefined ? schema : currentSchema,
+      table,
+    );
     if (generation !== loadGeneration || currentDbInfo?.id !== target) return;
     if (
       currentDbInfo?.kind === "redis" ||
@@ -955,6 +1092,7 @@ function createTabPane(
     target: DatabaseAnnotationTarget | undefined,
   ): void {
     if (!target || target.db !== currentDbInfo?.id) return;
+    if (target.schema && target.schema !== currentSchema) return;
     if (target.data) {
       if (target.table && target.table !== currentTable) return;
       setActiveTab("data");
@@ -996,6 +1134,7 @@ function createTabPane(
     const state: TabState = {
       id: cb.tabId,
       dbId: currentDbInfo?.id ?? null,
+      schema: currentSchema,
       table: currentTable ?? activeTable?.dataset.table ?? null,
       view: currentTab,
     };
@@ -1035,6 +1174,7 @@ function createTabPane(
     const target: DatabaseAnnotationTarget = {
       kind: "database",
       db: currentDbInfo.id,
+      ...(currentSchema ? { schema: currentSchema } : {}),
       ...(currentTable ? { table: currentTable } : {}),
       tab: currentTab,
     };
@@ -1051,18 +1191,21 @@ function createTabPane(
 
   function getLabel(): string {
     if (!currentDbInfo) return labelFromDbId(initial.dbId);
+    const suffix = currentSchema ? ` / ${currentSchema}` : "";
     // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
     if (currentDbInfo.id.startsWith("docker:")) {
       // currentDbInfo.name は recursive discovery の長い label なので、service 部分だけ取り出す。
       // 例: "redis-svc (redis:7-alpine, localhost:6390 — data/test/redis)"
       //  → "redis-svc"
       const m = currentDbInfo.name.match(/^(\S+)/);
-      return m ? m[1] : currentDbInfo.name;
+      return `${m ? m[1] : currentDbInfo.name}${suffix}`;
     }
     const lastSlash = currentDbInfo.path.lastIndexOf("/");
-    return lastSlash >= 0
-      ? currentDbInfo.path.slice(lastSlash + 1)
-      : currentDbInfo.path;
+    const label =
+      lastSlash >= 0
+        ? currentDbInfo.path.slice(lastSlash + 1)
+        : currentDbInfo.path;
+    return `${label}${suffix}`;
   }
 
   function dispose(): void {
@@ -1078,6 +1221,7 @@ function createTabPane(
     redisExplorer.dispose();
     esExplorer.dispose();
     currentDbInfo = null;
+    currentSchema = null;
     currentTable = null;
     schemaCache = null;
   }
@@ -1254,6 +1398,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       {
         screen: "database",
         db: s.dbId ?? undefined,
+        schema: s.schema ?? undefined,
         table: s.table ?? undefined,
         tab: s.view === "data" ? undefined : s.view,
         range: deps.currentRange(),
@@ -1277,6 +1422,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     for (const tab of tabs) {
       const key = JSON.stringify({
         dbId: tab.dbId,
+        schema: tab.schema ?? null,
         table: tab.table,
         view: tab.view,
         redis: tab.redis ?? null,
@@ -1525,6 +1671,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         // タブ独立の永続化対象 state を全部渡す。pane 内で localStorage を
         // 読まず、tabs.json から復元した値をここから取る。
         dbId: initial?.dbId ?? null,
+        schema: initial?.schema ?? null,
         table: initial?.table ?? null,
         view: (initial?.view as TabName | undefined) ?? undefined,
         sqlDraft: initial?.sqlDraft,
@@ -1562,6 +1709,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       try {
         await pane.enter(
           initial?.dbId || undefined,
+          initial?.schema || undefined,
           initial?.table || undefined,
           initial?.view || undefined,
           options,
@@ -1613,11 +1761,17 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   function routeMatchesState(
     state: TabState,
     db?: string,
+    schema?: string | null,
     table?: string,
     view?: TabName,
   ): boolean {
-    if (!db && (table || view) && !state.dbId) return false;
+    if (!db && (schema || table || view) && !state.dbId) return false;
     if (db !== undefined && state.dbId !== db) return false;
+    if (schema !== undefined) {
+      const routeSchema = schema || "public";
+      const stateSchema = state.schema || "public";
+      if (stateSchema !== routeSchema) return false;
+    }
     if (table !== undefined && state.table !== table) return false;
     if (view !== undefined && state.view !== view) return false;
     return true;
@@ -1625,6 +1779,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function applyRouteToTab(
     db?: string,
+    schema?: string | null,
     table?: string,
     view?: TabName,
     options: DatabaseEnterOptions = {},
@@ -1632,26 +1787,39 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     async function enterPane(
       pane: TabPaneInternal,
       targetDb?: string,
+      targetSchema?: string | null,
       targetTable?: string,
       targetView?: TabName,
       enterOptions?: DatabaseEnterOptions,
     ): Promise<void> {
       if (!enterOptions?.annotationTarget) {
-        await pane.enter(targetDb, targetTable, targetView, enterOptions);
+        await pane.enter(
+          targetDb,
+          targetSchema,
+          targetTable,
+          targetView,
+          enterOptions,
+        );
         return;
       }
       restoring = true;
       try {
-        await pane.enter(targetDb, targetTable, targetView, enterOptions);
+        await pane.enter(
+          targetDb,
+          targetSchema,
+          targetTable,
+          targetView,
+          enterOptions,
+        );
       } finally {
         restoring = false;
       }
     }
     for (const [id, entry] of tabsById) {
-      if (routeMatchesState(entry.pane.getState(), db, table, view)) {
+      if (routeMatchesState(entry.pane.getState(), db, schema, table, view)) {
         setActive(id);
         if (options.annotationTarget) {
-          await enterPane(entry.pane, db, table, view, options);
+          await enterPane(entry.pane, db, schema, table, view, options);
           if (!mounted) return;
         }
         refreshChipLabel(id);
@@ -1662,7 +1830,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const targetId = activeTabId;
       const active = tabsById.get(activeTabId);
       if (active) {
-        await enterPane(active.pane, db, table, view, options);
+        await enterPane(active.pane, db, schema, table, view, options);
         if (!mounted) return;
         refreshChipLabel(targetId);
         return;
@@ -1671,6 +1839,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const id = openTab(
       {
         dbId: db ?? null,
+        schema: schema ?? null,
         table: table ?? null,
         view: view ?? "data",
       },
@@ -1691,9 +1860,20 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
   }
 
+  function parseSseSchema(data?: string): string | null {
+    if (!data) return null;
+    try {
+      const parsed = JSON.parse(data) as { schema?: unknown };
+      return typeof parsed.schema === "string" ? parsed.schema : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function doEnter(
     seq: number,
     db?: string,
+    schema?: string,
     table?: string,
     view?: TabName,
     options: DatabaseEnterOptions = {},
@@ -1758,8 +1938,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         }
         // URL の引数があれば、まず同じ状態の既存タブを active 化する。
         // なければ active タブに上書き反映する。
-        if (db || table || view) {
-          await applyRouteToTab(db, table, view, {
+        if (db || schema || table || view) {
+          await applyRouteToTab(db, schema ?? null, table, view, {
             ...options,
             reuseActiveTab: options.reuseActiveTab ?? true,
           });
@@ -1786,6 +1966,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const id = openTab(
         {
           dbId: db || null,
+          schema: schema || null,
           table: table || null,
           view: view || "data",
         },
@@ -1799,8 +1980,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!activeTabId) return;
     const active = tabsById.get(activeTabId);
     if (!active) return;
-    if (db || table || view) {
-      await applyRouteToTab(db, table, view, {
+    if (db || schema || table || view) {
+      await applyRouteToTab(db, schema ?? null, table, view, {
         ...options,
         reuseActiveTab: options.reuseActiveTab ?? true,
       });
@@ -1811,6 +1992,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function enter(
     db?: string,
+    schema?: string,
     table?: string,
     view?: TabName,
     options: DatabaseEnterOptions = {},
@@ -1818,7 +2000,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
       .catch(() => {})
-      .then(() => doEnter(seq, db, table, view, options));
+      .then(() => doEnter(seq, db, schema, table, view, options));
     await enterQueue;
   }
 
@@ -1866,8 +2048,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   function handleSse(event?: string, data?: string): void {
     if (!mounted) return;
     const dbId = parseSseDbId(data);
+    const schema = parseSseSchema(data);
     for (const [, entry] of tabsById) {
-      if (dbId && entry.pane.getState().dbId !== dbId) continue;
+      const state = entry.pane.getState();
+      if (dbId && state.dbId !== dbId) continue;
+      if (schema && state.schema !== schema) continue;
       entry.pane.handleSse(event, data);
     }
   }

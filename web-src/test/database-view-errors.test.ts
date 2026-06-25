@@ -760,7 +760,7 @@ describe("database view SQL error rendering", () => {
     });
 
     const view = createViewForTest();
-    await view.enter("docker:db", "bookings");
+    await view.enter("docker:db", undefined, "bookings");
 
     expect(document.querySelectorAll(".db-tabs-chip")).toHaveLength(1);
     expect(fetchedTables).toEqual(["users", "bookings"]);
@@ -817,7 +817,7 @@ describe("database view SQL error rendering", () => {
         routes.push(route);
       },
     });
-    await view.enter("docker:db", "course_categories");
+    await view.enter("docker:db", undefined, "course_categories");
 
     const sawRestoredSearchRoute = routes.some(
       (route) =>
@@ -869,7 +869,7 @@ describe("database view SQL error rendering", () => {
     });
 
     const view = createViewForTest();
-    await view.enter("docker:db", "bookings");
+    await view.enter("docker:db", undefined, "bookings");
 
     expect(fetchedTables).toEqual(["bookings"]);
     await leaveView(view);
@@ -936,7 +936,11 @@ describe("database view SQL error rendering", () => {
     });
 
     const view = createViewForTest();
-    await view.enter(".code-viewer/db-snapshots.sqlite", "cancel_bookings");
+    await view.enter(
+      ".code-viewer/db-snapshots.sqlite",
+      undefined,
+      "cancel_bookings",
+    );
 
     expect(fetchedTables).toEqual([]);
     await leaveView(view);

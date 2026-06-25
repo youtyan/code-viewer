@@ -96,10 +96,15 @@ export function deleteQueryHistoryEntry(
 export function clearQueryHistory(
   state: QueryHistoryState,
   dbId?: string,
+  schema?: string,
 ): QueryHistoryState {
   if (!dbId) return emptyState();
   return {
     version: 1,
-    entries: state.entries.filter((e) => e.dbId !== dbId),
+    entries: state.entries.filter((e) => {
+      if (e.dbId !== dbId) return true;
+      if (schema === undefined) return false;
+      return (e.schema || "public") !== schema;
+    }),
   };
 }

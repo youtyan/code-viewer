@@ -5600,6 +5600,9 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 }
 
 .db-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }

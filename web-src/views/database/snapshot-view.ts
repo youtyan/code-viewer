@@ -8,6 +8,7 @@ import { isImeComposing } from "../../core/keyboard";
 
 export type SnapshotViewDeps = {
   getDbId: () => string | null;
+  getSchema: () => string | null;
   getTables: () => DbTableInfo[];
 };
 
@@ -228,6 +229,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   confirmBtn.addEventListener("click", async () => {
     const dbId = deps.getDbId();
+    const schema = deps.getSchema();
     if (!dbId) return;
     const tables = getSelectedTables();
     if (tables.length === 0) return;
@@ -238,11 +240,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     try {
       await postJson("/_db/snapshot/create", {
         db: dbId,
+        ...(schema ? { schema } : {}),
         tables,
         note: noteInput.value.trim(),
       });
       tableSelector.hidden = true;
-      scheduleAutoRefresh(dbId);
+      scheduleAutoRefresh(dbId, schema);
     } catch {
       // ignore
     } finally {
@@ -253,10 +256,12 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     }
   });
 
-  function scheduleAutoRefresh(dbId: string): void {
+  function scheduleAutoRefresh(dbId: string, schema: string | null): void {
     const timer = setTimeout(() => {
       autoRefreshTimers.delete(timer);
-      if (disposed || deps.getDbId() !== dbId) return;
+      if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema) {
+        return;
+      }
       void refreshAndAutoDiff();
     }, 3000);
     autoRefreshTimers.add(timer);
@@ -266,18 +271,26 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   async function refresh() {
     const dbId = deps.getDbId();
+    const schema = deps.getSchema();
     if (!dbId) return;
 
     try {
-      const snapRes = await fetch(
-        `/_db/snapshot/list?db=${encodeURIComponent(dbId)}`,
-      );
+      const params = new URLSearchParams({ db: dbId });
+      if (schema) params.set("schema", schema);
+      const snapRes = await fetch(`/_db/snapshot/list?${params}`);
       if (snapRes.ok) {
         const data = (await snapRes.json()) as { snapshots: SnapshotMeta[] };
-        if (disposed || deps.getDbId() !== dbId) return;
+        if (
+          disposed ||
+          deps.getDbId() !== dbId ||
+          deps.getSchema() !== schema
+        ) {
+          return;
+        }
         snapshots = data.snapshots;
       }
-      if (disposed || deps.getDbId() !== dbId) return;
+      if (disposed || deps.getDbId() !== dbId || deps.getSchema() !== schema)
+        return;
       renderMain();
     } catch {
       // ignore
@@ -733,10 +746,13 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const parsed = JSON.parse(data) as {
         action: string;
         dbId?: string;
+        schema?: string;
         id?: string;
       };
       const dbId = deps.getDbId();
+      const schema = deps.getSchema();
       if (parsed.dbId && dbId && parsed.dbId !== dbId) return;
+      if (parsed.schema && parsed.schema !== schema) return;
       if (parsed.action === "started" && parsed.id) {
         setActiveSnapshotId(parsed.id);
       }

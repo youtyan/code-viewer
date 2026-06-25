@@ -183,6 +183,7 @@ export type AnnotationTarget =
   | {
       kind: "database";
       db?: string;
+      schema?: string;
       table?: string;
       tab?: AnnotationDatabaseTab;
       data?: AnnotationDatabaseDataState;
