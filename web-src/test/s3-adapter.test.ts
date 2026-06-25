@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { __setDockerComposeSpawnSyncForTest } from "../server/database/adapters/docker-utils";
 import {
+  __setS3DockerCurlTimeoutMsForTest,
+  __setS3RequestTimeoutMsForTest,
   __setS3SpawnSyncForTest,
   isS3HttpError,
   openS3ExplorerAsync,
@@ -15,6 +17,8 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   closeS3Adapter("docker:minio");
+  __setS3RequestTimeoutMsForTest(null);
+  __setS3DockerCurlTimeoutMsForTest(null);
   __setS3SpawnSyncForTest(null);
   __setDockerComposeSpawnSyncForTest(null);
   Object.defineProperty(globalThis, "fetch", {
@@ -46,8 +50,39 @@ function s3Info(): DockerDbInfo {
 
 function s3InfoWithoutHostPort(): DockerDbInfo {
   const info = s3Info();
+  const { hostPort: _hostPort, image: _image, ...rest } = info;
+  return { ...rest, image: "example/s3-with-curl:latest" };
+}
+
+function minioInfoWithoutHostPort(): DockerDbInfo {
+  const info = s3Info();
   const { hostPort: _hostPort, ...rest } = info;
   return rest;
+}
+
+function tricklingStream(
+  chunkText: string,
+  intervalMs: number,
+  count: number,
+): ReadableStream<Uint8Array> {
+  const chunk = new TextEncoder().encode(chunkText);
+  let timer: ReturnType<typeof setInterval> | undefined;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      let sent = 0;
+      timer = setInterval(() => {
+        sent++;
+        controller.enqueue(chunk);
+        if (sent >= count) {
+          if (timer) clearInterval(timer);
+          controller.close();
+        }
+      }, intervalMs);
+    },
+    cancel() {
+      if (timer) clearInterval(timer);
+    },
+  });
 }
 
 describe("S3 adapter", () => {
@@ -77,6 +112,169 @@ describe("S3 adapter", () => {
     expect(buckets).toEqual([
       { name: "media", createdAt: "2026-06-01T00:00:00.000Z" },
     ]);
+  });
+
+  test("times out stalled bucket requests instead of hanging the route", async () => {
+    __setS3RequestTimeoutMsForTest(20);
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-timeout-"));
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Promise<Response>(() => {})) as typeof fetch,
+      });
+
+      const started = Date.now();
+      const req = new Request(
+        "http://localhost/_db/s3/buckets?db=docker:minio",
+      );
+      const res = await handleS3Route(req, new URL(req.url), cwd);
+      expect(Date.now() - started < 1000).toBe(true);
+      expect(res?.status).toBe(503);
+      expect(await res?.text()).toMatch(/S3 request timed out after 20ms/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("times out stalled bucket response bodies instead of hanging the route", async () => {
+    __setS3RequestTimeoutMsForTest(20);
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-body-timeout-"));
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start() {
+                // Keep headers successful while the XML body never completes.
+              },
+            }),
+            { status: 200 },
+          )) as typeof fetch,
+      });
+
+      const started = Date.now();
+      const req = new Request(
+        "http://localhost/_db/s3/buckets?db=docker:minio",
+      );
+      const res = await handleS3Route(req, new URL(req.url), cwd);
+      expect(Date.now() - started < 1000).toBe(true);
+      expect(res?.status).toBe(503);
+      expect(await res?.text()).toMatch(/S3 request timed out after 20ms/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("enforces an overall deadline for trickling bucket response bodies", async () => {
+    __setS3RequestTimeoutMsForTest(50);
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-body-deadline-"));
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(tricklingStream("x", 10, 80), {
+            status: 200,
+          })) as typeof fetch,
+      });
+
+      const started = Date.now();
+      const req = new Request(
+        "http://localhost/_db/s3/buckets?db=docker:minio",
+      );
+      const res = await handleS3Route(req, new URL(req.url), cwd);
+      expect(Date.now() - started < 1000).toBe(true);
+      expect(res?.status).toBe(503);
+      expect(await res?.text()).toMatch(/S3 request timed out after 50ms/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("aborts stalled bucket requests when the client request is aborted", async () => {
+    __setS3RequestTimeoutMsForTest(1000);
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-abort-"));
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Promise<Response>(() => {})) as typeof fetch,
+      });
+
+      const controller = new AbortController();
+      const req = new Request(
+        "http://localhost/_db/s3/buckets?db=docker:minio",
+        { signal: controller.signal },
+      );
+      const started = Date.now();
+      const pending = handleS3Route(req, new URL(req.url), cwd);
+      await Promise.resolve();
+      controller.abort();
+      const res = await pending;
+
+      expect(Date.now() - started < 500).toBe(true);
+      expect(res?.status).toBe(503);
+      expect(await res?.text()).toMatch(/aborted/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   test("streams raw objects with sandbox headers and preserves range metadata", async () => {
@@ -112,6 +310,75 @@ describe("S3 adapter", () => {
     expect(res.headers.get("content-range")).toBe("bytes 0-3/10");
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(await res.text()).toBe("test");
+  });
+
+  test("times out stalled raw object streams after upstream headers", async () => {
+    __setS3RequestTimeoutMsForTest(20);
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start() {
+              // Simulate an image/video response whose body never arrives.
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "image/png",
+              "content-length": "100",
+            },
+          },
+        )) as typeof fetch,
+    });
+
+    const explorer = await openS3ExplorerAsync(s3Info());
+    const res = await explorer.getObjectResponse({
+      bucket: "media",
+      key: "image.png",
+      method: "GET",
+    });
+    const started = Date.now();
+    let error: unknown;
+    try {
+      await res.arrayBuffer();
+    } catch (err) {
+      error = err;
+    }
+
+    expect(Date.now() - started < 1000).toBe(true);
+    expect(isS3HttpError(error)).toBe(true);
+    expect(error instanceof Error ? error.message : "").toMatch(
+      /S3 request timed out after 20ms/,
+    );
+  });
+
+  test("allows active raw object streams to exceed the request deadline", async () => {
+    __setS3RequestTimeoutMsForTest(30);
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(tricklingStream("a", 10, 6), {
+          status: 200,
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-length": "6",
+          },
+        })) as typeof fetch,
+    });
+
+    const explorer = await openS3ExplorerAsync(s3Info());
+    const res = await explorer.getObjectResponse({
+      bucket: "media",
+      key: "stream.bin",
+      method: "GET",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("aaaaaa");
   });
 
   test("reads text previews with one ranged GET request", async () => {
@@ -186,6 +453,7 @@ describe("S3 adapter", () => {
   });
 
   test("uses docker exec curl when the S3 service has no published host port", async () => {
+    __setS3RequestTimeoutMsForTest(20);
     __setDockerComposeSpawnSyncForTest(((cmd, args) => {
       expect(cmd).toBe("docker");
       expect(args?.slice(0, 3)).toEqual(["compose", "ps", "--format"]);
@@ -209,6 +477,9 @@ describe("S3 adapter", () => {
       expect(args?.includes("http://127.0.0.1:9000/")).toBe(true);
       expect(args?.join(" ").includes("Authorization")).toBe(false);
       expect(args?.join(" ").includes("x-amz")).toBe(false);
+      expect((options as { timeout?: number } | undefined)?.timeout).toBe(
+        30000,
+      );
       const input = (options as { input?: Buffer | string } | undefined)?.input;
       const curlConfig = Buffer.isBuffer(input)
         ? input.toString("utf8")
@@ -234,6 +505,20 @@ describe("S3 adapter", () => {
 
     const explorer = await openS3ExplorerAsync(s3InfoWithoutHostPort());
     expect(await explorer.listBuckets()).toEqual([{ name: "media" }]);
+  });
+
+  test("returns guidance for MinIO without a published host port", async () => {
+    let error: unknown;
+    try {
+      await openS3ExplorerAsync(minioInfoWithoutHostPort());
+    } catch (err) {
+      error = err;
+    }
+
+    expect(isS3HttpError(error)).toBe(true);
+    expect(error instanceof Error ? error.message : "").toMatch(
+      /MinIO S3 browsing requires a published host port/,
+    );
   });
 
   test("rejects unbounded raw GET through docker exec curl", async () => {

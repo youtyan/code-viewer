@@ -388,6 +388,7 @@ function parseComposeEnv(
 
 function parseComposePortMappings(
   serviceBlock: string,
+  composeDirEnv: Record<string, string> = {},
 ): Array<{ host: string; container: string }> {
   const portsMatch = serviceBlock.match(
     /^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m,
@@ -397,34 +398,69 @@ function parseComposePortMappings(
   for (const line of portsMatch[1].split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("-")) continue;
-    const value = trimmed
-      .slice(1)
-      .trim()
-      .replace(/^["']|["']$/g, "")
-      .split(/\s+#/)[0]
-      .split("/")[0]
-      .trim();
+    const value = resolveEnvValue(
+      trimmed
+        .slice(1)
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .split(/\s+#/)[0]
+        .split("/")[0]
+        .trim(),
+      composeDirEnv,
+    );
     if (!value || value.includes("target:")) continue;
     const parts = value.split(":");
     const container = parts.pop()?.trim() || "";
     const host = parts.pop()?.trim() || "";
-    if (!/^\d+$/.test(container)) continue;
-    if (host && !/^\d+$/.test(host)) continue;
-    mappings.push({ host, container });
+    const containerPorts = expandPortRange(container);
+    const hostPorts = host ? expandPortRange(host) : [];
+    if (!containerPorts) continue;
+    if (host && (!hostPorts || hostPorts.length !== containerPorts.length)) {
+      continue;
+    }
+    for (let i = 0; i < containerPorts.length; i++) {
+      mappings.push({
+        host: hostPorts ? (hostPorts[i] ?? "").toString() : "",
+        container: containerPorts[i].toString(),
+      });
+    }
   }
   return mappings;
 }
 
-function parseComposePorts(serviceBlock: string): string | null {
-  const first = parseComposePortMappings(serviceBlock).find((m) => m.host);
+function expandPortRange(value: string): number[] | null {
+  const match = value.match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2] || match[1]);
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 1 ||
+    end > 65535 ||
+    end < start
+  ) {
+    return null;
+  }
+  return Array.from({ length: end - start + 1 }, (_, idx) => start + idx);
+}
+
+function parseComposePorts(
+  serviceBlock: string,
+  composeDirEnv: Record<string, string> = {},
+): string | null {
+  const first = parseComposePortMappings(serviceBlock, composeDirEnv).find(
+    (m) => m.host,
+  );
   return first?.host || null;
 }
 
 function parseComposeHostPortForContainer(
   serviceBlock: string,
   containerPort: string,
+  composeDirEnv: Record<string, string> = {},
 ): string | null {
-  const found = parseComposePortMappings(serviceBlock).find(
+  const found = parseComposePortMappings(serviceBlock, composeDirEnv).find(
     (m) => m.container === containerPort && m.host,
   );
   return found?.host || null;
@@ -533,9 +569,13 @@ function parseComposeContent(
     const serviceContainerPort =
       kind === "s3" ? defaultPort : containerPort || defaultPort;
     const publishedHostPort =
-      parseComposeHostPortForContainer(svcBlock, serviceContainerPort) ||
-      parseComposeHostPortForContainer(svcBlock, defaultPort) ||
-      parseComposePorts(svcBlock);
+      parseComposeHostPortForContainer(
+        svcBlock,
+        serviceContainerPort,
+        composeDirEnv,
+      ) ||
+      parseComposeHostPortForContainer(svcBlock, defaultPort, composeDirEnv) ||
+      parseComposePorts(svcBlock, composeDirEnv);
     const hostPort =
       kind === "s3"
         ? publishedHostPort || undefined

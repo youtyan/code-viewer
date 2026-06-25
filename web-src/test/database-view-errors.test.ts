@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createDatabaseView } from "../views/database/database-view";
+import {
+  createDatabaseView,
+  TABLE_SELECT_FETCH_DELAY_MS,
+} from "../views/database/database-view";
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -779,7 +782,7 @@ describe("database view SQL error rendering", () => {
     await view.enter("docker:db", undefined, "bookings");
 
     expect(document.querySelectorAll(".db-tabs-chip")).toHaveLength(1);
-    expect(fetchedTables).toEqual(["users", "bookings"]);
+    expect(fetchedTables).toEqual(["bookings"]);
     await leaveView(view);
   });
 
@@ -891,6 +894,273 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  test("opens a routed restored background tab when another datastore is active", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "minio",
+          tabs: [
+            {
+              id: "postgres",
+              dbId: "docker:postgres:demo_app",
+              table: "queue_locks",
+              view: "data",
+            },
+            {
+              id: "minio",
+              dbId: "docker:minio",
+              table: null,
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files")
+        return jsonResponse({
+          files: [
+            {
+              id: "docker:postgres:demo_app",
+              path: "docker-compose.yml",
+              name: "postgres",
+              sizeBytes: 0,
+              kind: "postgres",
+            },
+            {
+              id: "docker:minio",
+              path: "docker-compose.yml",
+              name: "minio",
+              sizeBytes: 0,
+              kind: "s3",
+            },
+          ],
+        });
+      if (url.startsWith("/_db/s3/buckets"))
+        return jsonResponse({ buckets: [] });
+      if (url.startsWith("/_db/schemas"))
+        return jsonResponse({
+          schemas: [{ name: "public" }],
+          selectedSchema: "public",
+        });
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          schema: "public",
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "queue_locks", type: "table", rowCount: 0 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const params = new URL(url, "http://localhost").searchParams;
+        const table = params.get("table");
+        if (table) fetchedTables.push(table);
+        return jsonResponse({
+          ...baseTableResponse(),
+          table,
+          rows: [],
+          totalRows: 0,
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:postgres:demo_app", "public", "queue_locks");
+
+    expect(fetchedTables).toEqual(["queue_locks"]);
+    expect(
+      document.querySelector(".db-table-item.active")?.textContent,
+    ).toMatch(/queue_locks/);
+    expect(document.querySelector(".db-grid-status")?.textContent).toMatch(
+      /0 rows/,
+    );
+    await leaveView(view);
+  });
+
+  test("does not sync the route while materializing a routed restored table tab", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    const routeSyncs: unknown[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "postgres",
+          tabs: [
+            {
+              id: "postgres",
+              dbId: "docker:postgres:demo_app",
+              schema: null,
+              table: "queue_locks",
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files")
+        return jsonResponse({
+          files: [
+            {
+              id: "docker:postgres:demo_app",
+              path: "docker-compose.yml",
+              name: "postgres",
+              sizeBytes: 0,
+              kind: "postgres",
+            },
+          ],
+        });
+      if (url.startsWith("/_db/schemas"))
+        return jsonResponse({
+          schemas: [{ name: "public" }],
+          selectedSchema: "public",
+        });
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          schema: "public",
+          tables: [{ name: "queue_locks", type: "table", rowCount: 0 }],
+          columnsMap: {
+            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({
+          ...baseTableResponse(),
+          table,
+          rows: [],
+          totalRows: 0,
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest({
+      setRoute(route) {
+        routeSyncs.push(route);
+      },
+    });
+    await view.enter("docker:postgres:demo_app", "public", "queue_locks");
+
+    expect(routeSyncs).toEqual([]);
+    expect(fetchedTables).toEqual(["queue_locks"]);
+    expect(document.querySelector(".db-grid-status")?.textContent).toMatch(
+      /0 rows/,
+    );
+    await leaveView(view);
+  });
+
+  test("opens a routed restored S3 tab when a SQL tab is active", async () => {
+    installDatabaseDom();
+    const s3Requests: string[] = [];
+    const sqlRequests: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs")
+        return jsonResponse({
+          version: 1,
+          activeTabId: "postgres",
+          tabs: [
+            {
+              id: "postgres",
+              dbId: "docker:postgres:demo_app",
+              table: "queue_locks",
+              view: "data",
+            },
+            {
+              id: "minio",
+              dbId: "docker:minio",
+              table: null,
+              view: "data",
+            },
+          ],
+        });
+      if (url === "/_db/files")
+        return jsonResponse({
+          files: [
+            {
+              id: "docker:postgres:demo_app",
+              path: "docker-compose.yml",
+              name: "postgres",
+              sizeBytes: 0,
+              kind: "postgres",
+            },
+            {
+              id: "docker:minio",
+              path: "docker-compose.yml",
+              name: "minio",
+              sizeBytes: 0,
+              kind: "s3",
+            },
+          ],
+        });
+      if (url.startsWith("/_db/s3/buckets")) {
+        s3Requests.push(url);
+        return jsonResponse({ buckets: [{ name: "media" }] });
+      }
+      if (url.startsWith("/_db/s3/objects")) {
+        s3Requests.push(url);
+        return jsonResponse({ objects: [], truncated: false });
+      }
+      if (url.startsWith("/_db/schemas")) {
+        sqlRequests.push(url);
+        return jsonResponse({
+          schemas: [{ name: "public" }],
+          selectedSchema: "public",
+        });
+      }
+      if (url.startsWith("/_db/schema")) {
+        sqlRequests.push(url);
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          schema: "public",
+          tables: [{ name: "queue_locks", type: "table", rowCount: 0 }],
+          columnsMap: {
+            queue_locks: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      }
+      if (url.startsWith("/_db/table")) {
+        sqlRequests.push(url);
+        return jsonResponse({
+          ...baseTableResponse(),
+          table: "queue_locks",
+          rows: [],
+          totalRows: 0,
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:minio");
+
+    expect(s3Requests.some((url) => url.startsWith("/_db/s3/buckets"))).toBe(
+      true,
+    );
+    expect(sqlRequests).toEqual([]);
+    const activeChip = Array.from(
+      document.querySelectorAll(".db-tabs-chip"),
+    ).find((chip) =>
+      (chip as unknown as FakeElement).classList.contains("active"),
+    ) as unknown as FakeElement | undefined;
+    expect(activeChip?.textContent).toMatch(/minio/);
+    await leaveView(view);
+  });
+
   test("aborts stale table fetches when another table is selected", async () => {
     installDatabaseDom();
     const tableRequests: Array<{
@@ -965,6 +1235,102 @@ describe("database view SQL error rendering", () => {
     await clicking;
     await entering;
 
+    expect(document.querySelector(".db-pane-error")).toBeNull();
+    await leaveView(view);
+  });
+
+  test("coalesces rapid table clicks into a single final table fetch", async () => {
+    installDatabaseDom();
+    const tableRequests: Array<{
+      table: string | null;
+      signal?: AbortSignal;
+      resolve: (res: Response) => void;
+      reject: (err: unknown) => void;
+    }> = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "brands", type: "table", rowCount: 40 },
+            { name: "cities", type: "table", rowCount: 150_000 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            brands: [{ name: "id", type: "integer", primaryKey: true }],
+            cities: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        return new Promise<Response>((resolve, reject) => {
+          tableRequests.push({
+            table,
+            signal: init?.signal,
+            resolve,
+            reject,
+          });
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    const entering = view.enter("docker:db", undefined, "users");
+    await waitUntil(() => tableRequests.length === 1);
+    expect(tableRequests.map((req) => req.table)).toEqual(["users"]);
+    tableRequests[0].resolve(jsonResponse(baseTableResponse()));
+    await entering;
+    tableRequests.length = 0;
+
+    const tableRows = Array.from(
+      document.querySelectorAll(".db-table-item"),
+    ) as unknown as FakeElement[];
+    const brandsRow = tableRows.find((row) => row.dataset.table === "brands");
+    const citiesRow = tableRows.find((row) => row.dataset.table === "cities");
+    expect(brandsRow).toBeTruthy();
+    expect(citiesRow).toBeTruthy();
+
+    const clickCount = 30;
+    const lastTable = (clickCount - 1) % 2 ? "cities" : "brands";
+    const noExtraFetchWindowMs = TABLE_SELECT_FETCH_DELAY_MS + 25;
+    const clicks: Array<Promise<void>> = [];
+    for (let i = 0; i < clickCount; i++) {
+      clicks.push(
+        (i % 2 ? citiesRow : brandsRow)?.click() ?? Promise.resolve(),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await waitUntil(() => tableRequests.length >= 1);
+    expect(tableRequests.length > 0).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, noExtraFetchWindowMs));
+
+    expect(tableRequests).toHaveLength(1);
+    expect(tableRequests[0].table).toBe(lastTable);
+    expect(tableRequests[0].signal?.aborted).toBe(false);
+    expect(
+      (
+        document.querySelector(
+          ".db-table-item.active",
+        ) as unknown as FakeElement
+      )?.dataset.table,
+    ).toBe(lastTable);
+    tableRequests[0].resolve(
+      jsonResponse({ ...baseTableResponse(), table: lastTable }),
+    );
+    await Promise.all(clicks);
     expect(document.querySelector(".db-pane-error")).toBeNull();
     await leaveView(view);
   });

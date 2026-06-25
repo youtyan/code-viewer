@@ -237,6 +237,59 @@ services:
     expect(results[0]?.name).toMatch(/localhost:19000/);
   });
 
+  test("detects MinIO API port from published port ranges", async () => {
+    const results = await discoverFromCompose(`
+services:
+  s3:
+    image: minio/minio:latest
+    ports:
+      - "9000-9001:9000-9001"
+`);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.kind).toBe("s3");
+    expect(results[0]?.hostPort).toBe("9000");
+    expect(results[0]?.containerPort).toBe("9000");
+    expect(results[0]?.name).toMatch(/localhost:9000/);
+  });
+
+  test("detects MinIO API port from broad published port ranges", async () => {
+    const results = await discoverFromCompose(`
+services:
+  s3:
+    image: minio/minio:latest
+    ports:
+      - "9000-9200:9000-9200"
+`);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.kind).toBe("s3");
+    expect(results[0]?.hostPort).toBe("9000");
+    expect(results[0]?.containerPort).toBe("9000");
+  });
+
+  test("detects MinIO API port from environment-expanded port mappings", async () => {
+    const results = await discoverFromCompose(
+      `
+services:
+  s3:
+    image: minio/minio:latest
+    ports:
+      - $MINIO_PORT:9000
+      - $MINIO_UI_PORT:9001
+`,
+      {
+        ".env": ["MINIO_PORT=19000", "MINIO_UI_PORT=19001"].join("\n"),
+      },
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.kind).toBe("s3");
+    expect(results[0]?.hostPort).toBe("19000");
+    expect(results[0]?.containerPort).toBe("9000");
+    expect(results[0]?.name).toMatch(/localhost:19000/);
+  });
+
   test("detects MinIO without a published host port as container-reachable S3", async () => {
     const results = await discoverFromCompose(`
 services:

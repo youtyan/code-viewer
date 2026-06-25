@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_WORKTREE_OMIT_DIR_NAMES } from "../server/git";
 import {
   startWorktreeUpdateWatch,
   type WatchFn,
@@ -176,6 +177,119 @@ describe("worktree update watcher", () => {
     expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
   });
 
+  test("async initial scan skips default heavy runtime directories", () => {
+    const readDirs: string[] = [];
+    const scheduled: (() => void)[] = [];
+    const watched: string[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: DEFAULT_WORKTREE_OMIT_DIR_NAMES,
+      excludeNames: [],
+      initialScanMode: "async",
+      watch: ((path) => {
+        watched.push(path);
+      }) as WatchFn,
+      readdirSync: (path) => {
+        readDirs.push(path);
+        if (path === "/repo") {
+          return [
+            { name: "app", isDirectory: () => true },
+            { name: "tmp", isDirectory: () => true },
+            { name: "log", isDirectory: () => true },
+            { name: "storage", isDirectory: () => true },
+          ];
+        }
+        if (path === "/repo/app") return [];
+        throw new Error(`omitted directory must not be read: ${path}`);
+      },
+      onUpdate: () => {},
+      setTimeoutFn: ((callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      }) as typeof setTimeout,
+    });
+
+    while (scheduled.length) scheduled.shift()?.();
+    expect(watched).toEqual(["/repo", "/repo/app"]);
+    expect(readDirs).toEqual(["/repo", "/repo/app"]);
+  });
+
+  test("async initial scan stops at the configured watch directory limit", () => {
+    const readDirs: string[] = [];
+    const scheduled: (() => void)[] = [];
+    const watched: string[] = [];
+    const errors: string[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      initialScanMode: "async",
+      maxWatchedDirectories: 2,
+      watch: ((path) => {
+        watched.push(path);
+      }) as WatchFn,
+      readdirSync: (path) => {
+        readDirs.push(path);
+        if (path === "/repo") {
+          return [
+            { name: "a", isDirectory: () => true },
+            { name: "b", isDirectory: () => true },
+            { name: "c", isDirectory: () => true },
+          ];
+        }
+        throw new Error(`watch limit must stop descendant reads: ${path}`);
+      },
+      onUpdate: () => {},
+      onError: (error) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+      },
+      setTimeoutFn: ((callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      }) as typeof setTimeout,
+    });
+
+    while (scheduled.length) scheduled.shift()?.();
+    expect(watched).toEqual(["/repo", "/repo/a"]);
+    expect(readDirs).toEqual(["/repo"]);
+    expect(errors).toEqual([
+      "worktree watcher cap reached (2); subsequent changes may be missed",
+    ]);
+  });
+
+  test("reports the watcher cap once when more directories arrive later", () => {
+    let rootListener: Parameters<WatchFn>[2] | null = null;
+    const watched: string[] = [];
+    const errors: string[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      maxWatchedDirectories: 1,
+      watch: ((path, _options, next) => {
+        watched.push(path);
+        if (path === "/repo") rootListener = next;
+      }) as WatchFn,
+      readdirSync: () => [],
+      isDirectory: (path) => path === "/repo/a" || path === "/repo/b",
+      onUpdate: () => {},
+      onError: (error) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+      },
+    });
+
+    rootListener?.("rename", "a");
+    rootListener?.("rename", "b");
+
+    expect(watched).toEqual(["/repo"]);
+    expect(errors).toEqual([
+      "worktree watcher cap reached (1); subsequent changes may be missed",
+    ]);
+  });
+
   test("starts watching a newly created directory after a rename event", () => {
     let listener: Parameters<WatchFn>[2] | null = null;
     const watched: string[] = [];
@@ -202,6 +316,87 @@ describe("worktree update watcher", () => {
     listener?.("rename", "new-dir");
 
     expect(watched).toEqual(["/repo", "/repo/new-dir", "/repo/new-dir/child"]);
+  });
+
+  test("async watcher does not synchronously descend into new directory children", () => {
+    let rootListener: Parameters<WatchFn>[2] | null = null;
+    const scheduled: (() => void)[] = [];
+    const watched: string[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      initialScanMode: "async",
+      watch: ((path, _options, next) => {
+        watched.push(path);
+        if (path === "/repo") rootListener = next;
+      }) as WatchFn,
+      readdirSync: (path) => {
+        if (path === "/repo/new-dir") {
+          return [{ name: "child", isDirectory: () => true }];
+        }
+        if (path === "/repo/new-dir/child") {
+          return [{ name: "grandchild", isDirectory: () => true }];
+        }
+        return [];
+      },
+      isDirectory: (path) => path.startsWith("/repo/new-dir"),
+      onUpdate: () => {},
+      setTimeoutFn: ((callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      }) as typeof setTimeout,
+    });
+
+    while (scheduled.length) scheduled.shift()?.();
+    watched.length = 0;
+
+    rootListener?.("rename", "new-dir");
+
+    expect(watched).toEqual([]);
+    scheduled.shift()?.();
+    expect(watched).toEqual(["/repo/new-dir"]);
+    while (scheduled.length) scheduled.shift()?.();
+    expect(watched).toEqual([
+      "/repo/new-dir",
+      "/repo/new-dir/child",
+      "/repo/new-dir/child/grandchild",
+    ]);
+  });
+
+  test("async watcher coalesces repeated path inspections outside the event callback", () => {
+    let rootListener: Parameters<WatchFn>[2] | null = null;
+    const scheduled: (() => void)[] = [];
+    let inspected = 0;
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      initialScanMode: "async",
+      watch: ((path, _options, next) => {
+        if (path === "/repo") rootListener = next;
+      }) as WatchFn,
+      readdirSync: () => [],
+      isDirectory: () => {
+        inspected++;
+        return false;
+      },
+      onUpdate: () => {},
+      setTimeoutFn: ((callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      }) as typeof setTimeout,
+    });
+
+    rootListener?.("change", "app.ts");
+    rootListener?.("change", "app.ts");
+    rootListener?.("change", "app.ts");
+
+    expect(inspected).toBe(0);
+    while (scheduled.length && inspected === 0) scheduled.shift()?.();
+    expect(inspected).toBe(1);
   });
 
   test("rewatches a directory after it is deleted and recreated", () => {

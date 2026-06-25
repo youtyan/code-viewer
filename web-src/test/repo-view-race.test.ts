@@ -64,10 +64,14 @@ function makeRepoView(
     repoSidebarRef?: string | null;
     repoSidebarDomReady?: boolean;
     polluteSidebarAfterRender?: boolean;
+    sidebarRows?: Record<string, { kind: "dir"; dir: { path: string } }>;
+    lazyDirPaths?: Set<string>;
+    lazyLoadChildren?: Record<string, string[]>;
   } = {},
 ) {
   let repoSidebarRef: string | null = options.repoSidebarRef ?? null;
   let repoSidebarDomReady = !!options.repoSidebarDomReady;
+  const sidebarRows = options.sidebarRows ?? {};
   const state: RepoViewDeps["STATE"] = {
     route,
     files: [],
@@ -79,6 +83,8 @@ function makeRepoView(
     activePaths: [] as string[],
     headerSyncs: 0,
     projectNames: [] as string[],
+    lazyLoads: [] as string[],
+    virtualRenders: 0,
   };
   const deps: RepoViewDeps = {
     STATE: state,
@@ -103,10 +109,21 @@ function makeRepoView(
     renderSidebar(files) {
       calls.sidebarRenders.push(files);
     },
-    rerenderVirtualSidebar() {},
-    ensureVirtualSidebarDirLoaded: async () => {},
+    rerenderVirtualSidebar() {
+      calls.virtualRenders++;
+    },
+    ensureVirtualSidebarDirLoaded: async (dir: unknown) => {
+      const path = (dir as { path?: string })?.path || "";
+      calls.lazyLoads.push(path);
+      options.lazyDirPaths?.delete(path);
+      for (const child of options.lazyLoadChildren?.[path] || []) {
+        sidebarRows[child] = { kind: "dir", dir: { path: child } };
+      }
+    },
     scrollVirtualSidebarPathIntoView() {},
-    shouldLazyLoadSidebarDir: () => false,
+    shouldLazyLoadSidebarDir: (dir: unknown) =>
+      options.lazyDirPaths?.has((dir as { path?: string })?.path || "") ??
+      false,
     setFolderIcon() {},
     isRepositorySidebarMode: () => !!options.repoMode,
     placeSidebarToggle() {},
@@ -126,7 +143,7 @@ function makeRepoView(
     syncHeaderMenu() {
       calls.headerSyncs++;
     },
-    getSidebarRowByPath: () => undefined,
+    getSidebarRowByPath: (path) => sidebarRows[path],
     getSidebarVirtualActivePath: () => null,
     pushUndo() {},
     getRepoSidebarRef: () => repoSidebarRef,
@@ -192,6 +209,66 @@ describe("repo view route races", () => {
 
     expect(calls.sidebarRenders).toEqual([]);
     expect(calls.activePaths).toEqual([]);
+  });
+
+  test("renderRepoBlobSidebar loads a direct tree instead of recursive worktree data", async () => {
+    installNullDocument();
+    const urls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(jsonResponse(treeResponse("src")));
+    }) as unknown as typeof fetch;
+    const { view } = makeRepoView({
+      screen: "file",
+      path: "src/index.ts",
+      ref: "worktree",
+      view: "blob",
+      range,
+    });
+
+    await view.renderRepoBlobSidebar("src/index.ts", "worktree");
+
+    expect(urls).toHaveLength(1);
+    const url = new URL(urls[0], "http://localhost");
+    expect(url.pathname).toBe("/_tree");
+    expect(url.searchParams.get("ref")).toBe("worktree");
+    expect(url.searchParams.has("recursive")).toBe(false);
+  });
+
+  test("renderRepoBlobSidebar lazy-loads current file ancestors with one rerender", async () => {
+    installNullDocument();
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        jsonResponse({
+          ...treeResponse("src"),
+          entries: [{ name: "src", path: "src", type: "tree" }],
+        }),
+      )) as unknown as typeof fetch;
+    const lazyDirPaths = new Set(["src", "src/lib", "src/lib/deep"]);
+    const { view, calls } = makeRepoView(
+      {
+        screen: "file",
+        path: "src/lib/deep/index.ts",
+        ref: "worktree",
+        view: "blob",
+        range,
+      },
+      {
+        sidebarRows: { src: { kind: "dir", dir: { path: "src" } } },
+        lazyDirPaths,
+        lazyLoadChildren: {
+          src: ["src/lib"],
+          "src/lib": ["src/lib/deep"],
+        },
+      },
+    );
+
+    await view.renderRepoBlobSidebar("src/lib/deep/index.ts", "worktree");
+
+    expect(calls.sidebarRenders[0].map((file) => file.path)).toEqual(["src"]);
+    expect(calls.lazyLoads).toEqual(["src", "src/lib", "src/lib/deep"]);
+    expect(calls.virtualRenders).toBe(1);
+    expect(calls.activePaths.includes("src/lib/deep/index.ts")).toBe(true);
   });
 
   test("renderRepoBlobSidebar does not reuse a matching ref when the sidebar is no longer repo-rendered", async () => {
