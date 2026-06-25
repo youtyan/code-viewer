@@ -35,11 +35,42 @@ Expected:
 ```json
 {
   "name": "@youtyan/code-viewer",
-  "version": "0.1.0"
+  "version": "<intended release version>"
 }
 ```
 
 Never continue if `npm pkg get name` returns another package, especially `@youtyan/browser-pilot`.
+Never continue if the version is not the exact version intended for the release.
+
+## Public Repository Audit
+
+This repository and the npm package are public. Before any commit, tag, pull request, GitHub Release, or npm publish action, audit both committed history and the current file set as public artifacts.
+
+Required checks:
+
+1. Inspect recent commit messages and the release commit range for embarrassing, private, temporary, hostile, customer-specific, or internal-only wording. Rewrite before publishing if any message is unsuitable for a public repository.
+2. Inspect the files that would be committed, tagged, packed, pushed, or released. Do not publish credentials, `.env` files, private keys, local dumps, screenshots with sensitive content, personal notes, customer data, or generated artifacts that should not be public.
+3. Check for accidental project names, customer names, private service names, internal hostnames, or unrelated product names in commit messages, filenames, docs, test fixtures, and release notes. Public package names, repository names, and intentionally documented test service names are allowed only when they are part of this project.
+4. Treat broad search output as sensitive. Do not print secrets, secret-like values, or private names into chat or logs. Report only pass/fail categories and sanitized file paths.
+5. If any audit item is ambiguous, stop before publishing and resolve it with an explicit rename, removal, or user decision. Do not publish first and clean up later.
+
+Minimum local audit commands before a normal release:
+
+```sh
+git status --short --branch
+git log --oneline --decorate -30
+git diff --name-status
+git diff --stat
+npm pack --dry-run
+```
+
+For a release tag, also inspect the exact commit range since the previous tag:
+
+```sh
+git describe --tags --abbrev=0 HEAD^
+git log --oneline <previous-tag>..HEAD
+git diff --name-status <previous-tag>..HEAD
+```
 
 ## First Publish
 
