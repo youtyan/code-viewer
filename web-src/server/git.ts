@@ -21,6 +21,7 @@ export type GitFileMeta = {
   untracked?: boolean;
 };
 
+// ai-dup-check: allow -- server git layer keeps its public DTO local to avoid a core/server dependency cycle.
 export type GitTreeEntry = {
   name: string;
   path: string;
@@ -33,6 +34,7 @@ export type GitTreeEntry = {
   commit_updated_at?: string;
 };
 
+// ai-dup-check: allow -- server git layer emits commit DTOs without importing browser-facing core types.
 export type GitCommitMeta = {
   sha: string;
   subject: string;
@@ -624,6 +626,7 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
   return files;
 }
 
+// ai-dup-check: allow -- server subsystems need a shared predicate for code-viewer metadata paths.
 export function isToolInternalPath(path: string): boolean {
   return path
     .split(/[\\/]+/)
@@ -668,7 +671,7 @@ function worktreeEntryFromDirent(
   omitDirNames: Set<string>,
   excludeNames: Set<string>,
 ): GitTreeEntry {
-  if (excludeNames.has(name.toLowerCase()) || isToolInternalPath(name))
+  if (excludeNames.has(name.toLowerCase()))
     return {
       name,
       path: "",
@@ -759,11 +762,7 @@ function worktreeFilesystemEntries(
       return;
     }
     for (const entry of entries) {
-      if (
-        excludeNameSet.has(entry.name.toLowerCase()) ||
-        isToolInternalPath(entry.name)
-      )
-        continue;
+      if (excludeNameSet.has(entry.name.toLowerCase())) continue;
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {

@@ -154,6 +154,41 @@ export function textError(message: string, status: number): Response {
   });
 }
 
+export async function jsonLoadResponse<T>(
+  load: () => Promise<T>,
+  logPrefix: string,
+  errorMessage: string,
+): Promise<Response> {
+  try {
+    return json(await load());
+  } catch (err) {
+    console.error(`[code-viewer] ${logPrefix} error:`, err);
+    return textError(errorMessage, 500);
+  }
+}
+
+export async function parseBoundedJsonBody(
+  req: Request,
+  maxBytes: number,
+  tooLargeMessage: string,
+): Promise<unknown | Response> {
+  const contentType = req.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return textError("unsupported media type", 415);
+  }
+  const contentLength = Number(req.headers.get("content-length") || "0");
+  if (contentLength > maxBytes) return textError(tooLargeMessage, 413);
+  try {
+    const raw = await req.text();
+    if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+      return textError(tooLargeMessage, 413);
+    }
+    return JSON.parse(raw);
+  } catch {
+    return textError("invalid JSON body", 400);
+  }
+}
+
 function waitForCallerAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
@@ -186,6 +221,20 @@ function waitForCallerAbort<T>(
       },
     );
   });
+}
+
+function isFilesystemAccessError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return (
+    code === "EACCES" ||
+    code === "EBUSY" ||
+    code === "EIO" ||
+    code === "EISDIR" ||
+    code === "ENOSPC" ||
+    code === "ENOTDIR" ||
+    code === "EPERM" ||
+    code === "EROFS"
+  );
 }
 
 export async function resolveDockerExplorerAsync<
@@ -295,6 +344,9 @@ export function handleError(
   console.error(`[code-viewer] ${prefix} error:`, message);
   if (isDockerComposeServiceUnavailableError(err)) {
     return textError(message, err.status);
+  }
+  if (isFilesystemAccessError(err)) {
+    return textError(`failed to ${action}`, 500);
   }
   return textError(`failed to ${action}: ${message}`, 500);
 }

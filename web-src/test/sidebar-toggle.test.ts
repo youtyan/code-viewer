@@ -3,12 +3,10 @@ import { showEmptyHistoryDiffPane } from "../views/empty-diff-pane";
 import { createSidebar } from "../views/sidebar";
 
 const originalDocument = globalThis.document;
-const originalLocalStorage = globalThis.localStorage;
 const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 
 afterEach(() => {
   globalThis.document = originalDocument;
-  globalThis.localStorage = originalLocalStorage;
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
 });
 
@@ -27,6 +25,7 @@ class FakeClassList {
     return this.classes.has(name);
   }
 
+  // ai-dup-check: allow -- local fake DOM class list for this focused test.
   toggle(name: string, force?: boolean) {
     const next = force ?? !this.classes.has(name);
     if (next) this.classes.add(name);
@@ -120,6 +119,7 @@ class FakeElement {
     return this.querySelectorAll(selector)[0] || null;
   }
 
+  // ai-dup-check: allow -- local fake DOM selector traversal for this focused test.
   querySelectorAll(selector: string) {
     const selectors = selector.split(",").map((part) => part.trim());
     const found: FakeElement[] = [];
@@ -140,6 +140,7 @@ class FakeElement {
     return this.tagName.toLowerCase() === selector.toLowerCase();
   }
 
+  // ai-dup-check: allow -- local fake DOM parent bookkeeping for this focused test.
   private detachChildFromParent(child: FakeElement) {
     if (!child.parentElement) return;
     child.parentElement.children = child.parentElement.children.filter(
@@ -170,13 +171,6 @@ function installFakeDom() {
     querySelector: (selector: string) => body.querySelector(selector),
     querySelectorAll: (selector: string) => body.querySelectorAll(selector),
   } as unknown as Document;
-  globalThis.localStorage = {
-    setItem() {},
-    getItem() {
-      return null;
-    },
-    removeItem() {},
-  } as unknown as Storage;
   globalThis.requestAnimationFrame = (() => 1) as typeof requestAnimationFrame;
   return { body, globalHeader, sidebarHead, topbar };
 }
@@ -203,6 +197,11 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
     createOpenPathButton: () =>
       new FakeElement("button") as unknown as HTMLElement,
     normalizeViewerFontSize: () => "regular",
+    getSidebarFontSize: () => "regular",
+    persistSidebarHidden(hidden) {
+      state.sidebarHidden = hidden;
+    },
+    persistSidebarWidth() {},
     scheduleMainSurfaceFocus() {},
     setChevronIcon() {},
     trackLoad: (promise) => promise,

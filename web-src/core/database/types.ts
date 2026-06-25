@@ -446,7 +446,7 @@ export type S3ExplorerSelection = {
 export type TabState = {
   id: string;
   dbId: string | null;
-  schema?: string | null;
+  schema?: string;
   table: string | null;
   view: "data" | "query" | "schema" | "er" | "search" | "snapshot";
 

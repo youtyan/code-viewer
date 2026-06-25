@@ -59,7 +59,7 @@ export type DiffViewDeps = {
     kind: "directory" | "file-parent",
     title?: string,
   ): HTMLElement;
-  persistViewedFiles(): void;
+  persistViewedFiles(path: string, viewed: boolean): void;
   applyHideTests(): void;
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
@@ -160,7 +160,7 @@ export function createDiffView(deps: DiffViewDeps) {
   function setFileViewed(path: string, viewed: boolean) {
     if (viewed) STATE.viewedFiles.add(path);
     else STATE.viewedFiles.delete(path);
-    persistViewedFiles();
+    persistViewedFiles(path, viewed);
     applyViewedState();
     $$<HTMLElement>(diffCardSelector(path)).forEach((card) => {
       applyViewedToCard(card, viewed, true);

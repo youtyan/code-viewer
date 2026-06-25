@@ -62,6 +62,10 @@ export type AnnotationsUiDeps = {
   getFiles(): FileMeta[];
   getRoute(): AppRoute;
   setRange(from: string, to: string): void;
+  getAnnotationPanelOpen(): boolean;
+  setAnnotationPanelOpenState(open: boolean): void;
+  getAnnotationFollow(): boolean;
+  setAnnotationFollow(follow: boolean): void;
   leaveDatabaseView(): void;
   openDatabaseAnnotation(
     target: Extract<AnnotationEntry["target"], { kind: "database" }>,
@@ -103,7 +107,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   const { $ } = deps;
 
   let ANNOTATIONS: AnnotationsState = { version: 1, sessions: [] };
-  let annotationFollow = localStorage.getItem("gdp:annotation-follow") !== "0";
+  let annotationFollow = deps.getAnnotationFollow();
   let activeAnnotationId: string | null = null;
   let annotationPanelDismissed = false;
   let activeSessionId: string | null = new URLSearchParams(
@@ -164,7 +168,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       if (qhPanel) qhPanel.hidden = true;
       document.body.classList.remove("query-history-panel-open");
     }
-    localStorage.setItem("gdp:annotation-panel", open ? "1" : "0");
+    deps.setAnnotationPanelOpenState(open);
   }
 
   function annotationLineTarget(
@@ -1168,8 +1172,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   }
 
   // Restore the panel open/closed state across reloads.
-  if (localStorage.getItem("gdp:annotation-panel") === "1")
-    setAnnotationPanelOpen(true);
+  if (deps.getAnnotationPanelOpen()) setAnnotationPanelOpen(true);
   updateDatabaseCaptureButton();
 
   $("#annotations-toggle").addEventListener("click", () => {
@@ -1188,7 +1191,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   followCheckbox.checked = annotationFollow;
   followCheckbox.addEventListener("change", () => {
     annotationFollow = followCheckbox.checked;
-    localStorage.setItem("gdp:annotation-follow", annotationFollow ? "1" : "0");
+    deps.setAnnotationFollow(annotationFollow);
   });
   $("#annotation-clear").addEventListener("click", () => {
     if (!window.confirm("Delete all annotations?")) return;

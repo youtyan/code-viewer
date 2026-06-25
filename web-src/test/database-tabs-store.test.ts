@@ -47,6 +47,7 @@ describe("database tabs store", () => {
           {
             id: "tab-1",
             dbId: "one.db",
+            schema: "main",
             table: "users",
             view: "data",
             sidebarWidth: "260px",
@@ -60,6 +61,20 @@ describe("database tabs store", () => {
             historyOpen: true,
             historyHeight: "35%",
             redis: { dbIndex: 2, key: "session:1", keyFilter: "session:*" },
+          },
+          {
+            id: "tab-3",
+            dbId: "s3:local",
+            table: null,
+            view: "data",
+            s3: {
+              bucket: "logs",
+              prefix: "2026/",
+              query: "error",
+              mode: "contains",
+              sort: "updated-desc",
+              key: "2026/app.log",
+            },
           },
         ],
       });
@@ -71,6 +86,7 @@ describe("database tabs store", () => {
           {
             id: "tab-1",
             dbId: "one.db",
+            schema: "main",
             table: "users",
             view: "data",
             sidebarWidth: "260px",
@@ -84,6 +100,20 @@ describe("database tabs store", () => {
             historyOpen: true,
             historyHeight: "35%",
             redis: { dbIndex: 2, key: "session:1", keyFilter: "session:*" },
+          },
+          {
+            id: "tab-3",
+            dbId: "s3:local",
+            table: null,
+            view: "data",
+            s3: {
+              bucket: "logs",
+              prefix: "2026/",
+              query: "error",
+              mode: "contains",
+              sort: "updated-desc",
+              key: "2026/app.log",
+            },
           },
         ],
       });

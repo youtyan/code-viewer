@@ -37,6 +37,7 @@ export type DiffMeta = {
   generation?: number;
 };
 
+// ai-dup-check: allow -- client response DTO is intentionally kept in core types.
 export type RepoTreeEntry = {
   name: string;
   path: string;
@@ -73,6 +74,47 @@ export type SettingsResponse = {
     exclude_names_built_in: string[];
     max_entries: number;
   };
+};
+
+export type ViewerFontSizeSetting = "compact" | "regular" | "large" | "xlarge";
+
+export type AppSettingsState = {
+  version: 1;
+  layout?: "side-by-side" | "line-by-line";
+  theme?: "light" | "dark";
+  language?: "en" | "ja";
+  sidebarView?: "tree" | "flat";
+  sidebarWidth?: number;
+  historyWidth?: number;
+  sidebarHidden?: boolean;
+  sidebarFontSize?: ViewerFontSizeSetting;
+  codeFontSize?: ViewerFontSizeSetting;
+  syntaxHighlight?: boolean;
+  autoUpdate?: boolean;
+  queryHistoryPanelWidth?: number;
+  annotationPanelOpen?: boolean;
+  annotationFollow?: boolean;
+  annotationMuted?: boolean;
+  annotationRate?: number;
+  ignoreWhitespace?: boolean;
+  hideTests?: boolean;
+  scopeOmitDirs?: string[];
+  scopeExcludeNames?: string[];
+  range?: {
+    from: string;
+    to: string;
+  };
+};
+
+export type ViewState = {
+  version: 1;
+  collapsedDirs: string[];
+  viewedFiles: string[];
+};
+
+export type DbUiState = {
+  version: 1;
+  columnWidths: Record<string, Record<string, Record<string, number>>>;
 };
 
 export type UndoActionResponse = {
@@ -243,6 +285,7 @@ export type TagMeta = {
   when: string;
 };
 
+// ai-dup-check: allow -- client response DTO is intentionally kept in core types.
 export type CommitMeta = {
   sha: string;
   subject: string;

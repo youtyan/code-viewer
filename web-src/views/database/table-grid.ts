@@ -34,7 +34,12 @@ export type TableGridCallbacks = {
     signal?: AbortSignal,
   ) => Promise<DbTableDataResponse>;
   getDbId: () => string | null;
-  getProjectName?: () => string;
+  getColumnWidths: (dbId: string, table: string) => Record<string, number>;
+  setColumnWidths: (
+    dbId: string,
+    table: string,
+    widths: Record<string, number>,
+  ) => void;
 };
 
 export type TableGrid = {
@@ -120,44 +125,25 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     onMouseUp: () => void;
   } | null = null;
 
-  function storageKey(): string | null {
-    const project = callbacks.getProjectName?.() ?? "";
-    const dbId = callbacks.getDbId();
-    if (!currentTable) return null;
-    if (!dbId) return null;
-    return `db:col-widths:${project}:${dbId}:${currentTable}`;
-  }
-
   function saveColWidths() {
-    const key = storageKey();
-    if (!key) return;
+    const dbId = callbacks.getDbId();
+    if (!dbId || !currentTable) return;
     const obj: Record<string, number> = {};
     for (const [name, w] of colWidths) {
       obj[name] = w;
     }
-    try {
-      localStorage.setItem(key, JSON.stringify(obj));
-    } catch {
-      /* storage full — ignore */
-    }
+    callbacks.setColumnWidths(dbId, currentTable, obj);
   }
 
   function loadColWidths() {
     colWidths.clear();
-    const key = storageKey();
-    if (!key) return;
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const obj = JSON.parse(raw) as Record<string, number>;
-        for (const [name, w] of Object.entries(obj)) {
-          if (typeof w === "number" && w > 0) {
-            colWidths.set(name, w);
-          }
-        }
+    const dbId = callbacks.getDbId();
+    if (!dbId || !currentTable) return;
+    const obj = callbacks.getColumnWidths(dbId, currentTable);
+    for (const [name, w] of Object.entries(obj)) {
+      if (typeof w === "number" && w > 0) {
+        colWidths.set(name, w);
       }
-    } catch {
-      /* corrupted — ignore */
     }
   }
 
@@ -815,6 +801,7 @@ function formatValue(value: DbValue): string {
   return s;
 }
 
+// ai-dup-check: allow -- clipboard value formatting intentionally matches DB result formatting.
 function formatValueForCopy(value: DbValue): string {
   if (value === null) return "";
   if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;

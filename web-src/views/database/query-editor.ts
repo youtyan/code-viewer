@@ -22,6 +22,7 @@ type ShikiModule = {
 
 let shikiPromise: Promise<ShikiHighlighter | null> | null = null;
 
+// ai-dup-check: allow -- SQL editor loads only the sql highlighter theme bundle.
 function loadShikiSql(): Promise<ShikiHighlighter | null> {
   if (!shikiPromise) {
     shikiPromise = import("/" + "shiki.js")
@@ -37,33 +38,11 @@ function loadShikiSql(): Promise<ShikiHighlighter | null> {
   return shikiPromise;
 }
 
-const HISTORY_KEY = "db:query-history";
 const MAX_HISTORY = 50;
-
-function loadHistory(): string[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((s): s is string => typeof s === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveToHistory(sql: string) {
-  const history = loadHistory();
-  const idx = history.indexOf(sql);
-  if (idx >= 0) history.splice(idx, 1);
-  history.unshift(sql);
-  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-}
 
 export type QueryEditorCallbacks = {
   executeQuery: (sql: string) => Promise<DbQueryResponse>;
+  loadHistory?: () => Promise<string[]> | string[];
   // textarea の内容が変わった (input または setSql 経由) ことを外側に
   // 通知する。タブごとに SQL draft を persist するために使う。
   onSqlChange?: (sql: string) => void;
@@ -208,7 +187,6 @@ export function createQueryEditor(
         resultArea.appendChild(errEl);
         return;
       }
-      saveToHistory(sql);
       const suffix = result.truncated ? "+" : "";
       statusSpan.textContent = `${result.rowCount}${suffix} rows (${result.elapsedMs}ms)`;
       renderResultTable(result);
@@ -332,27 +310,42 @@ export function createQueryEditor(
       historyDropdown.hidden = true;
       return;
     }
-    const history = loadHistory();
     historyDropdown.innerHTML = "";
-    if (history.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "db-query-history-empty";
-      empty.textContent = "No history";
-      historyDropdown.appendChild(empty);
-    } else {
-      for (const sql of history) {
-        const item = document.createElement("div");
-        item.className = "db-query-history-item";
-        item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
-        item.title = sql;
-        item.addEventListener("click", () => {
-          setSql(sql);
-          historyDropdown.hidden = true;
-        });
-        historyDropdown.appendChild(item);
-      }
-    }
+    const loading = document.createElement("div");
+    loading.className = "db-query-history-empty";
+    loading.textContent = "Loading...";
+    historyDropdown.appendChild(loading);
     historyDropdown.hidden = false;
+    void Promise.resolve(callbacks.loadHistory?.() ?? [])
+      .then((history) => {
+        historyDropdown.innerHTML = "";
+        const items = history.slice(0, MAX_HISTORY);
+        if (items.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "db-query-history-empty";
+          empty.textContent = "No history";
+          historyDropdown.appendChild(empty);
+          return;
+        }
+        for (const sql of items) {
+          const item = document.createElement("div");
+          item.className = "db-query-history-item";
+          item.textContent = sql.length > 100 ? `${sql.slice(0, 100)}...` : sql;
+          item.title = sql;
+          item.addEventListener("click", () => {
+            setSql(sql);
+            historyDropdown.hidden = true;
+          });
+          historyDropdown.appendChild(item);
+        }
+      })
+      .catch(() => {
+        historyDropdown.innerHTML = "";
+        const empty = document.createElement("div");
+        empty.className = "db-query-history-empty";
+        empty.textContent = "Failed to load history";
+        historyDropdown.appendChild(empty);
+      });
   });
 
   const onDocumentClick = (e: MouseEvent) => {
@@ -418,6 +411,7 @@ export function createQueryEditor(
   return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
 }
 
+// ai-dup-check: allow -- query result cells share DB value formatting semantics.
 function formatValue(value: DbValue): string {
   if (value === null) return "NULL";
   if (value instanceof Uint8Array) return `<blob ${value.byteLength} bytes>`;

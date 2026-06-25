@@ -749,6 +749,35 @@ describe("repository tree helpers", () => {
     }
   });
 
+  test("lists .code-viewer as normal repository tree data", () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-visible-tree-"));
+    try {
+      git(dir, ["init"]);
+      mkdirSync(join(dir, ".code-viewer"));
+      writeFileSync(join(dir, ".code-viewer", "settings.json"), "{}\n");
+
+      const direct = listTree("worktree", "", dir);
+      const recursive = listTree("worktree", "", dir, { recursive: true });
+
+      expect(
+        direct.entries.find((entry) => entry.path === ".code-viewer"),
+      ).toEqual({
+        name: ".code-viewer",
+        path: ".code-viewer",
+        type: "tree",
+      });
+      expect(
+        recursive.entries.some(
+          (entry) =>
+            entry.path === ".code-viewer/settings.json" &&
+            entry.type === "blob",
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+
   test("does not mark empty worktree directories as omitted", () => {
     const dir = mkdtempSync(join(tmpdir(), "code-viewer-empty-tree-"));
     try {
