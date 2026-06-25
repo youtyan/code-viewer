@@ -27,7 +27,10 @@ import {
   handleDatabaseRoute,
   parseSelectAllTable,
 } from "../server/database/handle";
-import { createDockerAdapterCache } from "../server/database/handle-shared";
+import {
+  createDockerAdapterCache,
+  resolveDockerExplorerAsync,
+} from "../server/database/handle-shared";
 
 type SpawnSyncLike = typeof spawnSync;
 
@@ -157,6 +160,69 @@ describe("abort error classification", () => {
 });
 
 describe("docker adapter async cache", () => {
+  test("keeps a shared pending adapter open when one caller aborts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-open-signal-"));
+    try {
+      writeFileSync(
+        join(dir, "docker-compose.yml"),
+        [
+          "services:",
+          "  redis:",
+          "    image: redis:7",
+          "    ports:",
+          '      - "6379:6379"',
+        ].join("\n"),
+      );
+      const cache = createDockerAdapterCache<{ close(): void }>();
+      const controller = new AbortController();
+      let openCalls = 0;
+      let resolveOpen: ((adapter: { close(): void }) => void) | null = null;
+
+      const first = resolveDockerExplorerAsync(
+        dir,
+        "docker:redis",
+        "redis",
+        cache,
+        () => {
+          openCalls++;
+          return new Promise<{ close(): void }>((resolve) => {
+            resolveOpen = resolve;
+          });
+        },
+        [],
+        controller.signal,
+      );
+      await Promise.resolve();
+      controller.abort();
+      const firstResolved = await first;
+      expect(firstResolved instanceof Response).toBe(true);
+      expect((firstResolved as Response).status).toBe(503);
+      expect(await (firstResolved as Response).text()).toMatch(/open aborted/);
+
+      const second = resolveDockerExplorerAsync(
+        dir,
+        "docker:redis",
+        "redis",
+        cache,
+        () => {
+          openCalls++;
+          return { close() {} };
+        },
+        [],
+      );
+      const adapter = { close() {} };
+      resolveOpen?.(adapter);
+      const resolved = await second;
+      expect(resolved instanceof Response).toBe(false);
+      expect(openCalls).toBe(1);
+      expect((resolved as { explorer: { close(): void } }).explorer).toBe(
+        adapter,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("does not abort a shared pending adapter when one close races", async () => {
     const cache = createDockerAdapterCache<{ close(): void }>();
     let resolveOpen: ((adapter: { close(): void }) => void) | null = null;

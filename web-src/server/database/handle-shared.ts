@@ -1,4 +1,5 @@
 import type { DbKind } from "../../core/database/types";
+import { abortError, isAbortLikeError } from "./adapters/abort";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
   type DockerDbInfo,
@@ -153,6 +154,40 @@ export function textError(message: string, status: number): Response {
   });
 }
 
+function waitForCallerAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  message: string,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError(message));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(abortError(message));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      },
+    );
+  });
+}
+
 export async function resolveDockerExplorerAsync<
   T extends CloseableDatabaseHandle,
 >(
@@ -170,16 +205,36 @@ export async function resolveDockerExplorerAsync<
   }
   const parsed = parseDockerDbId(dbParam);
   if (!parsed) return textError("invalid docker db id", 400);
-  const info = await findDockerServiceByDbIdAsync(
-    cwd,
-    dbParam,
-    kind,
-    omitDirNames,
-    signal,
-  );
+  let info: DockerDbInfo | null;
+  try {
+    info = await findDockerServiceByDbIdAsync(
+      cwd,
+      dbParam,
+      kind,
+      omitDirNames,
+      signal,
+    );
+  } catch (err) {
+    if (isAbortLikeError(err, signal)) {
+      return textError(`${kind} lookup aborted`, 503);
+    }
+    throw err;
+  }
   if (!info) return textError(`${kind} service not found`, 404);
 
-  const explorer = await cache.getOrOpenAsync(dbParam, () => openFn(info));
+  let explorer: T;
+  try {
+    explorer = await waitForCallerAbort(
+      cache.getOrOpenAsync(dbParam, () => openFn(info)),
+      signal,
+      `${kind} open aborted`,
+    );
+  } catch (err) {
+    if (isAbortLikeError(err, signal)) {
+      return textError(`${kind} open aborted`, 503);
+    }
+    throw err;
+  }
   return { dbId: dbParam, explorer };
 }
 

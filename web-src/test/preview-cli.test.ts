@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -25,6 +26,47 @@ async function waitForExit(
     exited,
     sleep(timeoutMs).then(() => "timeout" as const),
   ]);
+}
+
+function waitForPreviewUrl(proc: ReturnType<typeof spawn>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+      const match = output.match(
+        /GDP_LISTEN_URL=(http:\/\/127\.0\.0\.1:\d+\/)/,
+      );
+      if (match) resolve(match[1]);
+    };
+    proc.stdout?.on("data", onData);
+    proc.stderr?.on("data", onData);
+    proc.once("exit", (code) =>
+      reject(new Error(`preview exited before listening: ${code}`)),
+    );
+  });
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForOutput(
+  readOutput: () => string,
+  pattern: RegExp,
+  timeoutMs: number,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (pattern.test(readOutput())) return true;
+    await sleep(10);
+  }
+  return pattern.test(readOutput());
 }
 
 function makeFakeBrowserCommand() {
@@ -97,6 +139,80 @@ describe("preview CLI", () => {
         expect(url.hostname).toBe("127.0.0.1");
         expect(Number(url.port) > 0).toBe(true);
         expect(url.pathname).toBe("/");
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
+  runOrSkip(
+    "serves requests promptly while the worktree watcher scans a large tree",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-large-preview-"));
+      tmpRoots.push(root);
+      for (let i = 0; i < 700; i++) {
+        mkdirSync(join(root, `dir-${i}`, "child"), { recursive: true });
+        writeFileSync(join(root, `dir-${i}`, "child", "file.txt"), "x");
+      }
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          env: {
+            ...process.env,
+            CODE_VIEWER_WORKTREE_WATCH_LIMIT: "1",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderrOutput = "";
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        stderrOutput += chunk.toString("utf8");
+      });
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const started = Date.now();
+        const responses = await Promise.all([
+          fetchWithTimeout(url, 1000),
+          fetchWithTimeout(
+            new URL("/_tree?ref=worktree", url).toString(),
+            1000,
+          ),
+          fetchWithTimeout(
+            new URL("/_tree?ref=worktree&recursive=1", url).toString(),
+            1000,
+          ),
+          fetchWithTimeout(new URL("/_db/files", url).toString(), 1000),
+        ]);
+
+        expect(Date.now() - started < 1500).toBe(true);
+        expect(responses.map((response) => response.status)).toEqual([
+          200, 200, 200, 200,
+        ]);
+        expect(
+          await waitForOutput(
+            () => stderrOutput,
+            /worktree watcher cap reached \(1\)/,
+            1000,
+          ),
+        ).toBe(true);
       } finally {
         proc.kill("SIGKILL");
         cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";

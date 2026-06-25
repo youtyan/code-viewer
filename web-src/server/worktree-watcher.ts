@@ -28,6 +28,7 @@ type WorktreeUpdateWatchOptions = {
   excludeNames: string[];
   watch?: WatchFn;
   initialScanMode?: "sync" | "async";
+  maxWatchedDirectories?: number;
   readdirSync?: (path: string) => DirectoryEntry[];
   isDirectory?: (path: string) => boolean;
   directorySignature?: (path: string) => string | null;
@@ -42,6 +43,8 @@ export type WorktreeUpdateWatch = {
   started: boolean;
   close: () => void;
 };
+
+export const DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT = 256;
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -83,6 +86,12 @@ export function startWorktreeUpdateWatch(
   const setTimer = options.setTimeoutFn || setTimeout;
   const clearTimer = options.clearTimeoutFn || clearTimeout;
   const debounceMs = options.debounceMs ?? 250;
+  const maxWatchedDirectories = Math.max(
+    1,
+    Math.floor(
+      options.maxWatchedDirectories ?? DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
+    ),
+  );
   const watchers = new Map<string, WatchHandle>();
   const signatures = new Map<string, string>();
   const initialScanAsync =
@@ -91,8 +100,11 @@ export function startWorktreeUpdateWatch(
       !options.readdirSync) as boolean);
   const initialScanQueue: string[] = [];
   let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
+  const pendingPathInspections = new Map<string, string>();
+  let pathInspectionTimer: ReturnType<typeof setTimeout> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const pendingChangedPaths = new Set<string>();
+  let watchLimitReported = false;
 
   const ignored = (path: string) =>
     isSkippableSearchPath(
@@ -100,6 +112,14 @@ export function startWorktreeUpdateWatch(
       options.omitDirNames,
       options.excludeNames,
     );
+
+  const directoryRelativePath = (dir: string) =>
+    normalizeRelativePath(relative(options.root, dir));
+
+  const ignoredDirectory = (dir: string) => {
+    const rel = directoryRelativePath(dir);
+    return Boolean(rel && ignored(rel));
+  };
 
   const scheduleUpdate = (changedPath?: string) => {
     if (changedPath) pendingChangedPaths.add(changedPath);
@@ -112,6 +132,16 @@ export function startWorktreeUpdateWatch(
       pendingChangedPaths.clear();
       options.onUpdate(paths);
     }, debounceMs);
+  };
+
+  const reportWatchLimit = () => {
+    if (watchLimitReported) return;
+    watchLimitReported = true;
+    options.onError?.(
+      new Error(
+        `worktree watcher cap reached (${maxWatchedDirectories}); subsequent changes may be missed`,
+      ),
+    );
   };
 
   const closeSubtree = (dir: string) => {
@@ -132,7 +162,12 @@ export function startWorktreeUpdateWatch(
       clearTimer(initialScanTimer);
       initialScanTimer = null;
     }
+    if (pathInspectionTimer) {
+      clearTimer(pathInspectionTimer);
+      pathInspectionTimer = null;
+    }
     initialScanQueue.length = 0;
+    pendingPathInspections.clear();
     for (const watcher of [...watchers.values()]) {
       try {
         watcher.close?.();
@@ -155,28 +190,84 @@ export function startWorktreeUpdateWatch(
     const children: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      children.push(join(dir, entry.name));
+      const child = join(dir, entry.name);
+      if (ignoredDirectory(child)) continue;
+      children.push(child);
     }
     return children;
   };
 
   const processInitialScanQueue = () => {
     initialScanTimer = null;
+    if (watchers.size >= maxWatchedDirectories) {
+      reportWatchLimit();
+      initialScanQueue.length = 0;
+      return;
+    }
     const next = initialScanQueue.shift();
     if (next) watchDirectory(next, true);
+    if (watchers.size >= maxWatchedDirectories) {
+      reportWatchLimit();
+      initialScanQueue.length = 0;
+    }
     if (initialScanQueue.length)
       initialScanTimer = setTimer(processInitialScanQueue, 50);
   };
 
   const queueInitialChildren = (dir: string) => {
-    initialScanQueue.push(...readChildDirectories(dir));
+    const remaining = maxWatchedDirectories - watchers.size;
+    if (remaining <= 0) {
+      reportWatchLimit();
+      return;
+    }
+    const children = readChildDirectories(dir);
+    if (children.length > remaining) reportWatchLimit();
+    initialScanQueue.push(...children.slice(0, remaining));
     if (!initialScanTimer)
       initialScanTimer = setTimer(processInitialScanQueue, 5000);
   };
 
+  const processChangedPath = (changed: string, fullChangedPath: string) => {
+    const known = watchers.has(fullChangedPath);
+    if (isDirectory(fullChangedPath)) {
+      if (known) {
+        const signature = directorySignature(fullChangedPath);
+        if (signature && signature !== signatures.get(fullChangedPath)) {
+          closeSubtree(fullChangedPath);
+          watchDirectory(fullChangedPath, initialScanAsync);
+        }
+        scheduleUpdate(changed);
+        return;
+      }
+      watchDirectory(fullChangedPath, initialScanAsync);
+    } else if (known) {
+      closeSubtree(fullChangedPath);
+    }
+    scheduleUpdate(changed);
+  };
+
+  const processPathInspections = () => {
+    pathInspectionTimer = null;
+    const entries = [...pendingPathInspections];
+    pendingPathInspections.clear();
+    for (const [changed, fullChangedPath] of entries) {
+      processChangedPath(changed, fullChangedPath);
+    }
+  };
+
+  const queuePathInspection = (changed: string, fullChangedPath: string) => {
+    pendingPathInspections.set(changed, fullChangedPath);
+    if (!pathInspectionTimer)
+      pathInspectionTimer = setTimer(processPathInspections, 25);
+  };
+
   const watchDirectory = (dir: string, initialScan = false): void => {
     if (watchers.has(dir)) return;
-    const rel = normalizeRelativePath(relative(options.root, dir));
+    if (watchers.size >= maxWatchedDirectories) {
+      reportWatchLimit();
+      return;
+    }
+    const rel = directoryRelativePath(dir);
     if (rel && ignored(rel)) return;
 
     try {
@@ -190,22 +281,11 @@ export function startWorktreeUpdateWatch(
           if (ignored(changed)) return;
           const fullChangedPath = join(options.root, changed);
           if (!isInsideRoot(options.root, fullChangedPath)) return;
-          const known = watchers.has(fullChangedPath);
-          if (isDirectory(fullChangedPath)) {
-            if (known) {
-              const signature = directorySignature(fullChangedPath);
-              if (signature && signature !== signatures.get(fullChangedPath)) {
-                closeSubtree(fullChangedPath);
-                watchDirectory(fullChangedPath);
-              }
-              scheduleUpdate(changed);
-              return;
-            }
-            watchDirectory(fullChangedPath);
-          } else if (known) {
-            closeSubtree(fullChangedPath);
+          if (initialScanAsync) {
+            queuePathInspection(changed, fullChangedPath);
+            return;
           }
-          scheduleUpdate(changed);
+          processChangedPath(changed, fullChangedPath);
         }) as WatchHandle | undefined) || {};
       watchers.set(dir, watcher);
       const signature = directorySignature(dir);
@@ -229,6 +309,10 @@ export function startWorktreeUpdateWatch(
 
     if (initialScanAsync && initialScan) {
       queueInitialChildren(dir);
+      return;
+    }
+    if (watchers.size >= maxWatchedDirectories) {
+      reportWatchLimit();
       return;
     }
     for (const child of readChildDirectories(dir)) watchDirectory(child);

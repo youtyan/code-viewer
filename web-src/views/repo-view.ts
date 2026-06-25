@@ -29,6 +29,7 @@ import type {
   SidebarItem,
   UndoActionResponse,
 } from "../core/types";
+import { sidebarAncestorDirs } from "./sidebar";
 
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -901,8 +902,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const normalizedRef = ref || "worktree";
     if (!isActiveRepoTreeRef(normalizedRef)) return Promise.resolve();
     if (isRepoSidebarReusable(normalizedRef)) {
-      activateRepoSidebarPath(currentPath);
-      return Promise.resolve();
+      return activateRepoSidebarPath(currentPath);
     }
     if (REPO_SIDEBAR_LOAD && REPO_SIDEBAR_LOAD_REF === normalizedRef) {
       return REPO_SIDEBAR_LOAD.then(() => {
@@ -911,12 +911,11 @@ export function createRepoView(deps: RepoViewDeps) {
           invalidateRepoSidebar();
           return renderRepoBlobSidebar(currentPath, normalizedRef);
         }
-        activateRepoSidebarPath(currentPath);
+        return activateRepoSidebarPath(currentPath);
       });
     }
     const params = new URLSearchParams();
     params.set("ref", normalizedRef);
-    params.set("recursive", "1");
     appendScopeParams(params);
     REPO_SIDEBAR_LOAD_REF = normalizedRef;
     const load = trackLoad<RepoTreeResponse>(
@@ -925,7 +924,7 @@ export function createRepoView(deps: RepoViewDeps) {
         return r.json();
       }),
     )
-      .then((meta) => {
+      .then(async (meta) => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
         const files = meta.entries.map(
           (entry, index) =>
@@ -954,7 +953,7 @@ export function createRepoView(deps: RepoViewDeps) {
           });
           renderStandaloneSource({ path: file.path, ref: normalizedRef });
         });
-        activateRepoSidebarPath(currentPath);
+        await activateRepoSidebarPath(currentPath);
       })
       .catch(() => {
         if (!isActiveRepoTreeRef(normalizedRef)) return;
@@ -972,7 +971,20 @@ export function createRepoView(deps: RepoViewDeps) {
     return load;
   }
 
-  function activateRepoSidebarPath(currentPath: string) {
+  async function loadRepoSidebarAncestors(currentPath: string) {
+    let loaded = false;
+    for (const dirPath of sidebarAncestorDirs(currentPath)) {
+      const row = getSidebarRowByPath(dirPath);
+      if (row?.kind !== "dir" || !row.dir) continue;
+      if (!shouldLazyLoadSidebarDir(row.dir)) continue;
+      await ensureVirtualSidebarDirLoaded(row.dir);
+      loaded = true;
+    }
+    if (loaded) rerenderVirtualSidebar();
+  }
+
+  async function activateRepoSidebarPath(currentPath: string) {
+    await loadRepoSidebarAncestors(currentPath);
     markActive(currentPath, { reveal: true });
     applyFilter();
     const row = getSidebarRowByPath(currentPath);

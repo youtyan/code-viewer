@@ -23,6 +23,13 @@ import type {
 export type ViewerFontSize = "compact" | "regular" | "large" | "xlarge";
 export const SIDEBAR_FONT_SIZE_KEY = "gdp:sidebar-font-size";
 
+export function sidebarAncestorDirs(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  const dirs: string[] = [];
+  for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join("/"));
+  return dirs;
+}
+
 export type SidebarDeps = {
   STATE: {
     sbView: "tree" | "flat";
@@ -1001,8 +1008,10 @@ export function createSidebar(deps: SidebarDeps) {
     onFileClick?: (file: SidebarItem) => void,
   ) {
     const ul = $("#filelist");
+    const repoSidebar = !!onFileClick;
+    const treeMode = STATE.sbView === "tree" || repoSidebar;
     ul.innerHTML = "";
-    ul.classList.toggle("tree", STATE.sbView === "tree");
+    ul.classList.toggle("tree", treeMode);
     ul.classList.remove("tree-virtual");
     ul.style.removeProperty("height");
     ul.style.removeProperty("position");
@@ -1019,9 +1028,9 @@ export function createSidebar(deps: SidebarDeps) {
     SIDEBAR_FILES = files;
     SIDEBAR_ON_FILE_CLICK = onFileClick;
     if (!onFileClick) setRepoSidebarRef(null);
-    if (STATE.sbView === "tree") {
+    if (treeMode) {
       const root = buildTree(files);
-      if (onFileClick && files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
+      if (repoSidebar || files.length >= VIRTUAL_SIDEBAR_THRESHOLD)
         renderVirtualTreeSidebar(root);
       else renderTreeNode(root, 0, ul, onFileClick);
     } else {
@@ -1031,12 +1040,12 @@ export function createSidebar(deps: SidebarDeps) {
       ? `${files.length} file${files.length === 1 ? "" : "s"}`
       : "";
     // Update view-toggle visual
+    const effectiveView = treeMode ? "tree" : STATE.sbView;
     $$(".sb-view-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.view === STATE.sbView);
+      b.classList.toggle("active", b.dataset.view === effectiveView);
     });
     $$(".sb-tree-action").forEach((b) => {
-      (b as HTMLButtonElement).disabled =
-        STATE.sbView !== "tree" || !files.length;
+      (b as HTMLButtonElement).disabled = !treeMode || !files.length;
     });
     // Re-apply active highlight if any
     if (STATE.activeFile) markActive(STATE.activeFile);
@@ -1066,16 +1075,8 @@ export function createSidebar(deps: SidebarDeps) {
     persistCollapsedDirs();
   }
 
-  function sidebarAncestorDirs(path: string): string[] {
-    const parts = path.split("/").filter(Boolean);
-    const dirs: string[] = [];
-    for (let i = 1; i < parts.length; i++)
-      dirs.push(parts.slice(0, i).join("/"));
-    return dirs;
-  }
-
   function expandSidebarAncestors(path: string) {
-    if (STATE.sbView !== "tree") return;
+    if (!isSidebarTreeRendered()) return;
     let changed = false;
     for (const dir of sidebarAncestorDirs(path)) {
       if (STATE.collapsedDirs.delete(dir)) changed = true;
@@ -1093,7 +1094,7 @@ export function createSidebar(deps: SidebarDeps) {
   function markActive(path: string, options: { reveal?: boolean } = {}) {
     STATE.activeFile = path;
     SIDEBAR_VIRTUAL_ACTIVE_PATH = path;
-    if (options.reveal && STATE.sbView === "tree") expandSidebarAncestors(path);
+    if (options.reveal && isSidebarTreeRendered()) expandSidebarAncestors(path);
     setActiveSidebarItem(sidebarItemByPath(path));
     if ($("#filelist").classList.contains("tree-virtual")) {
       renderVirtualSidebarWindow();
@@ -1385,6 +1386,10 @@ export function createSidebar(deps: SidebarDeps) {
       document.body.classList.contains("gdp-repo-page") ||
       document.body.classList.contains("gdp-repo-blob-page")
     );
+  }
+
+  function isSidebarTreeRendered() {
+    return $("#filelist").classList.contains("tree");
   }
 
   function moveActiveSidebarItem(direction: 1 | -1) {

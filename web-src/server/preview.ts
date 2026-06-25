@@ -85,7 +85,10 @@ import {
   parseRgOutput,
 } from "./search";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
-import { startWorktreeUpdateWatch } from "./worktree-watcher";
+import {
+  DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
+  startWorktreeUpdateWatch,
+} from "./worktree-watcher";
 
 const WEB_ROOT = join(ROOT, "web");
 const VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"))
@@ -934,6 +937,15 @@ function handleSettings() {
       max_entries: git.WORKTREE_RECURSIVE_ENTRY_LIMIT,
     },
   } satisfies SettingsResponse);
+}
+
+function worktreeWatchDirectoryLimitFromEnv(): number {
+  const raw = process.env.CODE_VIEWER_WORKTREE_WATCH_LIMIT;
+  if (!raw) return DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
 }
 
 function handleFiles(url: URL) {
@@ -2510,6 +2522,7 @@ worktreeWatch = startWorktreeUpdateWatch({
   excludeNames: scopeExcludeNames,
   watch,
   initialScanMode: "async",
+  maxWatchedDirectories: worktreeWatchDirectoryLimitFromEnv(),
   onUpdate: triggerUpdate,
   onError: (error) => {
     const message = error instanceof Error ? error.message : String(error);

@@ -57,6 +57,7 @@ type DatabaseEnterOptions = {
   autoSelectFirst?: boolean;
   annotationTarget?: DatabaseAnnotationTarget;
   reuseActiveTab?: boolean;
+  suppressRouteSync?: boolean;
 };
 type OpenTabOptions = DatabaseEnterOptions & {
   deferInitialEnter?: boolean;
@@ -145,7 +146,7 @@ function isSqlView(view: TabName): boolean {
 }
 
 const HISTORY_SSE_REFRESH_DELAY_MS = 250;
-const TABLE_SELECT_FETCH_DELAY_MS = 50;
+export const TABLE_SELECT_FETCH_DELAY_MS = 50;
 
 type DbVisibility = {
   toolsHidden: boolean;
@@ -1440,7 +1441,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let dropAfterTarget = false;
   // restoring 中は scheduleSave を抑制して、初期復元の連鎖 setState で
   // 過剰な PUT を発生させないようにする。復元完了後に 1 回まとめて保存する。
-  let restoring = false;
+  let restoringDepth = 0;
   let savePending: ReturnType<typeof setTimeout> | null = null;
   let saveChain: Promise<void> = Promise.resolve();
   let lastSavedTabsRaw: string | null = null;
@@ -1457,6 +1458,20 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         promise: Promise<DbFilesResponse>;
       }
     | null = null;
+
+  function isRestoring(): boolean {
+    return restoringDepth > 0;
+  }
+
+  function beginRestoring(): () => void {
+    restoringDepth += 1;
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      restoringDepth = Math.max(0, restoringDepth - 1);
+    };
+  }
 
   function fetchDbFilesCached(): Promise<DbFilesResponse> {
     const now = Date.now();
@@ -1489,7 +1504,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   }
 
   function scheduleSave(): void {
-    if (!mounted || restoring) return;
+    if (!mounted || isRestoring()) return;
     if (savePending !== null) clearTimeout(savePending);
     savePending = setTimeout(saveNow, 500);
   }
@@ -1501,7 +1516,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
 
   async function saveNow(options: { keepalive?: boolean } = {}): Promise<void> {
     savePending = null;
-    if (!mounted || restoring) return;
+    if (!mounted || isRestoring()) return;
     const tabs: TabState[] = [];
     for (const [, entry] of tabsById) {
       tabs.push(entry.pane.getState());
@@ -1611,9 +1626,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.chip.tabIndex = isActive ? 0 : -1;
       entry.closeBtn.tabIndex = isActive ? 0 : -1;
     }
-    if (!restoring) syncActiveRoute();
+    if (!isRestoring()) syncActiveRoute();
     scheduleSave();
-    if (mounted && !restoring) {
+    if (mounted && !isRestoring()) {
       void ensureInitialEnter(id)?.catch(() => {});
     }
   }
@@ -1890,10 +1905,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       {
         tabId: id,
         isActive: () => activeTabId === id,
-        canSyncRoute: () => !restoring,
+        canSyncRoute: () => !isRestoring(),
         onStateChange: () => {
           refreshChipLabel(id);
-          if (activeTabId === id && !restoring) syncActiveRoute();
+          if (activeTabId === id && !isRestoring()) syncActiveRoute();
           scheduleSave();
         },
       },
@@ -1936,7 +1951,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!entry) return Promise.resolve();
     const pane = entry.pane;
     const ready = (async () => {
-      if (options.annotationTarget) restoring = true;
+      const suppressRouteSync =
+        options.annotationTarget || options.suppressRouteSync;
+      const finishRestoring = suppressRouteSync ? beginRestoring() : null;
       try {
         await pane.enter(
           initial?.dbId || undefined,
@@ -1947,7 +1964,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         );
         refreshChipLabel(id);
       } finally {
-        if (options.annotationTarget) restoring = false;
+        finishRestoring?.();
         paneReadyById.delete(id);
       }
     })();
@@ -1961,7 +1978,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!lazyInitialById.has(id)) return null;
     const initial = lazyInitialById.get(id);
     lazyInitialById.delete(id);
-    return startInitialEnter(id, initial, { autoSelectFirst: false });
+    return startInitialEnter(id, initial, {
+      autoSelectFirst: false,
+      suppressRouteSync: true,
+    });
   }
 
   function closeTab(id: string): void {
@@ -2033,7 +2053,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       targetView?: TabName,
       enterOptions?: DatabaseEnterOptions,
     ): Promise<void> {
-      if (!enterOptions?.annotationTarget) {
+      const suppressRouteSync =
+        enterOptions?.annotationTarget || enterOptions?.suppressRouteSync;
+      if (!suppressRouteSync) {
         await pane.enter(
           targetDb,
           targetSchema,
@@ -2043,7 +2065,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         );
         return;
       }
-      restoring = true;
+      const finishRestoring = beginRestoring();
       try {
         await pane.enter(
           targetDb,
@@ -2053,14 +2075,19 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           enterOptions,
         );
       } finally {
-        restoring = false;
+        finishRestoring();
       }
     }
     for (const [id, entry] of tabsById) {
       if (routeMatchesState(entry.pane.getState(), db, schema, table, view)) {
-        setActive(id);
-        const ready = ensureInitialEnter(id);
-        if (ready) await ready;
+        const finishRestoring = beginRestoring();
+        try {
+          setActive(id);
+          const ready = ensureInitialEnter(id);
+          if (ready) await ready;
+        } finally {
+          finishRestoring();
+        }
         if (!mounted) return;
         if (options.annotationTarget) {
           await enterPane(entry.pane, db, schema, table, view, options);
@@ -2087,7 +2114,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         table: table ?? null,
         view: view ?? "data",
       },
-      { autoSelectFirst: db === undefined, ...options },
+      {
+        autoSelectFirst: db === undefined,
+        ...options,
+      },
     );
     const ready = paneReadyById.get(id);
     if (ready) await ready;
@@ -2146,7 +2176,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       const restored = tabsById.size === 0 ? await fetchTabs() : null;
       if (!mounted || seq !== lifecycleSeq) return;
       if (restored && restored.tabs.length > 0) {
-        restoring = true;
+        const hasRouteTarget = Boolean(db || schema || table || view);
+        const finishRestoring = beginRestoring();
         try {
           const restoredTabs = dedupeTabs(restored.tabs);
           for (const t of restoredTabs) {
@@ -2163,13 +2194,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
               ? restored.activeTabId
               : tabsById.keys().next().value;
           if (targetId) setActive(targetId);
-          if (targetId) {
+          if (targetId && !hasRouteTarget) {
             const ready = ensureInitialEnter(targetId);
             if (ready) await ready;
           }
           if (!mounted || seq !== lifecycleSeq) return;
         } finally {
-          restoring = false;
+          finishRestoring();
         }
         // URL の引数があれば、まず同じ状態の既存タブを active 化する。
         // なければ active タブに上書き反映する。
@@ -2205,7 +2236,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           table: table || null,
           view: view || "data",
         },
-        { autoSelectFirst: !db, ...options },
+        {
+          autoSelectFirst: !db,
+          ...options,
+        },
       );
       const ready = paneReadyById.get(id);
       if (ready) await ready;
