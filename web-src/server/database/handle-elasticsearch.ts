@@ -5,9 +5,10 @@ import type {
   EsMappingResponse,
   EsQueryResponse,
 } from "../../core/database/types";
+import { asAsyncDoc } from "./adapters/async-facade";
 import {
   type ElasticsearchExplorer,
-  openElasticsearchAdapter,
+  openElasticsearchAdapterAsync,
 } from "./adapters/elasticsearch";
 import {
   createDockerAdapterCache,
@@ -16,7 +17,7 @@ import {
   handleError,
   json,
   parsePostJsonBody,
-  resolveDockerExplorer,
+  resolveDockerExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -29,28 +30,40 @@ export function closeElasticsearchAdapter(dbId: string): void {
 function resolveEs(
   cwd: string,
   dbParam: string | null,
+  signal?: AbortSignal,
   omitDirNames?: string[],
-): { dbId: string; explorer: ElasticsearchExplorer } | Response {
-  return resolveDockerExplorer<ElasticsearchExplorer>(
+): Promise<{ dbId: string; explorer: ElasticsearchExplorer } | Response> {
+  return resolveDockerExplorerAsync<ElasticsearchExplorer>(
     cwd,
     dbParam,
     "elasticsearch",
     esAdapterCache,
     (info) =>
-      openElasticsearchAdapter(info.serviceName, info.env, info.composeDir),
+      openElasticsearchAdapterAsync(
+        info.serviceName,
+        info.env,
+        info.composeDir,
+      ),
     omitDirNames,
+    signal,
   );
 }
 
-function handleIndices(
+async function handleIndices(
+  req: Request,
   cwd: string,
   url: URL,
   omitDirNames?: string[],
-): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+): Promise<Response> {
+  const r = await resolveEs(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   try {
-    const indices = r.explorer.listIndices();
+    const indices = await asAsyncDoc(r.explorer).listIndices(req.signal);
     const body: EsIndicesResponse = { dbId: r.dbId, indices };
     return json(body);
   } catch (err) {
@@ -58,8 +71,18 @@ function handleIndices(
   }
 }
 
-function handleDocs(cwd: string, url: URL, omitDirNames?: string[]): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+async function handleDocs(
+  req: Request,
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = await resolveEs(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   if (!index) return textError("missing index parameter", 400);
@@ -77,7 +100,13 @@ function handleDocs(cwd: string, url: URL, omitDirNames?: string[]): Response {
     }
   }
   try {
-    const result = r.explorer.searchDocs({ index, query, size, searchAfter });
+    const result = await asAsyncDoc(r.explorer).searchDocs({
+      index,
+      query,
+      size,
+      searchAfter,
+      signal: req.signal,
+    });
     const body: EsDocsResponse = {
       dbId: r.dbId,
       index,
@@ -97,7 +126,12 @@ async function handleSearch(
   url: URL,
   omitDirNames?: string[],
 ): Promise<Response> {
-  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+  const r = await resolveEs(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
 
   // GET の場合は `?q=<lucene>` を受けて `_search?q=...` に流す簡易フォーム。
@@ -133,7 +167,7 @@ async function handleSearch(
   }
 
   try {
-    const result = await r.explorer.query(input);
+    const result = await r.explorer.query(input, undefined, req.signal);
     const body: EsQueryResponse = {
       dbId: r.dbId,
       ...result,
@@ -153,15 +187,29 @@ async function handleSearch(
   }
 }
 
-function handleDoc(cwd: string, url: URL, omitDirNames?: string[]): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+async function handleDoc(
+  req: Request,
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = await resolveEs(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   const id = url.searchParams.get("id");
   if (!index) return textError("missing index parameter", 400);
   if (!id) return textError("missing id parameter", 400);
   try {
-    const doc = r.explorer.getDoc({ index, id });
+    const doc = await asAsyncDoc(r.explorer).getDoc({
+      index,
+      id,
+      signal: req.signal,
+    });
     const body: EsDocResponse = {
       dbId: r.dbId,
       index,
@@ -177,17 +225,23 @@ function handleDoc(cwd: string, url: URL, omitDirNames?: string[]): Response {
   }
 }
 
-function handleMapping(
+async function handleMapping(
+  req: Request,
   cwd: string,
   url: URL,
   omitDirNames?: string[],
-): Response {
-  const r = resolveEs(cwd, url.searchParams.get("db"), omitDirNames);
+): Promise<Response> {
+  const r = await resolveEs(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   const index = url.searchParams.get("index");
   if (!index) return textError("missing index parameter", 400);
   try {
-    const mapping = r.explorer.getMapping(index);
+    const mapping = await asAsyncDoc(r.explorer).getMapping(index, req.signal);
     const body: EsMappingResponse = { dbId: r.dbId, mapping };
     return json(body);
   } catch (err) {
@@ -209,19 +263,19 @@ export async function handleElasticsearchRoute(
     {
       "/_db/elasticsearch/indices": {
         methods: ["GET"],
-        handler: () => handleIndices(cwd, url, omitDirNames),
+        handler: () => handleIndices(req, cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/mapping": {
         methods: ["GET"],
-        handler: () => handleMapping(cwd, url, omitDirNames),
+        handler: () => handleMapping(req, cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/docs": {
         methods: ["GET"],
-        handler: () => handleDocs(cwd, url, omitDirNames),
+        handler: () => handleDocs(req, cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/doc": {
         methods: ["GET"],
-        handler: () => handleDoc(cwd, url, omitDirNames),
+        handler: () => handleDoc(req, cwd, url, omitDirNames),
       },
       "/_db/elasticsearch/search": {
         methods: ["GET", "POST"],

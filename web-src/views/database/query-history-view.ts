@@ -12,7 +12,7 @@ export type QueryHistoryViewCallbacks = {
 
 export type QueryHistoryView = {
   el: HTMLElement;
-  refresh: () => Promise<void>;
+  refresh: (options?: { force?: boolean }) => Promise<void>;
   clear: () => void;
 };
 
@@ -62,6 +62,21 @@ export function createQueryHistoryView(
   let entries: QueryHistoryEntry[] = [];
   const expandedIds = new Set<string>();
   let clearConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastRefreshKey: string | null = null;
+  let lastRefreshAt = 0;
+  let inFlightRefresh: { key: string; promise: Promise<void> } | null = null;
+  const entryRowsById = new Map<string, HTMLElement>();
+  let selectedEntryRow: HTMLElement | null = null;
+
+  function currentRefreshParams(): { key: string; params: string } {
+    const dbId = callbacks.getDbId();
+    const schema = callbacks.getSchema();
+    const searchParams = new URLSearchParams();
+    if (dbId) searchParams.set("db", dbId);
+    if (schema) searchParams.set("schema", schema);
+    const params = searchParams.toString() ? `?${searchParams.toString()}` : "";
+    return { key: params, params };
+  }
 
   function armButtonConfirm(
     button: HTMLButtonElement,
@@ -84,18 +99,27 @@ export function createQueryHistoryView(
     return false;
   }
 
-  async function refresh() {
-    const dbId = callbacks.getDbId();
-    const schema = callbacks.getSchema();
-    const searchParams = new URLSearchParams();
-    if (dbId) searchParams.set("db", dbId);
-    if (schema) searchParams.set("schema", schema);
-    const params = searchParams.toString() ? `?${searchParams.toString()}` : "";
-    try {
+  async function refresh(options: { force?: boolean } = {}) {
+    const { key: refreshKey, params } = currentRefreshParams();
+    const now = Date.now();
+    if (inFlightRefresh?.key === refreshKey) {
+      return inFlightRefresh.promise;
+    }
+    if (
+      !options.force &&
+      refreshKey === lastRefreshKey &&
+      now - lastRefreshAt < 1_000
+    ) {
+      return;
+    }
+    const promise = (async () => {
       const res = await fetch(`/_db/history${params}`);
       if (!res.ok) return;
       const state = (await res.json()) as QueryHistoryState;
+      if (currentRefreshParams().key !== refreshKey) return;
       entries = state.entries;
+      lastRefreshKey = refreshKey;
+      lastRefreshAt = Date.now();
       if (
         selectedEntryId &&
         !entries.some((entry) => entry.id === selectedEntryId)
@@ -103,13 +127,21 @@ export function createQueryHistoryView(
         clearDetail();
       }
       render();
-    } catch {
+    })().catch(() => {
       /* ignore */
+    });
+    inFlightRefresh = { key: refreshKey, promise };
+    try {
+      await promise;
+    } finally {
+      if (inFlightRefresh?.promise === promise) inFlightRefresh = null;
     }
   }
 
   function render() {
     listEl.innerHTML = "";
+    entryRowsById.clear();
+    selectedEntryRow = null;
     if (entries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-query-history-empty";
@@ -117,26 +149,28 @@ export function createQueryHistoryView(
       listEl.appendChild(empty);
       return;
     }
+    const fragment = document.createDocumentFragment();
     for (const entry of entries) {
-      listEl.appendChild(renderEntry(entry));
+      fragment.appendChild(renderEntry(entry));
     }
+    listEl.appendChild(fragment);
   }
 
   let selectedEntryId: string | null = null;
 
   function clearDetail() {
     selectedEntryId = null;
+    selectedEntryRow?.classList.remove("selected");
+    selectedEntryRow = null;
     detailCol.innerHTML = "";
     detailCol.appendChild(detailPlaceholder);
   }
 
   function selectEntry(entry: QueryHistoryEntry) {
     selectedEntryId = entry.id;
-    listEl
-      .querySelectorAll<HTMLElement>(".db-query-history-entry")
-      .forEach((el) => {
-        el.classList.toggle("selected", el.dataset.id === entry.id);
-      });
+    selectedEntryRow?.classList.remove("selected");
+    selectedEntryRow = entryRowsById.get(entry.id) ?? null;
+    selectedEntryRow?.classList.add("selected");
     renderDetail(entry);
   }
 
@@ -207,8 +241,12 @@ export function createQueryHistoryView(
   function renderEntry(entry: QueryHistoryEntry): HTMLElement {
     const item = document.createElement("div");
     item.className = "db-query-history-entry";
-    if (entry.id === selectedEntryId) item.classList.add("selected");
+    if (entry.id === selectedEntryId) {
+      item.classList.add("selected");
+      selectedEntryRow = item;
+    }
     item.dataset.id = entry.id;
+    entryRowsById.set(entry.id, item);
 
     const meta = document.createElement("div");
     meta.className = "db-query-history-entry-meta";
@@ -311,10 +349,9 @@ export function createQueryHistoryView(
       entries = entries.filter((e) => e.id !== id);
       expandedIds.delete(id);
       if (selectedEntryId === id) resetDetailCol();
-      const itemEl = listEl.querySelector<HTMLElement>(
-        `.db-query-history-entry[data-id="${CSS.escape(id)}"]`,
-      );
+      const itemEl = entryRowsById.get(id);
       if (itemEl) {
+        entryRowsById.delete(id);
         itemEl.remove();
         if (entries.length === 0) render();
       } else {
@@ -364,12 +401,14 @@ export function createQueryHistoryView(
   });
 
   refreshBtn.addEventListener("click", () => {
-    refresh();
+    refresh({ force: true });
   });
 
   function clear(): void {
     entries = [];
     expandedIds.clear();
+    lastRefreshKey = null;
+    lastRefreshAt = 0;
     if (clearConfirmTimer) {
       clearTimeout(clearConfirmTimer);
       clearConfirmTimer = null;

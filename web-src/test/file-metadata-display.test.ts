@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { rawFileHeaders } from "../server/raw-file-headers";
 import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
@@ -29,7 +30,24 @@ describe("file metadata display", () => {
         "entries: recursive ? entries : entries.map((entry) => attachTreeEntryMetadata(target, entry))",
       ),
     ).toBe(true);
-    expect(server.includes("Object.entries(fileMetadataHeaders")).toBe(true);
+    const rawHeaders = new Headers(
+      rawFileHeaders("README.md", {
+        metadata: {
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-02T00:00:00.000Z",
+          commit_updated_at: "2026-01-03T00:00:00.000Z",
+        },
+      }),
+    );
+    expect(rawHeaders.get("x-code-viewer-created-at")).toBe(
+      "2026-01-01T00:00:00.000Z",
+    );
+    expect(rawHeaders.get("x-code-viewer-updated-at")).toBe(
+      "2026-01-02T00:00:00.000Z",
+    );
+    expect(rawHeaders.get("x-code-viewer-commit-updated-at")).toBe(
+      "2026-01-03T00:00:00.000Z",
+    );
     expect(
       server.includes("const metadata = gitFileMetadata(ref, path, size)"),
     ).toBe(true);

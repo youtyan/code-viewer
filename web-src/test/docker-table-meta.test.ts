@@ -150,7 +150,7 @@ describe("docker table meta queries", () => {
     expect(result.totalRows).toBe(7);
   });
 
-  test("starts filtered columns and count before awaiting table data", async () => {
+  test("filters columns before building filtered table SQL", async () => {
     activeHarness = installSpawnHarness();
     const adapter = createMysqlAdapter();
 
@@ -160,10 +160,11 @@ describe("docker table meta queries", () => {
       grouped: new Map([["Ada", ["name"]]]),
     });
 
-    expect(activeHarness.calls).toHaveLength(2);
+    expect(activeHarness.calls).toHaveLength(1);
     const result = await pending;
     const sql = activeHarness.calls.map((call) => call.sql);
 
+    expect(sql[0]).toMatch(/information_schema\.columns/);
     expect(sql[1]).toMatch(/WHERE CAST\(`name` AS CHAR\) LIKE '%Ada%'/);
     expect(sql[2]).toMatch(/WHERE CAST\(`name` AS CHAR\) LIKE '%Ada%'/);
     expect(sql[2]).toMatch(/LIMIT 10 OFFSET 5/);
@@ -277,20 +278,50 @@ describe("docker table meta queries", () => {
     expect(result.totalRows).toBe(2);
   });
 
-  test("sets PostgreSQL search_path for readonly editor queries", () => {
-    const calls: string[] = [];
-    __setDockerSpawnSyncForTest(((_cmd: string, args: string[]) => {
-      calls.push(String(args[args.length - 1] || ""));
-      return { stdout: "1\n", stderr: "", status: 0 };
-    }) as never);
+  test("sets PostgreSQL search_path for readonly editor queries", async () => {
+    activeHarness = installSpawnHarness(() => "1\n");
     const adapter = createPostgresAdapter("tenant space");
 
-    const result = adapter.executeReadonlyQuery("select * from users", [], 10);
+    const result = await adapter.executeReadonlyQueryAsync(
+      "select * from users",
+      [],
+      10,
+    );
+    const calls = activeHarness.calls.map((call) => call.sql);
 
     expect(result.rowCount).toBe(1);
     expect(calls[0]).toMatch(
       /BEGIN TRANSACTION READ ONLY; SET LOCAL search_path = "tenant space"; select \* from users LIMIT 10; COMMIT/,
     );
     expect(calls[0].includes("pg_catalog")).toBe(false);
+  });
+
+  test("does not append a duplicate LIMIT to readonly editor queries", async () => {
+    activeHarness = installSpawnHarness(() => "1\n");
+    const adapter = createPostgresAdapter("tenant_a");
+
+    await adapter.executeReadonlyQueryAsync(
+      "select * from users limit 5",
+      [],
+      10,
+    );
+    const calls = activeHarness.calls.map((call) => call.sql);
+
+    expect(calls[0]).toMatch(/select \* from users limit 5; COMMIT/);
+    expect(calls[0].includes("limit 5 LIMIT 10")).toBe(false);
+  });
+
+  test("invalidates the legacy column cache together with table meta cache", async () => {
+    activeHarness = installSpawnHarness(mysqlStdout);
+    const adapter = createMysqlAdapter();
+
+    await adapter.getColumnsAsync("users");
+    adapter.invalidateTableMetaCache?.("users");
+    await adapter.getColumnsAsync("users");
+
+    const columnQueries = activeHarness.calls.filter((call) =>
+      call.sql.includes("information_schema.columns"),
+    );
+    expect(columnQueries).toHaveLength(2);
   });
 });

@@ -40,6 +40,11 @@ import type {
   HljsApi,
   RawFileInfo,
 } from "../core/types";
+import {
+  appendMediaEmbed,
+  renderHtmlPreviewFrame,
+  renderUnsupportedPreview,
+} from "./source-preview-elements";
 
 export type VirtualSourcePagingKeyboardEvent = KeyboardEvent & {
   __gdpVirtualSourcePagingHandled?: boolean;
@@ -587,17 +592,6 @@ export function createSourceView(deps: SourceViewDeps) {
     const body = card.querySelector<HTMLElement>(
       ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
     );
-    const view = document.createElement("div");
-    view.className = "gdp-source-viewer unsupported";
-    const content = document.createElement("div");
-    content.className = "gdp-source-unsupported-content";
-    const title = document.createElement("strong");
-    title.className = "gdp-source-unsupported-title";
-    title.textContent = "Preview unavailable";
-    const message = document.createElement("div");
-    message.className = "gdp-source-unsupported-message";
-    message.textContent =
-      "This file type cannot be previewed safely in the browser.";
     const info = createSourceFileInfo(target, "unsupported file");
     const link = document.createElement("a");
     link.className = "gdp-btn gdp-btn-sm gdp-source-download";
@@ -605,8 +599,10 @@ export function createSourceView(deps: SourceViewDeps) {
     link.textContent = "Download raw";
     link.target = "_blank";
     link.rel = "noreferrer";
-    content.append(title, message, info, link);
-    view.appendChild(content);
+    const view = renderUnsupportedPreview({
+      message: "This file type cannot be previewed safely in the browser.",
+      extraChildren: [info, link],
+    });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }
@@ -615,15 +611,7 @@ export function createSourceView(deps: SourceViewDeps) {
     target: SourceFileTarget,
     html: string,
   ): HTMLElement {
-    const preview = document.createElement("div");
-    preview.className = "gdp-html-preview";
-    const frame = document.createElement("iframe");
-    frame.title = `${target.path} preview`;
-    frame.sandbox.value = "";
-    frame.referrerPolicy = "no-referrer";
-    frame.srcdoc = html;
-    preview.appendChild(frame);
-    return preview;
+    return renderHtmlPreviewFrame(`${target.path} preview`, html);
   }
 
   function createSourceFileInfo(
@@ -1828,39 +1816,16 @@ export function createSourceView(deps: SourceViewDeps) {
     const url = buildRawFileUrl(target);
     const info = createSourceFileInfo(target, mediaKind);
     view.appendChild(info);
-    if (mediaKind === "video") {
-      const video = document.createElement("video");
-      video.src = url;
-      video.controls = true;
-      video.preload = "metadata";
-      view.appendChild(video);
-    } else if (mediaKind === "audio") {
-      const audio = document.createElement("audio");
-      audio.src = url;
-      audio.controls = true;
-      audio.preload = "metadata";
-      view.appendChild(audio);
-    } else if (mediaKind === "pdf") {
-      const frame = document.createElement("iframe");
-      frame.src = url;
-      frame.title = target.path;
-      frame.loading = "lazy";
-      view.appendChild(frame);
-    } else {
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = "";
-      img.addEventListener(
-        "load",
-        () => {
-          const resolution = document.createElement("span");
-          resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
-          info.appendChild(resolution);
-        },
-        { once: true },
-      );
-      view.appendChild(img);
-    }
+    appendMediaEmbed(view, {
+      url,
+      kind: mediaKind,
+      title: target.path,
+      onImageLoad: (img) => {
+        const resolution = document.createElement("span");
+        resolution.textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
+        info.appendChild(resolution);
+      },
+    });
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }

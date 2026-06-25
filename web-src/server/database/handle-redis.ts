@@ -3,14 +3,15 @@ import type {
   RedisKeysResponse,
   RedisValueResponse,
 } from "../../core/database/types";
-import { openRedisExplorer, type RedisExplorer } from "./adapters/redis";
+import { asAsyncKv } from "./adapters/async-facade";
+import { openRedisExplorerAsync, type RedisExplorer } from "./adapters/redis";
 import {
   createDockerAdapterCache,
   createQueryStrippedLogger,
   dispatchRoutes,
   handleError,
   json,
-  resolveDockerExplorer,
+  resolveDockerExplorerAsync,
   textError,
 } from "./handle-shared";
 
@@ -23,27 +24,36 @@ export function closeRedisAdapter(dbId: string): void {
 function resolveRedis(
   cwd: string,
   dbParam: string | null,
+  signal?: AbortSignal,
   omitDirNames?: string[],
-): { dbId: string; explorer: RedisExplorer } | Response {
-  return resolveDockerExplorer<RedisExplorer>(
+): Promise<{ dbId: string; explorer: RedisExplorer } | Response> {
+  return resolveDockerExplorerAsync<RedisExplorer>(
     cwd,
     dbParam,
     "redis",
     redisAdapterCache,
-    (info) => openRedisExplorer(info.serviceName, info.env, info.composeDir),
+    (info) =>
+      openRedisExplorerAsync(info.serviceName, info.env, info.composeDir),
     omitDirNames,
+    signal,
   );
 }
 
-function handleDatabases(
+async function handleDatabases(
+  req: Request,
   cwd: string,
   url: URL,
   omitDirNames?: string[],
-): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+): Promise<Response> {
+  const r = await resolveRedis(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   try {
-    const databases = r.explorer.listDatabases();
+    const databases = await asAsyncKv(r.explorer).listDatabases(req.signal);
     const body: RedisDatabasesResponse = { dbId: r.dbId, databases };
     return json(body);
   } catch (err) {
@@ -51,8 +61,18 @@ function handleDatabases(
   }
 }
 
-function handleKeys(cwd: string, url: URL, omitDirNames?: string[]): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+async function handleKeys(
+  req: Request,
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = await resolveRedis(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
   if (dbIndexRaw === null) return textError("missing dbIndex", 400);
@@ -67,11 +87,12 @@ function handleKeys(cwd: string, url: URL, omitDirNames?: string[]): Response {
     ? Math.min(10000, Math.max(1, Number(countRaw) || 200))
     : 200;
   try {
-    const { keys, nextCursor } = r.explorer.listKeys({
+    const { keys, nextCursor } = await asAsyncKv(r.explorer).listKeys({
       db: dbIndex,
       pattern,
       cursor,
       count,
+      signal: req.signal,
     });
     const body: RedisKeysResponse = {
       dbId: r.dbId,
@@ -99,15 +120,15 @@ export async function handleRedisRoute(
     {
       "/_db/redis/databases": {
         methods: ["GET"],
-        handler: () => handleDatabases(cwd, url, omitDirNames),
+        handler: () => handleDatabases(req, cwd, url, omitDirNames),
       },
       "/_db/redis/keys": {
         methods: ["GET"],
-        handler: () => handleKeys(cwd, url, omitDirNames),
+        handler: () => handleKeys(req, cwd, url, omitDirNames),
       },
       "/_db/redis/value": {
         methods: ["GET"],
-        handler: () => handleValue(cwd, url, omitDirNames),
+        handler: () => handleValue(req, cwd, url, omitDirNames),
       },
     },
     sideEffectAllowed,
@@ -116,8 +137,18 @@ export async function handleRedisRoute(
   );
 }
 
-function handleValue(cwd: string, url: URL, omitDirNames?: string[]): Response {
-  const r = resolveRedis(cwd, url.searchParams.get("db"), omitDirNames);
+async function handleValue(
+  req: Request,
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = await resolveRedis(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
   if (r instanceof Response) return r;
   const dbIndexRaw = url.searchParams.get("dbIndex");
   if (dbIndexRaw === null) return textError("missing dbIndex", 400);
@@ -128,7 +159,11 @@ function handleValue(cwd: string, url: URL, omitDirNames?: string[]): Response {
   const key = url.searchParams.get("key");
   if (!key) return textError("missing key", 400);
   try {
-    const value = r.explorer.getValue({ db: dbIndex, key });
+    const value = await asAsyncKv(r.explorer).getValue({
+      db: dbIndex,
+      key,
+      signal: req.signal,
+    });
     const body: RedisValueResponse = { dbId: r.dbId, dbIndex, key, value };
     return json(body);
   } catch (err) {

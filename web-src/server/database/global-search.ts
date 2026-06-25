@@ -1,6 +1,9 @@
 import type { DbColumn, DbValue } from "../../core/database/types";
+import { isAbortLikeError } from "./adapters/abort";
+import { asAsync } from "./adapters/async-facade";
 import type { DatabaseAdapter } from "./adapters/types";
 import { serializeDbRow, serializeDbValue } from "./serialize";
+import { escapeSqlString, sanitizeIdentifier } from "./sql-utils";
 
 export type SearchHit = {
   table: string;
@@ -18,18 +21,6 @@ export type SearchProgress = {
   done: boolean;
   error?: string;
 };
-
-function sanitizeIdentifier(
-  name: string,
-  kind: "sqlite" | "postgresql" | "mysql",
-): string {
-  if (kind === "mysql") return `\`${name.replace(/`/g, "``")}\``;
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
-function escapeSqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
 
 function isTextLikeType(type: string): boolean {
   const upper = type.toUpperCase();
@@ -50,7 +41,7 @@ function escapeLikeTerm(term: string): string {
   return term.replace(/=/g, "==").replace(/%/g, "=%").replace(/_/g, "=_");
 }
 
-export function searchTable(
+export async function searchTableAsync(
   adapter: DatabaseAdapter,
   table: string,
   columns: DbColumn[],
@@ -58,7 +49,8 @@ export function searchTable(
   maxHits: number,
   includeNonText: boolean,
   pkColumns: string[],
-): SearchHit[] {
+  signal?: AbortSignal,
+): Promise<SearchHit[]> {
   const kind = adapter.kind as "sqlite" | "postgresql" | "mysql";
   const searchCols = includeNonText
     ? columns.filter(
@@ -72,8 +64,10 @@ export function searchTable(
   const escapedTerm = escapeLikeTerm(term);
   const tbl = sanitizeIdentifier(table, kind);
   const hits: SearchHit[] = [];
+  const db = asAsync(adapter);
 
   for (const col of searchCols) {
+    if (signal?.aborted) break;
     if (hits.length >= maxHits) break;
 
     const colId = sanitizeIdentifier(col.name, kind);
@@ -90,10 +84,8 @@ export function searchTable(
     }
 
     try {
-      const result =
-        kind === "sqlite"
-          ? adapter.executeReadonlyQuery(sql, [`%${escapedTerm}%`], remaining)
-          : adapter.executeReadonlyQuery(sql, undefined, remaining);
+      const params = kind === "sqlite" ? [`%${escapedTerm}%`] : undefined;
+      const result = await db.readonlyQuery(sql, params, remaining, signal);
 
       for (const row of result.rows) {
         const colIdx = result.columns.indexOf(col.name);
@@ -120,7 +112,8 @@ export function searchTable(
           rowPreview: serializeDbRow(row),
         });
       }
-    } catch {
+    } catch (err) {
+      if (isAbortLikeError(err, signal)) throw err;
       // skip columns that fail (e.g. generated columns)
     }
   }
@@ -128,10 +121,6 @@ export function searchTable(
   return hits;
 }
 
-export function getPrimaryKeyColumns(
-  adapter: DatabaseAdapter,
-  table: string,
-): string[] {
-  const columns = adapter.getColumns(table);
+export function getPrimaryKeyColumnsFromColumns(columns: DbColumn[]): string[] {
   return columns.filter((c) => c.primaryKey).map((c) => c.name);
 }

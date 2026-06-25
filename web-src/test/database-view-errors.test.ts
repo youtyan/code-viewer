@@ -332,11 +332,13 @@ function installDatabaseDom() {
   const diff = new FakeElement("div", "diff");
   const empty = new FakeElement("div", "empty");
   body.append(content, diff, empty);
+  const windowListeners: Record<string, Array<() => void>> = {};
 
   const fakeDocument = {
     body,
     createElement: (tagName: string) => new FakeElement(tagName),
     createElementNS: (_ns: string, tagName: string) => new FakeElement(tagName),
+    createDocumentFragment: () => new FakeElement("fragment"),
     createTextNode: (text: string) => new FakeText(text),
     getElementById: (id: string) => body.querySelector(`#${id}`),
     querySelector: (selector: string) => body.querySelector(selector),
@@ -353,8 +355,14 @@ function installDatabaseDom() {
     configurable: true,
     writable: true,
     value: {
-      addEventListener() {},
-      removeEventListener() {},
+      addEventListener(event: string, listener: () => void) {
+        windowListeners[event] = [...(windowListeners[event] || []), listener];
+      },
+      removeEventListener(event: string, listener: () => void) {
+        windowListeners[event] = (windowListeners[event] || []).filter(
+          (current) => current !== listener,
+        );
+      },
     },
   });
   Object.defineProperty(globalThis, "localStorage", {
@@ -397,7 +405,7 @@ function installDatabaseDom() {
     value: { TEXT_NODE: 3 },
   });
 
-  return { body };
+  return { body, windowListeners };
 }
 
 function jsonResponse(body: unknown): Response {
@@ -484,6 +492,14 @@ async function leaveView(view: ReturnType<typeof createDatabaseView>) {
 
 async function flushMicrotasks(count = 8) {
   for (let i = 0; i < count; i++) await Promise.resolve();
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 describe("database view SQL error rendering", () => {
@@ -875,6 +891,155 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  test("aborts stale table fetches when another table is selected", async () => {
+    installDatabaseDom();
+    const tableRequests: Array<{
+      table: string | null;
+      signal?: AbortSignal;
+      resolve: (res: Response) => void;
+      reject: (err: unknown) => void;
+    }> = [];
+
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            bookings: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        return new Promise<Response>((resolve, reject) => {
+          tableRequests.push({
+            table,
+            signal: init?.signal,
+            resolve,
+            reject,
+          });
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    const entering = view.enter("docker:db", undefined, "users");
+    await waitUntil(() => tableRequests.length > 0);
+
+    expect(tableRequests.map((req) => req.table)).toEqual(["users"]);
+    const bookingsRow = Array.from(
+      document.querySelectorAll(".db-table-item"),
+    ).find(
+      (row) => (row as unknown as FakeElement).dataset.table === "bookings",
+    ) as unknown as FakeElement | undefined;
+    expect(bookingsRow).toBeTruthy();
+
+    const clicking = bookingsRow?.click();
+    await waitUntil(() => tableRequests.length > 1);
+
+    expect(tableRequests[0].signal?.aborted).toBe(true);
+    expect(tableRequests.map((req) => req.table)).toEqual([
+      "users",
+      "bookings",
+    ]);
+
+    tableRequests[1].resolve(
+      jsonResponse({ ...baseTableResponse(), table: "bookings" }),
+    );
+    await clicking;
+    await entering;
+
+    expect(document.querySelector(".db-pane-error")).toBeNull();
+    await leaveView(view);
+  });
+
+  test("sends a keepalive tabs save even when the same state is already pending", async () => {
+    const { windowListeners } = installDatabaseDom();
+    const tabPuts: RequestInit[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT") {
+        tabPuts.push(init);
+        if (init.keepalive) return jsonResponse({ ok: true });
+        return new Promise<Response>((resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+          setTimeout(() => resolve(jsonResponse({ ok: true })), 5000);
+        });
+      }
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    await waitUntil(() => tabPuts.length === 1);
+    expect(Boolean(tabPuts[0]?.keepalive)).toBe(false);
+
+    windowListeners.beforeunload?.[0]?.();
+    await waitUntil(() => tabPuts.length === 2);
+
+    expect(tabPuts[0]?.signal?.aborted).toBe(true);
+    expect(tabPuts[1]?.keepalive).toBe(true);
+    await leaveView(view);
+  });
+
+  test("opens a query view without fetching the first table", async () => {
+    installDatabaseDom();
+    const fetchedTables: string[] = [];
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        if (table) fetchedTables.push(table);
+        return jsonResponse({ ...baseTableResponse(), table });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", undefined, undefined, "query");
+
+    expect(fetchedTables).toEqual([]);
+    await leaveView(view);
+  });
+
   test("does not fallback stale restored tabs to the first database", async () => {
     installDatabaseDom();
     const fetchedTables: string[] = [];
@@ -962,7 +1127,7 @@ describe("database view SQL error rendering", () => {
           tabs: [
             {
               id: "docker",
-              dbId: "docker:db:reraku_v2_development",
+              dbId: "docker:db:sample_v2_development",
               table: "users",
               view: "data",
             },
@@ -1006,7 +1171,7 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
-  test("loads the restored active tab before background tabs", async () => {
+  test("loads restored background tabs lazily when selected", async () => {
     installDatabaseDom();
     const events: string[] = [];
     mockFetch((url, init) => {
@@ -1072,6 +1237,22 @@ describe("database view SQL error rendering", () => {
     expect(events.slice(0, 2)).toEqual([
       "schema:docker:analytics",
       "table:docker:analytics:bookings",
+    ]);
+    expect(events).toEqual([
+      "schema:docker:analytics",
+      "table:docker:analytics:bookings",
+    ]);
+
+    const mainTab = document.querySelectorAll(
+      ".db-tabs-chip",
+    )[0] as unknown as FakeElement;
+    await mainTab.click();
+    await waitUntil(() => events.includes("table:docker:db:users"));
+    expect(events).toEqual([
+      "schema:docker:analytics",
+      "table:docker:analytics:bookings",
+      "schema:docker:db",
+      "table:docker:db:users",
     ]);
     await leaveView(view);
   });

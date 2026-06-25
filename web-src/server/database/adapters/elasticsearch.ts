@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import type {
   EsIndexInfo,
   EsMapping,
@@ -13,11 +12,13 @@ import type {
   SnapshotItem,
   SnapshotIterable,
 } from "../sources/types";
-import { resolveRunningComposeContainerNameOrThrow } from "./docker-utils";
+import { throwIfAborted } from "./abort";
+import { resolveRunningComposeContainerNameOrThrowAsync } from "./docker-utils";
+import { spawnTextAsync } from "./spawn-runner";
 
 type EsConfig = {
   containerName: string;
-  // 認証あり ES の場合 elastic ユーザーのパスワード。spawnSync の env 経由で
+  // 認証あり ES の場合 elastic ユーザーのパスワード。stdin 経由で
   // 渡すので argv には現れない (Round 1 C2 と同パターン)。
   password: string;
 };
@@ -64,17 +65,16 @@ export function quoteCurlConfigString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function execEsRequest(
+function buildEsRequestInvocation(
   config: EsConfig,
   method: "GET" | "POST",
   path: string,
   body?: unknown,
-  timeoutMs = 15000,
-): { code: number; stdout: string; stderr: string } {
+): { args: string[]; input?: string } {
   const hasPassword = !!config.password;
   // curl --user elastic:$PASSWORD は argv 露出するため、認証ありの場合は
   // -K - で stdin から config を流す。host の `ps -ef` には -K - だけが
-  // 見え、credential 値は spawnSync の stdin 経由で渡る。
+  // 見え、credential 値は stdin 経由で渡る。
   // PoC では認証なしを default で動かす想定。認証ありは password が
   // 与えられた場合に有効化する。
   // curl の write-out で HTTP status と body を区切るために以下の trick を使う。
@@ -101,18 +101,30 @@ function execEsRequest(
     ...(hasPassword ? ["-K", "-"] : []),
     ...(body !== undefined ? ["--data-binary", JSON.stringify(body)] : []),
   ];
-  const proc = spawnSync("docker", args, {
-    encoding: "utf8",
+  return { args, input: curlConfig };
+}
+
+function execEsRequestAsync(
+  config: EsConfig,
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  timeoutMs = 15000,
+  signal?: AbortSignal,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  throwIfAborted(signal, "elasticsearch request aborted");
+  const invocation = buildEsRequestInvocation(config, method, path, body);
+  return spawnTextAsync({
+    command: "docker",
+    args: invocation.args,
     env: process.env,
-    timeout: timeoutMs,
-    input: curlConfig,
-    stdio: hasPassword ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
+    input: invocation.input,
+    timeoutMs,
+    signal,
+    abortMessage: "elasticsearch request aborted",
+    timeoutMessage: `elasticsearch request timed out after ${timeoutMs}ms`,
+    rejectOnError: false,
   });
-  return {
-    code: proc.status ?? 1,
-    stdout: proc.stdout || "",
-    stderr: proc.stderr || "",
-  };
 }
 
 // curl の write-out で末尾に `\n__ES_STATUS__:NNN\n` を付けている。
@@ -140,13 +152,21 @@ function safeJsonParse<T>(stdout: string, label: string): T {
 }
 
 function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
-  function callJson<T>(
+  async function callJsonAsync<T>(
     method: "GET" | "POST",
     path: string,
     body: unknown,
     label: string,
-  ): T {
-    const r = execEsRequest(config, method, path, body);
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const r = await execEsRequestAsync(
+      config,
+      method,
+      path,
+      body,
+      15000,
+      signal,
+    );
     if (r.code !== 0) {
       throw new Error(r.stderr.trim() || `${label}: curl exit ${r.code}`);
     }
@@ -158,10 +178,10 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     return safeJsonParse<T>(text, label);
   }
 
-  function listIndices(): EsIndexInfo[] {
-    // _cat/indices の出力: [{ "index": "name", "docs.count": "10", "store.size": "1kb", ... }, ...]
-    // expand_wildcards=open でクローズド index は除く。
-    const raw = callJson<
+  async function listIndicesAsync(
+    signal?: AbortSignal,
+  ): Promise<EsIndexInfo[]> {
+    const raw = await callJsonAsync<
       Array<{
         index?: string;
         "docs.count"?: string;
@@ -174,11 +194,12 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
       "/_cat/indices?format=json&expand_wildcards=open",
       undefined,
       "_cat/indices",
+      signal,
     );
     const result: EsIndexInfo[] = [];
     for (const row of raw) {
       const name = row.index;
-      if (!name || name.startsWith(".")) continue; // システム index は除外
+      if (!name || name.startsWith(".")) continue;
       result.push({
         name,
         docCount: Number(row["docs.count"]) || 0,
@@ -191,14 +212,14 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     return result;
   }
 
-  function getMapping(index: string): EsMapping {
+  async function getMappingAsync(
+    index: string,
+    signal?: AbortSignal,
+  ): Promise<EsMapping> {
     if (!index || index.includes("/") || index.includes("?")) {
       throw new Error(`invalid index name: ${index}`);
     }
-    // GET /<index>/_mapping レスポンス:
-    //   { "<index>": { "mappings": { "properties": {...} } } }
-    // index が alias の場合は実 index 名が key になるので Object.keys で拾う。
-    const raw = callJson<
+    const raw = await callJsonAsync<
       Record<
         string,
         {
@@ -207,7 +228,13 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
           };
         }
       >
-    >("GET", `/${encodeURIComponent(index)}/_mapping`, undefined, "_mapping");
+    >(
+      "GET",
+      `/${encodeURIComponent(index)}/_mapping`,
+      undefined,
+      "_mapping",
+      signal,
+    );
     const keys = Object.keys(raw);
     if (keys.length === 0) {
       return { index, properties: {} };
@@ -216,21 +243,18 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     const props = raw[realIndex]?.mappings?.properties ?? {};
     return { index: realIndex, properties: props };
   }
-  function searchDocs(opts: {
+
+  async function searchDocsAsync(opts: {
     index: string;
     query?: string;
     size?: number;
     searchAfter?: unknown[];
-  }): EsSearchResult {
+    signal?: AbortSignal;
+  }): Promise<EsSearchResult> {
     if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
       throw new Error(`invalid index name: ${opts.index}`);
     }
     const size = Math.min(1000, Math.max(1, opts.size ?? ES_DEFAULT_SIZE));
-    // search_after は安定 sort が必須。`_doc` で全件 stable な順序を取る
-    // (PIT なしでも ES 8 で使える tie-breaker)。lucene query 文字列が
-    // 与えられていれば `query_string` 経由で渡す。未指定なら match_all。
-    // 補足: `_shard_doc` は PIT 必須 (ES 8 で action_request_validation_exception)
-    // なので、PoC では PIT を取らない代わりに `_doc` を使う。
     const body: Record<string, unknown> = {
       size,
       track_total_hits: true,
@@ -258,11 +282,12 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
         hits?: RawHit[];
       };
     };
-    const raw = callJson<RawResult>(
+    const raw = await callJsonAsync<RawResult>(
       "POST",
       `/${encodeURIComponent(opts.index)}/_search`,
       body,
       "_search",
+      opts.signal,
     );
     const rawHits = raw.hits?.hits ?? [];
     const hits = rawHits.map((h) => ({
@@ -281,26 +306,30 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     const lastSort = hits.length > 0 ? hits[hits.length - 1].sort : undefined;
     return { totalHits, hits, lastSort };
   }
-  function getDoc(opts: { index: string; id: string }): {
+
+  async function getDocAsync(opts: {
+    index: string;
+    id: string;
+    signal?: AbortSignal;
+  }): Promise<{
     found: boolean;
     source: unknown;
     seqNo?: number;
     primaryTerm?: number;
-  } {
+  }> {
     if (!opts.index || opts.index.includes("/") || opts.index.includes("?")) {
       throw new Error(`invalid index name: ${opts.index}`);
     }
     if (!opts.id) {
       throw new Error("missing doc id");
     }
-    // ES の `GET /<index>/_doc/<id>` は doc 不在のとき HTTP 404 と
-    //   `{"_index": "...", "_id": "...", "found": false}`
-    // を返す。callJson は 4xx を全部例外にしてしまうので、ここは
-    // execEsRequest を直接呼んで 404 だけ `{found: false}` に救う。
-    const r = execEsRequest(
+    const r = await execEsRequestAsync(
       config,
       "GET",
       `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`,
+      undefined,
+      15000,
+      opts.signal,
     );
     if (r.code !== 0) {
       throw new Error(r.stderr.trim() || `_doc: curl exit ${r.code}`);
@@ -313,7 +342,6 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
       _primary_term?: number;
     };
     if (status === 404) {
-      // 404 でも JSON body が来るが、parse 失敗時は found: false に倒す。
       try {
         const parsed = text ? (JSON.parse(text) as DocResp) : { found: false };
         return { found: parsed.found === true, source: parsed._source };
@@ -345,11 +373,12 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     let searchAfter: unknown[] | undefined;
     for (;;) {
       if (signal?.aborted) return;
-      const result = searchDocs({
+      const result = await searchDocsAsync({
         index,
         query,
         size: PAGE,
         searchAfter,
+        signal,
       });
       if (result.hits.length === 0) return;
       for (const hit of result.hits) {
@@ -371,7 +400,11 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     }
   }
 
-  async function query(input: EsQueryRequest): Promise<EsQueryResult> {
+  async function query(
+    input: EsQueryRequest,
+    _maxRows?: number,
+    signal?: AbortSignal,
+  ): Promise<EsQueryResult> {
     if (input.method !== "GET" && input.method !== "POST") {
       throw new Error(`method not allowed: ${input.method}`);
     }
@@ -385,7 +418,14 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     }
     // path 先頭の / は execEsRequest 側で吸収するのでそのまま渡す。
     const start = Date.now();
-    const r = execEsRequest(config, input.method, input.path, input.body);
+    const r = await execEsRequestAsync(
+      config,
+      input.method,
+      input.path,
+      input.body,
+      15000,
+      signal,
+    );
     const elapsedMs = Date.now() - start;
     if (r.code !== 0) {
       throw new Error(r.stderr.trim() || `query: curl exit ${r.code}`);
@@ -409,7 +449,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
   > {
     // index 一覧を SnapshotIterable の container 候補として返す。
     // id は canonical JSON で、label は表示用の生 index 名。
-    const indices = listIndices();
+    const indices = await listIndicesAsync();
     return indices.map((ix) => ({
       id: JSON.stringify({ index: ix.name }),
       label: ix.name,
@@ -420,10 +460,10 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     kind: "elasticsearch",
     model: "document",
     capabilities: { snapshot: true, query: true },
-    listIndices,
-    getMapping,
-    searchDocs,
-    getDoc,
+    listIndicesAsync,
+    getMappingAsync,
+    searchDocsAsync,
+    getDocAsync,
     iterateForSnapshot,
     listSnapshotContainers,
     query,
@@ -497,14 +537,16 @@ export function canonicalizeEsSnapshotContainer(container: string): string {
   return JSON.stringify({ index: container || "*" });
 }
 
-export function openElasticsearchAdapter(
+export async function openElasticsearchAdapterAsync(
   serviceName: string,
   env: Record<string, string>,
   cwd: string,
-): ElasticsearchExplorer {
-  const containerName = resolveRunningComposeContainerNameOrThrow(
+  signal?: AbortSignal,
+): Promise<ElasticsearchExplorer> {
+  const containerName = await resolveRunningComposeContainerNameOrThrowAsync(
     serviceName,
     cwd,
+    signal,
   );
   const password = env.ELASTIC_PASSWORD || "";
   return createElasticsearchAdapter({ containerName, password });

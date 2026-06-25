@@ -1,10 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TabState, TabsState } from "../../core/database/types";
 import { makeId } from "../../core/id";
@@ -24,6 +18,7 @@ const MAX_TABLE_NAME_LEN = 512;
 const MAX_REDIS_KEY_LEN = 1024;
 const MAX_REDIS_KEY_FILTER_LEN = 512;
 const MAX_INDEX_NAME_LEN = 256;
+const tabsWriteQueues = new Map<string, Promise<void>>();
 // CSS の "240px" のような短い文字列だけ受ける。長さで弾く。
 const MAX_CSS_SIZE_LEN = 16;
 const VALID_VIEWS = new Set([
@@ -37,6 +32,10 @@ const VALID_VIEWS = new Set([
 
 function tabsFilePath(root: string): string {
   return join(root, CODE_VIEWER_DIR, TABS_FILE_NAME);
+}
+
+function isEnoent(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }
 
 function emptyState(): TabsState {
@@ -168,46 +167,81 @@ function sanitize(input: unknown): TabsState {
   return { version: 1, tabs, activeTabId };
 }
 
-export function loadTabs(cwd: string): TabsState {
+export async function loadTabsAsync(cwd: string): Promise<TabsState> {
+  const pendingWrite = tabsWriteQueues.get(cwd);
+  if (pendingWrite) {
+    await pendingWrite.catch(() => {});
+  }
   const file = tabsFilePath(cwd);
-  if (!existsSync(file)) return emptyState();
+  let raw: string;
   try {
-    const raw = readFileSync(file, "utf8");
+    raw = await readFile(file, "utf8");
+  } catch (err) {
+    if (isEnoent(err)) return emptyState();
+    await backupInvalidTabsFileAsync(file);
+    return emptyState();
+  }
+  try {
     const parsed = JSON.parse(raw);
     if (
       !parsed ||
       typeof parsed !== "object" ||
       (parsed as { version?: unknown }).version !== 1
     ) {
-      backupInvalidTabsFile(file);
+      await backupInvalidTabsFileAsync(file);
       return emptyState();
     }
     return sanitize(parsed);
-  } catch {
-    backupInvalidTabsFile(file);
+  } catch (err) {
+    if (isEnoent(err)) return emptyState();
+    await backupInvalidTabsFileAsync(file);
     return emptyState();
   }
 }
 
-function backupInvalidTabsFile(file: string): void {
+async function backupInvalidTabsFileAsync(file: string): Promise<void> {
   try {
-    renameSync(file, `${file}.bak-${Date.now()}`);
+    await rename(file, `${file}.bak-${Date.now()}`);
   } catch {
     // best effort only
   }
 }
 
-export function saveTabs(cwd: string, state: TabsState): void {
+async function saveTabsAsyncUnqueued(
+  cwd: string,
+  state: TabsState,
+): Promise<void> {
   const normalized = sanitize(state);
   const dir = join(cwd, CODE_VIEWER_DIR);
-  mkdirSync(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
   const file = tabsFilePath(cwd);
   const tmp = `${file}.${makeId(`tmp-${process.pid}`)}`;
   const content = `${JSON.stringify(normalized, null, 2)}\n`;
   if (Buffer.byteLength(content, "utf8") > MAX_JSON_BYTES) {
-    // 上限を超えるほど巨大な state は受けない (構造上ありえないが defensive)。
     throw new Error("tabs state too large");
   }
-  writeFileSync(tmp, content, "utf8");
-  renameSync(tmp, file);
+  await writeFile(tmp, content, "utf8");
+  await rename(tmp, file);
+}
+
+export async function saveTabsAsync(
+  cwd: string,
+  state: TabsState,
+): Promise<void> {
+  const previous = tabsWriteQueues.get(cwd) ?? Promise.resolve();
+  const run = previous
+    .catch(() => {})
+    .then(() => saveTabsAsyncUnqueued(cwd, state));
+  const queued = run.then(
+    () => {},
+    () => {},
+  );
+  tabsWriteQueues.set(cwd, queued);
+  try {
+    await run;
+  } finally {
+    if (tabsWriteQueues.get(cwd) === queued) {
+      tabsWriteQueues.delete(cwd);
+    }
+  }
 }

@@ -17,7 +17,6 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { normalizeNewDirectoryName } from "../core/directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
-import { sourceDisplayKind } from "../core/source-meta";
 import type {
   AnnotationTarget,
   DiffMeta,
@@ -64,6 +63,7 @@ import {
   lineByteRangeForIndex,
   parseHttpByteRange,
 } from "./range";
+import { type FileMetadata, rawFileHeaders } from "./raw-file-headers";
 import { ROOT } from "./root";
 import {
   fileByteRangeResponseBody,
@@ -785,13 +785,6 @@ function parentRepoPath(path: string): string {
   return parent === "." ? "" : parent;
 }
 
-type FileMetadata = {
-  size?: number;
-  created_at?: string;
-  updated_at?: string;
-  commit_updated_at?: string;
-};
-
 function isoDate(ms: number | undefined): string | undefined {
   return ms && Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
 }
@@ -869,17 +862,6 @@ function attachTreeEntryMetadata(
     return { ...entry, ...directoryMetadata(target, entry.path) };
   if (entry.type !== "blob") return entry;
   return { ...entry, ...fileMetadataForTarget(target, entry.path) };
-}
-
-function fileMetadataHeaders(metadata: FileMetadata): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (metadata.created_at)
-    headers["X-Code-Viewer-Created-At"] = metadata.created_at;
-  if (metadata.updated_at)
-    headers["X-Code-Viewer-Updated-At"] = metadata.updated_at;
-  if (metadata.commit_updated_at)
-    headers["X-Code-Viewer-Commit-Updated-At"] = metadata.commit_updated_at;
-  return headers;
 }
 
 function readReadme(
@@ -1580,7 +1562,7 @@ function handleRawFile(req: Request, url: URL) {
     const metadata = gitFileMetadata(ref, path, size);
     if (req.method === "HEAD")
       return new Response(null, {
-        headers: rawFileHeaders(path, size, undefined, metadata),
+        headers: rawFileHeaders(path, { size, metadata }),
       });
     const res = git.showBytes(ref, path, cwd);
     if (res.code !== 0) return text("not in ref", 404);
@@ -1589,7 +1571,7 @@ function handleRawFile(req: Request, url: URL) {
       res.stdout.byteOffset + res.stdout.byteLength,
     ) as ArrayBuffer;
     return new Response(body, {
-      headers: rawFileHeaders(path, size, undefined, metadata),
+      headers: rawFileHeaders(path, { size, metadata }),
     });
   } else {
     const full = safeWorktreePath(path);
@@ -1604,7 +1586,7 @@ function handleRawFile(req: Request, url: URL) {
       return new Response(null, {
         status: 416,
         headers: {
-          ...rawFileHeaders(path, size, undefined, metadata),
+          ...rawFileHeaders(path, { size, metadata }),
           "Content-Range": `bytes */${size}`,
           "Content-Length": "0",
         },
@@ -1615,23 +1597,23 @@ function handleRawFile(req: Request, url: URL) {
       if (req.method === "HEAD") {
         return new Response(null, {
           status: 206,
-          headers: rawFileHeaders(path, size, range, metadata),
+          headers: rawFileHeaders(path, { size, range, metadata }),
         });
       }
       return new Response(
         fileByteRangeResponseBody(full, range.start, range.end),
         {
           status: 206,
-          headers: rawFileHeaders(path, size, range, metadata),
+          headers: rawFileHeaders(path, { size, range, metadata }),
         },
       );
     }
     if (req.method === "HEAD")
       return new Response(null, {
-        headers: rawFileHeaders(path, size, undefined, metadata),
+        headers: rawFileHeaders(path, { size, metadata }),
       });
     return new Response(fileReadableStream(full), {
-      headers: rawFileHeaders(path, size, undefined, metadata),
+      headers: rawFileHeaders(path, { size, metadata }),
     });
   }
 }
@@ -1649,54 +1631,6 @@ function rawFileSize(path: string, ref: string): number | null {
   } catch {
     return null;
   }
-}
-
-function rawFileHeaders(
-  path: string,
-  size: number | null = null,
-  range?: { start: number; end: number },
-  metadata: FileMetadata = {},
-): HeadersInit {
-  const mime: Record<string, string> = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
-    ".mp4": "video/mp4",
-    ".webm": "video/webm",
-    ".mov": "video/quicktime",
-    ".pdf": "application/pdf",
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".ogg": "audio/ogg",
-    ".flac": "audio/flac",
-    ".m4a": "audio/mp4",
-    ".aac": "audio/aac",
-    ".opus": "audio/ogg",
-  };
-  const headers: Record<string, string> = {
-    "Content-Type":
-      mime[extname(path).toLowerCase()] ||
-      (sourceDisplayKind(path) === "text"
-        ? "text/plain; charset=utf-8"
-        : "application/octet-stream"),
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-    "Content-Security-Policy": "sandbox",
-    "Accept-Ranges": "bytes",
-  };
-  if (range && size != null) {
-    headers["Content-Length"] = String(range.end - range.start + 1);
-    headers["Content-Range"] = `bytes ${range.start}-${range.end}/${size}`;
-  } else if (size != null) {
-    headers["Content-Length"] = String(size);
-  }
-  for (const [key, value] of Object.entries(fileMetadataHeaders(metadata))) {
-    headers[key] = value;
-  }
-  return headers;
 }
 
 function isForbiddenUploadName(name: string): boolean {

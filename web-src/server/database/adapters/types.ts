@@ -30,22 +30,30 @@ export type TriggerInfo = {
 
 export type DatabaseAdapter = {
   readonly kind: DbKind;
-  getTables(): DbTableInfo[];
-  getColumns(table: string): DbColumn[];
-  getColumnsMulti?(tables: string[]): Map<string, DbColumn[]>;
-  getIndexes(): DbIndexInfo[];
-  getForeignKeys(): DbForeignKey[];
-  getTableRowCount(table: string): number;
-  getTableRowCounts?(tables: string[]): Map<string, number>;
-  getTablePage(
+  getTablesAsync(signal?: AbortSignal): Promise<DbTableInfo[]>;
+  getColumnsAsync(table: string, signal?: AbortSignal): Promise<DbColumn[]>;
+  getColumnsMultiAsync(
+    tables: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, DbColumn[]>>;
+  getIndexesAsync(signal?: AbortSignal): Promise<DbIndexInfo[]>;
+  getForeignKeysAsync(signal?: AbortSignal): Promise<DbForeignKey[]>;
+  getTableRowCountAsync(table: string, signal?: AbortSignal): Promise<number>;
+  getTableRowCountsAsync(
+    tables: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, number>>;
+  getTablePageAsync(
     table: string,
     options: { offset: number; limit: number; orderBy?: DbOrder[] },
-  ): QueryResult;
-  getTablePageWithMeta?(
+    signal?: AbortSignal,
+  ): Promise<QueryResult>;
+  getTablePageWithMeta(
     table: string,
     options: { offset: number; limit: number; orderBy?: DbOrder[] },
+    signal?: AbortSignal,
   ): Promise<TablePageMeta>;
-  getFilteredTablePageWithMeta?(
+  getFilteredTablePageWithMeta(
     table: string,
     options: {
       offset: number;
@@ -53,15 +61,17 @@ export type DatabaseAdapter = {
       orderBy?: DbOrder[];
       grouped: Map<string, string[]>;
     },
+    signal?: AbortSignal,
   ): Promise<TablePageMeta>;
-  executeReadonlyQuery(
+  executeReadonlyQueryAsync(
     sql: string,
     params?: DbValue[],
     maxRows?: number,
-  ): QueryResult;
+    signal?: AbortSignal,
+  ): Promise<QueryResult>;
   invalidateTableMetaCache?(table?: string): void;
-  getCreateStatement(table: string): string;
-  getTriggers(table: string): TriggerInfo[];
+  getCreateStatementAsync(table: string, signal?: AbortSignal): Promise<string>;
+  getTriggersAsync(table: string, signal?: AbortSignal): Promise<TriggerInfo[]>;
   close(): void;
 };
 

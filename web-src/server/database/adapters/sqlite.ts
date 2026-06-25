@@ -13,10 +13,17 @@ import {
   SQL_SNAPSHOT_BATCH_SIZE,
 } from "../sources/sql-snapshot";
 import type { SnapshotItem } from "../sources/types";
+import {
+  buildFilterWhere,
+  filterGroupedColumns,
+  filterOrderByColumns,
+  sanitizeIdentifier,
+} from "../sql-utils";
 import type {
   DatabaseAdapter,
   DatabaseAdapterFactory,
   QueryResult,
+  TablePageMeta,
   TriggerInfo,
 } from "./types";
 
@@ -31,6 +38,27 @@ type SqliteSource = DatabaseAdapter & {
     signal?: AbortSignal,
   ): AsyncIterable<SnapshotItem>;
   listSnapshotContainers(): Promise<Array<{ id: string; label: string }>>;
+} & SqliteSyncHelpers;
+
+type SqliteSyncHelpers = {
+  getTables(): DbTableInfo[];
+  getColumns(table: string): DbColumn[];
+  getIndexes(): DbIndexInfo[];
+  getForeignKeys(): DbForeignKey[];
+  getColumnsMulti(tables: string[]): Map<string, DbColumn[]>;
+  getTableRowCount(table: string): number;
+  getTableRowCounts(tables: string[]): Map<string, number>;
+  getTablePage(
+    table: string,
+    options: { offset: number; limit: number; orderBy?: DbOrder[] },
+  ): QueryResult;
+  executeReadonlyQuery(
+    sql: string,
+    params?: DbValue[],
+    maxRows?: number,
+  ): QueryResult;
+  getCreateStatement(table: string): string;
+  getTriggers(table: string): TriggerInfo[];
 };
 
 type SqliteStmt = {
@@ -90,10 +118,6 @@ async function getSqliteClass(): Promise<SqliteConstructor> {
   );
 }
 
-function sanitizeIdentifier(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
 function buildOrderClause(orderBy?: DbOrder[]): string {
   if (!orderBy?.length) return "";
   const parts = orderBy.map(
@@ -101,6 +125,21 @@ function buildOrderClause(orderBy?: DbOrder[]): string {
       `${sanitizeIdentifier(o.column)} ${o.direction === "desc" ? "DESC" : "ASC"}`,
   );
   return ` ORDER BY ${parts.join(", ")}`;
+}
+
+function queryRowsToResult(
+  rows: Record<string, DbValue>[],
+  columns: DbColumn[],
+): QueryResult {
+  const columnNames =
+    rows.length > 0 ? Object.keys(rows[0]) : columns.map((c) => c.name);
+  const typeMap = new Map(columns.map((c) => [c.name, c.type]));
+  return {
+    columns: columnNames,
+    columnTypes: columnNames.map((name) => typeMap.get(name) || "TEXT"),
+    rows: rows.map((row) => columnNames.map((col) => row[col] as DbValue)),
+    rowCount: rows.length,
+  };
 }
 
 function queryColumns(db: SqliteDb, table: string): DbColumn[] {
@@ -141,8 +180,16 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       }));
     },
 
+    async getTablesAsync(): Promise<DbTableInfo[]> {
+      return this.getTables();
+    },
+
     getColumns(table: string): DbColumn[] {
       return queryColumns(db, table);
+    },
+
+    async getColumnsAsync(table: string): Promise<DbColumn[]> {
+      return this.getColumns(table);
     },
 
     getIndexes(): DbIndexInfo[] {
@@ -166,6 +213,10 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
           unique: entry ? entry.unique === 1 : false,
         };
       });
+    },
+
+    async getIndexesAsync(): Promise<DbIndexInfo[]> {
+      return this.getIndexes();
     },
 
     getForeignKeys(): DbForeignKey[] {
@@ -195,6 +246,10 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       return fks;
     },
 
+    async getForeignKeysAsync(): Promise<DbForeignKey[]> {
+      return this.getForeignKeys();
+    },
+
     getColumnsMulti(tables: string[]): Map<string, DbColumn[]> {
       const result = new Map<string, DbColumn[]>();
       for (const t of tables) {
@@ -203,11 +258,21 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       return result;
     },
 
+    async getColumnsMultiAsync(
+      tables: string[],
+    ): Promise<Map<string, DbColumn[]>> {
+      return this.getColumnsMulti(tables);
+    },
+
     getTableRowCount(table: string): number {
       const row = db
         .prepare(`SELECT COUNT(*) AS cnt FROM ${sanitizeIdentifier(table)}`)
         .get() as { cnt: number } | undefined;
       return row?.cnt ?? 0;
+    },
+
+    async getTableRowCountAsync(table: string): Promise<number> {
+      return this.getTableRowCount(table);
     },
 
     getTableRowCounts(tables: string[]): Map<string, number> {
@@ -234,6 +299,12 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       return result;
     },
 
+    async getTableRowCountsAsync(
+      tables: string[],
+    ): Promise<Map<string, number>> {
+      return this.getTableRowCounts(tables);
+    },
+
     getTablePage(
       table: string,
       options: { offset: number; limit: number; orderBy?: DbOrder[] },
@@ -245,21 +316,78 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
         options.offset,
       ) as Record<string, DbValue>[];
       const cols = queryColumns(db, table);
-      if (rows.length === 0) {
-        return {
-          columns: cols.map((c) => c.name),
-          columnTypes: cols.map((c) => c.type),
-          rows: [],
-          rowCount: 0,
-        };
-      }
-      const columnNames = Object.keys(rows[0]);
-      const typeMap = new Map(cols.map((c) => [c.name, c.type]));
+      return queryRowsToResult(rows, cols);
+    },
+
+    async getTablePageAsync(
+      table: string,
+      options: { offset: number; limit: number; orderBy?: DbOrder[] },
+    ): Promise<QueryResult> {
+      return this.getTablePage(table, options);
+    },
+
+    async getTablePageWithMeta(
+      table: string,
+      options: { offset: number; limit: number; orderBy?: DbOrder[] },
+    ): Promise<TablePageMeta> {
+      const columns = queryColumns(db, table);
+      const orderBy = filterOrderByColumns(
+        options.orderBy,
+        columns.map((column) => column.name),
+      );
+      const order = buildOrderClause(orderBy);
+      const sql = `SELECT * FROM ${sanitizeIdentifier(table)}${order} LIMIT ? OFFSET ?`;
+      const rows = safePrepare(db, sql).all(
+        options.limit,
+        options.offset,
+      ) as Record<string, DbValue>[];
+      const result = queryRowsToResult(rows, columns);
+      const totalRows = this.getTableRowCount(table);
       return {
-        columns: columnNames,
-        columnTypes: columnNames.map((n) => typeMap.get(n) || "TEXT"),
-        rows: rows.map((row) => columnNames.map((col) => row[col] as DbValue)),
-        rowCount: rows.length,
+        columns,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        totalRows,
+      };
+    },
+
+    async getFilteredTablePageWithMeta(
+      table: string,
+      options: {
+        offset: number;
+        limit: number;
+        orderBy?: DbOrder[];
+        grouped: Map<string, string[]>;
+      },
+    ): Promise<TablePageMeta> {
+      const columns = queryColumns(db, table);
+      const columnNames = columns.map((column) => column.name);
+      const filter = buildFilterWhere(
+        filterGroupedColumns(options.grouped, columnNames),
+        "sqlite",
+      );
+      const order = buildOrderClause(
+        filterOrderByColumns(options.orderBy, columnNames),
+      );
+      const tableId = sanitizeIdentifier(table);
+      const whereClause = filter.where ? ` WHERE ${filter.where}` : "";
+      const countRow = safePrepare(
+        db,
+        `SELECT COUNT(*) AS cnt FROM ${tableId}${whereClause}`,
+      ).get(...filter.params) as { cnt: number } | undefined;
+      const rows = safePrepare(
+        db,
+        `SELECT * FROM ${tableId}${whereClause}${order} LIMIT ? OFFSET ?`,
+      ).all(...filter.params, options.limit, options.offset) as Record<
+        string,
+        DbValue
+      >[];
+      const result = queryRowsToResult(rows, columns);
+      return {
+        columns,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        totalRows: countRow?.cnt ?? 0,
       };
     },
 
@@ -319,11 +447,23 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       };
     },
 
+    async executeReadonlyQueryAsync(
+      sql: string,
+      params?: DbValue[],
+      maxRows?: number,
+    ): Promise<QueryResult> {
+      return this.executeReadonlyQuery(sql, params, maxRows);
+    },
+
     getCreateStatement(table: string): string {
       const row = db
         .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
         .get(table) as { sql: string } | undefined;
       return row?.sql ?? "";
+    },
+
+    async getCreateStatementAsync(table: string): Promise<string> {
+      return this.getCreateStatement(table);
     },
 
     getTriggers(table: string): TriggerInfo[] {
@@ -335,6 +475,10 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       return rows.map((row) => ({ name: row.name, sql: row.sql ?? "" }));
     },
 
+    async getTriggersAsync(table: string): Promise<TriggerInfo[]> {
+      return this.getTriggers(table);
+    },
+
     close(): void {
       db.close();
     },
@@ -343,14 +487,14 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       table: string,
       signal?: AbortSignal,
     ): AsyncIterable<SnapshotItem> {
-      const columns = adapter.getColumns(table);
+      const columns = await adapter.getColumnsAsync(table);
       const colNames = columns.map((c) => c.name);
       const pkColumns = columns.filter((c) => c.primaryKey).map((c) => c.name);
       let offset = 0;
       let rowIndex = 0;
       for (;;) {
         if (signal?.aborted) return;
-        const result = adapter.getTablePage(table, {
+        const result = await adapter.getTablePageAsync(table, {
           offset,
           limit: SQL_SNAPSHOT_BATCH_SIZE,
         });
@@ -371,10 +515,10 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
     async listSnapshotContainers(): Promise<
       Array<{ id: string; label: string }>
     > {
-      return adapter
-        .getTables()
-        .filter((t) => t.type === "table")
-        .map((t) => ({ id: t.name, label: t.name }));
+      const tables = await adapter.getTablesAsync();
+      return tables
+        .filter((table) => table.type === "table")
+        .map((table) => ({ id: table.name, label: table.name }));
     },
   };
   return adapter;

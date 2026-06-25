@@ -31,6 +31,7 @@ export type TableGridCallbacks = {
     limit: number,
     sort: GridSort | null,
     filters: GridFilter[],
+    signal?: AbortSignal,
   ) => Promise<DbTableDataResponse>;
   getDbId: () => string | null;
   getProjectName?: () => string;
@@ -106,6 +107,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let pageCache = new Map<number, DbValue[][]>();
   let pendingPages = new Map<number, Promise<void>>();
   let loadGeneration = 0;
+  let loadController = new AbortController();
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
@@ -228,10 +230,23 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     detailPanel.innerHTML = "";
   }
 
+  function startNewLoadGeneration() {
+    loadController.abort("db-grid:generation");
+    loadController = new AbortController();
+    loadGeneration++;
+  }
+
+  function isAbortError(err: unknown): boolean {
+    return (
+      (err instanceof DOMException && err.name === "AbortError") ||
+      (err instanceof Error && err.name === "AbortError")
+    );
+  }
+
   function invalidateData(): Promise<void> {
     pageCache = new Map();
     pendingPages = new Map();
-    loadGeneration++;
+    startNewLoadGeneration();
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
     return ensurePage(0);
@@ -251,7 +266,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     filterRow.innerHTML = "";
     pageCache = new Map();
     pendingPages = new Map();
-    loadGeneration++;
+    startNewLoadGeneration();
     cancelAnimationFrame(rafId);
     if (filterTimer) clearTimeout(filterTimer);
     headerRow.innerHTML = "";
@@ -497,6 +512,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
     pageCache = new Map();
     pendingPages = new Map();
+    startNewLoadGeneration();
     resetSelectionAndDetail();
     renderHeader();
     renderViewport();
@@ -507,9 +523,10 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     const pending = pendingPages.get(pageStart);
     if (pending) return pending;
     const gen = loadGeneration;
+    const signal = loadController.signal;
     const filters = collectFilters();
     const promise = callbacks
-      .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters)
+      .fetchPage(currentTable, pageStart, PAGE_SIZE, sort, filters, signal)
       .then((data) => {
         if (gen !== loadGeneration) return;
         pageCache.set(pageStart, data.rows);
@@ -519,6 +536,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
         renderViewport();
       })
       .catch((err) => {
+        if (gen !== loadGeneration || isAbortError(err)) return;
         if (gen === loadGeneration) {
           showError(err instanceof Error ? err.message : String(err));
         }

@@ -8,21 +8,39 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadTabs, saveTabs } from "../server/database/tabs-store";
+import { loadTabsAsync, saveTabsAsync } from "../server/database/tabs-store";
 
-function withTempProject(run: (dir: string) => void): void {
+async function withTempProject(
+  run: (dir: string) => void | Promise<void>,
+): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "code-viewer-tabs-"));
   try {
-    run(dir);
+    await run(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 describe("database tabs store", () => {
-  test("persists sanitized tabs in the caller-provided order", () => {
-    withTempProject((dir) => {
-      saveTabs(dir, {
+  test("async load treats a missing tabs file as empty without creating backups", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-tabs-"));
+    try {
+      mkdirSync(join(dir, ".code-viewer"), { recursive: true });
+
+      expect(await loadTabsAsync(dir)).toEqual({
+        version: 1,
+        activeTabId: null,
+        tabs: [],
+      });
+      expect(readdirSync(join(dir, ".code-viewer"))).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("persists sanitized tabs in the caller-provided order", async () => {
+    await withTempProject(async (dir) => {
+      await saveTabsAsync(dir, {
         version: 1,
         activeTabId: "tab-2",
         tabs: [
@@ -46,7 +64,7 @@ describe("database tabs store", () => {
         ],
       });
 
-      expect(loadTabs(dir)).toEqual({
+      expect(await loadTabsAsync(dir)).toEqual({
         version: 1,
         activeTabId: "tab-2",
         tabs: [
@@ -72,8 +90,8 @@ describe("database tabs store", () => {
     });
   });
 
-  test("drops duplicate ids and resets active tab to the first surviving tab", () => {
-    withTempProject((dir) => {
+  test("drops duplicate ids and resets active tab to the first surviving tab", async () => {
+    await withTempProject(async (dir) => {
       const storeDir = join(dir, ".code-viewer");
       mkdirSync(storeDir, { recursive: true });
       writeFileSync(
@@ -107,7 +125,7 @@ describe("database tabs store", () => {
         "utf8",
       );
 
-      expect(loadTabs(dir)).toEqual({
+      expect(await loadTabsAsync(dir)).toEqual({
         version: 1,
         activeTabId: "a",
         tabs: [
@@ -124,9 +142,9 @@ describe("database tabs store", () => {
     });
   });
 
-  test("drops tabs pointing at code-viewer internal databases", () => {
-    withTempProject((dir) => {
-      saveTabs(dir, {
+  test("drops tabs pointing at code-viewer internal databases", async () => {
+    await withTempProject(async (dir) => {
+      await saveTabsAsync(dir, {
         version: 1,
         activeTabId: "internal",
         tabs: [
@@ -145,7 +163,7 @@ describe("database tabs store", () => {
         ],
       });
 
-      expect(loadTabs(dir)).toEqual({
+      expect(await loadTabsAsync(dir)).toEqual({
         version: 1,
         activeTabId: "valid",
         tabs: [
@@ -160,13 +178,13 @@ describe("database tabs store", () => {
     });
   });
 
-  test("backs up invalid JSON and returns an empty state", () => {
-    withTempProject((dir) => {
+  test("backs up invalid JSON and returns an empty state", async () => {
+    await withTempProject(async (dir) => {
       const storeDir = join(dir, ".code-viewer");
       mkdirSync(storeDir, { recursive: true });
       writeFileSync(join(storeDir, "tabs.json"), "{broken", "utf8");
 
-      expect(loadTabs(dir)).toEqual({
+      expect(await loadTabsAsync(dir)).toEqual({
         version: 1,
         activeTabId: null,
         tabs: [],
@@ -179,9 +197,9 @@ describe("database tabs store", () => {
     });
   });
 
-  test("truncates large drafts and rejects unsafe css sizes", () => {
-    withTempProject((dir) => {
-      saveTabs(dir, {
+  test("truncates large drafts and rejects unsafe css sizes", async () => {
+    await withTempProject(async (dir) => {
+      await saveTabsAsync(dir, {
         version: 1,
         activeTabId: "large",
         tabs: [
@@ -197,7 +215,7 @@ describe("database tabs store", () => {
         ],
       });
 
-      const state = loadTabs(dir);
+      const state = await loadTabsAsync(dir);
       expect(state.tabs).toHaveLength(1);
       expect(state.tabs[0].sqlDraft?.length).toBe(16_000);
       expect(state.tabs[0].historyHeight).toBeUndefined();
@@ -205,8 +223,8 @@ describe("database tabs store", () => {
     });
   });
 
-  test("caps tabs at 64 and ignores prototype-shaped fields", () => {
-    withTempProject((dir) => {
+  test("caps tabs at 64 and ignores prototype-shaped fields", async () => {
+    await withTempProject(async (dir) => {
       const storeDir = join(dir, ".code-viewer");
       mkdirSync(storeDir, { recursive: true });
       const tabs = Array.from({ length: 70 }, (_, index) => ({
@@ -223,7 +241,7 @@ describe("database tabs store", () => {
         "utf8",
       );
 
-      const state = loadTabs(dir);
+      const state = await loadTabsAsync(dir);
       expect(state.tabs).toHaveLength(64);
       expect(state.activeTabId).toBe("tab-0");
       expect(
@@ -232,13 +250,13 @@ describe("database tabs store", () => {
     });
   });
 
-  test("returns an empty state for non-object JSON values", () => {
-    withTempProject((dir) => {
+  test("returns an empty state for non-object JSON values", async () => {
+    await withTempProject(async (dir) => {
       const storeDir = join(dir, ".code-viewer");
       mkdirSync(storeDir, { recursive: true });
       writeFileSync(join(storeDir, "tabs.json"), "null", "utf8");
 
-      expect(loadTabs(dir)).toEqual({
+      expect(await loadTabsAsync(dir)).toEqual({
         version: 1,
         activeTabId: null,
         tabs: [],

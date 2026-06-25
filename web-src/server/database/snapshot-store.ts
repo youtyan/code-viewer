@@ -176,34 +176,46 @@ export async function addSnapshotTableData(
   const insertPayload = db.prepare(
     "INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)",
   );
+  const updateTable = db.prepare(
+    "UPDATE snapshot_tables SET row_count = ?, table_hash = ?, pk_columns_json = ? WHERE snapshot_id = ? AND table_name = ?",
+  );
 
-  for (const row of rows) {
-    const rowKeyHash = createHash("sha256")
-      .update(row.rowKeyJson)
-      .digest("hex");
-    const payloadHash = hashPayload(row.payloadJson);
-    tableHasher.update(row.rowHash);
-    insertRow.run(
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      const rowKeyHash = createHash("sha256")
+        .update(row.rowKeyJson)
+        .digest("hex");
+      const payloadHash = hashPayload(row.payloadJson);
+      tableHasher.update(row.rowHash);
+      insertRow.run(
+        snapshotId,
+        tableName,
+        rowKeyHash,
+        row.rowKeyJson,
+        row.rowHash,
+        payloadHash,
+      );
+      insertPayload.run(payloadHash, row.payloadJson);
+    }
+
+    const tableHash = tableHasher.digest("hex");
+    updateTable.run(
+      rows.length,
+      tableHash,
+      JSON.stringify(pkColumns),
       snapshotId,
       tableName,
-      rowKeyHash,
-      row.rowKeyJson,
-      row.rowHash,
-      payloadHash,
     );
-    insertPayload.run(payloadHash, row.payloadJson);
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failure; original error is more useful.
+    }
+    throw err;
   }
-
-  const tableHash = tableHasher.digest("hex");
-  db.prepare(
-    "UPDATE snapshot_tables SET row_count = ?, table_hash = ?, pk_columns_json = ? WHERE snapshot_id = ? AND table_name = ?",
-  ).run(
-    rows.length,
-    tableHash,
-    JSON.stringify(pkColumns),
-    snapshotId,
-    tableName,
-  );
 }
 
 export async function finalizeSnapshot(
@@ -304,22 +316,24 @@ export async function deleteSnapshot(
   snapshotId: string,
 ): Promise<void> {
   const db = await getStoreDb(cwd);
-  const payloadHashes = db
-    .prepare(
-      "SELECT DISTINCT payload_hash FROM snapshot_rows WHERE snapshot_id = ?",
-    )
-    .all(snapshotId)
-    .map((r) => r.payload_hash as string);
-  db.prepare("DELETE FROM snapshots WHERE id = ?").run(snapshotId);
-  for (const ph of payloadHashes) {
-    const used = db
-      .prepare("SELECT 1 FROM snapshot_rows WHERE payload_hash = ? LIMIT 1")
-      .get(ph);
-    if (!used) {
-      db.prepare("DELETE FROM snapshot_payloads WHERE payload_hash = ?").run(
-        ph,
-      );
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM snapshots WHERE id = ?").run(snapshotId);
+    db.prepare(
+      `DELETE FROM snapshot_payloads
+       WHERE NOT EXISTS (
+         SELECT 1 FROM snapshot_rows
+         WHERE snapshot_rows.payload_hash = snapshot_payloads.payload_hash
+       )`,
+    ).run();
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failure; original error is more useful.
     }
+    throw err;
   }
 }
 

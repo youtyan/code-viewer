@@ -119,6 +119,10 @@ export function createElasticsearchExplorer(
   let suppressNotify = false;
   let queryNotifyTimer: ReturnType<typeof setTimeout> | null = null;
   let disposed = false;
+  let activeIndexRow: HTMLElement | null = null;
+  let activeDocRow: HTMLElement | null = null;
+  const indexRowsByName = new Map<string, HTMLElement>();
+  const docRowsById = new Map<string, HTMLElement>();
   const indexGuard = createAbortGuard();
   const mappingGuard = createAbortGuard();
   const docsGuard = createAbortGuard();
@@ -147,14 +151,17 @@ export function createElasticsearchExplorer(
 
   function renderIndices(indices: EsIndicesResponse["indices"]): void {
     indexList.innerHTML = "";
+    indexRowsByName.clear();
     if (indices.length === 0) {
       setIndexStatus("(no indices)");
       return;
     }
+    const fragment = document.createDocumentFragment();
     for (const ix of indices) {
       const item = document.createElement("div");
       item.className = "es-index-item";
       item.dataset.indexName = ix.name;
+      indexRowsByName.set(ix.name, item);
       const name = document.createElement("span");
       name.className = "es-index-name";
       name.textContent = ix.name;
@@ -163,24 +170,25 @@ export function createElasticsearchExplorer(
       meta.className = "es-index-meta";
       meta.textContent = `${ix.docCount.toLocaleString()} docs / ${formatBytes(ix.sizeBytes)}`;
       item.append(name, meta);
-      item.addEventListener("click", () => selectIndex(ix.name));
-      indexList.appendChild(item);
+      fragment.appendChild(item);
     }
+    indexList.appendChild(fragment);
   }
 
   function highlightActiveIndex(name: string) {
-    for (const item of indexList.querySelectorAll<HTMLElement>(
-      ".es-index-item",
-    )) {
-      item.classList.toggle("active", item.dataset.indexName === name);
-    }
+    if (activeIndexRow?.dataset.indexName === name) return;
+    activeIndexRow?.classList.remove("active");
+    activeIndexRow = indexRowsByName.get(name) ?? null;
+    activeIndexRow?.classList.add("active");
   }
 
   function appendDocs(hits: EsDocHit[]): void {
+    const fragment = document.createDocumentFragment();
     for (const hit of hits) {
       const row = document.createElement("div");
       row.className = "es-doc-item";
       row.dataset.docId = hit._id;
+      docRowsById.set(hit._id, row);
       const id = document.createElement("span");
       id.className = "es-doc-id";
       id.textContent = hit._id;
@@ -189,25 +197,37 @@ export function createElasticsearchExplorer(
       preview.className = "es-doc-preview";
       preview.textContent = previewSource(hit._source);
       row.append(id, preview);
-      row.addEventListener("click", () => selectDoc(hit._id));
-      docList.appendChild(row);
+      fragment.appendChild(row);
     }
+    docList.appendChild(fragment);
   }
 
   function previewSource(src: unknown): string {
     if (src === null || src === undefined) return "";
-    try {
-      const s = JSON.stringify(src);
-      return s.length > 200 ? `${s.slice(0, 200)}…` : s;
-    } catch {
-      return String(src);
+    if (Array.isArray(src)) return `array(${src.length})`;
+    if (typeof src === "object") {
+      const entries = Object.entries(src as Record<string, unknown>).slice(
+        0,
+        6,
+      );
+      const parts = entries.map(([key, value]) => {
+        if (value === null) return `${key}=null`;
+        if (Array.isArray(value)) return `${key}=array(${value.length})`;
+        if (typeof value === "object") return `${key}=object`;
+        const text = String(value);
+        return `${key}=${text.length > 40 ? `${text.slice(0, 40)}...` : text}`;
+      });
+      return parts.join(" / ");
     }
+    const text = String(src);
+    return text.length > 200 ? `${text.slice(0, 200)}...` : text;
   }
 
   function highlightActiveDoc(id: string) {
-    for (const row of docList.querySelectorAll<HTMLElement>(".es-doc-item")) {
-      row.classList.toggle("active", row.dataset.docId === id);
-    }
+    if (activeDocRow?.dataset.docId === id) return;
+    activeDocRow?.classList.remove("active");
+    activeDocRow = docRowsById.get(id) ?? null;
+    activeDocRow?.classList.add("active");
   }
 
   function setDetailTab(tab: "mapping" | "doc") {
@@ -347,6 +367,8 @@ export function createElasticsearchExplorer(
     if (!append) {
       lastSort = undefined;
       setDocStatus("Loading docs...");
+      docRowsById.clear();
+      activeDocRow = null;
     }
     try {
       const params = new URLSearchParams({
@@ -378,7 +400,10 @@ export function createElasticsearchExplorer(
       ) {
         return;
       }
-      if (!append) docList.innerHTML = "";
+      if (!append) {
+        docList.innerHTML = "";
+        docRowsById.clear();
+      }
       if (data.hits.length === 0 && !append) {
         setDocStatus("(no docs)");
       } else {
@@ -487,6 +512,22 @@ export function createElasticsearchExplorer(
     }, 300);
   });
   docMoreBtn.addEventListener("click", () => loadDocs(true));
+  indexList.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+      ".es-index-item",
+    );
+    if (!row || !indexList.contains(row)) return;
+    const name = row.dataset.indexName;
+    if (name) void selectIndex(name);
+  });
+  docList.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+      ".es-doc-item",
+    );
+    if (!row || !docList.contains(row)) return;
+    const id = row.dataset.docId;
+    if (id) void selectDoc(id);
+  });
 
   async function load(
     dbId: string,
@@ -513,6 +554,9 @@ export function createElasticsearchExplorer(
     searchInput.value = initial?.query ?? "";
     currentQuery = searchInput.value.trim();
     docList.innerHTML = "";
+    docRowsById.clear();
+    activeIndexRow = null;
+    activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
     mappingBody.textContent = "Select an index to view its mapping.";
@@ -585,6 +629,10 @@ export function createElasticsearchExplorer(
     searchInput.value = "";
     indexList.innerHTML = "";
     docList.innerHTML = "";
+    indexRowsByName.clear();
+    docRowsById.clear();
+    activeIndexRow = null;
+    activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
     mappingBody.textContent = "Select an index to view its mapping.";

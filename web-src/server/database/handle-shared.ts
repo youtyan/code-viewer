@@ -2,7 +2,7 @@ import type { DbKind } from "../../core/database/types";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import {
   type DockerDbInfo,
-  findDockerServiceByDbId,
+  findDockerServiceByDbIdAsync,
   parseDockerDbId,
 } from "./discovery";
 
@@ -15,8 +15,13 @@ type AdapterCacheEntry<T extends CloseableDatabaseHandle> = {
   lastUsed: number;
 };
 
+type PendingAdapterOpen<T extends CloseableDatabaseHandle> = {
+  promise: Promise<T>;
+  closed: boolean;
+};
+
 export type DockerAdapterCache<T extends CloseableDatabaseHandle> = {
-  getOrOpen(key: string, open: () => T): T;
+  getOrOpenAsync(key: string, open: () => T | Promise<T>): Promise<T>;
   close(key: string): void;
   closePrefix(prefix: string): void;
 };
@@ -29,6 +34,7 @@ export function createDockerAdapterCache<T extends CloseableDatabaseHandle>(
   idleMs = DEFAULT_DOCKER_ADAPTER_IDLE_MS,
 ): DockerAdapterCache<T> {
   const cache = new Map<string, AdapterCacheEntry<T>>();
+  const pending = new Map<string, PendingAdapterOpen<T>>();
 
   function closeEntry(key: string, entry: AdapterCacheEntry<T>): void {
     try {
@@ -59,27 +65,52 @@ export function createDockerAdapterCache<T extends CloseableDatabaseHandle>(
   }
 
   return {
-    getOrOpen(key: string, open: () => T): T {
+    async getOrOpenAsync(key: string, open: () => T | Promise<T>): Promise<T> {
       prune();
       const cached = cache.get(key);
       if (cached) {
         cached.lastUsed = Date.now();
         return cached.adapter;
       }
-      const adapter = open();
-      cache.set(key, { adapter, lastUsed: Date.now() });
-      prune();
-      return adapter;
+      const pendingOpen = pending.get(key);
+      if (pendingOpen) return pendingOpen.promise;
+      const pendingEntry: PendingAdapterOpen<T> = {
+        closed: false,
+        promise: undefined as unknown as Promise<T>,
+      };
+      pendingEntry.promise = Promise.resolve()
+        .then(open)
+        .then((adapter) => {
+          if (pendingEntry.closed) {
+            adapter.close();
+          } else {
+            cache.set(key, { adapter, lastUsed: Date.now() });
+            prune();
+          }
+          return adapter;
+        })
+        .finally(() => {
+          if (pending.get(key) === pendingEntry) {
+            pending.delete(key);
+          }
+        });
+      pending.set(key, pendingEntry);
+      return pendingEntry.promise;
     },
 
     close(key: string): void {
       const cached = cache.get(key);
       if (cached) closeEntry(key, cached);
+      const pendingOpen = pending.get(key);
+      if (pendingOpen) pendingOpen.closed = true;
     },
 
     closePrefix(prefix: string): void {
       for (const [key, entry] of Array.from(cache)) {
         if (key.startsWith(prefix)) closeEntry(key, entry);
+      }
+      for (const [key, entry] of Array.from(pending)) {
+        if (key.startsWith(prefix)) entry.closed = true;
       }
     },
   };
@@ -122,24 +153,33 @@ export function textError(message: string, status: number): Response {
   });
 }
 
-export function resolveDockerExplorer<T extends CloseableDatabaseHandle>(
+export async function resolveDockerExplorerAsync<
+  T extends CloseableDatabaseHandle,
+>(
   cwd: string,
   dbParam: string | null,
   kind: DbKind,
   cache: DockerAdapterCache<T>,
-  openFn: (info: DockerDbInfo) => T,
+  openFn: (info: DockerDbInfo) => T | Promise<T>,
   omitDirNames?: string[],
-): { dbId: string; explorer: T } | Response {
+  signal?: AbortSignal,
+): Promise<{ dbId: string; explorer: T } | Response> {
   if (!dbParam) return textError("missing db parameter", 400);
   if (!dbParam.startsWith("docker:")) {
     return textError(`${kind} requires docker: prefix`, 400);
   }
   const parsed = parseDockerDbId(dbParam);
   if (!parsed) return textError("invalid docker db id", 400);
-  const info = findDockerServiceByDbId(cwd, dbParam, kind, omitDirNames);
+  const info = await findDockerServiceByDbIdAsync(
+    cwd,
+    dbParam,
+    kind,
+    omitDirNames,
+    signal,
+  );
   if (!info) return textError(`${kind} service not found`, 404);
 
-  const explorer = cache.getOrOpen(dbParam, () => openFn(info));
+  const explorer = await cache.getOrOpenAsync(dbParam, () => openFn(info));
   return { dbId: dbParam, explorer };
 }
 

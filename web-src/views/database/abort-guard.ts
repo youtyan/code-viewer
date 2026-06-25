@@ -15,7 +15,7 @@ export function createAbortGuard(): AbortGuard {
 
   return {
     start(): AbortGuardSlot {
-      active?.abort("abort-guard:start");
+      active?.abort();
       const abort = new AbortController();
       active = abort;
       const requestRunId = ++runId;
@@ -31,7 +31,7 @@ export function createAbortGuard(): AbortGuard {
     },
     dispose(): void {
       runId++;
-      active?.abort("abort-guard:dispose");
+      active?.abort();
       active = null;
     },
   };

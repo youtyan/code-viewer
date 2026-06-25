@@ -178,7 +178,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   function annotationLocationLabel(entry: AnnotationEntry): string {
     if (entry.target?.kind === "database") {
-      const parts = ["Database"];
+      const parts = ["Datastores"];
       if (entry.target.db) parts.push(entry.target.db);
       if (entry.target.schema) parts.push(entry.target.schema);
       if (entry.target.table) parts.push(entry.target.table);
@@ -295,7 +295,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     if (!root) return;
     const strip = document.createElement("section");
     strip.className = "gdp-db-annotation-strip";
-    strip.setAttribute("aria-label", "Database annotations");
+    strip.setAttribute("aria-label", "Datastore annotations");
     for (const entry of matches) {
       strip.appendChild(buildDatabaseAnnotationBlock(entry));
     }
@@ -636,7 +636,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   function databaseAnnotationTitle(
     target: Extract<AnnotationEntry["target"], { kind: "database" }>,
   ): string {
-    const parts = [target.table || target.schema || target.db || "Database"];
+    const parts = [target.table || target.schema || target.db || "Datastores"];
     if (target.schema && target.table) parts.unshift(target.schema);
     if (target.tab === "data" && target.data?.search)
       parts.push(`search: ${target.data.search}`);
@@ -651,7 +651,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     target: Extract<AnnotationTarget, { kind: "database" }>,
   ) {
     $("#annotation-detail-session").textContent =
-      activeSessionId || "Database annotations";
+      activeSessionId || "Datastore annotations";
     $("#annotation-detail-step").textContent = "new";
     const location = $<HTMLAnchorElement>("#annotation-detail-location");
     location.textContent = databaseAnnotationTitle(target);
@@ -693,7 +693,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
           body: JSON.stringify({
             action: "add",
             session_id: activeSessionId || undefined,
-            session_title: activeSessionId ? undefined : "Database annotations",
+            session_title: activeSessionId
+              ? undefined
+              : "Datastore annotations",
             target,
             title: titleInput.value,
             body: bodyInput.value,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { DbColumn } from "../core/database/types";
 import type { DatabaseAdapter } from "../server/database/adapters/types";
-import { searchTable } from "../server/database/global-search";
+import { searchTableAsync } from "../server/database/global-search";
 
 const cityColumns: DbColumn[] = [
   {
@@ -27,18 +27,34 @@ function createSearchAdapter(): {
   const calls: Array<{ sql: string; maxRows?: number }> = [];
   const adapter: DatabaseAdapter = {
     kind: "mysql",
-    getTables: () => [],
-    getColumns: () => cityColumns,
-    getIndexes: () => [],
-    getForeignKeys: () => [],
-    getTableRowCount: () => 0,
-    getTablePage: () => ({
+    getTablesAsync: async () => [],
+    getColumnsAsync: async () => cityColumns,
+    getColumnsMultiAsync: async (tables) =>
+      new Map(tables.map((table) => [table, cityColumns])),
+    getIndexesAsync: async () => [],
+    getForeignKeysAsync: async () => [],
+    getTableRowCountAsync: async () => 0,
+    getTableRowCountsAsync: async (tables) =>
+      new Map(tables.map((table) => [table, 0])),
+    getTablePageAsync: async () => ({
       columns: [],
       columnTypes: [],
       rows: [],
       rowCount: 0,
     }),
-    executeReadonlyQuery: (sql, _params, maxRows) => {
+    getTablePageWithMeta: async () => ({
+      columns: cityColumns,
+      rows: [],
+      rowCount: 0,
+      totalRows: 0,
+    }),
+    getFilteredTablePageWithMeta: async () => ({
+      columns: cityColumns,
+      rows: [],
+      rowCount: 0,
+      totalRows: 0,
+    }),
+    executeReadonlyQueryAsync: async (sql, _params, maxRows) => {
       calls.push({ sql, maxRows });
       if (/\bLIMIT\b/i.test(sql)) {
         throw new Error("adapter adds LIMIT itself");
@@ -50,18 +66,18 @@ function createSearchAdapter(): {
         rowCount: 1,
       };
     },
-    getCreateStatement: () => "",
-    getTriggers: () => [],
+    getCreateStatementAsync: async () => "",
+    getTriggersAsync: async () => [],
     close: () => {},
   };
   return { adapter, calls };
 }
 
 describe("global database search", () => {
-  test("lets the adapter own row limiting so Docker SQL does not get duplicate LIMITs", () => {
+  test("lets the adapter own row limiting so Docker SQL does not get duplicate LIMITs", async () => {
     const { adapter, calls } = createSearchAdapter();
 
-    const hits = searchTable(
+    const hits = await searchTableAsync(
       adapter,
       "cities",
       cityColumns,
@@ -78,10 +94,18 @@ describe("global database search", () => {
     expect(calls[0].maxRows).toBe(50);
   });
 
-  test("uses portable LIKE escape syntax for mysql searches", () => {
+  test("uses portable LIKE escape syntax for mysql searches", async () => {
     const { adapter, calls } = createSearchAdapter();
 
-    searchTable(adapter, "cities", cityColumns, "100%_一致", 50, false, ["id"]);
+    await searchTableAsync(
+      adapter,
+      "cities",
+      cityColumns,
+      "100%_一致",
+      50,
+      false,
+      ["id"],
+    );
 
     expect(calls[0].sql).toMatch(/LIKE '%100=%=_一致%' ESCAPE '='/);
     expect(calls[0].sql.includes("ESCAPE '\\'")).toBe(false);
