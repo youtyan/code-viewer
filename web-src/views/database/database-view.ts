@@ -14,6 +14,7 @@ import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import type { AppRoute, DiffRange } from "../../core/routes";
 import type { AnnotationTarget } from "../../core/types";
+import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
@@ -21,6 +22,7 @@ import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
+import { createS3Explorer } from "./s3-explorer";
 import { createSchemaView } from "./schema-view";
 import { createSnapshotView } from "./snapshot-view";
 import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
@@ -32,6 +34,7 @@ export type DatabaseViewDeps = {
   currentRange: () => DiffRange;
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   syncHeaderMenu: () => void;
+  fetchDbFiles?: () => Promise<DbFilesResponse>;
 };
 
 export type DatabaseView = {
@@ -57,6 +60,7 @@ type DatabaseEnterOptions = {
 };
 type OpenTabOptions = DatabaseEnterOptions & {
   deferInitialEnter?: boolean;
+  activate?: boolean;
 };
 type DbTabEntry = {
   pane: TabPaneInternal;
@@ -80,6 +84,13 @@ async function responseErrorMessage(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
 }
 
 // ----- 内部: 1 タブ分の view (元 createDatabaseView の中身) -----
@@ -133,6 +144,9 @@ function isSqlView(view: TabName): boolean {
   );
 }
 
+const HISTORY_SSE_REFRESH_DELAY_MS = 250;
+const TABLE_SELECT_FETCH_DELAY_MS = 50;
+
 type DbVisibility = {
   toolsHidden: boolean;
   historyToggleHidden: boolean;
@@ -148,6 +162,7 @@ type DbVisibility = {
   snapshotHidden: boolean;
   redisHidden: boolean;
   esHidden: boolean;
+  s3Hidden: boolean;
 };
 
 function computeVisibility(
@@ -173,6 +188,7 @@ function computeVisibility(
     snapshotHidden: !sqlMode || tab !== "snapshot",
     redisHidden: kind !== "redis",
     esHidden: kind !== "elasticsearch",
+    s3Hidden: kind !== "s3",
   };
 }
 
@@ -219,10 +235,12 @@ function createTabPane(
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
+  const tableSelectGuard = createAbortGuard();
+  let historyRefreshPending: ReturnType<typeof setTimeout> | null = null;
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
-  dbSelect.title = "Select database file";
+  dbSelect.title = "Select datastore";
 
   const schemaSelect = document.createElement("select");
   schemaSelect.className = "db-file-select db-schema-select";
@@ -239,7 +257,7 @@ function createTabPane(
   const tabSchema = createInnerTab("Schema", false);
   tabBar.append(tabData, tabSchema);
 
-  let currentTab: TabName = "data";
+  let currentTab: TabName = initial.view ?? "data";
 
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
@@ -262,7 +280,7 @@ function createTabPane(
   const toolsSection = document.createElement("div");
   toolsSection.className = "db-icon-toolbar";
   toolsSection.setAttribute("role", "toolbar");
-  toolsSection.setAttribute("aria-label", "Database tools");
+  toolsSection.setAttribute("aria-label", "Datastore tools");
 
   const queryBtn = makeIconButton({
     label: "Query",
@@ -330,8 +348,8 @@ function createTabPane(
   });
 
   const grid = createTableGrid({
-    fetchPage: (table, offset, limit, sort, filters) =>
-      fetchTablePage(table, offset, limit, sort, filters),
+    fetchPage: (table, offset, limit, sort, filters, signal) =>
+      fetchTablePage(table, offset, limit, sort, filters, signal),
     getDbId: () => currentDbInfo?.id || null,
   });
 
@@ -373,6 +391,11 @@ function createTabPane(
   });
   esExplorer.el.hidden = true;
 
+  const s3Explorer = createS3Explorer({
+    onSelectionChange: () => cb.onStateChange(),
+  });
+  s3Explorer.el.hidden = true;
+
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
@@ -385,6 +408,7 @@ function createTabPane(
     snapshotView.el,
     redisExplorer.el,
     esExplorer.el,
+    s3Explorer.el,
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
@@ -460,6 +484,7 @@ function createTabPane(
     snapshotView.el.hidden = visibility.snapshotHidden;
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
+    s3Explorer.el.hidden = visibility.s3Hidden;
     if (!sqlMode) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
@@ -467,7 +492,7 @@ function createTabPane(
       snapshotBtn.classList.remove("active");
     }
     historyToggle.classList.toggle("active", userPrefersHistoryOpen);
-    if (!visibility.historyPaneHidden) historyView.refresh();
+    if (!visibility.historyPaneHidden && cb.isActive()) historyView.refresh();
   }
   applyVisibility();
 
@@ -507,6 +532,32 @@ function createTabPane(
   function setTableListStatus(message: string, options?: { error?: boolean }) {
     const list = tableList.el.querySelector<HTMLElement>(".db-table-list");
     if (list) setPaneStatus(list, message, options);
+  }
+
+  function waitForTableSelectFetch(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    }
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        cleanup();
+        resolve();
+      }, TABLE_SELECT_FETCH_DELAY_MS);
+      const onAbort = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        cleanup();
+        reject(new DOMException("aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   function setActiveTab(tab: TabName, updateUrl = true) {
@@ -556,6 +607,7 @@ function createTabPane(
   });
 
   async function fetchDbFiles(): Promise<DbFilesResponse> {
+    if (deps.fetchDbFiles) return deps.fetchDbFiles();
     const res = await deps.trackLoad(fetch("/_db/files"));
     if (!res.ok) return { files: [] };
     const data = (await res.json()) as DbFilesResponse;
@@ -618,6 +670,7 @@ function createTabPane(
     limit: number,
     sort: GridSort | null,
     filters: GridFilter[],
+    signal?: AbortSignal,
   ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
     const params = new URLSearchParams({
@@ -634,7 +687,10 @@ function createTabPane(
     if (filters.length > 0) {
       params.set("filters", JSON.stringify(filters));
     }
-    const res = await fetch(`/_db/table?${params}`);
+    const res = await fetch(
+      `/_db/table?${params}`,
+      signal ? { signal } : undefined,
+    );
     if (!res.ok) {
       throw new Error(await responseErrorMessage(res, "failed to fetch table"));
     }
@@ -664,7 +720,6 @@ function createTabPane(
       );
     }
     const result = (await res.json()) as DbQueryResponse;
-    if (userPrefersHistoryOpen) historyView.refresh();
     return result;
   }
 
@@ -673,16 +728,27 @@ function createTabPane(
     explorerInitial?: {
       redis?: { dbIndex?: number; key?: string; keyFilter?: string };
       es?: { index?: string; query?: string };
+      s3?: {
+        bucket?: string;
+        prefix?: string;
+        query?: string;
+        mode?: "prefix" | "contains";
+        sort?: "key-asc" | "updated-desc";
+        key?: string;
+      };
     },
     generation = loadGeneration,
     preferredSchema?: string | null,
     preferredTable?: string | null,
+    targetView?: TabName,
   ) {
     if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
+    tableSelectGuard.dispose();
     currentTable = null;
     if (
       currentDbInfo?.kind === "redis" ||
-      currentDbInfo?.kind === "elasticsearch"
+      currentDbInfo?.kind === "elasticsearch" ||
+      currentDbInfo?.kind === "s3"
     ) {
       currentSchema = null;
       renderSchemaOptions([], null);
@@ -695,10 +761,16 @@ function createTabPane(
       applyVisibility();
       if (currentDbInfo.kind === "redis") {
         esExplorer.clear();
+        s3Explorer.clear();
         await redisExplorer.load(dbId, explorerInitial?.redis);
+      } else if (currentDbInfo.kind === "elasticsearch") {
+        redisExplorer.clear();
+        s3Explorer.clear();
+        await esExplorer.load(dbId, explorerInitial?.es);
       } else {
         redisExplorer.clear();
-        await esExplorer.load(dbId, explorerInitial?.es);
+        esExplorer.clear();
+        await s3Explorer.load(dbId, explorerInitial?.s3);
       }
       if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
       cb.onStateChange();
@@ -706,6 +778,7 @@ function createTabPane(
     }
     redisExplorer.clear();
     esExplorer.clear();
+    s3Explorer.clear();
     applyVisibility();
     tableList.render([]);
     setTableListStatus("Loading schema...");
@@ -761,10 +834,13 @@ function createTabPane(
     grid.clear();
     schemaView.clear();
     erDiagram.clear();
-    setActiveTab("data", false);
+    const normalizedTargetView = normalizeViewForDb(targetView, currentDbInfo);
+    setActiveTab(normalizedTargetView === "schema" ? "schema" : "data", false);
     const initialTable = preferredTable || schema.tables[0]?.name;
-    if (initialTable) {
+    if (initialTable && normalizedTargetView === "data") {
       await selectTable(initialTable, generation);
+    } else if (initialTable && normalizedTargetView === "schema") {
+      await selectTableSchemaOnly(initialTable, generation);
     }
     // currentDbInfo が確定したので Query History pane を自動 refresh する。
     // 構築時の applyVisibility() 呼び出し時は currentDbInfo=null で
@@ -776,6 +852,7 @@ function createTabPane(
 
   async function selectTable(table: string, generation = loadGeneration) {
     if (generation !== loadGeneration) return;
+    const slot = tableSelectGuard.start();
     currentTable = table;
     tableList.setActive(table);
     if (!currentDbInfo) return;
@@ -804,10 +881,20 @@ function createTabPane(
       true,
     );
     try {
+      await waitForTableSelectFetch(slot.signal);
+      if (
+        slot.isStale() ||
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== requestDbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
       const data = await deps.trackLoad(
-        fetchTablePage(table, 0, 200, null, []),
+        fetchTablePage(table, 0, 200, null, [], slot.signal),
       );
       if (
+        slot.isStale() ||
         generation !== loadGeneration ||
         currentDbInfo?.id !== requestDbId ||
         currentTable !== table
@@ -817,6 +904,8 @@ function createTabPane(
       grid.load(table, data);
     } catch (err) {
       if (
+        slot.isStale() ||
+        isAbortError(err) ||
         generation !== loadGeneration ||
         currentDbInfo?.id !== requestDbId ||
         currentTable !== table
@@ -824,6 +913,8 @@ function createTabPane(
         return;
       }
       grid.showError(errorMessage(err));
+    } finally {
+      slot.finish();
     }
     if (currentTab === "schema") {
       const columns = await fetchColumns(table);
@@ -836,6 +927,27 @@ function createTabPane(
       }
       schemaView.render(table, columns, schemaCache?.indexes || []);
     }
+  }
+
+  async function selectTableSchemaOnly(
+    table: string,
+    generation = loadGeneration,
+  ) {
+    if (generation !== loadGeneration) return;
+    currentTable = table;
+    tableList.setActive(table);
+    if (!currentDbInfo) return;
+    const requestDbId = currentDbInfo.id;
+    setActiveTab("schema", false);
+    const columns = await fetchColumns(table);
+    if (
+      generation !== loadGeneration ||
+      currentDbInfo?.id !== requestDbId ||
+      currentTable !== table
+    ) {
+      return;
+    }
+    schemaView.render(table, columns, schemaCache?.indexes || []);
   }
 
   async function fetchColumns(table: string): Promise<DbColumn[]> {
@@ -976,6 +1088,7 @@ function createTabPane(
   // 別 DB に流し込まないため)。
   let pendingRedisInitial = initial.redis;
   let pendingEsInitial = initial.es;
+  let pendingS3Initial = initial.s3;
 
   async function enter(
     db?: string | null,
@@ -1000,13 +1113,14 @@ function createTabPane(
     if (files.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "No database files found";
+      opt.textContent = "No datastores found";
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
       cb.onStateChange();
       return;
     }
     dbSelect.disabled = false;
+    const optionsFragment = document.createDocumentFragment();
     for (const f of files) {
       const opt = document.createElement("option");
       opt.value = f.id;
@@ -1015,8 +1129,9 @@ function createTabPane(
         ? `${f.name} (Docker)`
         : `${f.path} (${formatSize(f.sizeBytes)})`;
       opt.textContent = label;
-      dbSelect.appendChild(opt);
+      optionsFragment.appendChild(opt);
     }
+    dbSelect.appendChild(optionsFragment);
 
     const autoSelectFirst = options.autoSelectFirst ?? true;
     if (db && !files.find((f) => f.id === db)) {
@@ -1035,6 +1150,7 @@ function createTabPane(
       erDiagram.clear();
       redisExplorer.clear();
       esExplorer.clear();
+      s3Explorer.clear();
       setActiveTab("data", false);
       cb.onStateChange();
       return;
@@ -1047,20 +1163,24 @@ function createTabPane(
     const explorerInitial = {
       redis: pendingRedisInitial,
       es: pendingEsInitial,
+      s3: pendingS3Initial,
     };
     pendingRedisInitial = undefined;
     pendingEsInitial = undefined;
+    pendingS3Initial = undefined;
     await selectDb(
       target,
       explorerInitial,
       generation,
       schema !== undefined ? schema : currentSchema,
       table,
+      view,
     );
     if (generation !== loadGeneration || currentDbInfo?.id !== target) return;
     if (
       currentDbInfo?.kind === "redis" ||
-      currentDbInfo?.kind === "elasticsearch"
+      currentDbInfo?.kind === "elasticsearch" ||
+      currentDbInfo?.kind === "s3"
     ) {
       cb.onStateChange();
       return;
@@ -1121,22 +1241,28 @@ function createTabPane(
   }
 
   function handleSse(event?: string, data?: string) {
-    if (userPrefersHistoryOpen) historyView.refresh();
+    if (userPrefersHistoryOpen && cb.isActive()) {
+      if (historyRefreshPending !== null) clearTimeout(historyRefreshPending);
+      historyRefreshPending = setTimeout(() => {
+        historyRefreshPending = null;
+        if (userPrefersHistoryOpen && cb.isActive()) {
+          historyView.refresh({ force: true });
+        }
+      }, HISTORY_SSE_REFRESH_DELAY_MS);
+    }
     if (event === "db-snapshot" && data) {
       snapshotView.handleSse(data);
     }
   }
 
   function getState(): TabState {
-    const activeTable = tableList.el.querySelector<HTMLElement>(
-      ".db-table-item.active",
-    );
+    const loaded = !!currentDbInfo;
     const state: TabState = {
       id: cb.tabId,
-      dbId: currentDbInfo?.id ?? null,
-      schema: currentSchema,
-      table: currentTable ?? activeTable?.dataset.table ?? null,
-      view: currentTab,
+      dbId: currentDbInfo?.id ?? initial.dbId ?? null,
+      schema: loaded ? currentSchema : (initial.schema ?? currentSchema),
+      table: loaded ? currentTable : (initial.table ?? currentTable ?? null),
+      view: loaded ? currentTab : (initial.view ?? currentTab),
     };
 
     // 永続化対象の per-tab UI state を載せる。空値は載せない (= tabs.json の
@@ -1150,7 +1276,11 @@ function createTabPane(
       state.historyHeight = historyPane.style.height;
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
 
-    if (currentDbInfo?.kind === "redis") {
+    if (!loaded) {
+      if (initial.redis) state.redis = initial.redis;
+      if (initial.es) state.es = initial.es;
+      if (initial.s3) state.s3 = initial.s3;
+    } else if (currentDbInfo?.kind === "redis") {
       const sel = redisExplorer.getSelection();
       if (
         sel.dbIndex !== undefined ||
@@ -1163,6 +1293,18 @@ function createTabPane(
       const sel = esExplorer.getSelection();
       if (sel.index !== undefined || sel.query !== undefined) {
         state.es = sel;
+      }
+    } else if (currentDbInfo?.kind === "s3") {
+      const sel = s3Explorer.getSelection();
+      if (
+        sel.bucket !== undefined ||
+        sel.prefix !== undefined ||
+        sel.query !== undefined ||
+        sel.key !== undefined ||
+        sel.mode !== "prefix" ||
+        sel.sort !== "updated-desc"
+      ) {
+        state.s3 = sel;
       }
     }
 
@@ -1210,6 +1352,11 @@ function createTabPane(
 
   function dispose(): void {
     loadGeneration++;
+    tableSelectGuard.dispose();
+    if (historyRefreshPending !== null) {
+      clearTimeout(historyRefreshPending);
+      historyRefreshPending = null;
+    }
     grid.destroy();
     schemaView.clear();
     erDiagram.dispose();
@@ -1220,6 +1367,7 @@ function createTabPane(
     historyView.clear();
     redisExplorer.dispose();
     esExplorer.dispose();
+    s3Explorer.dispose();
     currentDbInfo = null;
     currentSchema = null;
     currentTable = null;
@@ -1285,6 +1433,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
   const tabsById = new Map<string, DbTabEntry>();
   const paneReadyById = new Map<string, Promise<void>>();
+  const lazyInitialById = new Map<string, Partial<TabState> | undefined>();
   let activeTabId: string | null = null;
   let draggingTabId: string | null = null;
   let dropTargetId: string | null = null;
@@ -1294,14 +1443,60 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let restoring = false;
   let savePending: ReturnType<typeof setTimeout> | null = null;
   let saveChain: Promise<void> = Promise.resolve();
+  let lastSavedTabsRaw: string | null = null;
+  let pendingSavedTabsRaw: string | null = null;
+  let saveController: AbortController | null = null;
   let lifecycleSeq = 0;
   let enterQueue: Promise<void> = Promise.resolve();
   let unloadListenerInstalled = false;
+  let dbFilesCache:
+    | { value: DbFilesResponse; expiresAt: number; promise?: undefined }
+    | {
+        value?: undefined;
+        expiresAt?: undefined;
+        promise: Promise<DbFilesResponse>;
+      }
+    | null = null;
+
+  function fetchDbFilesCached(): Promise<DbFilesResponse> {
+    const now = Date.now();
+    if (dbFilesCache?.value && dbFilesCache.expiresAt > now) {
+      return Promise.resolve(dbFilesCache.value);
+    }
+    if (dbFilesCache?.promise) return dbFilesCache.promise;
+    const promise = deps
+      .trackLoad(fetch("/_db/files"))
+      .then(async (res) => {
+        if (!res.ok) {
+          const value: DbFilesResponse = { files: [] };
+          dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
+          return value;
+        }
+        const value = (await res.json()) as DbFilesResponse;
+        dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
+        return value;
+      })
+      .catch(() => {
+        const value: DbFilesResponse = { files: [] };
+        dbFilesCache = { value, expiresAt: Date.now() + 10_000 };
+        return value;
+      })
+      .finally(() => {
+        if (dbFilesCache?.promise === promise) dbFilesCache = null;
+      });
+    dbFilesCache = { promise };
+    return promise;
+  }
 
   function scheduleSave(): void {
     if (!mounted || restoring) return;
     if (savePending !== null) clearTimeout(savePending);
     savePending = setTimeout(saveNow, 500);
+  }
+
+  function abortActiveSave(): void {
+    saveController?.abort();
+    saveController = null;
   }
 
   async function saveNow(options: { keepalive?: boolean } = {}): Promise<void> {
@@ -1314,9 +1509,34 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (tabs.length === 0) return;
     const body: TabsState = { version: 1, tabs, activeTabId };
     const raw = JSON.stringify(body);
+    if (raw === lastSavedTabsRaw) return;
+    if (!options.keepalive && raw === pendingSavedTabsRaw) return;
+    pendingSavedTabsRaw = raw;
+    abortActiveSave();
+    if (options.keepalive) {
+      try {
+        await fetch("/_db/tabs", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Code-Viewer-Action": "1",
+          },
+          body: raw,
+          keepalive: true,
+        });
+        lastSavedTabsRaw = raw;
+      } catch {
+        // ベストエフォート。失敗してもユーザー操作は妨げない。
+      } finally {
+        if (pendingSavedTabsRaw === raw) pendingSavedTabsRaw = null;
+      }
+      return;
+    }
     saveChain = saveChain
       .catch(() => {})
       .then(async () => {
+        const controller = new AbortController();
+        saveController = controller;
         try {
           await fetch("/_db/tabs", {
             method: "PUT",
@@ -1325,10 +1545,16 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
               "X-Code-Viewer-Action": "1",
             },
             body: raw,
-            keepalive: options.keepalive,
+            signal: controller.signal,
           });
-        } catch {
-          // ベストエフォート。失敗してもユーザー操作は妨げない。
+          lastSavedTabsRaw = raw;
+        } catch (err) {
+          if (!isAbortError(err)) {
+            // ベストエフォート。失敗してもユーザー操作は妨げない。
+          }
+        } finally {
+          if (saveController === controller) saveController = null;
+          if (pendingSavedTabsRaw === raw) pendingSavedTabsRaw = null;
         }
       });
     await saveChain;
@@ -1387,6 +1613,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }
     if (!restoring) syncActiveRoute();
     scheduleSave();
+    if (mounted && !restoring) {
+      void ensureInitialEnter(id)?.catch(() => {});
+    }
   }
 
   function syncActiveRoute(): void {
@@ -1427,6 +1656,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         view: tab.view,
         redis: tab.redis ?? null,
         es: tab.es ?? null,
+        s3: tab.s3 ?? null,
       });
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1656,7 +1886,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     });
 
     const pane = createTabPane(
-      deps,
+      { ...deps, fetchDbFiles: fetchDbFilesCached },
       {
         tabId: id,
         isActive: () => activeTabId === id,
@@ -1680,6 +1910,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         sidebarWidth: initial?.sidebarWidth,
         redis: initial?.redis,
         es: initial?.es,
+        s3: initial?.s3,
       },
     );
     pane.el.hidden = true;
@@ -1688,7 +1919,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     tabHost.appendChild(pane.el);
     tabsById.set(id, { pane, chip, label: labelEl, closeBtn });
 
-    setActive(id);
+    if (options.activate !== false) setActive(id);
     if (!options.deferInitialEnter) {
       void startInitialEnter(id, initial, options);
     }
@@ -1724,6 +1955,15 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return ready;
   }
 
+  function ensureInitialEnter(id: string): Promise<void> | null {
+    const ready = paneReadyById.get(id);
+    if (ready) return ready;
+    if (!lazyInitialById.has(id)) return null;
+    const initial = lazyInitialById.get(id);
+    lazyInitialById.delete(id);
+    return startInitialEnter(id, initial, { autoSelectFirst: false });
+  }
+
   function closeTab(id: string): void {
     const entry = tabsById.get(id);
     if (!entry) return;
@@ -1733,6 +1973,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     entry.chip.remove();
     tabsById.delete(id);
     paneReadyById.delete(id);
+    lazyInitialById.delete(id);
     closeDbIfUnused(closedDbId);
     if (activeTabId !== id) {
       scheduleSave();
@@ -1818,6 +2059,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     for (const [id, entry] of tabsById) {
       if (routeMatchesState(entry.pane.getState(), db, schema, table, view)) {
         setActive(id);
+        const ready = ensureInitialEnter(id);
+        if (ready) await ready;
+        if (!mounted) return;
         if (options.annotationTarget) {
           await enterPane(entry.pane, db, schema, table, view, options);
           if (!mounted) return;
@@ -1903,8 +2147,6 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       if (!mounted || seq !== lifecycleSeq) return;
       if (restored && restored.tabs.length > 0) {
         restoring = true;
-        const restoredIds: string[] = [];
-        const restoredById = new Map<string, TabState>();
         try {
           const restoredTabs = dedupeTabs(restored.tabs);
           for (const t of restoredTabs) {
@@ -1912,9 +2154,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
             const id = openTab(t, {
               autoSelectFirst: false,
               deferInitialEnter: true,
+              activate: false,
             });
-            restoredIds.push(id);
-            restoredById.set(id, t);
+            lazyInitialById.set(id, t);
           }
           const targetId =
             restored.activeTabId && tabsById.has(restored.activeTabId)
@@ -1922,17 +2164,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
               : tabsById.keys().next().value;
           if (targetId) setActive(targetId);
           if (targetId) {
-            await startInitialEnter(targetId, restoredById.get(targetId), {
-              autoSelectFirst: false,
-            });
+            const ready = ensureInitialEnter(targetId);
+            if (ready) await ready;
           }
           if (!mounted || seq !== lifecycleSeq) return;
-          for (const id of restoredIds) {
-            if (id === targetId) continue;
-            void startInitialEnter(id, restoredById.get(id), {
-              autoSelectFirst: false,
-            }).catch(() => {});
-          }
         } finally {
           restoring = false;
         }
@@ -2012,6 +2247,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       entry.pane.dispose();
     }
     tabsById.clear();
+    dbFilesCache = null;
     tabsList.innerHTML = "";
     tabHost.innerHTML = "";
     activeTabId = null;

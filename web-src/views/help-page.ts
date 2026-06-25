@@ -209,13 +209,13 @@ code-viewer annotate add-db --db app.db --tab query \\
         ],
       },
       database: {
-        nav: "Database",
-        title: "Database Viewer",
+        nav: "Datastores",
+        title: "Datastore Viewer",
         intro:
-          "Browse SQLite files and Docker-hosted MySQL/PostgreSQL databases. Run queries with syntax highlighting and explore table schemas and ER diagrams.",
+          "Browse SQLite files, Docker-hosted databases, Redis, Elasticsearch, and S3-compatible object stores from one local viewer.",
         groups: [
           {
-            title: "Supported databases",
+            title: "Supported datastores",
             blocks: [
               {
                 kind: "table",
@@ -231,6 +231,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "PostgreSQL",
                     "Detected from docker-compose.yml services. Multiple databases per server are listed.",
+                  ],
+                  [
+                    "S3 / MinIO / LocalStack",
+                    "Detected from docker-compose.yml services. Browse buckets, search objects, sort by update time, and preview common file types.",
                   ],
                 ],
               },
@@ -582,13 +586,13 @@ code-viewer annotate add-db --db app.db --tab query \\
         ],
       },
       database: {
-        nav: "データベース",
-        title: "データベースビューア",
+        nav: "データストア",
+        title: "データストアビューア",
         intro:
-          "SQLite ファイルや Docker 上の MySQL/PostgreSQL を閲覧できます。シンタックスハイライト付きクエリ実行、スキーマ表示、ER 図を提供します。",
+          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、S3 互換オブジェクトストアをローカルビューアで閲覧できます。",
         groups: [
           {
-            title: "対応データベース",
+            title: "対応データストア",
             blocks: [
               {
                 kind: "table",
@@ -604,6 +608,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                   [
                     "PostgreSQL",
                     "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。",
+                  ],
+                  [
+                    "S3 / MinIO / LocalStack",
+                    "docker-compose.yml のサービスから検出。バケット閲覧、オブジェクト検索、更新日時順表示、主要ファイル形式のプレビューに対応します。",
                   ],
                 ],
               },
@@ -658,7 +666,7 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "データベース一覧",
+                title: "データストア一覧",
                 command: "code-viewer query list",
               },
               {

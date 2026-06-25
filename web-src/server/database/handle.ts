@@ -1,3 +1,4 @@
+import { hasControlCharacter } from "../../core/control-chars";
 import type {
   DbColumn,
   DbFilesResponse,
@@ -10,10 +11,12 @@ import type {
   QueryHistoryEntry,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
+import { isAbortLikeError } from "./adapters/abort";
+import { asAsync } from "./adapters/async-facade";
 import {
-  listDockerDatabases,
-  listDockerSchemas,
-  openDockerAdapter,
+  listDockerDatabasesAsync,
+  listDockerSchemasAsync,
+  openDockerAdapterAsync,
 } from "./adapters/docker";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
@@ -25,15 +28,19 @@ import {
 } from "./connection-pool";
 import {
   type DockerDbInfo,
-  discoverDockerDatabases,
-  discoverSqliteFiles,
-  findDockerServiceByDbId,
+  discoverDockerDatabasesAsync,
+  discoverSqliteFilesAsync,
+  findDockerServiceByDbIdAsync,
   parseDockerDbId,
   validateDbPath,
 } from "./discovery";
-import { getPrimaryKeyColumns, searchTable } from "./global-search";
+import {
+  getPrimaryKeyColumnsFromColumns,
+  searchTableAsync,
+} from "./global-search";
 import { closeElasticsearchAdapter } from "./handle-elasticsearch";
 import { closeRedisAdapter } from "./handle-redis";
+import { closeS3Adapter } from "./handle-s3";
 import {
   createDockerAdapterCache,
   dispatchRoutes,
@@ -46,8 +53,8 @@ import {
   addQueryHistoryEntry,
   clearQueryHistory,
   deleteQueryHistoryEntry,
-  loadQueryHistory,
-  saveQueryHistory,
+  loadQueryHistoryAsync,
+  updateQueryHistoryAsync,
 } from "./query-history";
 import { serializeDbRows } from "./serialize";
 import { runSnapshot } from "./snapshot-runner";
@@ -58,7 +65,7 @@ import {
   listSnapshots,
   updateSnapshotNote,
 } from "./snapshot-store";
-import { loadTabs, saveTabs } from "./tabs-store";
+import { loadTabsAsync, saveTabsAsync } from "./tabs-store";
 
 let initialized = false;
 
@@ -73,20 +80,22 @@ const dockerAdapterCache = createDockerAdapterCache<DatabaseAdapter>();
 async function getAdapter(
   r: ResolvedDb,
   _cwd: string,
+  signal?: AbortSignal,
 ): Promise<DatabaseAdapter> {
   if (r.docker) {
     const docker = r.docker;
     const cacheKey = r.schema ? `${r.dbId}\0schema=${r.schema}` : r.dbId;
-    return dockerAdapterCache.getOrOpen(cacheKey, () =>
+    return dockerAdapterCache.getOrOpenAsync(cacheKey, () =>
       // recursive discovery により compose は subdir に置けるので、
       // `docker compose ps` の cwd は r.docker.composeDir に固定する。
-      openDockerAdapter(
+      openDockerAdapterAsync(
         docker.serviceName,
         docker.kind as "postgresql" | "mysql",
         docker.env,
         docker.composeDir,
         docker.database,
         r.schema,
+        signal,
       ),
     );
   }
@@ -114,46 +123,49 @@ function normalizeSchemaParam(
   if (value.length > MAX_SCHEMA_NAME_LEN) {
     return textError("invalid schema parameter", 400);
   }
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: schema names may come from URLs; reject control chars.
-  if (/[\x00-\x1f\x7f]/.test(value)) {
+  if (hasControlCharacter(value)) {
     return textError("invalid schema parameter", 400);
   }
   return value;
 }
 
-function resolvePostgresSchema(
+async function resolvePostgresSchema(
   info: DockerDbInfo,
   requestedSchema: string | undefined,
-): string | Response | undefined {
+  signal?: AbortSignal,
+): Promise<string | Response | undefined> {
   if (info.kind !== "postgresql") return undefined;
-  const schemas = listDockerSchemas(
+  if (requestedSchema) return requestedSchema;
+  const schemas = await listDockerSchemasAsync(
     info.serviceName,
     "postgresql",
     info.env,
     info.composeDir,
     info.database,
+    signal,
   );
-  if (requestedSchema) {
-    if (!schemas.includes(requestedSchema)) {
-      return textError(`schema not found: ${requestedSchema}`, 404);
-    }
-    return requestedSchema;
-  }
   if (schemas.includes("public")) return "public";
   return schemas[0] || "public";
 }
 
-function resolveDb(
+async function resolveDb(
   cwd: string,
   dbParam: string | null,
   omitDirNames?: string[],
   schemaParam?: string | null,
-): ResolvedDb | Response {
+  signal?: AbortSignal,
+): Promise<ResolvedDb | Response> {
   if (!dbParam) return textError("missing db parameter", 400);
   if (dbParam.startsWith("docker:")) {
     const parsed = parseDockerDbId(dbParam);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, dbParam, undefined, omitDirNames);
+    const info = await findDockerServiceByDbIdAsync(
+      cwd,
+      dbParam,
+      undefined,
+      omitDirNames,
+      signal,
+    );
     if (!info) return textError("docker service not found", 404);
     if (info.kind === "redis") {
       return textError("redis services must use the /_db/redis/* routes", 400);
@@ -164,12 +176,19 @@ function resolveDb(
         400,
       );
     }
+    if (info.kind === "s3") {
+      return textError("s3 services must use the /_db/s3/* routes", 400);
+    }
     const resolved = parsed.database
       ? { ...info, database: parsed.database }
       : info;
     const requestedSchema = normalizeSchemaParam(schemaParam);
     if (requestedSchema instanceof Response) return requestedSchema;
-    const schema = resolvePostgresSchema(resolved, requestedSchema);
+    const schema = await resolvePostgresSchema(
+      resolved,
+      requestedSchema,
+      signal,
+    );
     if (schema instanceof Response) return schema;
     return {
       resolved: dbParam,
@@ -199,37 +218,52 @@ function toFileInfo(entry: {
   };
 }
 
-function handleFiles(cwd: string, omitDirNames: string[]): Response {
-  const sqliteFiles = discoverSqliteFiles(cwd, omitDirNames);
-  const dockerServices = discoverDockerDatabases(cwd, omitDirNames);
+async function handleFiles(
+  cwd: string,
+  omitDirNames: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const [sqliteFiles, dockerServices] = await Promise.all([
+    discoverSqliteFilesAsync(cwd, omitDirNames, signal),
+    discoverDockerDatabasesAsync(cwd, omitDirNames, signal),
+  ]);
   const dockerTruncated = dockerServices.truncated === true;
-  const dockerEntries: typeof dockerServices = [];
-  for (const svc of dockerServices) {
-    if (svc.kind === "redis" || svc.kind === "elasticsearch") {
-      dockerEntries.push(svc);
-      continue;
-    }
-    const dbs = listDockerDatabases(
-      svc.serviceName,
-      svc.kind as "postgresql" | "mysql",
-      svc.env,
-      svc.composeDir,
-    );
-    if (dbs.length <= 1) {
-      dockerEntries.push(svc);
-    } else {
-      for (const db of dbs) {
-        // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
-        // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
-        dockerEntries.push({
-          ...svc,
-          id: `${svc.id}:${db}`,
-          name: svc.name.replace(/\)$/, ` / ${db})`),
-          database: db,
-        });
-      }
-    }
-  }
+  const dockerEntries = (
+    await Promise.all(
+      dockerServices.map(async (svc) => {
+        if (
+          svc.kind === "redis" ||
+          svc.kind === "elasticsearch" ||
+          svc.kind === "s3"
+        ) {
+          return [svc];
+        }
+        const dbs = await listDockerDatabasesAsync(
+          svc.serviceName,
+          svc.kind as "postgresql" | "mysql",
+          svc.env,
+          svc.composeDir,
+          signal,
+        );
+        if (dbs.length <= 1) {
+          return [svc];
+        } else {
+          const entries: typeof dockerServices = [];
+          for (const db of dbs) {
+            // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
+            // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
+            entries.push({
+              ...svc,
+              id: `${svc.id}:${db}`,
+              name: svc.name.replace(/\)$/, ` / ${db})`),
+              database: db,
+            });
+          }
+          return entries;
+        }
+      }),
+    )
+  ).flat();
   // Strip env / serviceName / database from the response — these contain
   // credentials and internal state that the browser must not see.
   const body: DbFilesResponse = {
@@ -248,28 +282,31 @@ function handleFiles(cwd: string, omitDirNames: string[]): Response {
   return json(body);
 }
 
-function handleSchemas(
+async function handleSchemas(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
-): Response {
-  const r = resolveDb(
+  signal?: AbortSignal,
+): Promise<Response> {
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   if (!r.docker || r.docker.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
     return json(body);
   }
-  const schemas = listDockerSchemas(
+  const schemas = await listDockerSchemasAsync(
     r.docker.serviceName,
     "postgresql",
     r.docker.env,
     r.docker.composeDir,
     r.docker.database,
+    signal,
   );
   const body: DbSchemasResponse = {
     dbId: r.dbId,
@@ -283,36 +320,48 @@ async function handleSchema(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const r = resolveDb(
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   const includeColumns = url.searchParams.get("includeColumns") === "1";
+  const linkedAbort = createLinkedAbortController(signal);
   try {
-    const adapter = await getAdapter(r, cwd);
-    const tables = adapter.getTables();
+    const adapter = await getAdapter(r, cwd, signal);
+    const db = asAsync(adapter);
+    const tables = await db.tables(linkedAbort.signal);
     const tableNames = tables
       .filter((t) => t.type === "table")
       .map((t) => t.name);
-    let countMap: Map<string, number>;
-    if (adapter.getTableRowCounts) {
-      countMap = adapter.getTableRowCounts(tableNames);
-    } else {
-      countMap = new Map();
-      for (const name of tableNames) {
-        countMap.set(name, adapter.getTableRowCount(name));
-      }
-    }
+    const countMapPromise = db.tableRowCounts(tableNames, linkedAbort.signal);
+    const indexesPromise = db.indexes(linkedAbort.signal);
+    const foreignKeysPromise = db.foreignKeys(linkedAbort.signal);
+    const columnsMapPromise = includeColumns
+      ? db.columnsMulti(tableNames, linkedAbort.signal)
+      : Promise.resolve(null);
+    const schemaPromises = [
+      countMapPromise,
+      indexesPromise,
+      foreignKeysPromise,
+      columnsMapPromise,
+    ] as const;
+    const [countMap, indexes, foreignKeys, colsMap] = await Promise.all(
+      schemaPromises,
+    ).catch(async (err) => {
+      linkedAbort.abort();
+      await Promise.allSettled(schemaPromises);
+      throw err;
+    });
     const tablesWithCount = tables.map((t) => ({
       ...t,
       rowCount: t.type === "table" ? (countMap.get(t.name) ?? 0) : null,
     }));
-    const indexes = adapter.getIndexes();
-    const foreignKeys = adapter.getForeignKeys();
     const body: DbSchemaResponse = {
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
@@ -320,73 +369,16 @@ async function handleSchema(
       indexes,
       foreignKeys,
     };
-    if (includeColumns) {
-      let colsMap: Map<string, import("../../core/database/types").DbColumn[]>;
-      if (adapter.getColumnsMulti) {
-        colsMap = adapter.getColumnsMulti(tableNames);
-      } else {
-        colsMap = new Map();
-        for (const name of tableNames) {
-          colsMap.set(name, adapter.getColumns(name));
-        }
-      }
+    if (colsMap) {
       body.columnsMap = Object.fromEntries(colsMap);
     }
     return json(body);
   } catch (err) {
+    linkedAbort.abort();
     return handleError("database", "read schema", err);
+  } finally {
+    linkedAbort.cleanup();
   }
-}
-
-function sanitizeIdentifier(
-  name: string,
-  kind: "sqlite" | "postgresql" | "mysql" = "sqlite",
-): string {
-  if (kind === "mysql") return `\`${name.replace(/`/g, "``")}\``;
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
-function escapeSqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-type FilterSql = {
-  where: string;
-  params: string[];
-  useParams: boolean;
-};
-
-function buildFilterWhere(
-  grouped: Map<string, string[]>,
-  kind: "sqlite" | "postgresql" | "mysql",
-): FilterSql {
-  const whereParts: string[] = [];
-  const params: string[] = [];
-  const useParams = kind === "sqlite";
-  for (const [value, cols] of grouped) {
-    const likeVal = useParams ? "?" : escapeSqlString(`%${value}%`);
-    if (cols.length === 1) {
-      const cast =
-        kind === "mysql"
-          ? `CAST(${sanitizeIdentifier(cols[0], kind)} AS CHAR)`
-          : `CAST(${sanitizeIdentifier(cols[0], kind)} AS TEXT)`;
-      whereParts.push(`${cast} LIKE ${likeVal}`);
-      if (useParams) params.push(`%${value}%`);
-    } else {
-      const orParts = cols.map((c) => {
-        const cast =
-          kind === "mysql"
-            ? `CAST(${sanitizeIdentifier(c, kind)} AS CHAR)`
-            : `CAST(${sanitizeIdentifier(c, kind)} AS TEXT)`;
-        return `${cast} LIKE ${likeVal}`;
-      });
-      whereParts.push(`(${orParts.join(" OR ")})`);
-      if (useParams) {
-        for (let i = 0; i < cols.length; i++) params.push(`%${value}%`);
-      }
-    }
-  }
-  return { where: whereParts.join(" AND "), params, useParams };
 }
 
 function parseFilters(url: URL): { column: string; value: string }[] {
@@ -423,12 +415,14 @@ async function handleTable(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const r = resolveDb(
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
@@ -454,14 +448,18 @@ async function handleTable(
   }
   const filters = parseFilters(url);
   try {
-    const adapter = await getAdapter(r, cwd);
-    if (filters.length > 0 && adapter.getFilteredTablePageWithMeta) {
-      const meta = await adapter.getFilteredTablePageWithMeta(table, {
-        offset,
-        limit,
-        orderBy,
-        grouped: groupFiltersByValue(filters),
-      });
+    const adapter = await getAdapter(r, cwd, signal);
+    if (filters.length > 0) {
+      const meta = await adapter.getFilteredTablePageWithMeta(
+        table,
+        {
+          offset,
+          limit,
+          orderBy,
+          grouped: groupFiltersByValue(filters),
+        },
+        signal,
+      );
       const colNames = new Set(meta.columns.map((c) => c.name));
       if (sortCol && !colNames.has(sortCol)) {
         return textError(`invalid sort column: ${sortCol}`, 400);
@@ -479,90 +477,29 @@ async function handleTable(
       };
       return json(body);
     }
-    if (filters.length === 0 && adapter.getTablePageWithMeta) {
-      const meta = await adapter.getTablePageWithMeta(table, {
+    const meta = await adapter.getTablePageWithMeta(
+      table,
+      {
         offset,
         limit,
         orderBy,
-      });
-      const colNames = new Set(meta.columns.map((c) => c.name));
-      if (sortCol && !colNames.has(sortCol)) {
-        return textError(`invalid sort column: ${sortCol}`, 400);
-      }
-      const body: DbTableDataResponse = {
-        dbId: r.dbId,
-        ...(r.schema ? { schema: r.schema } : {}),
-        table,
-        columns: meta.columns,
-        rows: serializeDbRows(meta.rows),
-        totalRows: meta.totalRows,
-        offset,
-        limit,
-        hasMore: offset + meta.rowCount < meta.totalRows,
-      };
-      return json(body);
-    }
-    const columns = adapter.getColumns(table);
-    const colNames = new Set(columns.map((c) => c.name));
+      },
+      signal,
+    );
+    const colNames = new Set(meta.columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
       return textError(`invalid sort column: ${sortCol}`, 400);
     }
-
-    if (filters.length > 0) {
-      const validFilters = filters.filter((f) => colNames.has(f.column));
-      if (validFilters.length > 0) {
-        const grouped = groupFiltersByValue(validFilters);
-        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
-        const filter = buildFilterWhere(grouped, k);
-        const order = orderBy
-          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
-          : "";
-        const tbl = sanitizeIdentifier(table, k);
-        const countSql = `SELECT COUNT(*) AS cnt FROM ${tbl} WHERE ${filter.where}`;
-        const limitOffset = filter.useParams
-          ? "LIMIT ? OFFSET ?"
-          : `LIMIT ${limit} OFFSET ${offset}`;
-        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
-        const countResult = adapter.executeReadonlyQuery(
-          countSql,
-          filter.useParams ? filter.params : undefined,
-        );
-        const totalRows =
-          countResult.rows.length > 0 ? Number(countResult.rows[0][0]) || 0 : 0;
-        const dataResult = adapter.executeReadonlyQuery(
-          dataSql,
-          filter.useParams ? [...filter.params, limit, offset] : undefined,
-        );
-        const body: DbTableDataResponse = {
-          dbId: r.dbId,
-          ...(r.schema ? { schema: r.schema } : {}),
-          table,
-          columns,
-          rows: serializeDbRows(dataResult.rows),
-          totalRows,
-          offset,
-          limit,
-          hasMore: offset + dataResult.rowCount < totalRows,
-        };
-        return json(body);
-      }
-    }
-
-    const result = adapter.getTablePage(table, { offset, limit, orderBy });
-    const totalRows =
-      result.rowCount < limit
-        ? offset + result.rowCount
-        : adapter.getTableRowCount(table);
     const body: DbTableDataResponse = {
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
       table,
-      columns,
-      rows: serializeDbRows(result.rows),
-      totalRows,
+      columns: meta.columns,
+      rows: serializeDbRows(meta.rows),
+      totalRows: meta.totalRows,
       offset,
       limit,
-      hasMore: offset + result.rowCount < totalRows,
+      hasMore: offset + meta.rowCount < meta.totalRows,
     };
     return json(body);
   } catch (err) {
@@ -572,6 +509,27 @@ async function handleTable(
 
 function makeHistoryId(): string {
   return makeId("qh");
+}
+
+function createLinkedAbortController(parent?: AbortSignal): {
+  signal: AbortSignal;
+  abort(): void;
+  cleanup(): void;
+} {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (parent?.aborted) {
+    controller.abort();
+  } else {
+    parent?.addEventListener("abort", abort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    abort,
+    cleanup() {
+      parent?.removeEventListener("abort", abort);
+    },
+  };
 }
 
 function unquoteSqlIdentifier(raw: string): string {
@@ -588,7 +546,9 @@ function unquoteSqlIdentifier(raw: string): string {
   return trimmed;
 }
 
-export function parseSelectAllTable(sql: string): string | null {
+export type ParsedSelectAllTable = { schema?: string; table: string };
+
+export function parseSelectAllTable(sql: string): ParsedSelectAllTable | null {
   const identifier =
     '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[A-Za-z_][\\w$]*)';
   const match = sql
@@ -601,18 +561,31 @@ export function parseSelectAllTable(sql: string): string | null {
       ),
     );
   if (!match) return null;
-  return unquoteSqlIdentifier(match[2] || match[1]);
+  return {
+    ...(match[2] ? { schema: unquoteSqlIdentifier(match[1]) } : {}),
+    table: unquoteSqlIdentifier(match[2] || match[1]),
+  };
 }
 
-function inferEmptyQueryColumns(
+async function inferEmptyQueryColumns(
   adapter: DatabaseAdapter,
   sql: string,
-): DbColumn[] {
-  const table = parseSelectAllTable(sql);
-  if (!table) return [];
+  selectedSchema?: string,
+  signal?: AbortSignal,
+): Promise<DbColumn[]> {
+  const parsed = parseSelectAllTable(sql);
+  if (!parsed) return [];
+  if (
+    parsed.schema &&
+    parsed.schema !== (selectedSchema || "public") &&
+    parsed.schema !== "main"
+  ) {
+    return [];
+  }
   try {
-    return adapter.getColumns(table);
-  } catch {
+    return await asAsync(adapter).columns(parsed.table, signal);
+  } catch (err) {
+    if (isAbortLikeError(err, signal)) throw err;
     return [];
   }
 }
@@ -636,18 +609,30 @@ async function handleQuery(
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
+  const r = await resolveDb(
+    cwd,
+    body.db,
+    omitDirNames,
+    body.schema,
+    req.signal,
+  );
   if (r instanceof Response) return r;
   const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
   const start = Date.now();
   try {
-    const adapter = await getAdapter(r, cwd);
-    const result = adapter.executeReadonlyQuery(body.sql, undefined, maxRows);
+    const adapter = await getAdapter(r, cwd, req.signal);
+    const db = asAsync(adapter);
+    const result = await db.readonlyQuery(
+      body.sql,
+      undefined,
+      maxRows,
+      req.signal,
+    );
     const elapsed = Date.now() - start;
     const serializedRows = serializeDbRows(result.rows);
     const inferredColumns =
       result.columns.length === 0 && result.rows.length === 0
-        ? inferEmptyQueryColumns(adapter, body.sql)
+        ? await inferEmptyQueryColumns(adapter, body.sql, r.schema, req.signal)
         : [];
     const columns =
       inferredColumns.length > 0
@@ -685,9 +670,10 @@ async function handleQuery(
         executedBy: body.executedBy || "user",
         source: body.source || "browser",
       };
-      const state = loadQueryHistory(cwd);
-      const updated = addQueryHistoryEntry(state, entry);
-      saveQueryHistory(cwd, updated);
+      await updateQueryHistoryAsync(cwd, (state) => ({
+        state: addQueryHistoryEntry(state, entry),
+        result: undefined,
+      }));
       sendSse?.(
         "db-query",
         JSON.stringify({
@@ -723,11 +709,11 @@ async function handleQuery(
   }
 }
 
-function handleHistory(cwd: string, url: URL): Response {
+async function handleHistory(cwd: string, url: URL): Promise<Response> {
   const dbId = url.searchParams.get("db") || undefined;
   const schema = normalizeSchemaParam(url.searchParams.get("schema"));
   if (schema instanceof Response) return schema;
-  const state = loadQueryHistory(cwd);
+  const state = await loadQueryHistoryAsync(cwd);
   if (dbId) {
     return json({
       version: 1,
@@ -749,10 +735,10 @@ async function handleHistoryDelete(
   const body = await parsePostJsonBody<{ id?: string }>(req);
   if (body instanceof Response) return body;
   if (!body.id) return textError("missing id", 400);
-  const state = loadQueryHistory(cwd);
-  const deleted = state.entries.find((entry) => entry.id === body.id);
-  const updated = deleteQueryHistoryEntry(state, body.id);
-  saveQueryHistory(cwd, updated);
+  const deleted = await updateQueryHistoryAsync(cwd, (state) => ({
+    state: deleteQueryHistoryEntry(state, body.id || ""),
+    result: state.entries.find((entry) => entry.id === body.id),
+  }));
   sendSse?.(
     "db-query",
     JSON.stringify({
@@ -777,11 +763,12 @@ async function handleHistoryClear(
   } catch {
     body = {};
   }
-  const state = loadQueryHistory(cwd);
   const schema = normalizeSchemaParam(body.schema);
   if (schema instanceof Response) return schema;
-  const updated = clearQueryHistory(state, body.db, schema);
-  saveQueryHistory(cwd, updated);
+  await updateQueryHistoryAsync(cwd, (state) => ({
+    state: clearQueryHistory(state, body.db, schema),
+    result: undefined,
+  }));
   sendSse?.(
     "db-query",
     JSON.stringify({ action: "clear", dbId: body.db, schema }),
@@ -814,12 +801,14 @@ async function handleExport(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const r = resolveDb(
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
@@ -842,8 +831,9 @@ async function handleExport(
   const filters = parseFilters(url);
 
   try {
-    const adapter = await getAdapter(r, cwd);
-    const columns = adapter.getColumns(table);
+    const adapter = await getAdapter(r, cwd, signal);
+    const db = asAsync(adapter);
+    const columns = await db.columns(table, signal);
     const colNames = columns.map((c) => c.name);
     const colNameSet = new Set(colNames);
     if (sortCol && !colNameSet.has(sortCol)) {
@@ -852,44 +842,28 @@ async function handleExport(
     let rawRows: import("./serialize").RawDbValue[][];
 
     if (filters.length > 0) {
-      const validFilters = filters.filter((f) => colNameSet.has(f.column));
-      if (validFilters.length > 0) {
-        const grouped = new Map<string, string[]>();
-        for (const f of validFilters) {
-          const existing = grouped.get(f.value) || [];
-          existing.push(f.column);
-          grouped.set(f.value, existing);
-        }
-        const k = adapter.kind as "sqlite" | "postgresql" | "mysql";
-        const filter = buildFilterWhere(grouped, k);
-        const order = orderBy
-          ? ` ORDER BY ${sanitizeIdentifier(orderBy[0].column, k)} ${orderBy[0].direction === "desc" ? "DESC" : "ASC"}`
-          : "";
-        const tbl = sanitizeIdentifier(table, k);
-        const limitOffset = filter.useParams
-          ? "LIMIT ? OFFSET ?"
-          : `LIMIT ${EXPORT_MAX_ROWS} OFFSET 0`;
-        const dataSql = `SELECT * FROM ${tbl} WHERE ${filter.where}${order} ${limitOffset}`;
-        const result = adapter.executeReadonlyQuery(
-          dataSql,
-          filter.useParams ? [...filter.params, EXPORT_MAX_ROWS, 0] : undefined,
-        );
-        rawRows = result.rows;
-      } else {
-        const result = adapter.getTablePage(table, {
+      const meta = await adapter.getFilteredTablePageWithMeta(
+        table,
+        {
           offset: 0,
           limit: EXPORT_MAX_ROWS,
           orderBy,
-        });
-        rawRows = result.rows;
-      }
+          grouped: groupFiltersByValue(filters),
+        },
+        signal,
+      );
+      rawRows = meta.rows;
     } else {
-      const result = adapter.getTablePage(table, {
-        offset: 0,
-        limit: EXPORT_MAX_ROWS,
-        orderBy,
-      });
-      rawRows = result.rows;
+      const meta = await adapter.getTablePageWithMeta(
+        table,
+        {
+          offset: 0,
+          limit: EXPORT_MAX_ROWS,
+          orderBy,
+        },
+        signal,
+      );
+      rawRows = meta.rows;
     }
     const rows = serializeDbRows(rawRows);
 
@@ -934,19 +908,22 @@ async function handleColumns(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const r = resolveDb(
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
   try {
-    const adapter = await getAdapter(r, cwd);
-    const columns = adapter.getColumns(table);
+    const adapter = await getAdapter(r, cwd, signal);
+    const db = asAsync(adapter);
+    const columns = await db.columns(table, signal);
     return json({
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
@@ -962,20 +939,25 @@ async function handleDdl(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
+  signal?: AbortSignal,
 ): Promise<Response> {
-  const r = resolveDb(
+  const r = await resolveDb(
     cwd,
     url.searchParams.get("db"),
     omitDirNames,
     url.searchParams.get("schema"),
+    signal,
   );
   if (r instanceof Response) return r;
   const table = url.searchParams.get("table");
   if (!table) return textError("missing table parameter", 400);
   try {
-    const adapter = await getAdapter(r, cwd);
-    const sql = adapter.getCreateStatement(table);
-    const triggers = adapter.getTriggers(table);
+    const adapter = await getAdapter(r, cwd, signal);
+    const db = asAsync(adapter);
+    const [sql, triggers] = await Promise.all([
+      db.createStatement(table, signal),
+      db.triggers(table, signal),
+    ]);
     return json({
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
@@ -1001,9 +983,25 @@ type SearchJob = {
   done: boolean;
   error?: string;
   abortController: AbortController;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
+  cleanupAt?: number;
 };
 
 const searchJobs = new Map<string, SearchJob>();
+
+function scheduleSearchJobCleanup(jobId: string, delayMs: number): void {
+  const job = searchJobs.get(jobId);
+  if (!job) return;
+  const cleanupAt = Date.now() + delayMs;
+  if (job.cleanupTimer && job.cleanupAt && job.cleanupAt <= cleanupAt) return;
+  if (job.cleanupTimer) clearTimeout(job.cleanupTimer);
+  const timer = setTimeout(() => {
+    searchJobs.delete(jobId);
+  }, delayMs);
+  timer.unref?.();
+  job.cleanupTimer = timer;
+  job.cleanupAt = cleanupAt;
+}
 
 async function handleSearchStart(
   cwd: string,
@@ -1020,7 +1018,13 @@ async function handleSearchStart(
   }>(req);
   if (body instanceof Response) return body;
   if (!body.db || !body.term) return textError("missing db or term", 400);
-  const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
+  const r = await resolveDb(
+    cwd,
+    body.db,
+    omitDirNames,
+    body.schema,
+    req.signal,
+  );
   if (r instanceof Response) return r;
 
   const jobId = makeId("search");
@@ -1036,7 +1040,7 @@ async function handleSearchStart(
     abortController: ac,
   };
   searchJobs.set(jobId, job);
-  setTimeout(() => searchJobs.delete(jobId), 5 * 60_000);
+  scheduleSearchJobCleanup(jobId, 5 * 60_000);
 
   const term = body.term;
   const maxHitsPerTable = body.maxHitsPerTable ?? 50;
@@ -1045,9 +1049,9 @@ async function handleSearchStart(
 
   const runJob = async () => {
     try {
-      const adapter = await getAdapter(r, cwd);
-      let tables = adapter
-        .getTables()
+      const adapter = await getAdapter(r, cwd, ac.signal);
+      const db = asAsync(adapter);
+      let tables = (await db.tables(ac.signal))
         .filter((t) => t.type === "table")
         .map((t) => t.name);
       if (filterTables && filterTables.length > 0) {
@@ -1055,22 +1059,16 @@ async function handleSearchStart(
         tables = tables.filter((t) => allowed.has(t));
       }
 
-      let countMap: Map<string, number>;
-      if (adapter.getTableRowCounts) {
-        countMap = adapter.getTableRowCounts(tables);
-      } else {
-        countMap = new Map();
-        for (const t of tables) countMap.set(t, adapter.getTableRowCount(t));
-      }
+      const countMap = await db.tableRowCounts(tables, ac.signal);
       tables.sort((a, b) => (countMap.get(a) ?? 0) - (countMap.get(b) ?? 0));
       job.totalTables = tables.length;
 
       for (const table of tables) {
         if (ac.signal.aborted) break;
         job.currentTable = table;
-        const pkCols = getPrimaryKeyColumns(adapter, table);
-        const columns = adapter.getColumns(table);
-        const hits = searchTable(
+        const columns = await db.columns(table, ac.signal);
+        const pkCols = getPrimaryKeyColumnsFromColumns(columns);
+        const hits = await searchTableAsync(
           adapter,
           table,
           columns,
@@ -1078,6 +1076,7 @@ async function handleSearchStart(
           maxHitsPerTable,
           includeNonText,
           pkCols,
+          ac.signal,
         );
         job.hits.push(
           ...hits.map((hit) => ({
@@ -1090,8 +1089,12 @@ async function handleSearchStart(
       job.done = true;
       job.currentTable = undefined;
     } catch (err) {
-      job.error = err instanceof Error ? err.message : String(err);
+      if (!isAbortLikeError(err, ac.signal)) {
+        job.error = err instanceof Error ? err.message : String(err);
+      }
       job.done = true;
+      job.currentTable = undefined;
+      scheduleSearchJobCleanup(job.id, 60_000);
     }
   };
   const timer = setTimeout(() => void runJob(), 0);
@@ -1117,7 +1120,7 @@ function handleSearchStatus(url: URL): Response {
     error: job.error,
   };
   if (job.done) {
-    setTimeout(() => searchJobs.delete(jobId), 60_000);
+    scheduleSearchJobCleanup(jobId, 60_000);
   }
   return json(result);
 }
@@ -1130,6 +1133,8 @@ async function handleSearchCancel(req: Request): Promise<Response> {
   if (!job) return textError("job not found", 404);
   job.abortController.abort();
   job.done = true;
+  job.currentTable = undefined;
+  scheduleSearchJobCleanup(job.id, 60_000);
   return json({ ok: true });
 }
 
@@ -1151,6 +1156,7 @@ type SnapshotJob = {
 type SnapshotDockerSourceFactory = (
   info: DockerDbInfo,
   requestedContainers: string[] | undefined,
+  signal?: AbortSignal,
 ) => Promise<SnapshotDockerSource>;
 type DockerCloseHandler = (dbId: string) => void | Promise<void>;
 
@@ -1167,36 +1173,43 @@ const DOCKER_CLOSE_REGISTRY: Partial<Record<DbKind, DockerCloseHandler>> = {
   },
   redis: closeRedisAdapter,
   elasticsearch: closeElasticsearchAdapter,
+  s3: closeS3Adapter,
 };
 
 const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
   Record<DbKind, SnapshotDockerSourceFactory>
 > = {
-  redis: async (info, requestedContainers) => {
-    const { openRedisExplorer, canonicalizeRedisSnapshotContainer } =
+  redis: async (info, requestedContainers, signal) => {
+    const { openRedisExplorerAsync, canonicalizeRedisSnapshotContainer } =
       await import("./adapters/redis");
     const containers =
       requestedContainers && requestedContainers.length > 0
         ? requestedContainers
         : ["*"];
     return {
-      source: openRedisExplorer(info.serviceName, info.env, info.composeDir),
+      source: await openRedisExplorerAsync(
+        info.serviceName,
+        info.env,
+        info.composeDir,
+        signal,
+      ),
       containers: containers.map(canonicalizeRedisSnapshotContainer),
       closeAfterSnapshot: true,
     };
   },
-  elasticsearch: async (info, requestedContainers) => {
-    const { openElasticsearchAdapter, canonicalizeEsSnapshotContainer } =
+  elasticsearch: async (info, requestedContainers, signal) => {
+    const { openElasticsearchAdapterAsync, canonicalizeEsSnapshotContainer } =
       await import("./adapters/elasticsearch");
     const containers =
       requestedContainers && requestedContainers.length > 0
         ? requestedContainers
         : ["*"];
     return {
-      source: openElasticsearchAdapter(
+      source: await openElasticsearchAdapterAsync(
         info.serviceName,
         info.env,
         info.composeDir,
+        signal,
       ),
       containers: containers.map(canonicalizeEsSnapshotContainer),
       closeAfterSnapshot: true,
@@ -1207,9 +1220,10 @@ const SNAPSHOT_DOCKER_SOURCE_REGISTRY: Partial<
 async function openRegisteredDockerSnapshotSource(
   info: DockerDbInfo,
   requestedContainers: string[] | undefined,
+  signal?: AbortSignal,
 ): Promise<SnapshotDockerSource | null> {
   const factory = SNAPSHOT_DOCKER_SOURCE_REGISTRY[info.kind];
-  return factory ? factory(info, requestedContainers) : null;
+  return factory ? factory(info, requestedContainers, signal) : null;
 }
 
 async function handleSnapshotList(cwd: string, url: URL): Promise<Response> {
@@ -1264,11 +1278,18 @@ async function handleSnapshotCreate(
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    const info = await findDockerServiceByDbIdAsync(
+      cwd,
+      body.db,
+      undefined,
+      omitDirNames,
+      req.signal,
+    );
     if (!info) return textError("docker service not found", 404);
     const registeredSource = await openRegisteredDockerSnapshotSource(
       info,
       requestedTables,
+      req.signal,
     );
     if (registeredSource) {
       source = registeredSource.source;
@@ -1277,20 +1298,21 @@ async function handleSnapshotCreate(
     }
   }
   if (!source) {
-    const r = resolveDb(cwd, body.db, omitDirNames, body.schema);
+    const r = await resolveDb(
+      cwd,
+      body.db,
+      omitDirNames,
+      body.schema,
+      req.signal,
+    );
     if (r instanceof Response) return r;
-    source = await getAdapter(r, cwd);
+    source = await getAdapter(r, cwd, req.signal);
     body.schema = r.schema;
   }
 
   if (!containers || containers.length === 0) {
-    // SQL pass: getTables() で table 一覧を default にする。
-    const sqlAdapter = source as {
-      getTables?: () => Array<{ name: string; type: string }>;
-    };
-    if (typeof sqlAdapter.getTables === "function") {
-      containers = sqlAdapter
-        .getTables()
+    if ((source as { model?: string }).model === "sql") {
+      containers = (await asAsync(source as DatabaseAdapter).tables(req.signal))
         .filter((t) => t.type === "table")
         .map((t) => t.name);
     }
@@ -1362,17 +1384,22 @@ async function handleSnapshotCreate(
         }),
       );
     } catch (err) {
-      console.error(
-        "[code-viewer] snapshot error:",
-        err instanceof Error ? err.message : String(err),
-      );
+      const aborted = isAbortLikeError(err, abortController.signal);
+      if (!aborted) {
+        console.error(
+          "[code-viewer] snapshot error:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
       sendSse?.(
         "db-snapshot",
         JSON.stringify({
-          action: "error",
+          action: aborted ? "aborted" : "error",
           dbId: snapshotDbId,
           schema: body.schema,
-          error: err instanceof Error ? err.message : String(err),
+          ...(aborted
+            ? {}
+            : { error: err instanceof Error ? err.message : String(err) }),
         }),
       );
     } finally {
@@ -1477,8 +1504,8 @@ async function handleDiffRows(cwd: string, url: URL): Promise<Response> {
 
 // --- Tabs ---
 
-function handleTabsGet(cwd: string): Response {
-  return json(loadTabs(cwd));
+async function handleTabsGet(cwd: string): Promise<Response> {
+  return json(await loadTabsAsync(cwd));
 }
 
 async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
@@ -1504,7 +1531,10 @@ async function handleTabsPut(cwd: string, req: Request): Promise<Response> {
     return textError("invalid tabs version", 400);
   }
   try {
-    saveTabs(cwd, body as import("../../core/database/types").TabsState);
+    await saveTabsAsync(
+      cwd,
+      body as import("../../core/database/types").TabsState,
+    );
     return json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1526,18 +1556,25 @@ async function handleClose(
   if (body.db.startsWith("docker:")) {
     const parsed = parseDockerDbId(body.db);
     if (!parsed) return textError("invalid docker db id", 400);
-    const info = findDockerServiceByDbId(cwd, body.db, undefined, omitDirNames);
+    const info = await findDockerServiceByDbIdAsync(
+      cwd,
+      body.db,
+      undefined,
+      omitDirNames,
+      req.signal,
+    );
     if (!info) {
       dockerAdapterCache.close(body.db);
       dockerAdapterCache.closePrefix(`${body.db}\0`);
       closeRedisAdapter(body.db);
       closeElasticsearchAdapter(body.db);
+      closeS3Adapter(body.db);
       return json({ ok: true });
     }
     await DOCKER_CLOSE_REGISTRY[info.kind]?.(body.db);
     return json({ ok: true });
   }
-  const r = resolveDb(cwd, body.db, omitDirNames);
+  const r = await resolveDb(cwd, body.db, omitDirNames, undefined, req.signal);
   if (r instanceof Response) return r;
   if (r.docker) {
     dockerAdapterCache.close(r.dbId);
@@ -1571,6 +1608,10 @@ export async function handleDatabaseRoute(
       omitDirNames,
     );
   }
+  if (url.pathname.startsWith("/_db/s3/")) {
+    const { handleS3Route } = await import("./handle-s3");
+    return handleS3Route(req, url, cwd, sideEffectAllowed, omitDirNames);
+  }
   const path = url.pathname;
   const start = Date.now();
   const method = req.method;
@@ -1589,31 +1630,31 @@ export async function handleDatabaseRoute(
     {
       "/_db/files": {
         methods: ["GET"],
-        handler: () => handleFiles(cwd, omitDirNames),
+        handler: () => handleFiles(cwd, omitDirNames, req.signal),
       },
       "/_db/schemas": {
         methods: ["GET"],
-        handler: () => handleSchemas(cwd, url, omitDirNames),
+        handler: () => handleSchemas(cwd, url, omitDirNames, req.signal),
       },
       "/_db/schema": {
         methods: ["GET"],
-        handler: () => handleSchema(cwd, url, omitDirNames),
+        handler: () => handleSchema(cwd, url, omitDirNames, req.signal),
       },
       "/_db/table": {
         methods: ["GET"],
-        handler: () => handleTable(cwd, url, omitDirNames),
+        handler: () => handleTable(cwd, url, omitDirNames, req.signal),
       },
       "/_db/columns": {
         methods: ["GET"],
-        handler: () => handleColumns(cwd, url, omitDirNames),
+        handler: () => handleColumns(cwd, url, omitDirNames, req.signal),
       },
       "/_db/export": {
         methods: ["GET"],
-        handler: () => handleExport(cwd, url, omitDirNames),
+        handler: () => handleExport(cwd, url, omitDirNames, req.signal),
       },
       "/_db/ddl": {
         methods: ["GET"],
-        handler: () => handleDdl(cwd, url, omitDirNames),
+        handler: () => handleDdl(cwd, url, omitDirNames, req.signal),
       },
       "/_db/query": {
         methods: ["POST"],

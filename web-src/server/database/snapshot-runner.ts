@@ -11,6 +11,9 @@
 // 持たない場合は明示的にエラーを返す。
 
 import type { DbKind } from "../../core/database/types";
+import { isAbortLikeError, throwIfAborted } from "./adapters/abort";
+import { asAsync } from "./adapters/async-facade";
+import type { DatabaseAdapter } from "./adapters/types";
 import {
   addSnapshotTableData,
   createSnapshot,
@@ -36,12 +39,6 @@ type RunSnapshotOptions = {
   schema?: string;
   onSnapshotId?: (snapshotId: string) => void;
 };
-
-function throwIfSnapshotAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw new Error("snapshot cancelled");
-  }
-}
 
 export async function runSnapshot(
   cwd: string,
@@ -73,7 +70,7 @@ export async function runSnapshot(
     options.onSnapshotId?.(snapshotId);
 
     for (const container of containers) {
-      throwIfSnapshotAborted(options.signal);
+      throwIfAborted(options.signal, "snapshot cancelled");
       onProgress?.(container, false);
 
       // snapshot-store の addSnapshotTableData は historically `rowKeyJson`
@@ -90,26 +87,24 @@ export async function runSnapshot(
       // 持つだけで、diff 計算は row_key_hash + row_hash に依存しているので、
       // 空配列でも diff は正しく動く。
       let pkColumns: string[] = [];
-      try {
-        const adapterAny = snapshotSource as {
-          getColumns?: (t: string) => unknown;
-        };
-        if (typeof adapterAny.getColumns === "function") {
-          const cols = adapterAny.getColumns(container) as Array<{
-            name: string;
-            primaryKey: boolean;
-          }>;
+      if ((snapshotSource as { model?: string }).model === "sql") {
+        try {
+          const cols = await asAsync(
+            snapshotSource as SnapshotSource & DatabaseAdapter,
+          ).columns(container, options.signal);
           pkColumns = cols.filter((c) => c.primaryKey).map((c) => c.name);
+        } catch (err) {
+          if (isAbortLikeError(err, options.signal)) throw err;
+          // 非 SQL source や container が table ではない場合は無視。
         }
-      } catch {
-        // 非 SQL source や container が table ではない場合は無視。
       }
+      throwIfAborted(options.signal, "snapshot cancelled");
 
       for await (const item of snapshotSource.iterateForSnapshot(
         container,
         options.signal,
       )) {
-        throwIfSnapshotAborted(options.signal);
+        throwIfAborted(options.signal, "snapshot cancelled");
         collected.push({
           rowKeyJson: item.keyJson,
           rowHash: item.rowHash,
@@ -119,7 +114,7 @@ export async function runSnapshot(
         // 既存 snapshot-store は table 単位で 1 回 commit する仕様なので
         // ここではメモリに溜めてから一括書き込みする (旧実装と同じ挙動)。
       }
-      throwIfSnapshotAborted(options.signal);
+      throwIfAborted(options.signal, "snapshot cancelled");
 
       // SNAPSHOT_FLUSH_THRESHOLD は将来 streaming 化する際の hook。
       // 現状は単純に全件まとめて書く。

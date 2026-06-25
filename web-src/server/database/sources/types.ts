@@ -26,6 +26,9 @@ import type {
   EsIndexInfo,
   EsMapping,
   EsSearchResult,
+  S3BucketInfo,
+  S3ObjectHeadResponse,
+  S3ObjectInfo,
 } from "../../../core/database/types";
 import type {
   DatabaseAdapter,
@@ -50,7 +53,6 @@ export type SqlSource = DatabaseAdapter & {
 };
 
 // KV 系 (Redis 等): keyspace × key × type-specific value。
-// 現行 explorer は request 内で同期的に docker exec し、結果を返す。
 export type KvKeyEntry<TKeyType extends string = string> = {
   name: string;
   type: TKeyType;
@@ -61,39 +63,80 @@ export type KvSource<
   TKeyType extends string = string,
 > = DataSourceBase & {
   readonly model: "kv";
-  listDatabases(): Array<{ index: number; keyCount: number }>;
-  listKeys(opts: {
+  listDatabasesAsync(
+    signal?: AbortSignal,
+  ): Promise<Array<{ index: number; keyCount: number }>>;
+  listKeysAsync(opts: {
     db: number;
     pattern?: string;
     cursor?: string;
     count?: number;
-  }): { keys: Array<KvKeyEntry<TKeyType>>; nextCursor: string };
-  getValue(opts: { db: number; key: string }): TValue;
+    signal?: AbortSignal;
+  }): Promise<{ keys: Array<KvKeyEntry<TKeyType>>; nextCursor: string }>;
+  getValueAsync(opts: {
+    db: number;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<TValue>;
 };
 
-// Object store 系 (S3 / MinIO)。Round 3 で実装する。型だけ予約。
+// Object store 系 (S3 / MinIO)。
 export type ObjectSource = DataSourceBase & {
   readonly model: "object";
-  // 具体メソッドは Round 3 で確定。
+  listBuckets(signal?: AbortSignal): Promise<S3BucketInfo[]>;
+  listObjects(opts: {
+    bucket: string;
+    prefix?: string;
+    continuationToken?: string;
+    maxKeys?: number;
+    signal?: AbortSignal;
+  }): Promise<{
+    objects: S3ObjectInfo[];
+    nextToken?: string;
+    truncated: boolean;
+  }>;
+  headObject(opts: {
+    bucket: string;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<S3ObjectHeadResponse>;
+  getObjectText(opts: {
+    bucket: string;
+    key: string;
+    maxBytes?: number;
+    signal?: AbortSignal;
+  }): Promise<{ text: string; truncated: boolean; head: S3ObjectHeadResponse }>;
+  getObjectResponse(opts: {
+    bucket: string;
+    key: string;
+    method: "GET" | "HEAD";
+    range?: string | null;
+    signal?: AbortSignal;
+  }): Promise<Response>;
 };
 
 // Document store 系 (Elasticsearch)。
 export type DocSource = DataSourceBase & {
   readonly model: "document";
-  listIndices(): EsIndexInfo[];
-  getMapping(index: string): EsMapping;
-  searchDocs(opts: {
+  listIndicesAsync(signal?: AbortSignal): Promise<EsIndexInfo[]>;
+  getMappingAsync(index: string, signal?: AbortSignal): Promise<EsMapping>;
+  searchDocsAsync(opts: {
     index: string;
     query?: string;
     size?: number;
     searchAfter?: unknown[];
-  }): EsSearchResult;
-  getDoc(opts: { index: string; id: string }): {
+    signal?: AbortSignal;
+  }): Promise<EsSearchResult>;
+  getDocAsync(opts: {
+    index: string;
+    id: string;
+    signal?: AbortSignal;
+  }): Promise<{
     found: boolean;
     source: unknown;
     seqNo?: number;
     primaryTerm?: number;
-  };
+  }>;
 };
 
 // ---------- capability mixin ----------
@@ -133,7 +176,7 @@ export type SearchableSource = {
 // Q: 入力コマンド型, R: 結果型。
 export type Queryable<Q, R> = {
   readonly capabilities: { query: true };
-  query(input: Q, maxRows?: number): Promise<R>;
+  query(input: Q, maxRows?: number, signal?: AbortSignal): Promise<R>;
 };
 
 // ---------- 型ガード ----------
@@ -162,5 +205,8 @@ export type {
   DbTableInfo,
   DbValue,
   QueryResult,
+  S3BucketInfo,
+  S3ObjectHeadResponse,
+  S3ObjectInfo,
   TriggerInfo,
 };

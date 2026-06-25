@@ -112,14 +112,14 @@ Use `scope.omitDirs` for directories that should stay visible as skipped, and
 `scope.excludeNames` for file or directory names that should be hidden entirely.
 `.DS_Store` is hidden by default.
 
-## Database Viewer
+## Datastore Viewer
 
-code-viewer auto-discovers databases in your repository and provides a
+code-viewer auto-discovers local datastores in your repository and provides a
 browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
 automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
-**Redis**, and **Elasticsearch** services are detected from any
+**Redis**, **Elasticsearch**, **MinIO**, and **LocalStack S3** services are detected from any
 `docker-compose.yml` (or `compose.yml`) found by the same recursive
 scan — both the repository root and subdirectories are considered, so a
 single `code-viewer --cwd <root>` brings up every DB defined under that
@@ -131,10 +131,19 @@ SCAN keys, and view values per type (string/hash/list as dedicated
 panes, set/zset/stream as raw JSON). Elasticsearch support is read-only
 too: list indices, view mappings, paginate docs with `search_after`, run
 lucene `q=` searches, and take snapshots / diffs over `_search` iteration.
+S3-compatible object storage support is read-only: browse buckets, search by
+prefix or filename, sort scanned objects by update time, and preview images,
+video, audio, PDFs, Markdown, HTML, and text files. Updated-time sorting is
+scoped to the objects scanned for the current prefix/search rather than a
+persistent whole-bucket index. HTML previews are rendered in a sandboxed
+`srcdoc` iframe; relative subresources inside the HTML are not rewritten.
+If the S3 service publishes a host port, code-viewer connects through
+`localhost:<port>`; otherwise it falls back to `docker exec <container> curl`
+against the service's container-local endpoint.
 
 ### Browser UI
 
-Open the database icon in the sidebar to access:
+Open Datastores in the global navigation to access:
 
 - **Multi-DB tabs** — open multiple databases side by side (each tab has
   its own sidebar, panes, and history). `+` adds an empty tab; `×` or
@@ -228,7 +237,7 @@ The body is Markdown. Long bodies can be passed with `--body-file <path>` or
 piped through stdin. `code-viewer annotate --help` shows all commands,
 including `move`, `edit`, `list`, `delete <id>`, and `clear`. `add` and
 `add-db` accept `--before <id>`, `--after <id>`, or `--position <n>` when a
-note belongs somewhere other than the end. On the Database screen, the
+note belongs somewhere other than the end. On the Datastores screen, the
 annotations panel also has a pin button that captures the current data grid,
 query editor, or global search state as a database annotation. For AI agents,
 `code-viewer annotate agent-help` prints a skill-style guide covering the

@@ -92,6 +92,19 @@ describe("markdown preview", () => {
     ).toBe(null);
   });
 
+  test("allows object-store previews to provide their own markdown asset URLs", () => {
+    const html = renderMarkdownHtml(
+      "![shot](./img/screen.png)",
+      { path: "docs/guide/intro.md", ref: "s3" },
+      null,
+      undefined,
+      (path) => `/_db/s3/raw?key=${encodeURIComponent(path)}`,
+    );
+    expect(
+      html.includes('src="/_db/s3/raw?key=docs%2Fguide%2Fimg%2Fscreen.png"'),
+    ).toBe(true);
+  });
+
   test("renders task lists as list items that can be enhanced after parsing", () => {
     const html = renderMarkdownHtml(
       "- [x] done\n- [ ] todo\n",

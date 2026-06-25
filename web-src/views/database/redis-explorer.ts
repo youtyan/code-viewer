@@ -109,6 +109,10 @@ export function createRedisExplorer(
   let keyRunId = 0;
   let suppressNotify = false;
   let disposed = false;
+  let activeDbRow: HTMLElement | null = null;
+  let activeKeyRow: HTMLElement | null = null;
+  const dbRowsByIndex = new Map<number, HTMLElement>();
+  const keyRowsByName = new Map<string, HTMLElement>();
   const dbGuard = createAbortGuard();
   const keysGuard = createAbortGuard();
   const valueGuard = createAbortGuard();
@@ -139,10 +143,13 @@ export function createRedisExplorer(
     databases: RedisDatabasesResponse["databases"],
   ): void {
     dbList.innerHTML = "";
+    dbRowsByIndex.clear();
+    const fragment = document.createDocumentFragment();
     for (const db of databases) {
       const item = document.createElement("div");
       item.className = "redis-db-item";
       item.dataset.dbIndex = String(db.index);
+      dbRowsByIndex.set(db.index, item);
       const name = document.createElement("span");
       name.className = "redis-db-name";
       name.textContent = `db${db.index}`;
@@ -150,22 +157,25 @@ export function createRedisExplorer(
       count.className = "redis-db-count";
       count.textContent = `${db.keyCount.toLocaleString()} keys`;
       item.append(name, count);
-      item.addEventListener("click", () => selectDatabase(db.index));
-      dbList.appendChild(item);
+      fragment.appendChild(item);
     }
+    dbList.appendChild(fragment);
   }
 
   function highlightActiveDb(index: number) {
-    for (const item of dbList.querySelectorAll<HTMLElement>(".redis-db-item")) {
-      item.classList.toggle("active", item.dataset.dbIndex === String(index));
-    }
+    if (activeDbRow?.dataset.dbIndex === String(index)) return;
+    activeDbRow?.classList.remove("active");
+    activeDbRow = dbRowsByIndex.get(index) ?? null;
+    activeDbRow?.classList.add("active");
   }
 
   function appendKeys(keys: RedisKeysResponse["keys"]): void {
+    const fragment = document.createDocumentFragment();
     for (const k of keys) {
       const row = document.createElement("div");
       row.className = "redis-key-item";
       row.dataset.keyName = k.name;
+      keyRowsByName.set(k.name, row);
       const typeBadge = document.createElement("span");
       typeBadge.className = `redis-type-badge redis-type-${k.type}`;
       typeBadge.textContent = k.type;
@@ -174,23 +184,22 @@ export function createRedisExplorer(
       nameEl.textContent = k.name;
       nameEl.title = k.name;
       row.append(typeBadge, nameEl);
-      row.addEventListener("click", () => selectKey(k.name));
-      keyList.appendChild(row);
+      fragment.appendChild(row);
     }
+    keyList.appendChild(fragment);
   }
 
   function highlightActiveKey(name: string) {
-    for (const row of keyList.querySelectorAll<HTMLElement>(
-      ".redis-key-item",
-    )) {
-      row.classList.toggle("active", row.dataset.keyName === name);
-    }
+    if (activeKeyRow?.dataset.keyName === name) return;
+    activeKeyRow?.classList.remove("active");
+    activeKeyRow = keyRowsByName.get(name) ?? null;
+    activeKeyRow?.classList.add("active");
   }
 
   function makeNotice(message: string, kind: "info" | "warn" = "info") {
     const div = document.createElement("div");
     div.className =
-      kind === "warn" ? "redis-value-truncation" : "redis-value-info";
+      kind === "warn" ? "datastore-value-truncation" : "datastore-value-info";
     div.textContent = message;
     return div;
   }
@@ -389,6 +398,8 @@ export function createRedisExplorer(
     notifySelectionChange();
     highlightActiveDb(dbIndex);
     keyList.innerHTML = "";
+    keyRowsByName.clear();
+    activeKeyRow = null;
     mainPane.textContent = "Select a key to view its value.";
     await loadKeys(false);
   }
@@ -429,7 +440,11 @@ export function createRedisExplorer(
       ) {
         return;
       }
-      if (!append) keyList.innerHTML = "";
+      if (!append) {
+        keyList.innerHTML = "";
+        keyRowsByName.clear();
+        activeKeyRow = null;
+      }
       if (data.keys.length === 0 && !append) {
         setKeyStatus("(no keys)");
       } else {
@@ -451,6 +466,23 @@ export function createRedisExplorer(
   }
 
   keyMoreBtn.addEventListener("click", () => loadKeys(true));
+  dbList.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+      ".redis-db-item",
+    );
+    if (!row || !dbList.contains(row)) return;
+    const raw = row.dataset.dbIndex;
+    const index = raw === undefined ? NaN : Number(raw);
+    if (Number.isInteger(index)) void selectDatabase(index);
+  });
+  keyList.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+      ".redis-key-item",
+    );
+    if (!row || !keyList.contains(row)) return;
+    const key = row.dataset.keyName;
+    if (key) void selectKey(key);
+  });
 
   keyFilterForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -482,6 +514,9 @@ export function createRedisExplorer(
     keyFilterInput.value = currentKeyFilter === "*" ? "" : currentKeyFilter;
     currentCursor = "0";
     keyList.innerHTML = "";
+    keyRowsByName.clear();
+    activeDbRow = null;
+    activeKeyRow = null;
     keyMoreBtn.hidden = true;
     mainPane.textContent = "Select a key to view its value.";
     setDbStatus("Loading databases...");
@@ -515,10 +550,21 @@ export function createRedisExplorer(
       ) {
         suppressNotify = true;
         try {
-          await selectDatabase(initial.dbIndex);
+          currentDbIndex = initial.dbIndex;
+          currentKey = null;
+          currentCursor = "0";
+          highlightActiveDb(initial.dbIndex);
+          keyList.innerHTML = "";
+          keyRowsByName.clear();
+          mainPane.textContent = "Select a key to view its value.";
+          const valuePromise = initial.key
+            ? selectKey(initial.key).catch(() => {})
+            : null;
+          await loadKeys(false);
           if (currentDbId !== dbId) return;
-          if (initial.key) {
-            await selectKey(initial.key);
+          if (valuePromise) {
+            await valuePromise;
+            if (initial.key) highlightActiveKey(initial.key);
           }
         } finally {
           suppressNotify = false;
@@ -551,6 +597,10 @@ export function createRedisExplorer(
     currentCursor = "0";
     dbList.innerHTML = "";
     keyList.innerHTML = "";
+    dbRowsByIndex.clear();
+    keyRowsByName.clear();
+    activeDbRow = null;
+    activeKeyRow = null;
     keyMoreBtn.hidden = true;
     mainPane.textContent = "Select a database to view keys.";
   }

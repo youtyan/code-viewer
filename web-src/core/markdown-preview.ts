@@ -10,6 +10,7 @@ export type MarkdownPreviewOptions = {
   syntaxHighlight: boolean;
   signal?: AbortSignal;
   onNavigateMarkdown?: (path: string, ref: string) => void;
+  resolveAssetUrl?: (path: string, rawSrc: string) => string | null;
 };
 
 type MermaidApi = {
@@ -158,6 +159,7 @@ function createMarkdownIt(
   target: SourceFileTarget,
   highlighter: ShikiHighlighter | null,
   signal?: AbortSignal,
+  resolveAssetUrl?: (path: string, rawSrc: string) => string | null,
 ): MarkdownIt {
   const md = new MarkdownIt({
     html: false,
@@ -240,11 +242,12 @@ function createMarkdownIt(
     const token = tokens[idx];
     const src = token.attrGet("src") || "";
     const resolved = resolveMarkdownAssetPath(target.path, src);
-    if (resolved)
-      token.attrSet(
-        "src",
-        buildRawFileUrl({ path: resolved, ref: target.ref || "worktree" }),
-      );
+    if (resolved) {
+      const assetUrl = resolveAssetUrl
+        ? resolveAssetUrl(resolved, src)
+        : buildRawFileUrl({ path: resolved, ref: target.ref || "worktree" });
+      if (assetUrl) token.attrSet("src", assetUrl);
+    }
     token.attrSet("loading", "lazy");
     return image(tokens, idx, options, env, self);
   };
@@ -295,6 +298,7 @@ export async function renderMarkdownPreview(
     target,
     highlighter,
     options.signal,
+    options.resolveAssetUrl,
   );
   if (options.signal?.aborted) return markdown;
   enhanceTaskLists(markdown);
@@ -316,8 +320,9 @@ export function renderMarkdownHtml(
   target: SourceFileTarget,
   highlighter: ShikiHighlighter | null,
   signal?: AbortSignal,
+  resolveAssetUrl?: (path: string, rawSrc: string) => string | null,
 ): string {
-  const md = createMarkdownIt(target, highlighter, signal);
+  const md = createMarkdownIt(target, highlighter, signal, resolveAssetUrl);
   const frontmatter = splitYamlFrontmatter(textValue);
   if (!frontmatter) return md.render(textValue);
   return (

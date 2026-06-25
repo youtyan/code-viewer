@@ -4,6 +4,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  abortError,
+  isAbortLikeError,
+} from "../server/database/adapters/abort";
+import {
+  __clearDockerDatabaseListCacheForTest,
+  __clearDockerSchemaListCacheForTest,
+  __setDockerSpawnSyncForTest,
+} from "../server/database/adapters/docker";
+import {
   __clearDockerComposeContainerNameCacheForTest,
   __setDockerComposeSpawnSyncForTest,
 } from "../server/database/adapters/docker-utils";
@@ -18,12 +27,16 @@ import {
   handleDatabaseRoute,
   parseSelectAllTable,
 } from "../server/database/handle";
+import { createDockerAdapterCache } from "../server/database/handle-shared";
 
 type SpawnSyncLike = typeof spawnSync;
 
 afterEach(() => {
   __setDockerComposeSpawnSyncForTest(null);
+  __setDockerSpawnSyncForTest(null);
   __clearDockerComposeContainerNameCacheForTest();
+  __clearDockerDatabaseListCacheForTest();
+  __clearDockerSchemaListCacheForTest();
 });
 
 describe("Elasticsearch read-only path allowlist", () => {
@@ -118,8 +131,8 @@ describe("snapshot container canonicalization", () => {
 
 describe("empty query column inference parser", () => {
   for (const [sql, expected] of [
-    ["SELECT * FROM users", "users"],
-    ['select * from "public"."users"', "users"],
+    ["SELECT * FROM users", { table: "users" }],
+    ['select * from "public"."users"', { schema: "public", table: "users" }],
     ["SELECT * FROM users WHERE 1=0", null],
     ["WITH q AS (SELECT * FROM users) SELECT * FROM q", null],
     ["SELECT * FROM users UNION SELECT * FROM archived_users", null],
@@ -127,9 +140,87 @@ describe("empty query column inference parser", () => {
     ["SELECT * FROM users LIMIT 0", null],
   ] as const) {
     test(`${sql} => ${expected}`, () => {
-      expect(parseSelectAllTable(sql)).toBe(expected);
+      expect(parseSelectAllTable(sql)).toEqual(expected);
     });
   }
+});
+
+describe("abort error classification", () => {
+  test("does not treat non-abort database errors containing aborted as cancellation", () => {
+    expect(
+      isAbortLikeError(
+        new Error("current transaction is aborted, commands ignored"),
+      ),
+    ).toBe(false);
+    expect(isAbortLikeError(abortError("query aborted"))).toBe(true);
+  });
+});
+
+describe("docker adapter async cache", () => {
+  test("does not abort a shared pending adapter when one close races", async () => {
+    const cache = createDockerAdapterCache<{ close(): void }>();
+    let resolveOpen: ((adapter: { close(): void }) => void) | null = null;
+    let closed = 0;
+    const pending = cache.getOrOpenAsync(
+      "docker:db",
+      () =>
+        new Promise<{ close(): void }>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+
+    await Promise.resolve();
+    cache.close("docker:db");
+    const adapter = {
+      close() {
+        closed++;
+      },
+    };
+    resolveOpen?.(adapter);
+
+    expect(await pending).toBe(adapter);
+    expect(closed).toBe(1);
+    let freshClosed = 0;
+    const fresh = {
+      close() {
+        freshClosed++;
+      },
+    };
+    expect(await cache.getOrOpenAsync("docker:db", () => fresh)).toBe(fresh);
+
+    cache.close("docker:db");
+    expect(closed).toBe(1);
+    expect(freshClosed).toBe(1);
+  });
+
+  test("closePrefix does not abort shared pending callers", async () => {
+    const cache = createDockerAdapterCache<{ close(): void }>();
+    let resolveOpen: ((adapter: { close(): void }) => void) | null = null;
+
+    const first = cache.getOrOpenAsync(
+      "docker:db\0schema=public",
+      () =>
+        new Promise<{ close(): void }>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    const second = cache.getOrOpenAsync("docker:db\0schema=public", () => ({
+      close() {},
+    }));
+    await Promise.resolve();
+    cache.closePrefix("docker:db\0");
+
+    let closed = 0;
+    const adapter = {
+      close() {
+        closed++;
+      },
+    };
+    resolveOpen?.(adapter);
+    expect(await first).toBe(adapter);
+    expect(await second).toBe(adapter);
+    expect(closed).toBe(1);
+  });
 });
 
 describe("database close route", () => {
@@ -281,6 +372,58 @@ describe("docker service unavailable route errors", () => {
       expect(await res.text()).toBe(
         'Container for service "pg-svc" is not running. Start it with: docker compose up -d pg-svc',
       );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("schema-qualified postgres table route does not list schemas first", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "code-viewer-pg-schema-skip-"));
+    const sqls: string[] = [];
+    try {
+      writeCompose(dir);
+      __setDockerComposeSpawnSyncForTest((() => ({
+        status: 0,
+        stdout: JSON.stringify([
+          { Service: "pg-svc", Name: "code-viewer-pg-1", State: "running" },
+        ]),
+        stderr: "",
+      })) as unknown as SpawnSyncLike);
+      __setDockerSpawnSyncForTest(((_command, args) => {
+        const argv = Array.isArray(args) ? args.map(String) : [];
+        const sql = argv[argv.indexOf("-c") + 1] || "";
+        sqls.push(sql);
+        if (sql.includes("information_schema.columns")) {
+          return {
+            status: 0,
+            stdout: "id\tinteger\tNO\t\tYES\n",
+            stderr: "",
+          };
+        }
+        if (sql.includes("COUNT(*)")) {
+          return { status: 0, stdout: "1\n", stderr: "" };
+        }
+        return { status: 0, stdout: "1\n", stderr: "" };
+      }) as unknown as SpawnSyncLike);
+
+      const req = new Request(
+        "http://localhost/_db/table?db=docker:pg-svc&schema=public&table=users&offset=0&limit=1",
+      );
+      const res = await handleDatabaseRoute(
+        req,
+        new URL(req.url),
+        dir,
+        [],
+        () => true,
+      );
+      if (!res) throw new Error("route did not match");
+      expect(res.status).toBe(200);
+      expect(
+        sqls.some((sql) => sql.includes("information_schema.schemata")),
+      ).toBe(false);
+      expect(
+        sqls.some((sql) => sql.includes("information_schema.columns")),
+      ).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

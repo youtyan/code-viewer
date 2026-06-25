@@ -1,15 +1,14 @@
 import {
   closeSync,
   existsSync,
-  lstatSync,
   openSync,
-  readdirSync,
-  readFileSync,
   readSync,
   realpathSync,
   statSync,
 } from "node:fs";
+import { lstat, open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
+import { hasControlCharacter } from "../../core/control-chars";
 import type { DbFileInfo, DbKind } from "../../core/database/types";
 
 const SQLITE_EXTENSIONS = new Set([".db", ".sqlite", ".sqlite3", ".s3db"]);
@@ -17,6 +16,7 @@ const SQLITE_MAGIC = "SQLite format 3\0";
 const MAX_SCAN_DEPTH = 3;
 const MAX_ENTRIES = 50;
 const DOCKER_DISCOVERY_TTL_MS = 5_000;
+const SQLITE_DISCOVERY_TTL_MS = 5_000;
 
 function isSqliteFile(fullPath: string): boolean {
   try {
@@ -35,60 +35,106 @@ function isSqliteFile(fullPath: string): boolean {
   }
 }
 
+async function isSqliteFileAsync(fullPath: string): Promise<boolean> {
+  try {
+    const fileStat = await stat(fullPath);
+    if (!fileStat.isFile() || fileStat.size < 16) return false;
+    const file = await open(fullPath, "r");
+    try {
+      const buf = Buffer.alloc(16);
+      await file.read(buf, 0, 16, 0);
+      return buf.toString("utf8", 0, 16) === SQLITE_MAGIC;
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 export type DiscoveredDb = {
   path: string;
   name: string;
   sizeBytes: number;
 };
 
-export function discoverSqliteFiles(
+const sqliteDiscoveryCache = new Map<
+  string,
+  { expiresAt: number; result: DiscoveredDb[] }
+>();
+
+function discoveryCacheKey(cwd: string, omitDirNames: string[]): string {
+  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
+  return JSON.stringify([cwd, omit]);
+}
+
+function cloneDiscoveredDbs(result: DiscoveredDb[]): DiscoveredDb[] {
+  return result.map((entry) => ({ ...entry }));
+}
+
+export async function discoverSqliteFilesAsync(
   cwd: string,
   omitDirNames: string[],
-): DiscoveredDb[] {
+  signal?: AbortSignal,
+): Promise<DiscoveredDb[]> {
+  const cacheKey = discoveryCacheKey(cwd, omitDirNames);
+  const now = Date.now();
+  const cached = sqliteDiscoveryCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cloneDiscoveredDbs(cached.result);
+  }
+
   const omitSet = new Set(omitDirNames.map((d) => d.toLowerCase()));
   omitSet.add(".git");
   omitSet.add(".code-viewer");
   const results: DiscoveredDb[] = [];
 
-  function scan(dir: string, depth: number) {
+  async function scan(dir: string, depth: number): Promise<void> {
+    if (signal?.aborted) return;
     if (depth > MAX_SCAN_DEPTH || results.length >= MAX_ENTRIES) return;
     let entries: string[];
     try {
-      entries = readdirSync(dir);
+      entries = await readdir(dir);
     } catch {
       return;
     }
     for (const entry of entries) {
+      if (signal?.aborted) return;
       if (results.length >= MAX_ENTRIES) return;
       if (omitSet.has(entry.toLowerCase())) continue;
       const full = join(dir, entry);
-      let stat: ReturnType<typeof lstatSync>;
+      let entryStat: Awaited<ReturnType<typeof lstat>>;
       try {
-        stat = lstatSync(full);
+        entryStat = await lstat(full);
       } catch {
         continue;
       }
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) {
-        scan(full, depth + 1);
-      } else if (stat.isFile()) {
+      if (entryStat.isSymbolicLink()) continue;
+      if (entryStat.isDirectory()) {
+        await scan(full, depth + 1);
+      } else if (entryStat.isFile()) {
         const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
         if (!SQLITE_EXTENSIONS.has(ext)) continue;
-        if (!isSqliteFile(full)) continue;
+        if (!(await isSqliteFileAsync(full))) continue;
         const rel = relative(cwd, full);
         if (rel.startsWith("..") || rel.startsWith("/")) continue;
         results.push({
           path: rel,
           name: basename(rel),
-          sizeBytes: stat.size,
+          sizeBytes: entryStat.size,
         });
       }
     }
   }
 
-  scan(cwd, 0);
+  await scan(cwd, 0);
   results.sort((a, b) => a.path.localeCompare(b.path));
-  return results;
+  if (signal?.aborted) return cloneDiscoveredDbs(results);
+  sqliteDiscoveryCache.set(cacheKey, {
+    expiresAt: now + SQLITE_DISCOVERY_TTL_MS,
+    result: cloneDiscoveredDbs(results),
+  });
+  return cloneDiscoveredDbs(results);
 }
 
 export function validateDbPath(cwd: string, dbPath: string): string | null {
@@ -132,13 +178,33 @@ const COMPOSE_FILENAMES = [
   "compose.yaml",
 ];
 
-function detectDbKind(image: string): DbKind | null {
+function serviceListIncludesS3(value: string | undefined): boolean {
+  if (value === undefined || value.trim() === "") return true;
+  return value
+    .split(/[,\s]+/)
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+    .includes("s3");
+}
+
+function imageLooksLikeMinio(image: string): boolean {
+  return /(^|\/)minio(?::|\/|$)/.test(image.toLowerCase());
+}
+
+function detectDbKind(
+  image: string,
+  env: Record<string, string> = {},
+): DbKind | null {
   const lower = image.toLowerCase();
   if (lower.includes("postgres")) return "postgresql";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
   if (lower.includes("redis")) return "redis";
   if (lower.includes("elasticsearch") || lower.includes("opensearch"))
     return "elasticsearch";
+  if (imageLooksLikeMinio(lower)) return "s3";
+  if (lower.includes("localstack/localstack")) {
+    return serviceListIncludesS3(env.SERVICES) ? "s3" : null;
+  }
   return null;
 }
 
@@ -156,6 +222,15 @@ function detectDbKindFromEnv(env: Record<string, string>): DbKind | null {
   if (env.POSTGRES_DB || env.POSTGRES_USER || env.POSTGRES_PASSWORD) {
     return "postgresql";
   }
+  if (
+    env.MINIO_ROOT_USER ||
+    env.MINIO_ROOT_PASSWORD ||
+    env.MINIO_ACCESS_KEY ||
+    env.MINIO_SECRET_KEY
+  ) {
+    return "s3";
+  }
+  if (env.SERVICES && serviceListIncludesS3(env.SERVICES)) return "s3";
   return null;
 }
 
@@ -186,10 +261,17 @@ function detectDbKindFromServiceName(name: string): DbKind | null {
   if (lower === "elasticsearch" || lower === "opensearch" || lower === "es") {
     return "elasticsearch";
   }
+  if (lower === "minio" || lower === "s3" || lower === "object-storage") {
+    return "s3";
+  }
   return null;
 }
 
-function defaultPortFor(kind: DbKind): string {
+function defaultPortFor(
+  kind: DbKind,
+  image?: string | null,
+  env: Record<string, string> = {},
+): string {
   switch (kind) {
     case "postgresql":
       return "5432";
@@ -199,6 +281,13 @@ function defaultPortFor(kind: DbKind): string {
       return "6379";
     case "elasticsearch":
       return "9200";
+    case "s3": {
+      const lower = image?.toLowerCase() || "";
+      return lower.includes("localstack/localstack") ||
+        (env.SERVICES !== undefined && serviceListIncludesS3(env.SERVICES))
+        ? "4566"
+        : "9000";
+    }
     default:
       return "";
   }
@@ -241,15 +330,18 @@ function resolveEnvValue(
   );
 }
 
-function readDotenv(composeDir: string): Record<string, string> {
-  const envPath = join(composeDir, ".env");
-  if (!existsSync(envPath)) return {};
-  let content: string;
+async function readDotenvAsync(
+  composeDir: string,
+): Promise<Record<string, string>> {
   try {
-    content = readFileSync(envPath, "utf-8");
+    const content = await readFile(join(composeDir, ".env"), "utf-8");
+    return parseDotenvContent(content);
   } catch {
     return {};
   }
+}
+
+function parseDotenvContent(content: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
@@ -294,16 +386,48 @@ function parseComposeEnv(
   return env;
 }
 
-function parseComposePorts(serviceBlock: string): string | null {
+function parseComposePortMappings(
+  serviceBlock: string,
+): Array<{ host: string; container: string }> {
   const portsMatch = serviceBlock.match(
     /^[ \t]+ports:\s*\n((?:[ \t]+- [^\n]+\n?)*)/m,
   );
-  if (!portsMatch) return null;
+  if (!portsMatch) return [];
+  const mappings: Array<{ host: string; container: string }> = [];
   for (const line of portsMatch[1].split("\n")) {
-    const m = line.match(/["']?(\d+):(\d+)["']?/);
-    if (m) return m[1];
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("-")) continue;
+    const value = trimmed
+      .slice(1)
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .split(/\s+#/)[0]
+      .split("/")[0]
+      .trim();
+    if (!value || value.includes("target:")) continue;
+    const parts = value.split(":");
+    const container = parts.pop()?.trim() || "";
+    const host = parts.pop()?.trim() || "";
+    if (!/^\d+$/.test(container)) continue;
+    if (host && !/^\d+$/.test(host)) continue;
+    mappings.push({ host, container });
   }
-  return null;
+  return mappings;
+}
+
+function parseComposePorts(serviceBlock: string): string | null {
+  const first = parseComposePortMappings(serviceBlock).find((m) => m.host);
+  return first?.host || null;
+}
+
+function parseComposeHostPortForContainer(
+  serviceBlock: string,
+  containerPort: string,
+): string | null {
+  const found = parseComposePortMappings(serviceBlock).find(
+    (m) => m.container === containerPort && m.host,
+  );
+  return found?.host || null;
 }
 
 function parseComposeContainerPort(serviceBlock: string): string | null {
@@ -337,10 +461,13 @@ function parseComposeContainerPort(serviceBlock: string): string | null {
 //     射影しない、Round 1 C1 思想)。
 export type DockerDbInfo = DbFileInfo & {
   serviceName: string;
+  image?: string;
   env: Record<string, string>;
   database?: string;
   composeDir: string;
   relDirSlash: string;
+  hostPort?: string;
+  containerPort: string;
 };
 
 export type DockerDiscoveryResult = DockerDbInfo[] & { truncated?: boolean };
@@ -348,18 +475,14 @@ export type DockerDiscoveryResult = DockerDbInfo[] & { truncated?: boolean };
 // 1 ファイルから service 群を parse して結果配列に積む。
 // dbId は cwd 直下なら従来の `docker:<svc>`、サブディレクトリなら
 // `docker:<svc>@<encodedRelDir>` で衝突回避する。
-function parseComposeFile(
+function parseComposeContent(
+  content: string,
   filepath: string,
   composeDir: string,
   cwd: string,
+  composeDirEnv: Record<string, string>,
   results: DockerDbInfo[],
 ): void {
-  let content: string;
-  try {
-    content = readFileSync(filepath, "utf-8");
-  } catch {
-    return;
-  }
   const servicesMatch = content.match(/^services:\s*\n/m);
   if (!servicesMatch || servicesMatch.index === undefined) return;
 
@@ -385,7 +508,6 @@ function parseComposeFile(
   // path / id / label に乗せる relDir 表現。Windows パス区切りは `/` に揃える。
   const relDirSlash = relDir.replace(/\\/g, "/");
   const filename = basename(filepath);
-  const composeDirEnv = readDotenv(composeDir);
 
   for (let i = 0; i < servicePositions.length; i++) {
     if (results.length >= MAX_DOCKER_SERVICES) return;
@@ -401,14 +523,23 @@ function parseComposeFile(
     const env = parseComposeEnv(svcBlock, composeDirEnv);
     const containerPort = parseComposeContainerPort(svcBlock);
     const kind =
-      (image ? detectDbKind(image) : null) ??
+      (image ? detectDbKind(image, env) : null) ??
       detectDbKindFromEnv(env) ??
       detectDbKindFromContainerPort(containerPort) ??
       detectDbKindFromServiceName(svc.name);
     if (!kind) continue;
 
-    const port = parseComposePorts(svcBlock);
-    const hostPort = port || defaultPortFor(kind);
+    const defaultPort = defaultPortFor(kind, image, env);
+    const serviceContainerPort =
+      kind === "s3" ? defaultPort : containerPort || defaultPort;
+    const publishedHostPort =
+      parseComposeHostPortForContainer(svcBlock, serviceContainerPort) ||
+      parseComposeHostPortForContainer(svcBlock, defaultPort) ||
+      parseComposePorts(svcBlock);
+    const hostPort =
+      kind === "s3"
+        ? publishedHostPort || undefined
+        : publishedHostPort || defaultPort;
     const imageLabel = image ?? `build:${kind}`;
 
     const id = isRoot
@@ -417,8 +548,11 @@ function parseComposeFile(
     const labelPath = isRoot ? "" : ` — ${relDirSlash}`;
 
     let label: string;
-    if (kind === "redis" || kind === "elasticsearch") {
-      label = `${svc.name} (${imageLabel}, localhost:${hostPort}${labelPath})`;
+    if (kind === "redis" || kind === "elasticsearch" || kind === "s3") {
+      const endpointLabel = hostPort
+        ? `localhost:${hostPort}`
+        : `container:${serviceContainerPort}`;
+      label = `${svc.name} (${imageLabel}, ${endpointLabel}${labelPath})`;
     } else {
       const dbName =
         env.POSTGRES_DB ||
@@ -440,11 +574,37 @@ function parseComposeFile(
       sizeBytes: 0,
       kind,
       serviceName: svc.name,
+      ...(image ? { image } : {}),
       env,
       composeDir,
       relDirSlash,
+      ...(hostPort ? { hostPort } : {}),
+      containerPort: serviceContainerPort,
     });
   }
+}
+
+async function parseComposeFileAsync(
+  filepath: string,
+  composeDir: string,
+  cwd: string,
+  results: DockerDbInfo[],
+): Promise<void> {
+  let content: string;
+  try {
+    content = await readFile(filepath, "utf-8");
+  } catch {
+    return;
+  }
+  const composeDirEnv = await readDotenvAsync(composeDir);
+  parseComposeContent(
+    content,
+    filepath,
+    composeDir,
+    cwd,
+    composeDirEnv,
+    results,
+  );
 }
 
 // SQLite と同じ規約で MAX_SCAN_DEPTH まで再帰 walk し、各ディレクトリで
@@ -457,8 +617,7 @@ const dockerDiscoveryCache = new Map<
 >();
 
 function dockerDiscoveryCacheKey(cwd: string, omitDirNames: string[]): string {
-  const omit = [...omitDirNames].map((d) => d.toLowerCase()).sort();
-  return JSON.stringify([cwd, omit]);
+  return discoveryCacheKey(cwd, omitDirNames);
 }
 
 function cloneDockerDiscoveryResult(
@@ -472,10 +631,20 @@ function cloneDockerDiscoveryResult(
   return cloned;
 }
 
-export function discoverDockerDatabases(
+async function pathExistsAsync(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function discoverDockerDatabasesAsync(
   cwd: string,
   omitDirNames: string[] = [],
-): DockerDiscoveryResult {
+  signal?: AbortSignal,
+): Promise<DockerDiscoveryResult> {
   const cacheKey = dockerDiscoveryCacheKey(cwd, omitDirNames);
   const now = Date.now();
   const cached = dockerDiscoveryCache.get(cacheKey);
@@ -488,41 +657,43 @@ export function discoverDockerDatabases(
   omitSet.add(".git");
   omitSet.add("node_modules");
 
-  function scan(dir: string, depth: number): void {
+  async function scan(dir: string, depth: number): Promise<void> {
+    if (signal?.aborted) return;
     if (results.length >= MAX_DOCKER_SERVICES) return;
     if (depth > MAX_SCAN_DEPTH) return;
-    // 1. このディレクトリ直下の compose を 1 つ parse する。
     for (const filename of COMPOSE_FILENAMES) {
       const filepath = join(dir, filename);
-      if (existsSync(filepath)) {
-        parseComposeFile(filepath, dir, cwd, results);
+      if (await pathExistsAsync(filepath)) {
+        await parseComposeFileAsync(filepath, dir, cwd, results);
         break;
       }
     }
+    if (signal?.aborted) return;
     if (results.length >= MAX_DOCKER_SERVICES) return;
-    // 2. サブディレクトリへ recurse (symlink 除外 / omitDirNames 除外)。
     let entries: string[];
     try {
-      entries = readdirSync(dir);
+      entries = await readdir(dir);
     } catch {
       return;
     }
     for (const entry of entries) {
+      if (signal?.aborted) return;
       if (results.length >= MAX_DOCKER_SERVICES) return;
       if (omitSet.has(entry.toLowerCase())) continue;
       const full = join(dir, entry);
-      let stat: ReturnType<typeof lstatSync>;
+      let entryStat: Awaited<ReturnType<typeof lstat>>;
       try {
-        stat = lstatSync(full);
+        entryStat = await lstat(full);
       } catch {
         continue;
       }
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) scan(full, depth + 1);
+      if (entryStat.isSymbolicLink()) continue;
+      if (entryStat.isDirectory()) await scan(full, depth + 1);
     }
   }
 
-  scan(cwd, 0);
+  await scan(cwd, 0);
+  if (signal?.aborted) return cloneDockerDiscoveryResult(results);
   if (results.length >= MAX_DOCKER_SERVICES) {
     results.truncated = true;
     console.warn(
@@ -586,16 +757,22 @@ export function parseDockerDbId(
   return { serviceName: rest, relDir: "", database };
 }
 
-export function findDockerServiceByDbId(
+export async function findDockerServiceByDbIdAsync(
   cwd: string,
   dbId: string,
   kind?: DbKind,
   omitDirNames?: string[],
-): DockerDbInfo | null {
+  signal?: AbortSignal,
+): Promise<DockerDbInfo | null> {
   const parsed = parseDockerDbId(dbId);
   if (!parsed) return null;
+  const services = await discoverDockerDatabasesAsync(
+    cwd,
+    omitDirNames,
+    signal,
+  );
   return (
-    discoverDockerDatabases(cwd, omitDirNames).find(
+    services.find(
       (d) =>
         d.serviceName === parsed.serviceName &&
         d.relDirSlash === parsed.relDir &&
@@ -620,12 +797,4 @@ function isSafeDockerDatabaseName(value: string | undefined): boolean {
   if (value === "") return false;
   if (hasControlCharacter(value)) return false;
   return /^[A-Za-z0-9_$.-]+$/.test(value);
-}
-
-function hasControlCharacter(value: string): boolean {
-  for (const ch of value) {
-    const code = ch.charCodeAt(0);
-    if (code < 32 || code === 127) return true;
-  }
-  return false;
 }

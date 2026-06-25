@@ -3,7 +3,8 @@ export type DbKind =
   | "postgresql"
   | "mysql"
   | "redis"
-  | "elasticsearch";
+  | "elasticsearch"
+  | "s3";
 
 export type DbValue = string | number | boolean | null | Uint8Array;
 
@@ -369,6 +370,69 @@ export type ElasticsearchExplorerSelection = {
   query?: string;
 };
 
+// ---------- S3 / object storage ----------
+
+export type S3SearchMode = "prefix" | "contains";
+export type S3SortMode = "key-asc" | "updated-desc";
+
+export type S3BucketInfo = {
+  name: string;
+  createdAt?: string;
+};
+
+export type S3ObjectInfo = {
+  key: string;
+  sizeBytes: number;
+  updatedAt?: string;
+  etag?: string;
+  contentType?: string;
+  storageClass?: string;
+};
+
+export type S3BucketsResponse = {
+  dbId: string;
+  buckets: S3BucketInfo[];
+};
+
+export type S3ObjectsResponse = {
+  dbId: string;
+  bucket: string;
+  prefix: string;
+  search: string;
+  mode: S3SearchMode;
+  sort: S3SortMode;
+  objects: S3ObjectInfo[];
+  nextToken?: string;
+  truncated: boolean;
+  scannedObjects: number;
+  scannedPages: number;
+  scanLimitReached?: boolean;
+};
+
+export type S3ObjectHeadResponse = {
+  dbId: string;
+  bucket: string;
+  key: string;
+  sizeBytes: number | null;
+  contentType?: string;
+  updatedAt?: string;
+  etag?: string;
+};
+
+export type S3ObjectTextResponse = S3ObjectHeadResponse & {
+  text: string;
+  truncated: boolean;
+};
+
+export type S3ExplorerSelection = {
+  bucket?: string;
+  prefix?: string;
+  query?: string;
+  mode?: S3SearchMode;
+  sort?: S3SortMode;
+  key?: string;
+};
+
 // ---------- Tabs ----------
 
 // 1 つの database タブ。画面全体 (サイドバー + メイン pane + 履歴 pane) の
@@ -405,6 +469,9 @@ export type TabState = {
   // Elasticsearch explorer の選択中 state。SQL の table と整合的に、
   // 「選択中の index + lucene query 文字列」を persist する。
   es?: ElasticsearchExplorerSelection;
+
+  // S3 explorer の選択中 state。
+  s3?: S3ExplorerSelection;
 };
 
 export type TabsState = {
