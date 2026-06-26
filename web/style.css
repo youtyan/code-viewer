@@ -5485,6 +5485,66 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 .db-icon-toolbar[hidden] {
   display: none !important;
 }
+
+/* sidebar の設定トグル行。dbToolbar 直下に並ぶ。複数トグルを横に並べる
+   想定なので flex-wrap で折り返し。 */
+.db-prefs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.db-prefs-bar[hidden] {
+  display: none;
+}
+/* ラベル付きピル形式の永続化トグル (Rails FK 推測など)。active 時は
+   accent 色のチントで「ON」が一目で分かるようにする。 */
+.db-pref-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--db-font-sm);
+}
+.db-pref-toggle:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.db-pref-toggle.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+.db-pref-toggle svg {
+  flex: 0 0 auto;
+}
+.db-pref-toggle-label {
+  white-space: nowrap;
+}
+
+/* 推測 FK は実 FK と区別。関連パネルのリスト項目に淡いマーカーを乗せる。 */
+.db-related-list-inferred {
+  background: color-mix(in srgb, var(--attn, var(--accent)) 6%, transparent);
+}
+.db-related-list-inferred-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--attn, var(--accent)) 18%, var(--bg));
+  color: var(--attn, var(--accent));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
 .db-icon-btn {
   display: inline-flex;
   align-items: center;

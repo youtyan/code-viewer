@@ -38,6 +38,10 @@ import { setPaneEmpty, setPaneStatus } from "./pane-status";
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
   getText?: () => DbText;
+  // ホバープレビュー tooltip の ON/OFF (db-ui.json の prefs に永続化)。
+  // localStorage は使わない。callback 未指定なら ON 固定で永続化なし。
+  getTooltipEnabled?: () => boolean;
+  setTooltipEnabled?: (enabled: boolean) => void;
 };
 
 export type S3ExplorerView = {
@@ -275,13 +279,9 @@ export function createS3Explorer(
   // ----- ホバーで全パスを表示する floating tooltip -----
   // sidebar 内では key 末尾しか見えないので、行ホバーで全 key + メタを別 DOM
   // に展開する。preview pane 側へはみ出して読めるよう document.body に attach。
-  const TOOLTIP_LS_KEY = "code-viewer.s3.tooltipEnabled";
-  let tooltipEnabled = true;
-  try {
-    tooltipEnabled = localStorage.getItem(TOOLTIP_LS_KEY) !== "0";
-  } catch {
-    /* private mode 等で localStorage が触れないケースは default true で続行 */
-  }
+  // 状態は db-ui.json の prefs.s3TooltipEnabled に集約 (localStorage は使わない)。
+  // callback 未提供時は ON 固定で永続化なし。
+  let tooltipEnabled = callbacks.getTooltipEnabled?.() ?? true;
 
   function applyTooltipToggleState(): void {
     tooltipToggle.classList.toggle("active", tooltipEnabled);
@@ -291,11 +291,7 @@ export function createS3Explorer(
 
   tooltipToggle.addEventListener("click", () => {
     tooltipEnabled = !tooltipEnabled;
-    try {
-      localStorage.setItem(TOOLTIP_LS_KEY, tooltipEnabled ? "1" : "0");
-    } catch {
-      /* persist 失敗は無視 (session 内では効く) */
-    }
+    callbacks.setTooltipEnabled?.(tooltipEnabled);
     applyTooltipToggleState();
     if (!tooltipEnabled) hideKeyTooltip();
   });

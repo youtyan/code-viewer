@@ -36,6 +36,11 @@ export type DbForeignKey = {
   toSchema?: string;
   toTable: string;
   toColumn: string;
+  // DB に宣言された FK か、命名規約 (例: Rails の <table>_id → <table>.id)
+  // から推測したもの (= virtual FK) か。クライアント側で関連パネル等に
+  // 視覚マーカー (リスト項目色や行末の "ʳ" ラベル等) を出すために使う。
+  // サーバ adapter は常に省略 (= 実 FK)。
+  inferred?: "rails";
 };
 
 export type DbSchemaResponse = {

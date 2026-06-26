@@ -1,3 +1,4 @@
+import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
   DbColumn,
   DbFileInfo,
@@ -14,7 +15,7 @@ import type {
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import type { AppRoute, DiffRange } from "../../core/routes";
-import type { AnnotationTarget, DbUiState } from "../../core/types";
+import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
@@ -49,6 +50,17 @@ type DatabasePaneDeps = DatabaseViewDeps & {
     table: string,
     widths: Record<string, number>,
   ): void;
+  // db-ui.json の prefs。boolean トグル系の永続化はここに集約する
+  // (localStorage を使わない)。
+  getDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    fallback: NonNullable<DbUiPrefs[K]>,
+  ): NonNullable<DbUiPrefs[K]>;
+  setDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    value: NonNullable<DbUiPrefs[K]>,
+  ): void;
+  onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
 };
 
@@ -370,6 +382,38 @@ function createTabPane(
       snapshotView.refresh();
     },
   });
+
+  // Rails 命名規約 (foo_id → foos.id) からの仮想 FK 推測トグル。
+  // active 状態は db-ui.json の prefs.inferFkRails に永続化。
+  // クリックで pref を反転 → grid に再計算を促す (データは再取得しない)。
+  // toolsSection の "ナビゲーション icon 並び" とは性質が違うため、
+  // ラベル付きピル形式 (S3 explorer の Hover preview toggle と同じ形) で
+  // dbToolbar 直下に独立した行として置く。
+  const inferFkToggle = document.createElement("button");
+  inferFkToggle.type = "button";
+  inferFkToggle.className = "db-pref-toggle";
+  inferFkToggle.title = "Infer FK from Rails-style <name>_id → <names>.id";
+  inferFkToggle.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' +
+    `<path d="${ICON_PATH_INFER_FK}"/>` +
+    "</svg>" +
+    '<span class="db-pref-toggle-label">Rails FK 推測</span>';
+  inferFkToggle.addEventListener("click", () => {
+    const next = !outerDeps.getDbUiPref("inferFkRails", false);
+    outerDeps.setDbUiPref("inferFkRails", next);
+    applyInferFkBtnState();
+    grid.refreshForeignKeys();
+  });
+  function applyInferFkBtnState() {
+    const on = outerDeps.getDbUiPref("inferFkRails", false);
+    inferFkToggle.classList.toggle("active", on);
+    inferFkToggle.setAttribute("aria-pressed", String(on));
+  }
+  applyInferFkBtnState();
+  outerDeps.onDbUiPrefChange(() => {
+    applyInferFkBtnState();
+    grid.refreshForeignKeys();
+  });
   reloc(() => {
     const t = paneText().nav;
     localizeIconButton(queryBtn, t.query, t.queryTitle);
@@ -380,6 +424,12 @@ function createTabPane(
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
+  // 設定トグル (Rails FK 推測など) は icon toolbar とは別行にまとめる。
+  // SQL kind 時のみ表示。
+  const prefsBar = document.createElement("div");
+  prefsBar.className = "db-prefs-bar";
+  prefsBar.append(inferFkToggle);
+
   // explorer (redis/es/s3) 用のサイドバースロット host。各 explorer が自前で
   // 構築した sidebarSlot をここに mount し、applyVisibility が kind ごとに
   // toggle する。SQL kind では全て hidden になり、空のまま下に流れる
@@ -387,8 +437,14 @@ function createTabPane(
   const explorerSidebarHost = document.createElement("div");
   explorerSidebarHost.className = "db-explorer-sidebar-host";
 
-  // 順序: アイコンツールバー → DB select → explorer sidebar (s3/redis/es) → table list の順。
-  sidebar.append(toolsSection, dbToolbar, explorerSidebarHost, tableList.el);
+  // 順序: アイコンツールバー → DB select → prefs バー → explorer sidebar → table list。
+  sidebar.append(
+    toolsSection,
+    dbToolbar,
+    prefsBar,
+    explorerSidebarHost,
+    tableList.el,
+  );
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "db-sidebar-resize";
@@ -423,7 +479,20 @@ function createTabPane(
     getColumnWidths: (dbId, table) => outerDeps.getColumnWidths(dbId, table),
     setColumnWidths: (dbId, table, widths) =>
       outerDeps.setColumnWidths(dbId, table, widths),
-    getForeignKeys: () => schemaCache?.foreignKeys ?? [],
+    // inferFkRails が ON のときだけ Rails 命名規約由来の仮想 FK を上乗せ
+    // する。実 FK と同じ (fromTable, fromColumn) があれば inference 側で
+    // スキップされるので重複しない。
+    getForeignKeys: () => {
+      const real = schemaCache?.foreignKeys ?? [];
+      if (!outerDeps.getDbUiPref("inferFkRails", false)) return real;
+      if (!schemaCache) return real;
+      const inferred = inferRailsForeignKeys({
+        tables: schemaCache.tables,
+        columnsMap: schemaCache.columnsMap ?? {},
+        realForeignKeys: real,
+      });
+      return inferred.length > 0 ? [...real, ...inferred] : real;
+    },
     fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
       fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
     getRelatedPanelHeight: () => relatedPanelHeightPx,
@@ -490,6 +559,10 @@ function createTabPane(
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    // S3 hover preview の ON/OFF。db-ui.json の prefs に永続化される。
+    getTooltipEnabled: () => outerDeps.getDbUiPref("s3TooltipEnabled", true),
+    setTooltipEnabled: (enabled) =>
+      outerDeps.setDbUiPref("s3TooltipEnabled", enabled),
   });
   s3Explorer.el.hidden = true;
   s3Explorer.sidebarSlot.hidden = true;
@@ -579,6 +652,8 @@ function createTabPane(
       userPrefersHistoryOpen,
     );
     toolsSection.hidden = visibility.toolsHidden;
+    // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
+    prefsBar.hidden = visibility.toolsHidden;
     historyToggle.hidden = visibility.historyToggleHidden;
     historyResizer.hidden = visibility.historyResizerHidden;
     historyPane.hidden = visibility.historyPaneHidden;
@@ -1568,6 +1643,10 @@ const ICON_PATH_SEARCH =
 const ICON_PATH_SNAPSHOT =
   "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
 
+// 鎖リンク icon (octicon link)。Rails 規約由来の仮想 FK 推測トグルに使う。
+const ICON_PATH_INFER_FK =
+  "M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z";
+
 function makeIconButton(opts: {
   label: string;
   title: string;
@@ -1654,7 +1733,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     dbUiLoadPromise = fetch("/_db/ui")
       .then(async (res) => {
         if (!res.ok) return;
-        dbUiState = (await res.json()) as DbUiState;
+        // applyDbUiState 経由で listeners を起こす。直接代入だと「ロード完了
+        // 後にトグル UI に色が反映されない」回帰 (Rails FK 推測トグルで報告)
+        // の原因になる。
+        applyDbUiState((await res.json()) as DbUiState);
       })
       .catch(() => {});
     return dbUiLoadPromise;
@@ -1675,6 +1757,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const nextDb = { ...(dbUiState.columnWidths[dbId] || {}) };
     nextDb[table] = { ...widths };
     dbUiState = {
+      ...dbUiState,
       version: 1,
       columnWidths: { ...dbUiState.columnWidths, [dbId]: nextDb },
     };
@@ -1684,9 +1767,45 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
     })
       .then(async (res) => {
-        if (res.ok) dbUiState = (await res.json()) as DbUiState;
+        if (res.ok) applyDbUiState((await res.json()) as DbUiState);
       })
       .catch(() => {});
+  }
+
+  // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
+  // 即時通知する (例: 別タブで切り替えたら全タブの S3 explorer のトグル
+  // 表示も更新される — 今は同タブ即時反映のみで十分だが、形だけ用意)。
+  const dbUiPrefListeners = new Set<(state: DbUiState) => void>();
+  function applyDbUiState(next: DbUiState) {
+    dbUiState = next;
+    for (const fn of dbUiPrefListeners) fn(dbUiState);
+  }
+  function getDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    fallback: NonNullable<DbUiPrefs[K]>,
+  ): NonNullable<DbUiPrefs[K]> {
+    const v = dbUiState.prefs?.[key];
+    return v === undefined ? fallback : (v as NonNullable<DbUiPrefs[K]>);
+  }
+  function setDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    value: NonNullable<DbUiPrefs[K]>,
+  ): void {
+    const nextPrefs: DbUiPrefs = { ...(dbUiState.prefs ?? {}), [key]: value };
+    applyDbUiState({ ...dbUiState, prefs: nextPrefs });
+    void fetch("/_db/ui", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body: JSON.stringify({ prefs: { [key]: value } }),
+    })
+      .then(async (res) => {
+        if (res.ok) applyDbUiState((await res.json()) as DbUiState);
+      })
+      .catch(() => {});
+  }
+  function onDbUiPrefChange(listener: (state: DbUiState) => void): () => void {
+    dbUiPrefListeners.add(listener);
+    return () => dbUiPrefListeners.delete(listener);
   }
 
   async function loadSqlHistory(
@@ -2155,6 +2274,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         ensureDbUiState,
         getColumnWidths,
         setColumnWidths,
+        getDbUiPref,
+        setDbUiPref,
+        onDbUiPrefChange,
         loadSqlHistory,
       },
       {

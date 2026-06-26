@@ -114,6 +114,9 @@ export type TableGrid = {
   destroy: () => void;
   /** 言語切替時に組み込み済み DOM の文言を再適用する。 */
   localize: () => void;
+  /** getForeignKeys の返り値が変わったとき (例: 推測 FK トグル) に
+   * fkColumns を作り直してヘッダー/セル表示を更新する。データは再取得しない。 */
+  refreshForeignKeys: () => void;
 };
 
 export function createTableGrid(
@@ -879,11 +882,20 @@ export function createTableGrid(
       item.type = "button";
       item.className = "db-related-list-item";
       item.classList.add(`db-related-list-${target.direction}`);
+      // Rails 規約からの推測 FK は実 FK と見た目で区別する (ラベル + 色)。
+      if (target.fk.inferred) item.classList.add("db-related-list-inferred");
       if (i === level.selectedIndex) item.classList.add("active");
       const name = document.createElement("span");
       name.className = "db-related-list-name";
       // outgoing は参照先テーブル、incoming は参照元テーブル。
       name.textContent = relatedDrillTable(target);
+      if (target.fk.inferred) {
+        const badge = document.createElement("span");
+        badge.className = "db-related-list-inferred-badge";
+        badge.textContent = "inferred";
+        badge.title = "Inferred from Rails-style naming, not declared in DB";
+        name.appendChild(badge);
+      }
       const via = document.createElement("span");
       via.className = "db-related-list-via";
       // outgoing: this row's FK 列 = value (= parent の PK)
@@ -1414,13 +1426,7 @@ export function createTableGrid(
       columnNames = [];
       totalRows = 0;
     }
-    // FK 列 (outgoing) と、他から参照されている列 (incoming = 通常 PK) の
-    // 両方にヘッダ 🔗 を付け、セルクリックで関連パネルを開けるようにする。
-    fkColumns.clear();
-    for (const fk of callbacks.getForeignKeys?.() ?? []) {
-      if (fk.fromTable === table) fkColumns.add(fk.fromColumn);
-      if (fk.toTable === table) fkColumns.add(fk.toColumn);
-    }
+    rebuildFkColumnsForCurrentTable();
     loadColWidths();
     spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
     renderHeader();
@@ -1519,6 +1525,30 @@ export function createTableGrid(
     embeddedGrid?.localize();
   }
 
+  // FK 列 (outgoing) と、他から参照されている列 (incoming = 通常 PK) の
+  // 両方にヘッダ 🔗 を付け、セルクリックで関連パネルを開けるようにする。
+  // 設定トグル (Rails FK 推測) を切り替えたときも呼ばれる。
+  function rebuildFkColumnsForCurrentTable() {
+    fkColumns.clear();
+    if (!currentTable) return;
+    for (const fk of callbacks.getForeignKeys?.() ?? []) {
+      if (fk.fromTable === currentTable) fkColumns.add(fk.fromColumn);
+      if (fk.toTable === currentTable) fkColumns.add(fk.toColumn);
+    }
+  }
+
+  // 外部から FK セットの再計算を要求するエントリ。例: Rails 規約による
+  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダの 🔗 と
+  // セルクリック判定だけ更新する。
+  function refreshForeignKeys() {
+    rebuildFkColumnsForCurrentTable();
+    if (currentTable) {
+      renderHeader();
+      renderViewport();
+    }
+    embeddedGrid?.refreshForeignKeys();
+  }
+
   return {
     el,
     load,
@@ -1528,6 +1558,7 @@ export function createTableGrid(
     clear,
     destroy,
     localize,
+    refreshForeignKeys,
   };
 }
 

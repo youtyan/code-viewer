@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type {
   AppSettingsState,
+  DbUiPrefs,
   DbUiState,
   ViewerFontSizeSetting,
   ViewState,
@@ -259,8 +260,25 @@ function safeObjectKey(value: string): string | null {
   return value;
 }
 
+function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: DbUiPrefs = {};
+  // boolean は明示 undefined と区別したいので、未指定なら省略する。
+  if (raw.s3TooltipEnabled === true || raw.s3TooltipEnabled === false) {
+    out.s3TooltipEnabled = raw.s3TooltipEnabled;
+  }
+  if (raw.inferFkRails === true || raw.inferFkRails === false) {
+    out.inferFkRails = raw.inferFkRails;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeDbUiState(raw: unknown): DbUiState {
-  if (!isRecord(raw) || !isRecord(raw.columnWidths)) return emptyDbUiState();
+  if (!isRecord(raw)) return emptyDbUiState();
+  const prefs = sanitizeDbUiPrefs(raw.prefs);
+  if (!isRecord(raw.columnWidths)) {
+    return prefs ? { ...emptyDbUiState(), prefs } : emptyDbUiState();
+  }
   const columnWidths: DbUiState["columnWidths"] = {};
   let dbCount = 0;
   for (const [dbIdRaw, tablesRaw] of Object.entries(raw.columnWidths)) {
@@ -291,13 +309,45 @@ function sanitizeDbUiState(raw: unknown): DbUiState {
     columnWidths[dbId] = tables;
     dbCount++;
   }
-  return { version: 1, columnWidths };
+  const out: DbUiState = { version: 1, columnWidths };
+  if (prefs) out.prefs = prefs;
+  return out;
+}
+
+function mergeDbUiPrefs(
+  current: DbUiPrefs | undefined,
+  patch: unknown,
+): DbUiPrefs | undefined {
+  if (!isRecord(patch)) return current;
+  // patch 内で boolean が来てれば上書き、null なら削除、未指定なら維持。
+  const next: DbUiPrefs = { ...(current ?? {}) };
+  if (patch.s3TooltipEnabled === null) delete next.s3TooltipEnabled;
+  else if (
+    patch.s3TooltipEnabled === true ||
+    patch.s3TooltipEnabled === false
+  ) {
+    next.s3TooltipEnabled = patch.s3TooltipEnabled;
+  }
+  if (patch.inferFkRails === null) delete next.inferFkRails;
+  else if (patch.inferFkRails === true || patch.inferFkRails === false) {
+    next.inferFkRails = patch.inferFkRails;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
   if (!isRecord(patch)) return current;
+  // prefs はトップレベル並列の独立キーとして patch される (columnWidths と
+  // 同様)。columnWidths が居なくても prefs だけは反映できる必要がある。
+  const mergedPrefs =
+    "prefs" in patch
+      ? mergeDbUiPrefs(current.prefs, patch.prefs)
+      : current.prefs;
   if (!isRecord(patch.columnWidths)) {
-    return sanitizeDbUiState({ ...current, ...patch, version: 1 });
+    const merged: DbUiState = { ...current, version: 1 };
+    if (mergedPrefs) merged.prefs = mergedPrefs;
+    else delete merged.prefs;
+    return sanitizeDbUiState(merged);
   }
   const columnWidths: DbUiState["columnWidths"] = {
     ...current.columnWidths,
@@ -324,7 +374,13 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     }
     columnWidths[dbId] = tables;
   }
-  return sanitizeDbUiState({ ...current, ...patch, columnWidths, version: 1 });
+  return sanitizeDbUiState({
+    ...current,
+    ...patch,
+    columnWidths,
+    prefs: mergedPrefs,
+    version: 1,
+  });
 }
 
 const settingsStore = createJsonFileStore<AppSettingsState>({
