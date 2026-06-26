@@ -78,14 +78,19 @@ function mysqlStdout(sql: string): string {
   return ["id\tname", "1\tAda"].join("\n");
 }
 
+// psql は landing_page_html のような改行を含む TEXT 列を -A モードで
+// エスケープしないため、本番側で行区切りを ASCII 0x1E (RS) に切り替えた
+// (docker.ts:PG_RECORD_SEPARATOR)。テストのモックも同じ separator で
+// stdout を組み立てる。
+const PG_RS = "\x1e";
 function postgresStdout(sql: string): string {
   if (sql.includes("information_schema.columns")) {
-    return ["id\tinteger\tNO\t\tYES", "name\ttext\tYES\t\tNO"].join("\n");
+    return ["id\tinteger\tNO\t\tYES", "name\ttext\tYES\t\tNO"].join(PG_RS);
   }
   if (sql.includes("COUNT(*)")) {
-    return "2\n";
+    return `2${PG_RS}`;
   }
-  return "1\tAda\n";
+  return `1\tAda${PG_RS}`;
 }
 
 function installSpawnHarness(
