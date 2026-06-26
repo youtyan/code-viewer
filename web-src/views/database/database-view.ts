@@ -18,6 +18,7 @@ import type { AnnotationTarget, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
+import { type DbLang, dbGridText } from "./i18n";
 import { createGlobalSearchView } from "./global-search-view";
 import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
@@ -36,6 +37,8 @@ export type DatabaseViewDeps = {
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   syncHeaderMenu: () => void;
   fetchDbFiles?: () => Promise<DbFilesResponse>;
+  /** 現在の言語設定 (アプリ全体の en/ja トグルと同じ値)。 */
+  getLanguage?: () => DbLang;
 };
 
 type DatabasePaneDeps = DatabaseViewDeps & {
@@ -385,6 +388,7 @@ function createTabPane(
       relatedPanelHeightPx = h;
       cb.onStateChange();
     },
+    getText: () => dbGridText(outerDeps.getLanguage?.() ?? "en"),
   });
 
   const queryEditor = createQueryEditor({

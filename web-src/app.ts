@@ -2794,6 +2794,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     trackLoad,
     syncHeaderMenu,
+    getLanguage: () => STATE.language,
   });
 
   const REF_PICKER = createRefPicker({

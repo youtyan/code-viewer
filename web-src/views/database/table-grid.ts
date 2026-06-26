@@ -7,6 +7,7 @@ import type {
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { type DbGridText, dbGridText } from "./i18n";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
@@ -84,6 +85,8 @@ export type TableGridCallbacks = {
   getRelatedPanelHeight?: () => number | null;
   /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
   setRelatedPanelHeight?: (height: number) => void;
+  /** 現在の言語設定に応じたローカライズ文言を返す。 */
+  getText?: () => DbGridText;
 };
 
 export type TableGridOptions = {
@@ -106,6 +109,8 @@ export function createTableGrid(
   options: TableGridOptions = {},
 ): TableGrid {
   const embedded = options.embedded === true;
+  // ローカライズ文言。未指定時は英語にフォールバックする。
+  const text = (): DbGridText => callbacks.getText?.() ?? dbGridText("en");
   const el = document.createElement("div");
   el.className = "db-grid";
 
@@ -132,8 +137,8 @@ export function createTableGrid(
   const exportBtn = document.createElement("button");
   exportBtn.type = "button";
   exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
-  exportBtn.title = "エクスポート";
-  exportBtn.setAttribute("aria-label", "エクスポート");
+  exportBtn.title = text().exportAction;
+  exportBtn.setAttribute("aria-label", text().exportAction);
   exportBtn.textContent = "⬇";
   const exportMenu = document.createElement("div");
   exportMenu.className = "db-grid-export-menu";
@@ -543,6 +548,7 @@ export function createTableGrid(
         setColumnWidths: callbacks.setColumnWidths,
         getForeignKeys: callbacks.getForeignKeys,
         getBaseEq: () => relatedEq,
+        getText: callbacks.getText,
         // 埋め込みグリッドの FK クリックで 1 段潜る。
         onForeignKeyCellClick: (sourceTable, colNames, rowData, clicked) =>
           drillIntoRelated(sourceTable, colNames, rowData, clicked),
@@ -553,7 +559,7 @@ export function createTableGrid(
 
     relatedEmptyEl = document.createElement("div");
     relatedEmptyEl.className = "db-related-empty";
-    relatedEmptyEl.textContent = "参照先に該当する行がありません";
+    relatedEmptyEl.textContent = text().relatedEmpty;
     relatedEmptyEl.hidden = true;
     relatedGridHost.appendChild(relatedEmptyEl);
 
@@ -852,7 +858,7 @@ export function createTableGrid(
         const fkIcon = document.createElement("span");
         fkIcon.className = "db-grid-header-fk-icon";
         fkIcon.textContent = "🔗";
-        fkIcon.title = "外部キー: クリックして関連データを表示";
+        fkIcon.title = text().foreignKeyHint;
         label.appendChild(fkIcon);
       }
 
