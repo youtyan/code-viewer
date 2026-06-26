@@ -3,22 +3,26 @@ import type {
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
+import { type DbText, dbText } from "./i18n";
 
 export type QueryHistoryViewCallbacks = {
   getDbId: () => string | null;
   getSchema: () => string | null;
   copySqlToQuery: (sql: string) => void;
+  getText?: () => DbText;
 };
 
 export type QueryHistoryView = {
   el: HTMLElement;
   refresh: (options?: { force?: boolean }) => Promise<void>;
   clear: () => void;
+  localize: () => void;
 };
 
 export function createQueryHistoryView(
   callbacks: QueryHistoryViewCallbacks,
 ): QueryHistoryView {
+  const text = (): DbText => callbacks.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-query-history";
 
@@ -28,14 +32,14 @@ export function createQueryHistoryView(
   const refreshBtn = document.createElement("button");
   refreshBtn.className = "db-query-history-action";
   refreshBtn.type = "button";
-  refreshBtn.textContent = "Refresh";
-  refreshBtn.title = "Refresh history";
+  refreshBtn.textContent = text().history.refresh;
+  refreshBtn.title = text().history.refreshTitle;
 
   const clearBtn = document.createElement("button");
   clearBtn.className = "db-query-history-action db-query-history-danger";
   clearBtn.type = "button";
-  clearBtn.textContent = "Clear All";
-  clearBtn.title = "Delete all query history";
+  clearBtn.textContent = text().history.clearAll;
+  clearBtn.title = text().history.clearTitle;
 
   toolbar.append(refreshBtn, clearBtn);
 
@@ -53,7 +57,7 @@ export function createQueryHistoryView(
   detailCol.className = "db-query-history-detail-col";
   const detailPlaceholder = document.createElement("div");
   detailPlaceholder.className = "db-query-history-detail-placeholder";
-  detailPlaceholder.textContent = "Select a query to view details";
+  detailPlaceholder.textContent = text().history.selectPlaceholder;
   detailCol.appendChild(detailPlaceholder);
 
   body.append(listCol, detailCol);
@@ -145,7 +149,7 @@ export function createQueryHistoryView(
     if (entries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-query-history-empty";
-      empty.textContent = "No query history";
+      empty.textContent = text().history.empty;
       listEl.appendChild(empty);
       return;
     }
@@ -183,19 +187,19 @@ export function createQueryHistoryView(
     const useBtn = document.createElement("button");
     useBtn.className = "db-btn db-btn-primary";
     useBtn.type = "button";
-    useBtn.textContent = "Use in Editor";
+    useBtn.textContent = text().history.useInEditor;
     useBtn.addEventListener("click", () => callbacks.copySqlToQuery(entry.sql));
 
     const copyBtn = document.createElement("button");
     copyBtn.className = "db-btn";
     copyBtn.type = "button";
-    copyBtn.textContent = "Copy SQL";
+    copyBtn.textContent = text().history.copySql;
     copyBtn.addEventListener("click", () => {
       navigator.clipboard.writeText(entry.sql).then(
         () => {
-          copyBtn.textContent = "Copied!";
+          copyBtn.textContent = text().history.copied;
           setTimeout(() => {
-            copyBtn.textContent = "Copy SQL";
+            copyBtn.textContent = text().history.copySql;
           }, 1500);
         },
         () => {},
@@ -205,9 +209,16 @@ export function createQueryHistoryView(
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "db-btn db-query-history-danger";
     deleteBtn.type = "button";
-    deleteBtn.textContent = "Delete";
+    deleteBtn.textContent = text().history.delete;
     deleteBtn.addEventListener("click", () => {
-      if (!armButtonConfirm(deleteBtn, "Confirm delete", "Delete")) return;
+      if (
+        !armButtonConfirm(
+          deleteBtn,
+          text().history.confirmDelete,
+          text().history.delete,
+        )
+      )
+        return;
       deleteEntry(entry.id);
     });
 
@@ -233,7 +244,10 @@ export function createQueryHistoryView(
     if (entry.savedRows < entry.rowCount) {
       const note = document.createElement("div");
       note.className = "db-query-history-truncated";
-      note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+      note.textContent = text().history.truncatedRows(
+        entry.savedRows,
+        entry.rowCount,
+      );
       detailCol.appendChild(note);
     }
   }
@@ -323,7 +337,10 @@ export function createQueryHistoryView(
     if (entry.savedRows < entry.rowCount) {
       const note = document.createElement("div");
       note.className = "db-query-history-truncated";
-      note.textContent = `Showing ${entry.savedRows} of ${entry.rowCount} rows`;
+      note.textContent = text().history.truncatedRows(
+        entry.savedRows,
+        entry.rowCount,
+      );
       wrapper.appendChild(note);
     }
 
@@ -366,17 +383,17 @@ export function createQueryHistoryView(
     const dbId = callbacks.getDbId();
     if (clearBtn.dataset.confirm !== "1") {
       clearBtn.dataset.confirm = "1";
-      clearBtn.textContent = "Confirm clear";
+      clearBtn.textContent = text().history.confirmClear;
       if (clearConfirmTimer) clearTimeout(clearConfirmTimer);
       clearConfirmTimer = setTimeout(() => {
         clearBtn.dataset.confirm = "";
-        clearBtn.textContent = "Clear All";
+        clearBtn.textContent = text().history.clearAll;
         clearConfirmTimer = null;
       }, 3000);
       return;
     }
     clearBtn.dataset.confirm = "";
-    clearBtn.textContent = "Clear All";
+    clearBtn.textContent = text().history.clearAll;
     if (clearConfirmTimer) {
       clearTimeout(clearConfirmTimer);
       clearConfirmTimer = null;
@@ -414,12 +431,45 @@ export function createQueryHistoryView(
       clearConfirmTimer = null;
     }
     clearBtn.dataset.confirm = "";
-    clearBtn.textContent = "Clear All";
+    clearBtn.textContent = text().history.clearAll;
     clearDetail();
     render();
   }
 
-  return { el, refresh, clear };
+  function localize(): void {
+    refreshBtn.textContent = text().history.refresh;
+    refreshBtn.title = text().history.refreshTitle;
+    if (clearBtn.dataset.confirm !== "1") {
+      clearBtn.textContent = text().history.clearAll;
+    }
+    clearBtn.title = text().history.clearTitle;
+    detailPlaceholder.textContent = text().history.selectPlaceholder;
+    // render() は listEl を作り直すためスクロール位置が飛ぶ。退避して復元する。
+    const prevScrollTop = listEl.scrollTop;
+    render();
+    listEl.scrollTop = prevScrollTop;
+    const selected = selectedEntryId
+      ? entries.find((e) => e.id === selectedEntryId)
+      : null;
+    if (selected) {
+      // 詳細の削除ボタンが confirm 待ち(arm 済み)だった状態を再構築後も保つ。
+      const prevDeleteArmed =
+        detailCol.querySelector<HTMLButtonElement>(".db-query-history-danger")
+          ?.dataset.confirm === "1";
+      renderDetail(selected);
+      if (prevDeleteArmed) {
+        const deleteBtn = detailCol.querySelector<HTMLButtonElement>(
+          ".db-query-history-danger",
+        );
+        if (deleteBtn) {
+          deleteBtn.dataset.confirm = "1";
+          deleteBtn.textContent = text().history.confirmDelete;
+        }
+      }
+    }
+  }
+
+  return { el, refresh, clear, localize };
 }
 
 function formatTime(iso: string): string {

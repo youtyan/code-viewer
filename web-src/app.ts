@@ -1394,7 +1394,14 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector("#query-history-panel-close"),
       text.annotations.close,
     );
+    // DB ビューアは動的構築なので chrome の selector 走査では拾えない。
+    // 言語切替時にビュー側の localize() を呼んで再適用する。
+    relocalizeDatabase?.();
   }
+
+  // createDatabaseView 後に登録される DB ビューア再ローカライズ関数。
+  // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
+  let relocalizeDatabase: (() => void) | null = null;
 
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
     const next = normalizeViewerLanguage(language);
@@ -2805,7 +2812,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     trackLoad,
     syncHeaderMenu,
+    getLanguage: () => STATE.language,
   });
+  relocalizeDatabase = () => DATABASE_VIEW.localize();
 
   const REF_PICKER = createRefPicker({
     $,

@@ -51,6 +51,7 @@ describe("database tabs store", () => {
             table: "users",
             view: "data",
             sidebarWidth: "260px",
+            relatedPanelHeight: "320px",
           },
           {
             id: "tab-2",
@@ -90,6 +91,7 @@ describe("database tabs store", () => {
             table: "users",
             view: "data",
             sidebarWidth: "260px",
+            relatedPanelHeight: "320px",
           },
           {
             id: "tab-2",

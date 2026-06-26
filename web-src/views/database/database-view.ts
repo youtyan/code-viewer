@@ -18,6 +18,7 @@ import type { AnnotationTarget, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
+import { type DbLang, type DbText, dbText } from "./i18n";
 import { createGlobalSearchView } from "./global-search-view";
 import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
@@ -36,6 +37,8 @@ export type DatabaseViewDeps = {
   trackLoad: <T>(promise: Promise<T>) => Promise<T>;
   syncHeaderMenu: () => void;
   fetchDbFiles?: () => Promise<DbFilesResponse>;
+  /** 現在の言語設定 (アプリ全体の en/ja トグルと同じ値)。 */
+  getLanguage?: () => DbLang;
 };
 
 type DatabasePaneDeps = DatabaseViewDeps & {
@@ -61,6 +64,8 @@ export type DatabaseView = {
   suspend: () => void;
   leave: () => void;
   handleSse: (event?: string, data?: string) => void;
+  /** 言語切替時に DB ビューア配下の文言を再適用する。 */
+  localize: () => void;
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
@@ -131,6 +136,7 @@ type TabPaneInternal = {
   getAnnotationTarget: () => DatabaseAnnotationTarget | null;
   getLabel: () => string;
   dispose: () => void;
+  localize: () => void;
 };
 
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
@@ -243,6 +249,15 @@ function createTabPane(
     },
   };
 
+  // 現在の言語設定に応じたローカライズ文言。
+  const paneText = (): DbText => dbText(outerDeps.getLanguage?.() ?? "en");
+  // 言語切替で再適用する chrome の文言更新クロージャ群。reloc() は即時適用＋登録。
+  const paneLocalizers: Array<() => void> = [];
+  const reloc = (fn: () => void): void => {
+    fn();
+    paneLocalizers.push(fn);
+  };
+
   let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
   let lastFiles: DbFileInfo[] = [];
@@ -254,12 +269,16 @@ function createTabPane(
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
-  dbSelect.title = "Select datastore";
+  reloc(() => {
+    dbSelect.title = paneText().nav.selectDatastore;
+  });
 
   const schemaSelect = document.createElement("select");
   schemaSelect.className = "db-file-select db-schema-select";
-  schemaSelect.title = "Select PostgreSQL schema";
   schemaSelect.hidden = true;
+  reloc(() => {
+    schemaSelect.title = paneText().nav.selectSchema;
+  });
 
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
@@ -269,6 +288,10 @@ function createTabPane(
   tabBar.className = "db-tab-bar";
   const tabData = createInnerTab("Data", true);
   const tabSchema = createInnerTab("Schema", false);
+  reloc(() => {
+    tabData.textContent = paneText().nav.dataTab;
+    tabSchema.textContent = paneText().nav.schemaTab;
+  });
   tabBar.append(tabData, tabSchema);
 
   let currentTab: TabName = initial.view ?? "data";
@@ -286,6 +309,15 @@ function createTabPane(
   // initial 値があれば復元し、なければ CSS の default を使う。
   if (initial.sidebarWidth) sidebar.style.width = initial.sidebarWidth;
 
+  // 関連パネルの高さ(px)。sidebar 幅 / history 高さと同様にタブごとに独立して
+  // tabs.json へ永続化する。initial があれば復元する。
+  let relatedPanelHeightPx: number | null = (() => {
+    const raw = initial.relatedPanelHeight;
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+
   // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
   // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
@@ -294,7 +326,9 @@ function createTabPane(
   const toolsSection = document.createElement("div");
   toolsSection.className = "db-icon-toolbar";
   toolsSection.setAttribute("role", "toolbar");
-  toolsSection.setAttribute("aria-label", "Datastore tools");
+  reloc(() => {
+    toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
+  });
 
   const queryBtn = makeIconButton({
     label: "Query",
@@ -328,6 +362,13 @@ function createTabPane(
       setActiveTab("snapshot");
       snapshotView.refresh();
     },
+  });
+  reloc(() => {
+    const t = paneText().nav;
+    localizeIconButton(queryBtn, t.query, t.queryTitle);
+    localizeIconButton(erBtn, t.er, t.erTitle);
+    localizeIconButton(searchBtn, t.search, t.searchTitle);
+    localizeIconButton(snapshotBtn, t.snapshot, t.snapshotTitle);
   });
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
@@ -368,6 +409,15 @@ function createTabPane(
     getColumnWidths: (dbId, table) => outerDeps.getColumnWidths(dbId, table),
     setColumnWidths: (dbId, table, widths) =>
       outerDeps.setColumnWidths(dbId, table, widths),
+    getForeignKeys: () => schemaCache?.foreignKeys ?? [],
+    fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
+      fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
+    getRelatedPanelHeight: () => relatedPanelHeightPx,
+    setRelatedPanelHeight: (h) => {
+      relatedPanelHeightPx = h;
+      cb.onStateChange();
+    },
+    getText: () => paneText(),
   });
 
   const queryEditor = createQueryEditor({
@@ -375,25 +425,29 @@ function createTabPane(
     loadHistory: () =>
       outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
   // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
   if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft, { silent: true });
 
-  const schemaView = createSchemaView();
-  const erDiagram = createErDiagram();
+  const schemaView = createSchemaView({ getText: () => paneText() });
+  const erDiagram = createErDiagram({ getText: () => paneText() });
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
+    getText: () => paneText(),
   });
   const snapshotView = createSnapshotView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
     getTables: () => schemaCache?.tables || [],
+    getText: () => paneText(),
   });
   const historyView = createQueryHistoryView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
+    getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
       setActiveTab("query");
@@ -402,16 +456,19 @@ function createTabPane(
 
   const redisExplorer = createRedisExplorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   redisExplorer.el.hidden = true;
 
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   esExplorer.el.hidden = true;
 
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   s3Explorer.el.hidden = true;
 
@@ -474,8 +531,10 @@ function createTabPane(
   const historyToggle = document.createElement("button");
   historyToggle.className = "db-history-toggle";
   historyToggle.type = "button";
-  historyToggle.textContent = "Query History";
-  historyToggle.title = "Toggle query history panel";
+  reloc(() => {
+    historyToggle.textContent = paneText().nav.queryHistory;
+    historyToggle.title = paneText().nav.queryHistoryTitle;
+  });
   sidebar.appendChild(historyToggle);
 
   // history pane の開閉はタブごとに独立。initial が無ければ default は
@@ -683,6 +742,10 @@ function createTabPane(
     return (await res.json()) as DbSchemaResponse;
   }
 
+  /**
+   * テーブルページを取得する。eq はベース WHERE（完全一致）として常に適用され、
+   * その上にグリッド標準の filters / sort を重ねられる（FK 関連表示で使う）。
+   */
   async function fetchTablePage(
     table: string,
     offset: number,
@@ -690,6 +753,7 @@ function createTabPane(
     sort: GridSort | null,
     filters: GridFilter[],
     signal?: AbortSignal,
+    eq: Array<{ column: string; value: string }> = [],
   ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
     const params = new URLSearchParams({
@@ -706,6 +770,9 @@ function createTabPane(
     if (filters.length > 0) {
       params.set("filters", JSON.stringify(filters));
     }
+    if (eq.length > 0) {
+      params.set("eq", JSON.stringify(eq));
+    }
     const res = await fetch(
       `/_db/table?${params}`,
       signal ? { signal } : undefined,
@@ -714,6 +781,18 @@ function createTabPane(
       throw new Error(await responseErrorMessage(res, "failed to fetch table"));
     }
     return (await res.json()) as DbTableDataResponse;
+  }
+
+  function fetchRelatedPage(
+    table: string,
+    offset: number,
+    limit: number,
+    sort: GridSort | null,
+    filters: GridFilter[],
+    eq: Array<{ column: string; value: string }>,
+    signal?: AbortSignal,
+  ): Promise<DbTableDataResponse> {
+    return fetchTablePage(table, offset, limit, sort, filters, signal, eq);
   }
 
   async function executeQuery(sql: string): Promise<DbQueryResponse> {
@@ -800,7 +879,7 @@ function createTabPane(
     s3Explorer.clear();
     applyVisibility();
     tableList.render([]);
-    setTableListStatus("Loading schema...");
+    setTableListStatus(paneText().nav.loadingSchema);
     grid.clear();
     if (isPostgresKind(currentDbInfo?.kind)) {
       const desiredSchema =
@@ -1131,9 +1210,7 @@ function createTabPane(
     const files = filesResponse.files;
     lastFiles = files;
     if (filesResponse.truncated) {
-      showDockerNotice(
-        "Docker discovery reached the service limit; some compose services may be hidden.",
-      );
+      showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
       clearDockerNotice();
     }
@@ -1141,7 +1218,7 @@ function createTabPane(
     if (files.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "No datastores found";
+      opt.textContent = paneText().nav.noDatastores;
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
       cb.onStateChange();
@@ -1304,6 +1381,8 @@ function createTabPane(
     if (historyPane.style.height)
       state.historyHeight = historyPane.style.height;
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
+    if (relatedPanelHeightPx != null)
+      state.relatedPanelHeight = `${relatedPanelHeightPx}px`;
 
     if (!loaded) {
       if (initial.redis) state.redis = initial.redis;
@@ -1404,6 +1483,22 @@ function createTabPane(
     schemaCache = null;
   }
 
+  // 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。
+  // 各サブコンポーネントは順次 localize() 対応していく。
+  function localizePane() {
+    for (const fn of paneLocalizers) fn();
+    grid.localize();
+    schemaView.localize();
+    erDiagram.localize();
+    historyView.localize();
+    queryEditor.localize();
+    globalSearchView.localize();
+    snapshotView.localize();
+    redisExplorer.localize();
+    esExplorer.localize();
+    s3Explorer.localize();
+  }
+
   return {
     el: container,
     enter,
@@ -1412,6 +1507,7 @@ function createTabPane(
     getAnnotationTarget,
     getLabel,
     dispose,
+    localize: localizePane,
   };
 }
 
@@ -1457,10 +1553,21 @@ function makeIconButton(opts: {
   return btn;
 }
 
+/** アイコンボタンの title / aria-label を言語切替時に再適用する。 */
+function localizeIconButton(
+  btn: HTMLButtonElement,
+  label: string,
+  title: string,
+): void {
+  btn.title = title;
+  btn.setAttribute("aria-label", label);
+}
+
 // ----- 外側: 複数 TabPane を束ねる -----
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
+  const outerText = (): DbText => dbText(deps.getLanguage?.() ?? "en");
   const tabsById = new Map<string, DbTabEntry>();
   const paneReadyById = new Map<string, Promise<void>>();
   const lazyInitialById = new Map<string, Partial<TabState> | undefined>();
@@ -1705,7 +1812,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const newTabBtn = document.createElement("button");
   newTabBtn.type = "button";
   newTabBtn.className = "db-tabs-new-btn";
-  newTabBtn.title = "新しいタブ";
+  newTabBtn.title = outerText().nav.newTab;
   newTabBtn.textContent = "+";
   tabsBar.append(tabsList, newTabBtn);
 
@@ -1757,7 +1864,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const label = entry.pane.getLabel();
     entry.label.textContent = label;
     entry.label.title = label;
-    entry.closeBtn.setAttribute("aria-label", `${label} を閉じる`);
+    entry.closeBtn.setAttribute("aria-label", outerText().nav.closeTab(label));
   }
 
   function dedupeTabs(tabs: TabState[]): TabState[] {
@@ -1976,7 +2083,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     closeBtn.title = "閉じる";
     closeBtn.tabIndex = -1;
     closeBtn.textContent = "×";
-    closeBtn.setAttribute("aria-label", `${initialLabel} を閉じる`);
+    closeBtn.setAttribute("aria-label", outerText().nav.closeTab(initialLabel));
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(id);
@@ -2030,6 +2137,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         historyOpen: initial?.historyOpen,
         historyHeight: initial?.historyHeight,
         sidebarWidth: initial?.sidebarWidth,
+        relatedPanelHeight: initial?.relatedPanelHeight,
         redis: initial?.redis,
         es: initial?.es,
         s3: initial?.s3,
@@ -2439,7 +2547,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return tabsById.get(activeTabId)?.pane.getAnnotationTarget() ?? null;
   }
 
-  return { enter, captureAnnotationTarget, suspend, leave, handleSse };
+  // 言語切替時に全タブの DOM 文言を再適用する（localizeViewerChrome から呼ぶ）。
+  function localize(): void {
+    newTabBtn.title = outerText().nav.newTab;
+    for (const [, entry] of tabsById) {
+      entry.closeBtn.setAttribute(
+        "aria-label",
+        outerText().nav.closeTab(entry.pane.getLabel()),
+      );
+      entry.pane.localize();
+    }
+  }
+
+  return {
+    enter,
+    captureAnnotationTarget,
+    suspend,
+    leave,
+    handleSse,
+    localize,
+  };
 }
 
 function formatSize(bytes: number): string {

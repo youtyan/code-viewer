@@ -1,5 +1,6 @@
 import type { DbQueryResponse, DbValue } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import { type DbText, dbText } from "./i18n";
 
 type ShikiHighlighter = {
   codeToHtml: (
@@ -46,6 +47,7 @@ export type QueryEditorCallbacks = {
   // textarea の内容が変わった (input または setSql 経由) ことを外側に
   // 通知する。タブごとに SQL draft を persist するために使う。
   onSqlChange?: (sql: string) => void;
+  getText?: () => DbText;
 };
 
 export type QueryEditor = {
@@ -56,11 +58,13 @@ export type QueryEditor = {
   run: () => Promise<void>;
   explain: () => Promise<void>;
   dispose: () => void;
+  localize: () => void;
 };
 
 export function createQueryEditor(
   callbacks: QueryEditorCallbacks,
 ): QueryEditor {
+  const text = (): DbText => callbacks.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-query-editor";
 
@@ -76,7 +80,7 @@ export function createQueryEditor(
 
   const textarea = document.createElement("textarea");
   textarea.className = "db-query-textarea";
-  textarea.placeholder = "SELECT * FROM ...";
+  textarea.placeholder = text().editor.sqlPlaceholder;
   textarea.spellcheck = false;
   textarea.rows = 3;
 
@@ -138,20 +142,20 @@ export function createQueryEditor(
   const runBtn = document.createElement("button");
   runBtn.className = "db-btn db-btn-primary db-query-run";
   runBtn.type = "button";
-  runBtn.textContent = "Run";
-  runBtn.title = "Execute query (Ctrl+Enter)";
+  runBtn.textContent = text().editor.run;
+  runBtn.title = text().editor.runTitle;
 
   const explainBtn = document.createElement("button");
   explainBtn.className = "db-btn db-query-explain";
   explainBtn.type = "button";
-  explainBtn.textContent = "Explain";
-  explainBtn.title = "Show query execution plan";
+  explainBtn.textContent = text().editor.explain;
+  explainBtn.title = text().editor.explainTitle;
 
   const historyBtn = document.createElement("button");
   historyBtn.className = "db-btn db-query-history-btn";
   historyBtn.type = "button";
-  historyBtn.textContent = "Local History";
-  historyBtn.title = "Local editor history";
+  historyBtn.textContent = text().editor.localHistory;
+  historyBtn.title = text().editor.localHistoryTitle;
 
   const statusSpan = document.createElement("span");
   statusSpan.className = "db-query-status";
@@ -173,12 +177,12 @@ export function createQueryEditor(
     const sql = textarea.value.trim();
     if (!sql) return;
     runBtn.disabled = true;
-    statusSpan.textContent = "Running…";
+    statusSpan.textContent = text().editor.running;
     resultArea.hidden = true;
     try {
       const result = await callbacks.executeQuery(sql);
       if (result.error) {
-        statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+        statusSpan.textContent = text().editor.statusError(result.elapsedMs);
         resultArea.hidden = false;
         resultArea.innerHTML = "";
         const errEl = document.createElement("pre");
@@ -188,10 +192,14 @@ export function createQueryEditor(
         return;
       }
       const suffix = result.truncated ? "+" : "";
-      statusSpan.textContent = `${result.rowCount}${suffix} rows (${result.elapsedMs}ms)`;
+      statusSpan.textContent = text().editor.statusSuccess(
+        result.rowCount,
+        suffix,
+        result.elapsedMs,
+      );
       renderResultTable(result);
     } catch (err) {
-      statusSpan.textContent = "Failed";
+      statusSpan.textContent = text().editor.failed;
       resultArea.hidden = false;
       resultArea.innerHTML = "";
       const errEl = document.createElement("pre");
@@ -207,7 +215,7 @@ export function createQueryEditor(
     resultArea.hidden = false;
     resultArea.innerHTML = "";
     if (result.columns.length === 0) {
-      resultArea.textContent = "Query returned no columns.";
+      resultArea.textContent = text().editor.noColumns;
       return;
     }
     const table = document.createElement("table");
@@ -238,7 +246,7 @@ export function createQueryEditor(
       const td = document.createElement("td");
       td.className = "db-query-empty";
       td.colSpan = result.columns.length + 1;
-      td.textContent = "No rows";
+      td.textContent = text().editor.noRows;
       tr.appendChild(td);
       tbody.appendChild(tr);
     } else {
@@ -272,12 +280,12 @@ export function createQueryEditor(
     if (!sql) return;
     explainBtn.disabled = true;
     runBtn.disabled = true;
-    statusSpan.textContent = "Explaining…";
+    statusSpan.textContent = text().editor.explaining;
     resultArea.hidden = true;
     try {
       const result = await callbacks.executeQuery(`EXPLAIN QUERY PLAN ${sql}`);
       if (result.error) {
-        statusSpan.textContent = `Error (${result.elapsedMs}ms)`;
+        statusSpan.textContent = text().editor.statusError(result.elapsedMs);
         resultArea.hidden = false;
         resultArea.innerHTML = "";
         const errEl = document.createElement("pre");
@@ -286,10 +294,10 @@ export function createQueryEditor(
         resultArea.appendChild(errEl);
         return;
       }
-      statusSpan.textContent = `Explain (${result.elapsedMs}ms)`;
+      statusSpan.textContent = text().editor.statusExplain(result.elapsedMs);
       renderResultTable(result);
     } catch (err) {
-      statusSpan.textContent = "Failed";
+      statusSpan.textContent = text().editor.failed;
       resultArea.hidden = false;
       resultArea.innerHTML = "";
       const errEl = document.createElement("pre");
@@ -313,7 +321,7 @@ export function createQueryEditor(
     historyDropdown.innerHTML = "";
     const loading = document.createElement("div");
     loading.className = "db-query-history-empty";
-    loading.textContent = "Loading...";
+    loading.textContent = text().editor.historyLoading;
     historyDropdown.appendChild(loading);
     historyDropdown.hidden = false;
     void Promise.resolve(callbacks.loadHistory?.() ?? [])
@@ -323,7 +331,7 @@ export function createQueryEditor(
         if (items.length === 0) {
           const empty = document.createElement("div");
           empty.className = "db-query-history-empty";
-          empty.textContent = "No history";
+          empty.textContent = text().editor.historyEmpty;
           historyDropdown.appendChild(empty);
           return;
         }
@@ -343,7 +351,7 @@ export function createQueryEditor(
         historyDropdown.innerHTML = "";
         const empty = document.createElement("div");
         empty.className = "db-query-history-empty";
-        empty.textContent = "Failed to load history";
+        empty.textContent = text().editor.historyError;
         historyDropdown.appendChild(empty);
       });
   });
@@ -408,7 +416,27 @@ export function createQueryEditor(
     document.removeEventListener("click", onDocumentClick);
   }
 
-  return { el, focus, setSql, getSql, run, explain: runExplain, dispose };
+  function localize(): void {
+    const t = text().editor;
+    textarea.placeholder = t.sqlPlaceholder;
+    runBtn.textContent = t.run;
+    runBtn.title = t.runTitle;
+    explainBtn.textContent = t.explain;
+    explainBtn.title = t.explainTitle;
+    historyBtn.textContent = t.localHistory;
+    historyBtn.title = t.localHistoryTitle;
+  }
+
+  return {
+    el,
+    focus,
+    setSql,
+    getSql,
+    run,
+    explain: runExplain,
+    dispose,
+    localize,
+  };
 }
 
 // ai-dup-check: allow -- query result cells share DB value formatting semantics.

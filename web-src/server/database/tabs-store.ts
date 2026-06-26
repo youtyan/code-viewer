@@ -178,6 +178,9 @@ function sanitize(input: unknown): TabsState {
     if (historyHeight !== undefined) out.historyHeight = historyHeight;
     const sidebarWidth = sanitizeCssSize(tab.sidebarWidth);
     if (sidebarWidth !== undefined) out.sidebarWidth = sidebarWidth;
+    const relatedPanelHeight = sanitizeCssSize(tab.relatedPanelHeight);
+    if (relatedPanelHeight !== undefined)
+      out.relatedPanelHeight = relatedPanelHeight;
     const redis = sanitizeRedis(tab.redis);
     if (redis !== undefined) out.redis = redis;
     const es = sanitizeEs(tab.es);

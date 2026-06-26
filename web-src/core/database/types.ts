@@ -476,6 +476,9 @@ export type TabState = {
   // sidebar 幅。CSS pixel 表現 (例: "240px")。
   sidebarWidth?: string;
 
+  // FK 関連パネルの高さ。CSS pixel 表現 (例: "320px")。
+  relatedPanelHeight?: string;
+
   // Redis explorer の選択中 state。SQL の table を persist するのと整合的に、
   // Redis でも「選択中の db index + key」を persist する。
   redis?: RedisExplorerSelection;

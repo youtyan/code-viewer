@@ -1,11 +1,13 @@
 import type {
   DbColumn,
+  DbForeignKey,
   DbOrderDirection,
   DbTableDataResponse,
   DbValue,
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { type DbText, dbText } from "./i18n";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
@@ -13,6 +15,9 @@ const PAGE_SIZE = 200;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
+const RELATED_PANEL_DEFAULT_HEIGHT = 320;
+const RELATED_PANEL_MIN_HEIGHT = 140;
+const RELATED_PANEL_MAX_HEIGHT = 700;
 
 export type GridSort = {
   column: string;
@@ -20,6 +25,12 @@ export type GridSort = {
 };
 
 export type GridFilter = {
+  column: string;
+  value: string;
+};
+
+/** カラム完全一致条件（外部キー参照などのベース WHERE）。 */
+export type GridExactFilter = {
   column: string;
   value: string;
 };
@@ -40,6 +51,47 @@ export type TableGridCallbacks = {
     table: string,
     widths: Record<string, number>,
   ) => void;
+  /** 現在のテーブルに定義された外部キー一覧を返す（FK 関連表示用）。 */
+  getForeignKeys?: () => DbForeignKey[];
+  /**
+   * 参照先テーブルのページを取得する。eq はベース WHERE（完全一致）として
+   * 常に適用され、その上から filters / sort を重ねられる。
+   */
+  fetchRelatedPage?: (
+    table: string,
+    offset: number,
+    limit: number,
+    sort: GridSort | null,
+    filters: GridFilter[],
+    eq: GridExactFilter[],
+    signal?: AbortSignal,
+  ) => Promise<DbTableDataResponse>;
+  /**
+   * このグリッドへ常時適用されるベース WHERE（完全一致）。エクスポート時に
+   * フィルタへ合わせて付与する。関連パネルの埋め込みグリッドでのみ使う。
+   */
+  getBaseEq?: () => GridExactFilter[];
+  /**
+   * 埋め込みグリッドで FK セルがクリックされたことを親へ通知する。
+   * 親はこれを使って関連パネルをさらに 1 段潜らせる（ドリルダウン）。
+   */
+  onForeignKeyCellClick?: (
+    sourceTable: string,
+    columnNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) => void;
+  /** 関連パネルの保存済み高さ(px)。タブ状態から復元する。 */
+  getRelatedPanelHeight?: () => number | null;
+  /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
+  setRelatedPanelHeight?: (height: number) => void;
+  /** 現在の言語設定に応じたローカライズ文言を返す。 */
+  getText?: () => DbText;
+};
+
+export type TableGridOptions = {
+  /** 埋め込みグリッド（関連データ表示用）では関連パネル機能を無効化する。 */
+  embedded?: boolean;
 };
 
 export type TableGrid = {
@@ -50,9 +102,17 @@ export type TableGrid = {
   getState: () => AnnotationDatabaseDataState;
   clear: () => void;
   destroy: () => void;
+  /** 言語切替時に組み込み済み DOM の文言を再適用する。 */
+  localize: () => void;
 };
 
-export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
+export function createTableGrid(
+  callbacks: TableGridCallbacks,
+  options: TableGridOptions = {},
+): TableGrid {
+  const embedded = options.embedded === true;
+  // ローカライズ文言。未指定時は英語にフォールバックする。
+  const text = (): DbText => callbacks.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-grid";
 
@@ -64,14 +124,64 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   const filterInput = document.createElement("input");
   filterInput.type = "search";
   filterInput.className = "db-grid-filter-input";
-  filterInput.placeholder = "Search all columns…";
+  filterInput.placeholder = text().grid.searchPlaceholder;
   filterInput.autocomplete = "off";
   const filterClear = document.createElement("button");
   filterClear.type = "button";
   filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
   filterClear.textContent = "×";
   filterClear.hidden = true;
-  filterBar.append(filterIcon, filterInput, filterClear);
+
+  // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
+  // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
+  const exportWrap = document.createElement("div");
+  exportWrap.className = "db-grid-export";
+  const exportBtn = document.createElement("button");
+  exportBtn.type = "button";
+  exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
+  exportBtn.title = text().grid.exportAction;
+  exportBtn.setAttribute("aria-label", text().grid.exportAction);
+  exportBtn.textContent = "⬇";
+  const exportMenu = document.createElement("div");
+  exportMenu.className = "db-grid-export-menu";
+  exportMenu.hidden = true;
+  const exportCsv = document.createElement("button");
+  exportCsv.type = "button";
+  exportCsv.className = "db-grid-export-item";
+  exportCsv.textContent = "CSV";
+  const exportJson = document.createElement("button");
+  exportJson.type = "button";
+  exportJson.className = "db-grid-export-item";
+  exportJson.textContent = "JSON";
+  exportMenu.append(exportCsv, exportJson);
+  exportWrap.append(exportBtn, exportMenu);
+
+  const closeExportMenu = () => {
+    exportMenu.hidden = true;
+    document.removeEventListener("click", onDocClickForExport);
+  };
+  function onDocClickForExport(e: MouseEvent) {
+    if (!exportWrap.contains(e.target as Node)) closeExportMenu();
+  }
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (exportMenu.hidden) {
+      exportMenu.hidden = false;
+      document.addEventListener("click", onDocClickForExport);
+    } else {
+      closeExportMenu();
+    }
+  });
+  exportCsv.addEventListener("click", () => {
+    closeExportMenu();
+    triggerExport("csv");
+  });
+  exportJson.addEventListener("click", () => {
+    closeExportMenu();
+    triggerExport("json");
+  });
+
+  filterBar.append(filterIcon, filterInput, filterClear, exportWrap);
 
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
@@ -117,6 +227,51 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
+  // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
+  const fkColumns = new Set<string>();
+
+  /* ---- Related-data panel (FK navigation) ---- */
+  // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
+  type RelatedTarget = { fk: DbForeignKey; value: string };
+  // ドリルの 1 段。sourceTable の行が持つ FK 参照群と選択中の参照。
+  type RelatedLevel = {
+    sourceTable: string;
+    targets: RelatedTarget[];
+    selectedIndex: number;
+  };
+  let relatedPanel: HTMLElement | null = null;
+  let relatedListEl: HTMLElement | null = null;
+  let relatedGridHost: HTMLElement | null = null;
+  // 参照先が 0 件のときに出す空表示。
+  let relatedEmptyEl: HTMLElement | null = null;
+  // ヘッダーのパンくず（ドリル経路）を表示する要素。
+  let relatedCrumbEl: HTMLElement | null = null;
+  let embeddedGrid: TableGrid | null = null;
+  // ドリルのスタック。末尾が現在表示中の階層。
+  let relatedStack: RelatedLevel[] = [];
+  // リサイズドラッグ中の window リスナーを teardown 時に確実に外すための解除関数。
+  let relatedResizeCleanup: (() => void) | null = null;
+  // 切り替え中の取得競合を捨てるための世代。
+  let relatedGen = 0;
+  // 埋め込みグリッドへ常時適用するベース WHERE（完全一致）。
+  let relatedEq: GridExactFilter[] = [];
+  const savedRelatedHeight = embedded
+    ? null
+    : (callbacks.getRelatedPanelHeight?.() ?? null);
+  let relatedHeight =
+    savedRelatedHeight != null
+      ? Math.max(
+          RELATED_PANEL_MIN_HEIGHT,
+          Math.min(RELATED_PANEL_MAX_HEIGHT, savedRelatedHeight),
+        )
+      : RELATED_PANEL_DEFAULT_HEIGHT;
+  if (!embedded) {
+    relatedPanel = document.createElement("div");
+    relatedPanel.className = "db-related-panel";
+    relatedPanel.hidden = true;
+    relatedPanel.style.height = `${relatedHeight}px`;
+    el.appendChild(relatedPanel);
+  }
 
   /* ---- Column width management ---- */
   const colWidths = new Map<string, number>();
@@ -260,15 +415,356 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
+    // 新しいテーブルをロードする前に選択をリセットする。これを怠ると、
+    // 関連グリッドの使い回し時に前テーブルの行 index が別の行へ誤適用され、
+    // getState() にも誤った行番号が混入する。
+    selectedRowIndex = -1;
+    // 開いたままの export メニューが残すと document クリックリスナーが
+    // リークするため、確実に閉じて解除する。
+    closeExportMenu();
+    hideRelatedPanel();
     detailPanel.hidden = true;
     detailPanel.innerHTML = "";
     colWidths.clear();
+  }
+
+  let relatedFirstPageController: AbortController | null = null;
+
+  /** 値を参照先カラムとの一致条件に使える文字列へ正規化する。 */
+  function relatedLookupValue(value: DbValue): string | null {
+    if (value === null) return null;
+    if (value instanceof Uint8Array) return null;
+    if (typeof value === "boolean") return value ? "1" : "0";
+    const str = String(value);
+    return str === "" ? null : str;
+  }
+
+  /** 指定行が持つ外部キー参照を集める（左リストの元データ）。 */
+  function buildRowForeignKeys(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+  ): RelatedTarget[] {
+    const targets: RelatedTarget[] = [];
+    for (const fk of callbacks.getForeignKeys?.() ?? []) {
+      if (fk.fromTable !== sourceTable) continue;
+      const idx = colNames.indexOf(fk.fromColumn);
+      if (idx < 0) continue;
+      const value = relatedLookupValue(rowData[idx]);
+      if (value === null) continue;
+      targets.push({ fk, value });
+    }
+    return targets;
+  }
+
+  /** 行から 1 ドリル階層を作る。FK 参照が無ければ null。 */
+  function makeRelatedLevel(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ): RelatedLevel | null {
+    const targets = buildRowForeignKeys(sourceTable, colNames, rowData);
+    if (targets.length === 0) return null;
+    let selectedIndex = targets.findIndex(
+      (t) => t.fk.fromColumn === clickedColumn,
+    );
+    if (selectedIndex < 0) selectedIndex = 0;
+    return { sourceTable, targets, selectedIndex };
+  }
+
+  function currentRelatedLevel(): RelatedLevel | null {
+    return relatedStack[relatedStack.length - 1] ?? null;
+  }
+
+  function currentRelatedTarget(): RelatedTarget | null {
+    const level = currentRelatedLevel();
+    return level ? (level.targets[level.selectedIndex] ?? null) : null;
+  }
+
+  /** 関連パネルの DOM と埋め込みグリッドを初回だけ構築する。 */
+  function ensureRelatedDom() {
+    if (!relatedPanel || relatedListEl) return;
+
+    const resizer = document.createElement("div");
+    resizer.className = "db-related-resize";
+    resizer.addEventListener("mousedown", startRelatedResize);
+
+    const header = document.createElement("div");
+    header.className = "db-related-header";
+    const title = document.createElement("span");
+    title.className = "db-related-title";
+    title.textContent = "🔗";
+    // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
+    relatedCrumbEl = document.createElement("span");
+    relatedCrumbEl.className = "db-related-crumbs";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      const target = currentRelatedTarget();
+      if (!target) return;
+      navigator.clipboard.writeText(target.value).then(
+        () => {
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy";
+          }, 800);
+        },
+        () => {
+          copyBtn.textContent = "Copy failed";
+        },
+      );
+    });
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "db-btn db-btn-icon db-related-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", hideRelatedPanel);
+    header.append(title, relatedCrumbEl, copyBtn, closeBtn);
+
+    const bodyRow = document.createElement("div");
+    bodyRow.className = "db-related-body";
+    relatedListEl = document.createElement("div");
+    relatedListEl.className = "db-related-list";
+    relatedGridHost = document.createElement("div");
+    relatedGridHost.className = "db-related-grid-host";
+
+    embeddedGrid = createTableGrid(
+      {
+        fetchPage: (table, offset, limit, s, filters, signal) =>
+          callbacks.fetchRelatedPage
+            ? callbacks.fetchRelatedPage(
+                table,
+                offset,
+                limit,
+                s,
+                filters,
+                relatedEq,
+                signal,
+              )
+            : Promise.reject(new Error("related fetch is not configured")),
+        getDbId: callbacks.getDbId,
+        getColumnWidths: callbacks.getColumnWidths,
+        setColumnWidths: callbacks.setColumnWidths,
+        getForeignKeys: callbacks.getForeignKeys,
+        getBaseEq: () => relatedEq,
+        getText: callbacks.getText,
+        // 埋め込みグリッドの FK クリックで 1 段潜る。
+        onForeignKeyCellClick: (sourceTable, colNames, rowData, clicked) =>
+          drillIntoRelated(sourceTable, colNames, rowData, clicked),
+      },
+      { embedded: true },
+    );
+    relatedGridHost.appendChild(embeddedGrid.el);
+
+    relatedEmptyEl = document.createElement("div");
+    relatedEmptyEl.className = "db-related-empty";
+    relatedEmptyEl.textContent = text().grid.relatedEmpty;
+    relatedEmptyEl.hidden = true;
+    relatedGridHost.appendChild(relatedEmptyEl);
+
+    bodyRow.append(relatedListEl, relatedGridHost);
+    relatedPanel.append(resizer, header, bodyRow);
+  }
+
+  function startRelatedResize(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = relatedHeight;
+    const onMove = (ev: MouseEvent) => {
+      // 上端ハンドルなので、上にドラッグすると高くなる。
+      const delta = startY - ev.clientY;
+      relatedHeight = Math.max(
+        RELATED_PANEL_MIN_HEIGHT,
+        Math.min(RELATED_PANEL_MAX_HEIGHT, startHeight + delta),
+      );
+      if (relatedPanel) relatedPanel.style.height = `${relatedHeight}px`;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      relatedResizeCleanup = null;
+      // ドラッグ確定時にタブ状態へ保存する。
+      callbacks.setRelatedPanelHeight?.(relatedHeight);
+    };
+    // ドラッグ中に destroy/hide された場合でもリスナーを外せるよう保持する。
+    relatedResizeCleanup = onUp;
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function hideRelatedPanel() {
+    if (!relatedPanel) return;
+    relatedResizeCleanup?.();
+    relatedPanel.hidden = true;
+    if (relatedEmptyEl) relatedEmptyEl.hidden = true;
+    relatedStack = [];
+    relatedGen++;
+    relatedFirstPageController?.abort();
+    relatedFirstPageController = null;
+    embeddedGrid?.clear();
+  }
+
+  /** メイングリッドの FK セルクリックで、その行の関連を最上段から開く。 */
+  function openRelatedForRow(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) {
+    if (embedded || !relatedPanel || !callbacks.fetchRelatedPage) return;
+    const level = makeRelatedLevel(
+      sourceTable,
+      colNames,
+      rowData,
+      clickedColumn,
+    );
+    if (!level) return;
+    ensureRelatedDom();
+    detailPanel.hidden = true; // 単一値の詳細とは排他表示
+    relatedStack = [level];
+    relatedPanel.hidden = false;
+    renderRelated();
+  }
+
+  /** 埋め込みグリッドの FK クリックで 1 段潜る。 */
+  function drillIntoRelated(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) {
+    if (!relatedPanel) return;
+    const level = makeRelatedLevel(
+      sourceTable,
+      colNames,
+      rowData,
+      clickedColumn,
+    );
+    if (!level) return; // 参照先が無い行は何もしない
+    relatedStack.push(level);
+    renderRelated();
+  }
+
+  /** 同一階層内で参照先（兄弟 FK）を切り替える。 */
+  function selectRelatedTarget(index: number) {
+    const level = currentRelatedLevel();
+    if (!level || index < 0 || index >= level.targets.length) return;
+    // 既に選択中の参照先を再クリックしても再取得しない。
+    if (index === level.selectedIndex) return;
+    level.selectedIndex = index;
+    renderRelated();
+  }
+
+  /** パンくずのクリックでその階層まで戻る。 */
+  function goToRelatedLevel(levelIndex: number) {
+    if (levelIndex < 0 || levelIndex >= relatedStack.length - 1) return;
+    relatedStack = relatedStack.slice(0, levelIndex + 1);
+    renderRelated();
+  }
+
+  function renderRelated() {
+    renderRelatedCrumbs();
+    renderRelatedList();
+    void loadRelatedTarget();
+  }
+
+  function renderRelatedCrumbs() {
+    if (!relatedCrumbEl) return;
+    relatedCrumbEl.innerHTML = "";
+    if (relatedStack.length === 0) return;
+    const origin = document.createElement("span");
+    origin.className = "db-related-crumb-origin";
+    origin.textContent = relatedStack[0].sourceTable;
+    relatedCrumbEl.appendChild(origin);
+    relatedStack.forEach((level, i) => {
+      const sep = document.createElement("span");
+      sep.className = "db-related-crumb-sep";
+      sep.textContent = "▸";
+      relatedCrumbEl?.appendChild(sep);
+      const target = level.targets[level.selectedIndex];
+      const isLast = i === relatedStack.length - 1;
+      if (isLast) {
+        const seg = document.createElement("span");
+        seg.className = "db-related-crumb active";
+        seg.textContent = target.fk.toTable;
+        relatedCrumbEl?.appendChild(seg);
+      } else {
+        const seg = document.createElement("button");
+        seg.type = "button";
+        seg.className = "db-related-crumb";
+        seg.textContent = target.fk.toTable;
+        seg.addEventListener("click", () => goToRelatedLevel(i));
+        relatedCrumbEl?.appendChild(seg);
+      }
+    });
+  }
+
+  function renderRelatedList() {
+    const level = currentRelatedLevel();
+    if (!relatedListEl || !level) return;
+    relatedListEl.innerHTML = "";
+    level.targets.forEach((target, i) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "db-related-list-item";
+      if (i === level.selectedIndex) item.classList.add("active");
+      const name = document.createElement("span");
+      name.className = "db-related-list-name";
+      name.textContent = target.fk.toTable;
+      const via = document.createElement("span");
+      via.className = "db-related-list-via";
+      via.textContent = `${target.fk.fromColumn} = ${target.value}`;
+      item.append(name, via);
+      item.addEventListener("click", () => selectRelatedTarget(i));
+      relatedListEl?.appendChild(item);
+    });
+  }
+
+  /** 現在選択中の参照先を埋め込みグリッドへ読み込む。 */
+  async function loadRelatedTarget() {
+    const target = currentRelatedTarget();
+    if (!target) return;
+    relatedEq = [{ column: target.fk.toColumn, value: target.value }];
+    const grid = embeddedGrid;
+    if (!grid || !callbacks.fetchRelatedPage) return;
+    const gen = ++relatedGen;
+    relatedFirstPageController?.abort();
+    const controller = new AbortController();
+    relatedFirstPageController = controller;
+    grid.clear();
+    if (relatedEmptyEl) relatedEmptyEl.hidden = true;
+    try {
+      // 1 ページ目を取得して列情報ごとグリッドへ渡す（埋め込みグリッドの
+      // 以降のスクロール/フィルタ/ソートは fetchRelatedPage 経由で eq を保つ）。
+      const data = await callbacks.fetchRelatedPage(
+        target.fk.toTable,
+        0,
+        PAGE_SIZE,
+        null,
+        [],
+        relatedEq,
+        controller.signal,
+      );
+      if (gen !== relatedGen) return;
+      grid.load(target.fk.toTable, data);
+      // 参照先が 0 件なら空表示を出す（孤立 FK 等）。
+      if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
+    } catch (err) {
+      if (gen !== relatedGen || isAbortError(err)) return;
+      grid.showError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function showCellDetail(colIndex: number, value: DbValue) {
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
 
+    // 単一値詳細とは排他。関連パネルを閉じるだけでなく、進行中の関連ロードも
+    // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
+    hideRelatedPanel();
     detailPanel.hidden = false;
     detailPanel.innerHTML = "";
 
@@ -359,6 +855,15 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       label.className = "db-grid-header-label";
       label.textContent = col.name;
 
+      if (fkColumns.has(col.name)) {
+        cell.classList.add("db-grid-header-fk");
+        const fkIcon = document.createElement("span");
+        fkIcon.className = "db-grid-header-fk-icon";
+        fkIcon.textContent = "🔗";
+        fkIcon.title = text().grid.foreignKeyHint;
+        label.appendChild(fkIcon);
+      }
+
       const sortIcon = document.createElement("span");
       sortIcon.className = "db-grid-sort-icon";
       sortIcon.textContent =
@@ -447,7 +952,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       const input = document.createElement("input");
       input.type = "search";
       input.className = "db-grid-col-filter";
-      input.placeholder = `${col.name}…`;
+      input.placeholder = text().grid.columnFilterPlaceholder(col.name);
       input.autocomplete = "off";
       input.value = columnFilters.get(col.name) || "";
       input.addEventListener("input", () => {
@@ -596,6 +1101,16 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
             cell.style.cursor = "pointer";
             const cellValue = val;
             const cellColIndex = c;
+            const cellColName = columnNames[c];
+            const rowValues = rowData;
+            // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
+            // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
+            const fkClickable =
+              fkColumns.has(cellColName) &&
+              (!embedded || !!callbacks.onForeignKeyCellClick);
+            if (fkClickable) {
+              cell.classList.add("db-grid-cell-fk");
+            }
             cell.addEventListener("click", (e) => {
               e.stopPropagation();
               selectedRowIndex = rowIndex;
@@ -603,7 +1118,27 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
                 r.classList.remove("selected");
               });
               row.classList.add("selected");
-              showCellDetail(cellColIndex, cellValue);
+              // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
+              // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
+              if (fkClickable) {
+                if (embedded) {
+                  callbacks.onForeignKeyCellClick?.(
+                    currentTable,
+                    columnNames,
+                    rowValues,
+                    cellColName,
+                  );
+                } else {
+                  openRelatedForRow(
+                    currentTable,
+                    columnNames,
+                    rowValues,
+                    cellColName,
+                  );
+                }
+              } else {
+                showCellDetail(cellColIndex, cellValue);
+              }
             });
             row.appendChild(cell);
           }
@@ -637,6 +1172,10 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     if (filters.length > 0) {
       params.set("filters", JSON.stringify(filters));
     }
+    const baseEq = callbacks.getBaseEq?.() ?? [];
+    if (baseEq.length > 0) {
+      params.set("eq", JSON.stringify(baseEq));
+    }
     const a = document.createElement("a");
     a.href = `/_db/export?${params}`;
     a.download = `${currentTable}.${format}`;
@@ -645,34 +1184,18 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     a.remove();
   }
 
-  let exportCsvBtn: HTMLButtonElement | null = null;
-  let exportJsonBtn: HTMLButtonElement | null = null;
-
   function updateStatus() {
     if (!statusEl) {
       statusEl = document.createElement("div");
       statusEl.className = "db-grid-status";
-
-      exportCsvBtn = document.createElement("button");
-      exportCsvBtn.type = "button";
-      exportCsvBtn.className = "db-btn db-btn-sm db-grid-export-btn";
-      exportCsvBtn.textContent = "Export CSV";
-      exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
-
-      exportJsonBtn = document.createElement("button");
-      exportJsonBtn.type = "button";
-      exportJsonBtn.className = "db-btn db-btn-sm db-grid-export-btn";
-      exportJsonBtn.textContent = "Export JSON";
-      exportJsonBtn.addEventListener("click", () => triggerExport("json"));
-
-      statusEl.append(exportCsvBtn, exportJsonBtn);
       el.appendChild(statusEl);
     }
-    const parts: string[] = [`${totalRows.toLocaleString()} rows`];
+    const t = text().grid;
+    const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)
-      parts.push(`Sort: ${sort.column} ${sort.direction.toUpperCase()}`);
+      parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
     const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
-    if (activeFilterCount > 0) parts.push(`${activeFilterCount} filter(s)`);
+    if (activeFilterCount > 0) parts.push(t.statusFilters(activeFilterCount));
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;
@@ -704,6 +1227,10 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
       columns = [];
       columnNames = [];
       totalRows = 0;
+    }
+    fkColumns.clear();
+    for (const fk of callbacks.getForeignKeys?.() ?? []) {
+      if (fk.fromTable === table) fkColumns.add(fk.fromColumn);
     }
     loadColWidths();
     spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
@@ -781,10 +1308,36 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
   function destroy() {
     clear();
+    embeddedGrid?.destroy();
+    embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
   }
 
-  return { el, load, showError, applyState, getState, clear, destroy };
+  /** 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。 */
+  function localize() {
+    const t = text();
+    filterInput.placeholder = t.grid.searchPlaceholder;
+    exportBtn.title = t.grid.exportAction;
+    exportBtn.setAttribute("aria-label", t.grid.exportAction);
+    if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
+    if (currentTable) {
+      renderHeader(); // FK アイコンの title や列フィルタを再構築
+      updateStatus();
+    }
+    renderRelatedCrumbs();
+    embeddedGrid?.localize();
+  }
+
+  return {
+    el,
+    load,
+    showError,
+    applyState,
+    getState,
+    clear,
+    destroy,
+    localize,
+  };
 }
 
 function formatValue(value: DbValue): string {

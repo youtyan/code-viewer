@@ -6467,9 +6467,256 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   word-break: break-word;
 }
 
-/* ---------- Export Buttons ---------- */
-.db-grid-export-btn {
-  margin-left: 6px;
+/* ---------- Foreign-key related data ---------- */
+.db-grid-header-fk-icon {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.db-grid-cell-fk {
+  color: var(--accent, var(--link, #2563eb));
+}
+.db-grid-cell-fk:hover {
+  text-decoration: underline;
+}
+
+/* Related-data panel: 下部に出る「左=関連テーブル一覧 / 右=データグリッド」 */
+.db-related-panel[hidden] {
+  display: none !important;
+}
+
+.db-related-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-top: 2px solid var(--border);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.db-related-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+}
+.db-related-resize:hover {
+  background: var(--accent, var(--border));
+  opacity: 0.4;
+}
+
+.db-related-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-mute);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--db-font-base);
+  font-weight: 600;
+}
+
+.db-related-title {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.db-related-close {
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+.db-related-close:hover {
+  color: var(--danger);
+  background: none;
+}
+
+.db-related-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.db-related-list {
+  width: 200px;
+  flex-shrink: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding: 4px;
+}
+
+.db-related-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 8px;
+  margin-bottom: 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.db-related-list-item:hover {
+  background: var(--bg-mute);
+}
+.db-related-list-item.active {
+  background: var(--bg-mute);
+  border-color: var(--accent, var(--border));
+}
+
+.db-related-list-name {
+  font-size: var(--db-font-base);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.db-related-list-via {
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+
+.db-related-grid-host {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.db-related-empty[hidden] {
+  display: none !important;
+}
+.db-related-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-style: italic;
+  font-size: var(--db-font-base);
+}
+
+/* ---------- Export (icon + menu at the right of the search bar) ---------- */
+.db-grid-export {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.db-grid-export-toggle {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--db-font-md);
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.db-grid-export-toggle:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.db-grid-export-menu[hidden] {
+  display: none !important;
+}
+.db-grid-export-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 92px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.db-grid-export-item {
+  border: none;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--db-font-base);
+  font-family: inherit;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.db-grid-export-item:hover {
+  background: var(--bg-mute);
+}
+
+/* Related-panel header: breadcrumb (drill path). */
+.db-related-crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 400;
+  font-size: var(--db-font-base);
+}
+
+.db-related-crumb-origin {
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+.db-related-crumb-sep {
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+.db-related-crumb {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--accent, var(--link, #2563eb));
+  cursor: pointer;
+}
+.db-related-crumb:hover {
+  background: var(--bg-mute);
+  text-decoration: underline;
+}
+.db-related-crumb.active {
+  color: var(--fg);
+  font-weight: 600;
+  cursor: default;
+}
+
+.db-related-copy {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-right: 8px;
+  color: var(--fg-muted);
+}
+.db-related-copy:hover {
+  color: var(--fg);
 }
 
 /* ---------- Query History ---------- */

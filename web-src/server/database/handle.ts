@@ -384,22 +384,46 @@ async function handleSchema(
   }
 }
 
-function parseFilters(url: URL): { column: string; value: string }[] {
-  const raw = url.searchParams.get("filters");
+// 条件の個数・列名/値長の上限。巨大な WHERE 生成や export 経由の DoS を防ぐ。
+const MAX_COLUMN_VALUE_PAIRS = 64;
+const MAX_FILTER_COLUMN_LEN = 128;
+const MAX_FILTER_VALUE_LEN = 4096;
+
+function parseColumnValuePairs(
+  url: URL,
+  param: string,
+): { column: string; value: string }[] {
+  const raw = url.searchParams.get(param);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (f: unknown): f is { column: string; value: string } =>
-        !!f &&
-        typeof f === "object" &&
-        typeof (f as Record<string, unknown>).column === "string" &&
-        typeof (f as Record<string, unknown>).value === "string",
-    );
+    return parsed
+      .filter(
+        (f: unknown): f is { column: string; value: string } =>
+          !!f &&
+          typeof f === "object" &&
+          typeof (f as Record<string, unknown>).column === "string" &&
+          typeof (f as Record<string, unknown>).value === "string",
+      )
+      .filter(
+        (f) =>
+          f.column.length <= MAX_FILTER_COLUMN_LEN &&
+          f.value.length <= MAX_FILTER_VALUE_LEN,
+      )
+      .slice(0, MAX_COLUMN_VALUE_PAIRS);
   } catch {
     return [];
   }
+}
+
+function parseFilters(url: URL): { column: string; value: string }[] {
+  return parseColumnValuePairs(url, "filters");
+}
+
+/** `eq` パラメータ: カラム完全一致条件（FK 参照の WHERE 用）。 */
+function parseExactConditions(url: URL): { column: string; value: string }[] {
+  return parseColumnValuePairs(url, "eq");
 }
 
 function groupFiltersByValue(
@@ -450,9 +474,10 @@ async function handleTable(
     ];
   }
   const filters = parseFilters(url);
+  const exact = parseExactConditions(url);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    if (filters.length > 0) {
+    if (filters.length > 0 || exact.length > 0) {
       const meta = await adapter.getFilteredTablePageWithMeta(
         table,
         {
@@ -460,6 +485,7 @@ async function handleTable(
           limit,
           orderBy,
           grouped: groupFiltersByValue(filters),
+          ...(exact.length > 0 ? { exact } : {}),
         },
         signal,
       );
@@ -833,6 +859,7 @@ async function handleExport(
     ];
   }
   const filters = parseFilters(url);
+  const exact = parseExactConditions(url);
 
   try {
     const adapter = await getAdapter(r, cwd, signal);
@@ -845,7 +872,7 @@ async function handleExport(
     }
     let rawRows: import("./serialize").RawDbValue[][];
 
-    if (filters.length > 0) {
+    if (filters.length > 0 || exact.length > 0) {
       const meta = await adapter.getFilteredTablePageWithMeta(
         table,
         {
@@ -853,6 +880,7 @@ async function handleExport(
           limit: EXPORT_MAX_ROWS,
           orderBy,
           grouped: groupFiltersByValue(filters),
+          ...(exact.length > 0 ? { exact } : {}),
         },
         signal,
       );

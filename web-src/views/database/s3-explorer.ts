@@ -32,10 +32,12 @@ import {
   renderUnsupportedPreview,
 } from "../source-preview-elements";
 import { createAbortGuard } from "./abort-guard";
+import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
+  getText?: () => DbText;
 };
 
 export type S3ExplorerView = {
@@ -44,6 +46,7 @@ export type S3ExplorerView = {
   clear: () => void;
   dispose: () => void;
   getSelection: () => S3ExplorerSelection;
+  localize: () => void;
 };
 
 function buildS3RawUrl(dbId: string, bucket: string, key: string): string {
@@ -110,6 +113,10 @@ function setExplorerFolderIcon(el: HTMLElement, collapsed: boolean): void {
 export function createS3Explorer(
   callbacks: S3ExplorerCallbacks = {},
 ): S3ExplorerView {
+  const text = (): DbText["explorer"]["s3"] =>
+    (callbacks.getText?.() ?? dbText("en")).explorer.s3;
+  const tCommon = (): DbText["explorer"]["common"] =>
+    (callbacks.getText?.() ?? dbText("en")).explorer.common;
   const container = document.createElement("div");
   container.className = "s3-explorer";
 
@@ -123,7 +130,7 @@ export function createS3Explorer(
   bucketRow.className = "s3-bucket-row";
   const bucketLabel = document.createElement("label");
   bucketLabel.className = "s3-field-label";
-  bucketLabel.textContent = "Bucket";
+  bucketLabel.textContent = text().bucket;
   const bucketSelect = document.createElement("select");
   bucketSelect.className = "s3-bucket-select";
   bucketLabel.appendChild(bucketSelect);
@@ -147,12 +154,12 @@ export function createS3Explorer(
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.className = "s3-search-input";
-  searchInput.placeholder = "Search objects";
+  searchInput.placeholder = text().searchPlaceholder;
   searchInput.autocomplete = "off";
   const searchBtn = document.createElement("button");
   searchBtn.type = "submit";
   searchBtn.className = "db-btn db-btn-primary s3-search-btn";
-  searchBtn.textContent = "Search";
+  searchBtn.textContent = tCommon().search;
   searchRow.append(searchInput, searchBtn);
 
   const optionRow = document.createElement("div");
@@ -161,20 +168,20 @@ export function createS3Explorer(
   modeSeg.className = "seg s3-mode-seg";
   const prefixModeBtn = document.createElement("button");
   prefixModeBtn.type = "button";
-  prefixModeBtn.textContent = "Prefix";
+  prefixModeBtn.textContent = text().prefixMode;
   const containsModeBtn = document.createElement("button");
   containsModeBtn.type = "button";
-  containsModeBtn.textContent = "Contains";
+  containsModeBtn.textContent = text().containsMode;
   modeSeg.append(prefixModeBtn, containsModeBtn);
 
   const sortSelect = document.createElement("select");
   sortSelect.className = "s3-sort-select";
   const sortUpdated = document.createElement("option");
   sortUpdated.value = "updated-desc";
-  sortUpdated.textContent = "Updated newest";
+  sortUpdated.textContent = text().sortUpdated;
   const sortKey = document.createElement("option");
   sortKey.value = "key-asc";
-  sortKey.textContent = "Key A-Z";
+  sortKey.textContent = text().sortKey;
   sortSelect.append(sortUpdated, sortKey);
   optionRow.append(modeSeg, sortSelect);
 
@@ -192,7 +199,7 @@ export function createS3Explorer(
   const moreBtn = document.createElement("button");
   moreBtn.type = "button";
   moreBtn.className = "s3-object-more-btn";
-  moreBtn.textContent = "Load more";
+  moreBtn.textContent = tCommon().loadMore;
   moreBtn.hidden = true;
   objectPane.appendChild(moreBtn);
 
@@ -205,7 +212,7 @@ export function createS3Explorer(
 
   const previewPane = document.createElement("div");
   previewPane.className = "s3-preview-pane";
-  setPaneEmpty(previewPane, "Select an object to preview.");
+  setPaneEmpty(previewPane, text().selectObject);
 
   container.append(objectPane, previewPane);
 
@@ -249,7 +256,7 @@ export function createS3Explorer(
     prefixModeBtn.classList.toggle("active", mode === "prefix");
     containsModeBtn.classList.toggle("active", mode === "contains");
     searchInput.placeholder =
-      mode === "prefix" ? "Prefix, e.g. photos/2026/" : "Filename contains";
+      mode === "prefix" ? text().prefixPlaceholder : text().containsPlaceholder;
   }
 
   function renderBuckets(buckets: S3BucketInfo[]): void {
@@ -364,7 +371,7 @@ export function createS3Explorer(
       currentKey = null;
       currentNextToken = undefined;
       setPaneStatus(objectList, "Loading objects...");
-      setPaneEmpty(previewPane, "Select an object to preview.");
+      setPaneEmpty(previewPane, text().selectObject);
     }
     try {
       const params = new URLSearchParams({
@@ -411,7 +418,7 @@ export function createS3Explorer(
           objectList,
           data.scanLimitReached
             ? `(no matches in the first ${data.scannedObjects.toLocaleString()} scanned objects; narrow the prefix and search again)`
-            : "(no objects)",
+            : text().noObjects,
         );
       } else {
         appendObjects(data.objects);
@@ -459,27 +466,27 @@ export function createS3Explorer(
       open.href = rawUrl;
       open.target = "_blank";
       open.rel = "noreferrer";
-      open.textContent = "Open raw";
+      open.textContent = text().openRaw;
       const download = document.createElement("a");
       download.className = "db-btn db-btn-sm";
       download.href = rawUrl;
       download.download = s3ObjectName(object.key);
-      download.textContent = "Download";
+      download.textContent = text().download;
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "db-btn db-btn-sm";
-      copy.textContent = "Copy S3 URI";
+      copy.textContent = text().copyUri;
       copy.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(
             s3Uri(currentBucket || "", object.key),
           );
-          copy.textContent = "Copied";
+          copy.textContent = text().copied;
           window.setTimeout(() => {
-            copy.textContent = "Copy S3 URI";
+            copy.textContent = text().copyUri;
           }, 1200);
         } catch {
-          copy.textContent = "Copy failed";
+          copy.textContent = text().copyFailed;
         }
       });
       actions.append(open, download, copy);
@@ -500,7 +507,7 @@ export function createS3Explorer(
   function renderUnsupported(): HTMLElement {
     return renderUnsupportedPreview({
       className: "s3-source-preview",
-      message: "This object type cannot be previewed safely in the browser.",
+      message: text().unsupported,
     });
   }
 
@@ -557,7 +564,7 @@ export function createS3Explorer(
       wrap.className = "s3-text-preview-wrap";
       const note = document.createElement("div");
       note.className = "datastore-value-truncation";
-      note.textContent = `Showing first ${formatBytes(512 * 1024)}.`;
+      note.textContent = text().truncatedNotice(formatBytes(512 * 1024));
       wrap.append(note, body);
       return wrap;
     }
@@ -1060,7 +1067,7 @@ export function createS3Explorer(
     moreBtn.hidden = true;
     resetExplorer();
     applyViewVisibility(initialView);
-    setPaneEmpty(previewPane, "Select an object to preview.");
+    setPaneEmpty(previewPane, text().selectObject);
     setPaneStatus(
       initialView === "explorer" ? explorerTree : objectList,
       "Loading buckets...",
@@ -1095,7 +1102,7 @@ export function createS3Explorer(
         data.buckets[0]?.name ||
         null;
       if (!selected) {
-        setPaneStatus(objectList, "(no buckets)");
+        setPaneStatus(objectList, text().noBuckets);
         return;
       }
       bucketSelect.value = selected;
@@ -1172,7 +1179,7 @@ export function createS3Explorer(
     moreBtn.hidden = true;
     resetExplorer();
     applyViewVisibility("list");
-    setPaneEmpty(previewPane, "Select an object to preview.");
+    setPaneEmpty(previewPane, text().selectObject);
   }
 
   function getSelection(): S3ExplorerSelection {
@@ -1196,5 +1203,20 @@ export function createS3Explorer(
   setMode("prefix");
   applyViewVisibility("list");
 
-  return { el: container, load, clear, dispose, getSelection };
+  function localize(): void {
+    const t = text();
+    // bucketLabel は先頭テキストノード + select。テキストノードのみ更新する。
+    if (bucketLabel.firstChild) bucketLabel.firstChild.textContent = t.bucket;
+    searchBtn.textContent = tCommon().search;
+    prefixModeBtn.textContent = t.prefixMode;
+    containsModeBtn.textContent = t.containsMode;
+    sortUpdated.textContent = t.sortUpdated;
+    sortKey.textContent = t.sortKey;
+    moreBtn.textContent = tCommon().loadMore;
+    searchInput.placeholder =
+      currentMode === "prefix" ? t.prefixPlaceholder : t.containsPlaceholder;
+    if (!currentKey) setPaneEmpty(previewPane, t.selectObject);
+  }
+
+  return { el: container, load, clear, dispose, getSelection, localize };
 }
