@@ -416,7 +416,7 @@ export function createS3Explorer(
   function renderUnsupported(): HTMLElement {
     return renderUnsupportedPreview({
       className: "s3-source-preview",
-      message: "This object type cannot be previewed safely in the browser.",
+      message: text().unsupported,
     });
   }
 

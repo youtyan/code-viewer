@@ -146,6 +146,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   let snapshots: SnapshotMeta[] = [];
   let activeSnapshotId: string | null = null;
+  let currentDiff: { beforeId: string; afterId: string } | null = null;
   let disposed = false;
   const autoRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
 
@@ -443,6 +444,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   }
 
   async function showDiffInline(beforeId: string, afterId: string) {
+    currentDiff = { beforeId, afterId };
     const existing = mainArea.querySelector(".db-snapshot-diff-inline");
     if (existing) existing.remove();
 
@@ -787,9 +789,29 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     deselectAllBtn.textContent = t.deselectAll;
     noteInput.placeholder = t.notePlaceholder;
     noteLabel.textContent = t.noteLabel;
-    confirmBtn.textContent = t.confirm;
+    // 取得中(confirmBtn.disabled で creating 表示中)は上書きしない。
+    if (!confirmBtn.disabled) confirmBtn.textContent = t.confirm;
     cancelBtn.textContent = t.cancel;
+
+    // renderMain() は mainArea を作り直すため、表示中の差分と
+    // before/after の選択状態を退避して再構築後に復元する。
+    const prevSelects = mainArea.querySelectorAll<HTMLSelectElement>(
+      ".db-snapshot-diff-select",
+    );
+    const prevBeforeVal = prevSelects[0]?.value;
+    const prevAfterVal = prevSelects[1]?.value;
+    const hadDiff = mainArea.querySelector(".db-snapshot-diff-inline") != null;
+
     renderMain();
+
+    const newSelects = mainArea.querySelectorAll<HTMLSelectElement>(
+      ".db-snapshot-diff-select",
+    );
+    if (newSelects[0] && prevBeforeVal) newSelects[0].value = prevBeforeVal;
+    if (newSelects[1] && prevAfterVal) newSelects[1].value = prevAfterVal;
+    if (hadDiff && currentDiff) {
+      void showDiffInline(currentDiff.beforeId, currentDiff.afterId);
+    }
   }
 
   return { el, refresh, handleSse, dispose, localize };

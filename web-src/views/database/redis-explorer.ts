@@ -634,7 +634,12 @@ export function createRedisExplorer(
     keyFilterInput.placeholder = t.redis.keyFilterPlaceholder;
     keyFilterBtn.textContent = t.common.search;
     keyMoreBtn.textContent = t.common.loadMore;
-    if (!currentKey) mainPane.textContent = t.redis.selectKey;
+    // 空状態のプレースホルダは「DB未選択」か「キー未選択」かで文言が異なる。
+    if (!currentKey) {
+      mainPane.textContent = currentDbId
+        ? t.redis.selectKey
+        : t.redis.selectDatabase;
+    }
   }
 
   return { el: container, load, clear, dispose, getSelection, localize };

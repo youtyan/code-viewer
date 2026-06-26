@@ -126,6 +126,10 @@ export function createElasticsearchExplorer(
   let disposed = false;
   let activeIndexRow: HTMLElement | null = null;
   let activeDocRow: HTMLElement | null = null;
+  // 言語ライブ切替時に描画済みのマッピング/ドキュメント内容まで再ローカライズ
+  // するため、直近のレスポンスを保持しておく。
+  let lastMapping: EsMappingResponse | null = null;
+  let lastDoc: EsDocResponse | null = null;
   const indexRowsByName = new Map<string, HTMLElement>();
   const docRowsById = new Map<string, HTMLElement>();
   const indexGuard = createAbortGuard();
@@ -246,6 +250,7 @@ export function createElasticsearchExplorer(
   tabDoc.addEventListener("click", () => setDetailTab("doc"));
 
   function renderMapping(resp: EsMappingResponse): void {
+    lastMapping = resp;
     mappingBody.innerHTML = "";
     const header = document.createElement("div");
     header.className = "es-mapping-header";
@@ -291,6 +296,7 @@ export function createElasticsearchExplorer(
   }
 
   function renderDoc(resp: EsDocResponse): void {
+    lastDoc = resp;
     docBody.innerHTML = "";
     const header = document.createElement("div");
     header.className = "es-doc-detail-header";
@@ -435,6 +441,7 @@ export function createElasticsearchExplorer(
     currentIndex = name;
     notifySelectionChange();
     highlightActiveIndex(name);
+    lastDoc = null;
     docBody.innerHTML = "";
     docBody.textContent = text().es.selectDoc;
     setDetailTab("mapping");
@@ -562,13 +569,15 @@ export function createElasticsearchExplorer(
     docRowsById.clear();
     activeIndexRow = null;
     activeDocRow = null;
+    lastMapping = null;
+    lastDoc = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
     mappingBody.textContent = text().es.selectIndex;
     docBody.innerHTML = "";
     docBody.textContent = text().es.selectDoc;
     setDetailTab("mapping");
-    setIndexStatus("Loading indices...");
+    setIndexStatus(text().es.loadingIndices);
     try {
       const res = await fetch(
         `/_db/elasticsearch/indices?db=${encodeURIComponent(dbId)}`,
@@ -638,6 +647,8 @@ export function createElasticsearchExplorer(
     docRowsById.clear();
     activeIndexRow = null;
     activeDocRow = null;
+    lastMapping = null;
+    lastDoc = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
     mappingBody.textContent = text().es.selectIndex;
@@ -670,8 +681,18 @@ export function createElasticsearchExplorer(
     docMoreBtn.textContent = t.common.loadMore;
     tabMapping.textContent = t.es.mapping;
     tabDoc.textContent = t.es.doc;
-    if (!currentIndex) mappingBody.textContent = t.es.selectIndex;
-    if (!activeDocRow) docBody.textContent = t.es.selectDoc;
+    if (!currentIndex) {
+      mappingBody.textContent = t.es.selectIndex;
+    } else if (lastMapping && mappingBody.querySelector(".es-mapping-table")) {
+      // 描画済みのマッピングテーブル(ヘッダ/「(no mapped fields)」)を再ローカライズ。
+      renderMapping(lastMapping);
+    }
+    if (!activeDocRow) {
+      docBody.textContent = t.es.selectDoc;
+    } else if (lastDoc) {
+      // 描画済みドキュメント(「(doc not found)」含む)を再ローカライズ。
+      renderDoc(lastDoc);
+    }
   }
 
   return { el: container, load, clear, dispose, getSelection, localize };

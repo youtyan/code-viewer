@@ -444,11 +444,29 @@ export function createQueryHistoryView(
     }
     clearBtn.title = text().history.clearTitle;
     detailPlaceholder.textContent = text().history.selectPlaceholder;
+    // render() は listEl を作り直すためスクロール位置が飛ぶ。退避して復元する。
+    const prevScrollTop = listEl.scrollTop;
     render();
+    listEl.scrollTop = prevScrollTop;
     const selected = selectedEntryId
       ? entries.find((e) => e.id === selectedEntryId)
       : null;
-    if (selected) renderDetail(selected);
+    if (selected) {
+      // 詳細の削除ボタンが confirm 待ち(arm 済み)だった状態を再構築後も保つ。
+      const prevDeleteArmed =
+        detailCol.querySelector<HTMLButtonElement>(".db-query-history-danger")
+          ?.dataset.confirm === "1";
+      renderDetail(selected);
+      if (prevDeleteArmed) {
+        const deleteBtn = detailCol.querySelector<HTMLButtonElement>(
+          ".db-query-history-danger",
+        );
+        if (deleteBtn) {
+          deleteBtn.dataset.confirm = "1";
+          deleteBtn.textContent = text().history.confirmDelete;
+        }
+      }
+    }
   }
 
   return { el, refresh, clear, localize };
