@@ -7,7 +7,7 @@ import type {
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
-import { type DbGridText, dbGridText } from "./i18n";
+import { type DbText, dbText } from "./i18n";
 
 const ROW_HEIGHT = 28;
 const OVERSCAN = 20;
@@ -86,7 +86,7 @@ export type TableGridCallbacks = {
   /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
   setRelatedPanelHeight?: (height: number) => void;
   /** 現在の言語設定に応じたローカライズ文言を返す。 */
-  getText?: () => DbGridText;
+  getText?: () => DbText;
 };
 
 export type TableGridOptions = {
@@ -102,6 +102,8 @@ export type TableGrid = {
   getState: () => AnnotationDatabaseDataState;
   clear: () => void;
   destroy: () => void;
+  /** 言語切替時に組み込み済み DOM の文言を再適用する。 */
+  localize: () => void;
 };
 
 export function createTableGrid(
@@ -110,7 +112,7 @@ export function createTableGrid(
 ): TableGrid {
   const embedded = options.embedded === true;
   // ローカライズ文言。未指定時は英語にフォールバックする。
-  const text = (): DbGridText => callbacks.getText?.() ?? dbGridText("en");
+  const text = (): DbText => callbacks.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-grid";
 
@@ -122,7 +124,7 @@ export function createTableGrid(
   const filterInput = document.createElement("input");
   filterInput.type = "search";
   filterInput.className = "db-grid-filter-input";
-  filterInput.placeholder = "Search all columns…";
+  filterInput.placeholder = text().grid.searchPlaceholder;
   filterInput.autocomplete = "off";
   const filterClear = document.createElement("button");
   filterClear.type = "button";
@@ -137,8 +139,8 @@ export function createTableGrid(
   const exportBtn = document.createElement("button");
   exportBtn.type = "button";
   exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
-  exportBtn.title = text().exportAction;
-  exportBtn.setAttribute("aria-label", text().exportAction);
+  exportBtn.title = text().grid.exportAction;
+  exportBtn.setAttribute("aria-label", text().grid.exportAction);
   exportBtn.textContent = "⬇";
   const exportMenu = document.createElement("div");
   exportMenu.className = "db-grid-export-menu";
@@ -559,7 +561,7 @@ export function createTableGrid(
 
     relatedEmptyEl = document.createElement("div");
     relatedEmptyEl.className = "db-related-empty";
-    relatedEmptyEl.textContent = text().relatedEmpty;
+    relatedEmptyEl.textContent = text().grid.relatedEmpty;
     relatedEmptyEl.hidden = true;
     relatedGridHost.appendChild(relatedEmptyEl);
 
@@ -858,7 +860,7 @@ export function createTableGrid(
         const fkIcon = document.createElement("span");
         fkIcon.className = "db-grid-header-fk-icon";
         fkIcon.textContent = "🔗";
-        fkIcon.title = text().foreignKeyHint;
+        fkIcon.title = text().grid.foreignKeyHint;
         label.appendChild(fkIcon);
       }
 
@@ -950,7 +952,7 @@ export function createTableGrid(
       const input = document.createElement("input");
       input.type = "search";
       input.className = "db-grid-col-filter";
-      input.placeholder = `${col.name}…`;
+      input.placeholder = text().grid.columnFilterPlaceholder(col.name);
       input.autocomplete = "off";
       input.value = columnFilters.get(col.name) || "";
       input.addEventListener("input", () => {
@@ -1188,11 +1190,12 @@ export function createTableGrid(
       statusEl.className = "db-grid-status";
       el.appendChild(statusEl);
     }
-    const parts: string[] = [`${totalRows.toLocaleString()} rows`];
+    const t = text().grid;
+    const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)
-      parts.push(`Sort: ${sort.column} ${sort.direction.toUpperCase()}`);
+      parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
     const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
-    if (activeFilterCount > 0) parts.push(`${activeFilterCount} filter(s)`);
+    if (activeFilterCount > 0) parts.push(t.statusFilters(activeFilterCount));
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;
@@ -1310,7 +1313,31 @@ export function createTableGrid(
     viewport.removeEventListener("scroll", onViewportScroll);
   }
 
-  return { el, load, showError, applyState, getState, clear, destroy };
+  /** 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。 */
+  function localize() {
+    const t = text();
+    filterInput.placeholder = t.grid.searchPlaceholder;
+    exportBtn.title = t.grid.exportAction;
+    exportBtn.setAttribute("aria-label", t.grid.exportAction);
+    if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
+    if (currentTable) {
+      renderHeader(); // FK アイコンの title や列フィルタを再構築
+      updateStatus();
+    }
+    renderRelatedCrumbs();
+    embeddedGrid?.localize();
+  }
+
+  return {
+    el,
+    load,
+    showError,
+    applyState,
+    getState,
+    clear,
+    destroy,
+    localize,
+  };
 }
 
 function formatValue(value: DbValue): string {

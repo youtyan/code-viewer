@@ -18,7 +18,7 @@ import type { AnnotationTarget, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
-import { type DbLang, dbGridText } from "./i18n";
+import { type DbLang, type DbText, dbText } from "./i18n";
 import { createGlobalSearchView } from "./global-search-view";
 import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
@@ -64,6 +64,8 @@ export type DatabaseView = {
   suspend: () => void;
   leave: () => void;
   handleSse: (event?: string, data?: string) => void;
+  /** 言語切替時に DB ビューア配下の文言を再適用する。 */
+  localize: () => void;
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
@@ -134,6 +136,7 @@ type TabPaneInternal = {
   getAnnotationTarget: () => DatabaseAnnotationTarget | null;
   getLabel: () => string;
   dispose: () => void;
+  localize: () => void;
 };
 
 // TabPane のすべての永続化対象 state を 1 箇所で受け取る。pane の構築時に
@@ -246,6 +249,15 @@ function createTabPane(
     },
   };
 
+  // 現在の言語設定に応じたローカライズ文言。
+  const paneText = (): DbText => dbText(outerDeps.getLanguage?.() ?? "en");
+  // 言語切替で再適用する chrome の文言更新クロージャ群。reloc() は即時適用＋登録。
+  const paneLocalizers: Array<() => void> = [];
+  const reloc = (fn: () => void): void => {
+    fn();
+    paneLocalizers.push(fn);
+  };
+
   let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
   let lastFiles: DbFileInfo[] = [];
@@ -257,12 +269,16 @@ function createTabPane(
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
-  dbSelect.title = "Select datastore";
+  reloc(() => {
+    dbSelect.title = paneText().nav.selectDatastore;
+  });
 
   const schemaSelect = document.createElement("select");
   schemaSelect.className = "db-file-select db-schema-select";
-  schemaSelect.title = "Select PostgreSQL schema";
   schemaSelect.hidden = true;
+  reloc(() => {
+    schemaSelect.title = paneText().nav.selectSchema;
+  });
 
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
@@ -272,6 +288,10 @@ function createTabPane(
   tabBar.className = "db-tab-bar";
   const tabData = createInnerTab("Data", true);
   const tabSchema = createInnerTab("Schema", false);
+  reloc(() => {
+    tabData.textContent = paneText().nav.dataTab;
+    tabSchema.textContent = paneText().nav.schemaTab;
+  });
   tabBar.append(tabData, tabSchema);
 
   let currentTab: TabName = initial.view ?? "data";
@@ -306,7 +326,9 @@ function createTabPane(
   const toolsSection = document.createElement("div");
   toolsSection.className = "db-icon-toolbar";
   toolsSection.setAttribute("role", "toolbar");
-  toolsSection.setAttribute("aria-label", "Datastore tools");
+  reloc(() => {
+    toolsSection.setAttribute("aria-label", paneText().nav.toolbar);
+  });
 
   const queryBtn = makeIconButton({
     label: "Query",
@@ -340,6 +362,13 @@ function createTabPane(
       setActiveTab("snapshot");
       snapshotView.refresh();
     },
+  });
+  reloc(() => {
+    const t = paneText().nav;
+    localizeIconButton(queryBtn, t.query, t.queryTitle);
+    localizeIconButton(erBtn, t.er, t.erTitle);
+    localizeIconButton(searchBtn, t.search, t.searchTitle);
+    localizeIconButton(snapshotBtn, t.snapshot, t.snapshotTitle);
   });
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
@@ -388,7 +417,7 @@ function createTabPane(
       relatedPanelHeightPx = h;
       cb.onStateChange();
     },
-    getText: () => dbGridText(outerDeps.getLanguage?.() ?? "en"),
+    getText: () => paneText(),
   });
 
   const queryEditor = createQueryEditor({
@@ -495,8 +524,10 @@ function createTabPane(
   const historyToggle = document.createElement("button");
   historyToggle.className = "db-history-toggle";
   historyToggle.type = "button";
-  historyToggle.textContent = "Query History";
-  historyToggle.title = "Toggle query history panel";
+  reloc(() => {
+    historyToggle.textContent = paneText().nav.queryHistory;
+    historyToggle.title = paneText().nav.queryHistoryTitle;
+  });
   sidebar.appendChild(historyToggle);
 
   // history pane の開閉はタブごとに独立。initial が無ければ default は
@@ -841,7 +872,7 @@ function createTabPane(
     s3Explorer.clear();
     applyVisibility();
     tableList.render([]);
-    setTableListStatus("Loading schema...");
+    setTableListStatus(paneText().nav.loadingSchema);
     grid.clear();
     if (isPostgresKind(currentDbInfo?.kind)) {
       const desiredSchema =
@@ -1172,9 +1203,7 @@ function createTabPane(
     const files = filesResponse.files;
     lastFiles = files;
     if (filesResponse.truncated) {
-      showDockerNotice(
-        "Docker discovery reached the service limit; some compose services may be hidden.",
-      );
+      showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
       clearDockerNotice();
     }
@@ -1182,7 +1211,7 @@ function createTabPane(
     if (files.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "No datastores found";
+      opt.textContent = paneText().nav.noDatastores;
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
       cb.onStateChange();
@@ -1446,6 +1475,13 @@ function createTabPane(
     schemaCache = null;
   }
 
+  // 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。
+  // 各サブコンポーネントは順次 localize() 対応していく。
+  function localizePane() {
+    for (const fn of paneLocalizers) fn();
+    grid.localize();
+  }
+
   return {
     el: container,
     enter,
@@ -1454,6 +1490,7 @@ function createTabPane(
     getAnnotationTarget,
     getLabel,
     dispose,
+    localize: localizePane,
   };
 }
 
@@ -1499,10 +1536,21 @@ function makeIconButton(opts: {
   return btn;
 }
 
+/** アイコンボタンの title / aria-label を言語切替時に再適用する。 */
+function localizeIconButton(
+  btn: HTMLButtonElement,
+  label: string,
+  title: string,
+): void {
+  btn.title = title;
+  btn.setAttribute("aria-label", label);
+}
+
 // ----- 外側: 複数 TabPane を束ねる -----
 
 export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   let mounted = false;
+  const outerText = (): DbText => dbText(deps.getLanguage?.() ?? "en");
   const tabsById = new Map<string, DbTabEntry>();
   const paneReadyById = new Map<string, Promise<void>>();
   const lazyInitialById = new Map<string, Partial<TabState> | undefined>();
@@ -1747,7 +1795,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   const newTabBtn = document.createElement("button");
   newTabBtn.type = "button";
   newTabBtn.className = "db-tabs-new-btn";
-  newTabBtn.title = "新しいタブ";
+  newTabBtn.title = outerText().nav.newTab;
   newTabBtn.textContent = "+";
   tabsBar.append(tabsList, newTabBtn);
 
@@ -1799,7 +1847,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const label = entry.pane.getLabel();
     entry.label.textContent = label;
     entry.label.title = label;
-    entry.closeBtn.setAttribute("aria-label", `${label} を閉じる`);
+    entry.closeBtn.setAttribute("aria-label", outerText().nav.closeTab(label));
   }
 
   function dedupeTabs(tabs: TabState[]): TabState[] {
@@ -2018,7 +2066,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     closeBtn.title = "閉じる";
     closeBtn.tabIndex = -1;
     closeBtn.textContent = "×";
-    closeBtn.setAttribute("aria-label", `${initialLabel} を閉じる`);
+    closeBtn.setAttribute("aria-label", outerText().nav.closeTab(initialLabel));
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(id);
@@ -2482,7 +2530,26 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     return tabsById.get(activeTabId)?.pane.getAnnotationTarget() ?? null;
   }
 
-  return { enter, captureAnnotationTarget, suspend, leave, handleSse };
+  // 言語切替時に全タブの DOM 文言を再適用する（localizeViewerChrome から呼ぶ）。
+  function localize(): void {
+    newTabBtn.title = outerText().nav.newTab;
+    for (const [, entry] of tabsById) {
+      entry.closeBtn.setAttribute(
+        "aria-label",
+        outerText().nav.closeTab(entry.pane.getLabel()),
+      );
+      entry.pane.localize();
+    }
+  }
+
+  return {
+    enter,
+    captureAnnotationTarget,
+    suspend,
+    leave,
+    handleSse,
+    localize,
+  };
 }
 
 function formatSize(bytes: number): string {
