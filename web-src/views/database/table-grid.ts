@@ -236,6 +236,8 @@ export function createTableGrid(
   let embeddedGrid: TableGrid | null = null;
   // ドリルのスタック。末尾が現在表示中の階層。
   let relatedStack: RelatedLevel[] = [];
+  // リサイズドラッグ中の window リスナーを teardown 時に確実に外すための解除関数。
+  let relatedResizeCleanup: (() => void) | null = null;
   // 切り替え中の取得競合を捨てるための世代。
   let relatedGen = 0;
   // 埋め込みグリッドへ常時適用するベース WHERE（完全一致）。
@@ -554,13 +556,17 @@ export function createTableGrid(
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      relatedResizeCleanup = null;
     };
+    // ドラッグ中に destroy/hide された場合でもリスナーを外せるよう保持する。
+    relatedResizeCleanup = onUp;
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }
 
   function hideRelatedPanel() {
     if (!relatedPanel) return;
+    relatedResizeCleanup?.();
     relatedPanel.hidden = true;
     relatedStack = [];
     relatedGen++;
