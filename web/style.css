@@ -958,12 +958,20 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   100% { transform: translateX(450%); }
 }
 
-/* ===== Change notification banner ===== */
-#change-banner {
+/* ===== Notification banners (change + watch-limit) ===== */
+#banner-stack {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 80;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+.gdp-banner {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -978,12 +986,16 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   color: var(--fg);
   animation: gdp-banner-slide 0.2s ease;
 }
-#change-banner[hidden] { display: none; }
+.gdp-banner[hidden] { display: none; }
+.gdp-banner--warn {
+  background: var(--bg-soft);
+  border-color: var(--attn);
+}
 @keyframes gdp-banner-slide {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-#change-banner-copy {
+.gdp-banner-copy {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -999,6 +1011,9 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   font-size: 12px;
   white-space: nowrap;
 }
+#watch-limit-text {
+  font-weight: 600;
+}
 #change-banner-reload {
   flex: 0 0 auto;
   min-height: 30px;
@@ -1012,7 +1027,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   white-space: nowrap;
 }
 #change-banner-reload:hover { background: var(--accent-emph); }
-#change-banner-dismiss {
+.gdp-banner-dismiss {
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
@@ -1024,7 +1039,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   cursor: pointer;
   line-height: 1;
 }
-#change-banner-dismiss:hover { color: var(--fg); }
+.gdp-banner-dismiss:hover { color: var(--fg); }
 
 /* ===== Commit history panel ===== */
 #history-panel {
@@ -7820,6 +7835,38 @@ body.db-resizing {
   color: var(--error, #c00);
   font-size: var(--db-font-sm);
 }
+/* explorer の詳細/プレビュー pane に出す「未選択」空状態。中央寄せの
+   アイコン + メッセージで統一する (S3 / Redis / Elasticsearch 共通)。 */
+.db-pane-empty {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.db-pane-empty-icon {
+  display: flex;
+  color: var(--fg-subtle);
+  opacity: 0.65;
+}
+.db-pane-empty-icon .octicon {
+  width: 32px;
+  height: 32px;
+}
+.db-pane-empty-title {
+  color: var(--fg-muted);
+  font-size: var(--db-font-md);
+}
+.db-pane-empty-hint {
+  max-width: 320px;
+  color: var(--fg-subtle);
+  font-size: var(--db-font-sm);
+  line-height: 1.5;
+}
 
 /* ---------- Elasticsearch explorer ---------- */
 .es-explorer {
@@ -8087,6 +8134,12 @@ body.db-resizing {
   gap: 8px;
   min-width: 0;
 }
+/* これらの行は display:flex を持つため、hidden 属性 (UA の display:none) が
+   効かない。Explorer 表示で List 専用の行を隠せるよう明示的に上書きする。 */
+.s3-search-row[hidden],
+.s3-options-row[hidden] {
+  display: none;
+}
 .s3-field-label {
   flex: 1;
   min-width: 0;
@@ -8165,7 +8218,14 @@ body.db-resizing {
   background: var(--bg-active, var(--bg-soft));
   border-left-color: var(--accent);
 }
+.s3-object-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .s3-object-name {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8195,6 +8255,195 @@ body.db-resizing {
 .s3-object-more-btn:disabled {
   cursor: default;
   color: var(--fg-muted);
+}
+
+/* ファイル種別がひと目で分かる色付きバッジ (List / Explorer 共通)。 */
+.s3-kind-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+/* 色は意味別のテーマトークンを使い、ダークモードでも自動で追従させる
+   (背景/縁も同じトークンを color-mix することで theme 変数の切替に乗る)。 */
+.s3-kind-badge.kind-image {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+.s3-kind-badge.kind-video {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--done) 35%, transparent);
+}
+.s3-kind-badge.kind-audio {
+  color: var(--attn);
+  background: color-mix(in srgb, var(--attn) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--attn) 35%, transparent);
+}
+.s3-kind-badge.kind-pdf {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.s3-kind-badge.kind-text {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.s3-kind-badge.kind-binary {
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  border-color: var(--border);
+}
+
+/* List / Explorer 切替セグメント。 */
+.s3-view-seg {
+  flex-shrink: 0;
+}
+
+/* Explorer 表示: 既存ファイルツリー (#filelist.tree) の見た目を S3 ペインに
+   合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。 */
+.s3-tree {
+  --lvl-pad: 12px;
+  padding: 4px 6px;
+}
+.s3-tree .s3-tree-node {
+  min-width: 0;
+}
+.s3-tree .tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.s3-tree .tree-dir.collapsed + .tree-children {
+  display: none;
+}
+.s3-tree .tree-dir {
+  display: grid;
+  grid-template-columns: 16px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px var(--lvl-pad, 12px);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+}
+.s3-tree .tree-dir:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.s3-tree .tree-dir .chev {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  transition: transform 0.15s;
+}
+.s3-tree .tree-dir.collapsed .chev {
+  transform: rotate(-90deg);
+}
+.s3-tree .tree-dir .chev .octicon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.s3-tree .tree-dir .dir-icon {
+  color: #54aeff;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  align-items: center;
+  justify-content: center;
+}
+.s3-tree .tree-dir .dir-icon .octicon {
+  display: block;
+}
+.s3-tree .tree-dir .dir-label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.s3-tree .tree-dir .dir-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+}
+.s3-tree .tree-file {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px var(--lvl-pad, 12px);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg);
+}
+.s3-tree .tree-file:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.s3-tree .tree-file.active {
+  background: var(--bg-active, var(--bg-soft));
+  border-left-color: var(--accent);
+}
+.s3-tree .tree-file .chev-spacer {
+  width: 16px;
+  height: 1px;
+}
+.s3-tree .tree-file .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+}
+.s3-tree .s3-tree-more {
+  display: block;
+  width: calc(100% - 12px);
+  margin: 2px 6px;
+  padding: 4px 6px 4px var(--lvl-pad, 12px);
+  border: none;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--accent);
+  font-size: var(--db-font-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.s3-tree .s3-tree-more:hover {
+  background: var(--bg-hover, var(--bg));
+}
+.s3-tree .s3-tree-more:disabled {
+  cursor: default;
+  color: var(--fg-muted);
+}
+.s3-tree .s3-tree-empty,
+.s3-tree .s3-tree-loading,
+.s3-tree .s3-tree-error {
+  padding: 4px 6px 4px var(--lvl-pad, 12px);
+  color: var(--fg-muted);
+  font-size: var(--db-font-sm);
+}
+.s3-tree .s3-tree-error {
+  color: var(--danger);
 }
 .s3-preview-pane {
   flex: 1;

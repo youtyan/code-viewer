@@ -89,9 +89,13 @@ export type ObjectSource = DataSourceBase & {
     prefix?: string;
     continuationToken?: string;
     maxKeys?: number;
+    // 区切り文字。"/" を渡すと 1 階層ずつの列挙になり、サブフォルダが
+    // commonPrefixes として返る (S3 コンソール風のフォルダ表示用)。
+    delimiter?: string;
     signal?: AbortSignal;
   }): Promise<{
     objects: S3ObjectInfo[];
+    commonPrefixes?: string[];
     nextToken?: string;
     truncated: boolean;
   }>;

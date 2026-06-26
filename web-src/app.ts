@@ -956,6 +956,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         minutesAgo: (minutes: number) => string;
         hoursAgo: (hours: number) => string;
       };
+      watchLimitBanner: {
+        text: (limit: number) => string;
+      };
       sidebar: {
         files: string;
         actions: string;
@@ -1046,6 +1049,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         secondsAgo: (seconds) => `${seconds}s ago`,
         minutesAgo: (minutes) => `${minutes}m ago`,
         hoursAgo: (hours) => `${hours}h ago`,
+      },
+      watchLimitBanner: {
+        text: (limit) =>
+          `Watching ${limit} ${limit === 1 ? "folder" : "folders"} (limit reached) — changes in deeper folders may go unnoticed.`,
       },
       sidebar: {
         files: "Files",
@@ -1139,6 +1146,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         secondsAgo: (seconds) => `${seconds}秒前`,
         minutesAgo: (minutes) => `${minutes}分前`,
         hoursAgo: (hours) => `${hours}時間前`,
+      },
+      watchLimitBanner: {
+        text: (limit) =>
+          `監視フォルダ数が上限(${limit})に達しました — これより深いフォルダの変更は検知されない場合があります。`,
       },
       sidebar: {
         files: "ファイル",
@@ -3223,6 +3234,21 @@ window.GdpExpandLogic = GdpExpandLogic;
     ?.addEventListener("click", () => {
       hideChangeBanner();
     });
+
+  function showWatchLimitBanner(limit: number) {
+    const banner = document.getElementById("watch-limit-banner");
+    if (!banner) return;
+    const textEl = document.getElementById("watch-limit-text");
+    if (textEl) textEl.textContent = uiText().watchLimitBanner.text(limit);
+    banner.hidden = false;
+  }
+
+  document
+    .getElementById("watch-limit-dismiss")
+    ?.addEventListener("click", () => {
+      const banner = document.getElementById("watch-limit-banner");
+      if (banner) banner.hidden = true;
+    });
   document.getElementById("auto-update")?.addEventListener("click", () => {
     setAutoUpdate(!STATE.autoUpdate);
   });
@@ -3316,6 +3342,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       }
     }
     scheduleSseLoad(paths);
+  });
+  es.addEventListener("watch-limit", (event) => {
+    const raw = (event as MessageEvent).data;
+    const limit = Number(raw);
+    if (Number.isFinite(limit) && limit > 0) showWatchLimitBanner(limit);
   });
   es.addEventListener("reload", () => location.reload());
   es.addEventListener("annotation", (event) => {

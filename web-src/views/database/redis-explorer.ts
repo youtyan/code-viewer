@@ -9,7 +9,7 @@ import type {
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -105,7 +105,7 @@ export function createRedisExplorer(
 
   const mainPane = document.createElement("div");
   mainPane.className = "redis-main-pane";
-  mainPane.textContent = text().redis.selectKey;
+  setPaneEmpty(mainPane, text().redis.selectKey);
 
   container.append(dbListPane, keyListPane, mainPane);
 
@@ -409,7 +409,7 @@ export function createRedisExplorer(
     keyList.innerHTML = "";
     keyRowsByName.clear();
     activeKeyRow = null;
-    mainPane.textContent = text().redis.selectKey;
+    setPaneEmpty(mainPane, text().redis.selectKey);
     await loadKeys(false);
   }
 
@@ -501,7 +501,7 @@ export function createRedisExplorer(
     currentKey = null;
     currentCursor = "0";
     notifySelectionChange();
-    mainPane.textContent = text().redis.selectKey;
+    setPaneEmpty(mainPane, text().redis.selectKey);
     void loadKeys(false);
   });
 
@@ -527,7 +527,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = text().redis.selectKey;
+    setPaneEmpty(mainPane, text().redis.selectKey);
     setDbStatus("Loading databases...");
     try {
       const res = await fetch(
@@ -565,7 +565,7 @@ export function createRedisExplorer(
           highlightActiveDb(initial.dbIndex);
           keyList.innerHTML = "";
           keyRowsByName.clear();
-          mainPane.textContent = text().redis.selectKey;
+          setPaneEmpty(mainPane, text().redis.selectKey);
           const valuePromise = initial.key
             ? selectKey(initial.key).catch(() => {})
             : null;
@@ -611,7 +611,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = text().redis.selectDatabase;
+    setPaneEmpty(mainPane, text().redis.selectDatabase);
   }
 
   function getSelection(): RedisExplorerSelection {
@@ -636,9 +636,10 @@ export function createRedisExplorer(
     keyMoreBtn.textContent = t.common.loadMore;
     // 空状態のプレースホルダは「DB未選択」か「キー未選択」かで文言が異なる。
     if (!currentKey) {
-      mainPane.textContent = currentDbId
-        ? t.redis.selectKey
-        : t.redis.selectDatabase;
+      setPaneEmpty(
+        mainPane,
+        currentDbId ? t.redis.selectKey : t.redis.selectDatabase,
+      );
     }
   }
 

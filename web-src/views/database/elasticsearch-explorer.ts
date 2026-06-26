@@ -10,7 +10,7 @@ import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -104,11 +104,11 @@ export function createElasticsearchExplorer(
 
   const mappingBody = document.createElement("div");
   mappingBody.className = "es-mapping-body";
-  mappingBody.textContent = text().es.selectIndex;
+  setPaneEmpty(mappingBody, text().es.selectIndex);
   const docBody = document.createElement("div");
   docBody.className = "es-doc-body";
   docBody.hidden = true;
-  docBody.textContent = text().es.selectDoc;
+  setPaneEmpty(docBody, text().es.selectDoc);
   detailPane.append(mappingBody, docBody);
 
   container.append(indexListPane, docListPane, detailPane);
@@ -443,7 +443,7 @@ export function createElasticsearchExplorer(
     highlightActiveIndex(name);
     lastDoc = null;
     docBody.innerHTML = "";
-    docBody.textContent = text().es.selectDoc;
+    setPaneEmpty(docBody, text().es.selectDoc);
     setDetailTab("mapping");
     await Promise.all([fetchMapping(name), loadDocs(false)]);
   }
@@ -573,9 +573,9 @@ export function createElasticsearchExplorer(
     lastDoc = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = text().es.selectIndex;
+    setPaneEmpty(mappingBody, text().es.selectIndex);
     docBody.innerHTML = "";
-    docBody.textContent = text().es.selectDoc;
+    setPaneEmpty(docBody, text().es.selectDoc);
     setDetailTab("mapping");
     setIndexStatus(text().es.loadingIndices);
     try {
@@ -651,9 +651,9 @@ export function createElasticsearchExplorer(
     lastDoc = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = text().es.selectIndex;
+    setPaneEmpty(mappingBody, text().es.selectIndex);
     docBody.innerHTML = "";
-    docBody.textContent = text().es.selectDoc;
+    setPaneEmpty(docBody, text().es.selectDoc);
     setDetailTab("mapping");
   }
 
@@ -682,13 +682,13 @@ export function createElasticsearchExplorer(
     tabMapping.textContent = t.es.mapping;
     tabDoc.textContent = t.es.doc;
     if (!currentIndex) {
-      mappingBody.textContent = t.es.selectIndex;
+      setPaneEmpty(mappingBody, t.es.selectIndex);
     } else if (lastMapping && mappingBody.querySelector(".es-mapping-table")) {
       // 描画済みのマッピングテーブル(ヘッダ/「(no mapped fields)」)を再ローカライズ。
       renderMapping(lastMapping);
     }
     if (!activeDocRow) {
-      docBody.textContent = t.es.selectDoc;
+      setPaneEmpty(docBody, t.es.selectDoc);
     } else if (lastDoc) {
       // 描画済みドキュメント(「(doc not found)」含む)を再ローカライズ。
       renderDoc(lastDoc);

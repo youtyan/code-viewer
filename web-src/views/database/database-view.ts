@@ -1410,7 +1410,8 @@ function createTabPane(
         sel.query !== undefined ||
         sel.key !== undefined ||
         sel.mode !== "prefix" ||
-        sel.sort !== "updated-desc"
+        sel.sort !== "updated-desc" ||
+        sel.view === "explorer"
       ) {
         state.s3 = sel;
       }
