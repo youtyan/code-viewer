@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DbRelatedResponse } from "../core/database/types";
+import type { DbTableDataResponse } from "../core/database/types";
 import { handleDatabaseRoute } from "../server/database/handle";
 
 const dirs: string[] = [];
@@ -25,8 +25,11 @@ function seedDb(): { dir: string; db: string } {
       user_id INTEGER REFERENCES users(id),
       title TEXT
     );
-    INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
-    INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'Hello'), (2, 1, 'Again');
+    INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (11, 'Eve');
+    INSERT INTO posts (id, user_id, title) VALUES
+      (1, 1, 'Hello'),
+      (2, 1, 'Again'),
+      (3, 11, 'Eve post');
   `);
   sqlite.close();
   return { dir, db: "app.db" };
@@ -45,82 +48,100 @@ async function route(dir: string, path: string): Promise<Response> {
   return res;
 }
 
-function related(dir: string, query: string): Promise<Response> {
-  return route(dir, `/_db/related?${query}`);
+function tableUrl(
+  db: string,
+  table: string,
+  extra: Record<string, string> = {},
+): string {
+  const params = new URLSearchParams({
+    db,
+    table,
+    offset: "0",
+    limit: "200",
+    ...extra,
+  });
+  return `/_db/table?${params}`;
 }
 
-describe("/_db/related foreign key lookup", () => {
-  test("returns the referenced row by exact match", async () => {
+describe("/_db/table eq (exact foreign-key match)", () => {
+  test("eq matches exactly and not as a substring", async () => {
     const { dir, db } = seedDb();
-    const res = await related(dir, `db=${db}&table=users&column=id&value=1`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as DbRelatedResponse;
-    expect(body.table).toBe("users");
-    expect(body.column).toBe("id");
-    expect(body.rows.length).toBe(1);
-    const idIdx = body.columns.indexOf("id");
-    const nameIdx = body.columns.indexOf("name");
-    expect(body.rows[0][idIdx]).toBe(1);
-    expect(body.rows[0][nameIdx]).toBe("Alice");
-    expect(body.truncated).toBe(false);
-  });
-
-  test("matches exactly and does not substring-match like the filter UI", async () => {
-    const { dir, db } = seedDb();
-    // value "1" must not also match id 11/21 etc.; here only id=1 exists,
-    // but the reverse direction (posts.user_id) has two rows for user 1.
-    const res = await related(
+    // user_id = 1 must match only the two posts for user 1, not user 11.
+    const res = await route(
       dir,
-      `db=${db}&table=posts&column=user_id&value=1`,
+      tableUrl(db, "posts", {
+        eq: JSON.stringify([{ column: "user_id", value: "1" }]),
+      }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as DbRelatedResponse;
+    const body = (await res.json()) as DbTableDataResponse;
+    expect(body.totalRows).toBe(2);
     expect(body.rows.length).toBe(2);
   });
 
-  test("returns an empty result set when nothing matches", async () => {
+  test("eq returns the single referenced row", async () => {
     const { dir, db } = seedDb();
-    const res = await related(dir, `db=${db}&table=users&column=id&value=999`);
+    const res = await route(
+      dir,
+      tableUrl(db, "users", {
+        eq: JSON.stringify([{ column: "id", value: "11" }]),
+      }),
+    );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as DbRelatedResponse;
-    expect(body.rows.length).toBe(0);
+    const body = (await res.json()) as DbTableDataResponse;
+    expect(body.rows.length).toBe(1);
+    const nameIdx = body.columns.findIndex((c) => c.name === "name");
+    expect(body.rows[0][nameIdx]).toBe("Eve");
   });
 
-  test("rejects an unknown column instead of building a bad query", async () => {
+  test("eq combines with a LIKE filter on top of the base WHERE", async () => {
     const { dir, db } = seedDb();
-    const res = await related(
+    // Base WHERE user_id = 1 (2 rows) further narrowed by title LIKE %Again%.
+    const res = await route(
       dir,
-      `db=${db}&table=users&column=not_a_column&value=1`,
+      tableUrl(db, "posts", {
+        eq: JSON.stringify([{ column: "user_id", value: "1" }]),
+        filters: JSON.stringify([{ column: "title", value: "Again" }]),
+      }),
     );
-    expect(res.status).toBe(400);
-    expect(await res.text()).toMatch("unknown column");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DbTableDataResponse;
+    expect(body.rows.length).toBe(1);
+    const titleIdx = body.columns.findIndex((c) => c.name === "title");
+    expect(body.rows[0][titleIdx]).toBe("Again");
+  });
+
+  test("an unknown eq column is ignored rather than erroring", async () => {
+    const { dir, db } = seedDb();
+    const res = await route(
+      dir,
+      tableUrl(db, "users", {
+        eq: JSON.stringify([{ column: "not_a_column", value: "1" }]),
+      }),
+    );
+    // Invalid eq columns are dropped (consistent with LIKE filters), so the
+    // request still succeeds and returns the full table.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DbTableDataResponse;
+    expect(body.totalRows).toBe(3);
   });
 
   test("filtered table read returns a JSON-serializable totalRows (no BigInt)", async () => {
     // Regression: safeIntegers makes COUNT(*) a bigint; the filtered table
     // path must coerce totalRows to a number, otherwise the JSON response
-    // throws "JSON.stringify cannot serialize BigInt". This is exercised by
-    // the FK "Open <table>" jump, which navigates with a column filter.
+    // throws "JSON.stringify cannot serialize BigInt".
     const { dir, db } = seedDb();
-    const filters = encodeURIComponent('[{"column":"id","value":"1"}]');
+    // id LIKE %1% matches id 1 and 11 — two rows; the point is that the
+    // response serializes at all (no BigInt) and totalRows is a number.
     const res = await route(
       dir,
-      `/_db/table?db=${db}&table=users&offset=0&limit=5&filters=${filters}`,
+      tableUrl(db, "users", {
+        filters: JSON.stringify([{ column: "id", value: "1" }]),
+      }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { totalRows: number; rows: unknown[] };
-    expect(body.totalRows).toBe(1);
-    expect(body.rows.length).toBe(1);
-  });
-
-  test("requires table, column and value parameters", async () => {
-    const { dir, db } = seedDb();
-    expect((await related(dir, `db=${db}&column=id&value=1`)).status).toBe(400);
-    expect((await related(dir, `db=${db}&table=users&value=1`)).status).toBe(
-      400,
-    );
-    expect((await related(dir, `db=${db}&table=users&column=id`)).status).toBe(
-      400,
-    );
+    const body = (await res.json()) as DbTableDataResponse;
+    expect(typeof body.totalRows).toBe("number");
+    expect(body.totalRows).toBe(2);
   });
 });

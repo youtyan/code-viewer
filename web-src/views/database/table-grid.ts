@@ -2,7 +2,6 @@ import type {
   DbColumn,
   DbForeignKey,
   DbOrderDirection,
-  DbRelatedResponse,
   DbTableDataResponse,
   DbValue,
 } from "../../core/database/types";
@@ -15,6 +14,9 @@ const PAGE_SIZE = 200;
 const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
+const RELATED_PANEL_DEFAULT_HEIGHT = 320;
+const RELATED_PANEL_MIN_HEIGHT = 140;
+const RELATED_PANEL_MAX_HEIGHT = 700;
 
 export type GridSort = {
   column: string;
@@ -22,6 +24,12 @@ export type GridSort = {
 };
 
 export type GridFilter = {
+  column: string;
+  value: string;
+};
+
+/** カラム完全一致条件（外部キー参照などのベース WHERE）。 */
+export type GridExactFilter = {
   column: string;
   value: string;
 };
@@ -42,21 +50,26 @@ export type TableGridCallbacks = {
     table: string,
     widths: Record<string, number>,
   ) => void;
-  /** 現在のテーブルに定義された外部キー一覧を返す（FK ナビゲーション用）。 */
+  /** 現在のテーブルに定義された外部キー一覧を返す（FK 関連表示用）。 */
   getForeignKeys?: () => DbForeignKey[];
-  /** 参照先テーブルから一致する行を取得する。 */
-  fetchRelatedRows?: (
+  /**
+   * 参照先テーブルのページを取得する。eq はベース WHERE（完全一致）として
+   * 常に適用され、その上から filters / sort を重ねられる。
+   */
+  fetchRelatedPage?: (
     table: string,
-    column: string,
-    value: string,
+    offset: number,
+    limit: number,
+    sort: GridSort | null,
+    filters: GridFilter[],
+    eq: GridExactFilter[],
     signal?: AbortSignal,
-  ) => Promise<DbRelatedResponse>;
-  /** 参照先テーブルを開いて該当値で絞り込む。 */
-  onNavigateToReference?: (
-    table: string,
-    column: string,
-    value: string,
-  ) => void;
+  ) => Promise<DbTableDataResponse>;
+};
+
+export type TableGridOptions = {
+  /** 埋め込みグリッド（関連データ表示用）では関連パネル機能を無効化する。 */
+  embedded?: boolean;
 };
 
 export type TableGrid = {
@@ -69,7 +82,11 @@ export type TableGrid = {
   destroy: () => void;
 };
 
-export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
+export function createTableGrid(
+  callbacks: TableGridCallbacks,
+  options: TableGridOptions = {},
+): TableGrid {
+  const embedded = options.embedded === true;
   const el = document.createElement("div");
   el.className = "db-grid";
 
@@ -134,10 +151,30 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
-  // 関連データ取得は詳細パネルを開き直すたびに前回分を破棄する。
-  let relatedController: AbortController | null = null;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
   const fkColumns = new Set<string>();
+
+  /* ---- Related-data panel (FK navigation) ---- */
+  // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
+  type RelatedTarget = { fk: DbForeignKey; value: string };
+  let relatedPanel: HTMLElement | null = null;
+  let relatedListEl: HTMLElement | null = null;
+  let relatedGridHost: HTMLElement | null = null;
+  let embeddedGrid: TableGrid | null = null;
+  let relatedTargets: RelatedTarget[] = [];
+  let relatedSelectedIndex = -1;
+  // 切り替え中の取得競合を捨てるための世代。
+  let relatedGen = 0;
+  // 埋め込みグリッドへ常時適用するベース WHERE（完全一致）。
+  let relatedEq: GridExactFilter[] = [];
+  let relatedHeight = RELATED_PANEL_DEFAULT_HEIGHT;
+  if (!embedded) {
+    relatedPanel = document.createElement("div");
+    relatedPanel.className = "db-related-panel";
+    relatedPanel.hidden = true;
+    relatedPanel.style.height = `${relatedHeight}px`;
+    el.appendChild(relatedPanel);
+  }
 
   /* ---- Column width management ---- */
   const colWidths = new Map<string, number>();
@@ -281,16 +318,13 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
-    cancelRelatedFetch();
+    hideRelatedPanel();
     detailPanel.hidden = true;
     detailPanel.innerHTML = "";
     colWidths.clear();
   }
 
-  function cancelRelatedFetch() {
-    relatedController?.abort();
-    relatedController = null;
-  }
+  let relatedFirstPageController: AbortController | null = null;
 
   /** 値を参照先カラムとの一致条件に使える文字列へ正規化する。 */
   function relatedLookupValue(value: DbValue): string | null {
@@ -301,98 +335,171 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     return str === "" ? null : str;
   }
 
-  /**
-   * FK 列のセル詳細に「関連データ」セクションを描画する。
-   * 参照先テーブルへのジャンプリンクと、一致行のインライン表示を行う。
-   */
-  function renderRelatedSection(fk: DbForeignKey, value: DbValue) {
-    const lookupValue = relatedLookupValue(value);
-    if (lookupValue === null) return;
-
-    const section = document.createElement("div");
-    section.className = "db-grid-detail-related";
-
-    const head = document.createElement("div");
-    head.className = "db-grid-detail-related-head";
-
-    const label = document.createElement("span");
-    label.className = "db-grid-detail-related-label";
-    label.textContent = `🔗 ${fk.toTable}.${fk.toColumn}`;
-    head.appendChild(label);
-
-    if (callbacks.onNavigateToReference) {
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "db-btn db-grid-detail-related-open";
-      openBtn.textContent = `Open ${fk.toTable}`;
-      openBtn.addEventListener("click", () => {
-        callbacks.onNavigateToReference?.(fk.toTable, fk.toColumn, lookupValue);
-      });
-      head.appendChild(openBtn);
+  /** クリックされた行が持つ外部キー参照を集める（左リストの元データ）。 */
+  function buildRowForeignKeys(rowData: DbValue[]): RelatedTarget[] {
+    const targets: RelatedTarget[] = [];
+    for (const fk of callbacks.getForeignKeys?.() ?? []) {
+      if (fk.fromTable !== currentTable) continue;
+      const idx = columnNames.indexOf(fk.fromColumn);
+      if (idx < 0) continue;
+      const value = relatedLookupValue(rowData[idx]);
+      if (value === null) continue;
+      targets.push({ fk, value });
     }
-
-    const body = document.createElement("div");
-    body.className = "db-grid-detail-related-body";
-    body.textContent = "Loading…";
-
-    section.append(head, body);
-    detailPanel.appendChild(section);
-
-    if (!callbacks.fetchRelatedRows) {
-      body.textContent = "";
-      return;
-    }
-
-    cancelRelatedFetch();
-    const controller = new AbortController();
-    relatedController = controller;
-    callbacks
-      .fetchRelatedRows(fk.toTable, fk.toColumn, lookupValue, controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        renderRelatedRows(body, res);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        body.textContent = `Failed to load related rows: ${
-          err instanceof Error ? err.message : String(err)
-        }`;
-        body.classList.add("error");
-      });
+    return targets;
   }
 
-  function renderRelatedRows(body: HTMLElement, res: DbRelatedResponse) {
-    body.textContent = "";
-    body.classList.remove("error");
-    if (res.rows.length === 0) {
-      body.textContent = "No matching row.";
-      body.classList.add("empty");
-      return;
-    }
-    for (const row of res.rows) {
-      const card = document.createElement("div");
-      card.className = "db-grid-detail-related-row";
-      for (let i = 0; i < res.columns.length; i++) {
-        const field = document.createElement("div");
-        field.className = "db-grid-detail-related-field";
-        const key = document.createElement("span");
-        key.className = "db-grid-detail-related-key";
-        key.textContent = res.columns[i];
-        const val = document.createElement("span");
-        val.className = "db-grid-detail-related-value";
-        const cellValue = row[i];
-        val.textContent = formatValue(cellValue);
-        if (cellValue === null) val.classList.add("null");
-        field.append(key, val);
-        card.appendChild(field);
-      }
-      body.appendChild(card);
-    }
-    if (res.truncated) {
-      const more = document.createElement("div");
-      more.className = "db-grid-detail-related-more";
-      more.textContent = `Showing first ${res.rows.length} rows…`;
-      body.appendChild(more);
+  /** 関連パネルの DOM と埋め込みグリッドを初回だけ構築する。 */
+  function ensureRelatedDom() {
+    if (!relatedPanel || relatedListEl) return;
+
+    const resizer = document.createElement("div");
+    resizer.className = "db-related-resize";
+    resizer.addEventListener("mousedown", startRelatedResize);
+
+    const header = document.createElement("div");
+    header.className = "db-related-header";
+    const title = document.createElement("span");
+    title.className = "db-related-title";
+    title.textContent = "🔗 関連データ";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "db-btn db-btn-icon db-related-close";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", hideRelatedPanel);
+    header.append(title, closeBtn);
+
+    const bodyRow = document.createElement("div");
+    bodyRow.className = "db-related-body";
+    relatedListEl = document.createElement("div");
+    relatedListEl.className = "db-related-list";
+    relatedGridHost = document.createElement("div");
+    relatedGridHost.className = "db-related-grid-host";
+
+    embeddedGrid = createTableGrid(
+      {
+        fetchPage: (table, offset, limit, s, filters, signal) =>
+          callbacks.fetchRelatedPage
+            ? callbacks.fetchRelatedPage(
+                table,
+                offset,
+                limit,
+                s,
+                filters,
+                relatedEq,
+                signal,
+              )
+            : Promise.reject(new Error("related fetch is not configured")),
+        getDbId: callbacks.getDbId,
+        getColumnWidths: callbacks.getColumnWidths,
+        setColumnWidths: callbacks.setColumnWidths,
+        getForeignKeys: callbacks.getForeignKeys,
+      },
+      { embedded: true },
+    );
+    relatedGridHost.appendChild(embeddedGrid.el);
+
+    bodyRow.append(relatedListEl, relatedGridHost);
+    relatedPanel.append(resizer, header, bodyRow);
+  }
+
+  function startRelatedResize(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = relatedHeight;
+    const onMove = (ev: MouseEvent) => {
+      // 上端ハンドルなので、上にドラッグすると高くなる。
+      const delta = startY - ev.clientY;
+      relatedHeight = Math.max(
+        RELATED_PANEL_MIN_HEIGHT,
+        Math.min(RELATED_PANEL_MAX_HEIGHT, startHeight + delta),
+      );
+      if (relatedPanel) relatedPanel.style.height = `${relatedHeight}px`;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function hideRelatedPanel() {
+    if (!relatedPanel) return;
+    relatedPanel.hidden = true;
+    relatedTargets = [];
+    relatedSelectedIndex = -1;
+    relatedGen++;
+    relatedFirstPageController?.abort();
+    relatedFirstPageController = null;
+    embeddedGrid?.clear();
+  }
+
+  /** FK セルクリックで、その行の全 FK 参照を関連パネルに開く。 */
+  function openRelatedForRow(rowData: DbValue[], clickedColumn: string) {
+    if (embedded || !relatedPanel || !callbacks.fetchRelatedPage) return;
+    const targets = buildRowForeignKeys(rowData);
+    if (targets.length === 0) return;
+    ensureRelatedDom();
+    detailPanel.hidden = true; // 単一値の詳細とは排他表示
+    relatedTargets = targets;
+    relatedPanel.hidden = false;
+    let selected = targets.findIndex((t) => t.fk.fromColumn === clickedColumn);
+    if (selected < 0) selected = 0;
+    void selectRelatedTarget(selected);
+  }
+
+  function renderRelatedList() {
+    if (!relatedListEl) return;
+    relatedListEl.innerHTML = "";
+    relatedTargets.forEach((target, i) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "db-related-list-item";
+      if (i === relatedSelectedIndex) item.classList.add("active");
+      const name = document.createElement("span");
+      name.className = "db-related-list-name";
+      name.textContent = target.fk.toTable;
+      const via = document.createElement("span");
+      via.className = "db-related-list-via";
+      via.textContent = `${target.fk.fromColumn} = ${target.value}`;
+      item.append(name, via);
+      item.addEventListener("click", () => void selectRelatedTarget(i));
+      relatedListEl?.appendChild(item);
+    });
+  }
+
+  /** 左リストの選択を切り替え、埋め込みグリッドへ参照先テーブルを読み込む。 */
+  async function selectRelatedTarget(index: number) {
+    if (index < 0 || index >= relatedTargets.length) return;
+    relatedSelectedIndex = index;
+    renderRelatedList();
+    const target = relatedTargets[index];
+    relatedEq = [{ column: target.fk.toColumn, value: target.value }];
+    const grid = embeddedGrid;
+    if (!grid || !callbacks.fetchRelatedPage) return;
+    const gen = ++relatedGen;
+    relatedFirstPageController?.abort();
+    const controller = new AbortController();
+    relatedFirstPageController = controller;
+    grid.clear();
+    try {
+      // 1 ページ目を取得して列情報ごとグリッドへ渡す（埋め込みグリッドの
+      // 以降のスクロール/フィルタ/ソートは fetchRelatedPage 経由で eq を保つ）。
+      const data = await callbacks.fetchRelatedPage(
+        target.fk.toTable,
+        0,
+        PAGE_SIZE,
+        null,
+        [],
+        relatedEq,
+        controller.signal,
+      );
+      if (gen !== relatedGen) return;
+      grid.load(target.fk.toTable, data);
+    } catch (err) {
+      if (gen !== relatedGen || isAbortError(err)) return;
+      grid.showError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -400,7 +507,7 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
 
-    cancelRelatedFetch();
+    if (relatedPanel) relatedPanel.hidden = true; // 単一値詳細とは排他
     detailPanel.hidden = false;
     detailPanel.innerHTML = "";
 
@@ -436,7 +543,6 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     closeBtn.className = "db-btn db-btn-icon db-grid-detail-close";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
-      cancelRelatedFetch();
       detailPanel.hidden = true;
     });
 
@@ -470,11 +576,6 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
     }
 
     detailPanel.append(header, content);
-
-    const fk = callbacks
-      .getForeignKeys?.()
-      .find((f) => f.fromTable === currentTable && f.fromColumn === colName);
-    if (fk) renderRelatedSection(fk, value);
   }
 
   function renderHeader() {
@@ -743,6 +844,11 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
             cell.style.cursor = "pointer";
             const cellValue = val;
             const cellColIndex = c;
+            const cellColName = columnNames[c];
+            const rowValues = rowData;
+            if (!embedded && fkColumns.has(cellColName)) {
+              cell.classList.add("db-grid-cell-fk");
+            }
             cell.addEventListener("click", (e) => {
               e.stopPropagation();
               selectedRowIndex = rowIndex;
@@ -750,7 +856,13 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
                 r.classList.remove("selected");
               });
               row.classList.add("selected");
-              showCellDetail(cellColIndex, cellValue);
+              // FK セルはその行の関連テーブルをパネルに開く。それ以外は
+              // 従来どおり単一値の詳細を表示する。
+              if (!embedded && fkColumns.has(cellColName)) {
+                openRelatedForRow(rowValues, cellColName);
+              } else {
+                showCellDetail(cellColIndex, cellValue);
+              }
             });
             row.appendChild(cell);
           }
@@ -932,6 +1044,8 @@ export function createTableGrid(callbacks: TableGridCallbacks): TableGrid {
 
   function destroy() {
     clear();
+    embeddedGrid?.destroy();
+    embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
   }
 

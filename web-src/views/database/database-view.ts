@@ -3,7 +3,6 @@ import type {
   DbFileInfo,
   DbFilesResponse,
   DbQueryResponse,
-  DbRelatedResponse,
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
@@ -370,10 +369,8 @@ function createTabPane(
     setColumnWidths: (dbId, table, widths) =>
       outerDeps.setColumnWidths(dbId, table, widths),
     getForeignKeys: () => schemaCache?.foreignKeys ?? [],
-    fetchRelatedRows: (table, column, value, signal) =>
-      fetchRelatedRows(table, column, value, signal),
-    onNavigateToReference: (table, column, value) =>
-      navigateToReference(table, column, value),
+    fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
+      fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
   });
 
   const queryEditor = createQueryEditor({
@@ -722,48 +719,45 @@ function createTabPane(
     return (await res.json()) as DbTableDataResponse;
   }
 
-  async function fetchRelatedRows(
+  /**
+   * 参照先テーブルのページを取得する。eq はベース WHERE（完全一致）として
+   * 常に適用され、その上にグリッド標準の filters / sort を重ねられる。
+   */
+  async function fetchRelatedPage(
     table: string,
-    column: string,
-    value: string,
+    offset: number,
+    limit: number,
+    sort: GridSort | null,
+    filters: GridFilter[],
+    eq: Array<{ column: string; value: string }>,
     signal?: AbortSignal,
-  ): Promise<DbRelatedResponse> {
+  ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
     const params = new URLSearchParams({
       db: currentDbInfo.id,
       table,
-      column,
-      value,
+      offset: String(offset),
+      limit: String(limit),
     });
     withCurrentSchema(params);
+    if (sort) {
+      params.set("sort", sort.column);
+      params.set("dir", sort.direction);
+    }
+    if (filters.length > 0) {
+      params.set("filters", JSON.stringify(filters));
+    }
+    if (eq.length > 0) {
+      params.set("eq", JSON.stringify(eq));
+    }
     const res = await fetch(
-      `/_db/related?${params}`,
+      `/_db/table?${params}`,
       signal ? { signal } : undefined,
     );
     if (!res.ok) {
-      throw new Error(
-        await responseErrorMessage(res, "failed to fetch related rows"),
-      );
+      throw new Error(await responseErrorMessage(res, "failed to fetch table"));
     }
-    return (await res.json()) as DbRelatedResponse;
-  }
-
-  /** FK 参照先テーブルを開き、該当値で絞り込んで表示する。 */
-  function navigateToReference(
-    table: string,
-    column: string,
-    value: string,
-  ): void {
-    if (!currentDbInfo) return;
-    // 参照先テーブルが現在のスキーマに存在しない場合は何もしない。
-    if (schemaCache && !schemaCache.tables.some((t) => t.name === table)) {
-      return;
-    }
-    void (async () => {
-      await selectTable(table);
-      if (currentTable !== table) return;
-      await grid.applyState({ filters: [{ column, value }] });
-    })();
+    return (await res.json()) as DbTableDataResponse;
   }
 
   async function executeQuery(sql: string): Promise<DbQueryResponse> {

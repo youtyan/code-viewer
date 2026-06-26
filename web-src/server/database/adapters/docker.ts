@@ -17,6 +17,7 @@ import type { SnapshotItem } from "../sources/types";
 import {
   buildFilterWhere,
   escapeSqlString,
+  filterExactColumns,
   filterGroupedColumns,
   filterOrderByColumns,
   sanitizeIdentifier,
@@ -850,6 +851,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         limit: number;
         orderBy?: DbOrder[];
         grouped: Map<string, string[]>;
+        exact?: { column: string; value: string }[];
       },
       signal?: AbortSignal,
     ): Promise<TablePageMeta> {
@@ -871,6 +873,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const where = buildFilterWhere(
         filterGroupedColumns(options.grouped, columnNames),
         config.kind,
+        filterExactColumns(options.exact, columnNames),
       ).where;
       const whereClause = where ? ` WHERE ${where}` : "";
       const countSql = `SELECT COUNT(*) AS cnt FROM ${id}${whereClause}`;

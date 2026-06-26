@@ -60,6 +60,8 @@ export type DatabaseAdapter = {
       limit: number;
       orderBy?: DbOrder[];
       grouped: Map<string, string[]>;
+      /** カラム完全一致条件（外部キー参照などの WHERE）。 */
+      exact?: { column: string; value: string }[];
     },
     signal?: AbortSignal,
   ): Promise<TablePageMeta>;

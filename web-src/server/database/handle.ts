@@ -5,7 +5,6 @@ import type {
   DbKind,
   DbOrder,
   DbQueryResponse,
-  DbRelatedResponse,
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
@@ -69,7 +68,6 @@ import {
   listSnapshots,
   updateSnapshotNote,
 } from "./snapshot-store";
-import { type SqlKind, escapeSqlString, sanitizeIdentifier } from "./sql-utils";
 import { loadTabsAsync, saveTabsAsync } from "./tabs-store";
 
 let initialized = false;
@@ -386,8 +384,11 @@ async function handleSchema(
   }
 }
 
-function parseFilters(url: URL): { column: string; value: string }[] {
-  const raw = url.searchParams.get("filters");
+function parseColumnValuePairs(
+  url: URL,
+  param: string,
+): { column: string; value: string }[] {
+  const raw = url.searchParams.get(param);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -402,6 +403,15 @@ function parseFilters(url: URL): { column: string; value: string }[] {
   } catch {
     return [];
   }
+}
+
+function parseFilters(url: URL): { column: string; value: string }[] {
+  return parseColumnValuePairs(url, "filters");
+}
+
+/** `eq` パラメータ: カラム完全一致条件（FK 参照の WHERE 用）。 */
+function parseExactConditions(url: URL): { column: string; value: string }[] {
+  return parseColumnValuePairs(url, "eq");
 }
 
 function groupFiltersByValue(
@@ -452,9 +462,10 @@ async function handleTable(
     ];
   }
   const filters = parseFilters(url);
+  const exact = parseExactConditions(url);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    if (filters.length > 0) {
+    if (filters.length > 0 || exact.length > 0) {
       const meta = await adapter.getFilteredTablePageWithMeta(
         table,
         {
@@ -462,6 +473,7 @@ async function handleTable(
           limit,
           orderBy,
           grouped: groupFiltersByValue(filters),
+          ...(exact.length > 0 ? { exact } : {}),
         },
         signal,
       );
@@ -938,103 +950,6 @@ async function handleColumns(
     });
   } catch (err) {
     return handleError("database", "get columns", err);
-  }
-}
-
-/** DbKind を SQL 方言にマッピング。FK 参照引きは SQL 系のみ対応。 */
-function toSqlKind(kind: DbKind): SqlKind | null {
-  if (kind === "sqlite") return "sqlite";
-  if (kind === "postgresql") return "postgresql";
-  if (kind === "mysql") return "mysql";
-  return null;
-}
-
-const RELATED_ROWS_LIMIT = 50;
-const RELATED_VALUE_MAX_CHARS = 2000;
-
-/**
- * 外部キー値に一致する参照先テーブルの行を返す。
- * セル詳細パネルの「関連データ」表示で使う。値は型差異を避けるため
- * TEXT/CHAR にキャストして完全一致で比較する（フィルタ UI の LIKE とは別経路）。
- */
-async function handleRelated(
-  cwd: string,
-  url: URL,
-  omitDirNames?: string[],
-  signal?: AbortSignal,
-): Promise<Response> {
-  const r = await resolveDb(
-    cwd,
-    url.searchParams.get("db"),
-    omitDirNames,
-    url.searchParams.get("schema"),
-    signal,
-  );
-  if (r instanceof Response) return r;
-  const table = url.searchParams.get("table");
-  const column = url.searchParams.get("column");
-  const value = url.searchParams.get("value");
-  if (!table) return textError("missing table parameter", 400);
-  if (!column) return textError("missing column parameter", 400);
-  if (value === null) return textError("missing value parameter", 400);
-  if (value.length > RELATED_VALUE_MAX_CHARS) {
-    return textError("value too long", 400);
-  }
-  try {
-    const adapter = await getAdapter(r, cwd, signal);
-    const sqlKind = toSqlKind(adapter.kind);
-    if (!sqlKind) {
-      return textError(
-        "related rows are not supported for this database kind",
-        400,
-      );
-    }
-    const db = asAsync(adapter);
-    // カラム名はクエリに直接埋め込むため、実在カラムだけを許可する。
-    const columns = await db.columns(table, signal);
-    if (!columns.some((c) => c.name === column)) {
-      return textError(`unknown column: ${column}`, 400);
-    }
-    const tableIdent = sanitizeIdentifier(table, sqlKind);
-    const colIdent = sanitizeIdentifier(column, sqlKind);
-    const cast =
-      sqlKind === "mysql"
-        ? `CAST(${colIdent} AS CHAR)`
-        : `CAST(${colIdent} AS TEXT)`;
-    // sqlite はパラメータバインド、それ以外はリテラルをエスケープ
-    // （buildFilterWhere と同じ方針で方言差を吸収する）。
-    const useParams = sqlKind === "sqlite";
-    const fetchLimit = RELATED_ROWS_LIMIT + 1;
-    const sql = useParams
-      ? `SELECT * FROM ${tableIdent} WHERE ${cast} = ? LIMIT ${fetchLimit}`
-      : `SELECT * FROM ${tableIdent} WHERE ${cast} = ${escapeSqlString(
-          value,
-        )} LIMIT ${fetchLimit}`;
-    const result = await db.readonlyQuery(
-      sql,
-      useParams ? [value] : undefined,
-      fetchLimit,
-      signal,
-    );
-    const serialized = serializeDbRows(result.rows);
-    const truncated = serialized.length > RELATED_ROWS_LIMIT;
-    const rows = truncated
-      ? serialized.slice(0, RELATED_ROWS_LIMIT)
-      : serialized;
-    const body: DbRelatedResponse = {
-      dbId: r.dbId,
-      ...(r.schema ? { schema: r.schema } : {}),
-      table,
-      column,
-      columns: result.columns,
-      columnTypes: result.columnTypes,
-      rows,
-      rowCount: rows.length,
-      truncated,
-    };
-    return json(body);
-  } catch (err) {
-    return handleError("database", "read related rows", err);
   }
 }
 
@@ -1775,10 +1690,6 @@ export async function handleDatabaseRoute(
       "/_db/columns": {
         methods: ["GET"],
         handler: () => handleColumns(cwd, url, omitDirNames, req.signal),
-      },
-      "/_db/related": {
-        methods: ["GET"],
-        handler: () => handleRelated(cwd, url, omitDirNames, req.signal),
       },
       "/_db/export": {
         methods: ["GET"],

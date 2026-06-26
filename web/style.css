@@ -6452,88 +6452,127 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   word-break: break-word;
 }
 
-/* ---------- Foreign-key related data (cell detail panel) ---------- */
+/* ---------- Foreign-key related data ---------- */
 .db-grid-header-fk-icon {
   margin-left: 4px;
   font-size: 10px;
   opacity: 0.7;
 }
 
-.db-grid-detail-related {
-  border-top: 1px dashed var(--border);
-  padding: 6px 12px 8px;
+.db-grid-cell-fk {
+  color: var(--accent, var(--link, #2563eb));
+}
+.db-grid-cell-fk:hover {
+  text-decoration: underline;
 }
 
-.db-grid-detail-related-head {
+/* Related-data panel: 下部に出る「左=関連テーブル一覧 / 右=データグリッド」 */
+.db-related-panel[hidden] {
+  display: none !important;
+}
+
+.db-related-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-top: 2px solid var(--border);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.db-related-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+}
+.db-related-resize:hover {
+  background: var(--accent, var(--border));
+  opacity: 0.4;
+}
+
+.db-related-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.db-grid-detail-related-label {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--bg-mute);
+  border-bottom: 1px solid var(--border);
   font-size: var(--db-font-base);
   font-weight: 600;
-  color: var(--fg-muted);
 }
 
-.db-grid-detail-related-open {
-  font-size: 11px;
-  padding: 2px 8px;
-  margin-left: auto;
-  color: var(--accent, var(--fg));
-}
-
-.db-grid-detail-related-body {
+.db-related-title {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--db-font-base);
 }
 
-.db-grid-detail-related-body.empty,
-.db-grid-detail-related-body.error {
-  color: var(--fg-subtle);
-  font-style: italic;
-}
-
-.db-grid-detail-related-body.error {
-  color: var(--danger);
-}
-
-.db-grid-detail-related-row {
-  display: grid;
-  grid-template-columns: minmax(80px, max-content) 1fr;
-  gap: 2px 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.db-grid-detail-related-row:last-child {
-  border-bottom: none;
-}
-
-.db-grid-detail-related-field {
-  display: contents;
-}
-
-.db-grid-detail-related-key {
+.db-related-close {
+  font-size: 14px;
   color: var(--fg-muted);
-  white-space: nowrap;
+}
+.db-related-close:hover {
+  color: var(--danger);
+  background: none;
 }
 
-.db-grid-detail-related-value {
-  word-break: break-word;
+.db-related-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
-.db-grid-detail-related-value.null {
-  color: var(--fg-subtle);
-  font-style: italic;
+.db-related-list {
+  width: 200px;
+  flex-shrink: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding: 4px;
 }
 
-.db-grid-detail-related-more {
-  margin-top: 6px;
-  color: var(--fg-subtle);
-  font-style: italic;
+.db-related-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 8px;
+  margin-bottom: 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.db-related-list-item:hover {
+  background: var(--bg-mute);
+}
+.db-related-list-item.active {
+  background: var(--bg-mute);
+  border-color: var(--accent, var(--border));
+}
+
+.db-related-list-name {
+  font-size: var(--db-font-base);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.db-related-list-via {
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+
+.db-related-grid-host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ---------- Export Buttons ---------- */

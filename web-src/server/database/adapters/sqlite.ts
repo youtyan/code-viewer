@@ -15,6 +15,7 @@ import {
 import type { SnapshotItem } from "../sources/types";
 import {
   buildFilterWhere,
+  filterExactColumns,
   filterGroupedColumns,
   filterOrderByColumns,
   sanitizeIdentifier,
@@ -358,6 +359,7 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
         limit: number;
         orderBy?: DbOrder[];
         grouped: Map<string, string[]>;
+        exact?: { column: string; value: string }[];
       },
     ): Promise<TablePageMeta> {
       const columns = queryColumns(db, table);
@@ -365,6 +367,7 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       const filter = buildFilterWhere(
         filterGroupedColumns(options.grouped, columnNames),
         "sqlite",
+        filterExactColumns(options.exact, columnNames),
       );
       const order = buildOrderClause(
         filterOrderByColumns(options.orderBy, columnNames),
