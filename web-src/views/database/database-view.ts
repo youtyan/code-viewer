@@ -456,16 +456,19 @@ function createTabPane(
 
   const redisExplorer = createRedisExplorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   redisExplorer.el.hidden = true;
 
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   esExplorer.el.hidden = true;
 
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   s3Explorer.el.hidden = true;
 
@@ -1490,6 +1493,9 @@ function createTabPane(
     queryEditor.localize();
     globalSearchView.localize();
     snapshotView.localize();
+    redisExplorer.localize();
+    esExplorer.localize();
+    s3Explorer.localize();
   }
 
   return {

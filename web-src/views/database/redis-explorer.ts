@@ -8,6 +8,7 @@ import type {
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
+import { type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
@@ -16,12 +17,16 @@ function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
 
 // item を element に書き込む。binary なら base64 badge を頭に付ける。
 // innerHTML 経由を避けて textContent + 要素生成で組み立てる。
-function renderItemInto(el: HTMLElement, item: RedisItem): void {
+function renderItemInto(
+  el: HTMLElement,
+  item: RedisItem,
+  binaryBadge: string,
+): void {
   el.textContent = "";
   if (isBinaryItem(item)) {
     const badge = document.createElement("span");
     badge.className = "redis-binary-badge";
-    badge.textContent = "binary, base64";
+    badge.textContent = binaryBadge;
     el.appendChild(badge);
     el.appendChild(document.createTextNode(item.binaryBase64));
     return;
@@ -33,6 +38,7 @@ export type RedisExplorerCallbacks = {
   // 選択中 (db index / key) が変わったことを外側に通知する。タブごとに
   // persist して reload 復元するために使う。
   onSelectionChange?: (selection: RedisExplorerSelection) => void;
+  getText?: () => DbText;
 };
 
 export type RedisExplorerView = {
@@ -41,11 +47,14 @@ export type RedisExplorerView = {
   clear: () => void;
   dispose: () => void;
   getSelection: () => RedisExplorerSelection;
+  localize: () => void;
 };
 
 export function createRedisExplorer(
   callbacks: RedisExplorerCallbacks = {},
 ): RedisExplorerView {
+  const text = (): DbText["explorer"] =>
+    (callbacks.getText?.() ?? dbText("en")).explorer;
   const container = document.createElement("div");
   container.className = "redis-explorer";
 
@@ -54,7 +63,7 @@ export function createRedisExplorer(
 
   const dbListHeader = document.createElement("div");
   dbListHeader.className = "db-explorer-pane-header";
-  dbListHeader.textContent = "Databases";
+  dbListHeader.textContent = text().redis.databases;
   dbListPane.appendChild(dbListHeader);
 
   const dbList = document.createElement("div");
@@ -66,7 +75,7 @@ export function createRedisExplorer(
 
   const keyListHeader = document.createElement("div");
   keyListHeader.className = "db-explorer-pane-header";
-  keyListHeader.textContent = "Keys";
+  keyListHeader.textContent = text().redis.keys;
   keyListPane.appendChild(keyListHeader);
 
   const keyFilterForm = document.createElement("form");
@@ -74,12 +83,12 @@ export function createRedisExplorer(
   const keyFilterInput = document.createElement("input");
   keyFilterInput.type = "search";
   keyFilterInput.className = "redis-key-filter";
-  keyFilterInput.placeholder = "key pattern, e.g. user:*";
+  keyFilterInput.placeholder = text().redis.keyFilterPlaceholder;
   keyFilterInput.autocomplete = "off";
   const keyFilterBtn = document.createElement("button");
   keyFilterBtn.type = "submit";
   keyFilterBtn.className = "redis-key-filter-btn";
-  keyFilterBtn.textContent = "Search";
+  keyFilterBtn.textContent = text().common.search;
   keyFilterForm.append(keyFilterInput, keyFilterBtn);
   keyListPane.appendChild(keyFilterForm);
 
@@ -90,13 +99,13 @@ export function createRedisExplorer(
   const keyMoreBtn = document.createElement("button");
   keyMoreBtn.type = "button";
   keyMoreBtn.className = "redis-key-more-btn";
-  keyMoreBtn.textContent = "Load more";
+  keyMoreBtn.textContent = text().common.loadMore;
   keyMoreBtn.hidden = true;
   keyListPane.appendChild(keyMoreBtn);
 
   const mainPane = document.createElement("div");
   mainPane.className = "redis-main-pane";
-  mainPane.textContent = "Select a key to view its value.";
+  mainPane.textContent = text().redis.selectKey;
 
   container.append(dbListPane, keyListPane, mainPane);
 
@@ -155,7 +164,7 @@ export function createRedisExplorer(
       name.textContent = `db${db.index}`;
       const count = document.createElement("span");
       count.className = "redis-db-count";
-      count.textContent = `${db.keyCount.toLocaleString()} keys`;
+      count.textContent = text().redis.keyCount(db.keyCount.toLocaleString());
       item.append(name, count);
       fragment.appendChild(item);
     }
@@ -220,7 +229,7 @@ export function createRedisExplorer(
     const body = document.createElement("div");
     body.className = "redis-value-body";
     if (value.type === "none") {
-      body.textContent = "(key does not exist or has no value)";
+      body.textContent = text().redis.noValue;
       body.classList.add("redis-value-empty");
     } else if (value.type === "string") {
       if (value.binaryBase64 !== undefined) {
@@ -274,7 +283,7 @@ export function createRedisExplorer(
         const td = document.createElement("td");
         td.colSpan = 2;
         td.className = "redis-value-empty";
-        td.textContent = "(empty hash)";
+        td.textContent = text().redis.emptyHash;
         row.appendChild(td);
         tbody.appendChild(row);
       }
@@ -282,10 +291,10 @@ export function createRedisExplorer(
         const row = document.createElement("tr");
         const fieldTd = document.createElement("td");
         fieldTd.className = "redis-value-hash-field";
-        renderItemInto(fieldTd, pair.field);
+        renderItemInto(fieldTd, pair.field, text().redis.binaryBadge);
         const valTd = document.createElement("td");
         valTd.className = "redis-value-hash-val";
-        renderItemInto(valTd, pair.value);
+        renderItemInto(valTd, pair.value, text().redis.binaryBadge);
         row.append(fieldTd, valTd);
         tbody.appendChild(row);
       }
@@ -305,12 +314,12 @@ export function createRedisExplorer(
       if (value.items.length === 0) {
         const li = document.createElement("li");
         li.className = "redis-value-empty";
-        li.textContent = "(empty list)";
+        li.textContent = text().redis.emptyList;
         ol.appendChild(li);
       }
       for (const item of value.items) {
         const li = document.createElement("li");
-        renderItemInto(li, item);
+        renderItemInto(li, item, text().redis.binaryBadge);
         ol.appendChild(li);
       }
       body.appendChild(ol);
@@ -400,7 +409,7 @@ export function createRedisExplorer(
     keyList.innerHTML = "";
     keyRowsByName.clear();
     activeKeyRow = null;
-    mainPane.textContent = "Select a key to view its value.";
+    mainPane.textContent = text().redis.selectKey;
     await loadKeys(false);
   }
 
@@ -446,7 +455,7 @@ export function createRedisExplorer(
         activeKeyRow = null;
       }
       if (data.keys.length === 0 && !append) {
-        setKeyStatus("(no keys)");
+        setKeyStatus(text().redis.noKeys);
       } else {
         appendKeys(data.keys);
       }
@@ -492,7 +501,7 @@ export function createRedisExplorer(
     currentKey = null;
     currentCursor = "0";
     notifySelectionChange();
-    mainPane.textContent = "Select a key to view its value.";
+    mainPane.textContent = text().redis.selectKey;
     void loadKeys(false);
   });
 
@@ -518,7 +527,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = "Select a key to view its value.";
+    mainPane.textContent = text().redis.selectKey;
     setDbStatus("Loading databases...");
     try {
       const res = await fetch(
@@ -556,7 +565,7 @@ export function createRedisExplorer(
           highlightActiveDb(initial.dbIndex);
           keyList.innerHTML = "";
           keyRowsByName.clear();
-          mainPane.textContent = "Select a key to view its value.";
+          mainPane.textContent = text().redis.selectKey;
           const valuePromise = initial.key
             ? selectKey(initial.key).catch(() => {})
             : null;
@@ -602,7 +611,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = "Select a database to view keys.";
+    mainPane.textContent = text().redis.selectDatabase;
   }
 
   function getSelection(): RedisExplorerSelection {
@@ -618,5 +627,15 @@ export function createRedisExplorer(
     clear();
   }
 
-  return { el: container, load, clear, dispose, getSelection };
+  function localize(): void {
+    const t = text();
+    dbListHeader.textContent = t.redis.databases;
+    keyListHeader.textContent = t.redis.keys;
+    keyFilterInput.placeholder = t.redis.keyFilterPlaceholder;
+    keyFilterBtn.textContent = t.common.search;
+    keyMoreBtn.textContent = t.common.loadMore;
+    if (!currentKey) mainPane.textContent = t.redis.selectKey;
+  }
+
+  return { el: container, load, clear, dispose, getSelection, localize };
 }

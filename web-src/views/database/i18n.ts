@@ -174,6 +174,60 @@ export type DbText = {
     showingRows: (shown: number, total: number) => string;
     label: (date: string, tables: number, note: string) => string;
   };
+  // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
+  // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
+  explorer: {
+    common: { loadMore: string; search: string };
+    redis: {
+      databases: string;
+      keys: string;
+      binaryBadge: string;
+      keyFilterPlaceholder: string;
+      selectKey: string;
+      selectDatabase: string;
+      noValue: string;
+      emptyHash: string;
+      emptyList: string;
+      noKeys: string;
+      keyCount: (n: string) => string;
+    };
+    es: {
+      indices: string;
+      docs: string;
+      mapping: string;
+      doc: string;
+      queryPlaceholder: string;
+      fieldHeader: string;
+      typeHeader: string;
+      selectIndex: string;
+      selectDoc: string;
+      noIndices: string;
+      noMappedFields: string;
+      noDocs: string;
+      docNotFound: string;
+      loadingIndices: string;
+    };
+    s3: {
+      bucket: string;
+      searchPlaceholder: string;
+      prefixMode: string;
+      containsMode: string;
+      sortUpdated: string;
+      sortKey: string;
+      prefixPlaceholder: string;
+      containsPlaceholder: string;
+      selectObject: string;
+      noObjects: string;
+      noBuckets: string;
+      openRaw: string;
+      download: string;
+      copyUri: string;
+      copied: string;
+      copyFailed: string;
+      unsupported: string;
+      truncatedNotice: (size: string) => string;
+    };
+  };
 };
 
 const EN: DbText = {
@@ -332,6 +386,59 @@ const EN: DbText = {
       (unchanged > 0 ? `, ${unchanged} unchanged` : ""),
     showingRows: (shown, total) => `Showing ${shown} of ${total}`,
     label: (date, tables, note) => `${date} (${tables} tables)${note}`,
+  },
+  explorer: {
+    common: { loadMore: "Load more", search: "Search" },
+    redis: {
+      databases: "Databases",
+      keys: "Keys",
+      binaryBadge: "binary, base64",
+      keyFilterPlaceholder: "key pattern, e.g. user:*",
+      selectKey: "Select a key to view its value.",
+      selectDatabase: "Select a database to view keys.",
+      noValue: "(key does not exist or has no value)",
+      emptyHash: "(empty hash)",
+      emptyList: "(empty list)",
+      noKeys: "(no keys)",
+      keyCount: (n) => `${n} keys`,
+    },
+    es: {
+      indices: "Indices",
+      docs: "Docs",
+      mapping: "Mapping",
+      doc: "Doc",
+      queryPlaceholder: "lucene query (e.g. field:value)",
+      fieldHeader: "Field",
+      typeHeader: "Type",
+      selectIndex: "Select an index to view its mapping.",
+      selectDoc: "Select a doc to view its _source.",
+      noIndices: "(no indices)",
+      noMappedFields: "(no mapped fields)",
+      noDocs: "(no docs)",
+      docNotFound: "(doc not found)",
+      loadingIndices: "Loading indices...",
+    },
+    s3: {
+      bucket: "Bucket",
+      searchPlaceholder: "Search objects",
+      prefixMode: "Prefix",
+      containsMode: "Contains",
+      sortUpdated: "Updated newest",
+      sortKey: "Key A-Z",
+      prefixPlaceholder: "Prefix, e.g. photos/2026/",
+      containsPlaceholder: "Filename contains",
+      selectObject: "Select an object to preview.",
+      noObjects: "(no objects)",
+      noBuckets: "(no buckets)",
+      openRaw: "Open raw",
+      download: "Download",
+      copyUri: "Copy S3 URI",
+      copied: "Copied",
+      copyFailed: "Copy failed",
+      unsupported:
+        "This object type cannot be previewed safely in the browser.",
+      truncatedNotice: (size) => `Showing first ${size}.`,
+    },
   },
 };
 
@@ -493,6 +600,59 @@ const JA: DbText = {
       (unchanged > 0 ? `、${unchanged}テーブルは変更なし` : ""),
     showingRows: (shown, total) => `全${total}件中 ${shown}件を表示中`,
     label: (date, tables, note) => `${date} (${tables}テーブル)${note}`,
+  },
+  explorer: {
+    common: { loadMore: "さらに読み込む", search: "検索" },
+    redis: {
+      databases: "データベース",
+      keys: "キー",
+      binaryBadge: "バイナリ, base64",
+      keyFilterPlaceholder: "キーパターン 例: user:*",
+      selectKey: "キーを選択すると値が表示されます。",
+      selectDatabase: "データベースを選択するとキーが表示されます。",
+      noValue: "(キーが存在しないか値がありません)",
+      emptyHash: "(空のハッシュ)",
+      emptyList: "(空のリスト)",
+      noKeys: "(キーがありません)",
+      keyCount: (n) => `${n} キー`,
+    },
+    es: {
+      indices: "インデックス",
+      docs: "ドキュメント",
+      mapping: "マッピング",
+      doc: "ドキュメント",
+      queryPlaceholder: "lucene クエリ 例: field:value",
+      fieldHeader: "フィールド",
+      typeHeader: "型",
+      selectIndex: "インデックスを選択するとマッピングが表示されます。",
+      selectDoc: "ドキュメントを選択すると _source が表示されます。",
+      noIndices: "(インデックスがありません)",
+      noMappedFields: "(マッピング済みフィールドがありません)",
+      noDocs: "(ドキュメントがありません)",
+      docNotFound: "(ドキュメントが見つかりません)",
+      loadingIndices: "インデックスを読み込み中...",
+    },
+    s3: {
+      bucket: "バケット",
+      searchPlaceholder: "オブジェクトを検索",
+      prefixMode: "プレフィックス",
+      containsMode: "部分一致",
+      sortUpdated: "更新が新しい順",
+      sortKey: "キー名 A-Z",
+      prefixPlaceholder: "プレフィックス 例: photos/2026/",
+      containsPlaceholder: "ファイル名に含む",
+      selectObject: "オブジェクトを選択するとプレビューが表示されます。",
+      noObjects: "(オブジェクトがありません)",
+      noBuckets: "(バケットがありません)",
+      openRaw: "元データを開く",
+      download: "ダウンロード",
+      copyUri: "S3 URI をコピー",
+      copied: "コピーしました",
+      copyFailed: "コピーに失敗しました",
+      unsupported:
+        "この種類のオブジェクトはブラウザで安全にプレビューできません。",
+      truncatedNotice: (size) => `先頭 ${size} を表示中。`,
+    },
   },
 };
 

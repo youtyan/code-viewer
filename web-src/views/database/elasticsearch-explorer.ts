@@ -9,12 +9,14 @@ import type {
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
+import { type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
   // ごとに persist して reload 復元するために使う。
   onSelectionChange?: (selection: ElasticsearchExplorerSelection) => void;
+  getText?: () => DbText;
 };
 
 export type ElasticsearchExplorerView = {
@@ -26,11 +28,14 @@ export type ElasticsearchExplorerView = {
   clear: () => void;
   dispose: () => void;
   getSelection: () => ElasticsearchExplorerSelection;
+  localize: () => void;
 };
 
 export function createElasticsearchExplorer(
   callbacks: ElasticsearchExplorerCallbacks = {},
 ): ElasticsearchExplorerView {
+  const text = (): DbText["explorer"] =>
+    (callbacks.getText?.() ?? dbText("en")).explorer;
   const container = document.createElement("div");
   container.className = "es-explorer";
 
@@ -40,7 +45,7 @@ export function createElasticsearchExplorer(
 
   const indexListHeader = document.createElement("div");
   indexListHeader.className = "db-explorer-pane-header";
-  indexListHeader.textContent = "Indices";
+  indexListHeader.textContent = text().es.indices;
   indexListPane.appendChild(indexListHeader);
 
   const indexList = document.createElement("div");
@@ -53,19 +58,19 @@ export function createElasticsearchExplorer(
 
   const docListHeader = document.createElement("div");
   docListHeader.className = "db-explorer-pane-header";
-  docListHeader.textContent = "Docs";
+  docListHeader.textContent = text().es.docs;
   docListPane.appendChild(docListHeader);
 
   const searchBar = document.createElement("div");
   searchBar.className = "es-search-bar";
   const searchInput = document.createElement("input");
   searchInput.type = "text";
-  searchInput.placeholder = "lucene query (e.g. field:value)";
+  searchInput.placeholder = text().es.queryPlaceholder;
   searchInput.className = "es-search-input";
   const searchBtn = document.createElement("button");
   searchBtn.type = "button";
   searchBtn.className = "es-search-btn";
-  searchBtn.textContent = "Search";
+  searchBtn.textContent = text().common.search;
   searchBar.append(searchInput, searchBtn);
   docListPane.appendChild(searchBar);
 
@@ -76,7 +81,7 @@ export function createElasticsearchExplorer(
   const docMoreBtn = document.createElement("button");
   docMoreBtn.type = "button";
   docMoreBtn.className = "es-doc-more-btn";
-  docMoreBtn.textContent = "Load more";
+  docMoreBtn.textContent = text().common.loadMore;
   docMoreBtn.hidden = true;
   docListPane.appendChild(docMoreBtn);
 
@@ -89,21 +94,21 @@ export function createElasticsearchExplorer(
   const tabMapping = document.createElement("button");
   tabMapping.type = "button";
   tabMapping.className = "es-detail-tab active";
-  tabMapping.textContent = "Mapping";
+  tabMapping.textContent = text().es.mapping;
   const tabDoc = document.createElement("button");
   tabDoc.type = "button";
   tabDoc.className = "es-detail-tab";
-  tabDoc.textContent = "Doc";
+  tabDoc.textContent = text().es.doc;
   detailTabs.append(tabMapping, tabDoc);
   detailPane.appendChild(detailTabs);
 
   const mappingBody = document.createElement("div");
   mappingBody.className = "es-mapping-body";
-  mappingBody.textContent = "Select an index to view its mapping.";
+  mappingBody.textContent = text().es.selectIndex;
   const docBody = document.createElement("div");
   docBody.className = "es-doc-body";
   docBody.hidden = true;
-  docBody.textContent = "Select a doc to view its _source.";
+  docBody.textContent = text().es.selectDoc;
   detailPane.append(mappingBody, docBody);
 
   container.append(indexListPane, docListPane, detailPane);
@@ -153,7 +158,7 @@ export function createElasticsearchExplorer(
     indexList.innerHTML = "";
     indexRowsByName.clear();
     if (indices.length === 0) {
-      setIndexStatus("(no indices)");
+      setIndexStatus(text().es.noIndices);
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -250,7 +255,7 @@ export function createElasticsearchExplorer(
     table.className = "es-mapping-table";
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["Field", "Type"]) {
+    for (const label of [text().es.fieldHeader, text().es.typeHeader]) {
       const th = document.createElement("th");
       th.textContent = label;
       headRow.appendChild(th);
@@ -265,7 +270,7 @@ export function createElasticsearchExplorer(
       const td = document.createElement("td");
       td.colSpan = 2;
       td.className = "es-value-empty";
-      td.textContent = "(no mapped fields)";
+      td.textContent = text().es.noMappedFields;
       row.appendChild(td);
       tbody.appendChild(row);
     }
@@ -292,7 +297,7 @@ export function createElasticsearchExplorer(
     header.textContent = `${resp.index} / ${resp.id}`;
     docBody.appendChild(header);
     if (!resp.found) {
-      setPaneStatus(docBody, "(doc not found)", {
+      setPaneStatus(docBody, text().es.docNotFound, {
         afterClear: () => docBody.appendChild(header),
       });
       return;
@@ -405,7 +410,7 @@ export function createElasticsearchExplorer(
         docRowsById.clear();
       }
       if (data.hits.length === 0 && !append) {
-        setDocStatus("(no docs)");
+        setDocStatus(text().es.noDocs);
       } else {
         appendDocs(data.hits);
       }
@@ -431,7 +436,7 @@ export function createElasticsearchExplorer(
     notifySelectionChange();
     highlightActiveIndex(name);
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    docBody.textContent = text().es.selectDoc;
     setDetailTab("mapping");
     await Promise.all([fetchMapping(name), loadDocs(false)]);
   }
@@ -559,9 +564,9 @@ export function createElasticsearchExplorer(
     activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = "Select an index to view its mapping.";
+    mappingBody.textContent = text().es.selectIndex;
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    docBody.textContent = text().es.selectDoc;
     setDetailTab("mapping");
     setIndexStatus("Loading indices...");
     try {
@@ -635,9 +640,9 @@ export function createElasticsearchExplorer(
     activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = "Select an index to view its mapping.";
+    mappingBody.textContent = text().es.selectIndex;
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    docBody.textContent = text().es.selectDoc;
     setDetailTab("mapping");
   }
 
@@ -656,5 +661,18 @@ export function createElasticsearchExplorer(
     clear();
   }
 
-  return { el: container, load, clear, dispose, getSelection };
+  function localize(): void {
+    const t = text();
+    indexListHeader.textContent = t.es.indices;
+    docListHeader.textContent = t.es.docs;
+    searchInput.placeholder = t.es.queryPlaceholder;
+    searchBtn.textContent = t.common.search;
+    docMoreBtn.textContent = t.common.loadMore;
+    tabMapping.textContent = t.es.mapping;
+    tabDoc.textContent = t.es.doc;
+    if (!currentIndex) mappingBody.textContent = t.es.selectIndex;
+    if (!activeDocRow) docBody.textContent = t.es.selectDoc;
+  }
+
+  return { el: container, load, clear, dispose, getSelection, localize };
 }
