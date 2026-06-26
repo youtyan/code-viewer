@@ -7840,6 +7840,12 @@ body.db-resizing {
   gap: 8px;
   min-width: 0;
 }
+/* これらの行は display:flex を持つため、hidden 属性 (UA の display:none) が
+   効かない。Explorer 表示で List 専用の行を隠せるよう明示的に上書きする。 */
+.s3-search-row[hidden],
+.s3-options-row[hidden] {
+  display: none;
+}
 .s3-field-label {
   flex: 1;
   min-width: 0;
