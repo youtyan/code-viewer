@@ -254,4 +254,72 @@ describe("state store", () => {
       }
     });
   });
+
+  // prefs (s3TooltipEnabled, inferFkRails) を db-ui.json に集約した
+  // ことで、boolean 永続化のテスト経路を増やした。
+  describe("db ui prefs", () => {
+    test("sanitize keeps known boolean prefs and drops anything else", async () => {
+      await withTempProject(async (dir) => {
+        // 未知キー / 非 boolean / 数値は無視。空 prefs は state に乗らない。
+        const written = await patchDbUiState(dir, {
+          prefs: {
+            s3TooltipEnabled: true,
+            inferFkRails: false,
+            unknownPref: true,
+            invalidType: 1,
+          } as unknown as { [k: string]: unknown },
+        });
+        expect(written.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+        const reloaded = await loadDbUiState(dir);
+        expect(reloaded.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+      });
+    });
+
+    test("merge updates / deletes individual prefs without touching others", async () => {
+      await withTempProject(async (dir) => {
+        await patchDbUiState(dir, {
+          prefs: { s3TooltipEnabled: true, inferFkRails: true },
+        });
+        // 単独 key だけ更新しても他 key は維持される。
+        const after1 = await patchDbUiState(dir, {
+          prefs: { inferFkRails: false },
+        });
+        expect(after1.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+        // null で個別 key を削除できる。
+        const after2 = await patchDbUiState(dir, {
+          prefs: { s3TooltipEnabled: null },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(after2.prefs).toEqual({ inferFkRails: false });
+        // 全部消えたら prefs ごと undefined に縮退する (空オブジェクトを残さない)。
+        const after3 = await patchDbUiState(dir, {
+          prefs: { inferFkRails: null },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(after3.prefs).toBeUndefined();
+      });
+    });
+
+    test("columnWidths and prefs are independent on patch", async () => {
+      await withTempProject(async (dir) => {
+        await patchDbUiState(dir, {
+          columnWidths: { "a.db": { users: { id: 80 } } },
+        });
+        const afterPref = await patchDbUiState(dir, {
+          prefs: { inferFkRails: true },
+        });
+        expect(afterPref.columnWidths).toEqual({
+          "a.db": { users: { id: 80 } },
+        });
+        expect(afterPref.prefs).toEqual({ inferFkRails: true });
+      });
+    });
+  });
 });

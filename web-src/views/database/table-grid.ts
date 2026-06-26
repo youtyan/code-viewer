@@ -268,7 +268,7 @@ export function createTableGrid(
     }
     if (rowIndex < 0 || colIndex < 0) return;
     // colIndex+1: rowNum cell が先頭にあるので 1 ずれる。
-    const targetRow = body.children[rowIndex - getRenderStartRow()] as
+    const targetRow = body.children[rowIndex - renderStartRow] as
       | HTMLElement
       | undefined;
     targetRow?.children[colIndex + 1]?.classList.add("db-grid-cell-active");
@@ -276,16 +276,6 @@ export function createTableGrid(
 
   function clearActiveCell() {
     setActiveCell(-1, -1);
-  }
-
-  // body は仮想スクロール用に startRow から endRow までの分だけ DOM に
-  // 載っている。startRow は renderViewport 内のローカル計算なので、ここでは
-  // body.style.transform の translateY から逆算する (state を増やさない)。
-  function getRenderStartRow(): number {
-    const transform = body.style.transform;
-    const match = /translateY\((\d+(?:\.\d+)?)px\)/.exec(transform);
-    if (!match) return 0;
-    return Math.round(Number.parseFloat(match[1]) / ROW_HEIGHT);
   }
 
   // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
@@ -296,28 +286,56 @@ export function createTableGrid(
     }
   }
 
-  function startDetailResize(e: MouseEvent) {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = detailHeight;
+  // 上端ハンドル方式の panel 高さリサイズを 1 か所に集約。detail / related
+  // の 2 つの panel で同じ手順 (mousemove で delta = startY - ev.clientY、
+  // clamp、mouseup で persist) を踏むので、差分パラメタ (panel/min/getter/
+  // setter/persist) だけ渡す形にした。
+  function startTopEdgeResize(opts: {
+    panel: HTMLElement;
+    min: number;
+    getHeight: () => number;
+    setHeight: (h: number) => void;
+    persist: (h: number) => void;
+    setCleanup: (fn: (() => void) | null) => void;
+    startEvent: MouseEvent;
+  }) {
+    opts.startEvent.preventDefault();
+    const startY = opts.startEvent.clientY;
+    const startHeight = opts.getHeight();
     const onMove = (ev: MouseEvent) => {
-      // 上端ハンドル: 上にドラッグすると高くなる。
       const delta = startY - ev.clientY;
-      detailHeight = Math.max(
-        DETAIL_PANEL_MIN_HEIGHT,
+      const next = Math.max(
+        opts.min,
         Math.min(panelMaxHeight(), startHeight + delta),
       );
-      detailPanel.style.height = `${detailHeight}px`;
+      opts.setHeight(next);
+      opts.panel.style.height = `${next}px`;
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      detailResizeCleanup = null;
-      callbacks.setDetailPanelHeight?.(detailHeight);
+      opts.setCleanup(null);
+      opts.persist(opts.getHeight());
     };
-    detailResizeCleanup = onUp;
+    opts.setCleanup(onUp);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+  }
+
+  function startDetailResize(e: MouseEvent) {
+    startTopEdgeResize({
+      panel: detailPanel,
+      min: DETAIL_PANEL_MIN_HEIGHT,
+      getHeight: () => detailHeight,
+      setHeight: (h) => {
+        detailHeight = h;
+      },
+      persist: (h) => callbacks.setDetailPanelHeight?.(h),
+      setCleanup: (fn) => {
+        detailResizeCleanup = fn;
+      },
+      startEvent: e,
+    });
   }
 
   let currentTable = "";
@@ -339,6 +357,11 @@ export function createTableGrid(
   // renderViewport / 再描画でも色が維持されるよう、行/列 index を state に持つ。
   let activeCellRowIndex = -1;
   let activeCellColIndex = -1;
+  // 仮想スクロール時に body に積まれている先頭行の global index。
+  // renderViewport が描画する直前に確定する。setActiveCell が body 内の
+  // 相対位置を計算するために参照する (CSS transform を regex で読むのは
+  // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
+  let renderStartRow = 0;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
   const fkColumns = new Set<string>();
 
@@ -737,29 +760,20 @@ export function createTableGrid(
   }
 
   function startRelatedResize(e: MouseEvent) {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = relatedHeight;
-    const onMove = (ev: MouseEvent) => {
-      // 上端ハンドルなので、上にドラッグすると高くなる。
-      const delta = startY - ev.clientY;
-      relatedHeight = Math.max(
-        RELATED_PANEL_MIN_HEIGHT,
-        Math.min(panelMaxHeight(), startHeight + delta),
-      );
-      if (relatedPanel) relatedPanel.style.height = `${relatedHeight}px`;
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      relatedResizeCleanup = null;
-      // ドラッグ確定時にタブ状態へ保存する。
-      callbacks.setRelatedPanelHeight?.(relatedHeight);
-    };
-    // ドラッグ中に destroy/hide された場合でもリスナーを外せるよう保持する。
-    relatedResizeCleanup = onUp;
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    if (!relatedPanel) return;
+    startTopEdgeResize({
+      panel: relatedPanel,
+      min: RELATED_PANEL_MIN_HEIGHT,
+      getHeight: () => relatedHeight,
+      setHeight: (h) => {
+        relatedHeight = h;
+      },
+      persist: (h) => callbacks.setRelatedPanelHeight?.(h),
+      setCleanup: (fn) => {
+        relatedResizeCleanup = fn;
+      },
+      startEvent: e,
+    });
   }
 
   // hideRelatedPanel は showCellDetail からも内部的に呼ばれるため、
@@ -1241,6 +1255,8 @@ export function createTableGrid(
         0,
         Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN,
       );
+      // setActiveCell が body 内インデックスを計算するために参照する。
+      renderStartRow = startRow;
       const endRow = Math.min(
         totalRows,
         Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN,

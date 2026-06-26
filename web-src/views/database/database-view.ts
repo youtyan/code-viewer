@@ -3,6 +3,7 @@ import type {
   DbColumn,
   DbFileInfo,
   DbFilesResponse,
+  DbForeignKey,
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
@@ -22,6 +23,7 @@ import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { type DbLang, type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
+import { makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
@@ -272,6 +274,32 @@ function createTabPane(
 
   let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
+  // getForeignKeys memo: (schemaCache identity, inferFkRails pref) を覚えて
+  // おき、変わらない限り推測列挙を skip。大規模スキーマで getForeignKeys が
+  // ヒット毎に inferRailsForeignKeys を全走査するのを避ける。
+  let fkMemo: {
+    schema: DbSchemaResponse | null;
+    inferOn: boolean;
+    value: DbForeignKey[];
+  } | null = null;
+  function getForeignKeysCached(): DbForeignKey[] {
+    const real = schemaCache?.foreignKeys ?? [];
+    const inferOn = outerDeps.getDbUiPref("inferFkRails", false);
+    if (fkMemo && fkMemo.schema === schemaCache && fkMemo.inferOn === inferOn) {
+      return fkMemo.value;
+    }
+    let value: DbForeignKey[] = real;
+    if (inferOn && schemaCache) {
+      const inferred = inferRailsForeignKeys({
+        tables: schemaCache.tables,
+        columnsMap: schemaCache.columnsMap ?? {},
+        realForeignKeys: real,
+      });
+      if (inferred.length > 0) value = [...real, ...inferred];
+    }
+    fkMemo = { schema: schemaCache, inferOn, value };
+    return value;
+  }
   let lastFiles: DbFileInfo[] = [];
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
@@ -389,15 +417,11 @@ function createTabPane(
   // toolsSection の "ナビゲーション icon 並び" とは性質が違うため、
   // ラベル付きピル形式 (S3 explorer の Hover preview toggle と同じ形) で
   // dbToolbar 直下に独立した行として置く。
-  const inferFkToggle = document.createElement("button");
-  inferFkToggle.type = "button";
-  inferFkToggle.className = "db-pref-toggle";
-  inferFkToggle.title = "Infer FK from Rails-style <name>_id → <names>.id";
-  inferFkToggle.innerHTML =
-    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' +
-    `<path d="${ICON_PATH_INFER_FK}"/>` +
-    "</svg>" +
-    '<span class="db-pref-toggle-label">Rails FK 推測</span>';
+  const inferFkToggle = makePrefToggle({
+    title: "Infer FK from Rails-style <name>_id → <names>.id",
+    label: "Rails FK 推測",
+    pathD: ICON_PATH_INFER_FK,
+  });
   inferFkToggle.addEventListener("click", () => {
     const next = !outerDeps.getDbUiPref("inferFkRails", false);
     outerDeps.setDbUiPref("inferFkRails", next);
@@ -410,7 +434,10 @@ function createTabPane(
     inferFkToggle.setAttribute("aria-pressed", String(on));
   }
   applyInferFkBtnState();
-  outerDeps.onDbUiPrefChange(() => {
+  // 戻り値の disposer を捨てると、タブ dispose 後も listener が残って
+  // destroyed grid に refreshForeignKeys が飛ぶ ("listener leak")。dispose()
+  // で必ず unsubscribe する。
+  const disposeInferFkPrefSub = outerDeps.onDbUiPrefChange(() => {
     applyInferFkBtnState();
     grid.refreshForeignKeys();
   });
@@ -482,17 +509,9 @@ function createTabPane(
     // inferFkRails が ON のときだけ Rails 命名規約由来の仮想 FK を上乗せ
     // する。実 FK と同じ (fromTable, fromColumn) があれば inference 側で
     // スキップされるので重複しない。
-    getForeignKeys: () => {
-      const real = schemaCache?.foreignKeys ?? [];
-      if (!outerDeps.getDbUiPref("inferFkRails", false)) return real;
-      if (!schemaCache) return real;
-      const inferred = inferRailsForeignKeys({
-        tables: schemaCache.tables,
-        columnsMap: schemaCache.columnsMap ?? {},
-        realForeignKeys: real,
-      });
-      return inferred.length > 0 ? [...real, ...inferred] : real;
-    },
+    // 推測は (schemaCache の identity) + (pref 値) を key に memoize する。
+    // 数百テーブル規模で getForeignKeys が render 毎に走るのを防ぐ。
+    getForeignKeys: () => getForeignKeysCached(),
     fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
       fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
     getRelatedPanelHeight: () => relatedPanelHeightPx,
@@ -1578,6 +1597,9 @@ function createTabPane(
   function dispose(): void {
     loadGeneration++;
     tableSelectGuard.dispose();
+    // pref listener を必ず外す。残ると destroyed grid に refreshForeignKeys
+    // が飛んで「detached DOM 書込み」になる。
+    disposeInferFkPrefSub();
     if (historyRefreshPending !== null) {
       clearTimeout(historyRefreshPending);
       historyRefreshPending = null;
@@ -1761,15 +1783,14 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       version: 1,
       columnWidths: { ...dbUiState.columnWidths, [dbId]: nextDb },
     };
+    // PATCH のレスポンスは local state には流し込まない: 連続書込時に古い
+    // レスポンスが後勝ちして新しいローカル値を巻き戻す race を避ける。サーバ
+    // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
     void fetch("/_db/ui", {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
-    })
-      .then(async (res) => {
-        if (res.ok) applyDbUiState((await res.json()) as DbUiState);
-      })
-      .catch(() => {});
+    }).catch(() => {});
   }
 
   // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
@@ -1793,15 +1814,13 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   ): void {
     const nextPrefs: DbUiPrefs = { ...(dbUiState.prefs ?? {}), [key]: value };
     applyDbUiState({ ...dbUiState, prefs: nextPrefs });
+    // PATCH のレスポンスは local state に再適用しない (setColumnWidths と
+    // 同様の race 対策)。
     void fetch("/_db/ui", {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ prefs: { [key]: value } }),
-    })
-      .then(async (res) => {
-        if (res.ok) applyDbUiState((await res.json()) as DbUiState);
-      })
-      .catch(() => {});
+    }).catch(() => {});
   }
   function onDbUiPrefChange(listener: (state: DbUiState) => void): () => void {
     dbUiPrefListeners.add(listener);

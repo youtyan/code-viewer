@@ -260,15 +260,17 @@ function safeObjectKey(value: string): string | null {
   return value;
 }
 
+// DbUiPrefs に新キーを増やすたびに sanitize/merge を両方触らないで済むよう、
+// boolean prefs キーを 1 か所で列挙する。テストもこの集合が完備していること
+// を前提にする (state-store-prefs.test.ts)。
+const DB_UI_BOOL_PREF_KEYS = ["s3TooltipEnabled", "inferFkRails"] as const;
+
 function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
   if (!isRecord(raw)) return undefined;
   const out: DbUiPrefs = {};
-  // boolean は明示 undefined と区別したいので、未指定なら省略する。
-  if (raw.s3TooltipEnabled === true || raw.s3TooltipEnabled === false) {
-    out.s3TooltipEnabled = raw.s3TooltipEnabled;
-  }
-  if (raw.inferFkRails === true || raw.inferFkRails === false) {
-    out.inferFkRails = raw.inferFkRails;
+  for (const key of DB_UI_BOOL_PREF_KEYS) {
+    const v = raw[key];
+    if (v === true || v === false) out[key] = v;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -320,17 +322,12 @@ function mergeDbUiPrefs(
 ): DbUiPrefs | undefined {
   if (!isRecord(patch)) return current;
   // patch 内で boolean が来てれば上書き、null なら削除、未指定なら維持。
+  // 新キーは DB_UI_BOOL_PREF_KEYS に追加するだけで両方に反映される。
   const next: DbUiPrefs = { ...(current ?? {}) };
-  if (patch.s3TooltipEnabled === null) delete next.s3TooltipEnabled;
-  else if (
-    patch.s3TooltipEnabled === true ||
-    patch.s3TooltipEnabled === false
-  ) {
-    next.s3TooltipEnabled = patch.s3TooltipEnabled;
-  }
-  if (patch.inferFkRails === null) delete next.inferFkRails;
-  else if (patch.inferFkRails === true || patch.inferFkRails === false) {
-    next.inferFkRails = patch.inferFkRails;
+  for (const key of DB_UI_BOOL_PREF_KEYS) {
+    const v = patch[key];
+    if (v === null) delete next[key];
+    else if (v === true || v === false) next[key] = v;
   }
   return Object.keys(next).length > 0 ? next : undefined;
 }

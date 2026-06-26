@@ -6509,26 +6509,17 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   position: relative;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
-  /* 高さは JS から style.height で設定 (永続化対応)。default 200px。 */
+  /* 高さは JS から style.height で設定 (永続化対応)。default 200px。
+     min-height は table-grid.ts の DETAIL_PANEL_MIN_HEIGHT と揃える
+     (40 → 40)。CSS 側を緩めにしておくと、ユーザーが 40px まで縮めた
+     のに描画は 80px のまま、永続化値と表示が食い違う回帰になる。 */
   height: 200px;
-  min-height: 80px;
+  min-height: 40px;
   overflow: auto;
   flex-shrink: 0;
 }
-/* 上端のドラッグハンドル。関連パネル (.db-related-resize) と同じ仕様。 */
-.db-grid-detail-resize {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 6px;
-  cursor: row-resize;
-  z-index: 2;
-}
-.db-grid-detail-resize:hover {
-  background: var(--accent, var(--border));
-  opacity: 0.4;
-}
+/* 上端のドラッグハンドル: detail フッタと関連パネルで共通。
+   .db-related-resize と同じセレクタ規則を共有する。 */
 
 .db-grid-detail-header {
   display: flex;
@@ -6617,7 +6608,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   overflow: hidden;
 }
 
-.db-related-resize {
+.db-related-resize,
+.db-grid-detail-resize {
   position: absolute;
   top: 0;
   left: 0;
@@ -6626,7 +6618,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   cursor: row-resize;
   z-index: 2;
 }
-.db-related-resize:hover {
+.db-related-resize:hover,
+.db-grid-detail-resize:hover {
   background: var(--accent, var(--border));
   opacity: 0.4;
 }
@@ -8445,32 +8438,11 @@ body.db-resizing {
 
 /* tooltip 切替トグル: bucketRow 内 (Bucket select + List/Explorer の下) の
    小さなボタン。active 時はアクセントで強調。 */
+/* s3 explorer の Hover preview トグル: 共通 .db-pref-toggle を併用する。
+   ここでは bucketRow (column flex) 内で stretch しないように align-self
+   だけ上書き。ラベルクラスも .db-pref-toggle-label と同等。 */
 .s3-tooltip-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: var(--db-font-sm);
   align-self: flex-start;
-}
-.s3-tooltip-toggle:hover {
-  background: var(--bg-hover, var(--bg-soft));
-}
-.s3-tooltip-toggle.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-}
-.s3-tooltip-toggle svg {
-  flex: 0 0 auto;
-}
-.s3-tooltip-toggle-label {
-  white-space: nowrap;
 }
 .s3-object-more-btn {
   padding: 6px;

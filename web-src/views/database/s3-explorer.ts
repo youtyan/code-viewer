@@ -34,6 +34,7 @@ import {
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { makePrefToggle } from "./pref-toggle";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
@@ -156,18 +157,17 @@ export function createS3Explorer(
   viewSeg.append(listViewBtn, explorerViewBtn);
   bucketRow.appendChild(viewSeg);
 
-  // ホバー tooltip ON/OFF。localStorage で永続化、default ON。画像プレビュー
-  // 込みで重く感じる場合のオフスイッチ。
-  const tooltipToggle = document.createElement("button");
-  tooltipToggle.type = "button";
-  tooltipToggle.className = "s3-tooltip-toggle";
-  tooltipToggle.title = "Toggle hover preview tooltip";
-  // 視認できるラベルも添える (sidebar 狭幅でもアイコンだけだと意味不明)。
-  tooltipToggle.innerHTML =
-    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">' +
-    '<path d="M8 3.5C4.5 3.5 1.7 5.7 0 8c1.7 2.3 4.5 4.5 8 4.5s6.3-2.2 8-4.5C14.3 5.7 11.5 3.5 8 3.5Zm0 7.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm0-4.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>' +
-    "</svg>" +
-    '<span class="s3-tooltip-toggle-label">Hover preview</span>';
+  // ホバー tooltip ON/OFF。db-ui.json の prefs.s3TooltipEnabled に永続化、
+  // default ON。画像プレビュー込みで重く感じる場合のオフスイッチ。共通の
+  // .db-pref-toggle スタイルを使い、bucketRow 内で stretch しないよう
+  // .s3-tooltip-toggle で align-self を上書き。
+  const tooltipToggle = makePrefToggle({
+    title: "Toggle hover preview tooltip",
+    label: "Hover preview",
+    pathD:
+      "M8 3.5C4.5 3.5 1.7 5.7 0 8c1.7 2.3 4.5 4.5 8 4.5s6.3-2.2 8-4.5C14.3 5.7 11.5 3.5 8 3.5Zm0 7.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm0-4.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z",
+    extraClass: "s3-tooltip-toggle",
+  });
   bucketRow.appendChild(tooltipToggle);
   sidebarSlot.appendChild(bucketRow);
 
@@ -366,11 +366,26 @@ export function createS3Explorer(
   }
 
   function hideKeyTooltip(): void {
+    if (tooltipShowTimer !== null) {
+      clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = null;
+    }
     keyTooltip.hidden = true;
   }
 
+  // 行の高速スイープでも `<img src>` が連発しないよう、表示を 150ms 遅らせる。
+  // 途中で mouseleave が来たら timer をクリアして画像取得自体を起こさない。
+  const TOOLTIP_SHOW_DELAY_MS = 150;
+  let tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
+
   function attachKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
-    row.addEventListener("mouseenter", () => showKeyTooltip(row, object));
+    row.addEventListener("mouseenter", () => {
+      if (tooltipShowTimer !== null) clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = setTimeout(() => {
+        tooltipShowTimer = null;
+        showKeyTooltip(row, object);
+      }, TOOLTIP_SHOW_DELAY_MS);
+    });
     row.addEventListener("mouseleave", hideKeyTooltip);
   }
 
@@ -1344,6 +1359,10 @@ export function createS3Explorer(
     clear();
     // body に attach した tooltip を取り除く。タブ切替で複数残ると DOM leak。
     keyTooltip.remove();
+    if (tooltipShowTimer !== null) {
+      clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = null;
+    }
   }
 
   setMode("prefix");
