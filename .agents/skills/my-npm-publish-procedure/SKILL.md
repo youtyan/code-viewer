@@ -72,6 +72,36 @@ git log --oneline <previous-tag>..HEAD
 git diff --name-status <previous-tag>..HEAD
 ```
 
+## Documentation Reflection Check
+
+Before any commit that goes into a release, tag, GitHub Release, or `npm publish`, confirm that user-facing documentation reflects what the code actually does in this release. Documentation drift reads as a bug: a feature renamed in code but still described under the old name in `README.md`, a configuration file removed from the implementation but still documented as required, or new CLI flags missing from the Help page all break user trust as soon as the package is installed.
+
+Required scan for every release:
+
+1. `README.md` at the repository root — Features list, Usage / CLI options, Repository View, Uploads/Scope Settings, Datastore Viewer, AI Code Annotations, Agent Skill, Development sections. Walk the release diff range and confirm each user-visible change is reflected.
+2. In-app Help page (`web-src/views/help-page.ts`) — **both** `en` and `ja` `HELP_CONTENT` entries. Sections covering CLI commands, datastore viewer UI, annotations, agent skill install, and keyboard shortcuts must match the implementation.
+3. Bundled Agent Skill files under `skills/code-viewer-*/SKILL.md` — if the CLI subcommands or flags they advertise changed, update them too.
+4. Any other doc file the diff touches: `AGENTS.md`, top-level `CLAUDE.md`, this `SKILL.md`. Do not assume "internal docs" are exempt — they ship in the repository.
+
+If any doc no longer matches the implementation:
+
+- Stop the release path.
+- Update the docs as part of the same release PR/commit set.
+- Re-run `bun run verify` and `npm pack --dry-run` so the updated docs ride into the published tarball.
+
+How to detect drift without re-reading everything:
+
+```sh
+# Implementation surfaces that almost always have user-facing docs
+git diff --name-only <previous-tag>..HEAD -- web-src/ scripts/ package.json | head -50
+# Doc surfaces — re-skim sections whose anchors mention changed features
+grep -nE '^(##|###) ' README.md
+```
+
+For each non-trivial implementation change in the diff, ask: does a section in `README.md`, the Help page, or a SKILL.md describe this surface? If yes, walk it and confirm parity. If no, decide whether one should be added before release.
+
+Do not skip this check because the README "looks fine" — the question is not whether the prose reads well, it is whether the README still matches what a fresh user will see after `npx @youtyan/code-viewer` against this version.
+
 ## First Publish
 
 The first publish creates the npm package page. Trusted Publisher setup may not be available before this.
@@ -179,7 +209,7 @@ Do not run `npm whoami`, `npm access list packages`, `npm view`, or `npm publish
 
 ## Verification
 
-Before reporting normal release readiness, verify local package shape and GitHub repository state:
+Before reporting normal release readiness, verify local package shape and GitHub repository state, **and** confirm the Documentation Reflection Check above has been run for the release diff range:
 
 ```sh
 bun run verify
@@ -187,6 +217,8 @@ npm pack --dry-run
 gh repo view youtyan/code-viewer --json defaultBranchRef,url
 git ls-remote --heads origin main
 ```
+
+If `bun run verify` or `npm pack --dry-run` was passing before a doc update was applied, re-run both after the update so the published tarball contains the corrected `README.md`.
 
 For first publish, Trusted Publisher setup, or npm-specific troubleshooting, additionally verify npm authentication/package access:
 
