@@ -122,6 +122,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "paragraph",
                 text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode.",
               },
+              {
+                kind: "paragraph",
+                text: "In large repositories the sidebar loads folder children on demand. Folders you open are remembered and automatically re-expanded after a reload.",
+              },
             ],
           },
         ],
@@ -582,6 +586,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。",
+              },
+              {
+                kind: "paragraph",
+                text: "大きいリポジトリではサイドバーがフォルダの中身を必要に応じて読み込みます。開いたフォルダは記憶され、次回のリロード時に同じ状態で展開し直されます。",
               },
             ],
           },

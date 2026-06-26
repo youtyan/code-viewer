@@ -118,6 +118,10 @@ The worktree is watched and changes are pushed to every open tab over SSE so
 files reload as you edit. When the OS file-watch limit is reached the viewer
 shows a banner so reloads are not silently missed.
 
+Large repositories load folder children on demand. The sidebar remembers which
+lazy-loaded folders you opened and re-expands them on the next reload, so the
+tree state survives navigation and refresh.
+
 ## Uploads and Scope Settings
 
 File uploads are available for the local worktree target by default. Git tree
