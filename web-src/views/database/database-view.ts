@@ -436,6 +436,7 @@ function createTabPane(
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
+    getText: () => paneText(),
   });
   const snapshotView = createSnapshotView({
     getDbId: () => currentDbInfo?.id || null,
@@ -1486,6 +1487,7 @@ function createTabPane(
     erDiagram.localize();
     historyView.localize();
     queryEditor.localize();
+    globalSearchView.localize();
   }
 
   return {

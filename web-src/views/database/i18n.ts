@@ -114,6 +114,27 @@ export type DbText = {
     loadError: string;
     renderError: string;
   };
+  // 全テーブル横断検索。
+  search: {
+    placeholder: string;
+    searchButton: string;
+    cancelButton: string;
+    includeNonText: string;
+    starting: string;
+    cancelled: string;
+    checkingTable: string;
+    error: (message: string) => string;
+    done: (tables: number, hits: number) => string;
+    progress: (
+      currentTable: string,
+      pct: number,
+      scanned: number,
+      total: number,
+      hits: number,
+    ) => string;
+    tableSection: (label: string, count: number) => string;
+    moreHits: (n: number) => string;
+  };
 };
 
 const EN: DbText = {
@@ -217,6 +238,21 @@ const EN: DbText = {
     loadError: "Failed to load mermaid.js",
     renderError: "Failed to render ER diagram.",
   },
+  search: {
+    placeholder: "Search across all tables…",
+    searchButton: "Search",
+    cancelButton: "Cancel",
+    includeNonText: " Also search numeric and date columns",
+    starting: "Starting search…",
+    cancelled: "Search cancelled.",
+    checkingTable: "checking tables",
+    error: (message) => `Error: ${message}`,
+    done: (tables, hits) => `Done. Found ${hits} hits in ${tables} tables.`,
+    progress: (currentTable, pct, scanned, total, hits) =>
+      `Searching… ${currentTable} (${pct}% - ${scanned}/${total} tables, ${hits} hits)`,
+    tableSection: (label, count) => `${label} (${count})`,
+    moreHits: (n) => `${n} more`,
+  },
 };
 
 const JA: DbText = {
@@ -319,6 +355,22 @@ const JA: DbText = {
     noTables: "表示できるテーブルがありません。",
     loadError: "mermaid.js の読み込みに失敗しました",
     renderError: "ER 図の描画に失敗しました。",
+  },
+  search: {
+    placeholder: "全テーブルを横断検索...",
+    searchButton: "検索",
+    cancelButton: "キャンセル",
+    includeNonText: " 数値・日付カラムも検索する",
+    starting: "検索を開始しています...",
+    cancelled: "検索をキャンセルしました。",
+    checkingTable: "対象テーブルを確認中",
+    error: (message) => `エラー: ${message}`,
+    done: (tables, hits) =>
+      `完了。${tables}テーブルから ${hits}件見つかりました。`,
+    progress: (currentTable, pct, scanned, total, hits) =>
+      `検索中... ${currentTable} (${pct}% - ${scanned}/${total}テーブル、${hits}件)`,
+    tableSection: (label, count) => `${label} (${count}件)`,
+    moreHits: (n) => `ほか ${n}件`,
   },
 };
 

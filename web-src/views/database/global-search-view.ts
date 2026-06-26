@@ -1,9 +1,11 @@
 import type { GlobalSearchHit } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import { type DbText, dbText } from "./i18n";
 
 export type GlobalSearchViewDeps = {
   getDbId: () => string | null;
   getSchema: () => string | null;
+  getText?: () => DbText;
 };
 
 export type GlobalSearchView = {
@@ -14,11 +16,13 @@ export type GlobalSearchView = {
   ) => void;
   getSearch: () => { term?: string; includeNonText?: boolean };
   dispose: () => void;
+  localize: () => void;
 };
 
 export function createGlobalSearchView(
   deps: GlobalSearchViewDeps,
 ): GlobalSearchView {
+  const text = (): DbText => deps.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-global-search";
 
@@ -28,17 +32,17 @@ export function createGlobalSearchView(
   const input = document.createElement("input");
   input.type = "text";
   input.className = "db-global-search-input";
-  input.placeholder = "全テーブルを横断検索...";
+  input.placeholder = text().search.placeholder;
 
   const searchBtn = document.createElement("button");
   searchBtn.type = "button";
   searchBtn.className = "db-global-search-btn";
-  searchBtn.textContent = "検索";
+  searchBtn.textContent = text().search.searchButton;
 
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
   cancelBtn.className = "db-global-search-cancel";
-  cancelBtn.textContent = "キャンセル";
+  cancelBtn.textContent = text().search.cancelButton;
   cancelBtn.hidden = true;
 
   const optionsRow = document.createElement("div");
@@ -46,7 +50,8 @@ export function createGlobalSearchView(
   const nonTextLabel = document.createElement("label");
   const nonTextCheck = document.createElement("input");
   nonTextCheck.type = "checkbox";
-  nonTextLabel.append(nonTextCheck, " 数値・日付カラムも検索する");
+  const nonTextText = document.createTextNode(text().search.includeNonText);
+  nonTextLabel.append(nonTextCheck, nonTextText);
   optionsRow.appendChild(nonTextLabel);
 
   header.append(input, searchBtn, cancelBtn);
@@ -84,7 +89,7 @@ export function createGlobalSearchView(
 
     results.innerHTML = "";
     progress.hidden = false;
-    progress.textContent = "検索を開始しています...";
+    progress.textContent = text().search.starting;
     searchBtn.disabled = true;
     input.disabled = true;
     cancelBtn.hidden = false;
@@ -104,7 +109,7 @@ export function createGlobalSearchView(
         }),
       });
       if (!res.ok) {
-        progress.textContent = `エラー: ${await res.text()}`;
+        progress.textContent = text().search.error(await res.text());
         stopPolling();
         return;
       }
@@ -116,7 +121,9 @@ export function createGlobalSearchView(
       currentJobId = data.jobId;
       pollTimer = setInterval(() => pollStatus(), 500);
     } catch (err) {
-      progress.textContent = `エラー: ${err instanceof Error ? err.message : String(err)}`;
+      progress.textContent = text().search.error(
+        err instanceof Error ? err.message : String(err),
+      );
       stopPolling();
     }
   }
@@ -143,7 +150,7 @@ export function createGlobalSearchView(
       if (disposed) return;
 
       if (data.error) {
-        progress.textContent = `エラー: ${data.error}`;
+        progress.textContent = text().search.error(data.error);
         stopPolling();
         return;
       }
@@ -153,8 +160,14 @@ export function createGlobalSearchView(
           ? Math.round((data.scannedTables / data.totalTables) * 100)
           : 0;
       progress.textContent = data.done
-        ? `完了。${data.scannedTables}テーブルから ${data.hits.length}件見つかりました。`
-        : `検索中... ${data.currentTable || "対象テーブルを確認中"} (${pct}% - ${data.scannedTables}/${data.totalTables}テーブル、${data.hits.length}件)`;
+        ? text().search.done(data.scannedTables, data.hits.length)
+        : text().search.progress(
+            data.currentTable || text().search.checkingTable,
+            pct,
+            data.scannedTables,
+            data.totalTables,
+            data.hits.length,
+          );
 
       renderHits(data.hits);
 
@@ -174,7 +187,7 @@ export function createGlobalSearchView(
     await cancelJob(jobId);
     stopPolling();
     if (disposed) return;
-    progress.textContent = "検索をキャンセルしました。";
+    progress.textContent = text().search.cancelled;
   }
 
   async function cancelJob(jobId: string) {
@@ -210,7 +223,10 @@ export function createGlobalSearchView(
 
       const tableHeader = document.createElement("div");
       tableHeader.className = "db-search-table-header";
-      tableHeader.textContent = `${tableLabel} (${tableHits.length}件)`;
+      tableHeader.textContent = text().search.tableSection(
+        tableLabel,
+        tableHits.length,
+      );
       section.appendChild(tableHeader);
 
       const hitsList = document.createElement("div");
@@ -235,7 +251,7 @@ export function createGlobalSearchView(
       if (tableHits.length > 100) {
         const more = document.createElement("div");
         more.className = "db-search-more";
-        more.textContent = `ほか ${tableHits.length - 100}件`;
+        more.textContent = text().search.moreHits(tableHits.length - 100);
         hitsList.appendChild(more);
       }
 
@@ -281,5 +297,13 @@ export function createGlobalSearchView(
     }
   }
 
-  return { el, setSearch, getSearch, dispose };
+  function localize(): void {
+    const t = text().search;
+    input.placeholder = t.placeholder;
+    searchBtn.textContent = t.searchButton;
+    cancelBtn.textContent = t.cancelButton;
+    nonTextText.textContent = t.includeNonText;
+  }
+
+  return { el, setSearch, getSearch, dispose, localize };
 }
