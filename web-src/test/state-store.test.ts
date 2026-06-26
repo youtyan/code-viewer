@@ -108,6 +108,7 @@ describe("state store", () => {
       expect(await loadViewState(dir)).toEqual({
         version: 1,
         collapsedDirs: [],
+        lazyExpandedDirs: [],
         viewedFiles: [],
       });
       expect(
@@ -118,6 +119,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "src"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "b.ts"],
       });
       expect(
@@ -130,6 +132,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "c.ts"],
       });
       expect(
@@ -142,6 +145,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "d.ts"],
       });
       expect(
@@ -152,6 +156,42 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // lazyExpandedDirs: add/remove と collapsedDirs との優先順位
+      // 入力に重複 "docs" を入れて keepLast で uniq されることも確認。
+      expect(
+        await patchViewState(dir, {
+          addedLazyExpandedDirs: ["docs", "apps", "docs"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: ["apps", "docs"],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // 同 path を collapsed と lazyExpanded 両方で渡すと collapsed が勝つ
+      expect(
+        await patchViewState(dir, {
+          addedCollapsedDirs: ["docs"],
+          addedLazyExpandedDirs: ["docs", "tools"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages", "docs"],
+        lazyExpandedDirs: ["apps", "tools"],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // 既存 lazyExpanded を removed で消せる
+      expect(
+        await patchViewState(dir, {
+          removedLazyExpandedDirs: ["apps"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages", "docs"],
+        lazyExpandedDirs: ["tools"],
         viewedFiles: ["a.ts", "d.ts"],
       });
     });

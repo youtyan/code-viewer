@@ -87,6 +87,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     historyWidth: number;
     sidebarHidden: boolean;
     collapsedDirs: Set<string>;
+    lazyExpandedDirs: Set<string>;
     ignoreWs: boolean;
     from: string;
     to: string;
@@ -126,6 +127,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   let VIEW_STATE: ViewState = {
     version: 1,
     collapsedDirs: [],
+    lazyExpandedDirs: [],
     viewedFiles: [],
   };
 
@@ -328,6 +330,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     removedViewedFiles?: string[];
     addedCollapsedDirs?: string[];
     removedCollapsedDirs?: string[];
+    addedLazyExpandedDirs?: string[];
+    removedLazyExpandedDirs?: string[];
   };
 
   function mergeLocalSettings(patch: SettingsPatch): void {
@@ -367,8 +371,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     next: ViewPatch,
     base: ViewPatch | null,
     patch: ViewPatch,
-    addKey: "addedViewedFiles" | "addedCollapsedDirs",
-    removeKey: "removedViewedFiles" | "removedCollapsedDirs",
+    addKey: "addedViewedFiles" | "addedCollapsedDirs" | "addedLazyExpandedDirs",
+    removeKey:
+      | "removedViewedFiles"
+      | "removedCollapsedDirs"
+      | "removedLazyExpandedDirs",
   ): void {
     const added = new Set(base?.[addKey] || []);
     const removed = new Set(base?.[removeKey] || []);
@@ -398,6 +405,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       "addedCollapsedDirs",
       "removedCollapsedDirs",
     );
+    mergePathDelta(
+      next,
+      base,
+      patch,
+      "addedLazyExpandedDirs",
+      "removedLazyExpandedDirs",
+    );
     return next;
   }
 
@@ -406,12 +420,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     for (const path of patch.addedViewedFiles || []) viewedFiles.add(path);
     for (const path of patch.removedViewedFiles || []) viewedFiles.delete(path);
     const collapsedDirs = new Set(state.collapsedDirs);
-    for (const path of patch.addedCollapsedDirs || []) collapsedDirs.add(path);
+    const lazyExpandedDirs = new Set(state.lazyExpandedDirs);
+    for (const path of patch.addedCollapsedDirs || []) {
+      collapsedDirs.add(path);
+      lazyExpandedDirs.delete(path);
+    }
     for (const path of patch.removedCollapsedDirs || [])
       collapsedDirs.delete(path);
+    for (const path of patch.addedLazyExpandedDirs || []) {
+      if (!collapsedDirs.has(path)) lazyExpandedDirs.add(path);
+    }
+    for (const path of patch.removedLazyExpandedDirs || [])
+      lazyExpandedDirs.delete(path);
     return {
       version: 1,
       collapsedDirs: [...collapsedDirs],
+      lazyExpandedDirs: [...lazyExpandedDirs],
       viewedFiles: [...viewedFiles],
     };
   }
@@ -647,6 +671,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.historyWidth = savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640);
     STATE.sidebarHidden = APP_SETTINGS.sidebarHidden === true;
     STATE.collapsedDirs = new Set(VIEW_STATE.collapsedDirs || []);
+    STATE.lazyExpandedDirs = new Set(VIEW_STATE.lazyExpandedDirs || []);
     STATE.viewedFiles = new Set(VIEW_STATE.viewedFiles || []);
     STATE.ignoreWs =
       APP_SETTINGS.ignoreWhitespace === undefined
@@ -687,6 +712,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       historyWidth: savedNumber(APP_SETTINGS.historyWidth, 320, 220, 640),
       sidebarHidden: APP_SETTINGS.sidebarHidden === true,
       collapsedDirs: new Set<string>(VIEW_STATE.collapsedDirs),
+      lazyExpandedDirs: new Set<string>(VIEW_STATE.lazyExpandedDirs),
       ignoreWs:
         APP_SETTINGS.ignoreWhitespace === undefined
           ? true
@@ -743,6 +769,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       patchViewState({
         addedCollapsedDirs: added,
         removedCollapsedDirs: removed,
+      });
+    },
+    persistLazyExpandedDirs: ({ added = [], removed = [] }) => {
+      if (added.length === 0 && removed.length === 0) return;
+      patchViewState({
+        addedLazyExpandedDirs: added,
+        removedLazyExpandedDirs: removed,
       });
     },
     appendScopeParams,

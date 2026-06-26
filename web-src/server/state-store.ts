@@ -111,7 +111,12 @@ function emptySettings(): AppSettingsState {
 }
 
 function emptyViewState(): ViewState {
-  return { version: 1, collapsedDirs: [], viewedFiles: [] };
+  return {
+    version: 1,
+    collapsedDirs: [],
+    lazyExpandedDirs: [],
+    viewedFiles: [],
+  };
 }
 
 function emptyDbUiState(): DbUiState {
@@ -209,6 +214,13 @@ function sanitizeViewState(raw: unknown): ViewState {
         keepLast: true,
         sort: false,
       }) ?? [],
+    lazyExpandedDirs:
+      normalizeStringList(raw.lazyExpandedDirs, {
+        maxItems: MAX_VIEW_ITEMS,
+        maxLen: MAX_KEY_LEN,
+        keepLast: true,
+        sort: false,
+      }) ?? [],
     viewedFiles:
       normalizeStringList(raw.viewedFiles, {
         maxItems: MAX_VIEW_ITEMS,
@@ -223,6 +235,7 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
   if (!isRecord(patch)) return current;
   const base = sanitizeViewState({ ...current, version: 1 });
   const collapsedDirs = new Set(base.collapsedDirs);
+  const lazyExpandedDirs = new Set(base.lazyExpandedDirs);
   const viewedFiles = new Set(base.viewedFiles);
   const addedCollapsedDirs = normalizeStringList(patch.addedCollapsedDirs, {
     maxItems: MAX_VIEW_ITEMS,
@@ -230,13 +243,40 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
     keepLast: true,
     sort: false,
   });
-  for (const path of addedCollapsedDirs || []) collapsedDirs.add(path);
+  for (const path of addedCollapsedDirs || []) {
+    collapsedDirs.add(path);
+    // collapsed が明示されたら lazyExpanded は意味を失う。
+    lazyExpandedDirs.delete(path);
+  }
   const removedCollapsedDirs = normalizeStringList(patch.removedCollapsedDirs, {
     maxItems: MAX_VIEW_ITEMS,
     maxLen: MAX_KEY_LEN,
     sort: false,
   });
   for (const path of removedCollapsedDirs || []) collapsedDirs.delete(path);
+  const addedLazyExpandedDirs = normalizeStringList(
+    patch.addedLazyExpandedDirs,
+    {
+      maxItems: MAX_VIEW_ITEMS,
+      maxLen: MAX_KEY_LEN,
+      keepLast: true,
+      sort: false,
+    },
+  );
+  for (const path of addedLazyExpandedDirs || []) {
+    // 同時に collapsed として渡されていなければ追加。
+    if (!collapsedDirs.has(path)) lazyExpandedDirs.add(path);
+  }
+  const removedLazyExpandedDirs = normalizeStringList(
+    patch.removedLazyExpandedDirs,
+    {
+      maxItems: MAX_VIEW_ITEMS,
+      maxLen: MAX_KEY_LEN,
+      sort: false,
+    },
+  );
+  for (const path of removedLazyExpandedDirs || [])
+    lazyExpandedDirs.delete(path);
   const addedViewedFiles = normalizeStringList(patch.addedViewedFiles, {
     maxItems: MAX_VIEW_ITEMS,
     maxLen: MAX_KEY_LEN,
@@ -253,6 +293,7 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
   return sanitizeViewState({
     version: 1,
     collapsedDirs: [...collapsedDirs],
+    lazyExpandedDirs: [...lazyExpandedDirs],
     viewedFiles: [...viewedFiles],
   });
 }

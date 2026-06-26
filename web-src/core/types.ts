@@ -110,6 +110,7 @@ export type AppSettingsState = {
 export type ViewState = {
   version: 1;
   collapsedDirs: string[];
+  lazyExpandedDirs: string[];
   viewedFiles: string[];
 };
 

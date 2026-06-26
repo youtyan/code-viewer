@@ -40,6 +40,7 @@ export type SidebarDeps = {
     activeFile: string | null;
     hideTests: boolean;
     viewedFiles: Set<string>;
+    lazyExpandedDirs: Set<string>;
   };
   scrollToFile(path: string, line?: unknown): void;
   prefetchByPath(path: string): void;
@@ -47,6 +48,10 @@ export type SidebarDeps = {
   fileEntryIcon(): string;
   applyViewedState(): void;
   persistCollapsedDirs(patch: { added?: string[]; removed?: string[] }): void;
+  persistLazyExpandedDirs(patch: {
+    added?: string[];
+    removed?: string[];
+  }): void;
   appendScopeParams(params: URLSearchParams): void;
   createOpenPathButton(
     path: string,
@@ -78,6 +83,7 @@ export function createSidebar(deps: SidebarDeps) {
     fileEntryIcon,
     applyViewedState,
     persistCollapsedDirs,
+    persistLazyExpandedDirs,
     appendScopeParams,
     createOpenPathButton,
     normalizeViewerFontSize,
@@ -541,6 +547,23 @@ export function createSidebar(deps: SidebarDeps) {
     );
   }
 
+  // lazyExpandedDirs は「リロード後に再現したい (=hydrate で fetch する)」意図の
+  // 永続化用 Positive Set。見た目 (effectiveCollapsed) には混ぜない。混ぜると
+  // 「lazyExpanded だが load まだ → 展開表示 / 中身ゼロ」というバグが再発する。
+  // 見た目は「閉じてる / 開いてる」の二択で、lazy 完了で SIDEBAR_LAZY_LOADED_DIRS
+  // に入った dir は shouldLazyLoadSidebarDir が false に転じ、自然に展開表示。
+  function dirEffectiveCollapsed(dir: TreeNode) {
+    const userCollapsed = STATE.collapsedDirs.has(dir.path);
+    const userLazyExpanded = STATE.lazyExpandedDirs.has(dir.path);
+    const lazyNotLoaded = shouldLazyLoadSidebarDir(dir);
+    return {
+      userCollapsed,
+      userLazyExpanded,
+      lazyNotLoaded,
+      effectiveCollapsed: userCollapsed || lazyNotLoaded,
+    };
+  }
+
   function upsertSidebarTreeEntry(entry: SidebarItem, order: number) {
     if (!SIDEBAR_TREE_ROOT) return;
     const parts = entry.path.split("/").filter(Boolean);
@@ -690,25 +713,51 @@ export function createSidebar(deps: SidebarDeps) {
     const toggleDir = async (e: Event) => {
       e.stopPropagation();
       if (li.dataset.toggling === "true") return;
-      const expanding = li.classList.contains("collapsed");
       li.dataset.toggling = "true";
       try {
-        if (expanding) await ensureVirtualSidebarDirLoaded(dir);
-        li.classList.toggle("collapsed");
-        updateIcon();
-        if (li.classList.contains("collapsed")) {
-          STATE.collapsedDirs.add(dir.path);
-          persistCollapsedDirs({ added: [dir.path] });
+        // snapshot 取得は await の前。await 中に rerender が走っても
+        // この時点の意図 (開く/閉じる) を取り違えない。
+        const snap = dirEffectiveCollapsed(dir);
+        const expanding = snap.effectiveCollapsed;
+        if (expanding && snap.lazyNotLoaded)
+          await ensureVirtualSidebarDirLoaded(dir);
+        if (expanding) {
+          // 「開く」方向
+          if (snap.userCollapsed) {
+            STATE.collapsedDirs.delete(dir.path);
+            persistCollapsedDirs({ removed: [dir.path] });
+          }
+          // ユーザーが明示的に開いた lazy dir はリロード後も再現したいので
+          // lazyExpandedDirs にも記録する。lazy 対象でない通常 dir は
+          // collapsedDirs から消すだけで default-open に戻るので不要。
+          if (snap.lazyNotLoaded && !snap.userLazyExpanded) {
+            STATE.lazyExpandedDirs.add(dir.path);
+            persistLazyExpandedDirs({ added: [dir.path] });
+          }
+          li.classList.remove("collapsed");
         } else {
-          STATE.collapsedDirs.delete(dir.path);
-          persistCollapsedDirs({ removed: [dir.path] });
+          // 「閉じる」方向
+          if (!snap.userCollapsed) {
+            STATE.collapsedDirs.add(dir.path);
+            persistCollapsedDirs({ added: [dir.path] });
+          }
+          // 明示的に閉じたので lazyExpandedDirs の記録は破棄。
+          if (snap.userLazyExpanded) {
+            STATE.lazyExpandedDirs.delete(dir.path);
+            persistLazyExpandedDirs({ removed: [dir.path] });
+          }
+          li.classList.add("collapsed");
         }
+        updateIcon();
         rerenderVirtualSidebar();
       } finally {
         delete li.dataset.toggling;
       }
     };
-    li.classList.toggle("collapsed", STATE.collapsedDirs.has(dir.path));
+    li.classList.toggle(
+      "collapsed",
+      dirEffectiveCollapsed(dir).effectiveCollapsed,
+    );
     updateIcon();
     if (!dir.children_omitted) {
       chev.addEventListener("click", toggleDir);
@@ -839,9 +888,14 @@ export function createSidebar(deps: SidebarDeps) {
       for (const item of treeNodeItems(node)) {
         if (item.kind === "dir") {
           const dirMatches = filterActive && matches(item.dir.path);
+          const eff = dirEffectiveCollapsed(item.dir);
+          // filter 中はユーザー collapsed を無視してマッチ祖先を見えるようにする
+          // 既存挙動を維持。ただし lazy 未ロードはそもそも子データがメモリに
+          // 無いので展開できない (filterActive でも閉じる)。
           const expanded =
             !item.dir.children_omitted &&
-            (filterActive || !STATE.collapsedDirs.has(item.dir.path));
+            !eff.lazyNotLoaded &&
+            (filterActive ? !eff.userCollapsed : !eff.effectiveCollapsed);
           const child = walk(item.dir, depth + 1);
           const visible =
             item.dir.explicit && !filterActive
@@ -976,6 +1030,40 @@ export function createSidebar(deps: SidebarDeps) {
       ?.addEventListener("scroll", renderVirtualSidebarWindow, {
         passive: true,
       });
+    hydrateLazyExpandedDirs();
+  }
+
+  // 起動直後に lazyExpandedDirs に乗っている dir (前回ユーザーが開いた lazy dir)
+  // の子を fetch して展開状態を再現する。fetch 完了ごとに rerender して
+  // 開いた dir から順に中身が現れる。SIDEBAR_TREE_ROOT が差し替わったら
+  // (例: ref 切替) 古い hydrate の続きは捨てる。
+  function hydrateLazyExpandedDirs() {
+    if (!SIDEBAR_TREE_ROOT) return;
+    if (STATE.lazyExpandedDirs.size === 0) return;
+    const root = SIDEBAR_TREE_ROOT;
+    const visit = async (node: TreeNode) => {
+      if (SIDEBAR_TREE_ROOT !== root) return;
+      const tasks: Promise<void>[] = [];
+      for (const child of Object.values(node.dirs)) {
+        if (child.children_omitted) continue;
+        if (
+          STATE.lazyExpandedDirs.has(child.path) &&
+          shouldLazyLoadSidebarDir(child)
+        ) {
+          tasks.push(
+            ensureVirtualSidebarDirLoaded(child).then(() => {
+              if (SIDEBAR_TREE_ROOT !== root) return;
+              rerenderVirtualSidebar();
+              return visit(child);
+            }),
+          );
+        } else {
+          tasks.push(visit(child));
+        }
+      }
+      await Promise.all(tasks);
+    };
+    void visit(root);
   }
 
   function renderFlat(
@@ -1069,19 +1157,39 @@ export function createSidebar(deps: SidebarDeps) {
 
   function setAllSidebarDirsCollapsed(collapsed: boolean) {
     const before = new Set(STATE.collapsedDirs);
+    const beforeLazyExpanded = new Set(STATE.lazyExpandedDirs);
     if (!collapsed) STATE.collapsedDirs.clear();
     if ($("#filelist").classList.contains("tree-virtual")) {
       const added: string[] = [];
+      const addedLazyExpanded: string[] = [];
       if (collapsed) {
+        // Collapse all: 全 dir を collapsedDirs に積み、lazyExpandedDirs は破棄。
         for (const row of SIDEBAR_TREE_ROWS) {
           if (row.kind !== "dir") continue;
           if (!STATE.collapsedDirs.has(row.path)) added.push(row.path);
           STATE.collapsedDirs.add(row.path);
         }
+        STATE.lazyExpandedDirs.clear();
+      } else {
+        // Expand all: 現在メモリ上にある全 dir を「ユーザーが明示的に開いた」と
+        // みなして lazyExpandedDirs に記録する。これでリロードしても展開状態が
+        // 再現される (lazy 未ロード dir はリロード後 lazyExpandedDirs から
+        // hydrate される)。
+        for (const row of SIDEBAR_TREE_ROWS) {
+          if (row.kind !== "dir" || !row.dir) continue;
+          if (row.dir.children_omitted) continue;
+          if (!STATE.lazyExpandedDirs.has(row.path))
+            addedLazyExpanded.push(row.path);
+          STATE.lazyExpandedDirs.add(row.path);
+        }
       }
       persistCollapsedDirs({
         added,
         removed: collapsed ? [] : [...before],
+      });
+      persistLazyExpandedDirs({
+        added: addedLazyExpanded,
+        removed: collapsed ? [...beforeLazyExpanded] : [],
       });
       rerenderVirtualSidebar();
       return;
@@ -1106,17 +1214,34 @@ export function createSidebar(deps: SidebarDeps) {
 
   function expandSidebarAncestors(path: string) {
     if (!isSidebarTreeRendered()) return;
-    let changed = false;
-    for (const dir of sidebarAncestorDirs(path)) {
-      if (STATE.collapsedDirs.delete(dir)) changed = true;
-      const row = document.querySelector<HTMLElement>(
+    const ancestors = sidebarAncestorDirs(path);
+    let collapsedChanged = false;
+    const lazyExpandedAdded: string[] = [];
+    for (const dir of ancestors) {
+      if (STATE.collapsedDirs.delete(dir)) collapsedChanged = true;
+      // route reveal で開いた祖先がもし lazy 対象なら、リロード後も
+      // 同じ位置を辿れるよう lazyExpandedDirs にも記録しておく。
+      // (lazy 対象判定には TreeNode が要るので row 経由で参照する。)
+      const row = SIDEBAR_ROW_BY_PATH.get(dir);
+      if (
+        row?.dir &&
+        !row.dir.children_omitted &&
+        shouldLazyLoadSidebarDir(row.dir) &&
+        !STATE.lazyExpandedDirs.has(dir)
+      ) {
+        STATE.lazyExpandedDirs.add(dir);
+        lazyExpandedAdded.push(dir);
+      }
+      const liEl = document.querySelector<HTMLElement>(
         `#filelist .tree-dir[data-dirpath="${CSS.escape(dir)}"]`,
       );
-      row?.classList.remove("collapsed");
-      const icon = row?.querySelector<HTMLElement>(".dir-icon");
+      liEl?.classList.remove("collapsed");
+      const icon = liEl?.querySelector<HTMLElement>(".dir-icon");
       if (icon) setFolderIcon(icon, false);
     }
-    if (changed) persistCollapsedDirs({ removed: sidebarAncestorDirs(path) });
+    if (collapsedChanged) persistCollapsedDirs({ removed: ancestors });
+    if (lazyExpandedAdded.length > 0)
+      persistLazyExpandedDirs({ added: lazyExpandedAdded });
     rerenderVirtualSidebar();
   }
 
@@ -1512,13 +1637,35 @@ export function createSidebar(deps: SidebarDeps) {
     if (isVirtualSidebarActive()) {
       const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
       if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted) return;
-      if (STATE.collapsedDirs.has(row.path) === collapsed) return;
+      const snap = dirEffectiveCollapsed(row.dir);
+      if (snap.effectiveCollapsed === collapsed) return;
       if (collapsed) {
-        STATE.collapsedDirs.add(row.path);
-        persistCollapsedDirs({ added: [row.path] });
+        // 「閉じる」: collapsedDirs に積む & lazyExpanded は破棄。
+        if (!snap.userCollapsed) {
+          STATE.collapsedDirs.add(row.path);
+          persistCollapsedDirs({ added: [row.path] });
+        }
+        if (snap.userLazyExpanded) {
+          STATE.lazyExpandedDirs.delete(row.path);
+          persistLazyExpandedDirs({ removed: [row.path] });
+        }
       } else {
-        STATE.collapsedDirs.delete(row.path);
-        persistCollapsedDirs({ removed: [row.path] });
+        // 「開く」: user collapsed なら剥がす。lazy 未ロードなら lazyExpanded
+        // に記録し、子を fetch してから rerender し直す。
+        if (snap.userCollapsed) {
+          STATE.collapsedDirs.delete(row.path);
+          persistCollapsedDirs({ removed: [row.path] });
+        }
+        if (snap.lazyNotLoaded && !snap.userLazyExpanded) {
+          STATE.lazyExpandedDirs.add(row.path);
+          persistLazyExpandedDirs({ added: [row.path] });
+        }
+        if (snap.lazyNotLoaded) {
+          void ensureVirtualSidebarDirLoaded(row.dir).then(() => {
+            rerenderVirtualSidebar();
+            scrollVirtualSidebarPathIntoView(row.path);
+          });
+        }
       }
       rerenderVirtualSidebar();
       scrollVirtualSidebarPathIntoView(row.path);
@@ -1537,7 +1684,8 @@ export function createSidebar(deps: SidebarDeps) {
     if (isVirtualSidebarActive()) {
       const row = SIDEBAR_VISIBLE_ROWS[virtualSidebarActiveIndex()];
       if (row?.kind !== "dir" || !row.dir || row.dir.children_omitted) return;
-      setActiveSidebarDirectoryCollapsed(!STATE.collapsedDirs.has(row.path));
+      const snap = dirEffectiveCollapsed(row.dir);
+      setActiveSidebarDirectoryCollapsed(!snap.effectiveCollapsed);
       return;
     }
     const active = document.querySelector<HTMLElement>(
