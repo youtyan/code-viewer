@@ -16,8 +16,14 @@ const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
 const RELATED_PANEL_DEFAULT_HEIGHT = 320;
-const RELATED_PANEL_MIN_HEIGHT = 140;
-const RELATED_PANEL_MAX_HEIGHT = 700;
+const RELATED_PANEL_MIN_HEIGHT = 60;
+const DETAIL_PANEL_DEFAULT_HEIGHT = 200;
+const DETAIL_PANEL_MIN_HEIGHT = 40;
+// MAX は画面サイズに追従する (parent.clientHeight - 余白)。固定値だと
+// 大画面で 700 が窮屈、小画面で 700 がはみ出る。reserve は「グリッド上部の
+// 最低残し量」。resize handle 自体は panel 上端にあるので、reserve が極小でも
+// ハンドル自体は掴める。
+const PANEL_MAX_RESERVE = 20;
 
 export type GridSort = {
   column: string;
@@ -85,6 +91,10 @@ export type TableGridCallbacks = {
   getRelatedPanelHeight?: () => number | null;
   /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
   setRelatedPanelHeight?: (height: number) => void;
+  /** セル詳細フッタの保存済み高さ(px)。 */
+  getDetailPanelHeight?: () => number | null;
+  /** セル詳細フッタをリサイズしたとき高さ(px)を保存する。 */
+  setDetailPanelHeight?: (height: number) => void;
   /** 現在の言語設定に応じたローカライズ文言を返す。 */
   getText?: () => DbText;
 };
@@ -208,9 +218,72 @@ export function createTableGrid(
   const detailPanel = document.createElement("div");
   detailPanel.className = "db-grid-detail-panel";
   detailPanel.hidden = true;
+  // 上端ドラッグハンドル。関連パネル (.db-related-resize) と同じ構造で、
+  // ドラッグ確定時にコールバック経由でタブ状態へ保存する。
+  const detailResize = document.createElement("div");
+  detailResize.className = "db-grid-detail-resize";
+  detailResize.addEventListener("mousedown", startDetailResize);
+  detailPanel.appendChild(detailResize);
 
   viewport.append(spacer, body);
   el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
+
+  // セル詳細フッタの高さ (関連パネルと同じ persist 経路)。embedded の埋め込み
+  // グリッドでは詳細フッタは出ないので初期化のみで参照されない。
+  // pane の MAX は実機の el の高さに合わせて毎回算出する (window resize にも
+  // ある程度追従)。fallback で window.innerHeight を使う。
+  function panelMaxHeight(): number {
+    const containerH = el.clientHeight || window.innerHeight;
+    return Math.max(
+      DETAIL_PANEL_MIN_HEIGHT + 1,
+      containerH - PANEL_MAX_RESERVE,
+    );
+  }
+  const savedDetailHeight = embedded
+    ? null
+    : (callbacks.getDetailPanelHeight?.() ?? null);
+  let detailHeight =
+    savedDetailHeight != null
+      ? Math.max(
+          DETAIL_PANEL_MIN_HEIGHT,
+          Math.min(panelMaxHeight(), savedDetailHeight),
+        )
+      : DETAIL_PANEL_DEFAULT_HEIGHT;
+  detailPanel.style.height = `${detailHeight}px`;
+  // ドラッグ中の window リスナーを teardown 時に外せるよう保持。
+  let detailResizeCleanup: (() => void) | null = null;
+
+  // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
+  // ので、resize 以外の子だけ削除するヘルパを通す。
+  function clearDetailContent() {
+    for (const child of Array.from(detailPanel.children)) {
+      if (child !== detailResize) child.remove();
+    }
+  }
+
+  function startDetailResize(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = detailHeight;
+    const onMove = (ev: MouseEvent) => {
+      // 上端ハンドル: 上にドラッグすると高くなる。
+      const delta = startY - ev.clientY;
+      detailHeight = Math.max(
+        DETAIL_PANEL_MIN_HEIGHT,
+        Math.min(panelMaxHeight(), startHeight + delta),
+      );
+      detailPanel.style.height = `${detailHeight}px`;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      detailResizeCleanup = null;
+      callbacks.setDetailPanelHeight?.(detailHeight);
+    };
+    detailResizeCleanup = onUp;
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   let currentTable = "";
   let columns: DbColumn[] = [];
@@ -272,7 +345,7 @@ export function createTableGrid(
     savedRelatedHeight != null
       ? Math.max(
           RELATED_PANEL_MIN_HEIGHT,
-          Math.min(RELATED_PANEL_MAX_HEIGHT, savedRelatedHeight),
+          Math.min(panelMaxHeight(), savedRelatedHeight),
         )
       : RELATED_PANEL_DEFAULT_HEIGHT;
   if (!embedded) {
@@ -378,7 +451,7 @@ export function createTableGrid(
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
     detailPanel.hidden = true;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
   }
 
   function startNewLoadGeneration() {
@@ -434,7 +507,7 @@ export function createTableGrid(
     closeExportMenu();
     hideRelatedPanel();
     detailPanel.hidden = true;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
     colWidths.clear();
   }
 
@@ -629,7 +702,7 @@ export function createTableGrid(
       const delta = startY - ev.clientY;
       relatedHeight = Math.max(
         RELATED_PANEL_MIN_HEIGHT,
-        Math.min(RELATED_PANEL_MAX_HEIGHT, startHeight + delta),
+        Math.min(panelMaxHeight(), startHeight + delta),
       );
       if (relatedPanel) relatedPanel.style.height = `${relatedHeight}px`;
     };
@@ -827,7 +900,7 @@ export function createTableGrid(
     // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
     hideRelatedPanel();
     detailPanel.hidden = false;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
 
     const header = document.createElement("div");
     header.className = "db-grid-detail-header";
@@ -1375,6 +1448,8 @@ export function createTableGrid(
     embeddedGrid?.destroy();
     embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
+    // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。
+    detailResizeCleanup?.();
   }
 
   /** 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。 */

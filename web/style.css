@@ -6431,11 +6431,28 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-grid-detail-panel {
+  position: relative;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
-  max-height: 200px;
+  /* 高さは JS から style.height で設定 (永続化対応)。default 200px。 */
+  height: 200px;
+  min-height: 80px;
   overflow: auto;
   flex-shrink: 0;
+}
+/* 上端のドラッグハンドル。関連パネル (.db-related-resize) と同じ仕様。 */
+.db-grid-detail-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 2;
+}
+.db-grid-detail-resize:hover {
+  background: var(--accent, var(--border));
+  opacity: 0.4;
 }
 
 .db-grid-detail-header {

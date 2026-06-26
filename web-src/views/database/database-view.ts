@@ -317,6 +317,13 @@ function createTabPane(
     const n = Number.parseInt(raw, 10);
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
+  // セル詳細フッタの高さ(px)。同じく per-tab 永続化。
+  let detailPanelHeightPx: number | null = (() => {
+    const raw = initial.detailPanelHeight;
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
 
   // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
@@ -422,6 +429,11 @@ function createTabPane(
     getRelatedPanelHeight: () => relatedPanelHeightPx,
     setRelatedPanelHeight: (h) => {
       relatedPanelHeightPx = h;
+      cb.onStateChange();
+    },
+    getDetailPanelHeight: () => detailPanelHeightPx,
+    setDetailPanelHeight: (h) => {
+      detailPanelHeightPx = h;
       cb.onStateChange();
     },
     getText: () => paneText(),
@@ -1410,6 +1422,8 @@ function createTabPane(
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
     if (relatedPanelHeightPx != null)
       state.relatedPanelHeight = `${relatedPanelHeightPx}px`;
+    if (detailPanelHeightPx != null)
+      state.detailPanelHeight = `${detailPanelHeightPx}px`;
 
     if (!loaded) {
       if (initial.redis) state.redis = initial.redis;
@@ -2165,6 +2179,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         historyHeight: initial?.historyHeight,
         sidebarWidth: initial?.sidebarWidth,
         relatedPanelHeight: initial?.relatedPanelHeight,
+        detailPanelHeight: initial?.detailPanelHeight,
         redis: initial?.redis,
         es: initial?.es,
         s3: initial?.s3,
