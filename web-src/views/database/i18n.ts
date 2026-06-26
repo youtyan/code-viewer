@@ -135,6 +135,45 @@ export type DbText = {
     tableSection: (label: string, count: number) => string;
     moreHits: (n: number) => string;
   };
+  // スナップショット & 差分。
+  snapshot: {
+    guideTitle: string;
+    guideBody: string;
+    create: string;
+    refresh: string;
+    cancel: string;
+    cancelling: string;
+    creating: string;
+    selectTablesHeader: string;
+    selectAll: string;
+    deselectAll: string;
+    notePlaceholder: string;
+    noteLabel: string;
+    confirm: string;
+    empty: string;
+    editNote: string;
+    delete: string;
+    deleteConfirm: string;
+    diffManual: string;
+    comparing: string;
+    calculatingDiff: string;
+    diffError: string;
+    noChanges: string;
+    before: string;
+    loading: string;
+    loadError: string;
+    saveNote: string;
+    noteInputPlaceholder: string;
+    inserted: string;
+    updated: string;
+    deleted: string;
+    tableCount: (n: number) => string;
+    rowCount: (n: number) => string;
+    listTitle: (n: number) => string;
+    diffSummary: (changed: number, unchanged: number) => string;
+    showingRows: (shown: number, total: number) => string;
+    label: (date: string, tables: number, note: string) => string;
+  };
 };
 
 const EN: DbText = {
@@ -252,6 +291,47 @@ const EN: DbText = {
       `Searching… ${currentTable} (${pct}% - ${scanned}/${total} tables, ${hits} hits)`,
     tableSection: (label, count) => `${label} (${count})`,
     moreHits: (n) => `${n} more`,
+  },
+  snapshot: {
+    guideTitle: "Snapshot diff",
+    guideBody:
+      "① Take a snapshot → ② run your app or tests against the DB → ③ take another snapshot to see the diff automatically.",
+    create: "Take snapshot",
+    refresh: "Refresh",
+    cancel: "Cancel",
+    cancelling: "Cancelling…",
+    creating: "Taking…",
+    selectTablesHeader: "Select target tables",
+    selectAll: "Select all",
+    deselectAll: "Deselect all",
+    notePlaceholder: "e.g. before user-signup test",
+    noteLabel: "Note",
+    confirm: "Start",
+    empty: 'No snapshots yet. Start with "Take snapshot".',
+    editNote: "Note",
+    delete: "Delete",
+    deleteConfirm: "Confirm delete",
+    diffManual: "Check diff manually",
+    comparing: "Comparing…",
+    calculatingDiff: "Computing diff…",
+    diffError: "Failed to compute diff",
+    noChanges: "No changes detected.",
+    before: "Before",
+    loading: "Loading…",
+    loadError: "Failed to load",
+    saveNote: "Save",
+    noteInputPlaceholder: "Enter a note",
+    inserted: "Added",
+    updated: "Updated",
+    deleted: "Deleted",
+    tableCount: (n) => `${n} tables`,
+    rowCount: (n) => ` (${n})`,
+    listTitle: (n) => `Snapshots (${n})`,
+    diffSummary: (changed, unchanged) =>
+      `${changed} tables changed` +
+      (unchanged > 0 ? `, ${unchanged} unchanged` : ""),
+    showingRows: (shown, total) => `Showing ${shown} of ${total}`,
+    label: (date, tables, note) => `${date} (${tables} tables)${note}`,
   },
 };
 
@@ -371,6 +451,48 @@ const JA: DbText = {
       `検索中... ${currentTable} (${pct}% - ${scanned}/${total}テーブル、${hits}件)`,
     tableSection: (label, count) => `${label} (${count}件)`,
     moreHits: (n) => `ほか ${n}件`,
+  },
+  snapshot: {
+    guideTitle: "スナップショット差分",
+    guideBody:
+      "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます",
+    create: "スナップショット取得",
+    refresh: "更新",
+    cancel: "キャンセル",
+    cancelling: "キャンセル中...",
+    creating: "取得中...",
+    selectTablesHeader: "対象テーブルを選択",
+    selectAll: "すべて選択",
+    deselectAll: "選択解除",
+    notePlaceholder: "例: ユーザー登録テスト前",
+    noteLabel: "メモ",
+    confirm: "取得開始",
+    empty:
+      "まだスナップショットがありません。「スナップショット取得」で開始します。",
+    editNote: "メモ",
+    delete: "削除",
+    deleteConfirm: "削除を確認",
+    diffManual: "手動で差分チェック",
+    comparing: "比較中...",
+    calculatingDiff: "差分を計算中...",
+    diffError: "差分の計算に失敗しました",
+    noChanges: "変更は検出されませんでした。",
+    before: "更新前",
+    loading: "読み込み中...",
+    loadError: "読み込みに失敗しました",
+    saveNote: "保存",
+    noteInputPlaceholder: "メモを入力",
+    inserted: "追加",
+    updated: "更新",
+    deleted: "削除",
+    tableCount: (n) => `${n}テーブル`,
+    rowCount: (n) => ` (${n}件)`,
+    listTitle: (n) => `スナップショット (${n}件)`,
+    diffSummary: (changed, unchanged) =>
+      `${changed}テーブルに変更あり` +
+      (unchanged > 0 ? `、${unchanged}テーブルは変更なし` : ""),
+    showingRows: (shown, total) => `全${total}件中 ${shown}件を表示中`,
+    label: (date, tables, note) => `${date} (${tables}テーブル)${note}`,
   },
 };
 

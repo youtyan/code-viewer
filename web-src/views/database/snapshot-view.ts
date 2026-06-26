@@ -5,11 +5,13 @@ import type {
   SnapshotMeta,
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import { type DbText, dbText } from "./i18n";
 
 export type SnapshotViewDeps = {
   getDbId: () => string | null;
   getSchema: () => string | null;
   getTables: () => DbTableInfo[];
+  getText?: () => DbText;
 };
 
 export type SnapshotView = {
@@ -17,19 +19,8 @@ export type SnapshotView = {
   refresh: () => void;
   handleSse: (data: string) => void;
   dispose: () => void;
+  localize: () => void;
 };
-
-function changeTypeLabel(type: SnapshotDiffRow["changeType"]): string {
-  if (type === "inserted") return "追加";
-  if (type === "updated") return "更新";
-  return "削除";
-}
-
-function snapshotLabel(s: SnapshotMeta): string {
-  const date = new Date(s.createdAt).toLocaleString();
-  const note = s.note ? ` — ${s.note}` : "";
-  return `${date} (${s.tables.length}テーブル)${note}`;
-}
 
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -50,6 +41,17 @@ function postJson(path: string, body: unknown): Promise<Response> {
 }
 
 export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
+  const text = (): DbText => deps.getText?.() ?? dbText("en");
+  const changeTypeLabel = (type: SnapshotDiffRow["changeType"]): string => {
+    if (type === "inserted") return text().snapshot.inserted;
+    if (type === "updated") return text().snapshot.updated;
+    return text().snapshot.deleted;
+  };
+  const snapshotLabel = (s: SnapshotMeta): string => {
+    const date = new Date(s.createdAt).toLocaleString();
+    const note = s.note ? ` — ${s.note}` : "";
+    return text().snapshot.label(date, s.tables.length, note);
+  };
   const el = document.createElement("div");
   el.className = "db-snapshot-view";
 
@@ -57,11 +59,10 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   guide.className = "db-snapshot-guide";
   const guideTitle = document.createElement("div");
   guideTitle.className = "db-snapshot-guide-title";
-  guideTitle.textContent = "スナップショット差分";
+  guideTitle.textContent = text().snapshot.guideTitle;
   const guideBody = document.createElement("div");
   guideBody.className = "db-snapshot-guide-body";
-  guideBody.textContent =
-    "① スナップショット取得 → ② アプリやテストでDB操作 → ③ もう一度取得すると自動で差分表示されます";
+  guideBody.textContent = text().snapshot.guideBody;
   guide.append(guideTitle, guideBody);
 
   const toolbar = document.createElement("div");
@@ -70,17 +71,17 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
   const createBtn = document.createElement("button");
   createBtn.type = "button";
   createBtn.className = "db-snapshot-create-btn";
-  createBtn.textContent = "スナップショット取得";
+  createBtn.textContent = text().snapshot.create;
 
   const refreshBtn = document.createElement("button");
   refreshBtn.type = "button";
   refreshBtn.className = "db-snapshot-refresh-btn";
-  refreshBtn.textContent = "更新";
+  refreshBtn.textContent = text().snapshot.refresh;
 
   const snapshotCancelBtn = document.createElement("button");
   snapshotCancelBtn.type = "button";
   snapshotCancelBtn.className = "db-snapshot-job-cancel-btn";
-  snapshotCancelBtn.textContent = "キャンセル";
+  snapshotCancelBtn.textContent = text().snapshot.cancel;
   snapshotCancelBtn.hidden = true;
 
   toolbar.append(createBtn, refreshBtn, snapshotCancelBtn);
@@ -91,7 +92,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   const tableSelectorHeader = document.createElement("div");
   tableSelectorHeader.className = "db-snapshot-table-selector-header";
-  tableSelectorHeader.textContent = "対象テーブルを選択";
+  tableSelectorHeader.textContent = text().snapshot.selectTablesHeader;
 
   const tableCheckboxes = document.createElement("div");
   tableCheckboxes.className = "db-snapshot-table-checkboxes";
@@ -101,33 +102,33 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
   const selectAllBtn = document.createElement("button");
   selectAllBtn.type = "button";
-  selectAllBtn.textContent = "すべて選択";
+  selectAllBtn.textContent = text().snapshot.selectAll;
 
   const deselectAllBtn = document.createElement("button");
   deselectAllBtn.type = "button";
-  deselectAllBtn.textContent = "選択解除";
+  deselectAllBtn.textContent = text().snapshot.deselectAll;
 
   const noteInput = document.createElement("input");
   noteInput.type = "text";
   noteInput.className = "db-snapshot-note-input";
-  noteInput.placeholder = "例: ユーザー登録テスト前";
+  noteInput.placeholder = text().snapshot.notePlaceholder;
 
   const noteField = document.createElement("label");
   noteField.className = "db-snapshot-note-field";
   const noteLabel = document.createElement("span");
   noteLabel.className = "db-snapshot-note-label";
-  noteLabel.textContent = "メモ";
+  noteLabel.textContent = text().snapshot.noteLabel;
   noteField.append(noteLabel, noteInput);
 
   const confirmBtn = document.createElement("button");
   confirmBtn.type = "button";
   confirmBtn.className = "db-snapshot-confirm-btn";
-  confirmBtn.textContent = "取得開始";
+  confirmBtn.textContent = text().snapshot.confirm;
 
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
   cancelBtn.className = "db-snapshot-cancel-btn";
-  cancelBtn.textContent = "キャンセル";
+  cancelBtn.textContent = text().snapshot.cancel;
 
   selectActions.append(
     selectAllBtn,
@@ -152,7 +153,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     activeSnapshotId = id;
     snapshotCancelBtn.hidden = !id;
     snapshotCancelBtn.disabled = false;
-    snapshotCancelBtn.textContent = "キャンセル";
+    snapshotCancelBtn.textContent = text().snapshot.cancel;
   }
 
   function showTableSelector() {
@@ -167,7 +168,8 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       cb.type = "checkbox";
       cb.checked = lastTables.length === 0 || lastTables.includes(t.name);
       cb.value = t.name;
-      const rowInfo = t.rowCount != null ? ` (${t.rowCount}件)` : "";
+      const rowInfo =
+        t.rowCount != null ? text().snapshot.rowCount(t.rowCount) : "";
       label.append(cb, ` ${t.name}${rowInfo}`);
       tableCheckboxes.appendChild(label);
     }
@@ -214,7 +216,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     if (!activeSnapshotId) return;
     const snapshotId = activeSnapshotId;
     snapshotCancelBtn.disabled = true;
-    snapshotCancelBtn.textContent = "キャンセル中...";
+    snapshotCancelBtn.textContent = text().snapshot.cancelling;
     try {
       await postJson("/_db/snapshot/cancel", { id: snapshotId });
     } catch {
@@ -222,7 +224,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     } finally {
       if (!disposed && activeSnapshotId === snapshotId) {
         snapshotCancelBtn.disabled = false;
-        snapshotCancelBtn.textContent = "キャンセル";
+        snapshotCancelBtn.textContent = text().snapshot.cancel;
       }
     }
   });
@@ -235,7 +237,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     if (tables.length === 0) return;
 
     confirmBtn.disabled = true;
-    confirmBtn.textContent = "取得中...";
+    confirmBtn.textContent = text().snapshot.creating;
 
     try {
       await postJson("/_db/snapshot/create", {
@@ -251,7 +253,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     } finally {
       if (!disposed) {
         confirmBtn.disabled = false;
-        confirmBtn.textContent = "取得開始";
+        confirmBtn.textContent = text().snapshot.confirm;
       }
     }
   });
@@ -318,8 +320,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     if (snapshots.length === 0) {
       const empty = document.createElement("div");
       empty.className = "db-snapshot-empty";
-      empty.textContent =
-        "まだスナップショットがありません。「スナップショット取得」で開始します。";
+      empty.textContent = text().snapshot.empty;
       mainArea.appendChild(empty);
       return;
     }
@@ -329,7 +330,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
     const snapTitle = document.createElement("h3");
     snapTitle.className = "db-snapshot-section-title";
-    snapTitle.textContent = `スナップショット (${done.length}件)`;
+    snapTitle.textContent = text().snapshot.listTitle(done.length);
     snapshotSection.appendChild(snapTitle);
 
     for (const snap of snapshots) {
@@ -345,7 +346,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const tables = document.createElement("span");
       tables.className = "db-snapshot-tables-count";
       tables.title = snap.tables.join(", ");
-      tables.textContent = `${snap.tables.length}テーブル`;
+      tables.textContent = text().snapshot.tableCount(snap.tables.length);
       info.append(date, tables);
       if (snap.note) {
         const note = document.createElement("span");
@@ -358,25 +359,25 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       actions.className = "db-snapshot-actions";
       const noteBtn = document.createElement("button");
       noteBtn.type = "button";
-      noteBtn.textContent = "メモ";
+      noteBtn.textContent = text().snapshot.editNote;
       noteBtn.addEventListener("click", () => editNote(snap.id, snap.note));
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
-      deleteBtn.textContent = "削除";
+      deleteBtn.textContent = text().snapshot.delete;
       deleteBtn.addEventListener("click", () => {
         if (deleteBtn.dataset.confirm !== "1") {
           deleteBtn.dataset.confirm = "1";
-          deleteBtn.textContent = "削除を確認";
+          deleteBtn.textContent = text().snapshot.deleteConfirm;
           window.setTimeout(() => {
             if (deleteBtn.dataset.confirm === "1") {
               deleteBtn.dataset.confirm = "";
-              deleteBtn.textContent = "削除";
+              deleteBtn.textContent = text().snapshot.delete;
             }
           }, 3000);
           return;
         }
         deleteBtn.dataset.confirm = "";
-        deleteBtn.textContent = "削除";
+        deleteBtn.textContent = text().snapshot.delete;
         deleteSnap(snap.id);
       });
       actions.append(noteBtn, deleteBtn);
@@ -417,15 +418,15 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       const diffBtn = document.createElement("button");
       diffBtn.type = "button";
       diffBtn.className = "db-snapshot-diff-btn";
-      diffBtn.textContent = "手動で差分チェック";
+      diffBtn.textContent = text().snapshot.diffManual;
       diffBtn.addEventListener("click", async () => {
         diffBtn.disabled = true;
-        diffBtn.textContent = "比較中...";
+        diffBtn.textContent = text().snapshot.comparing;
         try {
           showDiffInline(beforeSelect.value, afterSelect.value);
         } finally {
           diffBtn.disabled = false;
-          diffBtn.textContent = "手動で差分チェック";
+          diffBtn.textContent = text().snapshot.diffManual;
         }
       });
 
@@ -449,7 +450,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     loading.className = "db-snapshot-diff-inline";
     const loadingText = document.createElement("div");
     loadingText.className = "db-snapshot-loading";
-    loadingText.textContent = "差分を計算中...";
+    loadingText.textContent = text().snapshot.calculatingDiff;
     loading.appendChild(loadingText);
     mainArea.appendChild(loading);
 
@@ -461,7 +462,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         loading.innerHTML = "";
         const error = document.createElement("div");
         error.className = "db-snapshot-error";
-        error.textContent = "差分の計算に失敗しました";
+        error.textContent = text().snapshot.diffError;
         loading.appendChild(error);
         return;
       }
@@ -474,7 +475,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       loading.innerHTML = "";
       const error = document.createElement("div");
       error.className = "db-snapshot-error";
-      error.textContent = "差分の計算に失敗しました";
+      error.textContent = text().snapshot.diffError;
       loading.appendChild(error);
     }
   }
@@ -498,14 +499,15 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     const summary = document.createElement("div");
     summary.className = "db-snapshot-diff-summary";
     if (changedTables.length === 0) {
-      summary.textContent = "変更は検出されませんでした。";
+      summary.textContent = text().snapshot.noChanges;
       section.appendChild(summary);
       mainArea.appendChild(section);
       return;
     }
-    summary.textContent =
-      `${changedTables.length}テーブルに変更あり` +
-      (unchangedCount > 0 ? `、${unchangedCount}テーブルは変更なし` : "");
+    summary.textContent = text().snapshot.diffSummary(
+      changedTables.length,
+      unchangedCount,
+    );
     section.appendChild(summary);
 
     for (const t of changedTables) {
@@ -555,7 +557,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     container.innerHTML = "";
     const loading = document.createElement("div");
     loading.className = "db-snapshot-loading";
-    loading.textContent = "読み込み中...";
+    loading.textContent = text().snapshot.loading;
     container.appendChild(loading);
     try {
       const res = await fetch(
@@ -565,7 +567,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         container.innerHTML = "";
         const error = document.createElement("div");
         error.className = "db-snapshot-error";
-        error.textContent = "読み込みに失敗しました";
+        error.textContent = text().snapshot.loadError;
         container.appendChild(error);
         return;
       }
@@ -578,7 +580,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       container.innerHTML = "";
       const error = document.createElement("div");
       error.className = "db-snapshot-error";
-      error.textContent = "読み込みに失敗しました";
+      error.textContent = text().snapshot.loadError;
       container.appendChild(error);
     }
   }
@@ -622,7 +624,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         trBefore.className = "snap-diff-del";
         const tdTypeBefore = document.createElement("td");
         tdTypeBefore.className = "snap-diff-type-cell";
-        tdTypeBefore.textContent = "更新前";
+        tdTypeBefore.textContent = text().snapshot.before;
         tdTypeBefore.rowSpan = 2;
         trBefore.appendChild(tdTypeBefore);
         for (const col of columns) {
@@ -683,7 +685,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     if (total > rows.length) {
       const more = document.createElement("div");
       more.className = "db-snapshot-diff-more";
-      more.textContent = `全${total}件中 ${rows.length}件を表示中`;
+      more.textContent = text().snapshot.showingRows(rows.length, total);
       container.appendChild(more);
     }
   }
@@ -698,14 +700,14 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     input.type = "text";
     input.className = "db-snapshot-note-input";
     input.value = currentNote || "";
-    input.placeholder = "メモを入力";
+    input.placeholder = text().snapshot.noteInputPlaceholder;
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
-    saveBtn.textContent = "保存";
+    saveBtn.textContent = text().snapshot.saveNote;
     saveBtn.className = "db-snapshot-confirm-btn";
     const cancelDlgBtn = document.createElement("button");
     cancelDlgBtn.type = "button";
-    cancelDlgBtn.textContent = "キャンセル";
+    cancelDlgBtn.textContent = text().snapshot.cancel;
     cancelDlgBtn.addEventListener("click", () => dialog.remove());
     saveBtn.addEventListener("click", async () => {
       if (disposed) return;
@@ -772,5 +774,23 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     autoRefreshTimers.clear();
   }
 
-  return { el, refresh, handleSse, dispose };
+  function localize(): void {
+    const t = text().snapshot;
+    guideTitle.textContent = t.guideTitle;
+    guideBody.textContent = t.guideBody;
+    createBtn.textContent = t.create;
+    refreshBtn.textContent = t.refresh;
+    // 進行中(cancelling 表示中)は上書きしない。
+    if (!activeSnapshotId) snapshotCancelBtn.textContent = t.cancel;
+    tableSelectorHeader.textContent = t.selectTablesHeader;
+    selectAllBtn.textContent = t.selectAll;
+    deselectAllBtn.textContent = t.deselectAll;
+    noteInput.placeholder = t.notePlaceholder;
+    noteLabel.textContent = t.noteLabel;
+    confirmBtn.textContent = t.confirm;
+    cancelBtn.textContent = t.cancel;
+    renderMain();
+  }
+
+  return { el, refresh, handleSse, dispose, localize };
 }

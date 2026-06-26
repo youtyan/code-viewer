@@ -442,6 +442,7 @@ function createTabPane(
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
     getTables: () => schemaCache?.tables || [],
+    getText: () => paneText(),
   });
   const historyView = createQueryHistoryView({
     getDbId: () => currentDbInfo?.id || null,
@@ -1488,6 +1489,7 @@ function createTabPane(
     historyView.localize();
     queryEditor.localize();
     globalSearchView.localize();
+    snapshotView.localize();
   }
 
   return {
