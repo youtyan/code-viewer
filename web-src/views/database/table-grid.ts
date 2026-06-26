@@ -65,6 +65,11 @@ export type TableGridCallbacks = {
     eq: GridExactFilter[],
     signal?: AbortSignal,
   ) => Promise<DbTableDataResponse>;
+  /**
+   * このグリッドへ常時適用されるベース WHERE（完全一致）。エクスポート時に
+   * フィルタへ合わせて付与する。関連パネルの埋め込みグリッドでのみ使う。
+   */
+  getBaseEq?: () => GridExactFilter[];
 };
 
 export type TableGridOptions = {
@@ -105,7 +110,57 @@ export function createTableGrid(
   filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
   filterClear.textContent = "×";
   filterClear.hidden = true;
-  filterBar.append(filterIcon, filterInput, filterClear);
+
+  // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
+  // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
+  const exportWrap = document.createElement("div");
+  exportWrap.className = "db-grid-export";
+  const exportBtn = document.createElement("button");
+  exportBtn.type = "button";
+  exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
+  exportBtn.title = "エクスポート";
+  exportBtn.setAttribute("aria-label", "エクスポート");
+  exportBtn.textContent = "⬇";
+  const exportMenu = document.createElement("div");
+  exportMenu.className = "db-grid-export-menu";
+  exportMenu.hidden = true;
+  const exportCsv = document.createElement("button");
+  exportCsv.type = "button";
+  exportCsv.className = "db-grid-export-item";
+  exportCsv.textContent = "CSV";
+  const exportJson = document.createElement("button");
+  exportJson.type = "button";
+  exportJson.className = "db-grid-export-item";
+  exportJson.textContent = "JSON";
+  exportMenu.append(exportCsv, exportJson);
+  exportWrap.append(exportBtn, exportMenu);
+
+  const closeExportMenu = () => {
+    exportMenu.hidden = true;
+    document.removeEventListener("click", onDocClickForExport);
+  };
+  function onDocClickForExport(e: MouseEvent) {
+    if (!exportWrap.contains(e.target as Node)) closeExportMenu();
+  }
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (exportMenu.hidden) {
+      exportMenu.hidden = false;
+      document.addEventListener("click", onDocClickForExport);
+    } else {
+      closeExportMenu();
+    }
+  });
+  exportCsv.addEventListener("click", () => {
+    closeExportMenu();
+    triggerExport("csv");
+  });
+  exportJson.addEventListener("click", () => {
+    closeExportMenu();
+    triggerExport("json");
+  });
+
+  filterBar.append(filterIcon, filterInput, filterClear, exportWrap);
 
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
@@ -160,6 +215,8 @@ export function createTableGrid(
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
+  // クリック元セルの「テーブル.列 = 値」を常時表示するヘッダー要素。
+  let relatedSourceEl: HTMLElement | null = null;
   let embeddedGrid: TableGrid | null = null;
   let relatedTargets: RelatedTarget[] = [];
   let relatedSelectedIndex = -1;
@@ -362,12 +419,34 @@ export function createTableGrid(
     const title = document.createElement("span");
     title.className = "db-related-title";
     title.textContent = "🔗 関連データ";
+    // クリック元の「テーブル.列 = 値」を常に表示する（選択セルの詳細）。
+    relatedSourceEl = document.createElement("span");
+    relatedSourceEl.className = "db-related-source";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      const target = relatedTargets[relatedSelectedIndex];
+      if (!target) return;
+      navigator.clipboard.writeText(target.value).then(
+        () => {
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy";
+          }, 800);
+        },
+        () => {
+          copyBtn.textContent = "Copy failed";
+        },
+      );
+    });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "db-btn db-btn-icon db-related-close";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", hideRelatedPanel);
-    header.append(title, closeBtn);
+    header.append(title, relatedSourceEl, copyBtn, closeBtn);
 
     const bodyRow = document.createElement("div");
     bodyRow.className = "db-related-body";
@@ -394,6 +473,7 @@ export function createTableGrid(
         getColumnWidths: callbacks.getColumnWidths,
         setColumnWidths: callbacks.setColumnWidths,
         getForeignKeys: callbacks.getForeignKeys,
+        getBaseEq: () => relatedEq,
       },
       { embedded: true },
     );
@@ -475,6 +555,10 @@ export function createTableGrid(
     relatedSelectedIndex = index;
     renderRelatedList();
     const target = relatedTargets[index];
+    if (relatedSourceEl) {
+      // 選択セルの「元テーブル.列 = 値 → 参照先テーブル」を表示。
+      relatedSourceEl.textContent = `${currentTable}.${target.fk.fromColumn} = ${target.value} → ${target.fk.toTable}`;
+    }
     relatedEq = [{ column: target.fk.toColumn, value: target.value }];
     const grid = embeddedGrid;
     if (!grid || !callbacks.fetchRelatedPage) return;
@@ -896,6 +980,10 @@ export function createTableGrid(
     if (filters.length > 0) {
       params.set("filters", JSON.stringify(filters));
     }
+    const baseEq = callbacks.getBaseEq?.() ?? [];
+    if (baseEq.length > 0) {
+      params.set("eq", JSON.stringify(baseEq));
+    }
     const a = document.createElement("a");
     a.href = `/_db/export?${params}`;
     a.download = `${currentTable}.${format}`;
@@ -904,27 +992,10 @@ export function createTableGrid(
     a.remove();
   }
 
-  let exportCsvBtn: HTMLButtonElement | null = null;
-  let exportJsonBtn: HTMLButtonElement | null = null;
-
   function updateStatus() {
     if (!statusEl) {
       statusEl = document.createElement("div");
       statusEl.className = "db-grid-status";
-
-      exportCsvBtn = document.createElement("button");
-      exportCsvBtn.type = "button";
-      exportCsvBtn.className = "db-btn db-btn-sm db-grid-export-btn";
-      exportCsvBtn.textContent = "Export CSV";
-      exportCsvBtn.addEventListener("click", () => triggerExport("csv"));
-
-      exportJsonBtn = document.createElement("button");
-      exportJsonBtn.type = "button";
-      exportJsonBtn.className = "db-btn db-btn-sm db-grid-export-btn";
-      exportJsonBtn.textContent = "Export JSON";
-      exportJsonBtn.addEventListener("click", () => triggerExport("json"));
-
-      statusEl.append(exportCsvBtn, exportJsonBtn);
       el.appendChild(statusEl);
     }
     const parts: string[] = [`${totalRows.toLocaleString()} rows`];

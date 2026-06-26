@@ -126,6 +126,22 @@ describe("/_db/table eq (exact foreign-key match)", () => {
     expect(body.totalRows).toBe(3);
   });
 
+  test("export honors the eq base WHERE", async () => {
+    const { dir, db } = seedDb();
+    const params = new URLSearchParams({
+      db,
+      table: "posts",
+      format: "csv",
+      eq: JSON.stringify([{ column: "user_id", value: "1" }]),
+    });
+    const res = await route(dir, `/_db/export?${params}`);
+    expect(res.status).toBe(200);
+    const csv = await res.text();
+    const lines = csv.trim().split("\n");
+    // header + 2 data rows for user 1 (posts 1 and 2), excluding user 11.
+    expect(lines).toHaveLength(3);
+  });
+
   test("filtered table read returns a JSON-serializable totalRows (no BigInt)", async () => {
     // Regression: safeIntegers makes COUNT(*) a bigint; the filtered table
     // path must coerce totalRows to a number, otherwise the JSON response

@@ -6498,7 +6498,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 .db-related-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 4px 8px;
   background: var(--bg-mute);
   border-bottom: 1px solid var(--border);
@@ -6507,6 +6507,7 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-related-title {
+  flex-shrink: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -6575,9 +6576,84 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   overflow: hidden;
 }
 
-/* ---------- Export Buttons ---------- */
-.db-grid-export-btn {
-  margin-left: 6px;
+/* ---------- Export (icon + menu at the right of the search bar) ---------- */
+.db-grid-export {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.db-grid-export-toggle {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--db-font-md);
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.db-grid-export-toggle:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.db-grid-export-menu[hidden] {
+  display: none !important;
+}
+.db-grid-export-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 92px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.db-grid-export-item {
+  border: none;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--db-font-base);
+  font-family: inherit;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.db-grid-export-item:hover {
+  background: var(--bg-mute);
+}
+
+/* Related-panel header: source cell context (selected column = value). */
+.db-related-source {
+  flex: 1;
+  min-width: 0;
+  margin-left: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 400;
+  font-size: var(--db-font-base);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-related-copy {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-right: 8px;
+  color: var(--fg-muted);
+}
+.db-related-copy:hover {
+  color: var(--fg);
 }
 
 /* ---------- Query History ---------- */

@@ -847,6 +847,7 @@ async function handleExport(
     ];
   }
   const filters = parseFilters(url);
+  const exact = parseExactConditions(url);
 
   try {
     const adapter = await getAdapter(r, cwd, signal);
@@ -859,7 +860,7 @@ async function handleExport(
     }
     let rawRows: import("./serialize").RawDbValue[][];
 
-    if (filters.length > 0) {
+    if (filters.length > 0 || exact.length > 0) {
       const meta = await adapter.getFilteredTablePageWithMeta(
         table,
         {
@@ -867,6 +868,7 @@ async function handleExport(
           limit: EXPORT_MAX_ROWS,
           orderBy,
           grouped: groupFiltersByValue(filters),
+          ...(exact.length > 0 ? { exact } : {}),
         },
         signal,
       );
