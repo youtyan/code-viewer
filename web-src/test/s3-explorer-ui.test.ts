@@ -102,7 +102,9 @@ afterAll(() => {
 async function mountExplorer(): Promise<ReturnType<typeof createS3Explorer>> {
   const view = createS3Explorer();
   explorer = view;
-  document.body.appendChild(view.el);
+  // sidebarSlot は本番では db-sidebar の dbToolbar 直下に mount される。
+  // テストでは同じ document.body に並べて、querySelector で両方を辿れるようにする。
+  document.body.append(view.sidebarSlot, view.el);
   await view.load("mock");
   return view;
 }
@@ -110,21 +112,28 @@ async function mountExplorer(): Promise<ReturnType<typeof createS3Explorer>> {
 async function switchToExplorer(
   view: ReturnType<typeof createS3Explorer>,
 ): Promise<void> {
-  const buttons = view.el.querySelectorAll(".s3-view-seg button");
+  // Bucket と View Seg は sidebarSlot に移された (本番では db-sidebar 配下)。
+  const buttons = view.sidebarSlot.querySelectorAll(".s3-view-seg button");
   click(buttons[1]); // Explorer
-  await waitFor(() => !!view.el.querySelector(".s3-tree .tree-dir"));
+  await waitFor(() => !!view.sidebarSlot.querySelector(".s3-tree .tree-dir"));
 }
 
 describe("S3 explorer UI", () => {
   test("List 表示の各オブジェクトに種別バッジが付く", async () => {
     const view = await mountExplorer();
-    await waitFor(() => !!view.el.querySelector(".s3-object-item"));
-    const badges = view.el.querySelectorAll(".s3-object-item .s3-kind-badge");
+    // List / Explorer 共通の検索/オプション/オブジェクトリスト/tree は
+    // すべて sidebarSlot に積まれる。
+    await waitFor(() => !!view.sidebarSlot.querySelector(".s3-object-item"));
+    const badges = view.sidebarSlot.querySelectorAll(
+      ".s3-object-item .s3-kind-badge",
+    );
     // 行ごとに 1 つバッジが出る。
     expect(badges.length).toBe(LIST_OBJECTS.length);
-    const pngRow = view.el.querySelector('.s3-object-item[data-key="a.png"]');
+    const pngRow = view.sidebarSlot.querySelector(
+      '.s3-object-item[data-key="a.png"]',
+    );
     expect(pngRow?.querySelector(".s3-kind-badge.kind-image")).toBeTruthy();
-    const txtRow = view.el.querySelector(
+    const txtRow = view.sidebarSlot.querySelector(
       '.s3-object-item[data-key="notes.txt"]',
     );
     expect(txtRow?.querySelector(".s3-kind-badge.kind-text")).toBeTruthy();
@@ -132,17 +141,19 @@ describe("S3 explorer UI", () => {
 
   test("Explorer に切り替えると List 専用の検索/ソート行が hidden になる", async () => {
     const view = await mountExplorer();
-    const searchRow = view.el.querySelector<HTMLElement>(".s3-search-row");
-    const optionRow = view.el.querySelector<HTMLElement>(".s3-options-row");
+    const searchRow =
+      view.sidebarSlot.querySelector<HTMLElement>(".s3-search-row");
+    const optionRow =
+      view.sidebarSlot.querySelector<HTMLElement>(".s3-options-row");
     expect(searchRow?.hidden).toBe(false);
     await switchToExplorer(view);
     expect(searchRow?.hidden).toBe(true);
     expect(optionRow?.hidden).toBe(true);
-    expect(view.el.querySelector<HTMLElement>(".s3-object-list")?.hidden).toBe(
-      true,
-    );
-    // セグメントの active 状態も切り替わる。
-    const buttons = view.el.querySelectorAll(".s3-view-seg button");
+    expect(
+      view.sidebarSlot.querySelector<HTMLElement>(".s3-object-list")?.hidden,
+    ).toBe(true);
+    // セグメントの active 状態も切り替わる (sidebarSlot 配下に移動済み)。
+    const buttons = view.sidebarSlot.querySelectorAll(".s3-view-seg button");
     expect(buttons[0].classList.contains("active")).toBe(false);
     expect(buttons[1].classList.contains("active")).toBe(true);
   });
@@ -150,10 +161,10 @@ describe("S3 explorer UI", () => {
   test("Explorer はフォルダとファイルをツリー構造で描画し、展開で子を遅延ロードする", async () => {
     const view = await mountExplorer();
     await switchToExplorer(view);
-    const dirs = view.el.querySelectorAll(".s3-tree .tree-dir");
+    const dirs = view.sidebarSlot.querySelectorAll(".s3-tree .tree-dir");
     expect(dirs.length).toBe(FOLDERS[""].folders.length);
     // root 直下のファイルは種別バッジ付きの tree-file。
-    const rootPng = view.el.querySelector(
+    const rootPng = view.sidebarSlot.querySelector(
       '.s3-tree .tree-file[data-key="a.png"] .s3-kind-badge.kind-image',
     );
     expect(rootPng).toBeTruthy();
@@ -164,33 +175,41 @@ describe("S3 explorer UI", () => {
     click(imagesDir);
     await waitFor(
       () =>
-        !!view.el.querySelector(
+        !!view.sidebarSlot.querySelector(
           '.s3-tree .tree-file[data-key="images/hero.png"]',
         ),
     );
     expect(
-      view.el.querySelector('.tree-file[data-key="images/diagram.svg"]'),
+      view.sidebarSlot.querySelector(
+        '.tree-file[data-key="images/diagram.svg"]',
+      ),
     ).toBeTruthy();
   });
 
   test("ファイルを選択し直してもハイライトは常に 1 行だけ (二重ハイライト回帰防止)", async () => {
     const view = await mountExplorer();
     await switchToExplorer(view);
-    click(view.el.querySelector('.s3-tree .tree-file[data-key="a.png"]'));
+    click(
+      view.sidebarSlot.querySelector('.s3-tree .tree-file[data-key="a.png"]'),
+    );
     await waitFor(
       () =>
-        view.el
+        view.sidebarSlot
           .querySelector('.tree-file[data-key="a.png"]')
           ?.classList.contains("active") === true,
     );
-    click(view.el.querySelector('.s3-tree .tree-file[data-key="b.png"]'));
+    click(
+      view.sidebarSlot.querySelector('.s3-tree .tree-file[data-key="b.png"]'),
+    );
     await waitFor(
       () =>
-        view.el
+        view.sidebarSlot
           .querySelector('.tree-file[data-key="b.png"]')
           ?.classList.contains("active") === true,
     );
-    const active = view.el.querySelectorAll(".s3-tree .tree-file.active");
+    const active = view.sidebarSlot.querySelectorAll(
+      ".s3-tree .tree-file.active",
+    );
     expect(active.length).toBe(1);
     expect((active[0] as HTMLElement).dataset.key).toBe("b.png");
   });

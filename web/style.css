@@ -5622,6 +5622,35 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   border-bottom: 1px solid var(--border);
 }
 
+/* explorer (redis/es/s3) の第1階層セレクタ (Databases / Indices / Bucket+View)
+   を抱える sidebar 内 host。kind が SQL のときは中身が全て hidden になるため
+   高さが潰れて見えなくなる (table list が下に詰まる)。
+   redis/es/s3 のときは hidden 子要素を 1 つだけ表示し、その slot が sidebar
+   の残り高さを全て取れるよう host 自身も flex:1 にする。 */
+.db-explorer-sidebar-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* author 側 display:flex が UA の [hidden]→display:none を上書きしてしまう
+   ため、明示で潰す。SQL kind 時はこの host を畳んで tableList を上に詰める。 */
+.db-explorer-sidebar-host[hidden] {
+  display: none;
+}
+.db-explorer-sidebar-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.db-explorer-sidebar-slot[hidden] {
+  display: none;
+}
+
 .db-file-select {
   width: 100%;
   padding: 5px 24px 5px 8px;
@@ -7545,13 +7574,15 @@ body.db-resizing {
 .redis-explorer[hidden] {
   display: none;
 }
+/* redis-db-list-pane は db-sidebar の dbToolbar 直下にスロットとして mount
+   される (database-view の explorerSidebarHost)。サイドバー自体が bg-soft +
+   resize handle 付きなので、固定幅 / border-right / 重複する背景は持たない。 */
 .redis-db-list-pane {
-  width: 220px;
-  border-right: 1px solid var(--border);
+  flex: 1 1 auto;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-soft);
 }
 .db-explorer-pane-header {
   padding: 8px 12px;
@@ -7880,13 +7911,14 @@ body.db-resizing {
 .es-explorer[hidden] {
   display: none;
 }
+/* es-index-list-pane は redis-db-list-pane と同じく db-sidebar の
+   explorerSidebarHost 内にスロットとして mount される。 */
 .es-index-list-pane {
-  width: 260px;
-  border-right: 1px solid var(--border);
+  flex: 1 1 auto;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-soft);
 }
 .es-index-list {
   flex: 1;
@@ -8109,24 +8141,10 @@ body.db-resizing {
 .s3-explorer[hidden] {
   display: none;
 }
-.s3-object-list-pane {
-  width: 420px;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
-}
-.s3-toolbar {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
-}
-.s3-bucket-row,
+/* List/Explorer 共通: Bucket / View seg / Search / Prefix・Contains / sort /
+   objectList / tree がすべて sidebarSlot に積まれる。
+   下記 .s3-search-row / .s3-options-row は flex 行なので [hidden] 属性
+   (UA の display:none) を明示で上書きしないと消えないことに注意。 */
 .s3-search-row,
 .s3-options-row {
   display: flex;
@@ -8134,11 +8152,31 @@ body.db-resizing {
   gap: 8px;
   min-width: 0;
 }
-/* これらの行は display:flex を持つため、hidden 属性 (UA の display:none) が
-   効かない。Explorer 表示で List 専用の行を隠せるよう明示的に上書きする。 */
 .s3-search-row[hidden],
 .s3-options-row[hidden] {
   display: none;
+}
+/* s3-bucket-row は db-sidebar の explorerSidebarHost に mount される。260px
+   幅でも Bucket label + select + List/Explorer seg が綺麗に収まるよう、縦並び
+   (label+select の行 / seg の行) にする。
+   Explorer モードでは下に tree がぶら下がるため、flex column で残り高さを
+   tree に渡せるようにする (`.db-explorer-sidebar-slot` の flex:1 と組合せ)。 */
+.s3-sidebar-slot {
+  padding: 8px;
+  gap: 8px;
+}
+.s3-bucket-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.s3-bucket-row .s3-view-seg {
+  align-self: stretch;
+  display: flex;
+}
+.s3-bucket-row .s3-view-seg button {
+  flex: 1;
 }
 .s3-field-label {
   flex: 1;
@@ -8183,23 +8221,26 @@ body.db-resizing {
   padding: 4px 8px;
 }
 .s3-object-status {
-  min-height: 26px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  min-height: 22px;
+  padding: 4px 0;
   color: var(--fg-muted);
   font-size: var(--db-font-sm);
-  background: var(--bg);
   flex-shrink: 0;
 }
 .s3-object-status.warn {
   color: #8a5a22;
   background: #fff4e0;
 }
+/* sidebarSlot 内で残り高さを取り、スクロール可能にする。横の負 margin で
+   sidebarSlot の左右 padding を相殺してフルブリードにする (アイテムの border
+   が sidebar の幅一杯まで届くように)。 */
 .s3-object-list {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 120px;
   overflow-y: auto;
   padding: 4px 0;
+  margin: 0 -8px;
+  border-top: 1px solid var(--border);
 }
 .s3-object-item {
   display: flex;
@@ -8217,6 +8258,16 @@ body.db-resizing {
 .s3-object-item.active {
   background: var(--bg-active, var(--bg-soft));
   border-left-color: var(--accent);
+}
+/* 1 行目: 親パス (薄)。サイドバー狭幅でも末尾が見える ellipsis のみ。 */
+.s3-object-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  color: var(--fg-muted);
+  line-height: 1.3;
 }
 .s3-object-head {
   display: flex;
@@ -8240,8 +8291,80 @@ body.db-resizing {
   color: var(--fg-muted);
   font-size: var(--db-font-sm);
 }
+
+/* List / Explorer 共通: 行ホバーで全 key を floating で出す。document.body
+   に attach するので、sidebar 外 (preview pane 側) へ突き出して読める。 */
+.s3-key-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  font-size: var(--db-font-sm);
+}
+.s3-key-tooltip[hidden] {
+  display: none;
+}
+.s3-key-tooltip-image {
+  display: block;
+  max-width: 336px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  margin: -2px 0 8px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+}
+.s3-key-tooltip-path {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.s3-key-tooltip-meta {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+/* tooltip 切替トグル: bucketRow 内 (Bucket select + List/Explorer の下) の
+   小さなボタン。active 時はアクセントで強調。 */
+.s3-tooltip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--db-font-sm);
+  align-self: flex-start;
+}
+.s3-tooltip-toggle:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.s3-tooltip-toggle.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+.s3-tooltip-toggle svg {
+  flex: 0 0 auto;
+}
+.s3-tooltip-toggle-label {
+  white-space: nowrap;
+}
 .s3-object-more-btn {
   padding: 6px;
+  margin: 0 -8px -8px;
   border: none;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
@@ -8313,10 +8436,20 @@ body.db-resizing {
 }
 
 /* Explorer 表示: 既存ファイルツリー (#filelist.tree) の見た目を S3 ペインに
-   合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。 */
+   合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。
+   sidebar 内の sidebarSlot に置かれるため、flex で残りの高さを満たし、
+   スクロール可能にする。padding をなくし、sidebarSlot の余白に揃える。 */
 .s3-tree {
   --lvl-pad: 12px;
-  padding: 4px 6px;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 4px 0;
+  margin: 0 -8px -8px;
+  border-top: 1px solid var(--border);
+}
+.s3-tree[hidden] {
+  display: none;
 }
 .s3-tree .s3-tree-node {
   min-width: 0;

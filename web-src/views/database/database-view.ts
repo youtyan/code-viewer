@@ -18,8 +18,8 @@ import type { AnnotationTarget, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
-import { type DbLang, type DbText, dbText } from "./i18n";
 import { createGlobalSearchView } from "./global-search-view";
+import { type DbLang, type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
@@ -373,8 +373,15 @@ function createTabPane(
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
-  // 順序: アイコンツールバー → DB select → table list の順。
-  sidebar.append(toolsSection, dbToolbar, tableList.el);
+  // explorer (redis/es/s3) 用のサイドバースロット host。各 explorer が自前で
+  // 構築した sidebarSlot をここに mount し、applyVisibility が kind ごとに
+  // toggle する。SQL kind では全て hidden になり、空のまま下に流れる
+  // (Query History toggle / table list がその下に来る)。
+  const explorerSidebarHost = document.createElement("div");
+  explorerSidebarHost.className = "db-explorer-sidebar-host";
+
+  // 順序: アイコンツールバー → DB select → explorer sidebar (s3/redis/es) → table list の順。
+  sidebar.append(toolsSection, dbToolbar, explorerSidebarHost, tableList.el);
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "db-sidebar-resize";
@@ -459,18 +466,29 @@ function createTabPane(
     getText: () => paneText(),
   });
   redisExplorer.el.hidden = true;
+  redisExplorer.sidebarSlot.hidden = true;
 
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
   });
   esExplorer.el.hidden = true;
+  esExplorer.sidebarSlot.hidden = true;
 
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
   });
   s3Explorer.el.hidden = true;
+  s3Explorer.sidebarSlot.hidden = true;
+
+  // explorer ごとの sidebarSlot を sidebar host に差し込む。表示制御は
+  // applyVisibility が一括で行う (kind による hidden toggle)。
+  explorerSidebarHost.append(
+    redisExplorer.sidebarSlot,
+    esExplorer.sidebarSlot,
+    s3Explorer.sidebarSlot,
+  );
 
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
@@ -563,6 +581,15 @@ function createTabPane(
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
     s3Explorer.el.hidden = visibility.s3Hidden;
+    // sidebar 内の第1階層セレクタも explorer 表示と同期する。
+    redisExplorer.sidebarSlot.hidden = visibility.redisHidden;
+    esExplorer.sidebarSlot.hidden = visibility.esHidden;
+    s3Explorer.sidebarSlot.hidden = visibility.s3Hidden;
+    // host は `flex: 1` で残り高さを全部食うため、SQL kind で中身が全部 hidden
+    // のときは host ごと畳まないと、tableList が下に押し出されて余白だらけに
+    // なる (報告された SQL ビューの「テーブル一覧がすごい離れる」回帰)。
+    explorerSidebarHost.hidden =
+      visibility.redisHidden && visibility.esHidden && visibility.s3Hidden;
     if (!sqlMode) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");

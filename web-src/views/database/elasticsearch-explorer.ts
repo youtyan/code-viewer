@@ -21,6 +21,9 @@ export type ElasticsearchExplorerCallbacks = {
 
 export type ElasticsearchExplorerView = {
   el: HTMLElement;
+  // Indices リストを左サイドバー (db-sidebar) の dbToolbar 直下に mount する
+  // スロット。container には含まれない。
+  sidebarSlot: HTMLElement;
   load: (
     dbId: string,
     initial?: ElasticsearchExplorerSelection,
@@ -39,18 +42,20 @@ export function createElasticsearchExplorer(
   const container = document.createElement("div");
   container.className = "es-explorer";
 
-  // ----- pane: indices -----
-  const indexListPane = document.createElement("div");
-  indexListPane.className = "es-index-list-pane";
+  // ----- sidebar slot: indices -----
+  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる Indices リスト。
+  // container には append しない。
+  const sidebarSlot = document.createElement("div");
+  sidebarSlot.className = "db-explorer-sidebar-slot es-index-list-pane";
 
   const indexListHeader = document.createElement("div");
   indexListHeader.className = "db-explorer-pane-header";
   indexListHeader.textContent = text().es.indices;
-  indexListPane.appendChild(indexListHeader);
+  sidebarSlot.appendChild(indexListHeader);
 
   const indexList = document.createElement("div");
   indexList.className = "es-index-list";
-  indexListPane.appendChild(indexList);
+  sidebarSlot.appendChild(indexList);
 
   // ----- pane: docs list -----
   const docListPane = document.createElement("div");
@@ -111,7 +116,7 @@ export function createElasticsearchExplorer(
   setPaneEmpty(docBody, text().es.selectDoc);
   detailPane.append(mappingBody, docBody);
 
-  container.append(indexListPane, docListPane, detailPane);
+  container.append(docListPane, detailPane);
 
   // ----- state -----
   let currentDbId: string | null = null;
@@ -695,5 +700,13 @@ export function createElasticsearchExplorer(
     }
   }
 
-  return { el: container, load, clear, dispose, getSelection, localize };
+  return {
+    el: container,
+    sidebarSlot,
+    load,
+    clear,
+    dispose,
+    getSelection,
+    localize,
+  };
 }
