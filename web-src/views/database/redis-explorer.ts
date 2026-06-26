@@ -8,7 +8,7 @@ import type {
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 function isBinaryItem(item: RedisItem): item is { binaryBase64: string } {
   return typeof item === "object" && item !== null && "binaryBase64" in item;
@@ -96,7 +96,7 @@ export function createRedisExplorer(
 
   const mainPane = document.createElement("div");
   mainPane.className = "redis-main-pane";
-  mainPane.textContent = "Select a key to view its value.";
+  setPaneEmpty(mainPane, "Select a key to view its value.");
 
   container.append(dbListPane, keyListPane, mainPane);
 
@@ -400,7 +400,7 @@ export function createRedisExplorer(
     keyList.innerHTML = "";
     keyRowsByName.clear();
     activeKeyRow = null;
-    mainPane.textContent = "Select a key to view its value.";
+    setPaneEmpty(mainPane, "Select a key to view its value.");
     await loadKeys(false);
   }
 
@@ -492,7 +492,7 @@ export function createRedisExplorer(
     currentKey = null;
     currentCursor = "0";
     notifySelectionChange();
-    mainPane.textContent = "Select a key to view its value.";
+    setPaneEmpty(mainPane, "Select a key to view its value.");
     void loadKeys(false);
   });
 
@@ -518,7 +518,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = "Select a key to view its value.";
+    setPaneEmpty(mainPane, "Select a key to view its value.");
     setDbStatus("Loading databases...");
     try {
       const res = await fetch(
@@ -556,7 +556,7 @@ export function createRedisExplorer(
           highlightActiveDb(initial.dbIndex);
           keyList.innerHTML = "";
           keyRowsByName.clear();
-          mainPane.textContent = "Select a key to view its value.";
+          setPaneEmpty(mainPane, "Select a key to view its value.");
           const valuePromise = initial.key
             ? selectKey(initial.key).catch(() => {})
             : null;
@@ -602,7 +602,7 @@ export function createRedisExplorer(
     activeDbRow = null;
     activeKeyRow = null;
     keyMoreBtn.hidden = true;
-    mainPane.textContent = "Select a database to view keys.";
+    setPaneEmpty(mainPane, "Select a database to view keys.");
   }
 
   function getSelection(): RedisExplorerSelection {

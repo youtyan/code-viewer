@@ -7573,6 +7573,38 @@ body.db-resizing {
   color: var(--error, #c00);
   font-size: var(--db-font-sm);
 }
+/* explorer の詳細/プレビュー pane に出す「未選択」空状態。中央寄せの
+   アイコン + メッセージで統一する (S3 / Redis / Elasticsearch 共通)。 */
+.db-pane-empty {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.db-pane-empty-icon {
+  display: flex;
+  color: var(--fg-subtle);
+  opacity: 0.65;
+}
+.db-pane-empty-icon .octicon {
+  width: 32px;
+  height: 32px;
+}
+.db-pane-empty-title {
+  color: var(--fg-muted);
+  font-size: var(--db-font-md);
+}
+.db-pane-empty-hint {
+  max-width: 320px;
+  color: var(--fg-subtle);
+  font-size: var(--db-font-sm);
+  line-height: 1.5;
+}
 
 /* ---------- Elasticsearch explorer ---------- */
 .es-explorer {

@@ -32,7 +32,7 @@ import {
   renderUnsupportedPreview,
 } from "../source-preview-elements";
 import { createAbortGuard } from "./abort-guard";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
@@ -201,7 +201,7 @@ export function createS3Explorer(
 
   const previewPane = document.createElement("div");
   previewPane.className = "s3-preview-pane";
-  previewPane.textContent = "Select an object to preview.";
+  setPaneEmpty(previewPane, "Select an object to preview.");
 
   container.append(objectPane, previewPane);
 
@@ -353,7 +353,7 @@ export function createS3Explorer(
       currentKey = null;
       currentNextToken = undefined;
       setPaneStatus(objectList, "Loading objects...");
-      previewPane.textContent = "Select an object to preview.";
+      setPaneEmpty(previewPane, "Select an object to preview.");
     }
     try {
       const params = new URLSearchParams({
@@ -994,7 +994,7 @@ export function createS3Explorer(
     moreBtn.hidden = true;
     resetExplorer();
     applyViewVisibility(initialView);
-    previewPane.textContent = "Select an object to preview.";
+    setPaneEmpty(previewPane, "Select an object to preview.");
     setPaneStatus(
       initialView === "explorer" ? explorerTree : objectList,
       "Loading buckets...",
@@ -1103,7 +1103,7 @@ export function createS3Explorer(
     moreBtn.hidden = true;
     resetExplorer();
     applyViewVisibility("list");
-    previewPane.textContent = "Select an object to preview.";
+    setPaneEmpty(previewPane, "Select an object to preview.");
   }
 
   function getSelection(): S3ExplorerSelection {
