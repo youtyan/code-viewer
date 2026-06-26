@@ -6605,6 +6605,24 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   font-size: var(--db-font-base);
   font-weight: 600;
   color: var(--fg);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* 方向アイコンを name の前に出す: outgoing は → (自分→他テーブル)、
+   incoming は ← (他テーブル→自分の PK)。テキスト 1 文字なのでフォントに
+   影響されず軽量。 */
+.db-related-list-name::before {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.db-related-list-outgoing .db-related-list-name::before {
+  content: "→";
+}
+.db-related-list-incoming .db-related-list-name::before {
+  content: "←";
 }
 
 .db-related-list-via {
