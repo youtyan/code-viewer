@@ -100,6 +100,7 @@ export type DbText = {
     delete: string;
     confirmDelete: string;
     confirmClear: string;
+    truncatedRows: (saved: number, total: number) => string;
   };
   // ER 図。
   er: {
@@ -203,6 +204,7 @@ const EN: DbText = {
     delete: "Delete",
     confirmDelete: "Confirm delete",
     confirmClear: "Confirm clear",
+    truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
   },
   er: {
     zoomIn: "Zoom in",
@@ -305,6 +307,7 @@ const JA: DbText = {
     delete: "削除",
     confirmDelete: "削除を確認",
     confirmClear: "全削除を確認",
+    truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
   },
   er: {
     zoomIn: "拡大",

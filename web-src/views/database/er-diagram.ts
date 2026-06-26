@@ -1,4 +1,5 @@
 import type { DbColumn, DbSchemaResponse } from "../../core/database/types";
+import { type DbText, dbText } from "./i18n";
 
 type MermaidApi = {
   initialize(config: Record<string, unknown>): void;
@@ -43,6 +44,7 @@ export type ErDiagram = {
   ) => Promise<void>;
   clear: () => void;
   dispose: () => void;
+  localize: () => void;
 };
 
 function mermaidType(sqlType: string): string {
@@ -114,7 +116,10 @@ function buildErMarkup(
   return lines.join("\n");
 }
 
-export function createErDiagram(): ErDiagram {
+export function createErDiagram(
+  deps: { getText?: () => DbText } = {},
+): ErDiagram {
+  const text = (): DbText => deps.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-er-diagram";
   el.hidden = true;
@@ -126,25 +131,25 @@ export function createErDiagram(): ErDiagram {
   zoomIn.type = "button";
   zoomIn.className = "db-btn db-er-zoom-btn";
   zoomIn.textContent = "+";
-  zoomIn.title = "Zoom in";
+  zoomIn.title = text().er.zoomIn;
 
   const zoomOut = document.createElement("button");
   zoomOut.type = "button";
   zoomOut.className = "db-btn db-er-zoom-btn";
   zoomOut.textContent = "−";
-  zoomOut.title = "Zoom out";
+  zoomOut.title = text().er.zoomOut;
 
   const zoomReset = document.createElement("button");
   zoomReset.type = "button";
   zoomReset.className = "db-btn db-er-zoom-btn";
   zoomReset.textContent = "1:1";
-  zoomReset.title = "Reset zoom";
+  zoomReset.title = text().er.zoomReset;
 
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "db-btn db-er-zoom-btn";
-  copyBtn.textContent = "Copy Mermaid";
-  copyBtn.title = "Copy mermaid source to clipboard";
+  copyBtn.textContent = text().er.copyMermaid;
+  copyBtn.title = text().er.copyMermaidTitle;
 
   toolbar.append(zoomIn, zoomOut, zoomReset, copyBtn);
 
@@ -181,9 +186,9 @@ export function createErDiagram(): ErDiagram {
     if (lastMarkup) {
       navigator.clipboard.writeText(lastMarkup).then(
         () => {
-          copyBtn.textContent = "Copied!";
+          copyBtn.textContent = text().er.copied;
           setTimeout(() => {
-            copyBtn.textContent = "Copy Mermaid";
+            copyBtn.textContent = text().er.copyMermaid;
           }, 1500);
         },
         () => {},
@@ -241,7 +246,7 @@ export function createErDiagram(): ErDiagram {
 
     const tables = schema.tables.filter((t) => t.type === "table");
     if (tables.length === 0) {
-      svgWrap.textContent = "No tables to display.";
+      svgWrap.textContent = text().er.noTables;
       return;
     }
 
@@ -250,7 +255,7 @@ export function createErDiagram(): ErDiagram {
 
     const mermaid = await loadMermaid();
     if (!mermaid) {
-      svgWrap.textContent = "Failed to load mermaid.js";
+      svgWrap.textContent = text().er.loadError;
       return;
     }
 
@@ -262,7 +267,7 @@ export function createErDiagram(): ErDiagram {
     try {
       await mermaid.run({ nodes: [node], suppressErrors: true });
     } catch {
-      svgWrap.textContent = "Failed to render ER diagram.";
+      svgWrap.textContent = text().er.renderError;
     }
   }
 
@@ -280,5 +285,15 @@ export function createErDiagram(): ErDiagram {
     window.removeEventListener("mouseup", onWindowMouseUp);
   }
 
-  return { el, render, clear, dispose };
+  function localize(): void {
+    const t = text().er;
+    zoomIn.title = t.zoomIn;
+    zoomOut.title = t.zoomOut;
+    zoomReset.title = t.zoomReset;
+    copyBtn.title = t.copyMermaidTitle;
+    // コピー直後のフィードバック表示中でなければラベルを再適用する。
+    if (copyBtn.textContent !== t.copied) copyBtn.textContent = t.copyMermaid;
+  }
+
+  return { el, render, clear, dispose, localize };
 }

@@ -425,13 +425,14 @@ function createTabPane(
     loadHistory: () =>
       outerDeps.loadSqlHistory(currentDbInfo?.id || null, currentSchema),
     onSqlChange: () => cb.onStateChange(),
+    getText: () => paneText(),
   });
   // 復元すべき SQL draft があれば初期化時に流し込む (これも onSqlChange を
   // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
   if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft, { silent: true });
 
-  const schemaView = createSchemaView();
-  const erDiagram = createErDiagram();
+  const schemaView = createSchemaView({ getText: () => paneText() });
+  const erDiagram = createErDiagram({ getText: () => paneText() });
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
@@ -444,6 +445,7 @@ function createTabPane(
   const historyView = createQueryHistoryView({
     getDbId: () => currentDbInfo?.id || null,
     getSchema: () => currentSchema,
+    getText: () => paneText(),
     copySqlToQuery: (sql) => {
       queryEditor.setSql(sql);
       setActiveTab("query");
@@ -1480,6 +1482,10 @@ function createTabPane(
   function localizePane() {
     for (const fn of paneLocalizers) fn();
     grid.localize();
+    schemaView.localize();
+    erDiagram.localize();
+    historyView.localize();
+    queryEditor.localize();
   }
 
   return {

@@ -3,6 +3,7 @@ import type {
   DbForeignKey,
   DbIndexInfo,
 } from "../../core/database/types";
+import { type DbText, dbText } from "./i18n";
 
 export type TriggerDisplayInfo = {
   name: string;
@@ -31,12 +32,28 @@ export type SchemaView = {
     },
   ) => void;
   clear: () => void;
+  localize: () => void;
 };
 
-export function createSchemaView(): SchemaView {
+export function createSchemaView(
+  deps: { getText?: () => DbText } = {},
+): SchemaView {
+  const text = (): DbText => deps.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-schema-view";
   el.hidden = true;
+
+  // 言語切替時に同じデータで再描画するため、直近の render 引数を保持する。
+  let lastArgs: {
+    table: string;
+    columns: DbColumn[];
+    indexes: DbIndexInfo[];
+    extra?: {
+      foreignKeys?: DbForeignKey[];
+      triggers?: TriggerDisplayInfo[];
+      ddl?: string;
+    };
+  } | null = null;
 
   function render(
     table: string,
@@ -48,6 +65,8 @@ export function createSchemaView(): SchemaView {
       ddl?: string;
     },
   ) {
+    lastArgs = { table, columns, indexes, extra };
+    const t = text().schema;
     el.hidden = false;
     el.innerHTML = "";
 
@@ -59,14 +78,20 @@ export function createSchemaView(): SchemaView {
     /* ---- Columns ---- */
     const colSectionHeader = document.createElement("div");
     colSectionHeader.className = "db-schema-section-header";
-    colSectionHeader.textContent = "Columns";
+    colSectionHeader.textContent = t.columns;
     el.appendChild(colSectionHeader);
 
     const colTable = document.createElement("table");
     colTable.className = "db-schema-table";
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["Column", "Type", "Nullable", "PK", "Default"]) {
+    for (const label of [
+      t.colName,
+      t.colType,
+      t.colNullable,
+      t.colPk,
+      t.colDefault,
+    ]) {
       const th = document.createElement("th");
       th.textContent = label;
       headRow.appendChild(th);
@@ -87,10 +112,10 @@ export function createSchemaView(): SchemaView {
       tdType.className = "db-schema-col-type";
 
       const tdNull = document.createElement("td");
-      tdNull.textContent = col.nullable ? "YES" : "NO";
+      tdNull.textContent = col.nullable ? t.yes : t.no;
 
       const tdPk = document.createElement("td");
-      tdPk.textContent = col.primaryKey ? "PK" : "";
+      tdPk.textContent = col.primaryKey ? t.colPk : "";
       if (col.primaryKey) tdPk.className = "db-schema-pk";
 
       const tdDefault = document.createElement("td");
@@ -108,14 +133,14 @@ export function createSchemaView(): SchemaView {
     if (fks && fks.length > 0) {
       const fkHeader = document.createElement("div");
       fkHeader.className = "db-schema-section-header";
-      fkHeader.textContent = "Foreign Keys";
+      fkHeader.textContent = t.foreignKeys;
       el.appendChild(fkHeader);
 
       const fkTable = document.createElement("table");
       fkTable.className = "db-schema-table";
       const fkThead = document.createElement("thead");
       const fkHeadRow = document.createElement("tr");
-      for (const label of ["Column", "References Table", "References Column"]) {
+      for (const label of [t.colName, t.refTable, t.refColumn]) {
         const th = document.createElement("th");
         th.textContent = label;
         fkHeadRow.appendChild(th);
@@ -143,14 +168,14 @@ export function createSchemaView(): SchemaView {
     if (tableIndexes.length > 0) {
       const idxHeader = document.createElement("div");
       idxHeader.className = "db-schema-section-header";
-      idxHeader.textContent = "Indexes";
+      idxHeader.textContent = t.indexes;
       el.appendChild(idxHeader);
 
       const idxTable = document.createElement("table");
       idxTable.className = "db-schema-table";
       const idxThead = document.createElement("thead");
       const idxHeadRow = document.createElement("tr");
-      for (const label of ["Name", "Columns", "Unique"]) {
+      for (const label of [t.idxName, t.idxColumns, t.idxUnique]) {
         const th = document.createElement("th");
         th.textContent = label;
         idxHeadRow.appendChild(th);
@@ -165,7 +190,7 @@ export function createSchemaView(): SchemaView {
         const tdCols = document.createElement("td");
         tdCols.textContent = idx.columns.join(", ");
         const tdUnique = document.createElement("td");
-        tdUnique.textContent = idx.unique ? "YES" : "NO";
+        tdUnique.textContent = idx.unique ? t.yes : t.no;
         tr.append(tdName, tdCols, tdUnique);
         idxTbody.appendChild(tr);
       }
@@ -178,7 +203,7 @@ export function createSchemaView(): SchemaView {
     if (triggers && triggers.length > 0) {
       const trigHeader = document.createElement("div");
       trigHeader.className = "db-schema-section-header";
-      trigHeader.textContent = "Triggers";
+      trigHeader.textContent = t.triggers;
       el.appendChild(trigHeader);
 
       for (const trig of triggers) {
@@ -203,7 +228,7 @@ export function createSchemaView(): SchemaView {
     if (ddl) {
       const ddlHeader = document.createElement("div");
       ddlHeader.className = "db-schema-section-header";
-      ddlHeader.textContent = "DDL";
+      ddlHeader.textContent = t.ddl;
       el.appendChild(ddlHeader);
 
       const ddlWrap = document.createElement("div");
@@ -212,13 +237,13 @@ export function createSchemaView(): SchemaView {
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "db-btn db-btn-sm db-schema-copy-btn";
-      copyBtn.textContent = "Copy DDL";
+      copyBtn.textContent = t.copyDdl;
       copyBtn.addEventListener("click", () => {
         navigator.clipboard.writeText(ddl).then(
           () => {
-            copyBtn.textContent = "Copied!";
+            copyBtn.textContent = t.copied;
             setTimeout(() => {
-              copyBtn.textContent = "Copy DDL";
+              copyBtn.textContent = t.copyDdl;
             }, 1500);
           },
           () => {
@@ -239,7 +264,13 @@ export function createSchemaView(): SchemaView {
   function clear() {
     el.hidden = true;
     el.innerHTML = "";
+    lastArgs = null;
   }
 
-  return { el, render, clear };
+  function localize(): void {
+    if (!lastArgs || el.hidden) return;
+    render(lastArgs.table, lastArgs.columns, lastArgs.indexes, lastArgs.extra);
+  }
+
+  return { el, render, clear, localize };
 }
