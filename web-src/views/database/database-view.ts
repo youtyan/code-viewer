@@ -686,6 +686,10 @@ function createTabPane(
     return (await res.json()) as DbSchemaResponse;
   }
 
+  /**
+   * テーブルページを取得する。eq はベース WHERE（完全一致）として常に適用され、
+   * その上にグリッド標準の filters / sort を重ねられる（FK 関連表示で使う）。
+   */
   async function fetchTablePage(
     table: string,
     offset: number,
@@ -693,44 +697,7 @@ function createTabPane(
     sort: GridSort | null,
     filters: GridFilter[],
     signal?: AbortSignal,
-  ): Promise<DbTableDataResponse> {
-    if (!currentDbInfo) throw new Error("no database selected");
-    const params = new URLSearchParams({
-      db: currentDbInfo.id,
-      table,
-      offset: String(offset),
-      limit: String(limit),
-    });
-    withCurrentSchema(params);
-    if (sort) {
-      params.set("sort", sort.column);
-      params.set("dir", sort.direction);
-    }
-    if (filters.length > 0) {
-      params.set("filters", JSON.stringify(filters));
-    }
-    const res = await fetch(
-      `/_db/table?${params}`,
-      signal ? { signal } : undefined,
-    );
-    if (!res.ok) {
-      throw new Error(await responseErrorMessage(res, "failed to fetch table"));
-    }
-    return (await res.json()) as DbTableDataResponse;
-  }
-
-  /**
-   * 参照先テーブルのページを取得する。eq はベース WHERE（完全一致）として
-   * 常に適用され、その上にグリッド標準の filters / sort を重ねられる。
-   */
-  async function fetchRelatedPage(
-    table: string,
-    offset: number,
-    limit: number,
-    sort: GridSort | null,
-    filters: GridFilter[],
-    eq: Array<{ column: string; value: string }>,
-    signal?: AbortSignal,
+    eq: Array<{ column: string; value: string }> = [],
   ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
     const params = new URLSearchParams({
@@ -758,6 +725,18 @@ function createTabPane(
       throw new Error(await responseErrorMessage(res, "failed to fetch table"));
     }
     return (await res.json()) as DbTableDataResponse;
+  }
+
+  function fetchRelatedPage(
+    table: string,
+    offset: number,
+    limit: number,
+    sort: GridSort | null,
+    filters: GridFilter[],
+    eq: Array<{ column: string; value: string }>,
+    signal?: AbortSignal,
+  ): Promise<DbTableDataResponse> {
+    return fetchTablePage(table, offset, limit, sort, filters, signal, eq);
   }
 
   async function executeQuery(sql: string): Promise<DbQueryResponse> {

@@ -384,6 +384,11 @@ async function handleSchema(
   }
 }
 
+// 条件の個数・列名/値長の上限。巨大な WHERE 生成や export 経由の DoS を防ぐ。
+const MAX_COLUMN_VALUE_PAIRS = 64;
+const MAX_FILTER_COLUMN_LEN = 128;
+const MAX_FILTER_VALUE_LEN = 4096;
+
 function parseColumnValuePairs(
   url: URL,
   param: string,
@@ -393,13 +398,20 @@ function parseColumnValuePairs(
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (f: unknown): f is { column: string; value: string } =>
-        !!f &&
-        typeof f === "object" &&
-        typeof (f as Record<string, unknown>).column === "string" &&
-        typeof (f as Record<string, unknown>).value === "string",
-    );
+    return parsed
+      .filter(
+        (f: unknown): f is { column: string; value: string } =>
+          !!f &&
+          typeof f === "object" &&
+          typeof (f as Record<string, unknown>).column === "string" &&
+          typeof (f as Record<string, unknown>).value === "string",
+      )
+      .filter(
+        (f) =>
+          f.column.length <= MAX_FILTER_COLUMN_LEN &&
+          f.value.length <= MAX_FILTER_VALUE_LEN,
+      )
+      .slice(0, MAX_COLUMN_VALUE_PAIRS);
   } catch {
     return [];
   }

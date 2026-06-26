@@ -126,6 +126,38 @@ describe("/_db/table eq (exact foreign-key match)", () => {
     expect(body.totalRows).toBe(3);
   });
 
+  test("an over-long eq value is dropped (DoS guard) and does not filter", async () => {
+    const { dir, db } = seedDb();
+    const huge = "x".repeat(5000); // exceeds MAX_FILTER_VALUE_LEN (4096)
+    const res = await route(
+      dir,
+      tableUrl(db, "users", {
+        eq: JSON.stringify([{ column: "id", value: huge }]),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totalRows: number };
+    // The condition is dropped, so the full table comes back rather than 0.
+    expect(body.totalRows).toBe(3);
+  });
+
+  test("a flood of eq conditions is capped and still succeeds", async () => {
+    const { dir, db } = seedDb();
+    const many = Array.from({ length: 500 }, () => ({
+      column: "user_id",
+      value: "1",
+    }));
+    const res = await route(
+      dir,
+      tableUrl(db, "posts", { eq: JSON.stringify(many) }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totalRows: number };
+    // All conditions are identical (user_id = 1) so the capped set matches the
+    // same two posts; the point is the request is bounded and does not error.
+    expect(body.totalRows).toBe(2);
+  });
+
   test("export honors the eq base WHERE", async () => {
     const { dir, db } = seedDb();
     const params = new URLSearchParams({

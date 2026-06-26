@@ -14,8 +14,16 @@ export function sanitizeIdentifier(
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-export function escapeSqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+export function escapeSqlString(value: string, kind?: SqlKind): string {
+  // MySQL は既定 (NO_BACKSLASH_ESCAPES 無効) でバックスラッシュをエスケープ
+  // 文字として解釈するため、リテラルに含めるには二重化が必要。PostgreSQL は
+  // standard_conforming_strings=on 既定でバックスラッシュは普通の文字なので
+  // 触らない（二重化すると逆に値が変わってしまう）。
+  const escaped =
+    kind === "mysql"
+      ? value.replace(/\\/g, "\\\\").replace(/'/g, "''")
+      : value.replace(/'/g, "''");
+  return `'${escaped}'`;
 }
 
 /** カラム単位の完全一致条件（外部キー参照などの WHERE に使う）。 */
@@ -34,7 +42,7 @@ export function buildFilterWhere(
       ? `CAST(${sanitizeIdentifier(column, kind)} AS CHAR)`
       : `CAST(${sanitizeIdentifier(column, kind)} AS TEXT)`;
   for (const [value, cols] of grouped) {
-    const likeVal = useParams ? "?" : escapeSqlString(`%${value}%`);
+    const likeVal = useParams ? "?" : escapeSqlString(`%${value}%`, kind);
     if (cols.length === 1) {
       whereParts.push(`${castOf(cols[0])} LIKE ${likeVal}`);
       if (useParams) params.push(`%${value}%`);
@@ -48,7 +56,7 @@ export function buildFilterWhere(
   }
   // 完全一致条件は型差を避けるため TEXT/CHAR にキャストして比較する。
   for (const cond of exact ?? []) {
-    const rhs = useParams ? "?" : escapeSqlString(cond.value);
+    const rhs = useParams ? "?" : escapeSqlString(cond.value, kind);
     whereParts.push(`${castOf(cond.column)} = ${rhs}`);
     if (useParams) params.push(cond.value);
   }

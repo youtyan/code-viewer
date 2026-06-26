@@ -391,6 +391,13 @@ export function createTableGrid(
     spacer.style.height = "0px";
     statusEl?.remove();
     statusEl = null;
+    // 新しいテーブルをロードする前に選択をリセットする。これを怠ると、
+    // 関連グリッドの使い回し時に前テーブルの行 index が別の行へ誤適用され、
+    // getState() にも誤った行番号が混入する。
+    selectedRowIndex = -1;
+    // 開いたままの export メニューが残すと document クリックリスナーが
+    // リークするため、確実に閉じて解除する。
+    closeExportMenu();
     hideRelatedPanel();
     detailPanel.hidden = true;
     detailPanel.innerHTML = "";
@@ -607,6 +614,8 @@ export function createTableGrid(
   function selectRelatedTarget(index: number) {
     const level = currentRelatedLevel();
     if (!level || index < 0 || index >= level.targets.length) return;
+    // 既に選択中の参照先を再クリックしても再取得しない。
+    if (index === level.selectedIndex) return;
     level.selectedIndex = index;
     renderRelated();
   }
@@ -712,7 +721,9 @@ export function createTableGrid(
     const colName = columnNames[colIndex];
     const colType = columns[colIndex]?.type || "";
 
-    if (relatedPanel) relatedPanel.hidden = true; // 単一値詳細とは排他
+    // 単一値詳細とは排他。関連パネルを閉じるだけでなく、進行中の関連ロードも
+    // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
+    hideRelatedPanel();
     detailPanel.hidden = false;
     detailPanel.innerHTML = "";
 
