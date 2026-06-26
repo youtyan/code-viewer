@@ -34,6 +34,7 @@ type WorktreeUpdateWatchOptions = {
   directorySignature?: (path: string) => string | null;
   onUpdate: (changedPaths?: string[]) => void;
   onError?: (error: unknown) => void;
+  onWatchLimit?: (limit: number) => void;
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
   debounceMs?: number;
@@ -137,6 +138,7 @@ export function startWorktreeUpdateWatch(
   const reportWatchLimit = () => {
     if (watchLimitReported) return;
     watchLimitReported = true;
+    options.onWatchLimit?.(maxWatchedDirectories);
     options.onError?.(
       new Error(
         `worktree watcher cap reached (${maxWatchedDirectories}); subsequent changes may be missed`,

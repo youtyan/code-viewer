@@ -2376,6 +2376,10 @@ function openBrowser(url: string) {
 
 parseCli();
 
+// Directory count the worktree watcher capped at, or null while under the cap.
+// Tracked so clients that connect after the cap was hit still learn about it.
+let watchLimitReached: number | null = null;
+
 const server = await startServer({
   hostname: "127.0.0.1",
   port: listenPort,
@@ -2438,6 +2442,13 @@ const server = await startServer({
             ctrl = controller;
             sseClients.add(controller);
             controller.enqueue(enc.encode("event: open\ndata: ok\n\n"));
+            if (watchLimitReached !== null) {
+              controller.enqueue(
+                enc.encode(
+                  `event: watch-limit\ndata: ${watchLimitReached}\n\n`,
+                ),
+              );
+            }
             keepalive = setInterval(() => {
               try {
                 controller.enqueue(enc.encode(": ping\n\n"));
@@ -2534,6 +2545,10 @@ worktreeWatch = startWorktreeUpdateWatch({
   initialScanMode: "async",
   maxWatchedDirectories: worktreeWatchDirectoryLimitFromEnv(),
   onUpdate: triggerUpdate,
+  onWatchLimit: (limit) => {
+    watchLimitReached = limit;
+    sendSse("watch-limit", String(limit));
+  },
   onError: (error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`code-viewer worktree watch skipped: ${message}`);

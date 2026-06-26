@@ -81,13 +81,21 @@
   </div>
 
   <div id="load-bar" aria-hidden="true"></div>
-  <div id="change-banner" hidden>
-    <span id="change-banner-copy">
-      <span id="change-banner-text"></span>
-      <span id="change-banner-age"></span>
-    </span>
-    <button id="change-banner-reload" type="button"></button>
-    <button id="change-banner-dismiss" type="button" aria-label="dismiss">×</button>
+  <div id="banner-stack">
+    <div id="watch-limit-banner" class="gdp-banner gdp-banner--warn" role="status" hidden>
+      <span class="gdp-banner-copy">
+        <span id="watch-limit-text"></span>
+      </span>
+      <button id="watch-limit-dismiss" class="gdp-banner-dismiss" type="button" aria-label="dismiss">×</button>
+    </div>
+    <div id="change-banner" class="gdp-banner" hidden>
+      <span id="change-banner-copy" class="gdp-banner-copy">
+        <span id="change-banner-text"></span>
+        <span id="change-banner-age"></span>
+      </span>
+      <button id="change-banner-reload" type="button"></button>
+      <button id="change-banner-dismiss" class="gdp-banner-dismiss" type="button" aria-label="dismiss">×</button>
+    </div>
   </div>
 
   <aside id="history-panel" aria-label="Commit history" hidden>
