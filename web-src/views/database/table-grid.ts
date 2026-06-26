@@ -70,6 +70,16 @@ export type TableGridCallbacks = {
    * フィルタへ合わせて付与する。関連パネルの埋め込みグリッドでのみ使う。
    */
   getBaseEq?: () => GridExactFilter[];
+  /**
+   * 埋め込みグリッドで FK セルがクリックされたことを親へ通知する。
+   * 親はこれを使って関連パネルをさらに 1 段潜らせる（ドリルダウン）。
+   */
+  onForeignKeyCellClick?: (
+    sourceTable: string,
+    columnNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) => void;
 };
 
 export type TableGridOptions = {
@@ -212,14 +222,20 @@ export function createTableGrid(
   /* ---- Related-data panel (FK navigation) ---- */
   // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
   type RelatedTarget = { fk: DbForeignKey; value: string };
+  // ドリルの 1 段。sourceTable の行が持つ FK 参照群と選択中の参照。
+  type RelatedLevel = {
+    sourceTable: string;
+    targets: RelatedTarget[];
+    selectedIndex: number;
+  };
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
-  // クリック元セルの「テーブル.列 = 値」を常時表示するヘッダー要素。
-  let relatedSourceEl: HTMLElement | null = null;
+  // ヘッダーのパンくず（ドリル経路）を表示する要素。
+  let relatedCrumbEl: HTMLElement | null = null;
   let embeddedGrid: TableGrid | null = null;
-  let relatedTargets: RelatedTarget[] = [];
-  let relatedSelectedIndex = -1;
+  // ドリルのスタック。末尾が現在表示中の階層。
+  let relatedStack: RelatedLevel[] = [];
   // 切り替え中の取得競合を捨てるための世代。
   let relatedGen = 0;
   // 埋め込みグリッドへ常時適用するベース WHERE（完全一致）。
@@ -392,18 +408,47 @@ export function createTableGrid(
     return str === "" ? null : str;
   }
 
-  /** クリックされた行が持つ外部キー参照を集める（左リストの元データ）。 */
-  function buildRowForeignKeys(rowData: DbValue[]): RelatedTarget[] {
+  /** 指定行が持つ外部キー参照を集める（左リストの元データ）。 */
+  function buildRowForeignKeys(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+  ): RelatedTarget[] {
     const targets: RelatedTarget[] = [];
     for (const fk of callbacks.getForeignKeys?.() ?? []) {
-      if (fk.fromTable !== currentTable) continue;
-      const idx = columnNames.indexOf(fk.fromColumn);
+      if (fk.fromTable !== sourceTable) continue;
+      const idx = colNames.indexOf(fk.fromColumn);
       if (idx < 0) continue;
       const value = relatedLookupValue(rowData[idx]);
       if (value === null) continue;
       targets.push({ fk, value });
     }
     return targets;
+  }
+
+  /** 行から 1 ドリル階層を作る。FK 参照が無ければ null。 */
+  function makeRelatedLevel(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ): RelatedLevel | null {
+    const targets = buildRowForeignKeys(sourceTable, colNames, rowData);
+    if (targets.length === 0) return null;
+    let selectedIndex = targets.findIndex(
+      (t) => t.fk.fromColumn === clickedColumn,
+    );
+    if (selectedIndex < 0) selectedIndex = 0;
+    return { sourceTable, targets, selectedIndex };
+  }
+
+  function currentRelatedLevel(): RelatedLevel | null {
+    return relatedStack[relatedStack.length - 1] ?? null;
+  }
+
+  function currentRelatedTarget(): RelatedTarget | null {
+    const level = currentRelatedLevel();
+    return level ? (level.targets[level.selectedIndex] ?? null) : null;
   }
 
   /** 関連パネルの DOM と埋め込みグリッドを初回だけ構築する。 */
@@ -418,16 +463,16 @@ export function createTableGrid(
     header.className = "db-related-header";
     const title = document.createElement("span");
     title.className = "db-related-title";
-    title.textContent = "🔗 関連データ";
-    // クリック元の「テーブル.列 = 値」を常に表示する（選択セルの詳細）。
-    relatedSourceEl = document.createElement("span");
-    relatedSourceEl.className = "db-related-source";
+    title.textContent = "🔗";
+    // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
+    relatedCrumbEl = document.createElement("span");
+    relatedCrumbEl.className = "db-related-crumbs";
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "db-btn db-grid-detail-copy db-related-copy";
     copyBtn.textContent = "Copy";
     copyBtn.addEventListener("click", () => {
-      const target = relatedTargets[relatedSelectedIndex];
+      const target = currentRelatedTarget();
       if (!target) return;
       navigator.clipboard.writeText(target.value).then(
         () => {
@@ -446,7 +491,7 @@ export function createTableGrid(
     closeBtn.className = "db-btn db-btn-icon db-related-close";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", hideRelatedPanel);
-    header.append(title, relatedSourceEl, copyBtn, closeBtn);
+    header.append(title, relatedCrumbEl, copyBtn, closeBtn);
 
     const bodyRow = document.createElement("div");
     bodyRow.className = "db-related-body";
@@ -474,6 +519,9 @@ export function createTableGrid(
         setColumnWidths: callbacks.setColumnWidths,
         getForeignKeys: callbacks.getForeignKeys,
         getBaseEq: () => relatedEq,
+        // 埋め込みグリッドの FK クリックで 1 段潜る。
+        onForeignKeyCellClick: (sourceTable, colNames, rowData, clicked) =>
+          drillIntoRelated(sourceTable, colNames, rowData, clicked),
       },
       { embedded: true },
     );
@@ -507,36 +555,115 @@ export function createTableGrid(
   function hideRelatedPanel() {
     if (!relatedPanel) return;
     relatedPanel.hidden = true;
-    relatedTargets = [];
-    relatedSelectedIndex = -1;
+    relatedStack = [];
     relatedGen++;
     relatedFirstPageController?.abort();
     relatedFirstPageController = null;
     embeddedGrid?.clear();
   }
 
-  /** FK セルクリックで、その行の全 FK 参照を関連パネルに開く。 */
-  function openRelatedForRow(rowData: DbValue[], clickedColumn: string) {
+  /** メイングリッドの FK セルクリックで、その行の関連を最上段から開く。 */
+  function openRelatedForRow(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) {
     if (embedded || !relatedPanel || !callbacks.fetchRelatedPage) return;
-    const targets = buildRowForeignKeys(rowData);
-    if (targets.length === 0) return;
+    const level = makeRelatedLevel(
+      sourceTable,
+      colNames,
+      rowData,
+      clickedColumn,
+    );
+    if (!level) return;
     ensureRelatedDom();
     detailPanel.hidden = true; // 単一値の詳細とは排他表示
-    relatedTargets = targets;
+    relatedStack = [level];
     relatedPanel.hidden = false;
-    let selected = targets.findIndex((t) => t.fk.fromColumn === clickedColumn);
-    if (selected < 0) selected = 0;
-    void selectRelatedTarget(selected);
+    renderRelated();
+  }
+
+  /** 埋め込みグリッドの FK クリックで 1 段潜る。 */
+  function drillIntoRelated(
+    sourceTable: string,
+    colNames: string[],
+    rowData: DbValue[],
+    clickedColumn: string,
+  ) {
+    if (!relatedPanel) return;
+    const level = makeRelatedLevel(
+      sourceTable,
+      colNames,
+      rowData,
+      clickedColumn,
+    );
+    if (!level) return; // 参照先が無い行は何もしない
+    relatedStack.push(level);
+    renderRelated();
+  }
+
+  /** 同一階層内で参照先（兄弟 FK）を切り替える。 */
+  function selectRelatedTarget(index: number) {
+    const level = currentRelatedLevel();
+    if (!level || index < 0 || index >= level.targets.length) return;
+    level.selectedIndex = index;
+    renderRelated();
+  }
+
+  /** パンくずのクリックでその階層まで戻る。 */
+  function goToRelatedLevel(levelIndex: number) {
+    if (levelIndex < 0 || levelIndex >= relatedStack.length - 1) return;
+    relatedStack = relatedStack.slice(0, levelIndex + 1);
+    renderRelated();
+  }
+
+  function renderRelated() {
+    renderRelatedCrumbs();
+    renderRelatedList();
+    void loadRelatedTarget();
+  }
+
+  function renderRelatedCrumbs() {
+    if (!relatedCrumbEl) return;
+    relatedCrumbEl.innerHTML = "";
+    if (relatedStack.length === 0) return;
+    const origin = document.createElement("span");
+    origin.className = "db-related-crumb-origin";
+    origin.textContent = relatedStack[0].sourceTable;
+    relatedCrumbEl.appendChild(origin);
+    relatedStack.forEach((level, i) => {
+      const sep = document.createElement("span");
+      sep.className = "db-related-crumb-sep";
+      sep.textContent = "▸";
+      relatedCrumbEl?.appendChild(sep);
+      const target = level.targets[level.selectedIndex];
+      const isLast = i === relatedStack.length - 1;
+      if (isLast) {
+        const seg = document.createElement("span");
+        seg.className = "db-related-crumb active";
+        seg.textContent = target.fk.toTable;
+        relatedCrumbEl?.appendChild(seg);
+      } else {
+        const seg = document.createElement("button");
+        seg.type = "button";
+        seg.className = "db-related-crumb";
+        seg.textContent = target.fk.toTable;
+        seg.addEventListener("click", () => goToRelatedLevel(i));
+        relatedCrumbEl?.appendChild(seg);
+      }
+    });
   }
 
   function renderRelatedList() {
-    if (!relatedListEl) return;
+    const level = currentRelatedLevel();
+    if (!relatedListEl || !level) return;
     relatedListEl.innerHTML = "";
-    relatedTargets.forEach((target, i) => {
+    level.targets.forEach((target, i) => {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "db-related-list-item";
-      if (i === relatedSelectedIndex) item.classList.add("active");
+      if (i === level.selectedIndex) item.classList.add("active");
       const name = document.createElement("span");
       name.className = "db-related-list-name";
       name.textContent = target.fk.toTable;
@@ -544,21 +671,15 @@ export function createTableGrid(
       via.className = "db-related-list-via";
       via.textContent = `${target.fk.fromColumn} = ${target.value}`;
       item.append(name, via);
-      item.addEventListener("click", () => void selectRelatedTarget(i));
+      item.addEventListener("click", () => selectRelatedTarget(i));
       relatedListEl?.appendChild(item);
     });
   }
 
-  /** 左リストの選択を切り替え、埋め込みグリッドへ参照先テーブルを読み込む。 */
-  async function selectRelatedTarget(index: number) {
-    if (index < 0 || index >= relatedTargets.length) return;
-    relatedSelectedIndex = index;
-    renderRelatedList();
-    const target = relatedTargets[index];
-    if (relatedSourceEl) {
-      // 選択セルの「元テーブル.列 = 値 → 参照先テーブル」を表示。
-      relatedSourceEl.textContent = `${currentTable}.${target.fk.fromColumn} = ${target.value} → ${target.fk.toTable}`;
-    }
+  /** 現在選択中の参照先を埋め込みグリッドへ読み込む。 */
+  async function loadRelatedTarget() {
+    const target = currentRelatedTarget();
+    if (!target) return;
     relatedEq = [{ column: target.fk.toColumn, value: target.value }];
     const grid = embeddedGrid;
     if (!grid || !callbacks.fetchRelatedPage) return;
@@ -930,7 +1051,12 @@ export function createTableGrid(
             const cellColIndex = c;
             const cellColName = columnNames[c];
             const rowValues = rowData;
-            if (!embedded && fkColumns.has(cellColName)) {
+            // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
+            // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
+            const fkClickable =
+              fkColumns.has(cellColName) &&
+              (!embedded || !!callbacks.onForeignKeyCellClick);
+            if (fkClickable) {
               cell.classList.add("db-grid-cell-fk");
             }
             cell.addEventListener("click", (e) => {
@@ -940,10 +1066,24 @@ export function createTableGrid(
                 r.classList.remove("selected");
               });
               row.classList.add("selected");
-              // FK セルはその行の関連テーブルをパネルに開く。それ以外は
-              // 従来どおり単一値の詳細を表示する。
-              if (!embedded && fkColumns.has(cellColName)) {
-                openRelatedForRow(rowValues, cellColName);
+              // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
+              // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
+              if (fkClickable) {
+                if (embedded) {
+                  callbacks.onForeignKeyCellClick?.(
+                    currentTable,
+                    columnNames,
+                    rowValues,
+                    cellColName,
+                  );
+                } else {
+                  openRelatedForRow(
+                    currentTable,
+                    columnNames,
+                    rowValues,
+                    cellColName,
+                  );
+                }
               } else {
                 showCellDetail(cellColIndex, cellValue);
               }

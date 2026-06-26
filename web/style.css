@@ -6631,18 +6631,49 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   background: var(--bg-mute);
 }
 
-/* Related-panel header: source cell context (selected column = value). */
-.db-related-source {
+/* Related-panel header: breadcrumb (drill path). */
+.db-related-crumbs {
   flex: 1;
   min-width: 0;
-  margin-left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-weight: 400;
   font-size: var(--db-font-base);
-  color: var(--fg-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.db-related-crumb-origin {
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+.db-related-crumb-sep {
+  color: var(--fg-subtle);
+  flex-shrink: 0;
+}
+
+.db-related-crumb {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--accent, var(--link, #2563eb));
+  cursor: pointer;
+}
+.db-related-crumb:hover {
+  background: var(--bg-mute);
+  text-decoration: underline;
+}
+.db-related-crumb.active {
+  color: var(--fg);
+  font-weight: 600;
+  cursor: default;
 }
 
 .db-related-copy {
