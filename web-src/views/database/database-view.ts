@@ -3,6 +3,7 @@ import type {
   DbFileInfo,
   DbFilesResponse,
   DbQueryResponse,
+  DbRelatedResponse,
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
@@ -368,6 +369,11 @@ function createTabPane(
     getColumnWidths: (dbId, table) => outerDeps.getColumnWidths(dbId, table),
     setColumnWidths: (dbId, table, widths) =>
       outerDeps.setColumnWidths(dbId, table, widths),
+    getForeignKeys: () => schemaCache?.foreignKeys ?? [],
+    fetchRelatedRows: (table, column, value, signal) =>
+      fetchRelatedRows(table, column, value, signal),
+    onNavigateToReference: (table, column, value) =>
+      navigateToReference(table, column, value),
   });
 
   const queryEditor = createQueryEditor({
@@ -714,6 +720,50 @@ function createTabPane(
       throw new Error(await responseErrorMessage(res, "failed to fetch table"));
     }
     return (await res.json()) as DbTableDataResponse;
+  }
+
+  async function fetchRelatedRows(
+    table: string,
+    column: string,
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<DbRelatedResponse> {
+    if (!currentDbInfo) throw new Error("no database selected");
+    const params = new URLSearchParams({
+      db: currentDbInfo.id,
+      table,
+      column,
+      value,
+    });
+    withCurrentSchema(params);
+    const res = await fetch(
+      `/_db/related?${params}`,
+      signal ? { signal } : undefined,
+    );
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "failed to fetch related rows"),
+      );
+    }
+    return (await res.json()) as DbRelatedResponse;
+  }
+
+  /** FK 参照先テーブルを開き、該当値で絞り込んで表示する。 */
+  function navigateToReference(
+    table: string,
+    column: string,
+    value: string,
+  ): void {
+    if (!currentDbInfo) return;
+    // 参照先テーブルが現在のスキーマに存在しない場合は何もしない。
+    if (schemaCache && !schemaCache.tables.some((t) => t.name === table)) {
+      return;
+    }
+    void (async () => {
+      await selectTable(table);
+      if (currentTable !== table) return;
+      await grid.applyState({ filters: [{ column, value }] });
+    })();
   }
 
   async function executeQuery(sql: string): Promise<DbQueryResponse> {

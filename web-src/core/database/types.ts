@@ -81,6 +81,24 @@ export type DbQueryResponse = {
   error?: string;
 };
 
+/**
+ * 外部キー参照先（または逆参照）の行を返すレスポンス。
+ * セル詳細パネルから「関連データ」を引くときに使う。
+ */
+export type DbRelatedResponse = {
+  dbId: string;
+  schema?: string;
+  /** 参照先テーブル名 */
+  table: string;
+  /** 一致条件に使った参照先カラム名 */
+  column: string;
+  columns: string[];
+  columnTypes: string[];
+  rows: DbValue[][];
+  rowCount: number;
+  truncated: boolean;
+};
+
 export type DbFileInfo = {
   id: string;
   path: string;
