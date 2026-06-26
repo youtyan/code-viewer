@@ -643,24 +643,22 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     async getIndexesAsync(signal?: AbortSignal): Promise<DbIndexInfo[]> {
       let sql: string;
       if (config.kind === "postgresql") {
-        sql = `SELECT indexname, tablename FROM pg_indexes WHERE schemaname = ${postgresSchemaLiteral()} AND indexname NOT LIKE 'pg_%' ORDER BY indexname`;
+        // pg_index.indkey の順序で構成列を string_agg。式 index は attname が
+        // null になるので空文字を捨てる。PK もここに乗る (PRIMARY KEY は内部的に
+        // unique index)。 schema view の indexes 表示に columns と uniqueness が
+        // 必要なので、pg_indexes 名前だけ取る旧クエリから差し替えた。
+        sql = `SELECT i.relname, t.relname, CASE WHEN ix.indisunique THEN '1' ELSE '0' END, COALESCE(string_agg(a.attname, ',' ORDER BY k.ord), '') FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum WHERE n.nspname = ${postgresSchemaLiteral()} AND i.relname NOT LIKE 'pg_%' GROUP BY i.relname, t.relname, ix.indisunique ORDER BY t.relname, i.relname`;
       } else {
-        sql = `SELECT DISTINCT index_name, table_name, non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() ORDER BY index_name`;
+        // mysql は statistics に列ごと 1 行で seq_in_index 順を持つので、
+        // index 単位に集約して columns と unique を一発で取る。
+        sql = `SELECT index_name, table_name, IF(MAX(non_unique) = 0, '1', '0'), GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') FROM information_schema.statistics WHERE table_schema = DATABASE() GROUP BY index_name, table_name ORDER BY table_name, index_name`;
       }
       const result = await execAsync(sql, signal);
-      if (config.kind === "postgresql") {
-        return result.rows.map((row) => ({
-          name: row[0],
-          table: row[1],
-          columns: [],
-          unique: false,
-        }));
-      }
       return result.rows.map((row) => ({
         name: row[0],
         table: row[1],
-        columns: [],
-        unique: row[2] === "0",
+        unique: row[2] === "1",
+        columns: row[3] ? row[3].split(",").filter((s) => s.length > 0) : [],
       }));
     },
 
