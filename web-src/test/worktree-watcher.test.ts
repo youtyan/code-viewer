@@ -290,6 +290,32 @@ describe("worktree update watcher", () => {
     ]);
   });
 
+  test("invokes onWatchLimit once with the cap when the limit is reached", () => {
+    let rootListener: Parameters<WatchFn>[2] | null = null;
+    const limits: number[] = [];
+
+    startWorktreeUpdateWatch({
+      root: "/repo",
+      omitDirNames: [],
+      excludeNames: [],
+      maxWatchedDirectories: 1,
+      watch: ((path, _options, next) => {
+        if (path === "/repo") rootListener = next;
+      }) as WatchFn,
+      readdirSync: () => [],
+      isDirectory: (path) => path === "/repo/a" || path === "/repo/b",
+      onUpdate: () => {},
+      onWatchLimit: (limit) => {
+        limits.push(limit);
+      },
+    });
+
+    rootListener?.("rename", "a");
+    rootListener?.("rename", "b");
+
+    expect(limits).toEqual([1]);
+  });
+
   test("starts watching a newly created directory after a rename event", () => {
     let listener: Parameters<WatchFn>[2] | null = null;
     const watched: string[] = [];

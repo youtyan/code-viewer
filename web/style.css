@@ -958,12 +958,20 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   100% { transform: translateX(450%); }
 }
 
-/* ===== Change notification banner ===== */
-#change-banner {
+/* ===== Notification banners (change + watch-limit) ===== */
+#banner-stack {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 80;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+.gdp-banner {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -978,12 +986,16 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   color: var(--fg);
   animation: gdp-banner-slide 0.2s ease;
 }
-#change-banner[hidden] { display: none; }
+.gdp-banner[hidden] { display: none; }
+.gdp-banner--warn {
+  background: var(--bg-soft);
+  border-color: var(--attn);
+}
 @keyframes gdp-banner-slide {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-#change-banner-copy {
+.gdp-banner-copy {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -999,6 +1011,9 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   font-size: 12px;
   white-space: nowrap;
 }
+#watch-limit-text {
+  font-weight: 600;
+}
 #change-banner-reload {
   flex: 0 0 auto;
   min-height: 30px;
@@ -1012,7 +1027,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   white-space: nowrap;
 }
 #change-banner-reload:hover { background: var(--accent-emph); }
-#change-banner-dismiss {
+.gdp-banner-dismiss {
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
@@ -1024,7 +1039,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   cursor: pointer;
   line-height: 1;
 }
-#change-banner-dismiss:hover { color: var(--fg); }
+.gdp-banner-dismiss:hover { color: var(--fg); }
 
 /* ===== Commit history panel ===== */
 #history-panel {
