@@ -470,6 +470,12 @@ function createTableMetaCache(now = () => Date.now()) {
   };
 }
 
+// A prefetch query may reject before later Promise.all joins it.
+function observeBackgroundRejection<T>(promise: Promise<T>): Promise<T> {
+  void promise.catch(() => {});
+  return promise;
+}
+
 export function createDockerAdapter(config: DockerDbConfig): DockerSource {
   async function execAsync(
     sql: string,
@@ -801,8 +807,10 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const columnsPromise = tableMetaCache.getColumns(table, () =>
         fetchColumnsAsyncUncached(table, signal),
       );
-      const totalRowsPromise = tableMetaCache.getRowCount(table, async () =>
-        rowCountFromResult(await execAsync(countSql, signal)),
+      const totalRowsPromise = observeBackgroundRejection(
+        tableMetaCache.getRowCount(table, async () =>
+          rowCountFromResult(await execAsync(countSql, signal)),
+        ),
       );
       let columns: DbColumn[];
       try {

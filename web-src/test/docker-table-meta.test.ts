@@ -15,6 +15,13 @@ type SpawnHarness = {
   restore(): void;
 };
 
+type SpawnResult = {
+  stdout: string;
+  stderr?: string;
+  code?: number;
+  delayMs?: number;
+};
+
 type SpawnLike = (
   args: string[],
   opts?: Record<string, unknown>,
@@ -81,19 +88,24 @@ function postgresStdout(sql: string): string {
   return "1\tAda\n";
 }
 
-function installSpawnHarness(stdoutForSql = mysqlStdout): SpawnHarness {
+function installSpawnHarness(
+  resultForSql: (sql: string) => string | SpawnResult = mysqlStdout,
+): SpawnHarness {
   const bunGlobal = globalThis as unknown as { Bun: { spawn: SpawnLike } };
   const originalSpawn = bunGlobal.Bun.spawn;
   const calls: SpawnCall[] = [];
   bunGlobal.Bun.spawn = ((args: string[]) => {
     const sql = args[args.length - 1] || "";
+    const rawResult = resultForSql(sql);
+    const result =
+      typeof rawResult === "string" ? { stdout: rawResult } : rawResult;
     calls.push({ args, sql, startedAt: performance.now() });
     return {
       exited: new Promise<number>((resolve) => {
-        setTimeout(() => resolve(0), 20);
+        setTimeout(() => resolve(result.code ?? 0), result.delayMs ?? 20);
       }),
-      stdout: new Response(stdoutForSql(sql)).body,
-      stderr: new Response("").body,
+      stdout: new Response(result.stdout).body,
+      stderr: new Response(result.stderr || "").body,
       kill() {},
     };
   }) as SpawnLike;
@@ -148,6 +160,52 @@ describe("docker table meta queries", () => {
     expect(result.rows).toEqual([["1", "Ada"]]);
     expect(result.rowCount).toBe(1);
     expect(result.totalRows).toBe(7);
+  });
+
+  test("keeps a prefetched row count failure out of unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return { stdout: postgresStdout(sql), delayMs: 30 };
+      }
+      if (sql.includes("COUNT(*)")) {
+        return {
+          stdout: "",
+          stderr:
+            'ERROR: relation "public.missing_schedule_triggers" does not exist',
+          code: 1,
+          delayMs: 0,
+        };
+      }
+      return { stdout: "1\tAda\n", delayMs: 30 };
+    });
+    const adapter = createPostgresAdapter("public");
+
+    try {
+      const pending = adapter.getTablePageWithMeta(
+        "missing_schedule_triggers",
+        {
+          offset: 0,
+          limit: 25,
+        },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+      let thrown: unknown;
+      try {
+        await pending;
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown instanceof Error).toBe(true);
+      expect((thrown as Error).message).toMatch(/missing_schedule_triggers/);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   test("filters columns before building filtered table SQL", async () => {
