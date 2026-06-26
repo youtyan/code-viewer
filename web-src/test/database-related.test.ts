@@ -32,8 +32,8 @@ function seedDb(): { dir: string; db: string } {
   return { dir, db: "app.db" };
 }
 
-async function related(dir: string, query: string): Promise<Response> {
-  const req = new Request(`http://localhost/_db/related?${query}`);
+async function route(dir: string, path: string): Promise<Response> {
+  const req = new Request(`http://localhost${path}`);
   const res = await handleDatabaseRoute(
     req,
     new URL(req.url),
@@ -43,6 +43,10 @@ async function related(dir: string, query: string): Promise<Response> {
   );
   if (!res) throw new Error("route did not match");
   return res;
+}
+
+function related(dir: string, query: string): Promise<Response> {
+  return route(dir, `/_db/related?${query}`);
 }
 
 describe("/_db/related foreign key lookup", () => {
@@ -90,6 +94,23 @@ describe("/_db/related foreign key lookup", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.text()).toMatch("unknown column");
+  });
+
+  test("filtered table read returns a JSON-serializable totalRows (no BigInt)", async () => {
+    // Regression: safeIntegers makes COUNT(*) a bigint; the filtered table
+    // path must coerce totalRows to a number, otherwise the JSON response
+    // throws "JSON.stringify cannot serialize BigInt". This is exercised by
+    // the FK "Open <table>" jump, which navigates with a column filter.
+    const { dir, db } = seedDb();
+    const filters = encodeURIComponent('[{"column":"id","value":"1"}]');
+    const res = await route(
+      dir,
+      `/_db/table?db=${db}&table=users&offset=0&limit=5&filters=${filters}`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totalRows: number; rows: unknown[] };
+    expect(body.totalRows).toBe(1);
+    expect(body.rows.length).toBe(1);
   });
 
   test("requires table, column and value parameters", async () => {

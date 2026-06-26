@@ -371,10 +371,14 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       );
       const tableId = sanitizeIdentifier(table);
       const whereClause = filter.where ? ` WHERE ${filter.where}` : "";
+      // safePrepare enables safeIntegers, so COUNT(*) comes back as a bigint.
+      // totalRows is serialized straight into the JSON response (not via
+      // serializeDbValue), so coerce it to a number here to avoid
+      // "JSON.stringify cannot serialize BigInt".
       const countRow = safePrepare(
         db,
         `SELECT COUNT(*) AS cnt FROM ${tableId}${whereClause}`,
-      ).get(...filter.params) as { cnt: number } | undefined;
+      ).get(...filter.params) as { cnt: number | bigint } | undefined;
       const rows = safePrepare(
         db,
         `SELECT * FROM ${tableId}${whereClause}${order} LIMIT ? OFFSET ?`,
@@ -387,7 +391,7 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
         columns,
         rows: result.rows,
         rowCount: result.rowCount,
-        totalRows: countRow?.cnt ?? 0,
+        totalRows: Number(countRow?.cnt ?? 0),
       };
     },
 
