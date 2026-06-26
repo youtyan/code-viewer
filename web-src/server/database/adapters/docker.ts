@@ -148,11 +148,21 @@ export function __clearDockerSchemaListCacheForTest(): void {
   dockerSchemasCache.clear();
 }
 
+// ai-dup-check: allow -- docker / s3 / docker-utils はそれぞれ独立した
+// spawnSync の差し替えポイントを持つ必要があり、共通化すると bun の test
+// isolation (per-module mutable state) を壊す。
 export function __setDockerSpawnSyncForTest(
   spawnSyncForTest: typeof spawnSync | null,
 ): void {
   spawnSyncImpl = spawnSyncForTest ?? spawnSync;
 }
+
+// 行区切りに ASCII 0x1E (Record Separator) を使う。psql の -A モードは値に
+// 含まれる改行をエスケープしないので、デフォルトの -R '\n' のままだと
+// landing_page_html 等に改行を含むカラムが来た瞬間に「1 行 → 複数行」に
+// 化けてカラム数がずれる (再現: projects テーブルの HTML 列)。RS は通常の
+// テキストデータには現れないので、行の terminator として安全。
+const PG_RECORD_SEPARATOR = "\x1e";
 
 function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
   if (config.kind === "postgresql") {
@@ -174,6 +184,8 @@ function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
       "-A",
       "-F",
       "\t",
+      "-R",
+      PG_RECORD_SEPARATOR,
       "-v",
       "ON_ERROR_STOP=1",
       "-c",
@@ -370,13 +382,32 @@ function splitTsvLine(line: string, decodeFields: boolean): string[] {
   return decodeFields ? fields.map(decodeMysqlBatchField) : fields;
 }
 
+function stripFinalRecordSeparator(
+  text: string,
+  recordSeparator: string,
+): string {
+  return text.endsWith(recordSeparator)
+    ? text.slice(0, -recordSeparator.length)
+    : text;
+}
+
 function parseTsvOutput(
   stdout: string,
   hasHeader: boolean,
+  recordSeparator?: string,
 ): { columns: string[]; rows: string[][] } {
-  const text = stripFinalLineBreak(stdout);
+  // psql は landing_page_html のような改行を含む TEXT 列を -A モードでは
+  // エスケープしないので、改行で行を区切ると 1 行が複数行に化ける。postgres
+  // 経由で呼ばれるときは PG_RECORD_SEPARATOR を渡して、行区切りを通常の
+  // テキストに現れない RS (0x1E) に切り替えてある。指定が無ければ従来通り
+  // 改行で割る (mysql / 既存呼び出し向け)。
+  const text = recordSeparator
+    ? stripFinalRecordSeparator(stdout, recordSeparator)
+    : stripFinalLineBreak(stdout);
   if (text.length === 0) return { columns: [], rows: [] };
-  const lines = text.split(/\r?\n/);
+  const lines = recordSeparator
+    ? text.split(recordSeparator)
+    : text.split(/\r?\n/);
   if (lines.length === 0) return { columns: [], rows: [] };
   if (hasHeader) {
     const columns = splitTsvLine(lines[0], true);
@@ -387,6 +418,7 @@ function parseTsvOutput(
   return { columns: [], rows };
 }
 
+// ai-dup-check: allow -- sqlite 側の buildOrderClause は SQLite 専用サニタイザを使い、docker 側は kind 切替が必要なので共通化できない。
 function buildOrderClause(
   orderBy: DbOrder[] | undefined,
   kind: "postgresql" | "mysql",
@@ -486,7 +518,11 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     if (result.code !== 0) {
       throw new Error(result.stderr.trim() || "query failed");
     }
-    return parseTsvOutput(result.stdout, config.kind === "mysql");
+    return parseTsvOutput(
+      result.stdout,
+      config.kind === "mysql",
+      config.kind === "postgresql" ? PG_RECORD_SEPARATOR : undefined,
+    );
   }
 
   function toDbValue(val: string): DbValue {
@@ -606,25 +642,30 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
 
     async getIndexesAsync(signal?: AbortSignal): Promise<DbIndexInfo[]> {
       let sql: string;
+      // postgres も mysql も「複数列インデックスの列名を 1 セル内に集約」する。
+      // カンマ等の通常文字を separator にすると、引用列名 ("foo,bar") に
+      // separator 自体が含まれて split が崩れる。ASCII 0x1F (Unit Separator)
+      // は通常テキスト・SQL 識別子に出現しないので衝突しない。
+      const INDEX_COL_SEP = "\x1f";
       if (config.kind === "postgresql") {
-        sql = `SELECT indexname, tablename FROM pg_indexes WHERE schemaname = ${postgresSchemaLiteral()} AND indexname NOT LIKE 'pg_%' ORDER BY indexname`;
+        // pg_index.indkey の順序で構成列を string_agg。式 index は attname が
+        // null になるので空文字を捨てる。PK もここに乗る (PRIMARY KEY は内部的に
+        // unique index)。 schema view の indexes 表示に columns と uniqueness が
+        // 必要なので、pg_indexes 名前だけ取る旧クエリから差し替えた。
+        sql = `SELECT i.relname, t.relname, CASE WHEN ix.indisunique THEN '1' ELSE '0' END, COALESCE(string_agg(a.attname, E'\\x1f' ORDER BY k.ord), '') FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_class t ON t.oid = ix.indrelid JOIN pg_namespace n ON n.oid = t.relnamespace LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum WHERE n.nspname = ${postgresSchemaLiteral()} AND i.relname NOT LIKE 'pg_%' GROUP BY i.relname, t.relname, ix.indisunique ORDER BY t.relname, i.relname`;
       } else {
-        sql = `SELECT DISTINCT index_name, table_name, non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() ORDER BY index_name`;
+        // mysql は statistics に列ごと 1 行で seq_in_index 順を持つので、
+        // index 単位に集約して columns と unique を一発で取る。
+        sql = `SELECT index_name, table_name, IF(MAX(non_unique) = 0, '1', '0'), GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR '\x1f') FROM information_schema.statistics WHERE table_schema = DATABASE() GROUP BY index_name, table_name ORDER BY table_name, index_name`;
       }
       const result = await execAsync(sql, signal);
-      if (config.kind === "postgresql") {
-        return result.rows.map((row) => ({
-          name: row[0],
-          table: row[1],
-          columns: [],
-          unique: false,
-        }));
-      }
       return result.rows.map((row) => ({
         name: row[0],
         table: row[1],
-        columns: [],
-        unique: row[2] === "0",
+        unique: row[2] === "1",
+        columns: row[3]
+          ? row[3].split(INDEX_COL_SEP).filter((s) => s.length > 0)
+          : [],
       }));
     },
 
@@ -1160,7 +1201,11 @@ export async function listDockerDatabasesAsync(
         now,
       );
     }
-    const parsed = parseTsvOutput(result.stdout, kind === "mysql");
+    const parsed = parseTsvOutput(
+      result.stdout,
+      kind === "mysql",
+      kind === "postgresql" ? PG_RECORD_SEPARATOR : undefined,
+    );
     const dbs = parsed.rows.map((r) => r[0]).filter(Boolean);
     const value = dbs.length > 0 ? dbs : fallbackDockerDatabases(defaultDb);
     return setDockerDatabasesCache(
@@ -1232,7 +1277,9 @@ export async function listDockerSchemasAsync(
         now,
       );
     }
-    const parsed = parseTsvOutput(result.stdout, false);
+    // listDockerSchemasAsync は postgres 専用パス (上で kind !== "postgresql"
+    // を early-return している) なので、常に PG_RECORD_SEPARATOR を渡す。
+    const parsed = parseTsvOutput(result.stdout, false, PG_RECORD_SEPARATOR);
     const schemas = parsed.rows.map((r) => r[0]).filter(Boolean);
     const value = schemas.length > 0 ? schemas : ["public"];
     return setDockerSchemasCache(

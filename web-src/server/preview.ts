@@ -19,6 +19,7 @@ import { normalizeNewDirectoryName } from "../core/directory-name";
 import { APP_ENTRY_PATHS, SPA_PATHS } from "../core/routes";
 import type {
   AnnotationTarget,
+  AppSettingsState,
   DiffMeta,
   FileDiffResponse,
   FileMeta,
@@ -85,6 +86,7 @@ import {
   parseRgOutput,
 } from "./search";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
+import { loadAppSettingsState } from "./state-store";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
   startWorktreeUpdateWatch,
@@ -152,7 +154,7 @@ let openAfterStart = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
-let uploadDisabledByConfig = false;
+let uploadEnabled = true;
 let rgAvailableCache: boolean | null = null;
 
 const enc = new TextEncoder();
@@ -245,15 +247,43 @@ Examples:
     }
   }
   if (rest.length) cliArgs = rest;
-  const configScopeOmitDirs = loadProjectConfigScopeOmitDirs();
-  const configScopeExcludeNames = loadProjectConfigScopeExcludeNames();
-  uploadDisabledByConfig = loadProjectConfigUploadDisabled();
+  warnIfLegacyConfigPresent();
   if (scopeOmitDirCliOverride) {
     scopeOmitDirNames = scopeOmitDirCliOverride;
-  } else if (configScopeOmitDirs) {
-    scopeOmitDirNames = configScopeOmitDirs;
   }
-  if (configScopeExcludeNames) scopeExcludeNames = configScopeExcludeNames;
+}
+
+function warnIfLegacyConfigPresent() {
+  try {
+    if (existsSync(join(cwd, ".code-viewer.json"))) {
+      console.warn(
+        "[code-viewer] .code-viewer.json is no longer used; configure scope and upload from Viewer Settings instead. The file can be safely removed.",
+      );
+    }
+  } catch {
+    // best effort only
+  }
+}
+
+function applyPersistedSettings(state: AppSettingsState) {
+  if (
+    !scopeOmitDirCliOverride &&
+    Array.isArray(state.scopeOmitDirs) &&
+    state.scopeOmitDirs.length > 0
+  ) {
+    scopeOmitDirNames = state.scopeOmitDirs;
+  } else if (!scopeOmitDirCliOverride) {
+    scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
+  }
+  if (
+    Array.isArray(state.scopeExcludeNames) &&
+    state.scopeExcludeNames.length > 0
+  ) {
+    scopeExcludeNames = state.scopeExcludeNames;
+  } else {
+    scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
+  }
+  uploadEnabled = state.uploadEnabled !== false;
 }
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -642,63 +672,6 @@ function parseScopeExcludeNamesQuery(value: string): string[] | null {
   return normalizeScopeExcludeNames(names);
 }
 
-function loadProjectConfig(): Record<string, unknown> | null {
-  const full = join(cwd, ".code-viewer.json");
-  if (!existsSync(full)) return null;
-  let realCwd: string;
-  let realConfig: string;
-  try {
-    realCwd = realpathSync(cwd);
-    realConfig = realpathSync(full);
-  } catch {
-    return null;
-  }
-  if (
-    dirname(realConfig) !== realCwd ||
-    basename(realConfig) !== ".code-viewer.json"
-  )
-    return null;
-  try {
-    const parsed = JSON.parse(readFileSync(realConfig, "utf8"));
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      "version" in parsed &&
-      (parsed as { version?: unknown }).version !== 1
-    )
-      return null;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function loadProjectConfigUploadDisabled(): boolean {
-  const config = loadProjectConfig() as {
-    upload?: { enabled?: unknown };
-  } | null;
-  return config?.upload?.enabled === false;
-}
-
-function loadProjectConfigScopeOmitDirs(): string[] | null {
-  const config = loadProjectConfig() as {
-    scope?: { omitDirs?: unknown };
-  } | null;
-  if (!config?.scope || !Array.isArray(config.scope.omitDirs)) return null;
-  return normalizeScopeOmitDirNames(config.scope.omitDirs);
-}
-
-function loadProjectConfigScopeExcludeNames(): string[] | null {
-  const config = loadProjectConfig() as {
-    scope?: { excludeNames?: unknown };
-  } | null;
-  if (!config?.scope || !Array.isArray(config.scope.excludeNames)) return null;
-  return normalizeScopeExcludeNames(config.scope.excludeNames);
-}
-
 function scopeOmitDirNamesFromQuery(url: URL): string[] {
   if (!url.searchParams.has("omit_dirs")) return scopeOmitDirNames;
   return (
@@ -737,6 +710,7 @@ function isExcludedScopePath(path: string, excludeNames: string[]): boolean {
     );
 }
 
+// ai-dup-check: allow -- ".git" path predicate mirrors git.isToolInternalPath for the git metadata directory.
 function isGitInternalPath(path: string): boolean {
   return path.split(/[\\/]+/).some((part) => part.toLowerCase() === ".git");
 }
@@ -919,8 +893,7 @@ function handleTree(url: URL) {
       ? entries
       : entries.map((entry) => attachTreeEntryMetadata(target, entry)),
     readme: readReadme(target, path),
-    upload_enabled:
-      !uploadDisabledByConfig && (target === "worktree" || target === ""),
+    upload_enabled: uploadEnabled && (target === "worktree" || target === ""),
   } satisfies RepoTreeResponse);
 }
 
@@ -1713,8 +1686,7 @@ function uploadOpenFlags() {
 }
 
 async function handleUploadFiles(req: Request) {
-  if (uploadDisabledByConfig)
-    return text("upload disabled by project config", 403);
+  if (!uploadEnabled) return text("upload disabled by viewer settings", 403);
   if (req.method !== "POST") return text("method not allowed", 405);
   if (!sideEffectRequestAllowed(req)) return text("forbidden", 403);
   if (req.headers.get("content-encoding"))
@@ -2329,11 +2301,7 @@ async function handleAnnotations(req: Request) {
   return text("invalid action", 400);
 }
 
-function isCodeViewerInternalPath(path: string): boolean {
-  return path
-    .split(/[\\/]+/)
-    .some((part) => part.toLowerCase() === ".code-viewer");
-}
+const isCodeViewerInternalPath = git.isToolInternalPath;
 
 function sendSse(event: string, data = "tick") {
   const payload = enc.encode(`event: ${event}\ndata: ${data}\n\n`);
@@ -2375,6 +2343,7 @@ function openBrowser(url: string) {
 }
 
 parseCli();
+applyPersistedSettings(await loadAppSettingsState(cwd));
 
 // Directory count the worktree watcher capped at, or null while under the cap.
 // Tracked so clients that connect after the cap was hit still learn about it.
@@ -2423,6 +2392,7 @@ const server = await startServer({
         url,
         cwd,
         sideEffectRequestAllowed,
+        { onSettingsChange: applyPersistedSettings },
       );
       if (stateResponse) return stateResponse;
     }

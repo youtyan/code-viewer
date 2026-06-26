@@ -7,17 +7,33 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 
 ## Features
 
-- Browse repository files and folders in a persistent sidebar.
-- View git diffs with unified or split layout, lazy loading, and viewed-file state.
-- Browse commit history per branch and open any commit's changed files and diff, with shareable `/history?commit=<sha>` links.
-- Open files directly from the repository or diff view, including large generated files.
-- Preview Markdown with a table of contents, task lists, Mermaid diagrams, and Shiki code highlighting.
-- Preview browser-safe media and show metadata for binary files that cannot be rendered.
-- Switch the viewer UI between English and Japanese from Viewer Settings.
-- Browse SQLite, PostgreSQL, MySQL, Redis, and Elasticsearch with a built-in database viewer.
-- Read the built-in Help page for repository browsing, diffs, annotations, agent skills, and shortcuts.
-- Open repository folders in the OS file manager from localhost-only actions.
-- Upload files into worktree folders when upload is explicitly enabled.
+- Browse repository files and folders in a persistent sidebar with live
+  worktree change updates over SSE.
+- View git diffs with unified or split layout, lazy loading, viewed-file
+  state, ignore-whitespace and hide-tests toggles, and per-line "reference
+  pills" that copy `@path#start-end` for AI agents.
+- Browse commit history per branch and open any commit's changed files and
+  diff, with shareable `/history?ref=<branch>&commit=<sha>` links.
+- Open files directly from the repository or diff view, including large
+  generated files (virtualized source viewer with copy/open-full-view).
+- Preview Markdown with a table of contents, task lists, Mermaid diagrams
+  (click to enlarge), and Shiki code highlighting.
+- Preview browser-safe media and show metadata for binary files that cannot
+  be rendered.
+- Find files and grep across the repository with `Ctrl+K` (file palette) and
+  `Ctrl+G` (text palette).
+- Switch the viewer UI between English and Japanese from Viewer Settings —
+  the language toggle live-updates every screen including the datastore
+  viewer.
+- Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, and S3-compatible
+  object storage (MinIO, LocalStack) with a built-in datastore viewer.
+- Read the built-in Help page for repository browsing, diffs, annotations,
+  the datastore viewer, agent skills, and shortcuts.
+- Open repository folders (and parent folders of files) in the OS file
+  manager, create folders, and trash/restore files from localhost-only
+  actions.
+- Upload files into worktree folders. Uploads are enabled by default for
+  worktree targets; toggle them off from Viewer Settings.
 
 ## Usage
 
@@ -57,6 +73,16 @@ code-viewer
 The published CLI runs on Node.js 20 or newer. Bun is supported as a package
 runner through `bunx`, but the npm package no longer requires Bun at runtime.
 
+Common options:
+
+- `--cwd <dir>` — repository to view (default: current working directory).
+- `--open` — open the printed URL in the default browser.
+- `--port <port>` — bind to a specific port (default: pick a free port).
+- `--scope-omit-dir <name>` — skip a directory under the worktree (repeatable;
+  overrides the Viewer Settings list for this session).
+- `--version`, `-v` — print the installed version.
+- `--help`, `-h` — print full CLI help.
+
 Arguments after options are passed to `git diff`. By default, code-viewer
 compares `HEAD` with the working tree.
 
@@ -70,7 +96,7 @@ code-viewer --cwd /path/to/repo --staged
 Open **Viewer Settings** in the header to change display options such as
 theme, layout, sidebar mode, font sizes, and UI language. The language setting
 translates the viewer chrome itself, including the Help page, settings labels,
-sidebars, history controls, and annotation panel labels.
+sidebars, history controls, datastore viewer, and annotation panel labels.
 
 ## Repository View
 
@@ -81,36 +107,52 @@ metadata instead of dumping bytes as text.
 
 Markdown files use a dedicated preview tab. Relative links and images are
 resolved inside the repository, code blocks are highlighted with Shiki, and
-Mermaid diagrams are rendered lazily in the browser.
+Mermaid diagrams are rendered lazily in the browser (click any diagram to
+open it in a lightbox).
 
 Very large text files use a virtualized source viewer. Only visible rows are
 rendered, and the page includes controls to copy the full file or reopen it in
 the full non-virtual view.
 
-## Uploads
+The worktree is watched and changes are pushed to every open tab over SSE so
+files reload as you edit. When the OS file-watch limit is reached the viewer
+shows a banner so reloads are not silently missed.
 
-File uploads are available for the local worktree target. Git tree views remain
-read-only.
+Large repositories load folder children on demand. The sidebar remembers which
+lazy-loaded folders you opened and re-expands them on the next reload, so the
+tree state survives navigation and refresh.
 
-Place `.code-viewer.json` at the repository root to configure repository scope
-defaults:
+## Uploads and Scope Settings
 
-```json
-{
-  "version": 1,
-  "scope": {
-    "omitDirs": ["node_modules", "dist", "build"]
-  }
-}
-```
+File uploads are available for the local worktree target by default. Git tree
+views remain read-only. Open **Viewer Settings** in the header to toggle
+uploads off, edit the directories to skip while browsing/searching, and hide
+files or directory names completely.
 
-Repository scope settings control recursive repository browsing and search scope
-for the left tree, Ctrl+K file palette, and Ctrl+G grep palette. The in-app Scope
-Settings popover stores only a browser-local override in localStorage; edit
-`.code-viewer.json` directly for project defaults shared with the repository.
-Use `scope.omitDirs` for directories that should stay visible as skipped, and
-`scope.excludeNames` for file or directory names that should be hidden entirely.
-`.DS_Store` is hidden by default.
+Scope settings control recursive repository browsing and search scope for the
+left tree, Ctrl+K file palette, and Ctrl+G grep palette. Everything you change
+in Viewer Settings is saved on the server under `.code-viewer/settings.json`
+(no separate project-level config file). `.DS_Store` and a small set of
+build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
+`.venv`, …) are hidden by default. Pass `--scope-omit-dir <name>` (repeatable)
+to override the omit list on the command line for one session.
+
+The viewer keeps its per-project state under `.code-viewer/` at the repository
+root:
+
+- `settings.json` — viewer chrome settings, scope overrides, annotation
+  panel/follow/TTS state.
+- `view-state.json` — last opened file, scroll positions, viewed-file marks.
+- `db-ui.json` — per-DB-tab UI state (column widths, related-panel size,
+  Rails FK toggle, S3 tooltip).
+- `tabs.json` — datastore tab list, order, and drafts.
+- `annotations.json` — AI Code Annotations.
+- `query-history.json` — datastore query history.
+- `db-snapshots.sqlite` — datastore snapshots and diff blobs.
+
+The `.code-viewer` directory is tool-internal: it never shows up in the file
+tree, searches, or diffs. Add it to `.gitignore` if you do not want to share
+its contents through git.
 
 ## Datastore Viewer
 
@@ -119,97 +161,105 @@ browser-based viewer for exploring their contents.
 
 **SQLite** files (`.db`, `.sqlite`, `.sqlite3`, `.s3db`) are detected
 automatically by scanning the repository tree. **PostgreSQL**, **MySQL**,
-**Redis**, **Elasticsearch**, **MinIO**, and **LocalStack S3** services are detected from any
-`docker-compose.yml` (or `compose.yml`) found by the same recursive
-scan — both the repository root and subdirectories are considered, so a
-single `code-viewer --cwd <root>` brings up every DB defined under that
-root. `.git/` and `node_modules/` are skipped. Services whose names
-collide across subdirectories are kept distinct via `docker:<service>@<relDir>`
-ids (cwd-direct compose files keep the historical `docker:<service>` id
-for backward compatibility). Redis support is read-only: browse DB 0–15,
-SCAN keys, and view values per type (string/hash/list as dedicated
-panes, set/zset/stream as raw JSON). Elasticsearch support is read-only
-too: list indices, view mappings, paginate docs with `search_after`, run
-lucene `q=` searches, and take snapshots / diffs over `_search` iteration.
-S3-compatible object storage support is read-only: browse buckets, search by
-prefix or filename, sort scanned objects by update time, and preview images,
-video, audio, PDFs, Markdown, HTML, and text files. Updated-time sorting is
-scoped to the objects scanned for the current prefix/search rather than a
-persistent whole-bucket index. HTML previews are rendered in a sandboxed
-`srcdoc` iframe; relative subresources inside the HTML are not rewritten.
-If the S3 service publishes a host port, code-viewer connects through
-`localhost:<port>`; otherwise it falls back to `docker exec <container> curl`
-against the service's container-local endpoint.
+**Redis**, **Elasticsearch**, **MinIO**, and **LocalStack S3** services are
+detected from any `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`,
+or `compose.yaml` found by the same recursive scan — both the repository root
+and subdirectories are considered, so a single `code-viewer --cwd <root>`
+brings up every DB defined under that root. `.git/`, `.code-viewer/`, and
+`node_modules/` are skipped, and discovery is capped at a few-level depth and
+a few dozen services per scan to keep startup cheap.
+
+Services whose names collide across subdirectories are kept distinct via
+`docker:<service>@<relDir>` ids (cwd-direct compose files keep the historical
+`docker:<service>` id for backward compatibility).
+
+**Redis** support is read-only: browse DB 0–15, SCAN keys, and view values per
+type (string/hash/list as dedicated panes, set/zset/stream as JSON views). It
+also participates in snapshots and diffs.
+
+**Elasticsearch** support is read-only: list indices, view mappings, paginate
+docs with `search_after`, run lucene `q=` searches, and submit DSL queries to a
+small allowlist of `_search` / `_count` / `_msearch` / `_explain` /
+`_validate` / `_field_caps` / `_eql`. Snapshots and diffs over `_search`
+iteration are supported.
+
+**S3-compatible object storage** (MinIO, LocalStack) is read-only: browse
+buckets as a folder tree, search by prefix or filename, sort scanned objects by
+update time, and preview images, video, audio, PDFs, Markdown, HTML, and text
+files. Updated-time sorting is scoped to the objects scanned for the current
+prefix/search rather than a persistent whole-bucket index. HTML previews are
+rendered in a sandboxed `srcdoc` iframe; relative subresources inside the HTML
+are not rewritten. **LocalStack** falls back to `docker exec <container> curl`
+against the container-local endpoint when the service does not publish a host
+port; **MinIO** requires a published host port (add a `9000:9000` mapping) and
+will refuse to browse otherwise.
 
 ### Browser UI
 
 Open Datastores in the global navigation to access:
 
-- **Multi-DB tabs** — open multiple databases side by side (each tab has
-  its own sidebar, panes, and history). `+` adds an empty tab; `×` or
-  middle-click closes one (the last tab is reset to empty instead of
-  vanishing). Tabs persist in `.code-viewer/tabs.json` and survive
-  reloads.
-- **Table browser** — paginated data grid with column sorting, text
-  filtering, and CSV/JSON export.
-- **Query editor** — execute read-only SQL with syntax highlighting.
-  Results and history are saved and shared across tabs.
+- **Multi-DB tabs** — open multiple databases side by side, with their own
+  sidebar, panes, and history. `+` adds an empty tab; `×` or middle-click
+  closes one (the last tab resets to empty instead of vanishing). Tabs can be
+  reordered by drag and drop and persist in `.code-viewer/tabs.json`.
+- **PostgreSQL schema selector** — switch between schemas without reopening
+  the database.
+- **Table browser** — paginated data grid with column sort, text filter, cell
+  copy, and CSV/JSON export (capped at 100,000 rows; export respects current
+  filter/sort).
+- **Detail footer and related panel** — click any cell to open a resizable
+  detail footer; foreign-key cells open a related panel showing the
+  referenced or referencing rows, with multi-step drill-down breadcrumbs.
+  Cells that match the focused row are highlighted in both panels.
+- **Rails FK inference toggle** — opt-in heuristic that adds virtual foreign
+  keys following Rails naming conventions (e.g. `user_id → users.id`) on top
+  of the database-declared FKs.
+- **Query editor** — execute read-only SQL with syntax highlighting. The
+  allowlist depends on the engine (SQLite: `SELECT`, `PRAGMA`, `EXPLAIN`,
+  `WITH`; PostgreSQL and MySQL also accept `SHOW` and `DESCRIBE`, and
+  PostgreSQL queries run inside `BEGIN TRANSACTION READ ONLY`). Per-DB results
+  and history are saved and synced across tabs over SSE; the editor records
+  whether each entry came from the browser or the CLI.
 - **ER diagram** — auto-generated entity-relationship diagram showing
-  foreign key relationships between tables.
-- **Global search** — full-text search across all tables and text columns.
-- **Snapshots & diffs** — take point-in-time snapshots of selected tables
-  and compare any two snapshots to see inserted, updated, and deleted rows
-  with full before/after values.
+  foreign-key relationships between tables.
+- **Schema view** — table columns, indexes, foreign keys, triggers, and DDL.
+- **Global search** — full-text search across all tables and text columns of
+  a database.
+- **Snapshots and diffs** — take point-in-time snapshots of selected tables
+  (or Redis key spaces, or Elasticsearch indices) and compare any two
+  snapshots to see inserted, updated, and deleted rows with full before/after
+  values.
+- **Datastore explorers** — first-class sidebars for Redis (DB / SCAN), 
+  Elasticsearch (indices / mappings / docs), and S3 (folder tree, kind
+  badges) so the same Multi-DB tab UI works for non-SQL stores too.
 
 ### CLI
 
-AI agents can query databases and manage snapshots from the command line:
+AI agents can read data and query history from the command line. The current
+CLI ships `exec`, `list`, and `clear`; search, snapshot, and diff operations
+are performed from the browser UI.
 
 ```sh
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
 
-code-viewer query search --db app.db --term "john@example.com"
+code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
+    --max-rows 1 --no-save
 
-code-viewer query snapshot create --db app.db --tables users,orders \
-    --note "Before migration"
+code-viewer query list --db app.db --json
+code-viewer query clear --db app.db
 ```
 
-`code-viewer query --help` shows all commands. `code-viewer query agent-help`
-prints a detailed guide for AI agents covering queries, search, snapshots,
-and diffs.
-
-### Snapshot & Diff Workflow
-
-Snapshots capture the state of selected tables at a point in time. Diff any
-two snapshots to verify that a migration, test, or operation changed exactly
-what you expected:
-
-```sh
-# 1. Snapshot before the operation
-code-viewer query snapshot create --db app.db --tables users --note "Before"
-
-# 2. (run the migration / test / script)
-
-# 3. Snapshot after
-code-viewer query snapshot create --db app.db --tables users --note "After"
-
-# 4. List snapshots to get IDs
-code-viewer query snapshot list --db app.db
-
-# 5. Compare
-code-viewer query diff tables --before snap-abc123 --after snap-def456
-code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users
-```
-
-Diffs are computed on demand — no pre-computation needed. The browser's
-Snapshot tab provides a visual interface for the same workflow.
+`code-viewer query --help` shows all command syntax. `code-viewer query
+agent-help` prints a longer guide for AI agents covering query shape and
+conventions. Both `query` and `annotate` accept `--cwd <repo>` and
+`--server <url>` for targeting a specific running server.
 
 ## AI Code Annotations
 
-AI coding agents (Claude Code, Codex, and similar CLI agents) can walk you
-through a codebase inside the viewer. An agent posts explanations for
-specific code locations with the `annotate` subcommand, and every open
+AI coding agents (Claude Code, Codex, Cursor, Gemini, and similar CLI agents)
+can walk you through a codebase inside the viewer. An agent posts explanations
+for specific code locations with the `annotate` subcommand, and every open
 browser tab jumps to that location live — in the diff view when the file has
 changes in the current range, or in the source view otherwise:
 
@@ -223,6 +273,8 @@ code-viewer annotate add --file web-src/app.ts --line 9650 \
 code-viewer annotate add --after a-previous --file web-src/app.ts --line 9700 \
   --body "This inserted note now appears in the middle of the walkthrough."
 code-viewer annotate move a-late --before a-early
+code-viewer annotate rename sess-abc --title "Renamed walkthrough"
+code-viewer annotate edit a-id --body "Tightened wording."
 code-viewer annotate add-db --db app.db --table users --tab schema \
   --body "This table is the identity root for user-facing records."
 code-viewer annotate add-db --db app.db --table orders --tab data \
@@ -234,14 +286,20 @@ code-viewer annotate add-db --db app.db --tab query \
 ```
 
 The body is Markdown. Long bodies can be passed with `--body-file <path>` or
-piped through stdin. `code-viewer annotate --help` shows all commands,
-including `move`, `edit`, `list`, `delete <id>`, and `clear`. `add` and
+piped through stdin (works for `add`, `add-db`, and `edit`).
+`code-viewer annotate --help` shows all commands: `start`, `add`, `add-db`,
+`move`, `edit`, `rename`, `list`, `delete <id>`, and `clear`. `add` and
 `add-db` accept `--before <id>`, `--after <id>`, or `--position <n>` when a
-note belongs somewhere other than the end. On the Datastores screen, the
-annotations panel also has a pin button that captures the current data grid,
-query editor, or global search state as a database annotation. For AI agents,
-`code-viewer annotate agent-help` prints a skill-style guide covering the
-workflow, conventions, and pitfalls for writing good walkthroughs.
+note belongs somewhere other than the end, and `--title`, `--session <id>`, or
+`--session-title <text>` for session targeting.
+
+`add-db` accepts a wide set of DB-pane flags so the agent can pin the exact
+view it is discussing: `--tab <data|schema|query|er|search|snapshot>`,
+`--filter key=value` (repeatable), `--sort col:asc|desc`, `--row <n>`,
+`--grid-search <text>`, `--sql <text>` or `--sql-file <path>` plus
+`--run-query` and `--query-mode <run|explain>`, and `--search-term <text>`
+with `--include-non-text` and `--run-search`. For AI agents,
+`code-viewer annotate agent-help` prints a skill-style guide.
 
 Annotations are grouped into sessions and persisted in
 `.code-viewer/annotations.json` at the repository root, so the walkthrough
@@ -249,13 +307,18 @@ survives reloads and server restarts. The `.code-viewer` directory is
 tool-internal: it never shows up in the file tree, searches, or diffs. Add it
 to `.gitignore` if you do not want to share annotations through git.
 
-In the browser, the 💬 button in the header opens the annotation side panel.
-The current explanation is rendered at the top of the panel while the code
-stays visible next to it, with the annotated lines highlighted. The history
-below groups annotations by session; clicking an entry jumps back to its
-location, and entries and sessions can be deleted there too. The "follow"
-checkbox controls whether the tab jumps automatically when an agent adds a
-new annotation.
+In the browser, the annotation icon in the header opens the side panel. The
+current explanation is rendered at the top of the panel while the code stays
+visible next to it, with the annotated lines highlighted. The history below
+groups annotations by session; clicking an entry jumps back to its location,
+and entries and sessions can be deleted there too. The "follow" checkbox
+controls whether the tab jumps automatically when an agent adds a new
+annotation. A built-in player can speak the current annotation aloud with
+play/pause, previous/next, mute, and rate controls (TTS state is saved per
+project).
+
+A copy button on each annotation produces a paste-ready prompt block that
+references the annotation by URL for sharing back into the originating agent.
 
 The `annotate` subcommand talks to the running server for the repository
 (discovered via `~/.cache/code-viewer/servers/`); start one with
@@ -281,11 +344,15 @@ open standard) that teach AI coding agents when and how to use
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
 npx -y @youtyan/code-viewer skill install --agent codex,gemini  # other agents
-npx -y @youtyan/code-viewer skill install --agent all           # claude, codex, gemini, cursor, .agents
+npx -y @youtyan/code-viewer skill install --agent all           # claude, codex, gemini, cursor, agents (.agents/skills/)
 ```
 
-Or install it once for all projects with `--global` (`~/.claude/skills/`
-etc). Running the same command again updates an existing installation.
+`--agent` accepts a comma-separated list of `claude`, `codex`, `gemini`,
+`cursor`, `agents` (vendor-neutral `.agents/skills`), or `all`. Pass
+`--global` to install into the agent's user-level skill directory
+(`~/.claude/skills/`, `~/.codex/skills/`, …) instead of the current project,
+and `--cwd <dir>` to target a specific repository. Running the same command
+again updates an existing installation in place.
 
 ## Development
 
@@ -295,10 +362,11 @@ bun run verify
 bun run preview --cwd /path/to/repo
 ```
 
-`bun run preview` is the development runner. It rebuilds the browser bundle
-when browser source files change, restarts the preview server when
-`web-src/server/*.ts` changes, and keeps the URL stable on
-`http://127.0.0.1:64160/` unless you pass `--port <port>`.
+`bun run preview` (and the alias `bun run dev`) is the development runner. It
+rebuilds the browser bundle when browser source files change, restarts the
+preview server when `web-src/server/*.ts` changes, and keeps the URL stable on
+`http://127.0.0.1:64160/` unless you pass `--port <port>`. Use
+`bun run preview:raw` to launch `preview.ts` directly without the dev watcher.
 
 Before releasing:
 

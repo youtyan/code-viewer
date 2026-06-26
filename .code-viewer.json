@@ -1,8 +1,0 @@
-{
-  "scope": {
-    "excludeNames": [".DS_Store"]
-  },
-  "upload": {
-    "enabled": true
-  }
-}

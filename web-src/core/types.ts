@@ -100,6 +100,7 @@ export type AppSettingsState = {
   hideTests?: boolean;
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
+  uploadEnabled?: boolean;
   range?: {
     from: string;
     to: string;
@@ -109,12 +110,27 @@ export type AppSettingsState = {
 export type ViewState = {
   version: 1;
   collapsedDirs: string[];
+  lazyExpandedDirs: string[];
   viewedFiles: string[];
+};
+
+// db-ui.json に保存される DB ビューア固有の永続 UI 状態。タブ寿命を超えて
+// 残したいユーザー設定 (列幅 / 各種トグル) はここに集約する。新しいキーは
+// prefs 配下に増やすことで、columnWidths 系の構造変更を巻き込まない。
+export type DbUiPrefs = {
+  // S3 explorer の行ホバーで画像プレビュー + 全 key を出すフローティング
+  // ツールチップを有効化するかどうか。default true。
+  s3TooltipEnabled?: boolean;
+  // Rails の命名規約 (foo_id → foos.id) を使って未宣言の FK を仮想的に
+  // 推測し、🔗 表示や関連パネル経由でナビゲートできるようにする。
+  // default false (DB の真実を尊重)。
+  inferFkRails?: boolean;
 };
 
 export type DbUiState = {
   version: 1;
   columnWidths: Record<string, Record<string, Record<string, number>>>;
+  prefs?: DbUiPrefs;
 };
 
 export type UndoActionResponse = {

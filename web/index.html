@@ -166,16 +166,24 @@
       <p id="display-settings-source">Applies to all projects in this browser.</p>
     </div>
     <div class="scope-settings-section">
+      <strong id="upload-section-title" class="scope-settings-section-title">Uploads</strong>
+      <label class="scope-settings-toggle">
+        <input id="upload-enabled" type="checkbox" />
+        <span id="upload-enabled-label">Allow file uploads into worktree folders</span>
+      </label>
+      <p id="upload-help" class="scope-settings-help"></p>
+    </div>
+    <div class="scope-settings-section">
       <strong class="scope-settings-section-title">Excluded directories</strong>
       <label for="scope-omit-dirs">Skip these directory names while browsing and searching</label>
       <textarea id="scope-omit-dirs" rows="6" spellcheck="false"></textarea>
       <label for="scope-exclude-names">Hide these file or directory names completely</label>
       <textarea id="scope-exclude-names" rows="4" spellcheck="false"></textarea>
       <p id="scope-omit-source"></p>
-      <div class="scope-settings-actions">
-        <button id="scope-omit-reset" type="button">Reset</button>
-        <button id="scope-omit-save" type="button">Save</button>
-      </div>
+    </div>
+    <div class="scope-settings-footer">
+      <p id="scope-settings-autosave-note" class="scope-settings-help"></p>
+      <button id="scope-omit-reset" type="button">Restore defaults</button>
     </div>
   </div>
 

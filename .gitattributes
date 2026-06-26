@@ -1,0 +1,13 @@
+# 日本語コメントを多く含む小さい TS ファイル (例: web-src/core/database/
+# infer-fk.ts) が git の自動判別で binary 扱いになり、diff/blame が読めなく
+# なるのを防ぐ。 text と diff を明示しないと、過去に binary 扱いで格納された
+# blob が引き続き Binary files differ で出力されてしまう。
+*.ts text diff
+*.tsx text diff
+*.js text diff
+*.json text diff
+*.css text diff
+*.md text diff
+*.yml text diff
+*.yaml text diff
+*.html text diff

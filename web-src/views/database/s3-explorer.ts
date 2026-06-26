@@ -34,14 +34,23 @@ import {
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
+import { makePrefToggle } from "./pref-toggle";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
   getText?: () => DbText;
+  // ホバープレビュー tooltip の ON/OFF (db-ui.json の prefs に永続化)。
+  // localStorage は使わない。callback 未指定なら ON 固定で永続化なし。
+  getTooltipEnabled?: () => boolean;
+  setTooltipEnabled?: (enabled: boolean) => void;
 };
 
 export type S3ExplorerView = {
   el: HTMLElement;
+  // Bucket セレクタと List/Explorer 切替セグメント。空 datastore-sidebar
+  // (kind=s3 のとき空白) を有効活用するため、左サイドバーの dbToolbar 直下に
+  // mount される。el には含まれない。
+  sidebarSlot: HTMLElement;
   load: (dbId: string, initial?: S3ExplorerSelection) => Promise<void>;
   clear: () => void;
   dispose: () => void;
@@ -120,11 +129,10 @@ export function createS3Explorer(
   const container = document.createElement("div");
   container.className = "s3-explorer";
 
-  const objectPane = document.createElement("div");
-  objectPane.className = "s3-object-list-pane";
-
-  const toolbar = document.createElement("div");
-  toolbar.className = "s3-toolbar";
+  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる、Bucket セレクタ +
+  // List/Explorer セグメント。container には append しない。
+  const sidebarSlot = document.createElement("div");
+  sidebarSlot.className = "db-explorer-sidebar-slot s3-sidebar-slot";
 
   const bucketRow = document.createElement("div");
   bucketRow.className = "s3-bucket-row";
@@ -149,6 +157,22 @@ export function createS3Explorer(
   viewSeg.append(listViewBtn, explorerViewBtn);
   bucketRow.appendChild(viewSeg);
 
+  // ホバー tooltip ON/OFF。db-ui.json の prefs.s3TooltipEnabled に永続化、
+  // default ON。画像プレビュー込みで重く感じる場合のオフスイッチ。共通の
+  // .db-pref-toggle スタイルを使い、bucketRow 内で stretch しないよう
+  // .s3-tooltip-toggle で align-self を上書き。
+  const tooltipToggle = makePrefToggle({
+    title: "Toggle hover preview tooltip",
+    label: "Hover preview",
+    pathD:
+      "M8 3.5C4.5 3.5 1.7 5.7 0 8c1.7 2.3 4.5 4.5 8 4.5s6.3-2.2 8-4.5C14.3 5.7 11.5 3.5 8 3.5Zm0 7.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm0-4.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z",
+    extraClass: "s3-tooltip-toggle",
+  });
+  bucketRow.appendChild(tooltipToggle);
+  sidebarSlot.appendChild(bucketRow);
+
+  // List/Explorer 共通: 検索バー / モード / sort / オブジェクトリスト /
+  // ツリーは全部 sidebarSlot に積む。右側はプレビューだけが残る。
   const searchRow = document.createElement("form");
   searchRow.className = "s3-search-row";
   const searchInput = document.createElement("input");
@@ -161,6 +185,7 @@ export function createS3Explorer(
   searchBtn.className = "db-btn db-btn-primary s3-search-btn";
   searchBtn.textContent = tCommon().search;
   searchRow.append(searchInput, searchBtn);
+  sidebarSlot.appendChild(searchRow);
 
   const optionRow = document.createElement("div");
   optionRow.className = "s3-options-row";
@@ -184,37 +209,37 @@ export function createS3Explorer(
   sortKey.textContent = text().sortKey;
   sortSelect.append(sortUpdated, sortKey);
   optionRow.append(modeSeg, sortSelect);
-
-  toolbar.append(bucketRow, searchRow, optionRow);
-  objectPane.appendChild(toolbar);
+  sidebarSlot.appendChild(optionRow);
 
   const objectStatus = document.createElement("div");
   objectStatus.className = "s3-object-status";
-  objectPane.appendChild(objectStatus);
+  sidebarSlot.appendChild(objectStatus);
 
   const objectList = document.createElement("div");
   objectList.className = "s3-object-list";
-  objectPane.appendChild(objectList);
+  sidebarSlot.appendChild(objectList);
 
   const moreBtn = document.createElement("button");
   moreBtn.type = "button";
   moreBtn.className = "s3-object-more-btn";
   moreBtn.textContent = tCommon().loadMore;
   moreBtn.hidden = true;
-  objectPane.appendChild(moreBtn);
+  sidebarSlot.appendChild(moreBtn);
 
   // Explorer 表示: 既存ツリーと同じ DOM/クラス (.tree, .tree-dir, .tree-file,
   // .chev, .dir-icon ...) を使い、データは delimiter ベースの遅延ロードで賄う。
+  // sidebarSlot 内で List のオブジェクトリストと同じ位置に置き、表示は
+  // applyViewVisibility で排他切替する。
   const explorerTree = document.createElement("div");
   explorerTree.className = "s3-object-list s3-tree tree";
   explorerTree.hidden = true;
-  objectPane.appendChild(explorerTree);
+  sidebarSlot.appendChild(explorerTree);
 
   const previewPane = document.createElement("div");
   previewPane.className = "s3-preview-pane";
   setPaneEmpty(previewPane, text().selectObject);
 
-  container.append(objectPane, previewPane);
+  container.append(previewPane);
 
   let currentDbId: string | null = null;
   let currentBucket: string | null = null;
@@ -249,6 +274,119 @@ export function createS3Explorer(
   function notifySelectionChange(): void {
     if (suppressNotify) return;
     callbacks.onSelectionChange?.(getSelection());
+  }
+
+  // ----- ホバーで全パスを表示する floating tooltip -----
+  // sidebar 内では key 末尾しか見えないので、行ホバーで全 key + メタを別 DOM
+  // に展開する。preview pane 側へはみ出して読めるよう document.body に attach。
+  // 状態は db-ui.json の prefs.s3TooltipEnabled に集約 (localStorage は使わない)。
+  // callback 未提供時は ON 固定で永続化なし。
+  let tooltipEnabled = callbacks.getTooltipEnabled?.() ?? true;
+
+  function applyTooltipToggleState(): void {
+    tooltipToggle.classList.toggle("active", tooltipEnabled);
+    tooltipToggle.setAttribute("aria-pressed", String(tooltipEnabled));
+  }
+  applyTooltipToggleState();
+
+  tooltipToggle.addEventListener("click", () => {
+    tooltipEnabled = !tooltipEnabled;
+    callbacks.setTooltipEnabled?.(tooltipEnabled);
+    applyTooltipToggleState();
+    if (!tooltipEnabled) hideKeyTooltip();
+  });
+
+  const keyTooltip = document.createElement("div");
+  keyTooltip.className = "s3-key-tooltip";
+  keyTooltip.hidden = true;
+  document.body.appendChild(keyTooltip);
+
+  function positionKeyTooltip(row: HTMLElement): void {
+    // 画像など中身の load 完了でサイズが伸びることがあるので、表示直後と
+    // load 後の双方から呼ばれる。
+    const rect = row.getBoundingClientRect();
+    const tw = keyTooltip.offsetWidth;
+    const th = keyTooltip.offsetHeight;
+    const gap = 8;
+    const fitsRight = rect.right + gap + tw < window.innerWidth - 8;
+    const left = fitsRight
+      ? rect.right + gap
+      : Math.max(8, rect.left - tw - gap);
+    const top = Math.max(8, Math.min(rect.top, window.innerHeight - th - 8));
+    keyTooltip.style.left = `${left}px`;
+    keyTooltip.style.top = `${top}px`;
+  }
+
+  function showKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
+    if (!tooltipEnabled) return;
+    keyTooltip.innerHTML = "";
+
+    // 画像オブジェクトのときはサムネイルを上に挟む。s3-preview の raw URL
+    // をそのまま <img> に渡すだけ。max-width / max-height で抑える。
+    if (currentDbId && currentBucket) {
+      const displayKind = sourceDisplayKind(object.key);
+      if (displayKind === "image") {
+        const img = document.createElement("img");
+        img.className = "s3-key-tooltip-image";
+        img.src = buildS3RawUrl(currentDbId, currentBucket, object.key);
+        img.alt = "";
+        img.decoding = "async";
+        img.loading = "lazy";
+        // load 完了で実サイズが反映された後に再 position する (はみ出し回避)。
+        img.addEventListener("load", () => positionKeyTooltip(row), {
+          once: true,
+        });
+        img.addEventListener("error", () => img.remove(), { once: true });
+        keyTooltip.appendChild(img);
+      }
+    }
+
+    const path = document.createElement("div");
+    path.className = "s3-key-tooltip-path";
+    path.textContent = object.key;
+    keyTooltip.appendChild(path);
+    const metaText = [
+      objectTypeLabel(object.key, object.contentType),
+      formatBytes(object.sizeBytes),
+      formatFileDate(object.updatedAt),
+    ]
+      .filter(Boolean)
+      .join(" / ");
+    if (metaText) {
+      const meta = document.createElement("div");
+      meta.className = "s3-key-tooltip-meta";
+      meta.textContent = metaText;
+      keyTooltip.appendChild(meta);
+    }
+    // position 計算前に offset を取りたいので一旦表示する。
+    keyTooltip.hidden = false;
+    keyTooltip.style.left = "0px";
+    keyTooltip.style.top = "0px";
+    positionKeyTooltip(row);
+  }
+
+  function hideKeyTooltip(): void {
+    if (tooltipShowTimer !== null) {
+      clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = null;
+    }
+    keyTooltip.hidden = true;
+  }
+
+  // 行の高速スイープでも `<img src>` が連発しないよう、表示を 150ms 遅らせる。
+  // 途中で mouseleave が来たら timer をクリアして画像取得自体を起こさない。
+  const TOOLTIP_SHOW_DELAY_MS = 150;
+  let tooltipShowTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function attachKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
+    row.addEventListener("mouseenter", () => {
+      if (tooltipShowTimer !== null) clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = setTimeout(() => {
+        tooltipShowTimer = null;
+        showKeyTooltip(row, object);
+      }, TOOLTIP_SHOW_DELAY_MS);
+    });
+    row.addEventListener("mouseleave", hideKeyTooltip);
   }
 
   function setMode(mode: S3SearchMode): void {
@@ -322,6 +460,13 @@ export function createS3Explorer(
     };
   }
 
+  function splitKey(key: string): { parent: string; name: string } {
+    const lastSlash = key.lastIndexOf("/");
+    return lastSlash >= 0
+      ? { parent: key.slice(0, lastSlash + 1), name: key.slice(lastSlash + 1) }
+      : { parent: "", name: key };
+  }
+
   function appendObjects(objects: S3ObjectInfo[]): void {
     const fragment = document.createDocumentFragment();
     for (const object of objects) {
@@ -331,22 +476,33 @@ export function createS3Explorer(
       row.dataset.key = object.key;
       objectRowsByKey.set(object.key, row);
 
+      const { parent, name: fileName } = splitKey(object.key);
+      // 1 行目: 親パス (薄)。サイドバー狭幅でも判別できるよう、末尾を省略。
+      if (parent) {
+        const parentEl = document.createElement("div");
+        parentEl.className = "s3-object-parent";
+        parentEl.textContent = parent;
+        row.appendChild(parentEl);
+      }
+      // 2 行目: kindBadge + ファイル名 (主役)。末尾セグメントだけにして
+      // 短い key 名に最大限の表示幅を渡す。
       const head = document.createElement("div");
       head.className = "s3-object-head";
       const name = document.createElement("span");
       name.className = "s3-object-name";
-      name.textContent = object.key;
-      name.title = object.key;
+      name.textContent = fileName;
       head.append(createKindBadge(object.key, object.contentType), name);
-
+      row.appendChild(head);
+      // 3 行目: メタ。
       const meta = document.createElement("span");
       meta.className = "s3-object-meta";
       const kind = objectTypeLabel(object.key, object.contentType);
       const size = formatBytes(object.sizeBytes);
       const updated = formatFileDate(object.updatedAt);
       meta.textContent = [kind, size, updated].filter(Boolean).join(" / ");
+      row.appendChild(meta);
 
-      row.append(head, meta);
+      attachKeyTooltip(row, object);
       fragment.appendChild(row);
     }
     objectList.appendChild(fragment);
@@ -706,6 +862,7 @@ export function createS3Explorer(
     // active の付与は highlightActiveObject に一元化する (renderFolderLevel 末尾で
     // 同期)。ここで直付けすると activeObjectRow と二重管理になりずれる。
     row.addEventListener("click", () => void selectObject(object));
+    attachKeyTooltip(row, object);
     return row;
   }
 
@@ -942,6 +1099,8 @@ export function createS3Explorer(
   }
 
   // UI の表示切替のみ (ロードは伴わない)。load() からも使う。
+  // List/Explorer どちらでも sidebarSlot に全 UI が積まれていて、表示は
+  // モードごとに排他で切替える (Search/options/objectList ↔ explorerTree)。
   function applyViewVisibility(view: S3ViewMode): void {
     currentView = view;
     listViewBtn.classList.toggle("active", view === "list");
@@ -1198,6 +1357,12 @@ export function createS3Explorer(
   function dispose(): void {
     disposed = true;
     clear();
+    // body に attach した tooltip を取り除く。タブ切替で複数残ると DOM leak。
+    keyTooltip.remove();
+    if (tooltipShowTimer !== null) {
+      clearTimeout(tooltipShowTimer);
+      tooltipShowTimer = null;
+    }
   }
 
   setMode("prefix");
@@ -1218,5 +1383,13 @@ export function createS3Explorer(
     if (!currentKey) setPaneEmpty(previewPane, t.selectObject);
   }
 
-  return { el: container, load, clear, dispose, getSelection, localize };
+  return {
+    el: container,
+    sidebarSlot,
+    load,
+    clear,
+    dispose,
+    getSelection,
+    localize,
+  };
 }

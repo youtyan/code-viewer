@@ -36,6 +36,11 @@ export type DbForeignKey = {
   toSchema?: string;
   toTable: string;
   toColumn: string;
+  // DB に宣言された FK か、命名規約 (例: Rails の <table>_id → <table>.id)
+  // から推測したもの (= virtual FK) か。クライアント側で関連パネル等に
+  // 視覚マーカー (リスト項目色や行末の "ʳ" ラベル等) を出すために使う。
+  // サーバ adapter は常に省略 (= 実 FK)。
+  inferred?: "rails";
 };
 
 export type DbSchemaResponse = {
@@ -478,6 +483,9 @@ export type TabState = {
 
   // FK 関連パネルの高さ。CSS pixel 表現 (例: "320px")。
   relatedPanelHeight?: string;
+
+  // セル詳細フッタ (db-grid-detail-panel) の高さ。CSS pixel 表現 (例: "240px")。
+  detailPanelHeight?: string;
 
   // Redis explorer の選択中 state。SQL の table を persist するのと整合的に、
   // Redis でも「選択中の db index + key」を persist する。

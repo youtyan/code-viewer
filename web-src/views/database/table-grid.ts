@@ -16,8 +16,14 @@ const FILTER_DEBOUNCE_MS = 300;
 const DEFAULT_COL_WIDTH = 180;
 const CELL_PREVIEW_MAX_CHARS = 4000;
 const RELATED_PANEL_DEFAULT_HEIGHT = 320;
-const RELATED_PANEL_MIN_HEIGHT = 140;
-const RELATED_PANEL_MAX_HEIGHT = 700;
+const RELATED_PANEL_MIN_HEIGHT = 60;
+const DETAIL_PANEL_DEFAULT_HEIGHT = 200;
+const DETAIL_PANEL_MIN_HEIGHT = 40;
+// MAX は画面サイズに追従する (parent.clientHeight - 余白)。固定値だと
+// 大画面で 700 が窮屈、小画面で 700 がはみ出る。reserve は「グリッド上部の
+// 最低残し量」。resize handle 自体は panel 上端にあるので、reserve が極小でも
+// ハンドル自体は掴める。
+const PANEL_MAX_RESERVE = 20;
 
 export type GridSort = {
   column: string;
@@ -85,6 +91,10 @@ export type TableGridCallbacks = {
   getRelatedPanelHeight?: () => number | null;
   /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
   setRelatedPanelHeight?: (height: number) => void;
+  /** セル詳細フッタの保存済み高さ(px)。 */
+  getDetailPanelHeight?: () => number | null;
+  /** セル詳細フッタをリサイズしたとき高さ(px)を保存する。 */
+  setDetailPanelHeight?: (height: number) => void;
   /** 現在の言語設定に応じたローカライズ文言を返す。 */
   getText?: () => DbText;
 };
@@ -104,6 +114,9 @@ export type TableGrid = {
   destroy: () => void;
   /** 言語切替時に組み込み済み DOM の文言を再適用する。 */
   localize: () => void;
+  /** getForeignKeys の返り値が変わったとき (例: 推測 FK トグル) に
+   * fkColumns を作り直してヘッダー/セル表示を更新する。データは再取得しない。 */
+  refreshForeignKeys: () => void;
 };
 
 export function createTableGrid(
@@ -208,9 +221,122 @@ export function createTableGrid(
   const detailPanel = document.createElement("div");
   detailPanel.className = "db-grid-detail-panel";
   detailPanel.hidden = true;
+  // 上端ドラッグハンドル。関連パネル (.db-related-resize) と同じ構造で、
+  // ドラッグ確定時にコールバック経由でタブ状態へ保存する。
+  const detailResize = document.createElement("div");
+  detailResize.className = "db-grid-detail-resize";
+  detailResize.addEventListener("mousedown", startDetailResize);
+  detailPanel.appendChild(detailResize);
 
   viewport.append(spacer, body);
   el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
+
+  // セル詳細フッタの高さ (関連パネルと同じ persist 経路)。embedded の埋め込み
+  // グリッドでは詳細フッタは出ないので初期化のみで参照されない。
+  // pane の MAX は実機の el の高さに合わせて毎回算出する (window resize にも
+  // ある程度追従)。fallback で window.innerHeight を使う。
+  function panelMaxHeight(): number {
+    const containerH = el.clientHeight || window.innerHeight;
+    return Math.max(
+      DETAIL_PANEL_MIN_HEIGHT + 1,
+      containerH - PANEL_MAX_RESERVE,
+    );
+  }
+  const savedDetailHeight = embedded
+    ? null
+    : (callbacks.getDetailPanelHeight?.() ?? null);
+  let detailHeight =
+    savedDetailHeight != null
+      ? Math.max(
+          DETAIL_PANEL_MIN_HEIGHT,
+          Math.min(panelMaxHeight(), savedDetailHeight),
+        )
+      : DETAIL_PANEL_DEFAULT_HEIGHT;
+  detailPanel.style.height = `${detailHeight}px`;
+  // ドラッグ中の window リスナーを teardown 時に外せるよう保持。
+  let detailResizeCleanup: (() => void) | null = null;
+
+  // active cell (詳細フッタ/関連パネルに表示中) を切替える。state を
+  // 更新したあと、現在 body 上にいる古い active class を外して新しい
+  // セルに付け直す。virtualized 再描画でも renderViewport が state を
+  // 見てクラスを再付与するので、スクロール後の表示も維持される。
+  function setActiveCell(rowIndex: number, colIndex: number) {
+    activeCellRowIndex = rowIndex;
+    activeCellColIndex = colIndex;
+    for (const c of body.querySelectorAll(".db-grid-cell-active")) {
+      c.classList.remove("db-grid-cell-active");
+    }
+    if (rowIndex < 0 || colIndex < 0) return;
+    // colIndex+1: rowNum cell が先頭にあるので 1 ずれる。
+    const targetRow = body.children[rowIndex - renderStartRow] as
+      | HTMLElement
+      | undefined;
+    targetRow?.children[colIndex + 1]?.classList.add("db-grid-cell-active");
+  }
+
+  function clearActiveCell() {
+    setActiveCell(-1, -1);
+  }
+
+  // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
+  // ので、resize 以外の子だけ削除するヘルパを通す。
+  function clearDetailContent() {
+    for (const child of Array.from(detailPanel.children)) {
+      if (child !== detailResize) child.remove();
+    }
+  }
+
+  // 上端ハンドル方式の panel 高さリサイズを 1 か所に集約。detail / related
+  // の 2 つの panel で同じ手順 (mousemove で delta = startY - ev.clientY、
+  // clamp、mouseup で persist) を踏むので、差分パラメタ (panel/min/getter/
+  // setter/persist) だけ渡す形にした。
+  function startTopEdgeResize(opts: {
+    panel: HTMLElement;
+    min: number;
+    getHeight: () => number;
+    setHeight: (h: number) => void;
+    persist: (h: number) => void;
+    setCleanup: (fn: (() => void) | null) => void;
+    startEvent: MouseEvent;
+  }) {
+    opts.startEvent.preventDefault();
+    const startY = opts.startEvent.clientY;
+    const startHeight = opts.getHeight();
+    const onMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY;
+      const next = Math.max(
+        opts.min,
+        Math.min(panelMaxHeight(), startHeight + delta),
+      );
+      opts.setHeight(next);
+      opts.panel.style.height = `${next}px`;
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      opts.setCleanup(null);
+      opts.persist(opts.getHeight());
+    };
+    opts.setCleanup(onUp);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startDetailResize(e: MouseEvent) {
+    startTopEdgeResize({
+      panel: detailPanel,
+      min: DETAIL_PANEL_MIN_HEIGHT,
+      getHeight: () => detailHeight,
+      setHeight: (h) => {
+        detailHeight = h;
+      },
+      persist: (h) => callbacks.setDetailPanelHeight?.(h),
+      setCleanup: (fn) => {
+        detailResizeCleanup = fn;
+      },
+      startEvent: e,
+    });
+  }
 
   let currentTable = "";
   let columns: DbColumn[] = [];
@@ -227,12 +353,31 @@ export function createTableGrid(
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
+  // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
+  // renderViewport / 再描画でも色が維持されるよう、行/列 index を state に持つ。
+  let activeCellRowIndex = -1;
+  let activeCellColIndex = -1;
+  // 仮想スクロール時に body に積まれている先頭行の global index。
+  // renderViewport が描画する直前に確定する。setActiveCell が body 内の
+  // 相対位置を計算するために参照する (CSS transform を regex で読むのは
+  // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
+  let renderStartRow = 0;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
   const fkColumns = new Set<string>();
 
   /* ---- Related-data panel (FK navigation) ---- */
   // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
-  type RelatedTarget = { fk: DbForeignKey; value: string };
+  // direction:
+  //   - "outgoing": この行の FK 列値 → 参照先 (fk.toTable.fk.toColumn = value)
+  //   - "incoming": この行の PK 列値 ← 参照元 (fk.fromTable.fk.fromColumn = value)
+  //     例: user.id をクリック → account / session / projects などの
+  //     user_id = user.id の行を辿れる。
+  type RelatedDirection = "outgoing" | "incoming";
+  type RelatedTarget = {
+    direction: RelatedDirection;
+    fk: DbForeignKey;
+    value: string;
+  };
   // ドリルの 1 段。sourceTable の行が持つ FK 参照群と選択中の参照。
   type RelatedLevel = {
     sourceTable: string;
@@ -262,7 +407,7 @@ export function createTableGrid(
     savedRelatedHeight != null
       ? Math.max(
           RELATED_PANEL_MIN_HEIGHT,
-          Math.min(RELATED_PANEL_MAX_HEIGHT, savedRelatedHeight),
+          Math.min(panelMaxHeight(), savedRelatedHeight),
         )
       : RELATED_PANEL_DEFAULT_HEIGHT;
   if (!embedded) {
@@ -368,7 +513,7 @@ export function createTableGrid(
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
     detailPanel.hidden = true;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
   }
 
   function startNewLoadGeneration() {
@@ -395,6 +540,7 @@ export function createTableGrid(
 
   function clear() {
     cleanupResize();
+    clearActiveCell();
     currentTable = "";
     columns = [];
     columnNames = [];
@@ -424,7 +570,7 @@ export function createTableGrid(
     closeExportMenu();
     hideRelatedPanel();
     detailPanel.hidden = true;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
     colWidths.clear();
   }
 
@@ -439,7 +585,10 @@ export function createTableGrid(
     return str === "" ? null : str;
   }
 
-  /** 指定行が持つ外部キー参照を集める（左リストの元データ）。 */
+  /** 指定行が持つ外部キー参照を集める（左リストの元データ）。
+   * outgoing: この行の FK 列値 → 参照先 (fk.fromTable === sourceTable)
+   * incoming: この行の PK 列値 ← 参照元 (fk.toTable === sourceTable)
+   */
   function buildRowForeignKeys(
     sourceTable: string,
     colNames: string[],
@@ -447,14 +596,54 @@ export function createTableGrid(
   ): RelatedTarget[] {
     const targets: RelatedTarget[] = [];
     for (const fk of callbacks.getForeignKeys?.() ?? []) {
-      if (fk.fromTable !== sourceTable) continue;
-      const idx = colNames.indexOf(fk.fromColumn);
-      if (idx < 0) continue;
-      const value = relatedLookupValue(rowData[idx]);
-      if (value === null) continue;
-      targets.push({ fk, value });
+      if (fk.fromTable === sourceTable) {
+        const idx = colNames.indexOf(fk.fromColumn);
+        if (idx >= 0) {
+          const value = relatedLookupValue(rowData[idx]);
+          if (value !== null) {
+            targets.push({ direction: "outgoing", fk, value });
+          }
+        }
+      }
+      if (fk.toTable === sourceTable) {
+        const idx = colNames.indexOf(fk.toColumn);
+        if (idx >= 0) {
+          const value = relatedLookupValue(rowData[idx]);
+          if (value !== null) {
+            targets.push({ direction: "incoming", fk, value });
+          }
+        }
+      }
     }
     return targets;
+  }
+
+  /** クリックされた列に対応する target index。outgoing は fromColumn、
+   * incoming は toColumn と突き合わせる。 */
+  function findTargetIndexForColumn(
+    targets: RelatedTarget[],
+    clickedColumn: string,
+  ): number {
+    return targets.findIndex((t) =>
+      t.direction === "outgoing"
+        ? t.fk.fromColumn === clickedColumn
+        : t.fk.toColumn === clickedColumn,
+    );
+  }
+
+  /** target の直接ドリル先 (table / 絞り込み列)。
+   * outgoing → 参照先 (toTable/toColumn = value)
+   * incoming → 参照元 (fromTable/fromColumn = value) */
+  function relatedDrillTable(target: RelatedTarget): string {
+    return target.direction === "outgoing"
+      ? target.fk.toTable
+      : target.fk.fromTable;
+  }
+
+  function relatedDrillEqColumn(target: RelatedTarget): string {
+    return target.direction === "outgoing"
+      ? target.fk.toColumn
+      : target.fk.fromColumn;
   }
 
   /** 行から 1 ドリル階層を作る。FK 参照が無ければ null。 */
@@ -466,9 +655,7 @@ export function createTableGrid(
   ): RelatedLevel | null {
     const targets = buildRowForeignKeys(sourceTable, colNames, rowData);
     if (targets.length === 0) return null;
-    let selectedIndex = targets.findIndex(
-      (t) => t.fk.fromColumn === clickedColumn,
-    );
+    let selectedIndex = findTargetIndexForColumn(targets, clickedColumn);
     if (selectedIndex < 0) selectedIndex = 0;
     return { sourceTable, targets, selectedIndex };
   }
@@ -521,7 +708,10 @@ export function createTableGrid(
     closeBtn.type = "button";
     closeBtn.className = "db-btn db-btn-icon db-related-close";
     closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", hideRelatedPanel);
+    closeBtn.addEventListener("click", () => {
+      hideRelatedPanel();
+      clearActiveCell();
+    });
     header.append(title, relatedCrumbEl, copyBtn, closeBtn);
 
     const bodyRow = document.createElement("div");
@@ -570,31 +760,25 @@ export function createTableGrid(
   }
 
   function startRelatedResize(e: MouseEvent) {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = relatedHeight;
-    const onMove = (ev: MouseEvent) => {
-      // 上端ハンドルなので、上にドラッグすると高くなる。
-      const delta = startY - ev.clientY;
-      relatedHeight = Math.max(
-        RELATED_PANEL_MIN_HEIGHT,
-        Math.min(RELATED_PANEL_MAX_HEIGHT, startHeight + delta),
-      );
-      if (relatedPanel) relatedPanel.style.height = `${relatedHeight}px`;
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      relatedResizeCleanup = null;
-      // ドラッグ確定時にタブ状態へ保存する。
-      callbacks.setRelatedPanelHeight?.(relatedHeight);
-    };
-    // ドラッグ中に destroy/hide された場合でもリスナーを外せるよう保持する。
-    relatedResizeCleanup = onUp;
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    if (!relatedPanel) return;
+    startTopEdgeResize({
+      panel: relatedPanel,
+      min: RELATED_PANEL_MIN_HEIGHT,
+      getHeight: () => relatedHeight,
+      setHeight: (h) => {
+        relatedHeight = h;
+      },
+      persist: (h) => callbacks.setRelatedPanelHeight?.(h),
+      setCleanup: (fn) => {
+        relatedResizeCleanup = fn;
+      },
+      startEvent: e,
+    });
   }
 
+  // hideRelatedPanel は showCellDetail からも内部的に呼ばれるため、
+  // active セルマーカーをここで落とすと「detail フッタを開いた瞬間に色が消える」
+  // 不具合が出る。クリアはユーザー操作 (close ボタン / clear()) 側に寄せる。
   function hideRelatedPanel() {
     if (!relatedPanel) return;
     relatedResizeCleanup?.();
@@ -686,16 +870,17 @@ export function createTableGrid(
       relatedCrumbEl?.appendChild(sep);
       const target = level.targets[level.selectedIndex];
       const isLast = i === relatedStack.length - 1;
+      const tableLabel = relatedDrillTable(target);
       if (isLast) {
         const seg = document.createElement("span");
         seg.className = "db-related-crumb active";
-        seg.textContent = target.fk.toTable;
+        seg.textContent = tableLabel;
         relatedCrumbEl?.appendChild(seg);
       } else {
         const seg = document.createElement("button");
         seg.type = "button";
         seg.className = "db-related-crumb";
-        seg.textContent = target.fk.toTable;
+        seg.textContent = tableLabel;
         seg.addEventListener("click", () => goToRelatedLevel(i));
         relatedCrumbEl?.appendChild(seg);
       }
@@ -710,13 +895,30 @@ export function createTableGrid(
       const item = document.createElement("button");
       item.type = "button";
       item.className = "db-related-list-item";
+      item.classList.add(`db-related-list-${target.direction}`);
+      // Rails 規約からの推測 FK は実 FK と見た目で区別する (ラベル + 色)。
+      if (target.fk.inferred) item.classList.add("db-related-list-inferred");
       if (i === level.selectedIndex) item.classList.add("active");
       const name = document.createElement("span");
       name.className = "db-related-list-name";
-      name.textContent = target.fk.toTable;
+      // outgoing は参照先テーブル、incoming は参照元テーブル。
+      name.textContent = relatedDrillTable(target);
+      if (target.fk.inferred) {
+        const badge = document.createElement("span");
+        badge.className = "db-related-list-inferred-badge";
+        badge.textContent = "inferred";
+        badge.title = "Inferred from Rails-style naming, not declared in DB";
+        name.appendChild(badge);
+      }
       const via = document.createElement("span");
       via.className = "db-related-list-via";
-      via.textContent = `${target.fk.fromColumn} = ${target.value}`;
+      // outgoing: this row's FK 列 = value (= parent の PK)
+      // incoming: parent の側で column = value となる行を見せる、ので
+      //   "<fromTable>.<fromColumn> = <value>" と完全形で出す。
+      via.textContent =
+        target.direction === "outgoing"
+          ? `${target.fk.fromColumn} = ${target.value}`
+          : `${target.fk.fromTable}.${target.fk.fromColumn} = ${target.value}`;
       item.append(name, via);
       item.addEventListener("click", () => selectRelatedTarget(i));
       relatedListEl?.appendChild(item);
@@ -727,7 +929,8 @@ export function createTableGrid(
   async function loadRelatedTarget() {
     const target = currentRelatedTarget();
     if (!target) return;
-    relatedEq = [{ column: target.fk.toColumn, value: target.value }];
+    const drillTable = relatedDrillTable(target);
+    relatedEq = [{ column: relatedDrillEqColumn(target), value: target.value }];
     const grid = embeddedGrid;
     if (!grid || !callbacks.fetchRelatedPage) return;
     const gen = ++relatedGen;
@@ -740,7 +943,7 @@ export function createTableGrid(
       // 1 ページ目を取得して列情報ごとグリッドへ渡す（埋め込みグリッドの
       // 以降のスクロール/フィルタ/ソートは fetchRelatedPage 経由で eq を保つ）。
       const data = await callbacks.fetchRelatedPage(
-        target.fk.toTable,
+        drillTable,
         0,
         PAGE_SIZE,
         null,
@@ -749,7 +952,7 @@ export function createTableGrid(
         controller.signal,
       );
       if (gen !== relatedGen) return;
-      grid.load(target.fk.toTable, data);
+      grid.load(drillTable, data);
       // 参照先が 0 件なら空表示を出す（孤立 FK 等）。
       if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
     } catch (err) {
@@ -766,7 +969,7 @@ export function createTableGrid(
     // 中断する（hideRelatedPanel が abort + stack クリア + 埋め込み grid.clear）。
     hideRelatedPanel();
     detailPanel.hidden = false;
-    detailPanel.innerHTML = "";
+    clearDetailContent();
 
     const header = document.createElement("div");
     header.className = "db-grid-detail-header";
@@ -801,6 +1004,8 @@ export function createTableGrid(
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
       detailPanel.hidden = true;
+      // 関連パネルも閉じていればフッタ表示中のセル色も落とす。
+      if (!relatedPanel || relatedPanel.hidden) clearActiveCell();
     });
 
     header.append(title, copyBtn, closeBtn);
@@ -1050,6 +1255,8 @@ export function createTableGrid(
         0,
         Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN,
       );
+      // setActiveCell が body 内インデックスを計算するために参照する。
+      renderStartRow = startRow;
       const endRow = Math.min(
         totalRows,
         Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN,
@@ -1118,6 +1325,8 @@ export function createTableGrid(
                 r.classList.remove("selected");
               });
               row.classList.add("selected");
+              // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
+              setActiveCell(rowIndex, cellColIndex);
               // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
               // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
               if (fkClickable) {
@@ -1140,6 +1349,11 @@ export function createTableGrid(
                 showCellDetail(cellColIndex, cellValue);
               }
             });
+            // virtualized 再描画でも色が残るよう、render 時に state と
+            // 突合せてクラスを付ける。
+            if (i === activeCellRowIndex && c === activeCellColIndex) {
+              cell.classList.add("db-grid-cell-active");
+            }
             row.appendChild(cell);
           }
         } else {
@@ -1228,10 +1442,7 @@ export function createTableGrid(
       columnNames = [];
       totalRows = 0;
     }
-    fkColumns.clear();
-    for (const fk of callbacks.getForeignKeys?.() ?? []) {
-      if (fk.fromTable === table) fkColumns.add(fk.fromColumn);
-    }
+    rebuildFkColumnsForCurrentTable();
     loadColWidths();
     spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
     renderHeader();
@@ -1311,6 +1522,8 @@ export function createTableGrid(
     embeddedGrid?.destroy();
     embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
+    // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。
+    detailResizeCleanup?.();
   }
 
   /** 言語切替時、組み込み済み DOM の文言を再適用する（再描画なし）。 */
@@ -1328,6 +1541,30 @@ export function createTableGrid(
     embeddedGrid?.localize();
   }
 
+  // FK 列 (outgoing) と、他から参照されている列 (incoming = 通常 PK) の
+  // 両方にヘッダ 🔗 を付け、セルクリックで関連パネルを開けるようにする。
+  // 設定トグル (Rails FK 推測) を切り替えたときも呼ばれる。
+  function rebuildFkColumnsForCurrentTable() {
+    fkColumns.clear();
+    if (!currentTable) return;
+    for (const fk of callbacks.getForeignKeys?.() ?? []) {
+      if (fk.fromTable === currentTable) fkColumns.add(fk.fromColumn);
+      if (fk.toTable === currentTable) fkColumns.add(fk.toColumn);
+    }
+  }
+
+  // 外部から FK セットの再計算を要求するエントリ。例: Rails 規約による
+  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダの 🔗 と
+  // セルクリック判定だけ更新する。
+  function refreshForeignKeys() {
+    rebuildFkColumnsForCurrentTable();
+    if (currentTable) {
+      renderHeader();
+      renderViewport();
+    }
+    embeddedGrid?.refreshForeignKeys();
+  }
+
   return {
     el,
     load,
@@ -1337,6 +1574,7 @@ export function createTableGrid(
     clear,
     destroy,
     localize,
+    refreshForeignKeys,
   };
 }
 

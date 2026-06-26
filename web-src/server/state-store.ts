@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type {
   AppSettingsState,
+  DbUiPrefs,
   DbUiState,
   ViewerFontSizeSetting,
   ViewState,
@@ -110,7 +111,12 @@ function emptySettings(): AppSettingsState {
 }
 
 function emptyViewState(): ViewState {
-  return { version: 1, collapsedDirs: [], viewedFiles: [] };
+  return {
+    version: 1,
+    collapsedDirs: [],
+    lazyExpandedDirs: [],
+    viewedFiles: [],
+  };
 }
 
 function emptyDbUiState(): DbUiState {
@@ -173,6 +179,8 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     pathSafe: true,
   });
   if (scopeExcludeNames) out.scopeExcludeNames = scopeExcludeNames;
+  const uploadEnabled = optionalBoolean(raw.uploadEnabled);
+  if (uploadEnabled !== undefined) out.uploadEnabled = uploadEnabled;
   if (isRecord(raw.range)) {
     const from = optionalString(raw.range.from, MAX_REF_LEN);
     const to = optionalString(raw.range.to, MAX_REF_LEN);
@@ -206,6 +214,13 @@ function sanitizeViewState(raw: unknown): ViewState {
         keepLast: true,
         sort: false,
       }) ?? [],
+    lazyExpandedDirs:
+      normalizeStringList(raw.lazyExpandedDirs, {
+        maxItems: MAX_VIEW_ITEMS,
+        maxLen: MAX_KEY_LEN,
+        keepLast: true,
+        sort: false,
+      }) ?? [],
     viewedFiles:
       normalizeStringList(raw.viewedFiles, {
         maxItems: MAX_VIEW_ITEMS,
@@ -220,6 +235,7 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
   if (!isRecord(patch)) return current;
   const base = sanitizeViewState({ ...current, version: 1 });
   const collapsedDirs = new Set(base.collapsedDirs);
+  const lazyExpandedDirs = new Set(base.lazyExpandedDirs);
   const viewedFiles = new Set(base.viewedFiles);
   const addedCollapsedDirs = normalizeStringList(patch.addedCollapsedDirs, {
     maxItems: MAX_VIEW_ITEMS,
@@ -227,13 +243,40 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
     keepLast: true,
     sort: false,
   });
-  for (const path of addedCollapsedDirs || []) collapsedDirs.add(path);
+  for (const path of addedCollapsedDirs || []) {
+    collapsedDirs.add(path);
+    // collapsed が明示されたら lazyExpanded は意味を失う。
+    lazyExpandedDirs.delete(path);
+  }
   const removedCollapsedDirs = normalizeStringList(patch.removedCollapsedDirs, {
     maxItems: MAX_VIEW_ITEMS,
     maxLen: MAX_KEY_LEN,
     sort: false,
   });
   for (const path of removedCollapsedDirs || []) collapsedDirs.delete(path);
+  const addedLazyExpandedDirs = normalizeStringList(
+    patch.addedLazyExpandedDirs,
+    {
+      maxItems: MAX_VIEW_ITEMS,
+      maxLen: MAX_KEY_LEN,
+      keepLast: true,
+      sort: false,
+    },
+  );
+  for (const path of addedLazyExpandedDirs || []) {
+    // 同時に collapsed として渡されていなければ追加。
+    if (!collapsedDirs.has(path)) lazyExpandedDirs.add(path);
+  }
+  const removedLazyExpandedDirs = normalizeStringList(
+    patch.removedLazyExpandedDirs,
+    {
+      maxItems: MAX_VIEW_ITEMS,
+      maxLen: MAX_KEY_LEN,
+      sort: false,
+    },
+  );
+  for (const path of removedLazyExpandedDirs || [])
+    lazyExpandedDirs.delete(path);
   const addedViewedFiles = normalizeStringList(patch.addedViewedFiles, {
     maxItems: MAX_VIEW_ITEMS,
     maxLen: MAX_KEY_LEN,
@@ -250,6 +293,7 @@ function mergeViewState(current: ViewState, patch: unknown): ViewState {
   return sanitizeViewState({
     version: 1,
     collapsedDirs: [...collapsedDirs],
+    lazyExpandedDirs: [...lazyExpandedDirs],
     viewedFiles: [...viewedFiles],
   });
 }
@@ -259,8 +303,27 @@ function safeObjectKey(value: string): string | null {
   return value;
 }
 
+// DbUiPrefs に新キーを増やすたびに sanitize/merge を両方触らないで済むよう、
+// boolean prefs キーを 1 か所で列挙する。テストもこの集合が完備していること
+// を前提にする (state-store-prefs.test.ts)。
+const DB_UI_BOOL_PREF_KEYS = ["s3TooltipEnabled", "inferFkRails"] as const;
+
+function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: DbUiPrefs = {};
+  for (const key of DB_UI_BOOL_PREF_KEYS) {
+    const v = raw[key];
+    if (v === true || v === false) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeDbUiState(raw: unknown): DbUiState {
-  if (!isRecord(raw) || !isRecord(raw.columnWidths)) return emptyDbUiState();
+  if (!isRecord(raw)) return emptyDbUiState();
+  const prefs = sanitizeDbUiPrefs(raw.prefs);
+  if (!isRecord(raw.columnWidths)) {
+    return prefs ? { ...emptyDbUiState(), prefs } : emptyDbUiState();
+  }
   const columnWidths: DbUiState["columnWidths"] = {};
   let dbCount = 0;
   for (const [dbIdRaw, tablesRaw] of Object.entries(raw.columnWidths)) {
@@ -291,13 +354,40 @@ function sanitizeDbUiState(raw: unknown): DbUiState {
     columnWidths[dbId] = tables;
     dbCount++;
   }
-  return { version: 1, columnWidths };
+  const out: DbUiState = { version: 1, columnWidths };
+  if (prefs) out.prefs = prefs;
+  return out;
+}
+
+function mergeDbUiPrefs(
+  current: DbUiPrefs | undefined,
+  patch: unknown,
+): DbUiPrefs | undefined {
+  if (!isRecord(patch)) return current;
+  // patch 内で boolean が来てれば上書き、null なら削除、未指定なら維持。
+  // 新キーは DB_UI_BOOL_PREF_KEYS に追加するだけで両方に反映される。
+  const next: DbUiPrefs = { ...(current ?? {}) };
+  for (const key of DB_UI_BOOL_PREF_KEYS) {
+    const v = patch[key];
+    if (v === null) delete next[key];
+    else if (v === true || v === false) next[key] = v;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
   if (!isRecord(patch)) return current;
+  // prefs はトップレベル並列の独立キーとして patch される (columnWidths と
+  // 同様)。columnWidths が居なくても prefs だけは反映できる必要がある。
+  const mergedPrefs =
+    "prefs" in patch
+      ? mergeDbUiPrefs(current.prefs, patch.prefs)
+      : current.prefs;
   if (!isRecord(patch.columnWidths)) {
-    return sanitizeDbUiState({ ...current, ...patch, version: 1 });
+    const merged: DbUiState = { ...current, version: 1 };
+    if (mergedPrefs) merged.prefs = mergedPrefs;
+    else delete merged.prefs;
+    return sanitizeDbUiState(merged);
   }
   const columnWidths: DbUiState["columnWidths"] = {
     ...current.columnWidths,
@@ -324,7 +414,13 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     }
     columnWidths[dbId] = tables;
   }
-  return sanitizeDbUiState({ ...current, ...patch, columnWidths, version: 1 });
+  return sanitizeDbUiState({
+    ...current,
+    ...patch,
+    columnWidths,
+    prefs: mergedPrefs,
+    version: 1,
+  });
 }
 
 const settingsStore = createJsonFileStore<AppSettingsState>({

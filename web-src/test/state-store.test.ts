@@ -67,11 +67,48 @@ describe("state store", () => {
     });
   });
 
+  test("upload toggle round-trips through settings patch and notifies subscribers", async () => {
+    await withTempProject(async (dir) => {
+      const notified: Array<boolean | undefined> = [];
+      const dispatch = async (body: unknown) => {
+        const url = new URL("http://localhost/_state/settings");
+        const req = new Request(url, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const res = await handleStateRoute(req, url, dir, () => true, {
+          onSettingsChange: (state) => notified.push(state.uploadEnabled),
+        });
+        if (!res) throw new Error("no response");
+        if (res.status !== 200)
+          throw new Error(
+            `unexpected status ${res.status}: ${await res.text()}`,
+          );
+        return res.json();
+      };
+
+      const disabled = await dispatch({ uploadEnabled: false });
+      expect(disabled.uploadEnabled).toBe(false);
+      expect((await loadAppSettingsState(dir)).uploadEnabled).toBe(false);
+
+      const reenabled = await dispatch({ uploadEnabled: true });
+      expect(reenabled.uploadEnabled).toBe(true);
+
+      const cleared = await dispatch({ uploadEnabled: null });
+      expect(cleared.uploadEnabled).toBeUndefined();
+      expect((await loadAppSettingsState(dir)).uploadEnabled).toBeUndefined();
+
+      expect(notified).toEqual([false, true, undefined]);
+    });
+  });
+
   test("view state keeps bounded normalized path lists", async () => {
     await withTempProject(async (dir) => {
       expect(await loadViewState(dir)).toEqual({
         version: 1,
         collapsedDirs: [],
+        lazyExpandedDirs: [],
         viewedFiles: [],
       });
       expect(
@@ -82,6 +119,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "src"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "b.ts"],
       });
       expect(
@@ -94,6 +132,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "c.ts"],
       });
       expect(
@@ -106,6 +145,7 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
         viewedFiles: ["a.ts", "d.ts"],
       });
       expect(
@@ -116,6 +156,42 @@ describe("state store", () => {
       ).toEqual({
         version: 1,
         collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: [],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // lazyExpandedDirs: add/remove と collapsedDirs との優先順位
+      // 入力に重複 "docs" を入れて keepLast で uniq されることも確認。
+      expect(
+        await patchViewState(dir, {
+          addedLazyExpandedDirs: ["docs", "apps", "docs"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages"],
+        lazyExpandedDirs: ["apps", "docs"],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // 同 path を collapsed と lazyExpanded 両方で渡すと collapsed が勝つ
+      expect(
+        await patchViewState(dir, {
+          addedCollapsedDirs: ["docs"],
+          addedLazyExpandedDirs: ["docs", "tools"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages", "docs"],
+        lazyExpandedDirs: ["apps", "tools"],
+        viewedFiles: ["a.ts", "d.ts"],
+      });
+      // 既存 lazyExpanded を removed で消せる
+      expect(
+        await patchViewState(dir, {
+          removedLazyExpandedDirs: ["apps"],
+        }),
+      ).toEqual({
+        version: 1,
+        collapsedDirs: ["web-src", "packages", "docs"],
+        lazyExpandedDirs: ["tools"],
         viewedFiles: ["a.ts", "d.ts"],
       });
     });
@@ -252,6 +328,74 @@ describe("state store", () => {
       } finally {
         console.error = originalError;
       }
+    });
+  });
+
+  // prefs (s3TooltipEnabled, inferFkRails) を db-ui.json に集約した
+  // ことで、boolean 永続化のテスト経路を増やした。
+  describe("db ui prefs", () => {
+    test("sanitize keeps known boolean prefs and drops anything else", async () => {
+      await withTempProject(async (dir) => {
+        // 未知キー / 非 boolean / 数値は無視。空 prefs は state に乗らない。
+        const written = await patchDbUiState(dir, {
+          prefs: {
+            s3TooltipEnabled: true,
+            inferFkRails: false,
+            unknownPref: true,
+            invalidType: 1,
+          } as unknown as { [k: string]: unknown },
+        });
+        expect(written.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+        const reloaded = await loadDbUiState(dir);
+        expect(reloaded.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+      });
+    });
+
+    test("merge updates / deletes individual prefs without touching others", async () => {
+      await withTempProject(async (dir) => {
+        await patchDbUiState(dir, {
+          prefs: { s3TooltipEnabled: true, inferFkRails: true },
+        });
+        // 単独 key だけ更新しても他 key は維持される。
+        const after1 = await patchDbUiState(dir, {
+          prefs: { inferFkRails: false },
+        });
+        expect(after1.prefs).toEqual({
+          s3TooltipEnabled: true,
+          inferFkRails: false,
+        });
+        // null で個別 key を削除できる。
+        const after2 = await patchDbUiState(dir, {
+          prefs: { s3TooltipEnabled: null },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(after2.prefs).toEqual({ inferFkRails: false });
+        // 全部消えたら prefs ごと undefined に縮退する (空オブジェクトを残さない)。
+        const after3 = await patchDbUiState(dir, {
+          prefs: { inferFkRails: null },
+        } as unknown as Parameters<typeof patchDbUiState>[1]);
+        expect(after3.prefs).toBeUndefined();
+      });
+    });
+
+    test("columnWidths and prefs are independent on patch", async () => {
+      await withTempProject(async (dir) => {
+        await patchDbUiState(dir, {
+          columnWidths: { "a.db": { users: { id: 80 } } },
+        });
+        const afterPref = await patchDbUiState(dir, {
+          prefs: { inferFkRails: true },
+        });
+        expect(afterPref.columnWidths).toEqual({
+          "a.db": { users: { id: 80 } },
+        });
+        expect(afterPref.prefs).toEqual({ inferFkRails: true });
+      });
     });
   });
 });

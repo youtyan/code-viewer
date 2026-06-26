@@ -83,6 +83,17 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 title: "Open another repository",
                 command: "code-viewer --cwd /path/to/repo --open",
               },
+              {
+                kind: "command",
+                title: "Bind to a specific port or override scope",
+                command:
+                  "code-viewer --port 64160 --scope-omit-dir node_modules --scope-omit-dir dist",
+              },
+              {
+                kind: "command",
+                title: "Print the installed version",
+                command: "code-viewer --version",
+              },
             ],
           },
           {
@@ -111,6 +122,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "paragraph",
                 text: "Use the sidebar or file palette to open source files, Markdown previews, images, PDFs, and other browser-safe media. Large text files automatically switch to virtual mode.",
               },
+              {
+                kind: "paragraph",
+                text: "In large repositories the sidebar loads folder children on demand. Folders you open are remembered and automatically re-expanded after a reload.",
+              },
             ],
           },
         ],
@@ -119,7 +134,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
         nav: "AI Annotations",
         title: "AI Code Annotations",
         intro:
-          "Annotations let an AI coding agent guide you through code in the browser. Each annotation points to a file and line range, and open tabs jump there live.",
+          "Annotations let an AI coding agent guide you through code in the browser. Each annotation points to a file and line range, open tabs jump there live, and the full walkthrough is saved to .code-viewer/annotations.json so it survives reloads.",
         groups: [
           {
             title: "What you ask the AI to do",
@@ -133,7 +148,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 items: [
                   "Start code-viewer for the repository and keep it running.",
                   "Ask the AI agent for an annotated walkthrough.",
-                  "Open the annotation panel in the browser and follow the entries in order.",
+                  "Open the annotation panel in the browser, toggle the follow checkbox if you want tabs to auto-jump, and press play to have the current note read aloud.",
                 ],
               },
             ],
@@ -161,6 +176,12 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "command",
+                title: "Edit, rename, delete, or clear",
+                command:
+                  'code-viewer annotate edit a-123 --body "Updated explanation."\ncode-viewer annotate rename sess-abc --title "Renamed walkthrough"\ncode-viewer annotate delete a-999\ncode-viewer annotate clear',
+              },
+              {
+                kind: "command",
                 title: "Annotate a database view",
                 command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
   --grid-search failed --filter status=failed --sort created_at:desc \\
@@ -173,6 +194,32 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Inspect posted annotations",
                 command: "code-viewer annotate list",
+              },
+            ],
+          },
+          {
+            title: "Browser panel features",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "Follow checkbox",
+                    "When on, every new annotation makes the active tab jump to its location. Turn it off to read at your own pace.",
+                  ],
+                  [
+                    "Audio playback",
+                    "Play / pause / previous / next / mute / rate controls speak the current annotation through the browser TTS engine. Rate and mute are saved per project.",
+                  ],
+                  [
+                    "Copy as AI prompt",
+                    "Each annotation has a copy button that produces a paste-ready prompt block referencing the annotation URL, so you can hand it back to the originating agent.",
+                  ],
+                  [
+                    "Persistent state",
+                    "Open/closed, follow, mute, and rate are stored under .code-viewer/settings.json; annotations themselves live in .code-viewer/annotations.json.",
+                  ],
+                ],
               },
             ],
           },
@@ -222,19 +269,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "SQLite",
-                    "Automatically discovered from .db, .sqlite, .sqlite3 files in the repository.",
+                    "Automatically discovered from .db, .sqlite, .sqlite3, and .s3db files in the repository.",
                   ],
                   [
                     "MySQL / MariaDB",
-                    "Detected from docker-compose.yml services. Multiple databases per server are listed.",
+                    "Detected from docker-compose.yml / compose.yml (or .yaml). Multiple databases per server are listed.",
                   ],
                   [
                     "PostgreSQL",
-                    "Detected from docker-compose.yml services. Multiple databases per server are listed.",
+                    "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening.",
+                  ],
+                  [
+                    "Redis",
+                    "Detected from compose files. Read-only browse over DB 0-15, SCAN keys, dedicated string/hash/list panes, JSON view for set/zset/stream, and participates in snapshots and diffs.",
+                  ],
+                  [
+                    "Elasticsearch",
+                    "Detected from compose files. List indices, view mappings, paginate with search_after, run lucene q= or DSL queries on an allowlist, and take snapshots/diffs.",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
-                    "Detected from docker-compose.yml services. Browse buckets, search objects, sort by update time, and preview common file types.",
+                    "Detected from compose files. Folder-tree browse, prefix/filename search, updated-time sort, and previews for images, video, audio, PDF, Markdown, HTML, and text. LocalStack falls back to `docker exec curl` when no host port is published; MinIO requires a published host port.",
                   ],
                 ],
               },
@@ -247,12 +302,20 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "table",
                 rows: [
                   [
+                    "Multi-DB tabs",
+                    "Open multiple databases side by side. Drag to reorder, + adds an empty tab, middle-click or × closes one (the last tab is reset to empty). Layout persists in .code-viewer/tabs.json.",
+                  ],
+                  [
                     "Sidebar",
-                    "DB selector, table tree (expand to see columns), filter, Query/ER buttons.",
+                    "DB selector, PostgreSQL schema selector, table tree (expand to see columns), filter, Rails FK inference toggle, and icon toolbar for Query / ER / Search / Snapshot tabs.",
                   ],
                   [
                     "Data tab",
-                    "Paginated table grid with sort, filter, cell copy, and CSV/JSON export.",
+                    "Paginated grid with sort, filter, cell copy, and CSV/JSON export (capped at 100k rows; export respects the current filter and sort).",
+                  ],
+                  [
+                    "Detail footer & related panel",
+                    "Click any cell to open a resizable detail footer. Foreign-key cells open a related-rows panel with multi-step drill-down breadcrumbs, supporting both outgoing (FK → PK) and incoming (PK ← FK) navigation.",
                   ],
                   [
                     "Schema tab",
@@ -260,15 +323,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Query editor",
-                    "SQL syntax highlighting, Tab indent, auto-resize, Ctrl+Enter to run.",
+                    "SQL syntax highlighting, Tab indent, auto-resize, Ctrl+Enter to run. Allowlist depends on the engine (SQLite: SELECT/PRAGMA/EXPLAIN/WITH; PostgreSQL and MySQL also accept SHOW/DESCRIBE).",
                   ],
                   [
                     "ER Diagram",
                     "Mermaid-based entity-relationship diagram with zoom and pan.",
                   ],
                   [
+                    "Search tab",
+                    "Full-text search across all tables and text columns of a database.",
+                  ],
+                  [
+                    "Snapshot tab",
+                    "Capture point-in-time snapshots of selected tables/indices/key spaces and diff any two to see inserts, updates, and deletes with full before/after values.",
+                  ],
+                  [
                     "Query History",
-                    "Bottom panel with master-detail layout. Left: history list, Right: result preview.",
+                    "Master-detail panel with history list and result preview. Each entry records whether it came from the browser or the CLI, and updates live over SSE.",
+                  ],
+                  [
+                    "Datastore explorers",
+                    "Redis / Elasticsearch / S3 keep the same Multi-DB tab UI but swap the table tree for a key-space / index-tree / folder-tree explorer.",
                   ],
                 ],
               },
@@ -279,7 +354,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "AI agents can execute read-only queries from the CLI. Results are saved to query history and visible in the browser.",
+                text: "AI agents can execute read-only queries and manage per-DB query history from the CLI. Results are saved into the same history visible in the browser. Search, snapshot, and diff operations live in the browser UI (Search tab / Snapshot tab) rather than the CLI.",
               },
               {
                 kind: "command",
@@ -289,8 +364,15 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "List databases",
-                command: "code-viewer query list",
+                title: "Run without saving history",
+                command:
+                  'code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" --max-rows 1 --no-save',
+              },
+              {
+                kind: "command",
+                title: "List or clear query history",
+                command:
+                  "code-viewer query list --db app.db --json\ncode-viewer query clear --db app.db",
               },
               {
                 kind: "command",
@@ -317,15 +399,21 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "Install for Codex and Gemini",
+                title: "Install for other agents",
                 command:
-                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini",
+                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini,cursor",
               },
               {
                 kind: "command",
-                title: "Install for all supported agents",
+                title: "Install for every supported agent",
                 command:
-                  "npx -y @youtyan/code-viewer skill install --agent all",
+                  "npx -y @youtyan/code-viewer skill install --agent all\n# all = claude (.claude/), codex (.codex/), gemini (.gemini/), cursor (.cursor/), agents (.agents/)",
+              },
+              {
+                kind: "command",
+                title: "Install globally for a user (not per project)",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent all --global",
               },
             ],
           },
@@ -460,6 +548,17 @@ code-viewer annotate add-db --db app.db --tab query \\
                 title: "別のリポジトリを開く",
                 command: "code-viewer --cwd /path/to/repo --open",
               },
+              {
+                kind: "command",
+                title: "ポート指定とスコープ除外を上書きする",
+                command:
+                  "code-viewer --port 64160 --scope-omit-dir node_modules --scope-omit-dir dist",
+              },
+              {
+                kind: "command",
+                title: "インストールされたバージョンを表示",
+                command: "code-viewer --version",
+              },
             ],
           },
           {
@@ -488,6 +587,10 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "paragraph",
                 text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。",
               },
+              {
+                kind: "paragraph",
+                text: "大きいリポジトリではサイドバーがフォルダの中身を必要に応じて読み込みます。開いたフォルダは記憶され、次回のリロード時に同じ状態で展開し直されます。",
+              },
             ],
           },
         ],
@@ -496,7 +599,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "AI注釈",
         title: "AI コード注釈",
         intro:
-          "注釈機能を使うと、AI コーディングエージェントがブラウザ上の特定ファイル・特定行へ説明を付けられます。開いているタブは注釈先へライブで移動します。",
+          "注釈機能を使うと、AI コーディングエージェントがブラウザ上の特定ファイル・特定行へ説明を付けられます。開いているタブは注釈先へライブで移動し、ウォークスルー全体は .code-viewer/annotations.json に保存されてリロード後も残ります。",
         groups: [
           {
             title: "AI に頼む言い方",
@@ -510,7 +613,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 items: [
                   "対象リポジトリで code-viewer を起動したままにします。",
                   "AI エージェントに注釈付きの解説を依頼します。",
-                  "ブラウザの注釈パネルを開き、履歴を上から順に追います。",
+                  "ブラウザの注釈パネルを開き、自動追従させたいときは follow チェックボックスをオン、再生ボタンで読み上げも使えます。",
                 ],
               },
             ],
@@ -538,6 +641,12 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
+                title: "edit / rename / delete / clear",
+                command:
+                  'code-viewer annotate edit a-123 --body "説明文を修正しました。"\ncode-viewer annotate rename sess-abc --title "ウォークスルー名を変更"\ncode-viewer annotate delete a-999\ncode-viewer annotate clear',
+              },
+              {
+                kind: "command",
                 title: "データベース画面へ注釈を追加する",
                 command: `code-viewer annotate add-db --db app.db --table orders --tab data \\
   --grid-search failed --filter status=failed --sort created_at:desc \\
@@ -550,6 +659,32 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "投稿済み注釈を確認する",
                 command: "code-viewer annotate list",
+              },
+            ],
+          },
+          {
+            title: "ブラウザパネルの機能",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "follow チェックボックス",
+                    "オンにすると新しい注釈が追加されるたびにアクティブタブが注釈先へ自動で移動します。落ち着いて読みたいときはオフに。",
+                  ],
+                  [
+                    "音声再生",
+                    "再生 / 一時停止 / 前後 / ミュート / 速度を持つプレイヤーが、現在の注釈をブラウザ TTS で読み上げます。速度とミュートはプロジェクト単位で保存されます。",
+                  ],
+                  [
+                    "AI 用プロンプトとしてコピー",
+                    "各注釈のコピーボタンが、注釈 URL を含む貼り付け可能なプロンプトを生成します。元のエージェントへそのまま戻せます。",
+                  ],
+                  [
+                    "永続化",
+                    "パネルの開閉・follow・ミュート・速度は .code-viewer/settings.json に、注釈自体は .code-viewer/annotations.json に保存されます。",
+                  ],
+                ],
               },
             ],
           },
@@ -599,19 +734,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "SQLite",
-                    "リポジトリ内の .db, .sqlite, .sqlite3 ファイルを自動検出します。",
+                    "リポジトリ内の .db, .sqlite, .sqlite3, .s3db ファイルを自動検出します。",
                   ],
                   [
                     "MySQL / MariaDB",
-                    "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。",
+                    "docker-compose.yml / compose.yml (.yaml 含む) のサービスから検出。同一サーバー上の複数データベースを一覧表示します。",
                   ],
                   [
                     "PostgreSQL",
-                    "docker-compose.yml のサービスから検出。同一サーバー上の複数データベースを一覧表示します。",
+                    "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。",
+                  ],
+                  [
+                    "Redis",
+                    "compose ファイルから検出。DB 0-15 を read-only で SCAN し、string/hash/list は専用ペイン、set/zset/stream は JSON ビュー。スナップショット/差分にも参加します。",
+                  ],
+                  [
+                    "Elasticsearch",
+                    "compose ファイルから検出。インデックス一覧、マッピング、search_after ページング、lucene q= と許可リスト経由の DSL、スナップショット/差分に対応します。",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
-                    "docker-compose.yml のサービスから検出。バケット閲覧、オブジェクト検索、更新日時順表示、主要ファイル形式のプレビューに対応します。",
+                    "compose ファイルから検出。フォルダツリー型ブラウザ、prefix/ファイル名検索、更新日時順表示、画像/動画/音声/PDF/Markdown/HTML/テキストのプレビューに対応。LocalStack はホストポート未公開時 `docker exec curl` にフォールバックしますが、MinIO はホストポート公開が必須です。",
                   ],
                 ],
               },
@@ -624,12 +767,20 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "table",
                 rows: [
                   [
+                    "マルチ DB タブ",
+                    "複数のデータベースを横並びで開きます。ドラッグで並び替え、+ で空タブ追加、× / 中クリックで閉じる（最後の1枚は空タブにリセット）。並びは .code-viewer/tabs.json に保存されます。",
+                  ],
+                  [
                     "サイドバー",
-                    "DB選択、テーブルツリー（展開でカラム表示）、フィルター、Query/ERボタン。",
+                    "DB 選択、PostgreSQL スキーマセレクター、テーブルツリー（展開でカラム表示）、フィルター、Rails 命名規約による仮想 FK 推測トグル、Query / ER / Search / Snapshot アイコンツールバー。",
                   ],
                   [
                     "Data タブ",
-                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSONエクスポート。",
+                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSON エクスポート（最大10万行、現在のフィルター/ソートを反映）。",
+                  ],
+                  [
+                    "詳細フッタ・関連パネル",
+                    "セルをクリックするとリサイズ可能な詳細フッタが開きます。外部キー値からは関連行パネルが開き、ブレッドクラム付きで多段ドリルダウン可能。outgoing (FK→PK) と incoming (PK←FK) の両方向に対応。",
                   ],
                   [
                     "Schema タブ",
@@ -637,15 +788,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "クエリエディター",
-                    "SQLシンタックスハイライト、Tabインデント、自動リサイズ、Ctrl+Enterで実行。",
+                    "SQL シンタックスハイライト、Tab インデント、自動リサイズ、Ctrl+Enter で実行。許可文は DB 種別により異なります（SQLite: SELECT/PRAGMA/EXPLAIN/WITH。PostgreSQL と MySQL は SHOW/DESCRIBE も可）。",
                   ],
                   [
-                    "ER図",
-                    "Mermaidベースのエンティティ関係図。ズーム・パン対応。",
+                    "ER 図",
+                    "Mermaid ベースのエンティティ関係図。ズーム・パン対応。",
+                  ],
+                  [
+                    "Search タブ",
+                    "全テーブル・全テキスト列を横断する全文検索。",
+                  ],
+                  [
+                    "Snapshot タブ",
+                    "選んだテーブル / インデックス / キー空間の状態を保存し、任意の 2 つの差分（insert / update / delete + before/after）を表示します。",
                   ],
                   [
                     "クエリ履歴",
-                    "下部パネルにマスター/ディテール表示。左に履歴一覧、右に結果プレビュー。",
+                    "マスター/ディテール表示。各エントリは browser / CLI どちらから来たかを記録し、SSE でライブ更新されます。",
+                  ],
+                  [
+                    "データストア専用エクスプローラ",
+                    "Redis / Elasticsearch / S3 はマルチ DB タブ UI を共有しつつ、テーブルツリーをキー空間ツリー / インデックスツリー / フォルダツリーに差し替えます。",
                   ],
                 ],
               },
@@ -656,7 +819,7 @@ code-viewer annotate add-db --db app.db --tab query \\
             blocks: [
               {
                 kind: "paragraph",
-                text: "AIエージェントはCLIから読み取り専用クエリを実行できます。結果はクエリ履歴に保存され、ブラウザで確認できます。",
+                text: "AI エージェントは CLI から read-only クエリの実行と per-DB クエリ履歴の管理ができます。結果はブラウザでも見える同じ履歴に保存されます。Search / Snapshot / Diff は CLI ではなくブラウザ UI の Search タブ / Snapshot タブから操作します。",
               },
               {
                 kind: "command",
@@ -666,8 +829,15 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "データストア一覧",
-                command: "code-viewer query list",
+                title: "履歴を残さずに実行",
+                command:
+                  'code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" --max-rows 1 --no-save',
+              },
+              {
+                kind: "command",
+                title: "履歴の一覧/削除",
+                command:
+                  "code-viewer query list --db app.db --json\ncode-viewer query clear --db app.db",
               },
               {
                 kind: "command",
@@ -694,15 +864,21 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
               {
                 kind: "command",
-                title: "Codex と Gemini 用に登録",
+                title: "別のエージェント向けに登録",
                 command:
-                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini",
+                  "npx -y @youtyan/code-viewer skill install --agent codex,gemini,cursor",
               },
               {
                 kind: "command",
                 title: "対応エージェントすべてに登録",
                 command:
-                  "npx -y @youtyan/code-viewer skill install --agent all",
+                  "npx -y @youtyan/code-viewer skill install --agent all\n# all = claude (.claude/), codex (.codex/), gemini (.gemini/), cursor (.cursor/), agents (.agents/)",
+              },
+              {
+                kind: "command",
+                title: "ユーザー全体（プロジェクト外）へ登録",
+                command:
+                  "npx -y @youtyan/code-viewer skill install --agent all --global",
               },
             ],
           },

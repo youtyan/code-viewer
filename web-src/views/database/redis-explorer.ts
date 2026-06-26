@@ -43,6 +43,9 @@ export type RedisExplorerCallbacks = {
 
 export type RedisExplorerView = {
   el: HTMLElement;
+  // Database リスト (db0/db1/...) を左サイドバー (db-sidebar) の dbToolbar
+  // 直下に mount するためのスロット。container には含まれない。
+  sidebarSlot: HTMLElement;
   load: (dbId: string, initial?: RedisExplorerSelection) => Promise<void>;
   clear: () => void;
   dispose: () => void;
@@ -58,17 +61,19 @@ export function createRedisExplorer(
   const container = document.createElement("div");
   container.className = "redis-explorer";
 
-  const dbListPane = document.createElement("div");
-  dbListPane.className = "redis-db-list-pane";
+  // 左サイドバー (db-sidebar) の dbToolbar 直下にぶら下がる Database リスト。
+  // container には append しない。
+  const sidebarSlot = document.createElement("div");
+  sidebarSlot.className = "db-explorer-sidebar-slot redis-db-list-pane";
 
   const dbListHeader = document.createElement("div");
   dbListHeader.className = "db-explorer-pane-header";
   dbListHeader.textContent = text().redis.databases;
-  dbListPane.appendChild(dbListHeader);
+  sidebarSlot.appendChild(dbListHeader);
 
   const dbList = document.createElement("div");
   dbList.className = "redis-db-list";
-  dbListPane.appendChild(dbList);
+  sidebarSlot.appendChild(dbList);
 
   const keyListPane = document.createElement("div");
   keyListPane.className = "redis-key-list-pane";
@@ -107,7 +112,7 @@ export function createRedisExplorer(
   mainPane.className = "redis-main-pane";
   setPaneEmpty(mainPane, text().redis.selectKey);
 
-  container.append(dbListPane, keyListPane, mainPane);
+  container.append(keyListPane, mainPane);
 
   let currentDbId: string | null = null;
   let currentDbIndex: number | null = null;
@@ -643,5 +648,13 @@ export function createRedisExplorer(
     }
   }
 
-  return { el: container, load, clear, dispose, getSelection, localize };
+  return {
+    el: container,
+    sidebarSlot,
+    load,
+    clear,
+    dispose,
+    getSelection,
+    localize,
+  };
 }

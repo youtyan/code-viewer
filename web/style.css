@@ -1735,6 +1735,29 @@ body.gdp-history-resizing * {
   gap: 8px;
   margin-top: 10px;
 }
+.scope-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.scope-settings-toggle input[type="checkbox"] {
+  margin: 0;
+}
+.scope-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.scope-settings-footer .scope-settings-help {
+  margin: 0;
+  flex: 1;
+}
 .scope-settings-actions button {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -5485,6 +5508,66 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 .db-icon-toolbar[hidden] {
   display: none !important;
 }
+
+/* sidebar の設定トグル行。dbToolbar 直下に並ぶ。複数トグルを横に並べる
+   想定なので flex-wrap で折り返し。 */
+.db-prefs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.db-prefs-bar[hidden] {
+  display: none;
+}
+/* ラベル付きピル形式の永続化トグル (Rails FK 推測など)。active 時は
+   accent 色のチントで「ON」が一目で分かるようにする。 */
+.db-pref-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--db-font-sm);
+}
+.db-pref-toggle:hover {
+  background: var(--bg-hover, var(--bg-soft));
+}
+.db-pref-toggle.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+.db-pref-toggle svg {
+  flex: 0 0 auto;
+}
+.db-pref-toggle-label {
+  white-space: nowrap;
+}
+
+/* 推測 FK は実 FK と区別。関連パネルのリスト項目に淡いマーカーを乗せる。 */
+.db-related-list-inferred {
+  background: color-mix(in srgb, var(--attn, var(--accent)) 6%, transparent);
+}
+.db-related-list-inferred-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--attn, var(--accent)) 18%, var(--bg));
+  color: var(--attn, var(--accent));
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
 .db-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -5620,6 +5703,35 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
+}
+
+/* explorer (redis/es/s3) の第1階層セレクタ (Databases / Indices / Bucket+View)
+   を抱える sidebar 内 host。kind が SQL のときは中身が全て hidden になるため
+   高さが潰れて見えなくなる (table list が下に詰まる)。
+   redis/es/s3 のときは hidden 子要素を 1 つだけ表示し、その slot が sidebar
+   の残り高さを全て取れるよう host 自身も flex:1 にする。 */
+.db-explorer-sidebar-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* author 側 display:flex が UA の [hidden]→display:none を上書きしてしまう
+   ため、明示で潰す。SQL kind 時はこの host を畳んで tableList を上に詰める。 */
+.db-explorer-sidebar-host[hidden] {
+  display: none;
+}
+.db-explorer-sidebar-slot {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.db-explorer-sidebar-slot[hidden] {
+  display: none;
 }
 
 .db-file-select {
@@ -6396,18 +6508,41 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   max-width: none !important;
 }
 
+/* 現在フッタ/関連パネルに表示している値の元セル。スクロール後も維持するため
+   render 時に state からクラスが再付与される。selected 行 + active 列で
+   二重に強調する。border-left を残しつつ accent 色のリング。 */
+.db-grid-cell.db-grid-cell-active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--fg);
+}
+.db-grid-cell.db-grid-cell-active.null,
+.db-grid-cell.db-grid-cell-active.empty,
+.db-grid-cell.db-grid-cell-active.blob {
+  /* 空状態でも視認できるよう色だけ上書きしない (fg-muted) → 通常 fg。 */
+  color: var(--fg);
+}
+
 /* ---------- Cell Detail Panel ---------- */
 .db-grid-detail-panel[hidden] {
   display: none !important;
 }
 
 .db-grid-detail-panel {
+  position: relative;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
-  max-height: 200px;
+  /* 高さは JS から style.height で設定 (永続化対応)。default 200px。
+     min-height は table-grid.ts の DETAIL_PANEL_MIN_HEIGHT と揃える
+     (40 → 40)。CSS 側を緩めにしておくと、ユーザーが 40px まで縮めた
+     のに描画は 80px のまま、永続化値と表示が食い違う回帰になる。 */
+  height: 200px;
+  min-height: 40px;
   overflow: auto;
   flex-shrink: 0;
 }
+/* 上端のドラッグハンドル: detail フッタと関連パネルで共通。
+   .db-related-resize と同じセレクタ規則を共有する。 */
 
 .db-grid-detail-header {
   display: flex;
@@ -6496,7 +6631,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   overflow: hidden;
 }
 
-.db-related-resize {
+.db-related-resize,
+.db-grid-detail-resize {
   position: absolute;
   top: 0;
   left: 0;
@@ -6505,7 +6641,8 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   cursor: row-resize;
   z-index: 2;
 }
-.db-related-resize:hover {
+.db-related-resize:hover,
+.db-grid-detail-resize:hover {
   background: var(--accent, var(--border));
   opacity: 0.4;
 }
@@ -6576,6 +6713,24 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   font-size: var(--db-font-base);
   font-weight: 600;
   color: var(--fg);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* 方向アイコンを name の前に出す: outgoing は → (自分→他テーブル)、
+   incoming は ← (他テーブル→自分の PK)。テキスト 1 文字なのでフォントに
+   影響されず軽量。 */
+.db-related-list-name::before {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.db-related-list-outgoing .db-related-list-name::before {
+  content: "→";
+}
+.db-related-list-incoming .db-related-list-name::before {
+  content: "←";
 }
 
 .db-related-list-via {
@@ -7545,13 +7700,15 @@ body.db-resizing {
 .redis-explorer[hidden] {
   display: none;
 }
+/* redis-db-list-pane は db-sidebar の dbToolbar 直下にスロットとして mount
+   される (database-view の explorerSidebarHost)。サイドバー自体が bg-soft +
+   resize handle 付きなので、固定幅 / border-right / 重複する背景は持たない。 */
 .redis-db-list-pane {
-  width: 220px;
-  border-right: 1px solid var(--border);
+  flex: 1 1 auto;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-soft);
 }
 .db-explorer-pane-header {
   padding: 8px 12px;
@@ -7880,13 +8037,14 @@ body.db-resizing {
 .es-explorer[hidden] {
   display: none;
 }
+/* es-index-list-pane は redis-db-list-pane と同じく db-sidebar の
+   explorerSidebarHost 内にスロットとして mount される。 */
 .es-index-list-pane {
-  width: 260px;
-  border-right: 1px solid var(--border);
+  flex: 1 1 auto;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-soft);
 }
 .es-index-list {
   flex: 1;
@@ -8109,24 +8267,10 @@ body.db-resizing {
 .s3-explorer[hidden] {
   display: none;
 }
-.s3-object-list-pane {
-  width: 420px;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
-}
-.s3-toolbar {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
-}
-.s3-bucket-row,
+/* List/Explorer 共通: Bucket / View seg / Search / Prefix・Contains / sort /
+   objectList / tree がすべて sidebarSlot に積まれる。
+   下記 .s3-search-row / .s3-options-row は flex 行なので [hidden] 属性
+   (UA の display:none) を明示で上書きしないと消えないことに注意。 */
 .s3-search-row,
 .s3-options-row {
   display: flex;
@@ -8134,11 +8278,31 @@ body.db-resizing {
   gap: 8px;
   min-width: 0;
 }
-/* これらの行は display:flex を持つため、hidden 属性 (UA の display:none) が
-   効かない。Explorer 表示で List 専用の行を隠せるよう明示的に上書きする。 */
 .s3-search-row[hidden],
 .s3-options-row[hidden] {
   display: none;
+}
+/* s3-bucket-row は db-sidebar の explorerSidebarHost に mount される。260px
+   幅でも Bucket label + select + List/Explorer seg が綺麗に収まるよう、縦並び
+   (label+select の行 / seg の行) にする。
+   Explorer モードでは下に tree がぶら下がるため、flex column で残り高さを
+   tree に渡せるようにする (`.db-explorer-sidebar-slot` の flex:1 と組合せ)。 */
+.s3-sidebar-slot {
+  padding: 8px;
+  gap: 8px;
+}
+.s3-bucket-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.s3-bucket-row .s3-view-seg {
+  align-self: stretch;
+  display: flex;
+}
+.s3-bucket-row .s3-view-seg button {
+  flex: 1;
 }
 .s3-field-label {
   flex: 1;
@@ -8183,23 +8347,26 @@ body.db-resizing {
   padding: 4px 8px;
 }
 .s3-object-status {
-  min-height: 26px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  min-height: 22px;
+  padding: 4px 0;
   color: var(--fg-muted);
   font-size: var(--db-font-sm);
-  background: var(--bg);
   flex-shrink: 0;
 }
 .s3-object-status.warn {
   color: #8a5a22;
   background: #fff4e0;
 }
+/* sidebarSlot 内で残り高さを取り、スクロール可能にする。横の負 margin で
+   sidebarSlot の左右 padding を相殺してフルブリードにする (アイテムの border
+   が sidebar の幅一杯まで届くように)。 */
 .s3-object-list {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 120px;
   overflow-y: auto;
   padding: 4px 0;
+  margin: 0 -8px;
+  border-top: 1px solid var(--border);
 }
 .s3-object-item {
   display: flex;
@@ -8217,6 +8384,16 @@ body.db-resizing {
 .s3-object-item.active {
   background: var(--bg-active, var(--bg-soft));
   border-left-color: var(--accent);
+}
+/* 1 行目: 親パス (薄)。サイドバー狭幅でも末尾が見える ellipsis のみ。 */
+.s3-object-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  color: var(--fg-muted);
+  line-height: 1.3;
 }
 .s3-object-head {
   display: flex;
@@ -8240,8 +8417,59 @@ body.db-resizing {
   color: var(--fg-muted);
   font-size: var(--db-font-sm);
 }
+
+/* List / Explorer 共通: 行ホバーで全 key を floating で出す。document.body
+   に attach するので、sidebar 外 (preview pane 側) へ突き出して読める。 */
+.s3-key-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  font-size: var(--db-font-sm);
+}
+.s3-key-tooltip[hidden] {
+  display: none;
+}
+.s3-key-tooltip-image {
+  display: block;
+  max-width: 336px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  margin: -2px 0 8px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+}
+.s3-key-tooltip-path {
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  word-break: break-all;
+  line-height: 1.4;
+}
+.s3-key-tooltip-meta {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+/* tooltip 切替トグル: bucketRow 内 (Bucket select + List/Explorer の下) の
+   小さなボタン。active 時はアクセントで強調。 */
+/* s3 explorer の Hover preview トグル: 共通 .db-pref-toggle を併用する。
+   ここでは bucketRow (column flex) 内で stretch しないように align-self
+   だけ上書き。ラベルクラスも .db-pref-toggle-label と同等。 */
+.s3-tooltip-toggle {
+  align-self: flex-start;
+}
 .s3-object-more-btn {
   padding: 6px;
+  margin: 0 -8px -8px;
   border: none;
   border-top: 1px solid var(--border);
   background: var(--bg-soft);
@@ -8313,10 +8541,20 @@ body.db-resizing {
 }
 
 /* Explorer 表示: 既存ファイルツリー (#filelist.tree) の見た目を S3 ペインに
-   合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。 */
+   合わせて再現したもの。クラス名は共通 (.tree-dir / .tree-file / .chev ...)。
+   sidebar 内の sidebarSlot に置かれるため、flex で残りの高さを満たし、
+   スクロール可能にする。padding をなくし、sidebarSlot の余白に揃える。 */
 .s3-tree {
   --lvl-pad: 12px;
-  padding: 4px 6px;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 4px 0;
+  margin: 0 -8px -8px;
+  border-top: 1px solid var(--border);
+}
+.s3-tree[hidden] {
+  display: none;
 }
 .s3-tree .s3-tree-node {
   min-width: 0;

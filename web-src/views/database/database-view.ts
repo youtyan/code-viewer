@@ -1,7 +1,9 @@
+import { inferRailsForeignKeys } from "../../core/database/infer-fk";
 import type {
   DbColumn,
   DbFileInfo,
   DbFilesResponse,
+  DbForeignKey,
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
@@ -14,13 +16,14 @@ import type {
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import type { AppRoute, DiffRange } from "../../core/routes";
-import type { AnnotationTarget, DbUiState } from "../../core/types";
+import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
-import { type DbLang, type DbText, dbText } from "./i18n";
 import { createGlobalSearchView } from "./global-search-view";
+import { type DbLang, type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
+import { makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
@@ -49,6 +52,17 @@ type DatabasePaneDeps = DatabaseViewDeps & {
     table: string,
     widths: Record<string, number>,
   ): void;
+  // db-ui.json の prefs。boolean トグル系の永続化はここに集約する
+  // (localStorage を使わない)。
+  getDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    fallback: NonNullable<DbUiPrefs[K]>,
+  ): NonNullable<DbUiPrefs[K]>;
+  setDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    value: NonNullable<DbUiPrefs[K]>,
+  ): void;
+  onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
 };
 
@@ -260,6 +274,32 @@ function createTabPane(
 
   let currentDbInfo: DbFileInfo | null = null;
   let schemaCache: DbSchemaResponse | null = null;
+  // getForeignKeys memo: (schemaCache identity, inferFkRails pref) を覚えて
+  // おき、変わらない限り推測列挙を skip。大規模スキーマで getForeignKeys が
+  // ヒット毎に inferRailsForeignKeys を全走査するのを避ける。
+  let fkMemo: {
+    schema: DbSchemaResponse | null;
+    inferOn: boolean;
+    value: DbForeignKey[];
+  } | null = null;
+  function getForeignKeysCached(): DbForeignKey[] {
+    const real = schemaCache?.foreignKeys ?? [];
+    const inferOn = outerDeps.getDbUiPref("inferFkRails", false);
+    if (fkMemo && fkMemo.schema === schemaCache && fkMemo.inferOn === inferOn) {
+      return fkMemo.value;
+    }
+    let value: DbForeignKey[] = real;
+    if (inferOn && schemaCache) {
+      const inferred = inferRailsForeignKeys({
+        tables: schemaCache.tables,
+        columnsMap: schemaCache.columnsMap ?? {},
+        realForeignKeys: real,
+      });
+      if (inferred.length > 0) value = [...real, ...inferred];
+    }
+    fkMemo = { schema: schemaCache, inferOn, value };
+    return value;
+  }
   let lastFiles: DbFileInfo[] = [];
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
@@ -317,6 +357,13 @@ function createTabPane(
     const n = Number.parseInt(raw, 10);
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
+  // セル詳細フッタの高さ(px)。同じく per-tab 永続化。
+  let detailPanelHeightPx: number | null = (() => {
+    const raw = initial.detailPanelHeight;
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
 
   // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
@@ -363,6 +410,37 @@ function createTabPane(
       snapshotView.refresh();
     },
   });
+
+  // Rails 命名規約 (foo_id → foos.id) からの仮想 FK 推測トグル。
+  // active 状態は db-ui.json の prefs.inferFkRails に永続化。
+  // クリックで pref を反転 → grid に再計算を促す (データは再取得しない)。
+  // toolsSection の "ナビゲーション icon 並び" とは性質が違うため、
+  // ラベル付きピル形式 (S3 explorer の Hover preview toggle と同じ形) で
+  // dbToolbar 直下に独立した行として置く。
+  const inferFkToggle = makePrefToggle({
+    title: "Infer FK from Rails-style <name>_id → <names>.id",
+    label: "Rails FK 推測",
+    pathD: ICON_PATH_INFER_FK,
+  });
+  inferFkToggle.addEventListener("click", () => {
+    const next = !outerDeps.getDbUiPref("inferFkRails", false);
+    outerDeps.setDbUiPref("inferFkRails", next);
+    applyInferFkBtnState();
+    grid.refreshForeignKeys();
+  });
+  function applyInferFkBtnState() {
+    const on = outerDeps.getDbUiPref("inferFkRails", false);
+    inferFkToggle.classList.toggle("active", on);
+    inferFkToggle.setAttribute("aria-pressed", String(on));
+  }
+  applyInferFkBtnState();
+  // 戻り値の disposer を捨てると、タブ dispose 後も listener が残って
+  // destroyed grid に refreshForeignKeys が飛ぶ ("listener leak")。dispose()
+  // で必ず unsubscribe する。
+  const disposeInferFkPrefSub = outerDeps.onDbUiPrefChange(() => {
+    applyInferFkBtnState();
+    grid.refreshForeignKeys();
+  });
   reloc(() => {
     const t = paneText().nav;
     localizeIconButton(queryBtn, t.query, t.queryTitle);
@@ -373,8 +451,27 @@ function createTabPane(
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
-  // 順序: アイコンツールバー → DB select → table list の順。
-  sidebar.append(toolsSection, dbToolbar, tableList.el);
+  // 設定トグル (Rails FK 推測など) は icon toolbar とは別行にまとめる。
+  // SQL kind 時のみ表示。
+  const prefsBar = document.createElement("div");
+  prefsBar.className = "db-prefs-bar";
+  prefsBar.append(inferFkToggle);
+
+  // explorer (redis/es/s3) 用のサイドバースロット host。各 explorer が自前で
+  // 構築した sidebarSlot をここに mount し、applyVisibility が kind ごとに
+  // toggle する。SQL kind では全て hidden になり、空のまま下に流れる
+  // (Query History toggle / table list がその下に来る)。
+  const explorerSidebarHost = document.createElement("div");
+  explorerSidebarHost.className = "db-explorer-sidebar-host";
+
+  // 順序: アイコンツールバー → DB select → prefs バー → explorer sidebar → table list。
+  sidebar.append(
+    toolsSection,
+    dbToolbar,
+    prefsBar,
+    explorerSidebarHost,
+    tableList.el,
+  );
 
   const resizeHandle = document.createElement("div");
   resizeHandle.className = "db-sidebar-resize";
@@ -409,12 +506,22 @@ function createTabPane(
     getColumnWidths: (dbId, table) => outerDeps.getColumnWidths(dbId, table),
     setColumnWidths: (dbId, table, widths) =>
       outerDeps.setColumnWidths(dbId, table, widths),
-    getForeignKeys: () => schemaCache?.foreignKeys ?? [],
+    // inferFkRails が ON のときだけ Rails 命名規約由来の仮想 FK を上乗せ
+    // する。実 FK と同じ (fromTable, fromColumn) があれば inference 側で
+    // スキップされるので重複しない。
+    // 推測は (schemaCache の identity) + (pref 値) を key に memoize する。
+    // 数百テーブル規模で getForeignKeys が render 毎に走るのを防ぐ。
+    getForeignKeys: () => getForeignKeysCached(),
     fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
       fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
     getRelatedPanelHeight: () => relatedPanelHeightPx,
     setRelatedPanelHeight: (h) => {
       relatedPanelHeightPx = h;
+      cb.onStateChange();
+    },
+    getDetailPanelHeight: () => detailPanelHeightPx,
+    setDetailPanelHeight: (h) => {
+      detailPanelHeightPx = h;
       cb.onStateChange();
     },
     getText: () => paneText(),
@@ -459,18 +566,33 @@ function createTabPane(
     getText: () => paneText(),
   });
   redisExplorer.el.hidden = true;
+  redisExplorer.sidebarSlot.hidden = true;
 
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
   });
   esExplorer.el.hidden = true;
+  esExplorer.sidebarSlot.hidden = true;
 
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    // S3 hover preview の ON/OFF。db-ui.json の prefs に永続化される。
+    getTooltipEnabled: () => outerDeps.getDbUiPref("s3TooltipEnabled", true),
+    setTooltipEnabled: (enabled) =>
+      outerDeps.setDbUiPref("s3TooltipEnabled", enabled),
   });
   s3Explorer.el.hidden = true;
+  s3Explorer.sidebarSlot.hidden = true;
+
+  // explorer ごとの sidebarSlot を sidebar host に差し込む。表示制御は
+  // applyVisibility が一括で行う (kind による hidden toggle)。
+  explorerSidebarHost.append(
+    redisExplorer.sidebarSlot,
+    esExplorer.sidebarSlot,
+    s3Explorer.sidebarSlot,
+  );
 
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
@@ -549,6 +671,8 @@ function createTabPane(
       userPrefersHistoryOpen,
     );
     toolsSection.hidden = visibility.toolsHidden;
+    // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
+    prefsBar.hidden = visibility.toolsHidden;
     historyToggle.hidden = visibility.historyToggleHidden;
     historyResizer.hidden = visibility.historyResizerHidden;
     historyPane.hidden = visibility.historyPaneHidden;
@@ -563,6 +687,15 @@ function createTabPane(
     redisExplorer.el.hidden = visibility.redisHidden;
     esExplorer.el.hidden = visibility.esHidden;
     s3Explorer.el.hidden = visibility.s3Hidden;
+    // sidebar 内の第1階層セレクタも explorer 表示と同期する。
+    redisExplorer.sidebarSlot.hidden = visibility.redisHidden;
+    esExplorer.sidebarSlot.hidden = visibility.esHidden;
+    s3Explorer.sidebarSlot.hidden = visibility.s3Hidden;
+    // host は `flex: 1` で残り高さを全部食うため、SQL kind で中身が全部 hidden
+    // のときは host ごと畳まないと、tableList が下に押し出されて余白だらけに
+    // なる (報告された SQL ビューの「テーブル一覧がすごい離れる」回帰)。
+    explorerSidebarHost.hidden =
+      visibility.redisHidden && visibility.esHidden && visibility.s3Hidden;
     if (!sqlMode) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
@@ -1383,6 +1516,8 @@ function createTabPane(
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
     if (relatedPanelHeightPx != null)
       state.relatedPanelHeight = `${relatedPanelHeightPx}px`;
+    if (detailPanelHeightPx != null)
+      state.detailPanelHeight = `${detailPanelHeightPx}px`;
 
     if (!loaded) {
       if (initial.redis) state.redis = initial.redis;
@@ -1462,6 +1597,9 @@ function createTabPane(
   function dispose(): void {
     loadGeneration++;
     tableSelectGuard.dispose();
+    // pref listener を必ず外す。残ると destroyed grid に refreshForeignKeys
+    // が飛んで「detached DOM 書込み」になる。
+    disposeInferFkPrefSub();
     if (historyRefreshPending !== null) {
       clearTimeout(historyRefreshPending);
       historyRefreshPending = null;
@@ -1526,6 +1664,10 @@ const ICON_PATH_SEARCH =
 
 const ICON_PATH_SNAPSHOT =
   "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
+
+// 鎖リンク icon (octicon link)。Rails 規約由来の仮想 FK 推測トグルに使う。
+const ICON_PATH_INFER_FK =
+  "M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z";
 
 function makeIconButton(opts: {
   label: string;
@@ -1613,7 +1755,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     dbUiLoadPromise = fetch("/_db/ui")
       .then(async (res) => {
         if (!res.ok) return;
-        dbUiState = (await res.json()) as DbUiState;
+        // applyDbUiState 経由で listeners を起こす。直接代入だと「ロード完了
+        // 後にトグル UI に色が反映されない」回帰 (Rails FK 推測トグルで報告)
+        // の原因になる。
+        applyDbUiState((await res.json()) as DbUiState);
       })
       .catch(() => {});
     return dbUiLoadPromise;
@@ -1634,18 +1779,52 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const nextDb = { ...(dbUiState.columnWidths[dbId] || {}) };
     nextDb[table] = { ...widths };
     dbUiState = {
+      ...dbUiState,
       version: 1,
       columnWidths: { ...dbUiState.columnWidths, [dbId]: nextDb },
     };
+    // PATCH のレスポンスは local state には流し込まない: 連続書込時に古い
+    // レスポンスが後勝ちして新しいローカル値を巻き戻す race を避ける。サーバ
+    // 側 merge は idempotent なので、各 PATCH が独立に届けば十分。
     void fetch("/_db/ui", {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
-    })
-      .then(async (res) => {
-        if (res.ok) dbUiState = (await res.json()) as DbUiState;
-      })
-      .catch(() => {});
+    }).catch(() => {});
+  }
+
+  // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
+  // 即時通知する (例: 別タブで切り替えたら全タブの S3 explorer のトグル
+  // 表示も更新される — 今は同タブ即時反映のみで十分だが、形だけ用意)。
+  const dbUiPrefListeners = new Set<(state: DbUiState) => void>();
+  function applyDbUiState(next: DbUiState) {
+    dbUiState = next;
+    for (const fn of dbUiPrefListeners) fn(dbUiState);
+  }
+  function getDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    fallback: NonNullable<DbUiPrefs[K]>,
+  ): NonNullable<DbUiPrefs[K]> {
+    const v = dbUiState.prefs?.[key];
+    return v === undefined ? fallback : (v as NonNullable<DbUiPrefs[K]>);
+  }
+  function setDbUiPref<K extends keyof DbUiPrefs>(
+    key: K,
+    value: NonNullable<DbUiPrefs[K]>,
+  ): void {
+    const nextPrefs: DbUiPrefs = { ...(dbUiState.prefs ?? {}), [key]: value };
+    applyDbUiState({ ...dbUiState, prefs: nextPrefs });
+    // PATCH のレスポンスは local state に再適用しない (setColumnWidths と
+    // 同様の race 対策)。
+    void fetch("/_db/ui", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body: JSON.stringify({ prefs: { [key]: value } }),
+    }).catch(() => {});
+  }
+  function onDbUiPrefChange(listener: (state: DbUiState) => void): () => void {
+    dbUiPrefListeners.add(listener);
+    return () => dbUiPrefListeners.delete(listener);
   }
 
   async function loadSqlHistory(
@@ -2114,6 +2293,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         ensureDbUiState,
         getColumnWidths,
         setColumnWidths,
+        getDbUiPref,
+        setDbUiPref,
+        onDbUiPrefChange,
         loadSqlHistory,
       },
       {
@@ -2138,6 +2320,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         historyHeight: initial?.historyHeight,
         sidebarWidth: initial?.sidebarWidth,
         relatedPanelHeight: initial?.relatedPanelHeight,
+        detailPanelHeight: initial?.detailPanelHeight,
         redis: initial?.redis,
         es: initial?.es,
         s3: initial?.s3,

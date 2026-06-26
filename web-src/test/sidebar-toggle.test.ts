@@ -182,6 +182,7 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       sbWidth: 280,
       sidebarHidden: state.sidebarHidden,
       collapsedDirs: new Set(),
+      lazyExpandedDirs: new Set(),
       files: [],
       activeFile: null,
       hideTests: false,
@@ -193,6 +194,7 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
     fileEntryIcon: () => "",
     applyViewedState() {},
     persistCollapsedDirs() {},
+    persistLazyExpandedDirs() {},
     appendScopeParams() {},
     createOpenPathButton: () =>
       new FakeElement("button") as unknown as HTMLElement,

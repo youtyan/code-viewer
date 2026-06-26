@@ -1,3 +1,4 @@
+import type { AppSettingsState } from "../core/types";
 import {
   dispatchRoutes,
   handleError,
@@ -14,6 +15,10 @@ import {
 } from "./state-store";
 
 const MAX_STATE_PATCH_BODY_BYTES = 1_000_000;
+
+export type StateRouteOptions = {
+  onSettingsChange?: (state: AppSettingsState) => void;
+};
 
 async function parseJsonBody(req: Request): Promise<unknown | Response> {
   return parseBoundedJsonBody(
@@ -34,11 +39,20 @@ async function handleSettingsGet(cwd: string): Promise<Response> {
 async function handleSettingsPatch(
   cwd: string,
   req: Request,
+  onChange?: (state: AppSettingsState) => void,
 ): Promise<Response> {
   const body = await parseJsonBody(req);
   if (body instanceof Response) return body;
   try {
-    return json(await patchAppSettingsState(cwd, body));
+    const next = await patchAppSettingsState(cwd, body);
+    if (onChange) {
+      try {
+        onChange(next);
+      } catch (notifyErr) {
+        console.warn("[code-viewer] settings change notify failed:", notifyErr);
+      }
+    }
+    return json(next);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "settings state too large") return textError(message, 413);
@@ -73,6 +87,7 @@ export async function handleStateRoute(
   url: URL,
   cwd: string,
   sideEffectAllowed: (req: Request) => boolean,
+  options: StateRouteOptions = {},
 ): Promise<Response | null> {
   return dispatchRoutes(
     req,
@@ -84,7 +99,7 @@ export async function handleStateRoute(
         handler: () =>
           req.method === "GET"
             ? handleSettingsGet(cwd)
-            : handleSettingsPatch(cwd, req),
+            : handleSettingsPatch(cwd, req, options.onSettingsChange),
       },
       "/_state/view": {
         methods: ["GET", "PATCH"],
