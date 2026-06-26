@@ -836,6 +836,42 @@ describe("S3 adapter", () => {
     }
   });
 
+  test("requests encoding-type=url and decodes URL-encoded keys and prefixes", async () => {
+    const requestedUrls: string[] = [];
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (async (input: RequestInfo | URL, _init?: RequestInit) => {
+        requestedUrls.push(String(input));
+        return new Response(
+          [
+            "<ListBucketResult>",
+            "<IsTruncated>false</IsTruncated>",
+            // "新規 folder/" と "a b.txt" を URL エンコードして返す。
+            "<CommonPrefixes><Prefix>%E6%96%B0%E8%A6%8F%20folder/</Prefix></CommonPrefixes>",
+            "<Contents><Key>photos/a%20b.txt</Key><LastModified>2026-01-01T00:00:00.000Z</LastModified><Size>1</Size></Contents>",
+            "</ListBucketResult>",
+          ].join(""),
+          { status: 200 },
+        );
+      }) as typeof fetch,
+    });
+
+    const explorer = await openS3ExplorerAsync(s3Info());
+    const result = await explorer.listObjects({
+      bucket: "media",
+      prefix: "photos/",
+      delimiter: "/",
+    });
+
+    expect(requestedUrls).toHaveLength(1);
+    expect(requestedUrls[0].includes("encoding-type=url")).toBe(true);
+    expect(result.objects.map((object) => object.key)).toEqual([
+      "photos/a b.txt",
+    ]);
+    expect(result.commonPrefixes).toEqual(["新規 folder/"]);
+  });
+
   test("propagates folder pagination tokens for large directories", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "cv-s3-folder-page-"));
     try {

@@ -588,6 +588,16 @@ function parseBuckets(xml: string): S3BucketInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// list-type=2 を encoding-type=url で呼ぶため、Key / Prefix は URL エンコード
+// されて返る。decodeURIComponent で戻す (壊れた列は raw のままにする)。
+function decodeS3UrlEncoded(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseObjects(xml: string): {
   objects: S3ObjectInfo[];
   commonPrefixes: string[];
@@ -596,7 +606,7 @@ function parseObjects(xml: string): {
 } {
   const objects = xmlBlocks(xml, "Contents")
     .map((block) => {
-      const key = xmlText(block, "Key") || "";
+      const key = decodeS3UrlEncoded(xmlText(block, "Key") || "");
       const updatedAt = toIsoDate(xmlText(block, "LastModified"));
       return {
         key,
@@ -612,7 +622,7 @@ function parseObjects(xml: string): {
   // delimiter 指定時、直下のサブフォルダは <CommonPrefixes><Prefix>foo/</Prefix>
   // として返る。
   const commonPrefixes = xmlBlocks(xml, "CommonPrefixes")
-    .map((block) => xmlText(block, "Prefix") || "")
+    .map((block) => decodeS3UrlEncoded(xmlText(block, "Prefix") || ""))
     .filter(Boolean);
   return {
     objects,
@@ -745,6 +755,7 @@ function createS3Adapter(config: S3Config): S3Explorer {
           bucket: opts.bucket,
           query: {
             "list-type": "2",
+            "encoding-type": "url",
             "max-keys": String(
               Math.min(1000, Math.max(1, opts.maxKeys ?? 200)),
             ),

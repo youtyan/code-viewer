@@ -94,6 +94,10 @@ function folderDisplayName(folderPrefix: string): string {
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 }
 
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
 function setExplorerFolderIcon(el: HTMLElement, collapsed: boolean): void {
   el.innerHTML = iconSvg(
     collapsed
@@ -219,6 +223,10 @@ export function createS3Explorer(
   const explorerRowsByKey = new Map<string, HTMLElement>();
   const explorerLoadedFolders = new Set<string>();
   const explorerLoadingFolders = new Map<string, Promise<void>>();
+  // 各階層 (container prefix) の追加ページ取得関数。1 ページ追加できれば true。
+  const explorerPagerByPrefix = new Map<string, () => Promise<boolean>>();
+  // バケット/DB 切替・dispose 時に進行中の folder fetch をまとめて中断する。
+  let explorerAbort: AbortController | null = null;
   let explorerRootLoaded = false;
   let listLoaded = false;
   let disposed = false;
@@ -274,11 +282,14 @@ export function createS3Explorer(
   }
 
   function highlightActiveObject(key: string | null): void {
-    if (activeObjectRow?.dataset.key === key) return;
-    activeObjectRow?.classList.remove("active");
     const rows =
       currentView === "explorer" ? explorerRowsByKey : objectRowsByKey;
-    activeObjectRow = key ? (rows.get(key) ?? null) : null;
+    // ノード同一性で比較する。キー一致だけで早期 return すると、再描画で
+    // 行が差し替わったときに古い (detached な) 行を指したままになる。
+    const target = key ? (rows.get(key) ?? null) : null;
+    if (target === activeObjectRow) return;
+    activeObjectRow?.classList.remove("active");
+    activeObjectRow = target;
     activeObjectRow?.classList.add("active");
   }
 
@@ -626,9 +637,13 @@ export function createS3Explorer(
   }
 
   function resetExplorer(): void {
+    // 進行中の folder fetch を中断してから状態を捨てる。
+    explorerAbort?.abort();
+    explorerAbort = new AbortController();
     explorerTree.innerHTML = "";
     explorerRowsByKey.clear();
     explorerDirByPath.clear();
+    explorerPagerByPrefix.clear();
     explorerLoadedFolders.clear();
     explorerLoadingFolders.clear();
     explorerRootLoaded = false;
@@ -645,7 +660,9 @@ export function createS3Explorer(
     });
     if (prefix) params.set("prefix", prefix);
     if (token) params.set("token", token);
-    const res = await fetch(`/_db/s3/folder?${params}`);
+    const res = await fetch(`/_db/s3/folder?${params}`, {
+      signal: explorerAbort?.signal,
+    });
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
     return (await res.json()) as S3FolderResponse;
   }
@@ -679,7 +696,8 @@ export function createS3Explorer(
     name.title = object.key;
     row.append(spacer, createKindBadge(object.key, object.contentType), name);
     explorerRowsByKey.set(object.key, row);
-    if (currentKey === object.key) row.classList.add("active");
+    // active の付与は highlightActiveObject に一元化する (renderFolderLevel 末尾で
+    // 同期)。ここで直付けすると activeObjectRow と二重管理になりずれる。
     row.addEventListener("click", () => void selectObject(object));
     return row;
   }
@@ -741,9 +759,13 @@ export function createS3Explorer(
     data: S3FolderResponse,
     append: boolean,
   ): void {
-    if (!append) parent.innerHTML = "";
+    if (!append) {
+      parent.innerHTML = "";
+      explorerPagerByPrefix.delete(prefix);
+    }
     if (!append && data.folders.length === 0 && data.objects.length === 0) {
       parent.appendChild(makeTreeMessageRow("s3-tree-empty", depth, "(empty)"));
+      if (currentKey) highlightActiveObject(currentKey);
       return;
     }
     const fragment = document.createDocumentFragment();
@@ -755,25 +777,46 @@ export function createS3Explorer(
     }
     parent.appendChild(fragment);
     if (data.nextToken) {
+      const dbId = currentDbId;
+      const bucket = currentBucket;
       const more = document.createElement("button");
       more.type = "button";
       more.className = "s3-tree-more";
       more.style.setProperty("--lvl-pad", indentPad(depth));
       more.textContent = "Load more";
-      more.addEventListener("click", async () => {
+      // ボタン押下と、復元時のプログラム的なページ送り (expandExplorerToKey) を
+      // 同じ関数で扱う。1 ページ追加できれば true を返す。
+      const loadMore = async (): Promise<boolean> => {
+        if (more.disabled) return false;
         more.disabled = true;
         try {
           const next = await fetchFolder(prefix, data.nextToken);
-          if (!next) return;
+          if (
+            !next ||
+            disposed ||
+            dbId !== currentDbId ||
+            bucket !== currentBucket
+          ) {
+            return false;
+          }
           more.remove();
           renderFolderLevel(parent, prefix, depth, next, true);
+          return true;
         } catch (err) {
+          if (isAbortError(err) || disposed) return false;
           more.disabled = false;
           more.textContent = `Load more failed: ${err instanceof Error ? err.message : String(err)}`;
+          return false;
         }
-      });
+      };
+      explorerPagerByPrefix.set(prefix, loadMore);
+      more.addEventListener("click", () => void loadMore());
       parent.appendChild(more);
+    } else {
+      explorerPagerByPrefix.delete(prefix);
     }
+    // active は highlightActiveObject に一元化。再描画後にここで同期する。
+    if (currentKey) highlightActiveObject(currentKey);
   }
 
   function ensureFolderLoaded(
@@ -801,6 +844,11 @@ export function createS3Explorer(
         renderFolderLevel(childUl, prefix, depth, data, false);
         explorerLoadedFolders.add(prefix);
       } catch (err) {
+        // バケット切替/dispose による中断はエラー表示しない。
+        if (isAbortError(err) || disposed) {
+          childUl.innerHTML = "";
+          return;
+        }
         childUl.replaceChildren(
           makeTreeMessageRow(
             "s3-tree-error",
@@ -840,7 +888,7 @@ export function createS3Explorer(
       renderFolderLevel(explorerTree, "", 0, data, false);
       explorerRootLoaded = true;
     } catch (err) {
-      if (slot.isStale()) return;
+      if (slot.isStale() || isAbortError(err)) return;
       setPaneStatus(
         explorerTree,
         `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -852,18 +900,36 @@ export function createS3Explorer(
   }
 
   // 復元用: 指定キーまで祖先フォルダを順に展開し、ファイルを選択する。
-  async function expandExplorerToKey(key: string): Promise<void> {
+  // 祖先フォルダがページ分割の先にある場合は、その親階層の追加ページを
+  // 見つかるまで自動でたどる。fallbackHead は List 復元と同様、行が読めない
+  // ときのメタ情報フォールバック。
+  async function expandExplorerToKey(
+    key: string,
+    fallbackHead?: S3ObjectInfo | null,
+  ): Promise<void> {
     await loadExplorerRoot();
     const parts = key.split("/");
+    let parentPrefix = "";
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i++) {
+      parentPrefix = prefix;
       prefix += `${parts[i]}/`;
-      const dir = explorerDirByPath.get(prefix);
+      let dir = explorerDirByPath.get(prefix);
+      // まだ読み込まれていなければ、親階層の追加ページをたどって探す。
+      while (!dir) {
+        const pager = explorerPagerByPrefix.get(parentPrefix);
+        if (!pager) break;
+        const advanced = await pager();
+        if (disposed) return;
+        if (!advanced) break;
+        dir = explorerDirByPath.get(prefix);
+      }
       if (!dir) break;
       await dir.expand();
       if (disposed) return;
     }
-    const object = objectsByKey.get(key) ?? { key, sizeBytes: 0 };
+    const object = objectsByKey.get(key) ??
+      fallbackHead ?? { key, sizeBytes: 0 };
     await selectObject(object);
     explorerRowsByKey.get(key)?.scrollIntoView({ block: "nearest" });
   }
@@ -1048,7 +1114,10 @@ export function createS3Explorer(
         if (initialView === "explorer") {
           await loadExplorerRoot();
           if (currentDbId !== dbId) return;
-          if (initial?.key) await expandExplorerToKey(initial.key);
+          if (initial?.key) {
+            const head = headPromise ? await headPromise : null;
+            await expandExplorerToKey(initial.key, head);
+          }
         } else {
           await loadObjects(false);
           if (currentDbId !== dbId) return;

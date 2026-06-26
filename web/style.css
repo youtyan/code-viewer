@@ -8012,30 +8012,32 @@ body.db-resizing {
   white-space: nowrap;
   user-select: none;
 }
+/* 色は意味別のテーマトークンを使い、ダークモードでも自動で追従させる
+   (背景/縁も同じトークンを color-mix することで theme 変数の切替に乗る)。 */
 .s3-kind-badge.kind-image {
-  color: #1a7f37;
-  background: color-mix(in srgb, #1a7f37 12%, var(--bg));
-  border-color: color-mix(in srgb, #1a7f37 35%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
 }
 .s3-kind-badge.kind-video {
-  color: #8250df;
-  background: color-mix(in srgb, #8250df 12%, var(--bg));
-  border-color: color-mix(in srgb, #8250df 35%, transparent);
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--done) 35%, transparent);
 }
 .s3-kind-badge.kind-audio {
-  color: #bc4c00;
-  background: color-mix(in srgb, #bc4c00 12%, var(--bg));
-  border-color: color-mix(in srgb, #bc4c00 35%, transparent);
+  color: var(--attn);
+  background: color-mix(in srgb, var(--attn) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--attn) 35%, transparent);
 }
 .s3-kind-badge.kind-pdf {
-  color: #cf222e;
-  background: color-mix(in srgb, #cf222e 12%, var(--bg));
-  border-color: color-mix(in srgb, #cf222e 35%, transparent);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
 .s3-kind-badge.kind-text {
-  color: #0969da;
-  background: color-mix(in srgb, #0969da 12%, var(--bg));
-  border-color: color-mix(in srgb, #0969da 35%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .s3-kind-badge.kind-binary {
   color: var(--fg-muted);
