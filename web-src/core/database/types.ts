@@ -409,6 +409,15 @@ export type S3ObjectsResponse = {
   scanLimitReached?: boolean;
 };
 
+export type S3FolderResponse = {
+  dbId: string;
+  bucket: string;
+  prefix: string;
+  folders: string[];
+  objects: S3ObjectInfo[];
+  nextToken?: string;
+};
+
 export type S3ObjectHeadResponse = {
   dbId: string;
   bucket: string;
@@ -424,6 +433,8 @@ export type S3ObjectTextResponse = S3ObjectHeadResponse & {
   truncated: boolean;
 };
 
+export type S3ViewMode = "list" | "explorer";
+
 export type S3ExplorerSelection = {
   bucket?: string;
   prefix?: string;
@@ -431,6 +442,9 @@ export type S3ExplorerSelection = {
   mode?: S3SearchMode;
   sort?: S3SortMode;
   key?: string;
+  view?: S3ViewMode;
+  // エクスプローラ表示で現在開いているフォルダ (末尾 "/"、ルートは空)。
+  path?: string;
 };
 
 // ---------- Tabs ----------

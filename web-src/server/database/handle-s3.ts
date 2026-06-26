@@ -2,6 +2,7 @@ import { hasControlCharacter } from "../../core/control-chars";
 import { s3ObjectName } from "../../core/database/s3-keys";
 import type {
   S3BucketsResponse,
+  S3FolderResponse,
   S3ObjectHeadResponse,
   S3ObjectsResponse,
   S3SearchMode,
@@ -345,6 +346,59 @@ async function handleObjects(
   }
 }
 
+async function handleFolder(
+  cwd: string,
+  req: Request,
+  url: URL,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const r = await resolveS3(
+    cwd,
+    url.searchParams.get("db"),
+    req.signal,
+    omitDirNames,
+  );
+  if (r instanceof Response) return r;
+  const bucket = validateBucket(url.searchParams.get("bucket"));
+  if (bucket instanceof Response) return bucket;
+  // prefix は末尾 "/" のフォルダパス。ルートは空文字。
+  const prefix = validateOptionalText(
+    url.searchParams.get("prefix"),
+    "prefix",
+    2048,
+  );
+  if (prefix instanceof Response) return prefix;
+  const token = validateOptionalText(
+    url.searchParams.get("token"),
+    "token",
+    4096,
+  );
+  if (token instanceof Response) return token;
+  try {
+    const page = await r.explorer.listObjects({
+      bucket,
+      prefix,
+      delimiter: "/",
+      continuationToken: token || undefined,
+      maxKeys: MAX_OBJECT_LIMIT,
+      signal: req.signal,
+    });
+    // フォルダ自身を表すプレースホルダオブジェクト (key === prefix) は除外する。
+    const objects = page.objects.filter((object) => object.key !== prefix);
+    const body: S3FolderResponse = {
+      dbId: r.dbId,
+      bucket,
+      prefix,
+      folders: page.commonPrefixes ?? [],
+      objects,
+      ...(page.nextToken ? { nextToken: page.nextToken } : {}),
+    };
+    return json(body);
+  } catch (err) {
+    return s3ErrorResponse(err, "list s3 folder");
+  }
+}
+
 async function handleHead(
   cwd: string,
   req: Request,
@@ -462,6 +516,10 @@ export async function handleS3Route(
       "/_db/s3/objects": {
         methods: ["GET"],
         handler: () => handleObjects(cwd, req, url, omitDirNames),
+      },
+      "/_db/s3/folder": {
+        methods: ["GET"],
+        handler: () => handleFolder(cwd, req, url, omitDirNames),
       },
       "/_db/s3/head": {
         methods: ["GET"],

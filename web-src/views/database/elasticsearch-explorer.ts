@@ -9,7 +9,7 @@ import type {
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
 import { createAbortGuard } from "./abort-guard";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 
 export type ElasticsearchExplorerCallbacks = {
   // 選択中の index / query 文字列が変わったことを外側に通知する。タブ
@@ -99,11 +99,11 @@ export function createElasticsearchExplorer(
 
   const mappingBody = document.createElement("div");
   mappingBody.className = "es-mapping-body";
-  mappingBody.textContent = "Select an index to view its mapping.";
+  setPaneEmpty(mappingBody, "Select an index to view its mapping.");
   const docBody = document.createElement("div");
   docBody.className = "es-doc-body";
   docBody.hidden = true;
-  docBody.textContent = "Select a doc to view its _source.";
+  setPaneEmpty(docBody, "Select a doc to view its _source.");
   detailPane.append(mappingBody, docBody);
 
   container.append(indexListPane, docListPane, detailPane);
@@ -431,7 +431,7 @@ export function createElasticsearchExplorer(
     notifySelectionChange();
     highlightActiveIndex(name);
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    setPaneEmpty(docBody, "Select a doc to view its _source.");
     setDetailTab("mapping");
     await Promise.all([fetchMapping(name), loadDocs(false)]);
   }
@@ -559,9 +559,9 @@ export function createElasticsearchExplorer(
     activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = "Select an index to view its mapping.";
+    setPaneEmpty(mappingBody, "Select an index to view its mapping.");
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    setPaneEmpty(docBody, "Select a doc to view its _source.");
     setDetailTab("mapping");
     setIndexStatus("Loading indices...");
     try {
@@ -635,9 +635,9 @@ export function createElasticsearchExplorer(
     activeDocRow = null;
     docMoreBtn.hidden = true;
     mappingBody.innerHTML = "";
-    mappingBody.textContent = "Select an index to view its mapping.";
+    setPaneEmpty(mappingBody, "Select an index to view its mapping.");
     docBody.innerHTML = "";
-    docBody.textContent = "Select a doc to view its _source.";
+    setPaneEmpty(docBody, "Select a doc to view its _source.");
     setDetailTab("mapping");
   }
 
