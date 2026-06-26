@@ -6425,6 +6425,21 @@ html[data-theme="dark"] .db-query-highlight span[style] {
   max-width: none !important;
 }
 
+/* 現在フッタ/関連パネルに表示している値の元セル。スクロール後も維持するため
+   render 時に state からクラスが再付与される。selected 行 + active 列で
+   二重に強調する。border-left を残しつつ accent 色のリング。 */
+.db-grid-cell.db-grid-cell-active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--fg);
+}
+.db-grid-cell.db-grid-cell-active.null,
+.db-grid-cell.db-grid-cell-active.empty,
+.db-grid-cell.db-grid-cell-active.blob {
+  /* 空状態でも視認できるよう色だけ上書きしない (fg-muted) → 通常 fg。 */
+  color: var(--fg);
+}
+
 /* ---------- Cell Detail Panel ---------- */
 .db-grid-detail-panel[hidden] {
   display: none !important;

@@ -253,6 +253,38 @@ export function createTableGrid(
   // ドラッグ中の window リスナーを teardown 時に外せるよう保持。
   let detailResizeCleanup: (() => void) | null = null;
 
+  // active cell (詳細フッタ/関連パネルに表示中) を切替える。state を
+  // 更新したあと、現在 body 上にいる古い active class を外して新しい
+  // セルに付け直す。virtualized 再描画でも renderViewport が state を
+  // 見てクラスを再付与するので、スクロール後の表示も維持される。
+  function setActiveCell(rowIndex: number, colIndex: number) {
+    activeCellRowIndex = rowIndex;
+    activeCellColIndex = colIndex;
+    for (const c of body.querySelectorAll(".db-grid-cell-active")) {
+      c.classList.remove("db-grid-cell-active");
+    }
+    if (rowIndex < 0 || colIndex < 0) return;
+    // colIndex+1: rowNum cell が先頭にあるので 1 ずれる。
+    const targetRow = body.children[rowIndex - getRenderStartRow()] as
+      | HTMLElement
+      | undefined;
+    targetRow?.children[colIndex + 1]?.classList.add("db-grid-cell-active");
+  }
+
+  function clearActiveCell() {
+    setActiveCell(-1, -1);
+  }
+
+  // body は仮想スクロール用に startRow から endRow までの分だけ DOM に
+  // 載っている。startRow は renderViewport 内のローカル計算なので、ここでは
+  // body.style.transform の translateY から逆算する (state を増やさない)。
+  function getRenderStartRow(): number {
+    const transform = body.style.transform;
+    const match = /translateY\((\d+(?:\.\d+)?)px\)/.exec(transform);
+    if (!match) return 0;
+    return Math.round(Number.parseFloat(match[1]) / ROW_HEIGHT);
+  }
+
   // detailPanel.innerHTML = "" を直に呼ぶと resize handle まで消えてしまう
   // ので、resize 以外の子だけ削除するヘルパを通す。
   function clearDetailContent() {
@@ -300,6 +332,10 @@ export function createTableGrid(
   let statusEl: HTMLElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
+  // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
+  // renderViewport / 再描画でも色が維持されるよう、行/列 index を state に持つ。
+  let activeCellRowIndex = -1;
+  let activeCellColIndex = -1;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
   const fkColumns = new Set<string>();
 
@@ -478,6 +514,7 @@ export function createTableGrid(
 
   function clear() {
     cleanupResize();
+    clearActiveCell();
     currentTable = "";
     columns = [];
     columnNames = [];
@@ -645,7 +682,10 @@ export function createTableGrid(
     closeBtn.type = "button";
     closeBtn.className = "db-btn db-btn-icon db-related-close";
     closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", hideRelatedPanel);
+    closeBtn.addEventListener("click", () => {
+      hideRelatedPanel();
+      clearActiveCell();
+    });
     header.append(title, relatedCrumbEl, copyBtn, closeBtn);
 
     const bodyRow = document.createElement("div");
@@ -719,6 +759,9 @@ export function createTableGrid(
     window.addEventListener("mouseup", onUp);
   }
 
+  // hideRelatedPanel は showCellDetail からも内部的に呼ばれるため、
+  // active セルマーカーをここで落とすと「detail フッタを開いた瞬間に色が消える」
+  // 不具合が出る。クリアはユーザー操作 (close ボタン / clear()) 側に寄せる。
   function hideRelatedPanel() {
     if (!relatedPanel) return;
     relatedResizeCleanup?.();
@@ -935,6 +978,8 @@ export function createTableGrid(
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
       detailPanel.hidden = true;
+      // 関連パネルも閉じていればフッタ表示中のセル色も落とす。
+      if (!relatedPanel || relatedPanel.hidden) clearActiveCell();
     });
 
     header.append(title, copyBtn, closeBtn);
@@ -1252,6 +1297,8 @@ export function createTableGrid(
                 r.classList.remove("selected");
               });
               row.classList.add("selected");
+              // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
+              setActiveCell(rowIndex, cellColIndex);
               // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
               // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
               if (fkClickable) {
@@ -1274,6 +1321,11 @@ export function createTableGrid(
                 showCellDetail(cellColIndex, cellValue);
               }
             });
+            // virtualized 再描画でも色が残るよう、render 時に state と
+            // 突合せてクラスを付ける。
+            if (i === activeCellRowIndex && c === activeCellColIndex) {
+              cell.classList.add("db-grid-cell-active");
+            }
             row.appendChild(cell);
           }
         } else {
