@@ -774,6 +774,118 @@ describe("S3 adapter", () => {
     }
   });
 
+  test("lists a single folder level with delimiter and excludes the self prefix", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-folder-"));
+    const requestedUrls: string[] = [];
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (input: RequestInfo | URL, _init?: RequestInit) => {
+          requestedUrls.push(String(input));
+          return new Response(
+            [
+              "<ListBucketResult>",
+              "<IsTruncated>false</IsTruncated>",
+              "<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>",
+              "<CommonPrefixes><Prefix>photos/2025/</Prefix></CommonPrefixes>",
+              // フォルダ自身を表すプレースホルダ (key === prefix) は除外される。
+              "<Contents><Key>photos/</Key><LastModified>2026-01-01T00:00:00.000Z</LastModified><Size>0</Size></Contents>",
+              "<Contents><Key>photos/cover.png</Key><LastModified>2026-01-02T00:00:00.000Z</LastModified><Size>10</Size></Contents>",
+              "</ListBucketResult>",
+            ].join(""),
+            { status: 200 },
+          );
+        }) as typeof fetch,
+      });
+
+      const req = new Request(
+        "http://localhost/_db/s3/folder?db=docker:minio&bucket=media&prefix=photos/",
+      );
+      const res = await handleS3Route(req, new URL(req.url), cwd);
+      expect(res?.status).toBe(200);
+      const data = (await res?.json()) as {
+        prefix: string;
+        folders: string[];
+        objects: Array<{ key: string }>;
+      };
+      // delimiter=/ で 1 階層だけを列挙していること。
+      expect(requestedUrls).toHaveLength(1);
+      expect(requestedUrls[0].includes("delimiter=%2F")).toBe(true);
+      expect(requestedUrls[0].includes("prefix=photos%2F")).toBe(true);
+      expect(data.prefix).toBe("photos/");
+      expect(data.folders).toEqual(["photos/2026/", "photos/2025/"]);
+      expect(data.objects.map((object) => object.key)).toEqual([
+        "photos/cover.png",
+      ]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates folder pagination tokens for large directories", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "cv-s3-folder-page-"));
+    try {
+      writeFileSync(
+        join(cwd, "docker-compose.yml"),
+        [
+          "services:",
+          "  minio:",
+          "    image: quay.io/minio/minio:latest",
+          "    ports:",
+          '      - "19000:9000"',
+          "    environment:",
+          "      MINIO_ROOT_USER: AK_TEST",
+          "      MINIO_ROOT_PASSWORD: SK_TEST",
+        ].join("\n"),
+      );
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        writable: true,
+        value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(
+            [
+              "<ListBucketResult>",
+              "<IsTruncated>true</IsTruncated>",
+              "<NextContinuationToken>next-page</NextContinuationToken>",
+              "<Contents><Key>a.txt</Key><LastModified>2026-01-01T00:00:00.000Z</LastModified><Size>1</Size></Contents>",
+              "</ListBucketResult>",
+            ].join(""),
+            { status: 200 },
+          )) as typeof fetch,
+      });
+
+      const req = new Request(
+        "http://localhost/_db/s3/folder?db=docker:minio&bucket=media",
+      );
+      const res = await handleS3Route(req, new URL(req.url), cwd);
+      expect(res?.status).toBe(200);
+      const data = (await res?.json()) as {
+        folders: string[];
+        objects: Array<{ key: string }>;
+        nextToken?: string;
+      };
+      expect(data.folders).toEqual([]);
+      expect(data.objects.map((object) => object.key)).toEqual(["a.txt"]);
+      expect(data.nextToken).toBe("next-page");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   test("stops contains scans once enough matches are found", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "cv-s3-route-"));
     const requestedUrls: string[] = [];

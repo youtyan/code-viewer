@@ -590,6 +590,7 @@ function parseBuckets(xml: string): S3BucketInfo[] {
 
 function parseObjects(xml: string): {
   objects: S3ObjectInfo[];
+  commonPrefixes: string[];
   nextToken?: string;
   truncated: boolean;
 } {
@@ -608,8 +609,14 @@ function parseObjects(xml: string): {
       };
     })
     .filter((object) => object.key);
+  // delimiter 指定時、直下のサブフォルダは <CommonPrefixes><Prefix>foo/</Prefix>
+  // として返る。
+  const commonPrefixes = xmlBlocks(xml, "CommonPrefixes")
+    .map((block) => xmlText(block, "Prefix") || "")
+    .filter(Boolean);
   return {
     objects,
+    commonPrefixes,
     nextToken: xmlText(xml, "NextContinuationToken"),
     truncated: xmlText(xml, "IsTruncated") === "true",
   };
@@ -722,9 +729,11 @@ function createS3Adapter(config: S3Config): S3Explorer {
     prefix?: string;
     continuationToken?: string;
     maxKeys?: number;
+    delimiter?: string;
     signal?: AbortSignal;
   }): Promise<{
     objects: S3ObjectInfo[];
+    commonPrefixes?: string[];
     nextToken?: string;
     truncated: boolean;
   }> {
@@ -740,6 +749,7 @@ function createS3Adapter(config: S3Config): S3Explorer {
               Math.min(1000, Math.max(1, opts.maxKeys ?? 200)),
             ),
             ...(opts.prefix ? { prefix: opts.prefix } : {}),
+            ...(opts.delimiter ? { delimiter: opts.delimiter } : {}),
             ...(opts.continuationToken
               ? { "continuation-token": opts.continuationToken }
               : {}),

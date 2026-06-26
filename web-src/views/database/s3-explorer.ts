@@ -3,13 +3,20 @@ import type {
   S3BucketInfo,
   S3BucketsResponse,
   S3ExplorerSelection,
+  S3FolderResponse,
   S3ObjectHeadResponse,
   S3ObjectInfo,
   S3ObjectsResponse,
   S3ObjectTextResponse,
   S3SearchMode,
   S3SortMode,
+  S3ViewMode,
 } from "../../core/database/types";
+import {
+  CHEVRON_DOWN_12_PATH,
+  FOLDER_ICON_PATHS,
+  iconSvg,
+} from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import { renderMarkdownPreview } from "../../core/markdown-preview";
 import {
@@ -57,6 +64,45 @@ function objectTypeLabel(key: string, contentType?: string): string {
   );
 }
 
+// ファイル種別をひと目で判別できる短いラベル。詳細 (例: "PNG image") は
+// title 属性に出す。
+const KIND_LABELS: Record<
+  ReturnType<typeof sourceDisplayKind>,
+  { text: string; cls: string }
+> = {
+  image: { text: "Image", cls: "kind-image" },
+  video: { text: "Video", cls: "kind-video" },
+  audio: { text: "Audio", cls: "kind-audio" },
+  pdf: { text: "PDF", cls: "kind-pdf" },
+  text: { text: "Text", cls: "kind-text" },
+  unsupported: { text: "Binary", cls: "kind-binary" },
+};
+
+function createKindBadge(key: string, contentType?: string): HTMLElement {
+  const { text, cls } = KIND_LABELS[sourceDisplayKind(key)];
+  const badge = document.createElement("span");
+  badge.className = `s3-kind-badge ${cls}`;
+  badge.textContent = text;
+  badge.title = objectTypeLabel(key, contentType);
+  return badge;
+}
+
+// folderPrefix は末尾 "/" を含むフルパス ("a/b/")。表示名は末尾セグメント。
+function folderDisplayName(folderPrefix: string): string {
+  const trimmed = folderPrefix.replace(/\/$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
+function setExplorerFolderIcon(el: HTMLElement, collapsed: boolean): void {
+  el.innerHTML = iconSvg(
+    collapsed
+      ? "octicon-file-directory-fill"
+      : "octicon-file-directory-open-fill",
+    collapsed ? FOLDER_ICON_PATHS.closed : FOLDER_ICON_PATHS.open,
+  );
+}
+
 export function createS3Explorer(
   callbacks: S3ExplorerCallbacks = {},
 ): S3ExplorerView {
@@ -78,6 +124,19 @@ export function createS3Explorer(
   bucketSelect.className = "s3-bucket-select";
   bucketLabel.appendChild(bucketSelect);
   bucketRow.appendChild(bucketLabel);
+
+  // List (フラット一覧) と Explorer (フォルダツリー) の切替。既存の .seg
+  // パターンを踏襲。
+  const viewSeg = document.createElement("div");
+  viewSeg.className = "seg s3-view-seg";
+  const listViewBtn = document.createElement("button");
+  listViewBtn.type = "button";
+  listViewBtn.textContent = "List";
+  const explorerViewBtn = document.createElement("button");
+  explorerViewBtn.type = "button";
+  explorerViewBtn.textContent = "Explorer";
+  viewSeg.append(listViewBtn, explorerViewBtn);
+  bucketRow.appendChild(viewSeg);
 
   const searchRow = document.createElement("form");
   searchRow.className = "s3-search-row";
@@ -133,6 +192,13 @@ export function createS3Explorer(
   moreBtn.hidden = true;
   objectPane.appendChild(moreBtn);
 
+  // Explorer 表示: 既存ツリーと同じ DOM/クラス (.tree, .tree-dir, .tree-file,
+  // .chev, .dir-icon ...) を使い、データは delimiter ベースの遅延ロードで賄う。
+  const explorerTree = document.createElement("div");
+  explorerTree.className = "s3-object-list s3-tree tree";
+  explorerTree.hidden = true;
+  objectPane.appendChild(explorerTree);
+
   const previewPane = document.createElement("div");
   previewPane.className = "s3-preview-pane";
   previewPane.textContent = "Select an object to preview.";
@@ -145,9 +211,16 @@ export function createS3Explorer(
   let currentMode: S3SearchMode = "prefix";
   let currentSort: S3SortMode = "updated-desc";
   let currentSearch = "";
+  let currentView: S3ViewMode = "list";
   let currentNextToken: string | undefined;
   const objectsByKey = new Map<string, S3ObjectInfo>();
   const objectRowsByKey = new Map<string, HTMLElement>();
+  // Explorer 表示の状態。folder prefix ("a/b/") 単位でロード済み/ロード中を管理。
+  const explorerRowsByKey = new Map<string, HTMLElement>();
+  const explorerLoadedFolders = new Set<string>();
+  const explorerLoadingFolders = new Map<string, Promise<void>>();
+  let explorerRootLoaded = false;
+  let listLoaded = false;
   let disposed = false;
   let loadRunId = 0;
   let objectRunId = 0;
@@ -156,6 +229,7 @@ export function createS3Explorer(
   const bucketGuard = createAbortGuard();
   const objectGuard = createAbortGuard();
   const previewGuard = createAbortGuard();
+  const explorerGuard = createAbortGuard();
 
   function notifySelectionChange(): void {
     if (suppressNotify) return;
@@ -202,7 +276,9 @@ export function createS3Explorer(
   function highlightActiveObject(key: string | null): void {
     if (activeObjectRow?.dataset.key === key) return;
     activeObjectRow?.classList.remove("active");
-    activeObjectRow = key ? (objectRowsByKey.get(key) ?? null) : null;
+    const rows =
+      currentView === "explorer" ? explorerRowsByKey : objectRowsByKey;
+    activeObjectRow = key ? (rows.get(key) ?? null) : null;
     activeObjectRow?.classList.add("active");
   }
 
@@ -237,10 +313,13 @@ export function createS3Explorer(
       row.dataset.key = object.key;
       objectRowsByKey.set(object.key, row);
 
+      const head = document.createElement("div");
+      head.className = "s3-object-head";
       const name = document.createElement("span");
       name.className = "s3-object-name";
       name.textContent = object.key;
       name.title = object.key;
+      head.append(createKindBadge(object.key, object.contentType), name);
 
       const meta = document.createElement("span");
       meta.className = "s3-object-meta";
@@ -249,7 +328,7 @@ export function createS3Explorer(
       const updated = formatFileDate(object.updatedAt);
       meta.textContent = [kind, size, updated].filter(Boolean).join(" / ");
 
-      row.append(name, meta);
+      row.append(head, meta);
       fragment.appendChild(row);
     }
     objectList.appendChild(fragment);
@@ -266,6 +345,7 @@ export function createS3Explorer(
     const requestSort = currentSort;
     moreBtn.disabled = true;
     if (!append) {
+      listLoaded = true;
       objectList.innerHTML = "";
       objectsByKey.clear();
       objectRowsByKey.clear();
@@ -527,17 +607,316 @@ export function createS3Explorer(
     }
   }
 
+  // ---- Explorer (フォルダツリー) ----
+
+  type ExplorerDir = {
+    childUl: HTMLElement;
+    expand: () => Promise<void>;
+  };
+  const explorerDirByPath = new Map<string, ExplorerDir>();
+
+  function indentPad(depth: number): string {
+    return `${12 + depth * 14}px`;
+  }
+
+  function setExplorerChevron(el: HTMLElement): void {
+    el.innerHTML =
+      '<svg class="octicon octicon-chevron-down" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">' +
+      `<path fill="currentColor" d="${CHEVRON_DOWN_12_PATH}"></path></svg>`;
+  }
+
+  function resetExplorer(): void {
+    explorerTree.innerHTML = "";
+    explorerRowsByKey.clear();
+    explorerDirByPath.clear();
+    explorerLoadedFolders.clear();
+    explorerLoadingFolders.clear();
+    explorerRootLoaded = false;
+  }
+
+  async function fetchFolder(
+    prefix: string,
+    token?: string,
+  ): Promise<S3FolderResponse | null> {
+    if (!currentDbId || !currentBucket) return null;
+    const params = new URLSearchParams({
+      db: currentDbId,
+      bucket: currentBucket,
+    });
+    if (prefix) params.set("prefix", prefix);
+    if (token) params.set("token", token);
+    const res = await fetch(`/_db/s3/folder?${params}`);
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    return (await res.json()) as S3FolderResponse;
+  }
+
+  function makeTreeMessageRow(
+    cls: string,
+    depth: number,
+    text: string,
+  ): HTMLElement {
+    const el = document.createElement("div");
+    el.className = cls;
+    el.style.setProperty("--lvl-pad", indentPad(depth));
+    el.textContent = text;
+    return el;
+  }
+
+  function createExplorerFileRow(
+    object: S3ObjectInfo,
+    depth: number,
+  ): HTMLElement {
+    objectsByKey.set(object.key, object);
+    const row = document.createElement("div");
+    row.className = "tree-file";
+    row.dataset.key = object.key;
+    row.style.setProperty("--lvl-pad", indentPad(depth));
+    const spacer = document.createElement("span");
+    spacer.className = "chev-spacer";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = s3ObjectName(object.key) || object.key;
+    name.title = object.key;
+    row.append(spacer, createKindBadge(object.key, object.contentType), name);
+    explorerRowsByKey.set(object.key, row);
+    if (currentKey === object.key) row.classList.add("active");
+    row.addEventListener("click", () => void selectObject(object));
+    return row;
+  }
+
+  function createExplorerDirRow(
+    folderPrefix: string,
+    depth: number,
+  ): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "s3-tree-node";
+
+    const row = document.createElement("div");
+    row.className = "tree-dir collapsed";
+    row.dataset.dirpath = folderPrefix;
+    row.style.setProperty("--lvl-pad", indentPad(depth));
+
+    const chev = document.createElement("span");
+    chev.className = "chev";
+    setExplorerChevron(chev);
+    const dirIcon = document.createElement("span");
+    dirIcon.className = "dir-icon";
+    setExplorerFolderIcon(dirIcon, true);
+    const label = document.createElement("span");
+    label.className = "dir-label";
+    const dn = document.createElement("span");
+    dn.className = "dir-name";
+    dn.textContent = folderDisplayName(folderPrefix);
+    dn.title = folderPrefix;
+    label.appendChild(dn);
+    row.append(chev, dirIcon, label);
+
+    const childUl = document.createElement("div");
+    childUl.className = "tree-children";
+    wrap.append(row, childUl);
+
+    const expand = async (): Promise<void> => {
+      if (!row.classList.contains("collapsed")) return;
+      await ensureFolderLoaded(folderPrefix, childUl, depth + 1);
+      row.classList.remove("collapsed");
+      setExplorerFolderIcon(dirIcon, false);
+    };
+    const collapse = (): void => {
+      row.classList.add("collapsed");
+      setExplorerFolderIcon(dirIcon, true);
+    };
+    row.addEventListener("click", () => {
+      if (row.classList.contains("collapsed")) void expand();
+      else collapse();
+    });
+
+    explorerDirByPath.set(folderPrefix, { childUl, expand });
+    return wrap;
+  }
+
+  function renderFolderLevel(
+    parent: HTMLElement,
+    prefix: string,
+    depth: number,
+    data: S3FolderResponse,
+    append: boolean,
+  ): void {
+    if (!append) parent.innerHTML = "";
+    if (!append && data.folders.length === 0 && data.objects.length === 0) {
+      parent.appendChild(makeTreeMessageRow("s3-tree-empty", depth, "(empty)"));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const folder of data.folders) {
+      fragment.appendChild(createExplorerDirRow(folder, depth));
+    }
+    for (const object of data.objects) {
+      fragment.appendChild(createExplorerFileRow(object, depth));
+    }
+    parent.appendChild(fragment);
+    if (data.nextToken) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "s3-tree-more";
+      more.style.setProperty("--lvl-pad", indentPad(depth));
+      more.textContent = "Load more";
+      more.addEventListener("click", async () => {
+        more.disabled = true;
+        try {
+          const next = await fetchFolder(prefix, data.nextToken);
+          if (!next) return;
+          more.remove();
+          renderFolderLevel(parent, prefix, depth, next, true);
+        } catch (err) {
+          more.disabled = false;
+          more.textContent = `Load more failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      });
+      parent.appendChild(more);
+    }
+  }
+
+  function ensureFolderLoaded(
+    prefix: string,
+    childUl: HTMLElement,
+    depth: number,
+  ): Promise<void> {
+    if (explorerLoadedFolders.has(prefix)) return Promise.resolve();
+    const existing = explorerLoadingFolders.get(prefix);
+    if (existing) return existing;
+    const dbId = currentDbId;
+    const bucket = currentBucket;
+    childUl.replaceChildren(
+      makeTreeMessageRow("s3-tree-loading", depth, "Loading…"),
+    );
+    const load = (async () => {
+      try {
+        const data = await fetchFolder(prefix);
+        if (disposed || dbId !== currentDbId || bucket !== currentBucket)
+          return;
+        if (!data) {
+          childUl.innerHTML = "";
+          return;
+        }
+        renderFolderLevel(childUl, prefix, depth, data, false);
+        explorerLoadedFolders.add(prefix);
+      } catch (err) {
+        childUl.replaceChildren(
+          makeTreeMessageRow(
+            "s3-tree-error",
+            depth,
+            `Error: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      } finally {
+        explorerLoadingFolders.delete(prefix);
+      }
+    })();
+    explorerLoadingFolders.set(prefix, load);
+    return load;
+  }
+
+  async function loadExplorerRoot(): Promise<void> {
+    if (!currentDbId || !currentBucket || disposed) return;
+    if (explorerRootLoaded) return;
+    resetExplorer();
+    const dbId = currentDbId;
+    const bucket = currentBucket;
+    explorerGuard.dispose();
+    const slot = explorerGuard.start();
+    setPaneStatus(explorerTree, "Loading objects...");
+    try {
+      const data = await fetchFolder("");
+      if (
+        disposed ||
+        slot.isStale() ||
+        dbId !== currentDbId ||
+        bucket !== currentBucket
+      ) {
+        return;
+      }
+      explorerTree.innerHTML = "";
+      if (!data) return;
+      renderFolderLevel(explorerTree, "", 0, data, false);
+      explorerRootLoaded = true;
+    } catch (err) {
+      if (slot.isStale()) return;
+      setPaneStatus(
+        explorerTree,
+        `Error: ${err instanceof Error ? err.message : String(err)}`,
+        { error: true },
+      );
+    } finally {
+      slot.finish();
+    }
+  }
+
+  // 復元用: 指定キーまで祖先フォルダを順に展開し、ファイルを選択する。
+  async function expandExplorerToKey(key: string): Promise<void> {
+    await loadExplorerRoot();
+    const parts = key.split("/");
+    let prefix = "";
+    for (let i = 0; i < parts.length - 1; i++) {
+      prefix += `${parts[i]}/`;
+      const dir = explorerDirByPath.get(prefix);
+      if (!dir) break;
+      await dir.expand();
+      if (disposed) return;
+    }
+    const object = objectsByKey.get(key) ?? { key, sizeBytes: 0 };
+    await selectObject(object);
+    explorerRowsByKey.get(key)?.scrollIntoView({ block: "nearest" });
+  }
+
+  // UI の表示切替のみ (ロードは伴わない)。load() からも使う。
+  function applyViewVisibility(view: S3ViewMode): void {
+    currentView = view;
+    listViewBtn.classList.toggle("active", view === "list");
+    explorerViewBtn.classList.toggle("active", view === "explorer");
+    const explorer = view === "explorer";
+    searchRow.hidden = explorer;
+    optionRow.hidden = explorer;
+    objectStatus.hidden = explorer;
+    objectList.hidden = explorer;
+    moreBtn.hidden = explorer || !currentNextToken;
+    explorerTree.hidden = !explorer;
+  }
+
+  function setView(view: S3ViewMode): void {
+    applyViewVisibility(view);
+    // ハイライト行は表示中ビューのものを指すよう取り直す。
+    activeObjectRow?.classList.remove("active");
+    activeObjectRow = null;
+    if (currentKey) highlightActiveObject(currentKey);
+    // ビュー初回表示時に対応するデータを遅延ロードする。
+    if (view === "explorer") void loadExplorerRoot();
+    else if (!listLoaded) void loadObjects(false);
+  }
+
   async function selectBucket(bucket: string): Promise<void> {
     if (disposed || !currentDbId) return;
     currentBucket = bucket;
     currentKey = null;
     currentNextToken = undefined;
+    listLoaded = false;
+    resetExplorer();
     notifySelectionChange();
-    await loadObjects(false);
+    if (currentView === "explorer") await loadExplorerRoot();
+    else await loadObjects(false);
   }
 
   bucketSelect.addEventListener("change", () => {
     if (bucketSelect.value) void selectBucket(bucketSelect.value);
+  });
+  listViewBtn.addEventListener("click", () => {
+    if (currentView === "list") return;
+    setView("list");
+    notifySelectionChange();
+  });
+  explorerViewBtn.addEventListener("click", () => {
+    if (currentView === "explorer") return;
+    setView("explorer");
+    notifySelectionChange();
   });
   prefixModeBtn.addEventListener("click", () => {
     setMode("prefix");
@@ -593,9 +972,12 @@ export function createS3Explorer(
     const slot = bucketGuard.start();
     const requestRunId = ++loadRunId;
     const initialMode = initial?.mode === "contains" ? "contains" : "prefix";
+    const initialView: S3ViewMode =
+      initial?.view === "explorer" ? "explorer" : "list";
     currentDbId = dbId;
     currentBucket = null;
     currentKey = null;
+    listLoaded = false;
     currentSearch =
       initialMode === "contains"
         ? (initial?.query ?? "")
@@ -610,8 +992,13 @@ export function createS3Explorer(
     objectRowsByKey.clear();
     activeObjectRow = null;
     moreBtn.hidden = true;
+    resetExplorer();
+    applyViewVisibility(initialView);
     previewPane.textContent = "Select an object to preview.";
-    setPaneStatus(objectList, "Loading buckets...");
+    setPaneStatus(
+      initialView === "explorer" ? explorerTree : objectList,
+      "Loading buckets...",
+    );
     try {
       const res = await fetch(
         `/_db/s3/buckets?db=${encodeURIComponent(dbId)}`,
@@ -658,14 +1045,20 @@ export function createS3Explorer(
               () => null,
             )
           : null;
-        await loadObjects(false);
-        if (currentDbId !== dbId) return;
-        if (initial?.key) {
-          const object =
-            objectsByKey.get(initial.key) ||
-            (headPromise ? await headPromise : null) ||
-            ({ key: initial.key, sizeBytes: 0 } satisfies S3ObjectInfo);
-          await selectObject(object);
+        if (initialView === "explorer") {
+          await loadExplorerRoot();
+          if (currentDbId !== dbId) return;
+          if (initial?.key) await expandExplorerToKey(initial.key);
+        } else {
+          await loadObjects(false);
+          if (currentDbId !== dbId) return;
+          if (initial?.key) {
+            const object =
+              objectsByKey.get(initial.key) ||
+              (headPromise ? await headPromise : null) ||
+              ({ key: initial.key, sizeBytes: 0 } satisfies S3ObjectInfo);
+            await selectObject(object);
+          }
         }
       } finally {
         suppressNotify = false;
@@ -690,12 +1083,14 @@ export function createS3Explorer(
     loadRunId++;
     objectRunId++;
     suppressNotify = false;
+    explorerGuard.dispose();
     currentDbId = null;
     currentBucket = null;
     currentKey = null;
     currentSearch = "";
     currentNextToken = undefined;
     currentSort = "updated-desc";
+    listLoaded = false;
     setMode("prefix");
     sortSelect.value = "updated-desc";
     searchInput.value = "";
@@ -706,6 +1101,8 @@ export function createS3Explorer(
     objectRowsByKey.clear();
     activeObjectRow = null;
     moreBtn.hidden = true;
+    resetExplorer();
+    applyViewVisibility("list");
     previewPane.textContent = "Select an object to preview.";
   }
 
@@ -717,6 +1114,7 @@ export function createS3Explorer(
         : { query: currentSearch || undefined }),
       mode: currentMode,
       sort: currentSort,
+      view: currentView,
       key: currentKey ?? undefined,
     };
   }
@@ -727,6 +1125,7 @@ export function createS3Explorer(
   }
 
   setMode("prefix");
+  applyViewVisibility("list");
 
   return { el: container, load, clear, dispose, getSelection };
 }
