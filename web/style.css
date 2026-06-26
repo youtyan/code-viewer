@@ -1735,6 +1735,29 @@ body.gdp-history-resizing * {
   gap: 8px;
   margin-top: 10px;
 }
+.scope-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.scope-settings-toggle input[type="checkbox"] {
+  margin: 0;
+}
+.scope-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.scope-settings-footer .scope-settings-help {
+  margin: 0;
+  flex: 1;
+}
 .scope-settings-actions button {
   border: 1px solid var(--border);
   border-radius: 6px;

@@ -199,7 +199,7 @@ describe("state changing refresh endpoint", () => {
 });
 
 describe("repository scope omit settings", () => {
-  test("server layers built-in, project config, CLI, and browser query omit dirs", () => {
+  test("server layers built-in, persisted settings, CLI, and browser query omit dirs", () => {
     expect(
       server.includes(
         "let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES",
@@ -208,15 +208,15 @@ describe("repository scope omit settings", () => {
     expect(server.includes("arg === '--scope-omit-dir'")).toBe(true);
     expect(server.includes("arg === '--scope-omit-dirs'")).toBe(false);
     expect(server.includes("arg === '--no-tree-omit-dirs'")).toBe(false);
-    expect(
-      server.includes(
-        "function loadProjectConfigScopeOmitDirs(): string[] | null",
-      ),
-    ).toBe(true);
-    expect(
-      server.includes("(parsed as { version?: unknown }).version !== 1"),
-    ).toBe(true);
-    expect(server.includes("scope?: { omitDirs?: unknown }")).toBe(true);
+    expect(server.includes("loadProjectConfigScopeOmitDirs")).toBe(false);
+    expect(server.includes("loadProjectConfigScopeExcludeNames")).toBe(false);
+    expect(server.includes("loadProjectConfigUploadDisabled")).toBe(false);
+    expect(server.includes(".code-viewer.json")).toBe(true);
+    expect(server.includes("applyPersistedSettings(")).toBe(true);
+    expect(server.includes("warnIfLegacyConfigPresent()")).toBe(true);
+    expect(server.includes("onSettingsChange: applyPersistedSettings")).toBe(
+      true,
+    );
     expect(
       server.includes(
         "function scopeOmitDirNamesFromQuery(url: URL): string[]",
@@ -239,10 +239,20 @@ describe("repository scope omit settings", () => {
     expect(
       server.includes("let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES"),
     ).toBe(true);
-    expect(server.includes("scope?: { excludeNames?: unknown }")).toBe(true);
     expect(server.includes("exclude_names_effective: scopeExcludeNames")).toBe(
       true,
     );
+  });
+
+  test("upload toggle flows from persisted settings into the tree response", () => {
+    expect(server.includes("let uploadEnabled = true")).toBe(true);
+    expect(
+      server.includes(
+        'upload_enabled: uploadEnabled && (target === "worktree" || target === "")',
+      ),
+    ).toBe(true);
+    expect(server.includes("upload disabled by viewer settings")).toBe(true);
+    expect(server.includes("uploadDisabledByConfig")).toBe(false);
   });
 });
 

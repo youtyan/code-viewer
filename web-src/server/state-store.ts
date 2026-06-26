@@ -174,6 +174,8 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     pathSafe: true,
   });
   if (scopeExcludeNames) out.scopeExcludeNames = scopeExcludeNames;
+  const uploadEnabled = optionalBoolean(raw.uploadEnabled);
+  if (uploadEnabled !== undefined) out.uploadEnabled = uploadEnabled;
   if (isRecord(raw.range)) {
     const from = optionalString(raw.range.from, MAX_REF_LEN);
     const to = optionalString(raw.range.to, MAX_REF_LEN);

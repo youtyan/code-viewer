@@ -100,6 +100,7 @@ export type AppSettingsState = {
   hideTests?: boolean;
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
+  uploadEnabled?: boolean;
   range?: {
     from: string;
     to: string;

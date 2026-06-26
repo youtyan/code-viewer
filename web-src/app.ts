@@ -993,10 +993,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         omitDirs: string;
         excludeNames: string;
         reset: string;
-        save: string;
+        autosaveNote: string;
         scopeSource: (project: string, source: string) => string;
         browserOverride: string;
         serverDefault: string;
+        uploadsTitle: string;
+        uploadEnabledLabel: string;
+        uploadEnabledHelp: string;
       };
       annotations: {
         title: string;
@@ -1089,12 +1092,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludedDirectories: "Excluded directories",
         omitDirs: "Skip these directory names while browsing and searching",
         excludeNames: "Hide these file or directory names completely",
-        reset: "Reset",
-        save: "Save",
+        reset: "Restore defaults",
+        autosaveNote: "Changes save automatically.",
         scopeSource: (project, source) =>
-          `Saved for project "${project}" in this browser. Source: ${source}. Used by tree, Ctrl+K, and Ctrl+G. Reset removes the browser override.`,
+          `Saved for project "${project}" in this browser. Source: ${source}. Used by tree, Ctrl+K, and Ctrl+G. Restore defaults removes the browser override.`,
         browserOverride: "Browser override",
         serverDefault: "Server default",
+        uploadsTitle: "Uploads",
+        uploadEnabledLabel: "Allow file uploads into worktree folders",
+        uploadEnabledHelp:
+          "Disable to make the worktree read-only for everyone using this server.",
       },
       annotations: {
         title: "Code annotations",
@@ -1186,12 +1193,16 @@ window.GdpExpandLogic = GdpExpandLogic;
         excludedDirectories: "除外ディレクトリ",
         omitDirs: "閲覧と検索でスキップするディレクトリ名",
         excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
-        reset: "リセット",
-        save: "保存",
+        reset: "デフォルトに戻す",
+        autosaveNote: "変更は自動で保存されます。",
         scopeSource: (project, source) =>
-          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。ツリー、Ctrl+K、Ctrl+G で使われます。リセットするとブラウザ側の上書きを削除します。`,
+          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。ツリー、Ctrl+K、Ctrl+G で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
         browserOverride: "ブラウザ側の上書き",
         serverDefault: "サーバ既定値",
+        uploadsTitle: "アップロード",
+        uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
+        uploadEnabledHelp:
+          "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
       },
       annotations: {
         title: "コード注釈",
@@ -1329,7 +1340,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (settingsSections[0])
       settingsSections[0].textContent = text.settings.display;
     if (settingsSections[1])
-      settingsSections[1].textContent = text.settings.excludedDirectories;
+      settingsSections[1].textContent = text.settings.uploadsTitle;
+    if (settingsSections[2])
+      settingsSections[2].textContent = text.settings.excludedDirectories;
+    setElementText("#upload-enabled-label", text.settings.uploadEnabledLabel);
+    setElementText("#upload-help", text.settings.uploadEnabledHelp);
     const labelMap: Record<string, string> = {
       "viewer-language": text.settings.language,
       "sidebar-font-size": text.settings.fileListFontSize,
@@ -1357,13 +1372,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     });
     setElementText("#ui-font-size-help", text.settings.fileListFontSizeHelp);
     setElementText("#display-settings-source", text.settings.displaySource);
+    setElementText("#scope-settings-autosave-note", text.settings.autosaveNote);
     setButtonLabel(
       document.querySelector("#scope-omit-reset"),
       text.settings.reset,
-    );
-    setButtonLabel(
-      document.querySelector("#scope-omit-save"),
-      text.settings.save,
     );
 
     setElementText(".annotation-panel-head strong", text.annotations.title);
@@ -1588,6 +1600,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     codeFontSize.value = savedCodeFontSize();
     input.value = effectiveScopeOmitDirs().join("\n");
     excludeInput.value = effectiveScopeExcludeNames().join("\n");
+    const uploadToggle =
+      document.querySelector<HTMLInputElement>("#upload-enabled");
+    if (uploadToggle)
+      uploadToggle.checked = APP_SETTINGS.uploadEnabled !== false;
     source.textContent = uiText().settings.scopeSource(
       PROJECT_NAME || "default",
       scopeOmitSourceLabel(),
@@ -1610,49 +1626,47 @@ window.GdpExpandLogic = GdpExpandLogic;
     void openScopeSettings();
   }
 
-  function saveScopeSettings() {
-    const input =
-      document.querySelector<HTMLTextAreaElement>("#scope-omit-dirs");
-    const excludeInput = document.querySelector<HTMLTextAreaElement>(
-      "#scope-exclude-names",
+  function refreshScopeSourceLabel() {
+    const source = document.querySelector<HTMLElement>("#scope-omit-source");
+    if (!source) return;
+    source.textContent = uiText().settings.scopeSource(
+      PROJECT_NAME || "default",
+      scopeOmitSourceLabel(),
     );
-    const sidebarFontSize =
-      document.querySelector<HTMLSelectElement>("#sidebar-font-size");
-    const codeFontSize =
-      document.querySelector<HTMLSelectElement>("#code-font-size");
-    const viewerLanguage =
-      document.querySelector<HTMLSelectElement>("#viewer-language");
-    if (
-      !input ||
-      !excludeInput ||
-      !sidebarFontSize ||
-      !codeFontSize ||
-      !viewerLanguage
-    )
-      return;
-    const nextSidebarFontSize = normalizeViewerFontSize(sidebarFontSize.value);
-    const nextCodeFontSize = normalizeViewerFontSize(codeFontSize.value);
-    const nextScopeOmitDirs = normalizeScopeOmitDirs(input.value);
-    const nextScopeExcludeNames = normalizeScopeExcludeNames(
-      excludeInput.value,
-    );
-    setViewerLanguage(normalizeViewerLanguage(viewerLanguage.value), false);
-    mergeLocalSettings({
-      sidebarFontSize: nextSidebarFontSize,
-      codeFontSize: nextCodeFontSize,
-      scopeOmitDirs: nextScopeOmitDirs,
-      scopeExcludeNames: nextScopeExcludeNames,
-    });
+  }
+
+  function saveSidebarFontSize(value: string) {
+    const next = normalizeViewerFontSize(value);
+    mergeLocalSettings({ sidebarFontSize: next });
     applySidebarFontSize();
+    patchSettings({ sidebarFontSize: next });
+  }
+
+  function saveCodeFontSize(value: string) {
+    const next = normalizeViewerFontSize(value);
+    mergeLocalSettings({ codeFontSize: next });
     applyCodeFontSize();
-    patchSettings({
-      language: STATE.language,
-      sidebarFontSize: nextSidebarFontSize,
-      codeFontSize: nextCodeFontSize,
-      scopeOmitDirs: nextScopeOmitDirs,
-      scopeExcludeNames: nextScopeExcludeNames,
-    });
-    closeScopeSettings();
+    patchSettings({ codeFontSize: next });
+  }
+
+  function saveUploadEnabled(checked: boolean) {
+    mergeLocalSettings({ uploadEnabled: checked });
+    patchSettings({ uploadEnabled: checked });
+  }
+
+  function saveScopeOmitDirsField(value: string) {
+    const next = normalizeScopeOmitDirs(value);
+    mergeLocalSettings({ scopeOmitDirs: next });
+    patchSettings({ scopeOmitDirs: next });
+    refreshScopeSourceLabel();
+    refreshRepositoryTreeAfterSettings();
+  }
+
+  function saveScopeExcludeNamesField(value: string) {
+    const next = normalizeScopeExcludeNames(value);
+    mergeLocalSettings({ scopeExcludeNames: next });
+    patchSettings({ scopeExcludeNames: next });
+    refreshScopeSourceLabel();
     refreshRepositoryTreeAfterSettings();
   }
 
@@ -1663,6 +1677,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       codeFontSize: null,
       scopeOmitDirs: null,
       scopeExcludeNames: null,
+      uploadEnabled: null,
     });
     applySidebarFontSize("regular");
     applyCodeFontSize("regular");
@@ -1672,8 +1687,29 @@ window.GdpExpandLogic = GdpExpandLogic;
       codeFontSize: null,
       scopeOmitDirs: null,
       scopeExcludeNames: null,
+      uploadEnabled: null,
     });
-    closeScopeSettings();
+    const sidebarFontSize =
+      document.querySelector<HTMLSelectElement>("#sidebar-font-size");
+    const codeFontSize =
+      document.querySelector<HTMLSelectElement>("#code-font-size");
+    const omitDirs =
+      document.querySelector<HTMLTextAreaElement>("#scope-omit-dirs");
+    const excludeNames = document.querySelector<HTMLTextAreaElement>(
+      "#scope-exclude-names",
+    );
+    const uploadToggle =
+      document.querySelector<HTMLInputElement>("#upload-enabled");
+    const viewerLanguage =
+      document.querySelector<HTMLSelectElement>("#viewer-language");
+    if (sidebarFontSize) sidebarFontSize.value = "regular";
+    if (codeFontSize) codeFontSize.value = "regular";
+    if (omitDirs) omitDirs.value = effectiveScopeOmitDirs().join("\n");
+    if (excludeNames)
+      excludeNames.value = effectiveScopeExcludeNames().join("\n");
+    if (uploadToggle) uploadToggle.checked = true;
+    if (viewerLanguage) viewerLanguage.value = STATE.language;
+    refreshScopeSourceLabel();
     refreshRepositoryTreeAfterSettings();
   }
 
@@ -2202,17 +2238,28 @@ window.GdpExpandLogic = GdpExpandLogic;
   );
   $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
-  $("#scope-omit-save")?.addEventListener("click", saveScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
   $("#viewer-language")?.addEventListener("change", (event) => {
     const select = event.currentTarget as HTMLSelectElement;
     setViewerLanguage(normalizeViewerLanguage(select.value));
-    const source = document.querySelector<HTMLElement>("#scope-omit-source");
-    if (source)
-      source.textContent = uiText().settings.scopeSource(
-        PROJECT_NAME || "default",
-        scopeOmitSourceLabel(),
-      );
+    refreshScopeSourceLabel();
+  });
+  $("#sidebar-font-size")?.addEventListener("change", (event) => {
+    saveSidebarFontSize((event.currentTarget as HTMLSelectElement).value);
+  });
+  $("#code-font-size")?.addEventListener("change", (event) => {
+    saveCodeFontSize((event.currentTarget as HTMLSelectElement).value);
+  });
+  $("#upload-enabled")?.addEventListener("change", (event) => {
+    saveUploadEnabled((event.currentTarget as HTMLInputElement).checked);
+  });
+  $("#scope-omit-dirs")?.addEventListener("change", (event) => {
+    saveScopeOmitDirsField((event.currentTarget as HTMLTextAreaElement).value);
+  });
+  $("#scope-exclude-names")?.addEventListener("change", (event) => {
+    saveScopeExcludeNamesField(
+      (event.currentTarget as HTMLTextAreaElement).value,
+    );
   });
   $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
     if (isImeComposing(e)) return;

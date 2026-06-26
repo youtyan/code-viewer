@@ -67,6 +67,42 @@ describe("state store", () => {
     });
   });
 
+  test("upload toggle round-trips through settings patch and notifies subscribers", async () => {
+    await withTempProject(async (dir) => {
+      const notified: Array<boolean | undefined> = [];
+      const dispatch = async (body: unknown) => {
+        const url = new URL("http://localhost/_state/settings");
+        const req = new Request(url, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const res = await handleStateRoute(req, url, dir, () => true, {
+          onSettingsChange: (state) => notified.push(state.uploadEnabled),
+        });
+        if (!res) throw new Error("no response");
+        if (res.status !== 200)
+          throw new Error(
+            `unexpected status ${res.status}: ${await res.text()}`,
+          );
+        return res.json();
+      };
+
+      const disabled = await dispatch({ uploadEnabled: false });
+      expect(disabled.uploadEnabled).toBe(false);
+      expect((await loadAppSettingsState(dir)).uploadEnabled).toBe(false);
+
+      const reenabled = await dispatch({ uploadEnabled: true });
+      expect(reenabled.uploadEnabled).toBe(true);
+
+      const cleared = await dispatch({ uploadEnabled: null });
+      expect(cleared.uploadEnabled).toBeUndefined();
+      expect((await loadAppSettingsState(dir)).uploadEnabled).toBeUndefined();
+
+      expect(notified).toEqual([false, true, undefined]);
+    });
+  });
+
   test("view state keeps bounded normalized path lists", async () => {
     await withTempProject(async (dir) => {
       expect(await loadViewState(dir)).toEqual({
