@@ -286,6 +286,15 @@ function createTabPane(
   // initial 値があれば復元し、なければ CSS の default を使う。
   if (initial.sidebarWidth) sidebar.style.width = initial.sidebarWidth;
 
+  // 関連パネルの高さ(px)。sidebar 幅 / history 高さと同様にタブごとに独立して
+  // tabs.json へ永続化する。initial があれば復元する。
+  let relatedPanelHeightPx: number | null = (() => {
+    const raw = initial.relatedPanelHeight;
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+
   // ----- サイドバー上端のアイコンツールバー (案 B 改: TablePlus / Beekeeper 風) -----
   // 縦並びの大きな枠線ボタンは「DB ビューア UI として普通じゃない」と
   // ユーザーから指摘を受けた。アイコンツールバーに置き換えて、サイドバー
@@ -371,6 +380,11 @@ function createTabPane(
     getForeignKeys: () => schemaCache?.foreignKeys ?? [],
     fetchRelatedPage: (table, offset, limit, sort, filters, eq, signal) =>
       fetchRelatedPage(table, offset, limit, sort, filters, eq, signal),
+    getRelatedPanelHeight: () => relatedPanelHeightPx,
+    setRelatedPanelHeight: (h) => {
+      relatedPanelHeightPx = h;
+      cb.onStateChange();
+    },
   });
 
   const queryEditor = createQueryEditor({
@@ -1327,6 +1341,8 @@ function createTabPane(
     if (historyPane.style.height)
       state.historyHeight = historyPane.style.height;
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
+    if (relatedPanelHeightPx != null)
+      state.relatedPanelHeight = `${relatedPanelHeightPx}px`;
 
     if (!loaded) {
       if (initial.redis) state.redis = initial.redis;
@@ -2052,6 +2068,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         historyOpen: initial?.historyOpen,
         historyHeight: initial?.historyHeight,
         sidebarWidth: initial?.sidebarWidth,
+        relatedPanelHeight: initial?.relatedPanelHeight,
         redis: initial?.redis,
         es: initial?.es,
         s3: initial?.s3,

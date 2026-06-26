@@ -80,6 +80,10 @@ export type TableGridCallbacks = {
     rowData: DbValue[],
     clickedColumn: string,
   ) => void;
+  /** 関連パネルの保存済み高さ(px)。タブ状態から復元する。 */
+  getRelatedPanelHeight?: () => number | null;
+  /** 関連パネルをリサイズしたとき高さ(px)を保存する。 */
+  setRelatedPanelHeight?: (height: number) => void;
 };
 
 export type TableGridOptions = {
@@ -231,6 +235,8 @@ export function createTableGrid(
   let relatedPanel: HTMLElement | null = null;
   let relatedListEl: HTMLElement | null = null;
   let relatedGridHost: HTMLElement | null = null;
+  // 参照先が 0 件のときに出す空表示。
+  let relatedEmptyEl: HTMLElement | null = null;
   // ヘッダーのパンくず（ドリル経路）を表示する要素。
   let relatedCrumbEl: HTMLElement | null = null;
   let embeddedGrid: TableGrid | null = null;
@@ -242,7 +248,16 @@ export function createTableGrid(
   let relatedGen = 0;
   // 埋め込みグリッドへ常時適用するベース WHERE（完全一致）。
   let relatedEq: GridExactFilter[] = [];
-  let relatedHeight = RELATED_PANEL_DEFAULT_HEIGHT;
+  const savedRelatedHeight = embedded
+    ? null
+    : (callbacks.getRelatedPanelHeight?.() ?? null);
+  let relatedHeight =
+    savedRelatedHeight != null
+      ? Math.max(
+          RELATED_PANEL_MIN_HEIGHT,
+          Math.min(RELATED_PANEL_MAX_HEIGHT, savedRelatedHeight),
+        )
+      : RELATED_PANEL_DEFAULT_HEIGHT;
   if (!embedded) {
     relatedPanel = document.createElement("div");
     relatedPanel.className = "db-related-panel";
@@ -536,6 +551,12 @@ export function createTableGrid(
     );
     relatedGridHost.appendChild(embeddedGrid.el);
 
+    relatedEmptyEl = document.createElement("div");
+    relatedEmptyEl.className = "db-related-empty";
+    relatedEmptyEl.textContent = "参照先に該当する行がありません";
+    relatedEmptyEl.hidden = true;
+    relatedGridHost.appendChild(relatedEmptyEl);
+
     bodyRow.append(relatedListEl, relatedGridHost);
     relatedPanel.append(resizer, header, bodyRow);
   }
@@ -557,6 +578,8 @@ export function createTableGrid(
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       relatedResizeCleanup = null;
+      // ドラッグ確定時にタブ状態へ保存する。
+      callbacks.setRelatedPanelHeight?.(relatedHeight);
     };
     // ドラッグ中に destroy/hide された場合でもリスナーを外せるよう保持する。
     relatedResizeCleanup = onUp;
@@ -568,6 +591,7 @@ export function createTableGrid(
     if (!relatedPanel) return;
     relatedResizeCleanup?.();
     relatedPanel.hidden = true;
+    if (relatedEmptyEl) relatedEmptyEl.hidden = true;
     relatedStack = [];
     relatedGen++;
     relatedFirstPageController?.abort();
@@ -703,6 +727,7 @@ export function createTableGrid(
     const controller = new AbortController();
     relatedFirstPageController = controller;
     grid.clear();
+    if (relatedEmptyEl) relatedEmptyEl.hidden = true;
     try {
       // 1 ページ目を取得して列情報ごとグリッドへ渡す（埋め込みグリッドの
       // 以降のスクロール/フィルタ/ソートは fetchRelatedPage 経由で eq を保つ）。
@@ -717,6 +742,8 @@ export function createTableGrid(
       );
       if (gen !== relatedGen) return;
       grid.load(target.fk.toTable, data);
+      // 参照先が 0 件なら空表示を出す（孤立 FK 等）。
+      if (relatedEmptyEl) relatedEmptyEl.hidden = data.totalRows > 0;
     } catch (err) {
       if (gen !== relatedGen || isAbortError(err)) return;
       grid.showError(err instanceof Error ? err.message : String(err));

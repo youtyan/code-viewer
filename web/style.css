@@ -6570,10 +6570,27 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-related-grid-host {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+.db-related-empty[hidden] {
+  display: none !important;
+}
+.db-related-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  font-style: italic;
+  font-size: var(--db-font-base);
 }
 
 /* ---------- Export (icon + menu at the right of the search bar) ---------- */
