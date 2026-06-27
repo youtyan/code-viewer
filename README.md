@@ -14,6 +14,12 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   pills" that copy `@path#start-end` for AI agents.
 - Browse commit history per branch and open any commit's changed files and
   diff, with shareable `/history?ref=<branch>&commit=<sha>` links.
+- Open per-file Blame and History tabs on a file detail page (GitHub-style):
+  Blame groups consecutive lines from the same commit with an Older→Newer
+  colour bar and lets you jump to the originating commit; History embeds the
+  same commit list and diff renderer used by `/history` inside the file's
+  tab shell, filtered to that path. Both tabs keep the Repository sidebar
+  visible.
 - Open files directly from the repository or diff view, including large
   generated files (virtualized source viewer with copy/open-full-view).
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams
@@ -110,6 +116,15 @@ Markdown files use a dedicated preview tab. Relative links and images are
 resolved inside the repository, code blocks are highlighted with Shiki, and
 Mermaid diagrams are rendered lazily in the browser (click any diagram to
 open it in a lightbox).
+
+A file detail page lays out four tabs — **Preview**, **Code**, **Blame**,
+**History** — modelled after the GitHub file view. `Code` is the default and
+`?preview=1` opts in to the Markdown / media preview. `Blame` and `History`
+each have their own canonical URL (`view=blame`, `view=history`), so deep
+links and the browser back/forward stay in sync. The Blame tab reuses the
+source view's row component, so line numbers, drag-selection of `line=`
+ranges, syntax highlighting and the Viewer Settings code font size all match
+the Code tab.
 
 Very large text files use a virtualized source viewer. Only visible rows are
 rendered, and the page includes controls to copy the full file or reopen it in
@@ -227,7 +242,9 @@ Open Datastores in the global navigation to access:
   whether each entry came from the browser or the CLI.
 - **ER diagram** — auto-generated entity-relationship diagram showing
   foreign-key relationships between tables.
-- **Schema view** — table columns, indexes, foreign keys, triggers, and DDL.
+- **Schema view** — table columns (with column comments when the database
+  defines them), indexes, foreign keys, triggers, and DDL. Tables themselves
+  surface a comment column on the database table list.
 - **Global search** — full-text search across all tables and text columns of
   a database.
 - **Snapshots and diffs** — take point-in-time snapshots of selected tables

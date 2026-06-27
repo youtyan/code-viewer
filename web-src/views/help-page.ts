@@ -126,6 +126,10 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
               {
                 kind: "paragraph",
+                text: "A file detail page exposes four tabs — Preview, Code, Blame, History. Code is the default and ?preview=1 opts in to the Markdown / media preview. Blame and History have their own canonical URLs (view=blame, view=history) so deep links and the browser back/forward stay in sync, and they keep the Repository sidebar visible.",
+              },
+              {
+                kind: "paragraph",
                 text: "In large repositories the sidebar loads folder children on demand. Folders you open are remembered and automatically re-expanded after a reload.",
               },
             ],
@@ -692,6 +696,10 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "サイドバーやファイルパレットから、ソース、Markdown プレビュー、画像、PDF などを開けます。大きいテキストファイルは自動で軽量な仮想表示に切り替わります。",
+              },
+              {
+                kind: "paragraph",
+                text: "ファイル詳細ページには Preview / Code / Blame / History の 4 つのタブがあります。Code がデフォルトで、?preview=1 を付けると Markdown / メディアプレビューに切り替わります。Blame と History はそれぞれ専用 URL (view=blame, view=history) を持つため、ディープリンクとブラウザの戻る / 進むが同期し、いずれも Repository サイドバーは表示されたままです。",
               },
               {
                 kind: "paragraph",
