@@ -184,7 +184,10 @@
     <div class="scope-settings-section">
       <strong id="watch-section-title" class="scope-settings-section-title">File change watcher</strong>
       <label for="scope-watch-limit">Maximum directories to watch</label>
-      <input id="scope-watch-limit" type="number" min="16" max="65536" step="16" />
+      <div class="scope-watch-limit-row">
+        <input id="scope-watch-limit-range" type="range" min="16" max="65536" step="16" aria-label="watch limit slider" />
+        <input id="scope-watch-limit" type="number" min="16" max="65536" step="1" />
+      </div>
       <p id="scope-watch-limit-help" class="scope-settings-help"></p>
     </div>
     <div class="scope-settings-footer">

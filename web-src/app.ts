@@ -1662,10 +1662,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     excludeInput.value = effectiveScopeExcludeNames().join("\n");
     const watchLimitInput =
       document.querySelector<HTMLInputElement>("#scope-watch-limit");
+    const watchLimitRange = document.querySelector<HTMLInputElement>(
+      "#scope-watch-limit-range",
+    );
+    const watchLimitValue = effectiveScopeWatchLimit();
     if (watchLimitInput) {
       watchLimitInput.min = String(SERVER_SCOPE_WATCH_LIMIT_MIN);
       watchLimitInput.max = String(SERVER_SCOPE_WATCH_LIMIT_MAX);
-      watchLimitInput.value = String(effectiveScopeWatchLimit());
+      watchLimitInput.value = String(watchLimitValue);
+    }
+    if (watchLimitRange) {
+      watchLimitRange.min = String(SERVER_SCOPE_WATCH_LIMIT_MIN);
+      watchLimitRange.max = String(SERVER_SCOPE_WATCH_LIMIT_MAX);
+      watchLimitRange.value = String(watchLimitValue);
     }
     const uploadToggle =
       document.querySelector<HTMLInputElement>("#upload-enabled");
@@ -1758,14 +1767,29 @@ window.GdpExpandLogic = GdpExpandLogic;
     return saved ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
   }
 
+  function syncScopeWatchLimitInputs(value: number) {
+    const numberInput =
+      document.querySelector<HTMLInputElement>("#scope-watch-limit");
+    const rangeInput = document.querySelector<HTMLInputElement>(
+      "#scope-watch-limit-range",
+    );
+    if (numberInput && numberInput.value !== String(value))
+      numberInput.value = String(value);
+    if (rangeInput && rangeInput.value !== String(value))
+      rangeInput.value = String(value);
+  }
+
   function saveScopeWatchLimitField(value: string) {
     const next = normalizeScopeWatchLimit(value);
     const resolved = next ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
     mergeLocalSettings({ scopeWatchLimit: resolved });
     patchSettings({ scopeWatchLimit: resolved });
-    const input =
-      document.querySelector<HTMLInputElement>("#scope-watch-limit");
-    if (input) input.value = String(resolved);
+    syncScopeWatchLimitInputs(resolved);
+  }
+
+  function previewScopeWatchLimit(value: string) {
+    const next = normalizeScopeWatchLimit(value);
+    if (next != null) syncScopeWatchLimitInputs(next);
   }
 
   function resetScopeSettings() {
@@ -2362,6 +2386,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
   });
   $("#scope-watch-limit")?.addEventListener("change", (event) => {
+    saveScopeWatchLimitField((event.currentTarget as HTMLInputElement).value);
+  });
+  $("#scope-watch-limit-range")?.addEventListener("input", (event) => {
+    previewScopeWatchLimit((event.currentTarget as HTMLInputElement).value);
+  });
+  $("#scope-watch-limit-range")?.addEventListener("change", (event) => {
     saveScopeWatchLimitField((event.currentTarget as HTMLInputElement).value);
   });
   $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
