@@ -4,16 +4,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installSkill, parseSkillArgs } from "../server/skill-cli";
 
+const BUNDLED_SKILLS = [
+  "code-viewer-annotate",
+  "code-viewer-query",
+  "code-viewer-snapshot",
+] as const;
+
 function makeDirs() {
   const base = mkdtempSync(join(tmpdir(), "cv-skill-"));
-  const sourceDir = join(base, "pkg", "skills", "code-viewer-annotate");
-  mkdirSync(sourceDir, { recursive: true });
-  writeFileSync(join(sourceDir, "SKILL.md"), "v1");
+  const skillsRoot = join(base, "pkg", "skills");
+  mkdirSync(skillsRoot, { recursive: true });
+  for (const skill of BUNDLED_SKILLS) {
+    const skillDir = join(skillsRoot, skill);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `v1:${skill}`);
+  }
   const projectDir = join(base, "project");
   mkdirSync(projectDir, { recursive: true });
   const homeDir = join(base, "home");
   mkdirSync(homeDir, { recursive: true });
-  return { sourceDir, projectDir, homeDir };
+  return { skillsRoot, projectDir, homeDir };
 }
 
 describe("parseSkillArgs", () => {
@@ -94,56 +104,81 @@ describe("parseSkillArgs", () => {
 });
 
 describe("installSkill", () => {
-  test("installs into the project .claude/skills directory", () => {
+  test("installs every bundled skill into the project .claude/skills directory", () => {
     const dirs = makeDirs();
     const result = installSkill({ agents: ["claude"], global: false }, dirs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0].action).toBe("installed");
-    expect(result.results[0].target).toBe(
-      join(dirs.projectDir, ".claude", "skills", "code-viewer-annotate"),
-    );
+    expect(result.results).toHaveLength(BUNDLED_SKILLS.length);
+    for (const entry of result.results) expect(entry.action).toBe("installed");
     expect(
-      readFileSync(join(result.results[0].target, "SKILL.md"), "utf8"),
-    ).toBe("v1");
+      result.results.map((r) => ({ skill: r.skill, target: r.target })),
+    ).toEqual(
+      BUNDLED_SKILLS.map((skill) => ({
+        skill,
+        target: join(dirs.projectDir, ".claude", "skills", skill),
+      })),
+    );
+    for (const entry of result.results) {
+      expect(readFileSync(join(entry.target, "SKILL.md"), "utf8")).toBe(
+        `v1:${entry.skill}`,
+      );
+    }
   });
 
-  test("installs into multiple agent directories", () => {
+  test("installs into every selected agent directory", () => {
     const dirs = makeDirs();
-    const result = installSkill(
-      {
-        agents: ["claude", "codex", "gemini", "cursor", "agents"],
-        global: false,
-      },
-      dirs,
-    );
+    const agents = ["claude", "codex", "gemini", "cursor", "agents"] as const;
+    const result = installSkill({ agents: [...agents], global: false }, dirs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.results.map((r) => r.target)).toEqual([
-      join(dirs.projectDir, ".claude", "skills", "code-viewer-annotate"),
-      join(dirs.projectDir, ".codex", "skills", "code-viewer-annotate"),
-      join(dirs.projectDir, ".gemini", "skills", "code-viewer-annotate"),
-      join(dirs.projectDir, ".cursor", "skills", "code-viewer-annotate"),
-      join(dirs.projectDir, ".agents", "skills", "code-viewer-annotate"),
-    ]);
+    const expected = agents.flatMap((agent) =>
+      BUNDLED_SKILLS.map((skill) => ({
+        agent,
+        skill,
+        target: join(
+          dirs.projectDir,
+          `.${agent === "agents" ? "agents" : agent}`,
+          "skills",
+          skill,
+        ),
+      })),
+    );
+    expect(
+      result.results.map((r) => ({
+        agent: r.agent,
+        skill: r.skill,
+        target: r.target,
+      })),
+    ).toEqual(expected);
     for (const entry of result.results) {
-      expect(readFileSync(join(entry.target, "SKILL.md"), "utf8")).toBe("v1");
+      expect(readFileSync(join(entry.target, "SKILL.md"), "utf8")).toBe(
+        `v1:${entry.skill}`,
+      );
     }
   });
 
   test("re-running reports updated and overwrites content", () => {
     const dirs = makeDirs();
     const first = installSkill({ agents: ["claude"], global: false }, dirs);
-    expect(first.ok && first.results[0].action === "installed").toBe(true);
-    writeFileSync(join(dirs.sourceDir, "SKILL.md"), "v2");
+    expect(
+      first.ok && first.results.every((r) => r.action === "installed"),
+    ).toBe(true);
+    writeFileSync(
+      join(dirs.skillsRoot, "code-viewer-annotate", "SKILL.md"),
+      "v2",
+    );
     const second = installSkill({ agents: ["claude"], global: false }, dirs);
     expect(second.ok).toBe(true);
     if (!second.ok) return;
-    expect(second.results[0].action).toBe("updated");
-    expect(
-      readFileSync(join(second.results[0].target, "SKILL.md"), "utf8"),
-    ).toBe("v2");
+    expect(second.results.every((r) => r.action === "updated")).toBe(true);
+    const annotate = second.results.find(
+      (r) => r.skill === "code-viewer-annotate",
+    );
+    expect(annotate).toBeTruthy();
+    expect(readFileSync(join(annotate?.target ?? "", "SKILL.md"), "utf8")).toBe(
+      "v2",
+    );
   });
 
   test("--global installs under the home directory", () => {
@@ -151,8 +186,10 @@ describe("installSkill", () => {
     const result = installSkill({ agents: ["codex"], global: true }, dirs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.results[0].target).toBe(
-      join(dirs.homeDir, ".codex", "skills", "code-viewer-annotate"),
+    expect(result.results.map((r) => r.target)).toEqual(
+      BUNDLED_SKILLS.map((skill) =>
+        join(dirs.homeDir, ".codex", "skills", skill),
+      ),
     );
   });
 
@@ -166,16 +203,16 @@ describe("installSkill", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.results[0].target).toBe(
-      join(other, ".claude", "skills", "code-viewer-annotate"),
+    expect(result.results.map((r) => r.target)).toEqual(
+      BUNDLED_SKILLS.map((skill) => join(other, ".claude", "skills", skill)),
     );
   });
 
-  test("missing bundled skill fails with an error", () => {
+  test("missing bundled skills directory fails with an error", () => {
     const dirs = makeDirs();
     const result = installSkill(
       { agents: ["claude"], global: false },
-      { ...dirs, sourceDir: join(dirs.sourceDir, "nope") },
+      { ...dirs, skillsRoot: join(dirs.skillsRoot, "nope") },
     );
     expect(result.ok).toBe(false);
   });

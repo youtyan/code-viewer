@@ -1,9 +1,7 @@
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { ROOT } from "./root";
-
-const SKILL_NAME = "code-viewer-annotate";
 
 // Skill directory name per agent. SKILL.md is an open standard; only the
 // install location differs. "agents" is the vendor-neutral .agents/skills.
@@ -19,15 +17,16 @@ export type AgentName = keyof typeof AGENT_SKILL_DIRS;
 
 const AGENT_NAMES = Object.keys(AGENT_SKILL_DIRS) as AgentName[];
 
-export const SKILL_HELP = `code-viewer skill — manage the bundled agent skill
+export const SKILL_HELP = `code-viewer skill — manage the bundled agent skills
 
 Usage:
   code-viewer skill install [--agent <list>] [--global] [--cwd <dir>]
 
-Installs the ${SKILL_NAME} skill (SKILL.md for AI coding agents) into the
-skills directory of each selected agent in the current project, or into the
-home directory equivalents with --global. Running install again overwrites
-the files, so the same command also updates an existing installation.
+Installs every bundled skill (each SKILL.md directory under the package's
+skills/) into the skills directory of each selected agent in the current
+project, or into the home directory equivalents with --global. Running
+install again overwrites the files, so the same command also updates an
+existing installation.
 
 Options:
   --agent <list>  comma separated agents: ${AGENT_NAMES.join(", ")}, or all
@@ -102,7 +101,7 @@ export function parseSkillArgs(argv: string[]): SkillParseResult {
 }
 
 export type InstallSkillDeps = {
-  sourceDir: string;
+  skillsRoot: string;
   homeDir: string;
   projectDir: string;
 };
@@ -112,20 +111,34 @@ export type InstallSkillResult =
       ok: true;
       results: {
         agent: AgentName;
+        skill: string;
         action: "installed" | "updated";
         target: string;
       }[];
     }
   | { ok: false; error: string };
 
+function discoverBundledSkills(skillsRoot: string): string[] {
+  if (!existsSync(skillsRoot)) return [];
+  return readdirSync(skillsRoot, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        existsSync(join(skillsRoot, entry.name, "SKILL.md")),
+    )
+    .map((entry) => entry.name)
+    .sort();
+}
+
 export function installSkill(
   args: { agents: AgentName[]; global: boolean; cwd?: string },
   deps: InstallSkillDeps,
 ): InstallSkillResult {
-  if (!existsSync(join(deps.sourceDir, "SKILL.md"))) {
+  const skills = discoverBundledSkills(deps.skillsRoot);
+  if (skills.length === 0) {
     return {
       ok: false,
-      error: `bundled skill not found at ${deps.sourceDir}`,
+      error: `no bundled skills found under ${deps.skillsRoot}`,
     };
   }
   const base = args.global
@@ -133,23 +146,28 @@ export function installSkill(
     : resolve(args.cwd ?? deps.projectDir);
   const results: {
     agent: AgentName;
+    skill: string;
     action: "installed" | "updated";
     target: string;
   }[] = [];
   for (const agent of args.agents) {
-    const target = join(base, AGENT_SKILL_DIRS[agent], "skills", SKILL_NAME);
-    const action = existsSync(target) ? "updated" : "installed";
-    try {
-      mkdirSync(target, { recursive: true });
-      cpSync(deps.sourceDir, target, { recursive: true });
-    } catch (error) {
-      return { ok: false, error: String(error) };
+    for (const skill of skills) {
+      const sourceDir = join(deps.skillsRoot, skill);
+      const target = join(base, AGENT_SKILL_DIRS[agent], "skills", skill);
+      const action = existsSync(target) ? "updated" : "installed";
+      try {
+        mkdirSync(target, { recursive: true });
+        cpSync(sourceDir, target, { recursive: true });
+      } catch (error) {
+        return { ok: false, error: String(error) };
+      }
+      results.push({ agent, skill, action, target });
     }
-    results.push({ agent, action, target });
   }
   return { ok: true, results };
 }
 
+// ai-dup-check: allow -- shares (string[]) -> void signature with runtime.spawnDetached but is the unrelated CLI entry point.
 export function runSkillCli(argv: string[]): void {
   const parsed = parseSkillArgs(argv);
   if (parsed.ok === false) {
@@ -162,7 +180,7 @@ export function runSkillCli(argv: string[]): void {
     return;
   }
   const result = installSkill(parsed.args, {
-    sourceDir: join(ROOT, "skills", SKILL_NAME),
+    skillsRoot: join(ROOT, "skills"),
     homeDir: homedir(),
     projectDir: process.cwd(),
   });
@@ -171,9 +189,11 @@ export function runSkillCli(argv: string[]): void {
     process.exit(1);
   }
   for (const entry of result.results) {
-    console.log(`${entry.action} (${entry.agent}): ${entry.target}`);
+    console.log(
+      `${entry.action} (${entry.agent}/${entry.skill}): ${entry.target}`,
+    );
   }
   if (result.results.some((entry) => entry.action === "installed")) {
-    console.log("Re-run the same command anytime to update the skill.");
+    console.log("Re-run the same command anytime to update the skills.");
   }
 }
