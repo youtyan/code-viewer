@@ -177,9 +177,20 @@
       <strong class="scope-settings-section-title">Excluded directories</strong>
       <label for="scope-omit-dirs">Skip these directory names while browsing and searching</label>
       <textarea id="scope-omit-dirs" rows="6" spellcheck="false"></textarea>
+      <p id="scope-omit-dirs-help" class="scope-settings-help"></p>
       <label for="scope-exclude-names">Hide these file or directory names completely</label>
       <textarea id="scope-exclude-names" rows="4" spellcheck="false"></textarea>
+      <p id="scope-exclude-names-help" class="scope-settings-help"></p>
       <p id="scope-omit-source"></p>
+    </div>
+    <div class="scope-settings-section">
+      <strong id="watch-section-title" class="scope-settings-section-title">File change watcher</strong>
+      <label for="scope-watch-limit">Maximum directories to watch</label>
+      <div class="scope-watch-limit-row">
+        <input id="scope-watch-limit-range" type="range" min="16" max="65536" step="16" aria-label="watch limit slider" />
+        <input id="scope-watch-limit" type="number" min="16" max="65536" step="1" />
+      </div>
+      <p id="scope-watch-limit-help" class="scope-settings-help"></p>
     </div>
     <div class="scope-settings-footer">
       <p id="scope-settings-autosave-note" class="scope-settings-help"></p>

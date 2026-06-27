@@ -73,6 +73,10 @@ export type SettingsResponse = {
     exclude_names_effective: string[];
     exclude_names_built_in: string[];
     max_entries: number;
+    watch_limit_effective: number;
+    watch_limit_default: number;
+    watch_limit_min: number;
+    watch_limit_max: number;
   };
 };
 
@@ -100,6 +104,7 @@ export type AppSettingsState = {
   hideTests?: boolean;
   scopeOmitDirs?: string[];
   scopeExcludeNames?: string[];
+  scopeWatchLimit?: number;
   uploadEnabled?: boolean;
   range?: {
     from: string;
