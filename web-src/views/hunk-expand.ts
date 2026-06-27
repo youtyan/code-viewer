@@ -644,7 +644,10 @@ export function createHunkExpand(deps: HunkExpandDeps) {
         '<div class="' +
         (isSplit ? "d2h-code-side-line" : "d2h-code-line") +
         '">' +
-        '<span class="d2h-code-line-prefix">&nbsp;</span>' +
+        // diff2html's own context rows render the prefix/content spans with a
+        // newline+indent between them, which collapses to one visible space.
+        // Match that whitespace exactly so inserted rows align with native ones.
+        '<span class="d2h-code-line-prefix">&nbsp;</span> ' +
         '<span class="d2h-code-line-ctn">' +
         escapeHtmlText(lines[i]) +
         "</span>" +
