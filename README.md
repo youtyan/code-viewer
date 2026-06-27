@@ -115,7 +115,9 @@ rendered, and the page includes controls to copy the full file or reopen it in
 the full non-virtual view.
 
 The worktree is watched and changes are pushed to every open tab over SSE so
-files reload as you edit. When the OS file-watch limit is reached the viewer
+files reload as you edit. The directory watcher is capped at 1024 directories
+by default and can be tuned from Viewer Settings → **File change watcher**
+(range slider + numeric input, 16–65536); when the cap is hit the viewer
 shows a banner so reloads are not silently missed.
 
 Large repositories load folder children on demand. The sidebar remembers which
@@ -129,13 +131,15 @@ views remain read-only. Open **Viewer Settings** in the header to toggle
 uploads off, edit the directories to skip while browsing/searching, and hide
 files or directory names completely.
 
-Scope settings control recursive repository browsing and search scope for the
-left tree, Ctrl+K file palette, and Ctrl+G grep palette. Everything you change
-in Viewer Settings is saved on the server under `.code-viewer/settings.json`
-(no separate project-level config file). `.DS_Store` and a small set of
+Scope settings control directory exclusions shared by the sidebar, Ctrl+K file
+palette, Ctrl+G grep palette, the Datastores browser, and the file change
+watcher — the same list applies to all five. Everything you change in Viewer
+Settings is saved on the server under `.code-viewer/settings.json` (no
+separate project-level config file). `.DS_Store` and a broad set of
 build/cache directories (`node_modules`, `dist`, `build`, `.next`, `.turbo`,
-`.venv`, …) are hidden by default. Pass `--scope-omit-dir <name>` (repeatable)
-to override the omit list on the command line for one session.
+`.parcel-cache`, `.vite`, `.angular`, `.dart_tool`, `.venv`, …) are hidden by
+default. Pass `--scope-omit-dir <name>` (repeatable) to override the omit
+list on the command line for one session.
 
 The viewer keeps its per-project state under `.code-viewer/` at the repository
 root:
