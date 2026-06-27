@@ -48,11 +48,50 @@ Trusted Publisher setup verification, or npm-specific troubleshooting.
 
 ## UI Component Reuse
 
-- 新しいボタンやUI要素を追加するとき、独自のCSSスタイルを一から書くな。既存のパターンを探して使い回せ。
-- グローバルヘッダー内のボタン → `global-icon-action` クラスを使う。テキスト付きなら `width: auto; padding: 0 8px;` を上書きする程度に留める。
-- topbar内のトグルボタン → `.controls > button` の既存パターン（`#ignore-ws`, `#hide-tests` 参照）を踏襲する。
-- セグメントボタン → `.seg` パターンを使う。
-- 新規パターンが本当に必要な場合のみ、最小限の差分CSSを書く。既存クラスの組み合わせで解決できないか必ず先に検討すること。
+- When adding new buttons or UI elements, do not write custom CSS from scratch. Find and reuse existing patterns first.
+- For buttons in the global header, use the `global-icon-action` class. For text buttons, keep changes limited to overrides such as `width: auto; padding: 0 8px;`.
+- For toggle buttons in the topbar, follow the existing `.controls > button` pattern used by `#ignore-ws` and `#hide-tests`.
+- For segmented buttons, use the `.seg` pattern.
+- Add new UI patterns only when they are truly necessary. First verify that existing classes cannot solve the requirement in combination.
+
+## Design Reuse Discipline
+
+- Before designing a change, thoroughly inspect the existing codebase for reusable modules, components, helpers, styles, route patterns, rendering utilities, and tests.
+- Prefer extending or composing existing code over introducing parallel implementations.
+- In design notes or implementation summaries, call out the existing code that was considered for reuse and explain why any new abstraction is necessary.
+
+## Public Repository Data Hygiene
+
+- Treat this repository as public. Never copy real project names, customer names, organization names, product names, external service account names, campaign names, table values, domain names, URLs, or other proper nouns observed from a local database, browser screenshot, API response, log, or developer environment into source code, tests, comments, documentation, snapshots, fixtures, or commit messages.
+- Local app data and screenshots are evidence for debugging only. They are not acceptable fixture content. When a test needs realistic data, replace it with neutral generic placeholders such as `sample_table`, `sample_column`, `example status`, or `Japanese column description`.
+- Do not preserve a real proper noun just because it is not a credential. Public repository hygiene covers business context and implementation context as well as secrets.
+- Before reporting completion, scan newly added or edited tests, docs, comments, and fixtures for proper nouns that came from observed runtime data. If any slipped in, replace them before handing off.
+
+## Request Lifecycle Discipline (Anti-Stuck)
+
+Never reintroduce the "stuck UI / stale response wins" regression. Read this section before writing any new API handler, fetch call, or view-switch hook. **Reuse the existing primitives by name. Do not invent new wrappers, new deps, or new server-generation accessors.**
+
+Existing primitives (do not duplicate):
+
+- `let SERVER_GENERATION = 0` in `app.ts` (around line 1956) — the single authoritative server-generation counter. Bumped from one place in `app.ts`. Reused by every consumer.
+- `NETWORK_ACTIVITY.installFetch(window)` in `app.ts` (around line 148) — wraps every `fetch` in an `AbortController`. Already global, do not bypass.
+- `trackLoad<T>(promise): Promise<T>` in `app.ts` (around line 1960) — registers a promise so it participates in `cancelInFlightRequests`. View modules receive it as `deps.trackLoad`. **Always use this name.**
+- `cancelInFlightRequests()` in `app.ts` (around line 164) — aborts every tracked fetch. Invoke this on user-initiated navigation cancellations.
+- `handleFileDiff` in `preview.ts` (the `generation` field around line 1378) — the reference server-handler pattern. New handlers include `generation` in their JSON response, taken from the same module-level counter `generation` in `preview.ts`.
+- `history-view.ts` — the reference for client-side generation discarding. Bump a local `generation`, compare to the response, drop stale results.
+
+Rules:
+
+- Every `fetch` is already wrapped by `installFetch`. Do not bypass it with raw `XMLHttpRequest`, worker-side fetch, or hand-rolled `AbortController`.
+- Every new fetch call goes through `deps.trackLoad(fetch(url)...)`. Do not invent a new deps name (`fetchWithCancel`, `loadGuarded`, etc.). The name is `trackLoad`.
+- Server handlers that can race with themselves or be re-entered include `generation` in the JSON response. Do not invent a new field name or wrap it under a sub-object.
+- The client checks `response.generation === myGeneration` before mounting the result. Do not add a new `getServerGeneration` / `setServerGeneration` accessor — view modules already track their own generation counter. The shared `SERVER_GENERATION` in `app.ts` is for SSE / diff-pipeline coordination; do not multiply it into per-view deps.
+- View-switch / enter functions (`enterHistory`, `renderBlamePage`, `applySourceRouteToShell`, etc.) must be idempotent.
+  - Re-invoking with the same parameters while the latest generation is already mounted is a no-op.
+  - Never bump generation without scheduling the matching refetch — that leaves the panel blank.
+- Every loading state must have a terminator. If you set `setStatusText("loading...")`, every code path (success, failure, cancellation, early `return`) clears it.
+- On SPA navigation (tab click, popstate, `setRoute`) cancel in-flight fetches via `cancelInFlightRequests` or invalidate them with the local generation counter. Never let a previous-view response overwrite the next view.
+- Implementations that skip these rules — or invent parallel primitives — are forbidden because they bring back the "stuck UI" regression. Reviewers must verify every new fetch / handler / view-switch against this section.
 
 ## UI/Test Discipline
 

@@ -1,4 +1,5 @@
 import type { DbColumn, DbTableInfo } from "../../core/database/types";
+import { COPY_16_PATHS, iconSvg } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 
 export type TableListCallbacks = {
@@ -6,6 +7,8 @@ export type TableListCallbacks = {
   onViewCreateTable?: (table: string) => void;
   onViewDefinition?: (table: string) => void;
   getColumns?: (table: string) => Promise<DbColumn[]>;
+  getExpandedTables?: () => string[];
+  onExpandedTableChange?: (table: string, expanded: boolean) => void;
 };
 
 export type TableList = {
@@ -156,13 +159,39 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       const colRow = document.createElement("div");
       colRow.className = "db-table-col-item";
       if (col.primaryKey) colRow.classList.add("pk");
+
+      const colMain = document.createElement("div");
+      colMain.className = "db-table-col-main";
+
+      const colNameWrap = document.createElement("div");
+      colNameWrap.className = "db-table-col-name-wrap";
+      if (col.primaryKey) {
+        const pk = document.createElement("span");
+        pk.className = "db-table-col-key";
+        pk.textContent = "PK";
+        colNameWrap.appendChild(pk);
+      }
       const colName = document.createElement("span");
       colName.className = "db-table-col-name";
       colName.textContent = col.name;
+      colNameWrap.append(colName, createColumnCopyButton(col.name));
+
       const colType = document.createElement("span");
       colType.className = "db-table-col-type";
-      colType.textContent = col.type;
-      colRow.append(colName, colType);
+      colType.textContent = compactColumnType(col.type);
+      colType.title = col.type;
+      colMain.append(colNameWrap, colType);
+      colRow.appendChild(colMain);
+
+      const comment = columnCommentText(col.comment);
+      if (comment) {
+        const colComment = document.createElement("div");
+        colComment.className = "db-table-col-comment";
+        colComment.textContent = comment;
+        colComment.title = comment;
+        colRow.title = `${col.name}: ${comment}`;
+        colRow.appendChild(colComment);
+      }
       container.appendChild(colRow);
     }
   }
@@ -178,10 +207,12 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       expandedTables.delete(tableName);
       children.hidden = true;
       arrow.classList.remove("expanded");
+      callbacks.onExpandedTableChange?.(tableName, false);
     } else {
       expandedTables.add(tableName);
       children.hidden = false;
       arrow.classList.add("expanded");
+      callbacks.onExpandedTableChange?.(tableName, true);
       if (children.children.length === 0) {
         renderColumns(children, tableName);
       }
@@ -270,6 +301,10 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   function render(tables: DbTableInfo[]) {
     allTables = tables;
     expandedTables.clear();
+    const tableNames = new Set(tables.map((table) => table.name));
+    for (const table of callbacks.getExpandedTables?.() || []) {
+      if (tableNames.has(table)) expandedTables.add(table);
+    }
     columnCache.clear();
     activeTable = null;
     closeContextMenu();
@@ -303,4 +338,40 @@ function formatRowCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+function columnCommentText(comment: string | null | undefined): string {
+  return (comment || "").trim();
+}
+
+function createColumnCopyButton(columnName: string): HTMLButtonElement {
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "db-icon-btn db-table-col-copy";
+  copy.title = "Copy column name";
+  copy.setAttribute("aria-label", `Copy column name: ${columnName}`);
+  copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+  copy.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    copy.classList.remove("copied", "failed");
+    try {
+      await navigator.clipboard.writeText(columnName);
+      copy.classList.add("copied");
+      setTimeout(() => copy.classList.remove("copied"), 1000);
+    } catch {
+      copy.classList.add("failed");
+      setTimeout(() => copy.classList.remove("failed"), 1000);
+    }
+  });
+  return copy;
+}
+
+function compactColumnType(type: string): string {
+  const normalized = type.toLowerCase();
+  if (normalized === "character varying") return "varchar";
+  if (normalized === "timestamp with time zone") return "timestamptz";
+  if (normalized === "timestamp without time zone") return "timestamp";
+  if (normalized === "double precision") return "double";
+  if (normalized === "USER-DEFINED".toLowerCase()) return "enum";
+  return type;
 }

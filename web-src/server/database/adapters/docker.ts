@@ -159,9 +159,9 @@ export function __setDockerSpawnSyncForTest(
 
 // 行区切りに ASCII 0x1E (Record Separator) を使う。psql の -A モードは値に
 // 含まれる改行をエスケープしないので、デフォルトの -R '\n' のままだと
-// landing_page_html 等に改行を含むカラムが来た瞬間に「1 行 → 複数行」に
-// 化けてカラム数がずれる (再現: projects テーブルの HTML 列)。RS は通常の
-// テキストデータには現れないので、行の terminator として安全。
+// 改行を含む長い text カラムが来た瞬間に「1 行 → 複数行」に化けて
+// カラム数がずれる。RS は通常のテキストデータには現れないので、行の
+// terminator として安全。
 const PG_RECORD_SEPARATOR = "\x1e";
 
 function buildExecArgs(config: DockerDbConfig, sql: string): string[] {
@@ -558,9 +558,15 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     const tableLiteral = table.replace(/'/g, "''");
     if (config.kind === "postgresql") {
       const schemaLiteral = postgresSchemaLiteral();
-      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END FROM information_schema.columns c LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = ${schemaLiteral} AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = ${schemaLiteral} AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END, COALESCE(d.description, '') FROM information_schema.columns c JOIN pg_namespace n ON n.nspname = c.table_schema JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped LEFT JOIN pg_description d ON d.objoid = cls.oid AND d.objsubid = a.attnum LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = ${schemaLiteral} AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = ${schemaLiteral} AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
     }
-    return `SELECT column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
+    return `SELECT column_name, column_type, is_nullable, column_default, column_key, column_comment FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
+  }
+
+  function columnCommentFromInfoValue(
+    value: string | undefined,
+  ): string | null {
+    return value ? value : null;
   }
 
   function columnsFromInfoRows(rows: string[][]): DbColumn[] {
@@ -571,6 +577,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         nullable: row[2] === "YES",
         primaryKey: row[4] === "YES",
         defaultValue: row[3] === "" ? null : row[3],
+        comment: columnCommentFromInfoValue(row[5]),
       }));
     }
     return rows.map((row: string[]) => ({
@@ -579,6 +586,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       nullable: row[2] === "YES",
       primaryKey: row[4] === "PRI",
       defaultValue: row[3] === "NULL" ? null : row[3],
+      comment: columnCommentFromInfoValue(row[5]),
     }));
   }
 
@@ -716,12 +724,12 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         const inList = uncached
           .map((t) => `'${t.replace(/'/g, "''")}'`)
           .join(",");
-        sql = `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = ${postgresSchemaLiteral()} AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+        sql = `SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default, COALESCE(d.description, '') FROM information_schema.columns c JOIN pg_namespace n ON n.nspname = c.table_schema JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped LEFT JOIN pg_description d ON d.objoid = cls.oid AND d.objsubid = a.attnum WHERE c.table_schema = ${postgresSchemaLiteral()} AND c.table_name IN (${inList}) ORDER BY c.table_name, c.ordinal_position`;
       } else {
         const inList = uncached
           .map((t) => `'${t.replace(/'/g, "''")}'`)
           .join(",");
-        sql = `SELECT table_name, column_name, column_type, is_nullable, column_default, column_key FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
+        sql = `SELECT table_name, column_name, column_type, is_nullable, column_default, column_key, column_comment FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name IN (${inList}) ORDER BY table_name, ordinal_position`;
       }
       try {
         const queryResult = await execAsync(sql, signal);
@@ -762,6 +770,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
               nullable: row[3] === "YES",
               primaryKey: pkCols.has(row[1]),
               defaultValue: row[4] === "" ? null : row[4],
+              comment: columnCommentFromInfoValue(row[5]),
             }));
           } else {
             cols = rows.map((row: string[]) => ({
@@ -770,6 +779,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
               nullable: row[3] === "YES",
               primaryKey: row[5] === "PRI",
               defaultValue: row[4] === "NULL" ? null : row[4],
+              comment: columnCommentFromInfoValue(row[6]),
             }));
           }
           columnCache.set(tbl, cols);
@@ -900,12 +910,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       const columnsPromise = tableMetaCache.getColumns(table, () =>
         fetchColumnsAsyncUncached(table, signal),
       );
-      let columns: DbColumn[];
-      try {
-        columns = await columnsPromise;
-      } catch (err) {
-        throw err;
-      }
+      const columns = await columnsPromise;
       const columnNames = columns.map((column) => column.name);
       const order = buildOrderClause(
         filterOrderByColumns(options.orderBy, columnNames),

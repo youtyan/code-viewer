@@ -14,6 +14,8 @@ export type HistoryCommit = {
 export type HistoryLogResponse = {
   commits: HistoryCommit[];
   hasMore: boolean;
+  generation?: number;
+  hasWorktree?: boolean;
 };
 
 // git's well-known empty tree object: diff target for root commits.

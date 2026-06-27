@@ -41,6 +41,12 @@ import type {
   RawFileInfo,
 } from "../core/types";
 import {
+  appendFileViewTabs,
+  createFileShellSticky,
+  mountFileShellCard,
+  type SourceBlobTab,
+} from "./file-shell";
+import {
   appendMediaEmbed,
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
@@ -67,7 +73,10 @@ export type SourceViewDeps = {
   loadRepo(): Promise<void>;
   repoRoute(ref: string, path: string): AppRoute;
   repoFileTargetFromRoute(): string | null;
-  renderRepoBlobSidebar(currentPath: string, ref: string): void;
+  renderRepoBlobSidebar(
+    currentPath: string,
+    ref: string,
+  ): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   createFileDetailMeta(
@@ -155,6 +164,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
   let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
     null;
+
+  let PREFERRED_SOURCE_TAB: SourceBlobTab | null = null;
 
   type VirtualSourceSearchMatch = { line: number; start: number; end: number };
 
@@ -332,7 +343,42 @@ export function createSourceView(deps: SourceViewDeps) {
     return true;
   }
 
-  function switchSourceTab(tab: "preview" | "code"): boolean {
+  function setSourceTabRoute(tab: SourceBlobTab): void {
+    const route = STATE.route;
+    if (route.screen !== "file") return;
+    setRoute({
+      screen: "file",
+      path: route.path,
+      ref: route.ref,
+      view: "blob",
+      range: currentRange(),
+      ...(tab === "preview" ? { preview: true as const } : {}),
+      ...(route.line ? { line: route.line } : {}),
+      ...(route.virtual === "off" ? { virtual: "off" as const } : {}),
+    });
+  }
+
+  function applyRenderedSourceTab(
+    tab: SourceBlobTab,
+    codeButton: HTMLButtonElement,
+    previewButton: HTMLButtonElement | null,
+    codePane: HTMLElement,
+    previewPane: HTMLElement | null,
+    updateRoute = true,
+  ): boolean {
+    if (tab === "preview" && (!previewButton || !previewPane)) return false;
+    codeButton.classList.toggle("active", tab === "code");
+    previewButton?.classList.toggle("active", tab === "preview");
+    codePane.hidden = tab === "preview";
+    if (previewPane) previewPane.hidden = tab === "code";
+    if (updateRoute) setSourceTabRoute(tab);
+    return true;
+  }
+
+  function switchSourceTab(
+    tab: "preview" | "code",
+    options: { updateRoute?: boolean } = {},
+  ): boolean {
     const tabs = document.querySelector<HTMLElement>(
       "#content .gdp-source-tabs",
     );
@@ -341,6 +387,31 @@ export function createSourceView(deps: SourceViewDeps) {
       `button[data-source-tab="${tab}"]`,
     );
     if (!button || button.hidden || button.disabled) return false;
+    if (options.updateRoute === false) {
+      const codeButton = tabs.querySelector<HTMLButtonElement>(
+        'button[data-source-tab="code"]',
+      );
+      const previewButton = tabs.querySelector<HTMLButtonElement>(
+        'button[data-source-tab="preview"]',
+      );
+      const codePane = document.querySelector<HTMLElement>(
+        '#content [data-source-pane="code"]',
+      );
+      const previewPane = document.querySelector<HTMLElement>(
+        '#content [data-source-pane="preview"]',
+      );
+      if (!codeButton || !codePane) return false;
+      const applied = applyRenderedSourceTab(
+        tab,
+        codeButton,
+        previewButton,
+        codePane,
+        previewPane,
+        false,
+      );
+      if (applied) focusMainPanel();
+      return applied;
+    }
     button.click();
     focusMainPanel();
     return true;
@@ -442,6 +513,26 @@ export function createSourceView(deps: SourceViewDeps) {
     } catch {
       return null;
     }
+  }
+
+  function setPreferredSourceTab(tab: SourceBlobTab): void {
+    PREFERRED_SOURCE_TAB = tab;
+  }
+
+  function consumePreferredSourceTab(previewable: boolean): SourceBlobTab {
+    if (!previewable) {
+      PREFERRED_SOURCE_TAB = null;
+      return "code";
+    }
+    const routeTab =
+      STATE.route.screen === "file" &&
+      STATE.route.view === "blob" &&
+      STATE.route.preview
+        ? "preview"
+        : "code";
+    const tab = PREFERRED_SOURCE_TAB || routeTab;
+    PREFERRED_SOURCE_TAB = null;
+    return tab;
   }
 
   let SOURCE_REQ_SEQ = 0;
@@ -659,25 +750,28 @@ export function createSourceView(deps: SourceViewDeps) {
     return copy;
   }
 
-  function createSourceTabs(active: "preview" | "code", textValue?: string) {
+  function createSourceTabs(
+    target: SourceFileTarget,
+    active: SourceBlobTab,
+    textValue?: string,
+    options: { previewable?: boolean } = {},
+  ) {
     const tabs = document.createElement("div");
     tabs.className = "gdp-source-tabs";
-    const codeButton = document.createElement("button");
-    codeButton.type = "button";
-    codeButton.dataset.sourceTab = "code";
-    codeButton.textContent = "Code";
-    codeButton.classList.toggle("active", active === "code");
-    tabs.appendChild(codeButton);
-    let previewButton: HTMLButtonElement | null = null;
-    if (active === "preview") {
-      previewButton = document.createElement("button");
-      previewButton.type = "button";
-      previewButton.dataset.sourceTab = "preview";
-      previewButton.className = "active";
-      previewButton.textContent = "Preview";
-      tabs.prepend(previewButton);
-    }
-    if (textValue != null) tabs.appendChild(createSourceCopyButton(textValue));
+    const { codeButton, previewButton } = appendFileViewTabs(
+      tabs,
+      { currentRange, setRoute, setPreferredSourceTab },
+      target,
+      active,
+      {
+        includeFileTabs: STATE.route.screen === "file",
+        previewable: !!options.previewable || active === "preview",
+        sourceTabClick: "manual",
+        ...(textValue != null
+          ? { sourceCopyButton: createSourceCopyButton(textValue) }
+          : {}),
+      },
+    );
     return { tabs, codeButton, previewButton };
   }
 
@@ -717,6 +811,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
     const previewKind = sourcePreviewKind(target.path);
+    const initialSourceTab = consumePreferredSourceTab(previewable);
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(
@@ -726,10 +821,13 @@ export function createSourceView(deps: SourceViewDeps) {
         hljsRef,
         lang,
       );
+      virtualCode.dataset.sourcePane = "code";
       if (previewable) {
         const { tabs, codeButton, previewButton } = createSourceTabs(
-          "preview",
+          target,
+          initialSourceTab,
           textValue,
+          { previewable },
         );
         if (tabsHost) {
           tabsHost.hidden = false;
@@ -753,18 +851,32 @@ export function createSourceView(deps: SourceViewDeps) {
                 },
               });
         if (signal?.aborted) return false;
-        virtualCode.hidden = true;
+        preview.dataset.sourcePane = "preview";
+        applyRenderedSourceTab(
+          initialSourceTab,
+          codeButton,
+          previewButton,
+          virtualCode,
+          preview,
+          false,
+        );
         previewButton?.addEventListener("click", () => {
-          previewButton.classList.add("active");
-          codeButton.classList.remove("active");
-          preview.hidden = false;
-          virtualCode.hidden = true;
+          applyRenderedSourceTab(
+            "preview",
+            codeButton,
+            previewButton,
+            virtualCode,
+            preview,
+          );
         });
         codeButton.addEventListener("click", () => {
-          codeButton.classList.add("active");
-          previewButton.classList.remove("active");
-          preview.hidden = true;
-          virtualCode.hidden = false;
+          applyRenderedSourceTab(
+            "code",
+            codeButton,
+            previewButton,
+            virtualCode,
+            preview,
+          );
         });
         if (header) view.appendChild(header);
         view.classList.add("virtual");
@@ -772,6 +884,13 @@ export function createSourceView(deps: SourceViewDeps) {
         if (body) body.replaceWith(view);
         else card.appendChild(view);
         return true;
+      }
+      const { tabs } = createSourceTabs(target, "code", textValue, {
+        previewable: false,
+      });
+      if (tabsHost) {
+        tabsHost.hidden = false;
+        tabsHost.replaceChildren(tabs);
       }
       if (header) view.appendChild(header);
       view.classList.add("virtual");
@@ -783,6 +902,7 @@ export function createSourceView(deps: SourceViewDeps) {
     }
     const table = document.createElement("table");
     table.className = "gdp-source-table";
+    table.dataset.sourcePane = "code";
     const tbody = document.createElement("tbody");
     const sourceShikiLang = normalizeSourceShikiLang(lang);
     const shikiLines =
@@ -824,8 +944,10 @@ export function createSourceView(deps: SourceViewDeps) {
     }
     table.appendChild(tbody);
     const { tabs, codeButton, previewButton } = createSourceTabs(
-      previewable ? "preview" : "code",
+      target,
+      initialSourceTab,
       textValue,
+      { previewable },
     );
     if (tabsHost) {
       tabsHost.hidden = false;
@@ -850,18 +972,32 @@ export function createSourceView(deps: SourceViewDeps) {
               },
             });
       if (signal?.aborted) return false;
-      table.hidden = true;
+      preview.dataset.sourcePane = "preview";
+      applyRenderedSourceTab(
+        initialSourceTab,
+        codeButton,
+        previewButton,
+        table,
+        preview,
+        false,
+      );
       previewButton?.addEventListener("click", () => {
-        previewButton.classList.add("active");
-        codeButton.classList.remove("active");
-        preview.hidden = false;
-        table.hidden = true;
+        applyRenderedSourceTab(
+          "preview",
+          codeButton,
+          previewButton,
+          table,
+          preview,
+        );
       });
       codeButton.addEventListener("click", () => {
-        codeButton.classList.add("active");
-        previewButton.classList.remove("active");
-        preview.hidden = true;
-        table.hidden = false;
+        applyRenderedSourceTab(
+          "code",
+          codeButton,
+          previewButton,
+          table,
+          preview,
+        );
       });
       if (header) view.appendChild(header);
       view.appendChild(preview);
@@ -1771,7 +1907,11 @@ export function createSourceView(deps: SourceViewDeps) {
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (tabsHost) {
       tabsHost.hidden = false;
-      tabsHost.replaceChildren(createSourceTabs("code").tabs);
+      tabsHost.replaceChildren(
+        createSourceTabs(target, "code", undefined, {
+          previewable: false,
+        }).tabs,
+      );
     }
     SOURCE_CURSOR_TOTALS.set(
       sourceCursorKey(target),
@@ -1859,7 +1999,6 @@ export function createSourceView(deps: SourceViewDeps) {
   async function renderStandaloneSource(target: SourceFileTarget) {
     cancelActiveSourceLoad("navigation");
     const req = ++SOURCE_REQ_SEQ;
-    const root = $("#diff");
     const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
@@ -1872,42 +2011,27 @@ export function createSourceView(deps: SourceViewDeps) {
     card.dataset.path = target.path;
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
-    const sticky = document.createElement("div");
-    sticky.className = "gdp-file-detail-sticky";
-    const header = document.createElement("div");
-    header.className = "gdp-file-detail-header";
-    const name = document.createElement("div");
-    name.className = "gdp-file-detail-path";
-    name.appendChild(createFileBreadcrumb(target.path, target.ref));
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "gdp-file-header-icon gdp-copy-path";
-    copy.title = "copy file path";
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(target.path);
-        copy.classList.add("copied");
-        setTimeout(() => {
-          copy.classList.remove("copied");
-        }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1200);
-      }
-    });
-    name.appendChild(copy);
-    name.appendChild(
+    const activeTab: SourceBlobTab =
+      STATE.route.screen === "file" && STATE.route.preview ? "preview" : "code";
+    const { sticky, header } = createFileShellSticky(
+      {
+        currentRange,
+        setRoute,
+        setPreferredSourceTab,
+        createFileBreadcrumb,
+      },
+      target,
+      activeTab,
+    );
+    const pathActions =
+      header.querySelector<HTMLElement>(".gdp-file-detail-path") || header;
+    pathActions.appendChild(
       createOpenPathButton(
         target.path,
         "file-parent",
         "open parent folder in OS",
       ),
     );
-    header.appendChild(name);
     if (repoTarget && canTrashWorktreeRef(repoTarget)) {
       header.appendChild(
         createMoveToTrashButton(target.path, () => {
@@ -1937,29 +2061,20 @@ export function createSourceView(deps: SourceViewDeps) {
       });
       header.appendChild(back);
     }
-    sticky.appendChild(header);
-    const tabsHost = document.createElement("div");
-    tabsHost.className = "gdp-file-detail-tabs";
-    tabsHost.hidden = true;
-    sticky.appendChild(tabsHost);
     wrapper.appendChild(sticky);
     const detailBody = document.createElement("div");
     detailBody.className = "gdp-file-detail-body";
     wrapper.appendChild(detailBody);
     card.appendChild(wrapper);
-    if (repoTarget) {
-      const layout = document.createElement("div");
-      layout.className = "gdp-repo-blob-layout";
-      renderRepoBlobSidebar(target.path, repoTarget);
-      layout.appendChild(card);
-      // Prepend instead of replaceChildren: the rendered diff cards stay
-      // alive (hidden via body.gdp-repo-blob-page CSS), so leaving the blob
-      // view does not force a full diff reload.
-      root.prepend(layout);
-    } else {
-      root.prepend(card);
-    }
-    placeSidebarToggle();
+    // Prepend instead of replaceChildren: the rendered diff cards stay alive
+    // (hidden via body.gdp-repo-blob-page CSS), so leaving the blob view does
+    // not force a full diff reload.
+    mountFileShellCard(
+      { $, repoFileTargetFromRoute, renderRepoBlobSidebar, placeSidebarToggle },
+      target,
+      card,
+      repoTarget,
+    );
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad("user"));
@@ -2192,6 +2307,7 @@ export function createSourceView(deps: SourceViewDeps) {
     fileSourceTarget,
     scrollStandaloneSourceLine,
     createSourceTabs,
+    setPreferredSourceTab,
     switchSourceTab,
     sourceLineScrollAmount,
     hasVisibleSourceCodeSurface,
@@ -2209,6 +2325,7 @@ export function createSourceView(deps: SourceViewDeps) {
     lineInSourceTarget,
     setSourceLineRoute,
     syncRenderedSourceLineHighlights,
+    bindSourceLineNumber,
     renderSourceError,
     loadSourceShikiHighlighter,
     sourceShikiLines,

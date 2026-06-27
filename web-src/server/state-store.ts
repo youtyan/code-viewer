@@ -21,6 +21,7 @@ const MAX_VIEW_ITEMS = 20_000;
 const MAX_DB_UI_DBS = 200;
 const MAX_DB_UI_TABLES = 500;
 const MAX_DB_UI_COLUMNS = 1000;
+const MAX_DB_UI_EXPANDED_SCOPES = 500;
 
 function codeViewerPath(root: string, fileName: string): string {
   return join(root, CODE_VIEWER_DIR, fileName);
@@ -318,11 +319,37 @@ function sanitizeDbUiPrefs(raw: unknown): DbUiPrefs | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function sanitizeDbUiExpandedTables(
+  raw: unknown,
+): Record<string, string[]> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Record<string, string[]> = {};
+  let scopeCount = 0;
+  for (const [scopeRaw, tablesRaw] of Object.entries(raw)) {
+    if (scopeCount >= MAX_DB_UI_EXPANDED_SCOPES) break;
+    const scope = safeObjectKey(scopeRaw);
+    if (!scope) continue;
+    const tables = normalizeStringList(tablesRaw, {
+      maxItems: MAX_DB_UI_TABLES,
+      maxLen: MAX_KEY_LEN,
+      sort: true,
+    });
+    if (!tables || tables.length === 0) continue;
+    out[scope] = tables;
+    scopeCount++;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeDbUiState(raw: unknown): DbUiState {
   if (!isRecord(raw)) return emptyDbUiState();
   const prefs = sanitizeDbUiPrefs(raw.prefs);
+  const expandedTables = sanitizeDbUiExpandedTables(raw.expandedTables);
   if (!isRecord(raw.columnWidths)) {
-    return prefs ? { ...emptyDbUiState(), prefs } : emptyDbUiState();
+    const out = emptyDbUiState();
+    if (expandedTables) out.expandedTables = expandedTables;
+    if (prefs) out.prefs = prefs;
+    return out;
   }
   const columnWidths: DbUiState["columnWidths"] = {};
   let dbCount = 0;
@@ -355,6 +382,7 @@ function sanitizeDbUiState(raw: unknown): DbUiState {
     dbCount++;
   }
   const out: DbUiState = { version: 1, columnWidths };
+  if (expandedTables) out.expandedTables = expandedTables;
   if (prefs) out.prefs = prefs;
   return out;
 }
@@ -375,6 +403,22 @@ function mergeDbUiPrefs(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+function mergeDbUiExpandedTables(
+  current: Record<string, string[]> | undefined,
+  patch: unknown,
+): Record<string, string[]> | undefined {
+  if (!isRecord(patch)) return current;
+  const next: Record<string, string[]> = { ...(current ?? {}) };
+  for (const [scope, tablesRaw] of Object.entries(patch)) {
+    if (tablesRaw === null) {
+      delete next[scope];
+      continue;
+    }
+    next[scope] = tablesRaw as string[];
+  }
+  return sanitizeDbUiExpandedTables(next);
+}
+
 function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
   if (!isRecord(patch)) return current;
   // prefs はトップレベル並列の独立キーとして patch される (columnWidths と
@@ -383,8 +427,14 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     "prefs" in patch
       ? mergeDbUiPrefs(current.prefs, patch.prefs)
       : current.prefs;
+  const mergedExpandedTables =
+    "expandedTables" in patch
+      ? mergeDbUiExpandedTables(current.expandedTables, patch.expandedTables)
+      : current.expandedTables;
   if (!isRecord(patch.columnWidths)) {
     const merged: DbUiState = { ...current, version: 1 };
+    if (mergedExpandedTables) merged.expandedTables = mergedExpandedTables;
+    else delete merged.expandedTables;
     if (mergedPrefs) merged.prefs = mergedPrefs;
     else delete merged.prefs;
     return sanitizeDbUiState(merged);
@@ -418,6 +468,7 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     ...current,
     ...patch,
     columnWidths,
+    expandedTables: mergedExpandedTables,
     prefs: mergedPrefs,
     version: 1,
   });

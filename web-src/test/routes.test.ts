@@ -39,7 +39,17 @@ describe("routes", () => {
         view: "blob",
         range,
       }),
-    ).toBe("/file?path=README.md&target=main");
+    ).toBe("/file?path=README.md&target=main&view=blob");
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "main",
+        view: "blob",
+        preview: true,
+        range,
+      }),
+    ).toBe("/file?path=README.md&target=main&view=blob&preview=1");
     expect(
       buildRoute({
         screen: "file",
@@ -49,7 +59,7 @@ describe("routes", () => {
         line: 12,
         range,
       }),
-    ).toBe("/file?path=README.md&target=main&line=12");
+    ).toBe("/file?path=README.md&target=main&view=blob&line=12");
     expect(
       buildRoute({
         screen: "file",
@@ -59,7 +69,7 @@ describe("routes", () => {
         line: { start: 12, end: 15 },
         range,
       }),
-    ).toBe("/file?path=README.md&target=main&line=12-15");
+    ).toBe("/file?path=README.md&target=main&view=blob&line=12-15");
     expect(
       buildRoute({
         screen: "file",
@@ -69,7 +79,7 @@ describe("routes", () => {
         virtual: "off",
         range,
       }),
-    ).toBe("/file?path=README.md&target=main&virtual=off");
+    ).toBe("/file?path=README.md&target=main&view=blob&virtual=off");
     expect(
       buildRoute({ screen: "help", lang: "en", section: "overview", range }),
     ).toBe("/help");
@@ -143,6 +153,47 @@ describe("routes", () => {
     });
     expect(
       parseRoute("/file", "?path=README.md&target=worktree", defaultRange),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blob",
+      range: defaultRange,
+    });
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=blob&preview=1",
+        defaultRange,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blob",
+      preview: true,
+      range: defaultRange,
+    });
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&preview=1",
+        defaultRange,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blob",
+      preview: true,
+      range: defaultRange,
+    });
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=blob",
+        defaultRange,
+      ),
     ).toEqual({
       screen: "file",
       path: "README.md",
@@ -324,6 +375,100 @@ describe("routes", () => {
         range: fallback,
       }),
     ).toBe("/history?commit=worktree");
+  });
+
+  test("parses and builds file blame routes", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=blame",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blame",
+      range: fallback,
+    });
+    expect(
+      parseRoute("/file", "?path=README.md&target=main&view=blame", fallback),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blame",
+      range: fallback,
+    });
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=main&view=blame&line=12-15",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blame",
+      line: { start: 12, end: 15 },
+      range: fallback,
+    });
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=worktree&view=blame");
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "main",
+        view: "blame",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=main&view=blame");
+  });
+
+  test("parses and builds file history routes", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=history",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: fallback,
+    });
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "history",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=worktree&view=history");
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "main",
+        view: "history",
+        line: 42,
+        range: fallback,
+      }),
+    ).toBe("/file?path=web-src%2Fapp.ts&target=main&view=history&line=42");
   });
 
   test("builds raw file API URLs from path and ref only", () => {

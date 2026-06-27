@@ -8,12 +8,6 @@ import {
 } from "../core/markdown-preview";
 import { sourceFixture } from "./source-fixture";
 
-// Source view rendering (tabs/preview wiring) lives in source-view.ts.
-const app = sourceFixture(
-  readFileSync(new URL("../app.ts", import.meta.url), "utf8") +
-    readFileSync(new URL("../views/source-view.ts", import.meta.url), "utf8") +
-    readFileSync(new URL("../views/repo-view.ts", import.meta.url), "utf8"),
-);
 const markdown = sourceFixture(
   readFileSync(new URL("../core/markdown-preview.ts", import.meta.url), "utf8"),
 );
@@ -232,30 +226,6 @@ describe("markdown preview", () => {
       ),
     ).toBe(true);
     expect(markdown.includes("link.title = entry.text")).toBe(true);
-  });
-
-  test("app wires markdown preview into README and file detail previews", () => {
-    expect(
-      app.includes(
-        "import { renderMarkdownPreview } from '../core/markdown-preview'",
-      ),
-    ).toBe(true);
-    expect(app.includes("onNavigateMarkdown: (path, ref) => {")).toBe(true);
-    expect(
-      app.includes(
-        "setRoute({ screen: 'file', path, ref, view: 'blob', range: currentRange() })",
-      ),
-    ).toBe(true);
-    expect(
-      app.includes(
-        "createSourceTabs(previewable ? 'preview' : 'code', textValue)",
-      ),
-    ).toBe(true);
-    expect(
-      app.includes("async function renderRepo(meta: RepoTreeResponse)"),
-    ).toBe(true);
-    expect(app.includes("await renderMarkdownPreview")).toBe(true);
-    expect(app.includes("syntaxHighlight: STATE.syntaxHighlight")).toBe(true);
   });
 
   test("mermaid is built as a lazy standalone asset and served by the preview server", () => {

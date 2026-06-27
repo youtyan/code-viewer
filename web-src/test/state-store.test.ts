@@ -289,6 +289,54 @@ describe("state store", () => {
     });
   });
 
+  test("db ui expanded table accordions merge by scope", async () => {
+    await withTempProject(async (dir) => {
+      expect(
+        await patchDbUiState(dir, {
+          expandedTables: {
+            "docker:postgres:app#schema=public": ["projects", "users"],
+          },
+        }),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        expandedTables: {
+          "docker:postgres:app#schema=public": ["projects", "users"],
+        },
+      });
+
+      expect(
+        await patchDbUiState(dir, {
+          expandedTables: {
+            "docker:postgres:app#schema=public": ["projects"],
+            "docker:postgres:app#schema=tenant": ["projects"],
+          },
+        }),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        expandedTables: {
+          "docker:postgres:app#schema=public": ["projects"],
+          "docker:postgres:app#schema=tenant": ["projects"],
+        },
+      });
+
+      expect(
+        await patchDbUiState(dir, {
+          expandedTables: {
+            "docker:postgres:app#schema=public": null,
+          },
+        } as unknown as Parameters<typeof patchDbUiState>[1]),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        expandedTables: {
+          "docker:postgres:app#schema=tenant": ["projects"],
+        },
+      });
+    });
+  });
+
   test("state PATCH rejects oversized request bodies before JSON parsing", async () => {
     await withTempProject(async (dir) => {
       const req = new Request("http://localhost/_state/settings", {

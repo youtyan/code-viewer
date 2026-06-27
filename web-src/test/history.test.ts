@@ -65,6 +65,7 @@ class FakeElement {
   attributes: Record<string, string> = {};
   preventDefaultCount = 0;
   parentElement: FakeElement | null = null;
+  value = "";
   private listeners: Record<string, Array<(event?: unknown) => void>> = {};
   private classValue = "";
 
@@ -113,6 +114,12 @@ class FakeElement {
 
   addEventListener(event: string, listener: (event?: unknown) => void) {
     this.listeners[event] = [...(this.listeners[event] || []), listener];
+  }
+
+  removeEventListener(event: string, listener: (event?: unknown) => void) {
+    this.listeners[event] = (this.listeners[event] || []).filter(
+      (current) => current !== listener,
+    );
   }
 
   click() {
@@ -397,6 +404,7 @@ function installHistoryViewDom() {
   const status = new FakeElement();
   const sentinel = new FakeElement();
   const info = new FakeElement();
+  const documentListeners: Record<string, Array<(event: unknown) => void>> = {};
   const head = new FakeElement();
   const sha = new FakeElement();
   const author = new FakeElement();
@@ -417,6 +425,12 @@ function installHistoryViewDom() {
     querySelector: (selector: string) =>
       selector === "#history-commit-info" ? info : null,
     createElement: () => new FakeElement(),
+    addEventListener: (event: string, listener: (event: unknown) => void) => {
+      documentListeners[event] = [
+        ...(documentListeners[event] || []),
+        listener,
+      ];
+    },
   } as unknown as Document;
   globalThis.IntersectionObserver = class {
     observe() {}
@@ -427,7 +441,29 @@ function installHistoryViewDom() {
     }
   } as unknown as typeof IntersectionObserver;
 
-  return { panel, list, banner, status, sentinel, info, head, subject, body };
+  return {
+    panel,
+    list,
+    banner,
+    status,
+    sentinel,
+    info,
+    head,
+    subject,
+    body,
+    keyDownDocument(key: string) {
+      let preventDefaultCount = 0;
+      const event = {
+        key,
+        target: panel,
+        preventDefault: () => {
+          preventDefaultCount++;
+        },
+      };
+      for (const listener of documentListeners.keydown || []) listener(event);
+      return { preventDefaultCount };
+    },
+  };
 }
 
 describe("history view lifecycle", () => {
@@ -632,5 +668,347 @@ describe("history view lifecycle", () => {
 
     expect(emptyDiffRenders).toBe(0);
     expect(info.hidden).toBe(true);
+  });
+
+  test("file history mode keeps the /file URL and applies a path-filtered diff range", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    const commit = {
+      sha: "abc1234567890",
+      parents: ["parent1"],
+      subject: "touch README",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    const requests: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: [commit], hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const routes: Array<{ route: AppRoute; replace?: boolean }> = [];
+    const applied: Array<{
+      range: { from: string; to: string };
+      pathFilter?: string;
+    }> = [];
+    let emptyDiffRenders = 0;
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next, replace) => {
+        route = next;
+        routes.push({ route: next, replace });
+      },
+      applyCommitRange: async (range, pathFilter) => {
+        applied.push({ range, pathFilter });
+      },
+      showEmptyDiffPane: () => {
+        emptyDiffRenders++;
+      },
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+
+    const logUrl = new URL(requests[0], "http://localhost");
+    expect(logUrl.pathname).toBe("/_log");
+    expect(logUrl.searchParams.get("ref")).toBe("HEAD");
+    expect(logUrl.searchParams.get("path")).toBe("README.md");
+    expect(logUrl.searchParams.get("worktree")).toBe("1");
+    expect(
+      list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
+    ).toEqual([commit.sha]);
+    expect(emptyDiffRenders).toBe(1);
+
+    const row = list.querySelector(".history-item");
+    list.dispatch("click", { target: row });
+    await Promise.resolve();
+
+    expect(routes).toEqual([
+      {
+        route: {
+          screen: "file",
+          path: "README.md",
+          ref: "worktree",
+          view: "history",
+          commit: commit.sha,
+          range: { from: "parent1", to: commit.sha },
+        },
+        replace: true,
+      },
+    ]);
+    expect(applied).toEqual([
+      {
+        range: { from: "parent1", to: commit.sha },
+        pathFilter: "README.md",
+      },
+    ]);
+  });
+
+  test("re-entering the same file history scope keeps the rendered commit list", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    const commit = {
+      sha: "abc1234567890",
+      parents: ["parent1"],
+      subject: "touch README",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    let fetchCount = 0;
+    globalThis.fetch = (() => {
+      fetchCount++;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            commits: [commit],
+            hasMore: false,
+            generation: 1,
+          }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => {},
+      applyCommitRange: async () => {},
+      showEmptyDiffPane: () => {},
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    await view.enterHistory();
+
+    expect(fetchCount).toBe(1);
+    expect(
+      list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
+    ).toEqual([commit.sha]);
+  });
+
+  test("arrow keys select commits in file history mode without leaving the /file route", async () => {
+    const { panel, list, banner, status, sentinel, keyDownDocument } =
+      installHistoryViewDom();
+    const commits = [
+      {
+        sha: "aaa111",
+        parents: ["parent-a"],
+        subject: "first",
+        body: "",
+        author: "Alice",
+        when: new Date().toISOString(),
+      },
+      {
+        sha: "bbb222",
+        parents: ["parent-b"],
+        subject: "second",
+        body: "",
+        author: "Bob",
+        when: new Date().toISOString(),
+      },
+    ];
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits, hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const routes: AppRoute[] = [];
+    const applied: Array<{ from: string; to: string; pathFilter?: string }> =
+      [];
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+        routes.push(next);
+      },
+      applyCommitRange: async (range, pathFilter) => {
+        applied.push({ ...range, pathFilter });
+      },
+      showEmptyDiffPane: () => {},
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+
+    const firstKey = keyDownDocument("ArrowDown");
+    await Promise.resolve();
+    expect(firstKey.preventDefaultCount).toBe(1);
+    expect(routes[0]).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      commit: commits[0].sha,
+      range: { from: "parent-a", to: commits[0].sha },
+    });
+    expect(applied[0]).toEqual({
+      from: "parent-a",
+      to: commits[0].sha,
+      pathFilter: "README.md",
+    });
+
+    keyDownDocument("ArrowDown");
+    await Promise.resolve();
+    expect(routes[1]).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      commit: commits[1].sha,
+      range: { from: "parent-b", to: commits[1].sha },
+    });
+    expect(applied[1]).toEqual({
+      from: "parent-b",
+      to: commits[1].sha,
+      pathFilter: "README.md",
+    });
+  });
+
+  test("file history mount filter input reloads the path-filtered commit list", async () => {
+    const { panel, list, banner, status, sentinel, info } =
+      installHistoryViewDom();
+    const filePanel = new FakeElement();
+    const fileList = new FakeElement();
+    const fileBanner = new FakeElement();
+    const fileStatus = new FakeElement();
+    const fileSentinel = new FakeElement();
+    const fileFilterInput = new FakeElement();
+    const commits = [
+      {
+        sha: "aaa111",
+        parents: ["parent-a"],
+        subject: "first",
+        body: "",
+        author: "Alice",
+        when: new Date().toISOString(),
+      },
+      {
+        sha: "bbb222",
+        parents: ["parent-b"],
+        subject: "second",
+        body: "",
+        author: "Bob",
+        when: new Date().toISOString(),
+      },
+    ];
+    const fetchedUrls: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input);
+      fetchedUrls.push(url);
+      const params = new URLSearchParams(url.split("?")[1] || "");
+      const filtered =
+        params.get("q") === "bbb"
+          ? commits.filter((commit) => commit.sha.startsWith("bbb"))
+          : commits;
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: filtered, hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => {},
+      applyCommitRange: async () => {},
+      showEmptyDiffPane: () => {},
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory({
+      mount: {
+        panel: filePanel as unknown as HTMLElement,
+        list: fileList as unknown as HTMLOListElement,
+        banner: fileBanner as unknown as HTMLElement,
+        status: fileStatus as unknown as HTMLElement,
+        sentinel: fileSentinel as unknown as HTMLElement,
+        filterInput: fileFilterInput as unknown as HTMLInputElement,
+        commitInfo: info as unknown as HTMLElement,
+      },
+    });
+
+    expect(fileList.querySelectorAll(".history-item").length).toBe(2);
+
+    fileFilterInput.value = "bbb";
+    fileFilterInput.dispatch("input", { target: fileFilterInput });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const rows = fileList.querySelectorAll(".history-item");
+    expect(rows.map((row) => row.dataset.sha)).toEqual(["bbb222"]);
+    expect(fetchedUrls.some((url) => url.includes("q=bbb"))).toBe(true);
   });
 });

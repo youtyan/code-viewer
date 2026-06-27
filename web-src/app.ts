@@ -50,16 +50,22 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
+  removeFileHistoryShell as removeRenderedFileHistoryShell,
+  renderFileHistoryShell as renderFileHistoryShellView,
+} from "./views/file-history-shell";
+import { isBlobOrBlameFileRoute } from "./views/file-shell";
+import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
 } from "./views/help-page";
-import { createHistoryView } from "./views/history-view";
+import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createLineRefPill } from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
@@ -890,6 +896,36 @@ window.GdpExpandLogic = GdpExpandLogic;
     handleVirtualSourcePagingKeydown,
     openVirtualSourceSearchFromKeyboard,
   } = SOURCE_VIEW;
+
+  const BLAME_VIEW = createBlameView({
+    $,
+    STATE,
+    setRoute,
+    applyRouteFromLocation,
+    setPageMode,
+    currentRange,
+    trackLoad,
+    getSyntaxHighlight: () => STATE.syntaxHighlight,
+    loadSourceShikiHighlighter: () => SOURCE_VIEW.loadSourceShikiHighlighter(),
+    sourceShikiLines: (textValue, lang, highlighter) =>
+      SOURCE_VIEW.sourceShikiLines(textValue, lang, highlighter),
+    inferLang: (path) => SOURCE_VIEW.inferLang(path),
+    currentSourceLineTarget: (target) =>
+      SOURCE_VIEW.currentSourceLineTarget(target),
+    lineInSourceTarget: (lineNumber, target) =>
+      SOURCE_VIEW.lineInSourceTarget(lineNumber, target),
+    bindSourceLineNumber: (num, card, target, line) =>
+      SOURCE_VIEW.bindSourceLineNumber(num, card, target, line),
+    setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
+    createFileBreadcrumb: (path, ref) =>
+      DIFF_VIEW.createFileBreadcrumb(path, ref),
+    removeStandaloneSource,
+    placeSidebarToggle,
+    escapeHtml,
+    repoFileTargetFromRoute,
+    renderRepoBlobSidebar: (path: string, ref: string) =>
+      REPO_VIEW.renderRepoBlobSidebar(path, ref),
+  });
 
   // ---------- Repository view: extracted to repo-view.ts ----------
   const REPO_VIEW = createRepoView({
@@ -1959,6 +1995,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   // parked here on entry and restored on exit so the two screens stay
   // independent. Declared before the startup calls below to avoid TDZ.
   let preHistoryRange: DiffRange | null = null;
+  let activeHistoryPathFilter: string | null = null;
+  let activeFileHistoryDiffHost: HTMLElement | null = null;
+  let activeFileHistoryEmptyHost: HTMLElement | null = null;
+  function isFileHistoryRoute(
+    route: AppRoute,
+  ): route is Extract<AppRoute, { screen: "file" }> & { view: "history" } {
+    return route.screen === "file" && route.view === "history";
+  }
+  function isHistoryPanelRoute(route: AppRoute): boolean {
+    return route.screen === "history" || isFileHistoryRoute(route);
+  }
   function parkRangeForHistory() {
     if (preHistoryRange === null)
       preHistoryRange = { from: STATE.from, to: STATE.to };
@@ -1968,19 +2015,49 @@ window.GdpExpandLogic = GdpExpandLogic;
     STATE.from = preHistoryRange.from;
     STATE.to = preHistoryRange.to;
     preHistoryRange = null;
+    activeHistoryPathFilter = null;
     syncRefInputs();
   }
 
   function repoFileTargetFromRoute(): string | null {
-    return STATE.route.screen === "file" && STATE.route.view === "blob"
+    return isBlobOrBlameFileRoute(STATE.route) ||
+      isFileHistoryRoute(STATE.route)
       ? STATE.route.ref
       : null;
   }
 
-  function isRepoBlobRoute(
-    route: AppRoute,
-  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blob" } {
-    return route.screen === "file" && route.view === "blob";
+  function repoFileTargetForControls(): string | null {
+    return repoFileTargetFromRoute();
+  }
+
+  function removeFileHistoryShell(): void {
+    removeRenderedFileHistoryShell();
+    activeFileHistoryDiffHost = null;
+    activeFileHistoryEmptyHost = null;
+  }
+
+  function renderFileHistoryShell(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ) {
+    const historyRoute = { ...route, view: "history" as const };
+    const mount = renderFileHistoryShellView(
+      {
+        $,
+        repoFileTargetFromRoute,
+        renderRepoBlobSidebar: (path, ref) =>
+          REPO_VIEW.renderRepoBlobSidebar(path, ref),
+        placeSidebarToggle,
+        currentRange,
+        setRoute,
+        setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
+        createFileBreadcrumb: (path, ref) =>
+          DIFF_VIEW.createFileBreadcrumb(path, ref),
+      },
+      historyRoute,
+    );
+    activeFileHistoryDiffHost = mount.diffHost;
+    activeFileHistoryEmptyHost = mount.emptyHost;
+    return mount;
   }
 
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
@@ -2019,17 +2096,87 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  function dispatchFileRoute(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): boolean {
+    if (route.view === "blob") {
+      setStatus("live");
+      removeFileHistoryShell();
+      BLAME_VIEW.removeBlamePage();
+      applySourceRouteToShell();
+      return true;
+    }
+    if (route.view === "blame") {
+      setStatus("live");
+      cancelActiveSourceLoad("navigation");
+      removeFileHistoryShell();
+      void BLAME_VIEW.renderBlamePage({ path: route.path, ref: route.ref });
+      return true;
+    }
+    if (route.view === "history") {
+      setStatus("live");
+      cancelActiveSourceLoad("navigation");
+      BLAME_VIEW.removeBlamePage();
+      removeStandaloneSource();
+      parkRangeForHistory();
+      setPageMode();
+      const mount = renderFileHistoryShell(route);
+      void HISTORY_VIEW.enterHistory({ mount });
+      return true;
+    }
+    return false;
+  }
+
+  function shouldDispatchFileRouteAfterSetRoute(
+    previousRoute: AppRoute,
+    nextRoute: AppRoute,
+  ): nextRoute is Extract<AppRoute, { screen: "file" }> {
+    if (nextRoute.screen !== "file") return false;
+    if (previousRoute.screen !== "file") return true;
+    return (
+      previousRoute.view !== nextRoute.view ||
+      previousRoute.path !== nextRoute.path ||
+      previousRoute.ref !== nextRoute.ref
+    );
+  }
+
+  function isSameBlobFileRoute(previousRoute: AppRoute, nextRoute: AppRoute) {
+    return (
+      previousRoute.screen === "file" &&
+      previousRoute.view === "blob" &&
+      nextRoute.screen === "file" &&
+      nextRoute.view === "blob" &&
+      previousRoute.path === nextRoute.path &&
+      previousRoute.ref === nextRoute.ref
+    );
+  }
+
+  function routeBlobPreview(route: AppRoute): boolean {
+    return route.screen === "file" && route.view === "blob" && !!route.preview;
+  }
+
   function setRoute(route: AppRoute, replace = false) {
-    const nextRoute =
+    const previousRoute = STATE.route;
+    let nextRoute =
       route.screen === "unknown"
         ? { screen: "diff" as const, range: route.range }
         : route;
+    if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute)) {
+      if (preHistoryRange) nextRoute = { ...nextRoute, range: preHistoryRange };
+      HISTORY_VIEW.leaveHistory();
+      activeHistoryPathFilter = null;
+      preHistoryRange = null;
+      removeFileHistoryShell();
+    }
     STATE.route = nextRoute;
     STATE.from = nextRoute.range.from;
     STATE.to = nextRoute.range.to;
     if (
       nextRoute.screen === "repo" ||
-      (nextRoute.screen === "file" && nextRoute.view === "blob")
+      (nextRoute.screen === "file" &&
+        (nextRoute.view === "blob" ||
+          nextRoute.view === "blame" ||
+          nextRoute.view === "history"))
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
@@ -2039,6 +2186,17 @@ window.GdpExpandLogic = GdpExpandLogic;
     else history.pushState(state, "", url);
     syncHeaderMenu();
     syncLineRefPill();
+    if (
+      isSameBlobFileRoute(previousRoute, nextRoute) &&
+      routeBlobPreview(previousRoute) !== routeBlobPreview(nextRoute)
+    ) {
+      switchSourceTab(routeBlobPreview(nextRoute) ? "preview" : "code", {
+        updateRoute: false,
+      });
+    }
+    if (shouldDispatchFileRouteAfterSetRoute(previousRoute, nextRoute)) {
+      dispatchFileRoute(nextRoute);
+    }
   }
 
   // ---- Query History right-panel open/close ----
@@ -2054,13 +2212,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function setPageMode() {
+    const historyPanelRoute = STATE.route.screen === "history";
+    const fileHistoryRoute = isFileHistoryRoute(STATE.route);
     document.body.classList.toggle(
       "gdp-file-detail-page",
       STATE.route.screen === "file",
     );
     document.body.classList.toggle(
       "gdp-repo-blob-page",
-      STATE.route.screen === "file" && STATE.route.view === "blob",
+      STATE.route.screen === "file" &&
+        (STATE.route.view === "blob" ||
+          STATE.route.view === "blame" ||
+          STATE.route.view === "history"),
     );
     document.body.classList.toggle(
       "gdp-repo-page",
@@ -2070,10 +2233,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-help-page",
       STATE.route.screen === "help",
     );
-    document.body.classList.toggle(
-      "gdp-history-page",
-      STATE.route.screen === "history",
-    );
+    document.body.classList.toggle("gdp-history-page", historyPanelRoute);
+    document.body.classList.toggle("gdp-file-history-page", fileHistoryRoute);
     document.body.classList.toggle(
       "gdp-database-page",
       STATE.route.screen === "database",
@@ -2085,12 +2246,20 @@ window.GdpExpandLogic = GdpExpandLogic;
     placeSidebarToggle();
     syncSidebarHeaderHeight();
     const historyPanel = $("#history-panel");
-    if (historyPanel) historyPanel.hidden = STATE.route.screen !== "history";
-    if (STATE.route.screen === "history") {
+    if (historyPanel) historyPanel.hidden = !historyPanelRoute;
+    if (historyPanelRoute) {
       const historyRefInput = $<HTMLInputElement>("#history-ref");
-      if (historyRefInput) historyRefInput.value = STATE.route.ref || "HEAD";
+      if (historyRefInput) {
+        const ref =
+          STATE.route.screen === "file" && STATE.route.ref === "worktree"
+            ? "HEAD"
+            : "ref" in STATE.route
+              ? STATE.route.ref || "HEAD"
+              : "HEAD";
+        historyRefInput.value = ref;
+      }
     }
-    syncRepoTargetInput(repoFileTargetFromRoute() || "worktree");
+    syncRepoTargetInput(repoFileTargetForControls() || "worktree");
 
     // Close query-history panel when leaving database screen
     if (STATE.route.screen !== "database") {
@@ -2107,7 +2276,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
       .forEach((link) => {
         const fileRouteOwner =
-          STATE.route.screen === "file" && STATE.route.view === "blob"
+          STATE.route.screen === "file" &&
+          (STATE.route.view === "blob" ||
+            STATE.route.view === "blame" ||
+            STATE.route.view === "history")
             ? "repo"
             : "diff";
         const active =
@@ -2321,6 +2493,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_GENERATION = generation;
     },
     invalidateRepoSidebar,
+    getDiffRoot: () => activeFileHistoryDiffHost || $("#diff"),
+    getEmptyPane: () => activeFileHistoryEmptyHost || $("#empty"),
+    isEmbeddedDiffMode: () => !!activeFileHistoryDiffHost,
   });
   const {
     renderMeta,
@@ -2359,6 +2534,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyCodeFontSize();
   applySidebarHidden(STATE.sidebarHidden, { persist: false });
   observeSidebarHeaderHeight();
+  installHistoryPageDom();
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
   // Sidebar view toggle (tree / flat)
@@ -2848,9 +3024,11 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return Promise.resolve(null);
     }
-    if (isRepoBlobRoute(STATE.route)) {
-      setStatus("live");
-      applySourceRouteToShell();
+    if (
+      STATE.route.screen === "file" &&
+      !(isFileHistoryRoute(STATE.route) && activeHistoryPathFilter) &&
+      dispatchFileRoute(STATE.route)
+    ) {
       return Promise.resolve({
         structureChanged: false,
         invalidatedCards: 0,
@@ -2859,9 +3037,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (STATE.route.screen === "repo") return loadRepo().then(() => null);
     {
-      const empty = $("#empty");
+      const empty = activeFileHistoryEmptyHost || $("#empty");
       if (empty) {
-        const onHistory = STATE.route.screen === "history";
+        const onHistory =
+          STATE.route.screen === "history" || isFileHistoryRoute(STATE.route);
         const h2 = empty.querySelector("h2");
         if (h2) h2.textContent = onHistory ? "Empty diff" : "No changes";
         const p = empty.querySelector("p");
@@ -2885,6 +3064,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.ignoreWs) params.set("ignore_ws", "1");
     if (STATE.from) params.set("from", STATE.from);
     if (STATE.to) params.set("to", STATE.to);
+    if (activeHistoryPathFilter) params.set("path", activeHistoryPathFilter);
     if (options.force) params.set("nocache", "1");
     const url = `/diff.json${params.toString() ? `?${params.toString()}` : ""}`;
     return trackLoad<DiffMeta>(fetch(url).then((r) => r.json()))
@@ -2905,9 +3085,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       renderHelpPage();
     } else if (STATE.route.screen === "repo") loadRepo();
-    else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
-      setStatus("live");
-      applySourceRouteToShell();
+    else if (STATE.route.screen === "file" && dispatchFileRoute(STATE.route)) {
+      // handled by dispatchFileRoute
     } else if (STATE.route.screen === "history") {
       parkRangeForHistory();
       setStatus("live");
@@ -2974,13 +3153,31 @@ window.GdpExpandLogic = GdpExpandLogic;
     escapeHtml,
     getRoute: () => STATE.route,
     setRoute,
-    applyCommitRange: (range) => {
+    applyCommitRange: (range, pathFilter) => {
       STATE.from = range.from;
       STATE.to = range.to;
+      activeHistoryPathFilter = pathFilter || null;
       syncRefInputs();
       return load().then(() => {});
     },
     showEmptyDiffPane: () => {
+      if (activeFileHistoryDiffHost || activeFileHistoryEmptyHost) {
+        activeFileHistoryDiffHost?.replaceChildren();
+        STATE.files = [];
+        window._lastMeta = null;
+        renderMeta(null);
+        DIFF_VIEW.clearLoadQueue();
+        if (activeFileHistoryEmptyHost) {
+          activeFileHistoryEmptyHost.classList.remove("hidden");
+          const h2 = activeFileHistoryEmptyHost.querySelector("h2");
+          if (h2) h2.textContent = "No commit selected";
+          const p = activeFileHistoryEmptyHost.querySelector("p");
+          if (p)
+            p.textContent = "Select a commit from the list to see its changes.";
+        }
+        setStatus("live");
+        return;
+      }
       showEmptyHistoryDiffPane({
         diff: $("#diff"),
         empty: $("#empty"),
@@ -3041,8 +3238,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     // Leaving the history screen: bring back the range the user had picked
     // for the other screens before the URL fallback below reads it.
     if (
-      previousRoute.screen === "history" &&
-      window.location.pathname !== "/history"
+      isHistoryPanelRoute(previousRoute) &&
+      window.location.pathname !== "/history" &&
+      !(
+        window.location.pathname === "/file" &&
+        new URLSearchParams(window.location.search).get("view") === "history"
+      )
     ) {
       restoreRangeAfterHistory();
     }
@@ -3060,8 +3261,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         : parsedRoute;
     if (previousRoute.screen === "database" && nextRoute.screen !== "database")
       DATABASE_VIEW.suspend();
-    if (previousRoute.screen === "history" && nextRoute.screen !== "history")
+    if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
       HISTORY_VIEW.leaveHistory();
+    if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
+      removeFileHistoryShell();
     STATE.route =
       nextRoute.screen === "help" &&
       !new URLSearchParams(window.location.search).has("lang")
@@ -3069,13 +3272,29 @@ window.GdpExpandLogic = GdpExpandLogic;
         : nextRoute;
     STATE.from = STATE.route.range.from;
     STATE.to = STATE.route.range.to;
-    if (STATE.route.screen === "repo")
+    if (
+      STATE.route.screen === "repo" ||
+      (STATE.route.screen === "file" &&
+        (STATE.route.view === "blob" ||
+          STATE.route.view === "blame" ||
+          STATE.route.view === "history"))
+    )
       STATE.repoRef = STATE.route.ref || "worktree";
     ANNOTATIONS_UI?.restoreSessionFromUrl();
     replaceUrlWithCurrentRoute();
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();
+    if (
+      isSameBlobFileRoute(previousRoute, STATE.route) &&
+      routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
+      switchSourceTab(routeBlobPreview(STATE.route) ? "preview" : "code", {
+        updateRoute: false,
+      })
+    ) {
+      setStatus("live");
+      return;
+    }
     if (STATE.route.screen === "help") {
       cancelActiveSourceLoad("navigation");
       setPageMode();
@@ -3094,6 +3313,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       parkRangeForHistory();
       cancelActiveSourceLoad("navigation");
       setPageMode();
+      removeFileHistoryShell();
+      BLAME_VIEW.removeBlamePage();
       removeStandaloneSource();
       HISTORY_VIEW.enterHistory();
       return;
@@ -3118,7 +3339,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       load();
       return;
     }
-    applySourceRouteToShell();
+    if (dispatchFileRoute(STATE.route)) {
+      return;
+    }
+    load();
   }
   window.addEventListener("popstate", applyRouteFromLocation);
   window.addEventListener("pagehide", () => flushViewStatePatch(true));
@@ -3419,11 +3643,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       hideChangeBanner();
       const route = STATE.route;
       if (!shouldAutoLoadCurrentRoute(route)) return;
-      if (isRepoBlobRoute(route)) {
-        renderStandaloneSource({
-          path: route.path,
-          ref: route.ref || "worktree",
-        });
+      if (isBlobOrBlameFileRoute(route)) {
+        dispatchFileRoute(route);
         return;
       }
       doSseLoad(paths);
@@ -3465,13 +3686,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function doSseLoad(paths: Set<string> | null) {
     const route = STATE.route;
     if (!shouldAutoLoadCurrentRoute(route)) return;
-    if (isRepoBlobRoute(route)) {
+    if (isBlobOrBlameFileRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
-      void renderStandaloneSource({
-        path: route.path,
-        ref: route.ref || "worktree",
-      });
+      dispatchFileRoute(route);
       return;
     }
     if (route.screen === "repo") {
@@ -3514,7 +3732,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = pendingSseChangedPaths;
       pendingSseChangedPaths = new Set();
       const route = STATE.route;
-      if (isRepoBlobRoute(route)) {
+      if (isBlobOrBlameFileRoute(route)) {
         const viewingPath = route.path;
         if (paths && viewingPath && !paths.has(viewingPath)) return;
       }
