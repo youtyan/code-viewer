@@ -89,6 +89,8 @@ import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
 import {
   DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
+  MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
+  MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
   startWorktreeUpdateWatch,
 } from "./worktree-watcher";
 
@@ -154,6 +156,7 @@ let openAfterStart = false;
 let scopeOmitDirNames = git.DEFAULT_WORKTREE_OMIT_DIR_NAMES;
 let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
+let scopeWatchLimit = DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
 let uploadEnabled = true;
 let rgAvailableCache: boolean | null = null;
 
@@ -251,6 +254,7 @@ Examples:
   if (scopeOmitDirCliOverride) {
     scopeOmitDirNames = scopeOmitDirCliOverride;
   }
+  scopeWatchLimit = worktreeWatchDirectoryLimitFromEnv();
 }
 
 function warnIfLegacyConfigPresent() {
@@ -266,6 +270,9 @@ function warnIfLegacyConfigPresent() {
 }
 
 function applyPersistedSettings(state: AppSettingsState) {
+  const prevOmit = scopeOmitDirNames;
+  const prevExclude = scopeExcludeNames;
+  const prevWatchLimit = scopeWatchLimit;
   if (
     !scopeOmitDirCliOverride &&
     Array.isArray(state.scopeOmitDirs) &&
@@ -283,7 +290,31 @@ function applyPersistedSettings(state: AppSettingsState) {
   } else {
     scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
   }
+  if (state.scopeWatchLimit != null) {
+    scopeWatchLimit = normalizeScopeWatchLimit(state.scopeWatchLimit);
+  }
   uploadEnabled = state.uploadEnabled !== false;
+  if (
+    prevOmit !== scopeOmitDirNames ||
+    prevExclude !== scopeExcludeNames ||
+    prevWatchLimit !== scopeWatchLimit
+  ) {
+    restartWorktreeWatch();
+  }
+}
+
+function normalizeScopeWatchLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  }
+  const floored = Math.floor(value);
+  if (floored < MIN_WORKTREE_WATCH_DIRECTORY_LIMIT) {
+    return MIN_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  }
+  if (floored > MAX_WORKTREE_WATCH_DIRECTORY_LIMIT) {
+    return MAX_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  }
+  return floored;
 }
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -908,6 +939,10 @@ function handleSettings() {
       exclude_names_effective: scopeExcludeNames,
       exclude_names_built_in: DEFAULT_EXCLUDE_NAMES,
       max_entries: git.WORKTREE_RECURSIVE_ENTRY_LIMIT,
+      watch_limit_effective: scopeWatchLimit,
+      watch_limit_default: DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT,
+      watch_limit_min: MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
+      watch_limit_max: MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
     },
   } satisfies SettingsResponse);
 }
@@ -916,9 +951,14 @@ function worktreeWatchDirectoryLimitFromEnv(): number {
   const raw = process.env.CODE_VIEWER_WORKTREE_WATCH_LIMIT;
   if (!raw) return DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? Math.floor(parsed)
-    : DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  if (!Number.isFinite(parsed) || parsed <= 0)
+    return DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  const floored = Math.floor(parsed);
+  if (floored < MIN_WORKTREE_WATCH_DIRECTORY_LIMIT)
+    return MIN_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  if (floored > MAX_WORKTREE_WATCH_DIRECTORY_LIMIT)
+    return MAX_WORKTREE_WATCH_DIRECTORY_LIMIT;
+  return floored;
 }
 
 function handleFiles(url: URL) {
@@ -2507,23 +2547,50 @@ startDevAssetReload({
   sendReload: () => sendSse("reload"),
 });
 
-worktreeWatch = startWorktreeUpdateWatch({
-  root: cwd,
-  omitDirNames: scopeOmitDirNames,
-  excludeNames: scopeExcludeNames,
-  watch,
-  initialScanMode: "async",
-  maxWatchedDirectories: worktreeWatchDirectoryLimitFromEnv(),
-  onUpdate: triggerUpdate,
-  onWatchLimit: (limit) => {
-    watchLimitReached = limit;
-    sendSse("watch-limit", String(limit));
-  },
-  onError: (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`code-viewer worktree watch skipped: ${message}`);
-  },
-});
+function startScopedWorktreeWatch(): ReturnType<
+  typeof startWorktreeUpdateWatch
+> {
+  watchLimitReached = null;
+  return startWorktreeUpdateWatch({
+    root: cwd,
+    omitDirNames: scopeOmitDirNames,
+    excludeNames: scopeExcludeNames,
+    watch,
+    initialScanMode: "async",
+    maxWatchedDirectories: scopeWatchLimit,
+    onUpdate: triggerUpdate,
+    onWatchLimit: (limit) => {
+      watchLimitReached = limit;
+      sendSse("watch-limit", String(limit));
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`code-viewer worktree watch skipped: ${message}`);
+    },
+  });
+}
+
+function restartWorktreeWatch() {
+  // Guard against being called during the synchronous startup phase, before
+  // `worktreeWatch` / `shuttingDown` are reached by their let declarations.
+  // Touching them inside the TDZ throws ReferenceError.
+  try {
+    if (shuttingDown) return;
+    if (!worktreeWatch) return;
+  } catch {
+    return;
+  }
+  try {
+    worktreeWatch.close();
+  } catch (error) {
+    console.warn(
+      `code-viewer worktree watch restart close skipped: ${String(error)}`,
+    );
+  }
+  worktreeWatch = startScopedWorktreeWatch();
+}
+
+worktreeWatch = startScopedWorktreeWatch();
 
 console.log(`GDP_LISTEN_URL=http://127.0.0.1:${server.port}/`);
 console.log(`git-diff-preview serving ${cwd}`);

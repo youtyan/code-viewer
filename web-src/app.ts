@@ -117,6 +117,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   let highlightLoadPromise: Promise<HljsApi | null> | null = null;
   let SERVER_SCOPE_OMIT_DIRS_DEFAULT: string[] = [];
   let SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT: string[] = [];
+  let SERVER_SCOPE_WATCH_LIMIT_DEFAULT = 1024;
+  let SERVER_SCOPE_WATCH_LIMIT_MIN = 16;
+  let SERVER_SCOPE_WATCH_LIMIT_MAX = 65536;
   const UNDO_STACK: UndoActionResponse[] = [];
   let PENDING_G_SCOPE: KeymapScope | null = null;
   let PENDING_G_UNTIL = 0;
@@ -620,6 +623,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_SCOPE_EXCLUDE_NAMES_DEFAULT = normalizeScopeExcludeNames(
         settings.scope.exclude_names_effective,
       );
+      if (typeof settings.scope.watch_limit_default === "number")
+        SERVER_SCOPE_WATCH_LIMIT_DEFAULT = settings.scope.watch_limit_default;
+      if (typeof settings.scope.watch_limit_min === "number")
+        SERVER_SCOPE_WATCH_LIMIT_MIN = settings.scope.watch_limit_min;
+      if (typeof settings.scope.watch_limit_max === "number")
+        SERVER_SCOPE_WATCH_LIMIT_MAX = settings.scope.watch_limit_max;
       return settings;
     } catch {
       return null;
@@ -1033,6 +1042,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadsTitle: string;
         uploadEnabledLabel: string;
         uploadEnabledHelp: string;
+        watchTitle: string;
+        watchLimit: string;
+        watchLimitHelp: (defaultLimit: number) => string;
       };
       annotations: {
         title: string;
@@ -1135,6 +1147,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "Allow file uploads into worktree folders",
         uploadEnabledHelp:
           "Disable to make the worktree read-only for everyone using this server.",
+        watchTitle: "File change watcher",
+        watchLimit: "Maximum directories to watch",
+        watchLimitHelp: (defaultLimit) =>
+          `Higher values reduce missed updates in deep trees at the cost of file handles. Default: ${defaultLimit}.`,
       },
       annotations: {
         title: "Code annotations",
@@ -1236,6 +1252,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
         uploadEnabledHelp:
           "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
+        watchTitle: "ファイル変更の監視",
+        watchLimit: "監視するディレクトリ数の上限",
+        watchLimitHelp: (defaultLimit) =>
+          `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。既定値: ${defaultLimit}。`,
       },
       annotations: {
         title: "コード注釈",
@@ -1376,14 +1396,21 @@ window.GdpExpandLogic = GdpExpandLogic;
       settingsSections[1].textContent = text.settings.uploadsTitle;
     if (settingsSections[2])
       settingsSections[2].textContent = text.settings.excludedDirectories;
+    if (settingsSections[3])
+      settingsSections[3].textContent = text.settings.watchTitle;
     setElementText("#upload-enabled-label", text.settings.uploadEnabledLabel);
     setElementText("#upload-help", text.settings.uploadEnabledHelp);
+    setElementText(
+      "#scope-watch-limit-help",
+      text.settings.watchLimitHelp(SERVER_SCOPE_WATCH_LIMIT_DEFAULT),
+    );
     const labelMap: Record<string, string> = {
       "viewer-language": text.settings.language,
       "sidebar-font-size": text.settings.fileListFontSize,
       "code-font-size": text.settings.codeFontSize,
       "scope-omit-dirs": text.settings.omitDirs,
       "scope-exclude-names": text.settings.excludeNames,
+      "scope-watch-limit": text.settings.watchLimit,
     };
     Object.entries(labelMap).forEach(([id, label]) => {
       const labelEl = document.querySelector<HTMLLabelElement>(
@@ -1633,6 +1660,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     codeFontSize.value = savedCodeFontSize();
     input.value = effectiveScopeOmitDirs().join("\n");
     excludeInput.value = effectiveScopeExcludeNames().join("\n");
+    const watchLimitInput =
+      document.querySelector<HTMLInputElement>("#scope-watch-limit");
+    if (watchLimitInput) {
+      watchLimitInput.min = String(SERVER_SCOPE_WATCH_LIMIT_MIN);
+      watchLimitInput.max = String(SERVER_SCOPE_WATCH_LIMIT_MAX);
+      watchLimitInput.value = String(effectiveScopeWatchLimit());
+    }
     const uploadToggle =
       document.querySelector<HTMLInputElement>("#upload-enabled");
     if (uploadToggle)
@@ -1703,6 +1737,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     refreshRepositoryTreeAfterSettings();
   }
 
+  function normalizeScopeWatchLimit(value: unknown): number | null {
+    const parsed =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Number(value)
+          : Number.NaN;
+    if (!Number.isFinite(parsed)) return null;
+    const floored = Math.floor(parsed);
+    if (floored < SERVER_SCOPE_WATCH_LIMIT_MIN)
+      return SERVER_SCOPE_WATCH_LIMIT_MIN;
+    if (floored > SERVER_SCOPE_WATCH_LIMIT_MAX)
+      return SERVER_SCOPE_WATCH_LIMIT_MAX;
+    return floored;
+  }
+
+  function effectiveScopeWatchLimit(): number {
+    const saved = normalizeScopeWatchLimit(APP_SETTINGS.scopeWatchLimit);
+    return saved ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
+  }
+
+  function saveScopeWatchLimitField(value: string) {
+    const next = normalizeScopeWatchLimit(value);
+    const resolved = next ?? SERVER_SCOPE_WATCH_LIMIT_DEFAULT;
+    mergeLocalSettings({ scopeWatchLimit: resolved });
+    patchSettings({ scopeWatchLimit: resolved });
+    const input =
+      document.querySelector<HTMLInputElement>("#scope-watch-limit");
+    if (input) input.value = String(resolved);
+  }
+
   function resetScopeSettings() {
     setViewerLanguage("en", false);
     mergeLocalSettings({
@@ -1710,6 +1775,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       codeFontSize: null,
       scopeOmitDirs: null,
       scopeExcludeNames: null,
+      scopeWatchLimit: null,
       uploadEnabled: null,
     });
     applySidebarFontSize("regular");
@@ -1720,6 +1786,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       codeFontSize: null,
       scopeOmitDirs: null,
       scopeExcludeNames: null,
+      scopeWatchLimit: null,
       uploadEnabled: null,
     });
     const sidebarFontSize =
@@ -2293,6 +2360,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     saveScopeExcludeNamesField(
       (event.currentTarget as HTMLTextAreaElement).value,
     );
+  });
+  $("#scope-watch-limit")?.addEventListener("change", (event) => {
+    saveScopeWatchLimitField((event.currentTarget as HTMLInputElement).value);
   });
   $("#scope-settings-popover")?.addEventListener("keydown", (e) => {
     if (isImeComposing(e)) return;

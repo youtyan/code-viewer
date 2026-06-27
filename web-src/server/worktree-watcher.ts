@@ -45,7 +45,9 @@ export type WorktreeUpdateWatch = {
   close: () => void;
 };
 
-export const DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT = 256;
+export const DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT = 1024;
+export const MIN_WORKTREE_WATCH_DIRECTORY_LIMIT = 1;
+export const MAX_WORKTREE_WATCH_DIRECTORY_LIMIT = 65536;
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");

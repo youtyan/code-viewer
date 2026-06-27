@@ -181,6 +181,12 @@
       <textarea id="scope-exclude-names" rows="4" spellcheck="false"></textarea>
       <p id="scope-omit-source"></p>
     </div>
+    <div class="scope-settings-section">
+      <strong id="watch-section-title" class="scope-settings-section-title">File change watcher</strong>
+      <label for="scope-watch-limit">Maximum directories to watch</label>
+      <input id="scope-watch-limit" type="number" min="16" max="65536" step="16" />
+      <p id="scope-watch-limit-help" class="scope-settings-help"></p>
+    </div>
     <div class="scope-settings-footer">
       <p id="scope-settings-autosave-note" class="scope-settings-help"></p>
       <button id="scope-omit-reset" type="button">Restore defaults</button>
