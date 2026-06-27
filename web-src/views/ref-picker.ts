@@ -347,14 +347,13 @@ export function createRefPicker(deps: RefPickerDeps) {
   wireRefSelectorInput(deps.$<HTMLInputElement>("#repo-target"), (ref) => {
     const route = deps.getRoute();
     if (route.screen !== "file") return;
-    deps.setRoute({
-      screen: "file",
-      path: route.path,
+    const nextRoute: AppRoute = {
+      ...route,
       ref,
-      view: "blob",
       range: deps.currentRange(),
-    });
-    deps.renderStandaloneSource({ path: route.path, ref });
+    };
+    if (nextRoute.view === "history") delete nextRoute.commit;
+    deps.setRoute(nextRoute);
   });
 
   popSearch.addEventListener("input", () => {

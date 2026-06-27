@@ -65,6 +65,7 @@ class FakeElement {
   attributes: Record<string, string> = {};
   preventDefaultCount = 0;
   parentElement: FakeElement | null = null;
+  value = "";
   private listeners: Record<string, Array<(event?: unknown) => void>> = {};
   private classValue = "";
 
@@ -113,6 +114,12 @@ class FakeElement {
 
   addEventListener(event: string, listener: (event?: unknown) => void) {
     this.listeners[event] = [...(this.listeners[event] || []), listener];
+  }
+
+  removeEventListener(event: string, listener: (event?: unknown) => void) {
+    this.listeners[event] = (this.listeners[event] || []).filter(
+      (current) => current !== listener,
+    );
   }
 
   click() {
@@ -912,5 +919,96 @@ describe("history view lifecycle", () => {
       to: commits[1].sha,
       pathFilter: "README.md",
     });
+  });
+
+  test("file history mount filter input reloads the path-filtered commit list", async () => {
+    const { panel, list, banner, status, sentinel, info } =
+      installHistoryViewDom();
+    const filePanel = new FakeElement();
+    const fileList = new FakeElement();
+    const fileBanner = new FakeElement();
+    const fileStatus = new FakeElement();
+    const fileSentinel = new FakeElement();
+    const fileFilterInput = new FakeElement();
+    const commits = [
+      {
+        sha: "aaa111",
+        parents: ["parent-a"],
+        subject: "first",
+        body: "",
+        author: "Alice",
+        when: new Date().toISOString(),
+      },
+      {
+        sha: "bbb222",
+        parents: ["parent-b"],
+        subject: "second",
+        body: "",
+        author: "Bob",
+        when: new Date().toISOString(),
+      },
+    ];
+    const fetchedUrls: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input);
+      fetchedUrls.push(url);
+      const params = new URLSearchParams(url.split("?")[1] || "");
+      const filtered =
+        params.get("q") === "bbb"
+          ? commits.filter((commit) => commit.sha.startsWith("bbb"))
+          : commits;
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: filtered, hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => {},
+      applyCommitRange: async () => {},
+      showEmptyDiffPane: () => {},
+      getSyntaxHighlight: () => false,
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory({
+      mount: {
+        panel: filePanel as unknown as HTMLElement,
+        list: fileList as unknown as HTMLOListElement,
+        banner: fileBanner as unknown as HTMLElement,
+        status: fileStatus as unknown as HTMLElement,
+        sentinel: fileSentinel as unknown as HTMLElement,
+        filterInput: fileFilterInput as unknown as HTMLInputElement,
+        commitInfo: info as unknown as HTMLElement,
+      },
+    });
+
+    expect(fileList.querySelectorAll(".history-item").length).toBe(2);
+
+    fileFilterInput.value = "bbb";
+    fileFilterInput.dispatch("input", { target: fileFilterInput });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const rows = fileList.querySelectorAll(".history-item");
+    expect(rows.map((row) => row.dataset.sha)).toEqual(["bbb222"]);
+    expect(fetchedUrls.some((url) => url.includes("q=bbb"))).toBe(true);
   });
 });

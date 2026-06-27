@@ -817,10 +817,22 @@ export function createHistoryView(deps: HistoryViewDeps) {
     void loadNextPage();
   }
 
-  function handleFilterInput() {
-    if (!attachedFilterInput) return;
+  function activeFilterInputFromEvent(event?: Event): HTMLInputElement | null {
+    const target = event?.target;
+    if (
+      typeof HTMLInputElement === "function" &&
+      target instanceof HTMLInputElement &&
+      target === activeMount.filterInput
+    ) {
+      return target;
+    }
+    return attachedFilterInput;
+  }
+
+  function handleFilterInput(event?: Event) {
+    const input = activeFilterInputFromEvent(event);
+    if (!input) return;
     if (filterTimer) clearTimeout(filterTimer);
-    const input = attachedFilterInput;
     filterTimer = setTimeout(() => {
       filterTimer = null;
       applyFilter(input.value);
@@ -846,6 +858,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     if (attachedFilterInput) {
       attachedFilterInput.removeEventListener("input", handleFilterInput);
+      attachedFilterInput.removeEventListener("change", handleFilterInput);
       attachedFilterInput.removeEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = null;
     }
@@ -868,6 +881,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (input) {
       input.value = query;
       input.addEventListener("input", handleFilterInput);
+      input.addEventListener("change", handleFilterInput);
       input.addEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = input;
     }
@@ -891,6 +905,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (!historyScopeFromRoute()) return;
     e.preventDefault();
     void moveSelection(e.key === "ArrowDown" ? 1 : -1);
+  });
+  docWithEvents.addEventListener?.("input", (e) => {
+    if (e.target !== activeMount.filterInput) return;
+    handleFilterInput(e);
+  });
+  docWithEvents.addEventListener?.("change", (e) => {
+    if (e.target !== activeMount.filterInput) return;
+    handleFilterInput(e);
   });
 
   activateMount(defaultMount);
