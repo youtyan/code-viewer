@@ -1033,7 +1033,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         displaySource: string;
         excludedDirectories: string;
         omitDirs: string;
+        omitDirsHelp: string;
         excludeNames: string;
+        excludeNamesHelp: string;
         reset: string;
         autosaveNote: string;
         scopeSource: (project: string, source: string) => string;
@@ -1136,11 +1138,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         displaySource: "Applies to all projects in this browser.",
         excludedDirectories: "Excluded directories",
         omitDirs: "Skip these directory names while browsing and searching",
+        omitDirsHelp:
+          "Reads no contents inside these directories. Applies to the sidebar (Files), Ctrl+K (file search), Ctrl+G (grep), Datastores, and the file change watcher.",
         excludeNames: "Hide these file or directory names completely",
+        excludeNamesHelp:
+          "Removes matching files or directories from the sidebar, search, and grep results entirely. Unlike Skip, the names themselves disappear from the UI.",
         reset: "Restore defaults",
         autosaveNote: "Changes save automatically.",
         scopeSource: (project, source) =>
-          `Saved for project "${project}" in this browser. Source: ${source}. Used by tree, Ctrl+K, and Ctrl+G. Restore defaults removes the browser override.`,
+          `Saved for project "${project}" in this browser. Source: ${source}. Used by the sidebar, Ctrl+K, Ctrl+G, Datastores, and the file change watcher. Restore defaults removes the browser override.`,
         browserOverride: "Browser override",
         serverDefault: "Server default",
         uploadsTitle: "Uploads",
@@ -1150,7 +1156,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         watchTitle: "File change watcher",
         watchLimit: "Maximum directories to watch",
         watchLimitHelp: (defaultLimit) =>
-          `Higher values reduce missed updates in deep trees at the cost of file handles. Default: ${defaultLimit}.`,
+          `Higher values reduce missed updates in deep trees at the cost of file handles. Combine with the Skip list above to keep heavy folders (node_modules, .git, dist...) out of the watch budget. Default: ${defaultLimit}.`,
       },
       annotations: {
         title: "Code annotations",
@@ -1241,11 +1247,15 @@ window.GdpExpandLogic = GdpExpandLogic;
         displaySource: "このブラウザのすべてのプロジェクトに適用されます。",
         excludedDirectories: "除外ディレクトリ",
         omitDirs: "閲覧と検索でスキップするディレクトリ名",
+        omitDirsHelp:
+          "これらのディレクトリの中身は読み込みません。サイドバー（Files）・Ctrl+K（ファイル検索）・Ctrl+G（grep）・Datastores・File change watcher の5機能すべてに適用されます。",
         excludeNames: "完全に非表示にするファイル名またはディレクトリ名",
+        excludeNamesHelp:
+          "リスト中の名前に一致するファイル/ディレクトリを、サイドバー・検索結果・grep 結果から完全に消します。Skip と違い、名前自体が UI に出なくなります。",
         reset: "デフォルトに戻す",
         autosaveNote: "変更は自動で保存されます。",
         scopeSource: (project, source) =>
-          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。ツリー、Ctrl+K、Ctrl+G で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
+          `このブラウザのプロジェクト "${project}" に保存されます。ソース: ${source}。サイドバー、Ctrl+K、Ctrl+G、Datastores、File change watcher で使われます。「デフォルトに戻す」でブラウザ側の上書きを削除します。`,
         browserOverride: "ブラウザ側の上書き",
         serverDefault: "サーバ既定値",
         uploadsTitle: "アップロード",
@@ -1255,7 +1265,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         watchTitle: "ファイル変更の監視",
         watchLimit: "監視するディレクトリ数の上限",
         watchLimitHelp: (defaultLimit) =>
-          `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。既定値: ${defaultLimit}。`,
+          `値を大きくすると深いツリーの変更を取りこぼしにくくなりますが、ファイルハンドル数を消費します。上の Skip リストと併用すると、重いフォルダ（node_modules, .git, dist など）を監視枠から外せます。既定値: ${defaultLimit}。`,
       },
       annotations: {
         title: "コード注釈",
@@ -1400,6 +1410,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       settingsSections[3].textContent = text.settings.watchTitle;
     setElementText("#upload-enabled-label", text.settings.uploadEnabledLabel);
     setElementText("#upload-help", text.settings.uploadEnabledHelp);
+    setElementText("#scope-omit-dirs-help", text.settings.omitDirsHelp);
+    setElementText("#scope-exclude-names-help", text.settings.excludeNamesHelp);
     setElementText(
       "#scope-watch-limit-help",
       text.settings.watchLimitHelp(SERVER_SCOPE_WATCH_LIMIT_DEFAULT),
