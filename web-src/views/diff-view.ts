@@ -614,11 +614,9 @@ export function createDiffView(deps: DiffViewDeps) {
     if (sidebarNeedsRender && canUpdateSidebar) renderSidebar(newFiles);
 
     const oldByKey = new Map<string, DiffCardElement>();
-    document
-      .querySelectorAll<DiffCardElement>(".gdp-file-shell")
-      .forEach((c) => {
-        if (c.dataset.key) oldByKey.set(c.dataset.key, c);
-      });
+    target.querySelectorAll<DiffCardElement>(".gdp-file-shell").forEach((c) => {
+      if (c.dataset.key) oldByKey.set(c.dataset.key, c);
+    });
 
     const ordered: DiffCardElement[] = [];
     for (const f of newFiles) {

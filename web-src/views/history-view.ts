@@ -44,6 +44,123 @@ export type HistoryViewMount = {
   commitInfo?: HTMLElement | null;
 };
 
+export type HistoryPanelDomOptions = {
+  variant?: "page" | "file";
+};
+
+export function buildHistoryPanelDom(
+  options: HistoryPanelDomOptions = {},
+): Omit<HistoryViewMount, "commitInfo"> {
+  const variant = options.variant || "page";
+  const page = variant === "page";
+  const panel = document.createElement("aside");
+  if (page) {
+    panel.id = "history-panel";
+    panel.hidden = true;
+  } else {
+    panel.className = "gdp-file-history-panel";
+  }
+  panel.setAttribute("aria-label", "Commit history");
+
+  const panelHead = document.createElement("div");
+  panelHead.className = "history-head";
+  const title = document.createElement("span");
+  title.className = "history-title";
+  title.textContent = "Commits";
+  panelHead.appendChild(title);
+  if (page) {
+    const refMount = document.createElement("span");
+    refMount.dataset.refSelectorMount = "";
+    refMount.dataset.refId = "history-ref";
+    refMount.dataset.placeholder = "ref...";
+    refMount.dataset.title = "history ref";
+    panelHead.appendChild(refMount);
+  }
+
+  const filterWrap = document.createElement("div");
+  filterWrap.className = "history-filter-wrap";
+  const filterInput = document.createElement("input");
+  if (page) filterInput.id = "history-filter";
+  else filterInput.className = "history-filter";
+  filterInput.type = "search";
+  filterInput.placeholder = page
+    ? "filter commits… (message, sha, author:name, path:file)"
+    : "filter commits… (message, sha, author:name)";
+  filterInput.autocomplete = "off";
+  filterWrap.appendChild(filterInput);
+
+  const banner = document.createElement("div");
+  if (page) banner.id = "history-banner";
+  banner.className = "history-banner";
+  banner.hidden = true;
+  banner.setAttribute("role", "status");
+
+  const list = document.createElement("ol");
+  if (page) list.id = "history-list";
+  list.className = "history-list";
+
+  const sentinel = document.createElement("div");
+  if (page) sentinel.id = "history-sentinel";
+  sentinel.className = "history-sentinel";
+  sentinel.setAttribute("aria-hidden", "true");
+
+  const status = document.createElement("div");
+  if (page) status.id = "history-status";
+  status.className = "history-status";
+  status.hidden = true;
+  status.setAttribute("role", "status");
+
+  panel.append(panelHead, filterWrap, banner, list, sentinel, status);
+  return { panel, list, banner, status, sentinel, filterInput };
+}
+
+export type HistoryCommitInfoDomOptions = {
+  variant?: "page" | "file";
+};
+
+export function buildHistoryCommitInfoDom(
+  options: HistoryCommitInfoDomOptions = {},
+): HTMLElement {
+  const variant = options.variant || "page";
+  const page = variant === "page";
+  const info = document.createElement("section");
+  if (page) info.id = "history-commit-info";
+  info.className = page
+    ? "history-commit-info"
+    : "history-commit-info gdp-file-history-commit-info";
+  info.hidden = true;
+  info.setAttribute("aria-label", "Selected commit");
+  const head = document.createElement("div");
+  head.className = "hci-head";
+  const sha = document.createElement("span");
+  if (page) sha.id = "hci-sha";
+  sha.className = "hci-sha";
+  const author = document.createElement("span");
+  if (page) author.id = "hci-author";
+  author.className = "hci-author";
+  const date = document.createElement("span");
+  if (page) date.id = "hci-date";
+  date.className = "hci-date";
+  head.append(sha, author, date);
+  const subject = document.createElement("h2");
+  if (page) subject.id = "hci-subject";
+  subject.className = "hci-subject";
+  const body = document.createElement("div");
+  if (page) body.id = "hci-body";
+  body.className = "hci-body";
+  body.hidden = true;
+  info.append(head, subject, body);
+  return info;
+}
+
+export function installHistoryPageDom(): HistoryViewMount {
+  const panelDom = buildHistoryPanelDom({ variant: "page" });
+  document.getElementById("history-panel")?.replaceWith(panelDom.panel);
+  const commitInfo = buildHistoryCommitInfoDom({ variant: "page" });
+  document.getElementById("history-commit-info")?.replaceWith(commitInfo);
+  return { ...panelDom, commitInfo };
+}
+
 export function historyBodyLineCount(rawText: string): number {
   if (!rawText) return 0;
   return rawText.split(/\r?\n/).length;
@@ -583,17 +700,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
   // picks plus route changes) run sequentially instead of interleaving.
   let entering: Promise<void> = Promise.resolve();
   function enterHistory(
-    mountOrForce?: HistoryViewMount | boolean,
-    forceArg?: boolean,
+    options: { mount?: HistoryViewMount; force?: boolean } = {},
   ): Promise<void> {
-    const mount =
-      typeof mountOrForce === "object"
-        ? mountOrForce
-        : mountOrForce === undefined
-          ? defaultMount
-          : activeMount;
-    const force =
-      typeof mountOrForce === "boolean" ? mountOrForce : forceArg === true;
+    const force = options.force === true;
+    const mount = options.mount || (force ? activeMount : defaultMount);
     activateMount(mount);
     entering = entering.then(() => doEnterHistory(force)).catch(() => {});
     return entering;
@@ -665,7 +775,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       );
     }
     // Force a reload even if the picked ref equals the current one.
-    void enterHistory(true);
+    void enterHistory({ force: true });
   }
 
   function leaveHistory() {

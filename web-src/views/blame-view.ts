@@ -11,7 +11,6 @@ import {
   blameTimeBins,
   groupBlameLines,
 } from "../core/blame";
-import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type {
   AppRoute,
   DiffRange,
@@ -20,8 +19,7 @@ import type {
 } from "../core/routes";
 import { normalizeSourceShikiLang } from "../core/source-meta";
 import {
-  createFileViewTabs,
-  type FileViewTab,
+  createFileShellSticky,
   mountFileShellCard,
   type SourceBlobTab,
 } from "./file-shell";
@@ -41,6 +39,7 @@ export type BlameViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: { route: AppRoute };
   setRoute(route: AppRoute, replace?: boolean): void;
+  applyRouteFromLocation?(): void;
   setPageMode(): void;
   currentRange(): DiffRange;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
@@ -83,48 +82,6 @@ export function createBlameView(deps: BlameViewDeps) {
     document.querySelectorAll(".gdp-standalone-blame").forEach((el) => {
       el.remove();
     });
-  }
-
-  function buildSticky(
-    target: SourceFileTarget,
-    activeTab: FileViewTab,
-  ): {
-    sticky: HTMLElement;
-    tabsHost: HTMLElement;
-  } {
-    const sticky = document.createElement("div");
-    sticky.className = "gdp-file-detail-sticky";
-    const header = document.createElement("div");
-    header.className = "gdp-file-detail-header";
-    const name = document.createElement("div");
-    name.className = "gdp-file-detail-path";
-    name.appendChild(deps.createFileBreadcrumb(target.path, target.ref));
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "gdp-file-header-icon gdp-copy-path";
-    copy.title = "copy file path";
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(target.path);
-        copy.classList.add("copied");
-        setTimeout(() => copy.classList.remove("copied"), 1000);
-      } catch {
-        // ignore
-      }
-    });
-    name.appendChild(copy);
-    header.appendChild(name);
-    sticky.appendChild(header);
-    const tabDeps = {
-      currentRange: deps.currentRange,
-      setRoute: deps.setRoute,
-      setPreferredSourceTab: deps.setPreferredSourceTab,
-    };
-    const tabs = createFileViewTabs(tabDeps, target, activeTab);
-    sticky.appendChild(tabs);
-    return { sticky, tabsHost: tabs };
   }
 
   function colourBarFor(
@@ -292,12 +249,15 @@ export function createBlameView(deps: BlameViewDeps) {
             sha.title = "open this commit in history";
             sha.style.cursor = "pointer";
             sha.addEventListener("click", () => {
+              const ref =
+                target.ref && target.ref !== "worktree" ? target.ref : "HEAD";
               deps.setRoute({
                 screen: "history",
-                ref: target.ref || "HEAD",
+                ref,
                 commit: group.sha,
                 range: deps.currentRange(),
               });
+              deps.applyRouteFromLocation?.();
             });
           }
           meta.appendChild(sha);
@@ -348,7 +308,16 @@ export function createBlameView(deps: BlameViewDeps) {
     card.dataset.path = target.path;
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
-    const { sticky } = buildSticky(target, "blame");
+    const { sticky } = createFileShellSticky(
+      {
+        currentRange: deps.currentRange,
+        setRoute: deps.setRoute,
+        setPreferredSourceTab: deps.setPreferredSourceTab,
+        createFileBreadcrumb: deps.createFileBreadcrumb,
+      },
+      target,
+      "blame",
+    );
     sticky.appendChild(buildLegend());
     wrapper.appendChild(sticky);
     const body = document.createElement("div");
@@ -394,7 +363,6 @@ export function createBlameView(deps: BlameViewDeps) {
   return {
     renderBlamePage,
     removeBlamePage,
-    buildSticky,
     cleanup,
   };
 }

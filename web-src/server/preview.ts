@@ -1317,6 +1317,8 @@ function handleFileBlame(url: URL) {
   const path = url.searchParams.get("path") || "";
   if (!safePath(path)) return text("invalid path", 400);
   const ref = url.searchParams.get("ref") || "worktree";
+  if (!ref || ref.startsWith("-") || ref.includes("\0"))
+    return text("invalid ref", 400);
   const rawBase = url.searchParams.get("base");
   const requestedBase: git.GitBlameBase =
     rawBase === "HEAD"

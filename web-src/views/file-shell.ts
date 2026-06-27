@@ -1,11 +1,12 @@
+import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import { isPreviewableSource } from "../core/source-meta";
 
-export type RepositoryFileView = "blob" | "blame" | "history";
+export type FileShellView = "blob" | "blame" | "history";
 export type SourceBlobTab = "preview" | "code";
 export type FileViewTab = SourceBlobTab | "blame" | "history";
 
-export type RepositoryFileRoute = Extract<AppRoute, { screen: "file" }> & {
+export type BlobOrBlameFileRoute = Extract<AppRoute, { screen: "file" }> & {
   view: "blob" | "blame";
 };
 
@@ -22,9 +23,25 @@ export type FileViewTabDeps = {
   setPreferredSourceTab?(tab: SourceBlobTab): void;
 };
 
-export function isRepositoryFileViewRoute(
+export type FileShellStickyDeps = FileViewTabDeps & {
+  createFileBreadcrumb(path: string, ref?: string): HTMLElement;
+};
+
+export type FileViewTabsOptions = {
+  includeFileTabs?: boolean;
+  previewable?: boolean;
+  sourceTabClick?: "route" | "manual";
+  sourceCopyButton?: HTMLElement;
+};
+
+export type FileViewTabButtons = {
+  codeButton: HTMLButtonElement;
+  previewButton: HTMLButtonElement | null;
+};
+
+export function isBlobOrBlameFileRoute(
   route: AppRoute,
-): route is RepositoryFileRoute {
+): route is BlobOrBlameFileRoute {
   return (
     route.screen === "file" && (route.view === "blob" || route.view === "blame")
   );
@@ -33,7 +50,7 @@ export function isRepositoryFileViewRoute(
 export function createFileViewTabButton(
   deps: FileViewTabDeps,
   target: SourceFileTarget,
-  view: RepositoryFileView,
+  view: FileShellView,
   label: string,
   active: boolean,
 ): HTMLButtonElement {
@@ -62,6 +79,7 @@ function createBlobSourceTabButton(
   target: SourceFileTarget,
   sourceTab: SourceBlobTab,
   active: boolean,
+  options: FileViewTabsOptions = {},
 ): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -73,6 +91,7 @@ function createBlobSourceTabButton(
   btn.addEventListener("click", () => {
     if (active) return;
     deps.setPreferredSourceTab?.(sourceTab);
+    if (options.sourceTabClick === "manual") return;
     deps.setRoute({
       screen: "file",
       path: target.path,
@@ -90,49 +109,112 @@ export function appendFileViewTabs(
   deps: FileViewTabDeps,
   target: SourceFileTarget,
   activeTab: FileViewTab,
-): void {
-  if (isPreviewableSource(target.path)) {
+  options: FileViewTabsOptions = {},
+): FileViewTabButtons {
+  const includeFileTabs = options.includeFileTabs !== false;
+  const showPreview =
+    options.previewable ??
+    (isPreviewableSource(target.path) || activeTab === "preview");
+  let previewButton: HTMLButtonElement | null = null;
+  if (showPreview) {
+    previewButton = createBlobSourceTabButton(
+      deps,
+      target,
+      "preview",
+      activeTab === "preview",
+      options,
+    );
+    tabs.appendChild(previewButton);
+  }
+  const codeButton = createBlobSourceTabButton(
+    deps,
+    target,
+    "code",
+    activeTab === "code",
+    options,
+  );
+  tabs.appendChild(codeButton);
+  if (includeFileTabs) {
     tabs.appendChild(
-      createBlobSourceTabButton(
+      createFileViewTabButton(
         deps,
         target,
-        "preview",
-        activeTab === "preview",
+        "blame",
+        "Blame",
+        activeTab === "blame",
+      ),
+    );
+    tabs.appendChild(
+      createFileViewTabButton(
+        deps,
+        target,
+        "history",
+        "History",
+        activeTab === "history",
       ),
     );
   }
-  tabs.appendChild(
-    createBlobSourceTabButton(deps, target, "code", activeTab === "code"),
-  );
-  tabs.appendChild(
-    createFileViewTabButton(
-      deps,
-      target,
-      "blame",
-      "Blame",
-      activeTab === "blame",
-    ),
-  );
-  tabs.appendChild(
-    createFileViewTabButton(
-      deps,
-      target,
-      "history",
-      "History",
-      activeTab === "history",
-    ),
-  );
+  if (options.sourceCopyButton) tabs.appendChild(options.sourceCopyButton);
+  return { codeButton, previewButton };
 }
 
 export function createFileViewTabs(
   deps: FileViewTabDeps,
   target: SourceFileTarget,
   activeTab: FileViewTab,
+  options: FileViewTabsOptions = {},
 ): HTMLElement {
   const tabs = document.createElement("div");
   tabs.className = "gdp-source-tabs gdp-file-view-tabs";
-  appendFileViewTabs(tabs, deps, target, activeTab);
+  appendFileViewTabs(tabs, deps, target, activeTab, options);
   return tabs;
+}
+
+function createFilePathCopyButton(target: SourceFileTarget): HTMLButtonElement {
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "gdp-file-header-icon gdp-copy-path";
+  copy.title = "copy file path";
+  copy.setAttribute("aria-label", "copy file path");
+  copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+  copy.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(target.path);
+      copy.classList.add("copied");
+      setTimeout(() => copy.classList.remove("copied"), 1200);
+    } catch {
+      copy.classList.add("failed");
+      setTimeout(() => copy.classList.remove("failed"), 1200);
+    }
+  });
+  return copy;
+}
+
+export function createFileShellSticky(
+  deps: FileShellStickyDeps,
+  target: SourceFileTarget,
+  activeTab: FileViewTab,
+): {
+  sticky: HTMLElement;
+  header: HTMLElement;
+  tabsHost: HTMLElement;
+} {
+  const sticky = document.createElement("div");
+  sticky.className = "gdp-file-detail-sticky";
+  const header = document.createElement("div");
+  header.className = "gdp-file-detail-header";
+  const name = document.createElement("div");
+  name.className = "gdp-file-detail-path";
+  name.appendChild(deps.createFileBreadcrumb(target.path, target.ref));
+  name.appendChild(createFilePathCopyButton(target));
+  header.appendChild(name);
+  sticky.appendChild(header);
+  const tabsHost = document.createElement("div");
+  tabsHost.className = "gdp-file-detail-tabs";
+  tabsHost.appendChild(createFileViewTabs(deps, target, activeTab));
+  sticky.appendChild(tabsHost);
+  return { sticky, header, tabsHost };
 }
 
 export function mountFileShellCard(

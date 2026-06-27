@@ -41,7 +41,8 @@ import type {
   RawFileInfo,
 } from "../core/types";
 import {
-  createFileViewTabButton,
+  appendFileViewTabs,
+  createFileShellSticky,
   mountFileShellCard,
   type SourceBlobTab,
 } from "./file-shell";
@@ -750,44 +751,28 @@ export function createSourceView(deps: SourceViewDeps) {
   }
 
   function createSourceTabs(
+    target: SourceFileTarget,
     active: SourceBlobTab,
     textValue?: string,
     options: { previewable?: boolean } = {},
   ) {
     const tabs = document.createElement("div");
     tabs.className = "gdp-source-tabs";
-    const showPreview = !!options.previewable || active === "preview";
-    const codeButton = document.createElement("button");
-    codeButton.type = "button";
-    codeButton.dataset.sourceTab = "code";
-    codeButton.textContent = "Code";
-    codeButton.classList.toggle("active", active === "code");
-    tabs.appendChild(codeButton);
-    let previewButton: HTMLButtonElement | null = null;
-    if (showPreview) {
-      previewButton = document.createElement("button");
-      previewButton.type = "button";
-      previewButton.dataset.sourceTab = "preview";
-      previewButton.classList.toggle("active", active === "preview");
-      previewButton.textContent = "Preview";
-      tabs.prepend(previewButton);
-    }
-    appendFileViewExtraTabs(tabs);
-    if (textValue != null) tabs.appendChild(createSourceCopyButton(textValue));
+    const { codeButton, previewButton } = appendFileViewTabs(
+      tabs,
+      { currentRange, setRoute, setPreferredSourceTab },
+      target,
+      active,
+      {
+        includeFileTabs: STATE.route.screen === "file",
+        previewable: !!options.previewable || active === "preview",
+        sourceTabClick: "manual",
+        ...(textValue != null
+          ? { sourceCopyButton: createSourceCopyButton(textValue) }
+          : {}),
+      },
+    );
     return { tabs, codeButton, previewButton };
-  }
-
-  function appendFileViewExtraTabs(tabs: HTMLElement) {
-    const route = STATE.route;
-    if (route.screen !== "file") return;
-    const target = { path: route.path, ref: route.ref };
-    const tabDeps = { currentRange, setRoute, setPreferredSourceTab };
-    tabs.appendChild(
-      createFileViewTabButton(tabDeps, target, "blame", "Blame", false),
-    );
-    tabs.appendChild(
-      createFileViewTabButton(tabDeps, target, "history", "History", false),
-    );
   }
 
   async function renderSourceText(
@@ -839,6 +824,7 @@ export function createSourceView(deps: SourceViewDeps) {
       virtualCode.dataset.sourcePane = "code";
       if (previewable) {
         const { tabs, codeButton, previewButton } = createSourceTabs(
+          target,
           initialSourceTab,
           textValue,
           { previewable },
@@ -899,7 +885,7 @@ export function createSourceView(deps: SourceViewDeps) {
         else card.appendChild(view);
         return true;
       }
-      const { tabs } = createSourceTabs("code", textValue, {
+      const { tabs } = createSourceTabs(target, "code", textValue, {
         previewable: false,
       });
       if (tabsHost) {
@@ -958,6 +944,7 @@ export function createSourceView(deps: SourceViewDeps) {
     }
     table.appendChild(tbody);
     const { tabs, codeButton, previewButton } = createSourceTabs(
+      target,
       initialSourceTab,
       textValue,
       { previewable },
@@ -1921,7 +1908,9 @@ export function createSourceView(deps: SourceViewDeps) {
     if (tabsHost) {
       tabsHost.hidden = false;
       tabsHost.replaceChildren(
-        createSourceTabs("code", undefined, { previewable: false }).tabs,
+        createSourceTabs(target, "code", undefined, {
+          previewable: false,
+        }).tabs,
       );
     }
     SOURCE_CURSOR_TOTALS.set(
@@ -2022,42 +2011,27 @@ export function createSourceView(deps: SourceViewDeps) {
     card.dataset.path = target.path;
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
-    const sticky = document.createElement("div");
-    sticky.className = "gdp-file-detail-sticky";
-    const header = document.createElement("div");
-    header.className = "gdp-file-detail-header";
-    const name = document.createElement("div");
-    name.className = "gdp-file-detail-path";
-    name.appendChild(createFileBreadcrumb(target.path, target.ref));
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "gdp-file-header-icon gdp-copy-path";
-    copy.title = "copy file path";
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(target.path);
-        copy.classList.add("copied");
-        setTimeout(() => {
-          copy.classList.remove("copied");
-        }, 1200);
-      } catch {
-        copy.classList.add("failed");
-        setTimeout(() => {
-          copy.classList.remove("failed");
-        }, 1200);
-      }
-    });
-    name.appendChild(copy);
-    name.appendChild(
+    const activeTab: SourceBlobTab =
+      STATE.route.screen === "file" && STATE.route.preview ? "preview" : "code";
+    const { sticky, header } = createFileShellSticky(
+      {
+        currentRange,
+        setRoute,
+        setPreferredSourceTab,
+        createFileBreadcrumb,
+      },
+      target,
+      activeTab,
+    );
+    const pathActions =
+      header.querySelector<HTMLElement>(".gdp-file-detail-path") || header;
+    pathActions.appendChild(
       createOpenPathButton(
         target.path,
         "file-parent",
         "open parent folder in OS",
       ),
     );
-    header.appendChild(name);
     if (repoTarget && canTrashWorktreeRef(repoTarget)) {
       header.appendChild(
         createMoveToTrashButton(target.path, () => {
@@ -2087,11 +2061,6 @@ export function createSourceView(deps: SourceViewDeps) {
       });
       header.appendChild(back);
     }
-    sticky.appendChild(header);
-    const tabsHost = document.createElement("div");
-    tabsHost.className = "gdp-file-detail-tabs";
-    tabsHost.hidden = true;
-    sticky.appendChild(tabsHost);
     wrapper.appendChild(sticky);
     const detailBody = document.createElement("div");
     detailBody.className = "gdp-file-detail-body";

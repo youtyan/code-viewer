@@ -16,7 +16,6 @@ import {
 import { ensureTerraformHighlightLanguage } from "./core/highlight-languages";
 import {
   CHEVRON_DOWN_12_PATH,
-  COPY_16_PATHS,
   GIT_BRANCH_16_PATH,
   iconSvg,
   OPEN_EXTERNAL_16_PATH,
@@ -34,7 +33,6 @@ import {
   buildRoute,
   type DiffRange,
   parseRoute,
-  type SourceFileTarget,
   type SourceLineTarget,
 } from "./core/routes";
 import type {
@@ -58,16 +56,16 @@ import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
-  createFileViewTabs,
-  isRepositoryFileViewRoute,
-  mountFileShellCard,
-} from "./views/file-shell";
+  removeFileHistoryShell as removeRenderedFileHistoryShell,
+  renderFileHistoryShell as renderFileHistoryShellView,
+} from "./views/file-history-shell";
+import { isBlobOrBlameFileRoute } from "./views/file-shell";
 import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
 } from "./views/help-page";
-import { createHistoryView, type HistoryViewMount } from "./views/history-view";
+import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
 import { createLineRefPill } from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
@@ -903,6 +901,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     $,
     STATE,
     setRoute,
+    applyRouteFromLocation,
     setPageMode,
     currentRange,
     trackLoad,
@@ -2021,7 +2020,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function repoFileTargetFromRoute(): string | null {
-    return isRepositoryFileViewRoute(STATE.route) ||
+    return isBlobOrBlameFileRoute(STATE.route) ||
       isFileHistoryRoute(STATE.route)
       ? STATE.route.ref
       : null;
@@ -2032,168 +2031,33 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function removeFileHistoryShell(): void {
-    document.querySelectorAll(".gdp-standalone-file-history").forEach((el) => {
-      (el.closest(".gdp-repo-blob-layout") || el).remove();
-    });
+    removeRenderedFileHistoryShell();
     activeFileHistoryDiffHost = null;
     activeFileHistoryEmptyHost = null;
   }
 
-  function createHistoryCommitInfo(): HTMLElement {
-    const info = document.createElement("section");
-    info.className = "history-commit-info gdp-file-history-commit-info";
-    info.hidden = true;
-    info.setAttribute("aria-label", "Selected commit");
-    const head = document.createElement("div");
-    head.className = "hci-head";
-    const sha = document.createElement("span");
-    sha.className = "hci-sha";
-    const author = document.createElement("span");
-    author.className = "hci-author";
-    const date = document.createElement("span");
-    date.className = "hci-date";
-    head.append(sha, author, date);
-    const subject = document.createElement("h2");
-    subject.className = "hci-subject";
-    const body = document.createElement("div");
-    body.className = "hci-body";
-    body.hidden = true;
-    info.append(head, subject, body);
-    return info;
-  }
-
   function renderFileHistoryShell(
     route: Extract<AppRoute, { screen: "file" }>,
-  ): HistoryViewMount {
-    removeFileHistoryShell();
-    const target: SourceFileTarget = { path: route.path, ref: route.ref };
-    const card = document.createElement("article");
-    card.className =
-      "gdp-file-shell loaded gdp-standalone-file-history gdp-file-history-mode";
-    card.dataset.path = target.path;
-    const wrapper = document.createElement("div");
-    wrapper.className = "gdp-file-detail-wrapper";
-
-    const sticky = document.createElement("div");
-    sticky.className = "gdp-file-detail-sticky";
-    const header = document.createElement("div");
-    header.className = "gdp-file-detail-header";
-    const name = document.createElement("div");
-    name.className = "gdp-file-detail-path";
-    name.appendChild(DIFF_VIEW.createFileBreadcrumb(target.path, target.ref));
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "gdp-file-header-icon gdp-copy-path";
-    copy.title = "copy file path";
-    copy.setAttribute("aria-label", "copy file path");
-    copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
-    copy.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(target.path);
-        copy.classList.add("copied");
-        setTimeout(() => copy.classList.remove("copied"), 1000);
-      } catch {
-        // ignore
-      }
-    });
-    name.appendChild(copy);
-    header.appendChild(name);
-    sticky.appendChild(header);
-    sticky.appendChild(
-      createFileViewTabs(
-        {
-          currentRange,
-          setRoute,
-          setPreferredSourceTab: (tab) =>
-            SOURCE_VIEW.setPreferredSourceTab(tab),
-        },
-        target,
-        "history",
-      ),
-    );
-    wrapper.appendChild(sticky);
-
-    const body = document.createElement("div");
-    body.className = "gdp-file-detail-body gdp-file-history-body";
-    const embed = document.createElement("div");
-    embed.className = "gdp-file-history-embed";
-    const panel = document.createElement("aside");
-    panel.className = "gdp-file-history-panel";
-    panel.setAttribute("aria-label", "Commit history");
-    const panelHead = document.createElement("div");
-    panelHead.className = "history-head";
-    const title = document.createElement("span");
-    title.className = "history-title";
-    title.textContent = "Commits";
-    panelHead.appendChild(title);
-    const filterWrap = document.createElement("div");
-    filterWrap.className = "history-filter-wrap";
-    const filterInput = document.createElement("input");
-    filterInput.className = "history-filter";
-    filterInput.type = "search";
-    filterInput.placeholder = "filter commits… (message, sha, author:name)";
-    filterInput.autocomplete = "off";
-    filterWrap.appendChild(filterInput);
-    const banner = document.createElement("div");
-    banner.className = "history-banner";
-    banner.hidden = true;
-    banner.setAttribute("role", "status");
-    const list = document.createElement("ol");
-    list.className = "history-list";
-    const sentinel = document.createElement("div");
-    sentinel.className = "history-sentinel";
-    sentinel.setAttribute("aria-hidden", "true");
-    const status = document.createElement("div");
-    status.className = "history-status";
-    status.hidden = true;
-    status.setAttribute("role", "status");
-    panel.append(panelHead, filterWrap, banner, list, sentinel, status);
-
-    const diffPane = document.createElement("main");
-    diffPane.className = "gdp-file-history-diff-pane";
-    const commitInfo = createHistoryCommitInfo();
-    const empty = document.createElement("div");
-    empty.className = "empty gdp-file-history-empty hidden";
-    const emptyIcon = document.createElement("div");
-    emptyIcon.className = "emoji";
-    emptyIcon.textContent = "✨";
-    const emptyTitle = document.createElement("h2");
-    emptyTitle.textContent = "No commit selected";
-    const emptyBody = document.createElement("p");
-    emptyBody.textContent = "Select a commit from the list to see its changes.";
-    empty.append(emptyIcon, emptyTitle, emptyBody);
-    const diffHost = document.createElement("div");
-    diffHost.className = "gdp-file-history-diff";
-    diffPane.append(commitInfo, empty, diffHost);
-    embed.append(panel, diffPane);
-    body.appendChild(embed);
-    wrapper.appendChild(body);
-    card.appendChild(wrapper);
-
-    activeFileHistoryDiffHost = diffHost;
-    activeFileHistoryEmptyHost = empty;
-    mountFileShellCard(
+  ) {
+    const historyRoute = { ...route, view: "history" as const };
+    const mount = renderFileHistoryShellView(
       {
         $,
         repoFileTargetFromRoute,
         renderRepoBlobSidebar: (path, ref) =>
           REPO_VIEW.renderRepoBlobSidebar(path, ref),
         placeSidebarToggle,
+        currentRange,
+        setRoute,
+        setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
+        createFileBreadcrumb: (path, ref) =>
+          DIFF_VIEW.createFileBreadcrumb(path, ref),
       },
-      target,
-      card,
-      target.ref,
+      historyRoute,
     );
-    return {
-      panel,
-      list,
-      banner,
-      status,
-      sentinel,
-      filterInput,
-      commitInfo,
-    };
+    activeFileHistoryDiffHost = mount.diffHost;
+    activeFileHistoryEmptyHost = mount.emptyHost;
+    return mount;
   }
 
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
@@ -2257,7 +2121,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       parkRangeForHistory();
       setPageMode();
       const mount = renderFileHistoryShell(route);
-      void HISTORY_VIEW.enterHistory(mount);
+      void HISTORY_VIEW.enterHistory({ mount });
       return true;
     }
     return false;
@@ -2670,6 +2534,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   applyCodeFontSize();
   applySidebarHidden(STATE.sidebarHidden, { persist: false });
   observeSidebarHeaderHeight();
+  installHistoryPageDom();
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
   // Sidebar view toggle (tree / flat)
@@ -3449,6 +3314,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       cancelActiveSourceLoad("navigation");
       setPageMode();
       removeFileHistoryShell();
+      BLAME_VIEW.removeBlamePage();
       removeStandaloneSource();
       HISTORY_VIEW.enterHistory();
       return;
@@ -3777,7 +3643,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       hideChangeBanner();
       const route = STATE.route;
       if (!shouldAutoLoadCurrentRoute(route)) return;
-      if (isRepositoryFileViewRoute(route)) {
+      if (isBlobOrBlameFileRoute(route)) {
         dispatchFileRoute(route);
         return;
       }
@@ -3820,7 +3686,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   function doSseLoad(paths: Set<string> | null) {
     const route = STATE.route;
     if (!shouldAutoLoadCurrentRoute(route)) return;
-    if (isRepositoryFileViewRoute(route)) {
+    if (isBlobOrBlameFileRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
       dispatchFileRoute(route);
@@ -3866,7 +3732,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = pendingSseChangedPaths;
       pendingSseChangedPaths = new Set();
       const route = STATE.route;
-      if (isRepositoryFileViewRoute(route)) {
+      if (isBlobOrBlameFileRoute(route)) {
         const viewingPath = route.path;
         if (paths && viewingPath && !paths.has(viewingPath)) return;
       }

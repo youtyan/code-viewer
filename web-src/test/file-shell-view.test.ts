@@ -11,7 +11,7 @@ import type { SourceBlobTab } from "../views/file-shell";
 GlobalRegistrator.register();
 
 const { createBlameView } = await import("../views/blame-view");
-const { isRepositoryFileViewRoute } = await import("../views/file-shell");
+const { isBlobOrBlameFileRoute } = await import("../views/file-shell");
 
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 const SHA = "1111111111111111111111111111111111111111";
@@ -120,6 +120,7 @@ function testDeps(
   state: { route: AppRoute },
   sidebarCalls: SidebarCall[],
   preferredTabs: SourceBlobTab[] = [],
+  appliedRoutes: AppRoute[] = [],
 ) {
   let dragStart: number | null = null;
   const sourceTargetMatches = (path: string, ref: string) =>
@@ -174,6 +175,9 @@ function testDeps(
       const url = buildRoute(route);
       if (replace) window.history.replaceState(null, "", url);
       else window.history.pushState(null, "", url);
+    },
+    applyRouteFromLocation() {
+      appliedRoutes.push(state.route);
     },
     setPageMode() {
       document.body.classList.toggle("gdp-file-detail-page", true);
@@ -246,7 +250,7 @@ function testDeps(
     },
     escapeHtml: (value: unknown) => String(value),
     repoFileTargetFromRoute() {
-      return isRepositoryFileViewRoute(state.route) ? state.route.ref : null;
+      return isBlobOrBlameFileRoute(state.route) ? state.route.ref : null;
     },
     renderRepoBlobSidebar(path: string, ref: string) {
       sidebarCalls.push({ path, ref });
@@ -382,6 +386,36 @@ describe("file view shell routing", () => {
       "/file?path=README.md&target=worktree&view=blob",
     );
     expect(preferredTabs[preferredTabs.length - 1]).toBe("code");
+  });
+
+  test("blame sha chip normalizes worktree ref and applies the history route", async () => {
+    const state: { route: AppRoute } = {
+      route: {
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: RANGE,
+      } satisfies AppRoute,
+    };
+    const appliedRoutes: AppRoute[] = [];
+    const deps = testDeps(state, [], [], appliedRoutes);
+    const blame = createBlameView(deps);
+    await blame.renderBlamePage({ path: "README.md", ref: "worktree" });
+    await waitFor(() => !!document.querySelector(".gdp-blame-sha[data-sha]"));
+
+    click(document.querySelector(".gdp-blame-sha[data-sha]"));
+
+    expect(state.route).toEqual({
+      screen: "history",
+      ref: "HEAD",
+      commit: SHA,
+      range: RANGE,
+    });
+    expect(window.location.pathname + window.location.search).toBe(
+      `/history?commit=${SHA}`,
+    );
+    expect(appliedRoutes).toEqual([state.route]);
   });
 
   test("previewable file tabs include Preview while non-previewable file tabs do not", async () => {

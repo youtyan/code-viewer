@@ -135,14 +135,3 @@ export function blameShortSha(sha: string): string {
   if (!sha || sha === BLAME_ZERO_SHA) return "0000000";
   return sha.slice(0, 7);
 }
-
-// Gravatar avatar URL from author email. Returns null when no email — caller
-// renders an initial-letter placeholder instead.
-export function blameAvatarUrl(commit: BlameCommit): string | null {
-  const mail = (commit.authorMail || "").trim().toLowerCase();
-  if (!mail) return null;
-  // We don't need a strong hash here — Gravatar uses MD5 of the email. To keep
-  // the core layer free of crypto deps, the caller decides whether to render
-  // an avatar img; this helper only returns the canonical email key.
-  return mail;
-}
