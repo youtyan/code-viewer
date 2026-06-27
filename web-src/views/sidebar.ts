@@ -802,7 +802,7 @@ export function createSidebar(deps: SidebarDeps) {
     );
     li.classList.toggle(
       "hidden-by-tests",
-      STATE.hideTests && isTestPath(f.path || ""),
+      STATE.hideTests && !isRepositorySidebarMode() && isTestPath(f.path || ""),
     );
     li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
     const spacer = document.createElement("span");
@@ -914,7 +914,9 @@ export function createSidebar(deps: SidebarDeps) {
           subtreeVisible = subtreeVisible || visible;
         } else {
           const testHidden =
-            STATE.hideTests && isTestPath(item.file.path || "");
+            STATE.hideTests &&
+            !isRepositorySidebarMode() &&
+            isTestPath(item.file.path || "");
           const visible = !testHidden && matches(item.file.path || "");
           if (visible) {
             rows.push({

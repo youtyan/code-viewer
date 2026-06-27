@@ -27,8 +27,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   viewer.
 - Browse SQLite, PostgreSQL, MySQL, Redis, Elasticsearch, and S3-compatible
   object storage (MinIO, LocalStack) with a built-in datastore viewer.
-- Read the built-in Help page for repository browsing, diffs, annotations,
-  the datastore viewer, agent skills, and shortcuts.
+- Read the built-in Help page for getting started, the `.code-viewer/`
+  project files, AI annotations, datastores, the agent skill, and
+  keybindings.
 - Open repository folders (and parent folders of files) in the OS file
   manager, create folders, and trash/restore files from localhost-only
   actions.
@@ -239,9 +240,10 @@ Open Datastores in the global navigation to access:
 
 ### CLI
 
-AI agents can read data and query history from the command line. The current
-CLI ships `exec`, `list`, and `clear`; search, snapshot, and diff operations
-are performed from the browser UI.
+AI agents can run read-only queries, search content across tables, and
+capture snapshots / diffs from the command line. The same operations are
+mirrored under the Datastores tab in the browser UI, and every CLI result is
+written to the per-repository history visible in the browser.
 
 ```sh
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
@@ -252,6 +254,22 @@ code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
 
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
+
+code-viewer query search --db app.db --term "john@example.com" \
+    --tables users,orders --include-non-text --max-hits 20
+
+code-viewer query snapshot create --db app.db --tables users,orders \
+    --note "Before user registration test"
+code-viewer query snapshot list --db app.db --json
+code-viewer query snapshot note --id snap-abc123 --note "Updated context"
+code-viewer query snapshot delete --id snap-abc123
+
+code-viewer query diff create --before snap-abc123 --after snap-def456 \
+    --note "User registration test"
+code-viewer query diff tables --id diff-xyz789
+code-viewer query diff rows --id diff-xyz789 --table users --type inserted
+code-viewer query diff list --db app.db --json
+code-viewer query diff delete --id diff-xyz789
 ```
 
 `code-viewer query --help` shows all command syntax. `code-viewer query
@@ -307,9 +325,9 @@ with `--include-non-text` and `--run-search`. For AI agents,
 
 Annotations are grouped into sessions and persisted in
 `.code-viewer/annotations.json` at the repository root, so the walkthrough
-survives reloads and server restarts. The `.code-viewer` directory is
-tool-internal: it never shows up in the file tree, searches, or diffs. Add it
-to `.gitignore` if you do not want to share annotations through git.
+survives reloads and server restarts. See **Uploads and Scope Settings**
+above for how `.code-viewer/` is treated by the viewer and how to opt out of
+sharing it through git.
 
 In the browser, the annotation icon in the header opens the side panel. The
 current explanation is rendered at the top of the panel while the code stays
@@ -341,9 +359,11 @@ write concise Markdown explanations, and how to install the bundled agent skill.
 
 ### Agent Skill
 
-The package bundles [Agent Skills](https://agentskills.io) (the SKILL.md
-open standard) that teach AI coding agents when and how to use
-`annotate`, `query`, and `snapshot`. Install them into the current project:
+The package bundles three [Agent Skills](https://agentskills.io)
+(the SKILL.md open standard) — `code-viewer-annotate`, `code-viewer-query`,
+and `code-viewer-snapshot` — that teach AI coding agents when and how to use
+`annotate`, read-only `query`, and snapshot / diff workflows. A single
+`skill install` copies all three into the selected agent directories:
 
 ```sh
 npx -y @youtyan/code-viewer skill install                       # Claude Code (.claude/skills/)
