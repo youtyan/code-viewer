@@ -57,6 +57,7 @@ export type DbText = {
     colNullable: string;
     colPk: string;
     colDefault: string;
+    colComment: string;
     refTable: string;
     refColumn: string;
     idxName: string;
@@ -277,6 +278,7 @@ const EN: DbText = {
     colNullable: "Nullable",
     colPk: "PK",
     colDefault: "Default",
+    colComment: "Comment",
     refTable: "References Table",
     refColumn: "References Column",
     idxName: "Name",
@@ -489,6 +491,7 @@ const JA: DbText = {
     colNullable: "NULL 許可",
     colPk: "PK",
     colDefault: "デフォルト",
+    colComment: "コメント",
     refTable: "参照先テーブル",
     refColumn: "参照先カラム",
     idxName: "名前",

@@ -40,7 +40,11 @@ import type {
   HljsApi,
   RawFileInfo,
 } from "../core/types";
-import { createFileViewTabButton, mountFileShellCard } from "./file-shell";
+import {
+  createFileViewTabButton,
+  mountFileShellCard,
+  type SourceBlobTab,
+} from "./file-shell";
 import {
   appendMediaEmbed,
   renderHtmlPreviewFrame,
@@ -159,6 +163,8 @@ export function createSourceView(deps: SourceViewDeps) {
 
   let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
     null;
+
+  let PREFERRED_SOURCE_TAB: SourceBlobTab | null = null;
 
   type VirtualSourceSearchMatch = { line: number; start: number; end: number };
 
@@ -336,7 +342,42 @@ export function createSourceView(deps: SourceViewDeps) {
     return true;
   }
 
-  function switchSourceTab(tab: "preview" | "code"): boolean {
+  function setSourceTabRoute(tab: SourceBlobTab): void {
+    const route = STATE.route;
+    if (route.screen !== "file") return;
+    setRoute({
+      screen: "file",
+      path: route.path,
+      ref: route.ref,
+      view: "blob",
+      range: currentRange(),
+      ...(tab === "preview" ? { preview: true as const } : {}),
+      ...(route.line ? { line: route.line } : {}),
+      ...(route.virtual === "off" ? { virtual: "off" as const } : {}),
+    });
+  }
+
+  function applyRenderedSourceTab(
+    tab: SourceBlobTab,
+    codeButton: HTMLButtonElement,
+    previewButton: HTMLButtonElement | null,
+    codePane: HTMLElement,
+    previewPane: HTMLElement | null,
+    updateRoute = true,
+  ): boolean {
+    if (tab === "preview" && (!previewButton || !previewPane)) return false;
+    codeButton.classList.toggle("active", tab === "code");
+    previewButton?.classList.toggle("active", tab === "preview");
+    codePane.hidden = tab === "preview";
+    if (previewPane) previewPane.hidden = tab === "code";
+    if (updateRoute) setSourceTabRoute(tab);
+    return true;
+  }
+
+  function switchSourceTab(
+    tab: "preview" | "code",
+    options: { updateRoute?: boolean } = {},
+  ): boolean {
     const tabs = document.querySelector<HTMLElement>(
       "#content .gdp-source-tabs",
     );
@@ -345,6 +386,31 @@ export function createSourceView(deps: SourceViewDeps) {
       `button[data-source-tab="${tab}"]`,
     );
     if (!button || button.hidden || button.disabled) return false;
+    if (options.updateRoute === false) {
+      const codeButton = tabs.querySelector<HTMLButtonElement>(
+        'button[data-source-tab="code"]',
+      );
+      const previewButton = tabs.querySelector<HTMLButtonElement>(
+        'button[data-source-tab="preview"]',
+      );
+      const codePane = document.querySelector<HTMLElement>(
+        '#content [data-source-pane="code"]',
+      );
+      const previewPane = document.querySelector<HTMLElement>(
+        '#content [data-source-pane="preview"]',
+      );
+      if (!codeButton || !codePane) return false;
+      const applied = applyRenderedSourceTab(
+        tab,
+        codeButton,
+        previewButton,
+        codePane,
+        previewPane,
+        false,
+      );
+      if (applied) focusMainPanel();
+      return applied;
+    }
     button.click();
     focusMainPanel();
     return true;
@@ -446,6 +512,26 @@ export function createSourceView(deps: SourceViewDeps) {
     } catch {
       return null;
     }
+  }
+
+  function setPreferredSourceTab(tab: SourceBlobTab): void {
+    PREFERRED_SOURCE_TAB = tab;
+  }
+
+  function consumePreferredSourceTab(previewable: boolean): SourceBlobTab {
+    if (!previewable) {
+      PREFERRED_SOURCE_TAB = null;
+      return "code";
+    }
+    const routeTab =
+      STATE.route.screen === "file" &&
+      STATE.route.view === "blob" &&
+      STATE.route.preview
+        ? "preview"
+        : "code";
+    const tab = PREFERRED_SOURCE_TAB || routeTab;
+    PREFERRED_SOURCE_TAB = null;
+    return tab;
   }
 
   let SOURCE_REQ_SEQ = 0;
@@ -663,9 +749,14 @@ export function createSourceView(deps: SourceViewDeps) {
     return copy;
   }
 
-  function createSourceTabs(active: "preview" | "code", textValue?: string) {
+  function createSourceTabs(
+    active: SourceBlobTab,
+    textValue?: string,
+    options: { previewable?: boolean } = {},
+  ) {
     const tabs = document.createElement("div");
     tabs.className = "gdp-source-tabs";
+    const showPreview = !!options.previewable || active === "preview";
     const codeButton = document.createElement("button");
     codeButton.type = "button";
     codeButton.dataset.sourceTab = "code";
@@ -673,11 +764,11 @@ export function createSourceView(deps: SourceViewDeps) {
     codeButton.classList.toggle("active", active === "code");
     tabs.appendChild(codeButton);
     let previewButton: HTMLButtonElement | null = null;
-    if (active === "preview") {
+    if (showPreview) {
       previewButton = document.createElement("button");
       previewButton.type = "button";
       previewButton.dataset.sourceTab = "preview";
-      previewButton.className = "active";
+      previewButton.classList.toggle("active", active === "preview");
       previewButton.textContent = "Preview";
       tabs.prepend(previewButton);
     }
@@ -690,7 +781,7 @@ export function createSourceView(deps: SourceViewDeps) {
     const route = STATE.route;
     if (route.screen !== "file") return;
     const target = { path: route.path, ref: route.ref };
-    const tabDeps = { currentRange, setRoute };
+    const tabDeps = { currentRange, setRoute, setPreferredSourceTab };
     tabs.appendChild(
       createFileViewTabButton(tabDeps, target, "blame", "Blame", false),
     );
@@ -735,6 +826,7 @@ export function createSourceView(deps: SourceViewDeps) {
     if (signal?.aborted) return false;
     const previewable = isPreviewableSource(target.path);
     const previewKind = sourcePreviewKind(target.path);
+    const initialSourceTab = consumePreferredSourceTab(previewable);
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (usesVirtualSource) {
       const virtualCode = renderVirtualSource(
@@ -744,10 +836,12 @@ export function createSourceView(deps: SourceViewDeps) {
         hljsRef,
         lang,
       );
+      virtualCode.dataset.sourcePane = "code";
       if (previewable) {
         const { tabs, codeButton, previewButton } = createSourceTabs(
-          "preview",
+          initialSourceTab,
           textValue,
+          { previewable },
         );
         if (tabsHost) {
           tabsHost.hidden = false;
@@ -771,18 +865,32 @@ export function createSourceView(deps: SourceViewDeps) {
                 },
               });
         if (signal?.aborted) return false;
-        virtualCode.hidden = true;
+        preview.dataset.sourcePane = "preview";
+        applyRenderedSourceTab(
+          initialSourceTab,
+          codeButton,
+          previewButton,
+          virtualCode,
+          preview,
+          false,
+        );
         previewButton?.addEventListener("click", () => {
-          previewButton.classList.add("active");
-          codeButton.classList.remove("active");
-          preview.hidden = false;
-          virtualCode.hidden = true;
+          applyRenderedSourceTab(
+            "preview",
+            codeButton,
+            previewButton,
+            virtualCode,
+            preview,
+          );
         });
         codeButton.addEventListener("click", () => {
-          codeButton.classList.add("active");
-          previewButton.classList.remove("active");
-          preview.hidden = true;
-          virtualCode.hidden = false;
+          applyRenderedSourceTab(
+            "code",
+            codeButton,
+            previewButton,
+            virtualCode,
+            preview,
+          );
         });
         if (header) view.appendChild(header);
         view.classList.add("virtual");
@@ -790,6 +898,13 @@ export function createSourceView(deps: SourceViewDeps) {
         if (body) body.replaceWith(view);
         else card.appendChild(view);
         return true;
+      }
+      const { tabs } = createSourceTabs("code", textValue, {
+        previewable: false,
+      });
+      if (tabsHost) {
+        tabsHost.hidden = false;
+        tabsHost.replaceChildren(tabs);
       }
       if (header) view.appendChild(header);
       view.classList.add("virtual");
@@ -801,6 +916,7 @@ export function createSourceView(deps: SourceViewDeps) {
     }
     const table = document.createElement("table");
     table.className = "gdp-source-table";
+    table.dataset.sourcePane = "code";
     const tbody = document.createElement("tbody");
     const sourceShikiLang = normalizeSourceShikiLang(lang);
     const shikiLines =
@@ -842,8 +958,9 @@ export function createSourceView(deps: SourceViewDeps) {
     }
     table.appendChild(tbody);
     const { tabs, codeButton, previewButton } = createSourceTabs(
-      previewable ? "preview" : "code",
+      initialSourceTab,
       textValue,
+      { previewable },
     );
     if (tabsHost) {
       tabsHost.hidden = false;
@@ -868,18 +985,32 @@ export function createSourceView(deps: SourceViewDeps) {
               },
             });
       if (signal?.aborted) return false;
-      table.hidden = true;
+      preview.dataset.sourcePane = "preview";
+      applyRenderedSourceTab(
+        initialSourceTab,
+        codeButton,
+        previewButton,
+        table,
+        preview,
+        false,
+      );
       previewButton?.addEventListener("click", () => {
-        previewButton.classList.add("active");
-        codeButton.classList.remove("active");
-        preview.hidden = false;
-        table.hidden = true;
+        applyRenderedSourceTab(
+          "preview",
+          codeButton,
+          previewButton,
+          table,
+          preview,
+        );
       });
       codeButton.addEventListener("click", () => {
-        codeButton.classList.add("active");
-        previewButton.classList.remove("active");
-        preview.hidden = true;
-        table.hidden = false;
+        applyRenderedSourceTab(
+          "code",
+          codeButton,
+          previewButton,
+          table,
+          preview,
+        );
       });
       if (header) view.appendChild(header);
       view.appendChild(preview);
@@ -1789,7 +1920,9 @@ export function createSourceView(deps: SourceViewDeps) {
     const tabsHost = card.querySelector<HTMLElement>(".gdp-file-detail-tabs");
     if (tabsHost) {
       tabsHost.hidden = false;
-      tabsHost.replaceChildren(createSourceTabs("code").tabs);
+      tabsHost.replaceChildren(
+        createSourceTabs("code", undefined, { previewable: false }).tabs,
+      );
     }
     SOURCE_CURSOR_TOTALS.set(
       sourceCursorKey(target),
@@ -2205,6 +2338,7 @@ export function createSourceView(deps: SourceViewDeps) {
     fileSourceTarget,
     scrollStandaloneSourceLine,
     createSourceTabs,
+    setPreferredSourceTab,
     switchSourceTab,
     sourceLineScrollAmount,
     hasVisibleSourceCodeSurface,
@@ -2222,6 +2356,7 @@ export function createSourceView(deps: SourceViewDeps) {
     lineInSourceTarget,
     setSourceLineRoute,
     syncRenderedSourceLineHighlights,
+    bindSourceLineNumber,
     renderSourceError,
     loadSourceShikiHighlighter,
     sourceShikiLines,

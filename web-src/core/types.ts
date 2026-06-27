@@ -135,6 +135,7 @@ export type DbUiPrefs = {
 export type DbUiState = {
   version: 1;
   columnWidths: Record<string, Record<string, Record<string, number>>>;
+  expandedTables?: Record<string, string[]>;
   prefs?: DbUiPrefs;
 };
 

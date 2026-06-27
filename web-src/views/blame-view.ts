@@ -12,12 +12,30 @@ import {
   groupBlameLines,
 } from "../core/blame";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
-import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
+import type {
+  AppRoute,
+  DiffRange,
+  SourceFileTarget,
+  SourceLineTarget,
+} from "../core/routes";
+import { normalizeSourceShikiLang } from "../core/source-meta";
 import {
-  createFileViewTabButton,
+  createFileViewTabs,
+  type FileViewTab,
   mountFileShellCard,
-  type RepositoryFileView,
+  type SourceBlobTab,
 } from "./file-shell";
+
+type SourceShikiHighlighter = {
+  codeToHtml: (
+    code: string,
+    options: {
+      lang: string;
+      themes: { light: string; dark: string };
+      defaultColor: false;
+    },
+  ) => string;
+};
 
 export type BlameViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -26,6 +44,28 @@ export type BlameViewDeps = {
   setPageMode(): void;
   currentRange(): DiffRange;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
+  getSyntaxHighlight(): boolean;
+  loadSourceShikiHighlighter(): Promise<SourceShikiHighlighter | null>;
+  sourceShikiLines(
+    textValue: string,
+    lang: string,
+    highlighter: SourceShikiHighlighter,
+  ): string[] | null;
+  inferLang(path: string): string | null;
+  currentSourceLineTarget(
+    target: SourceFileTarget,
+  ): SourceLineTarget | undefined;
+  lineInSourceTarget(
+    lineNumber: number,
+    target: SourceLineTarget | undefined,
+  ): boolean;
+  bindSourceLineNumber(
+    num: HTMLElement,
+    card: HTMLElement,
+    target: SourceFileTarget,
+    line: number,
+  ): void;
+  setPreferredSourceTab(tab: SourceBlobTab): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   removeStandaloneSource(): void;
   placeSidebarToggle(): void;
@@ -40,16 +80,14 @@ export function createBlameView(deps: BlameViewDeps) {
   let activeGeneration = 0;
 
   function cleanup() {
-    document
-      .querySelectorAll(".gdp-standalone-blame, .gdp-standalone-file-history")
-      .forEach((el) => {
-        el.remove();
-      });
+    document.querySelectorAll(".gdp-standalone-blame").forEach((el) => {
+      el.remove();
+    });
   }
 
   function buildSticky(
     target: SourceFileTarget,
-    activeTab: RepositoryFileView,
+    activeTab: FileViewTab,
   ): {
     sticky: HTMLElement;
     tabsHost: HTMLElement;
@@ -79,39 +117,12 @@ export function createBlameView(deps: BlameViewDeps) {
     name.appendChild(copy);
     header.appendChild(name);
     sticky.appendChild(header);
-    const tabs = document.createElement("div");
-    tabs.className = "gdp-source-tabs gdp-file-view-tabs";
     const tabDeps = {
       currentRange: deps.currentRange,
       setRoute: deps.setRoute,
+      setPreferredSourceTab: deps.setPreferredSourceTab,
     };
-    tabs.appendChild(
-      createFileViewTabButton(
-        tabDeps,
-        target,
-        "blob",
-        "Code",
-        activeTab === "blob",
-      ),
-    );
-    tabs.appendChild(
-      createFileViewTabButton(
-        tabDeps,
-        target,
-        "blame",
-        "Blame",
-        activeTab === "blame",
-      ),
-    );
-    tabs.appendChild(
-      createFileViewTabButton(
-        tabDeps,
-        target,
-        "history",
-        "History",
-        activeTab === "history",
-      ),
-    );
+    const tabs = createFileViewTabs(tabDeps, target, activeTab);
     sticky.appendChild(tabs);
     return { sticky, tabsHost: tabs };
   }
@@ -153,18 +164,23 @@ export function createBlameView(deps: BlameViewDeps) {
 
   async function fetchBlame(
     target: SourceFileTarget,
-    base: "worktree" | "HEAD",
+    requestGeneration: number,
   ): Promise<BlameResponse | null> {
     const params = new URLSearchParams();
     params.set("path", target.path);
     params.set("ref", target.ref);
-    params.set("base", base);
     const url = `/_file_blame?${params.toString()}`;
     try {
       return await deps.trackLoad(
         fetch(url).then(async (r) => {
           if (!r.ok) throw new Error(await r.text());
-          return (await r.json()) as BlameResponse;
+          const data = (await r.json()) as BlameResponse;
+          if (
+            data.generation !== undefined &&
+            requestGeneration !== activeGeneration
+          )
+            return null;
+          return data;
         }),
       );
     } catch (err) {
@@ -204,9 +220,11 @@ export function createBlameView(deps: BlameViewDeps) {
   }
 
   function buildBlameTable(
+    card: HTMLElement,
     target: SourceFileTarget,
     response: BlameResponse,
     sourceText: string,
+    highlighter: SourceShikiHighlighter | null,
   ): HTMLElement {
     const groups = groupBlameLines(response.lines, response.commits);
     const bins = blameTimeBins(response.commits, BLAME_TIME_BIN_COUNT);
@@ -216,9 +234,21 @@ export function createBlameView(deps: BlameViewDeps) {
     // Trim a trailing empty entry produced by a final newline.
     if (sourceLines.length > 0 && sourceLines[sourceLines.length - 1] === "")
       sourceLines.pop();
+    const sourceShikiLang = normalizeSourceShikiLang(
+      deps.inferLang(target.path),
+    );
+    const shikiLines =
+      highlighter && sourceShikiLang
+        ? deps.sourceShikiLines(
+            sourceLines.join("\n"),
+            sourceShikiLang,
+            highlighter,
+          )
+        : null;
 
+    const lineTarget = deps.currentSourceLineTarget(target);
     const table = document.createElement("table");
-    table.className = "gdp-blame-table";
+    table.className = "gdp-source-table gdp-blame-table";
     const tbody = document.createElement("tbody");
 
     for (const group of groups) {
@@ -227,6 +257,10 @@ export function createBlameView(deps: BlameViewDeps) {
         tr.className = "gdp-blame-row";
         tr.dataset.line = String(lineNo);
         tr.dataset.sha = group.sha;
+        tr.classList.toggle(
+          "gdp-source-line-target",
+          deps.lineInSourceTarget(lineNo, lineTarget),
+        );
         if (lineNo === group.startLine) {
           const info = document.createElement("td");
           info.className = "gdp-blame-info";
@@ -276,28 +310,20 @@ export function createBlameView(deps: BlameViewDeps) {
           tr.appendChild(info);
         }
         const num = document.createElement("td");
-        num.className = "gdp-blame-line-no";
+        num.className = "gdp-source-line-number";
         num.textContent = String(lineNo);
-        // line=N link via clicking line number
-        num.addEventListener("click", () => {
-          deps.setRoute(
-            {
-              screen: "file",
-              path: target.path,
-              ref: target.ref,
-              view: "blame",
-              line: lineNo,
-              range: deps.currentRange(),
-            },
-            true,
-          );
-        });
+        deps.bindSourceLineNumber(num, card, target, lineNo);
         tr.appendChild(num);
         const code = document.createElement("td");
-        code.className = "gdp-blame-code";
+        code.className = "gdp-source-line-code";
         const codeContent = sourceLines[lineNo - 1] ?? "";
         const codeEl = document.createElement("code");
-        codeEl.textContent = codeContent || " ";
+        if (shikiLines && shikiLines[lineNo - 1] != null) {
+          code.classList.add("shiki");
+          codeEl.innerHTML = shikiLines[lineNo - 1] || " ";
+        } else {
+          codeEl.textContent = codeContent || " ";
+        }
         code.appendChild(codeEl);
         tr.appendChild(code);
         tbody.appendChild(tr);
@@ -332,9 +358,12 @@ export function createBlameView(deps: BlameViewDeps) {
     card.appendChild(wrapper);
     mountFileShellCard(deps, target, card);
 
-    const [blameResp, srcText] = await Promise.all([
-      fetchBlame(target, base),
+    const [blameResp, srcText, highlighter] = await Promise.all([
+      fetchBlame(target, generation),
       fetchSource(target, base),
+      deps.getSyntaxHighlight()
+        ? deps.loadSourceShikiHighlighter()
+        : Promise.resolve(null),
     ]);
     if (generation !== activeGeneration) return;
     body.replaceChildren();
@@ -345,7 +374,9 @@ export function createBlameView(deps: BlameViewDeps) {
       body.appendChild(err);
       return;
     }
-    body.appendChild(buildBlameTable(target, blameResp, srcText));
+    body.appendChild(
+      buildBlameTable(card, target, blameResp, srcText, highlighter),
+    );
   }
 
   function buildLoading(): HTMLElement {

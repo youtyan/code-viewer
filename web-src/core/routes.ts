@@ -24,7 +24,9 @@ export type AppRoute =
       ref: string;
       range: DiffRange;
       view?: "blob" | "detail" | "blame" | "history";
+      preview?: true;
       line?: SourceLineTarget;
+      commit?: string;
       virtual?: "off";
     }
   | { screen: "help"; range: DiffRange; lang: string; section: string }
@@ -137,6 +139,21 @@ export function parseRoute(
           range,
         };
       const rawView = params.get("view");
+      const preview = params.get("preview") === "1";
+      if (rawView === "blob") {
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: "blob",
+          ...(preview ? { preview: true as const } : {}),
+          ...(line ? { line } : {}),
+          ...(params.get("virtual") === "off"
+            ? { virtual: "off" as const }
+            : {}),
+        };
+      }
       if (rawView === "blame") {
         return {
           screen: "file",
@@ -154,6 +171,9 @@ export function parseRoute(
           ref,
           range,
           view: "history",
+          ...(params.get("commit")
+            ? { commit: params.get("commit") || "" }
+            : {}),
           ...(line ? { line } : {}),
         };
       }
@@ -163,6 +183,7 @@ export function parseRoute(
         ref,
         range,
         view: target ? "blob" : "detail",
+        ...(target && preview ? { preview: true as const } : {}),
         ...(line ? { line } : {}),
         ...(params.get("virtual") === "off" ? { virtual: "off" as const } : {}),
       };
@@ -233,6 +254,8 @@ export function buildRoute(route: AppRoute): string {
           encodeURIComponent(route.path) +
           "&target=" +
           encodeURIComponent(route.ref || "worktree") +
+          "&view=blob" +
+          (route.preview ? "&preview=1" : "") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "") +
@@ -259,6 +282,7 @@ export function buildRoute(route: AppRoute): string {
           "&target=" +
           encodeURIComponent(route.ref || "worktree") +
           "&view=history" +
+          (route.commit ? `&commit=${encodeURIComponent(route.commit)}` : "") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "")

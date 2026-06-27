@@ -341,6 +341,75 @@ describe("docker table meta queries", () => {
     expect(result.totalRows).toBe(2);
   });
 
+  test("reads PostgreSQL column comments", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          "id\tuuid\tNO\t\tYES\tprimary identifier",
+          "name\ttext\tYES\t\tNO\tdisplay label",
+        ].join(PG_RS);
+      }
+      return postgresStdout(sql);
+    });
+    const adapter = createPostgresAdapter("public");
+
+    const columns = await adapter.getColumnsAsync("sample_table");
+
+    expect(activeHarness.calls[0].sql).toMatch(/pg_description/);
+    expect(columns.map((column) => column.comment)).toEqual([
+      "primary identifier",
+      "display label",
+    ]);
+  });
+
+  test("prefetches PostgreSQL column comments for schema maps", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          "sample_table\tid\tuuid\tNO\t\tprimary identifier",
+          "sample_table\tname\ttext\tYES\t\tdisplay label",
+        ].join(PG_RS);
+      }
+      if (sql.includes("pg_index")) {
+        return `sample_table\tid${PG_RS}`;
+      }
+      return postgresStdout(sql);
+    });
+    const adapter = createPostgresAdapter("public");
+
+    const columnsMap = await adapter.getColumnsMultiAsync(["sample_table"]);
+    const columns = columnsMap.get("sample_table") || [];
+
+    expect(activeHarness.calls[0].sql).toMatch(/pg_description/);
+    expect(columns.map((column) => column.comment)).toEqual([
+      "primary identifier",
+      "display label",
+    ]);
+    expect(columns[0]?.primaryKey).toBe(true);
+  });
+
+  test("reads MySQL column comments", async () => {
+    activeHarness = installSpawnHarness((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          "column_name\tcolumn_type\tis_nullable\tcolumn_default\tcolumn_key\tcolumn_comment",
+          "id\tint\tNO\tNULL\tPRI\tprimary identifier",
+          "name\tvarchar(255)\tYES\tNULL\t\tdisplay label",
+        ].join("\n");
+      }
+      return mysqlStdout(sql);
+    });
+    const adapter = createMysqlAdapter();
+
+    const columns = await adapter.getColumnsAsync("sample_table");
+
+    expect(activeHarness.calls[0].sql).toMatch(/column_comment/);
+    expect(columns.map((column) => column.comment)).toEqual([
+      "primary identifier",
+      "display label",
+    ]);
+  });
+
   test("sets PostgreSQL search_path for readonly editor queries", async () => {
     activeHarness = installSpawnHarness(() => "1\n");
     const adapter = createPostgresAdapter("tenant space");

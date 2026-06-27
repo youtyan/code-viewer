@@ -66,6 +66,9 @@ export type DiffViewDeps = {
   invalidateRepoSidebar(): void;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
+  getDiffRoot?(): HTMLElement;
+  getEmptyPane?(): HTMLElement;
+  isEmbeddedDiffMode?(): boolean;
 };
 
 type LoadQueueItem = {
@@ -129,6 +132,9 @@ export function createDiffView(deps: DiffViewDeps) {
     getServerGeneration,
     setServerGeneration,
     invalidateRepoSidebar,
+    getDiffRoot,
+    getEmptyPane,
+    isEmbeddedDiffMode,
   } = deps;
 
   function rerenderLoadedDiffs() {
@@ -145,6 +151,14 @@ export function createDiffView(deps: DiffViewDeps) {
         }
         scheduleIdleHighlight(card, file);
       });
+  }
+
+  function shouldSyncSourceRouteToShell(): boolean {
+    return STATE.route.screen === "file" && STATE.route.view !== "history";
+  }
+
+  function syncSourceRouteToShell(): void {
+    if (shouldSyncSourceRouteToShell()) applySourceRouteToShell();
   }
 
   function fileBadge(status?: string) {
@@ -484,21 +498,22 @@ export function createDiffView(deps: DiffViewDeps) {
       newListSig === prevListSignature && prevListSignature !== "";
 
     STATE.files = newFiles;
-    invalidateRepoSidebar();
+    const canUpdateSidebar = !isEmbeddedDiffMode?.();
+    if (canUpdateSidebar) invalidateRepoSidebar();
     setServerGeneration(meta.generation || 0);
     window._lastMeta = meta;
     renderMeta(meta);
 
-    const target = $("#diff");
-    const empty = $("#empty");
+    const target = getDiffRoot?.() || $("#diff");
+    const empty = getEmptyPane?.() || $("#empty");
     const expectedKeys = newFiles.map(fileKey);
     const domIntact = isDiffShellDomIntact(target, expectedKeys);
     const sidebarNeedsRender = shouldRenderDiffSidebar(listSame, domIntact);
     if (!newFiles.length) {
       prevListSignature = newListSig;
       prevCardSignatures.clear();
-      if (sidebarNeedsRender) renderSidebar(newFiles);
-      if (STATE.route.screen === "file") {
+      if (sidebarNeedsRender && canUpdateSidebar) renderSidebar(newFiles);
+      if (shouldSyncSourceRouteToShell()) {
         empty.classList.add("hidden");
         applySourceRouteToShell();
       } else {
@@ -536,7 +551,7 @@ export function createDiffView(deps: DiffViewDeps) {
         if (!sigChanged && !pathHint) {
           continue;
         }
-        const card = document.querySelector<DiffCardElement>(
+        const card = target.querySelector<DiffCardElement>(
           `.gdp-file-shell[data-key="${CSS.escape(key)}"]`,
         );
         if (!card) continue;
@@ -579,10 +594,11 @@ export function createDiffView(deps: DiffViewDeps) {
           if (sigChanged) sidebarNeedsStatsUpdate = true;
         }
       }
-      if (sidebarNeedsStatsUpdate) updateSidebarStats(newFiles);
+      if (sidebarNeedsStatsUpdate && canUpdateSidebar)
+        updateSidebarStats(newFiles);
       prevCardSignatures = newCardSigs;
       prevListSignature = newListSig;
-      applySourceRouteToShell();
+      syncSourceRouteToShell();
       if (!scrollSpyInstalled) {
         setupScrollSpy();
         scrollSpyInstalled = true;
@@ -595,7 +611,7 @@ export function createDiffView(deps: DiffViewDeps) {
     }
 
     // Full path: file list structure changed
-    if (sidebarNeedsRender) renderSidebar(newFiles);
+    if (sidebarNeedsRender && canUpdateSidebar) renderSidebar(newFiles);
 
     const oldByKey = new Map<string, DiffCardElement>();
     document
@@ -662,7 +678,7 @@ export function createDiffView(deps: DiffViewDeps) {
 
     setupLazyObserver();
     enqueueInitialLoads();
-    applySourceRouteToShell();
+    syncSourceRouteToShell();
     setupScrollSpy();
     scrollSpyInstalled = true;
     if (typeof applyHideTests === "function") applyHideTests();
@@ -952,16 +968,16 @@ export function createDiffView(deps: DiffViewDeps) {
     if (head) head.style.display = "none";
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
     if (!body) return;
-    body.innerHTML = "";
-
     if (!data.diff?.trim()) {
+      body.innerHTML = "";
       body.innerHTML = '<div class="gdp-info">No content</div>';
       return;
     }
 
+    body.innerHTML = "";
     const layout = file.force_layout || STATE.layout;
     const hljsRef = getHljs();
-    const ui = new Diff2HtmlUI(
+    const ui = new window.Diff2HtmlUI(
       body,
       data.diff,
       {
@@ -1426,8 +1442,8 @@ export function createDiffView(deps: DiffViewDeps) {
         }).value;
         s.classList.add("hljs", `language-${lang}`);
         s.classList.remove("plaintext");
-      } catch (_) {
-        /* swallow */
+      } catch {
+        // Keep the original text when highlight.js cannot parse a line.
       }
     }
     return true;

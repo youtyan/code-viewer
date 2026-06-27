@@ -14,6 +14,7 @@ export type DbColumn = {
   nullable: boolean;
   primaryKey: boolean;
   defaultValue: string | null;
+  comment?: string | null;
 };
 
 export type DbTableInfo = {

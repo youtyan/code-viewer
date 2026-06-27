@@ -510,6 +510,7 @@ function fileToMeta(
 function computePayload(
   extras: string[],
   range: { from?: string; to?: string },
+  pathFilter = "",
 ): DiffMeta {
   if (isSameWorktreeRange(range)) {
     return {
@@ -525,8 +526,15 @@ function computePayload(
   const fullArgs = [...extras, ...args];
   const files = git.fileMeta(fullArgs, cwd, false);
   if (includeUntracked(range, refs)) files.push(...git.untrackedMeta(cwd));
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  files.forEach((file, i) => {
+  const filteredFiles = pathFilter
+    ? files.filter(
+        (file) => file.path === pathFilter || file.old_path === pathFilter,
+      )
+    : files;
+  filteredFiles.sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  );
+  filteredFiles.forEach((file, i) => {
     file.order = i + 1;
   });
   const extraQs: Record<string, string> = {};
@@ -534,7 +542,7 @@ function computePayload(
     if (e === "-w" || e === "--ignore-all-space") extraQs.ignore_ws = "1";
     if (e === "--ignore-blank-lines") extraQs.ignore_blank = "1";
   }
-  const meta = files.map((file) => fileToMeta(file, range, extraQs));
+  const meta = filteredFiles.map((file) => fileToMeta(file, range, extraQs));
   const totals = meta.reduce(
     (acc, file) => {
       acc.additions += file.additions || 0;
@@ -566,9 +574,11 @@ function handleDiffJson(url: URL) {
     from: url.searchParams.get("from") || "",
     to: url.searchParams.get("to") || "",
   };
-  const key = `${range.from}|${range.to}|${url.searchParams.get("ignore_ws") || ""}|${url.searchParams.get("ignore_blank") || ""}`;
+  const path = url.searchParams.get("path") || "";
+  if (path && !safePath(path)) return text("invalid path", 400);
+  const key = `${range.from}|${range.to}|${url.searchParams.get("ignore_ws") || ""}|${url.searchParams.get("ignore_blank") || ""}|${path}`;
   if (url.searchParams.get("nocache") === "1") {
-    const payload = computePayload(extras, range);
+    const payload = computePayload(extras, range, path);
     const sig = JSON.stringify({ ...payload, generation: undefined });
     const cached = metaCache.get(key);
     if (!cached || cached.sig !== sig) {
@@ -594,7 +604,7 @@ function handleDiffJson(url: URL) {
         "Cache-Control": "no-store",
       },
     });
-  const payload = computePayload(extras, range);
+  const payload = computePayload(extras, range, path);
   const body = JSON.stringify(payload);
   setTimedCacheEntry(metaCache, key, {
     body,
@@ -1279,6 +1289,7 @@ function handleLog(url: URL) {
   return json({
     commits,
     hasMore: result.hasMore,
+    generation,
     ...(hasWorktree ? { hasWorktree: true } : {}),
   });
 }
@@ -1334,11 +1345,11 @@ function handleFileBlame(url: URL) {
       blameCache.delete(cacheKey);
       blameCache.set(cacheKey, cached);
     }
-    return json({ ...cached, base, ref });
+    return json({ ...cached, base, ref, generation });
   }
   const result = git.blame(cwd, { path, ref: normalized.ref, base });
   if (!result.error) rememberBlame(cacheKey, result);
-  return json({ ...result, base, ref });
+  return json({ ...result, base, ref, generation });
 }
 
 function handleFileDiff(url: URL) {

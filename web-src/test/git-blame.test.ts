@@ -96,6 +96,17 @@ describe("blame", () => {
     rmSync(join(repo, "new.txt"), { force: true });
   });
 
+  test("worktree base reports a missing file clearly", () => {
+    const res = blame(repo, {
+      path: "missing.txt",
+      ref: "worktree",
+      base: "worktree",
+    });
+    expect(res.lines).toEqual([]);
+    expect(res.commits).toEqual({});
+    expect(res.error).toBe("file not found");
+  });
+
   test("rejects unsafe paths", () => {
     const res = blame(repo, { path: "-evil", ref: "HEAD", base: "HEAD" });
     expect(res.error).toBeTruthy();

@@ -34,6 +34,16 @@ function git(cwd: string, args: string[]) {
   return proc;
 }
 
+function gitInput(cwd: string, args: string[], input: string) {
+  const proc = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    input,
+  });
+  expect(proc.status).toBe(0);
+  return proc;
+}
+
 describe("truncateToNHunks", () => {
   test("preserves newlines between rendered hunks", () => {
     const diff = [
@@ -332,18 +342,18 @@ describe("repository tree helpers", () => {
       git(dir, ["config", "user.email", "tester@example.com"]);
       git(dir, ["config", "user.name", "Test User"]);
       git(dir, ["symbolic-ref", "HEAD", "refs/heads/main"]);
-      let parent = "";
-      for (let index = 1; index <= 105; index++) {
-        const args = [
-          "commit-tree",
-          "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-          "-m",
-          `commit ${index}`,
-        ];
-        if (parent) args.push("-p", parent);
-        parent = git(dir, args).stdout.trim();
-      }
-      git(dir, ["update-ref", "refs/heads/main", parent]);
+      const importStream = Array.from({ length: 105 }, (_, offset) => {
+        const index = offset + 1;
+        const message = `commit ${index}`;
+        return [
+          "commit refs/heads/main",
+          `committer Test User <tester@example.com> ${1_700_000_000 + index} +0000`,
+          `data ${Buffer.byteLength(message)}`,
+          message,
+          "",
+        ].join("\n");
+      }).join("");
+      gitInput(dir, ["fast-import", "--quiet"], importStream);
 
       const result = refs(dir);
 

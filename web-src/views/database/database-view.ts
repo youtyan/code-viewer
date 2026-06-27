@@ -52,6 +52,8 @@ type DatabasePaneDeps = DatabaseViewDeps & {
     table: string,
     widths: Record<string, number>,
   ): void;
+  getExpandedTables(scopeKey: string): string[];
+  setExpandedTable(scopeKey: string, table: string, expanded: boolean): void;
   // db-ui.json の prefs。boolean トグル系の永続化はここに集約する
   // (localStorage を使わない)。
   getDbUiPref<K extends keyof DbUiPrefs>(
@@ -176,6 +178,10 @@ function isSqlView(view: TabName): boolean {
     view === "search" ||
     view === "snapshot"
   );
+}
+
+function dbUiTableExpansionScope(dbId: string, schema: string | null): string {
+  return schema ? `${dbId}#schema=${schema}` : dbId;
 }
 
 const HISTORY_SSE_REFRESH_DELAY_MS = 250;
@@ -336,11 +342,24 @@ function createTabPane(
 
   let currentTab: TabName = initial.view ?? "data";
 
+  function currentTableExpansionScope(): string | null {
+    if (!currentDbInfo) return null;
+    return dbUiTableExpansionScope(currentDbInfo.id, currentSchema);
+  }
+
   const tableList = createTableList({
     onSelectTable: (table) => selectTable(table),
     onViewCreateTable: (table) => showDdl(table),
     onViewDefinition: (table) => showSchema(table),
     getColumns: (table) => fetchColumns(table),
+    getExpandedTables: () => {
+      const scope = currentTableExpansionScope();
+      return scope ? outerDeps.getExpandedTables(scope) : [];
+    },
+    onExpandedTableChange: (table, expanded) => {
+      const scope = currentTableExpansionScope();
+      if (scope) outerDeps.setExpandedTable(scope, table, expanded);
+    },
   });
 
   const sidebar = document.createElement("div");
@@ -1061,6 +1080,8 @@ function createTabPane(
     if (!schema) return;
     currentSchema = schema.schema || currentSchema;
     schemaCache = schema;
+    await outerDeps.ensureDbUiState();
+    if (generation !== loadGeneration || currentDbInfo?.id !== dbId) return;
     tableList.render(schema.tables);
     grid.clear();
     schemaView.clear();
@@ -1793,6 +1814,39 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }).catch(() => {});
   }
 
+  function getExpandedTables(scopeKey: string): string[] {
+    return [...(dbUiState.expandedTables?.[scopeKey] || [])];
+  }
+
+  function setExpandedTable(
+    scopeKey: string,
+    table: string,
+    expanded: boolean,
+  ): void {
+    const expandedTables = { ...(dbUiState.expandedTables || {}) };
+    const tables = new Set(expandedTables[scopeKey] || []);
+    if (expanded) tables.add(table);
+    else tables.delete(table);
+    const nextTables = [...tables].sort((a, b) => a.localeCompare(b));
+    if (nextTables.length > 0) expandedTables[scopeKey] = nextTables;
+    else delete expandedTables[scopeKey];
+    const nextExpanded =
+      Object.keys(expandedTables).length > 0 ? expandedTables : undefined;
+    const nextState: DbUiState = { ...dbUiState, version: 1 };
+    if (nextExpanded) nextState.expandedTables = nextExpanded;
+    else delete nextState.expandedTables;
+    applyDbUiState(nextState);
+    void fetch("/_db/ui", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body: JSON.stringify({
+        expandedTables: {
+          [scopeKey]: nextTables.length > 0 ? nextTables : null,
+        },
+      }),
+    }).catch(() => {});
+  }
+
   // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
   // 即時通知する (例: 別タブで切り替えたら全タブの S3 explorer のトグル
   // 表示も更新される — 今は同タブ即時反映のみで十分だが、形だけ用意)。
@@ -2293,6 +2347,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         ensureDbUiState,
         getColumnWidths,
         setColumnWidths,
+        getExpandedTables,
+        setExpandedTable,
         getDbUiPref,
         setDbUiPref,
         onDbUiPrefChange,

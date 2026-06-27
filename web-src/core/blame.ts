@@ -25,6 +25,7 @@ export type BlameCommit = {
 export type BlameResponse = {
   lines: BlameLine[];
   commits: Record<string, BlameCommit>;
+  generation?: number;
   isUntracked?: boolean;
   isSynthetic?: boolean;
   error?: string;

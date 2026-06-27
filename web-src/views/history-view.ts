@@ -24,11 +24,24 @@ export type HistoryViewDeps = {
   getRoute(): AppRoute;
   setRoute(route: AppRoute, replace?: boolean): void;
   // Sets STATE.from/to to the commit range and reloads the diff pane.
-  applyCommitRange(range: { from: string; to: string }): Promise<void>;
+  applyCommitRange(
+    range: { from: string; to: string },
+    pathFilter?: string,
+  ): Promise<void>;
   // Clears the diff pane and shows the "no commit selected" empty state.
   showEmptyDiffPane(): void;
   getSyntaxHighlight(): boolean;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
+};
+
+export type HistoryViewMount = {
+  panel: HTMLElement;
+  list: HTMLOListElement;
+  banner: HTMLElement;
+  status: HTMLElement;
+  sentinel: HTMLElement;
+  filterInput?: HTMLInputElement | null;
+  commitInfo?: HTMLElement | null;
 };
 
 export function historyBodyLineCount(rawText: string): number {
@@ -81,11 +94,25 @@ export function buildExpandableHistoryBody(
 }
 
 export function createHistoryView(deps: HistoryViewDeps) {
-  const panel = deps.$<HTMLElement>("#history-panel");
-  const list = deps.$<HTMLOListElement>("#history-list");
-  const banner = deps.$<HTMLElement>("#history-banner");
-  const statusEl = deps.$<HTMLElement>("#history-status");
-  const sentinel = deps.$<HTMLElement>("#history-sentinel");
+  const defaultMount: HistoryViewMount = {
+    panel: deps.$<HTMLElement>("#history-panel"),
+    list: deps.$<HTMLOListElement>("#history-list"),
+    banner: deps.$<HTMLElement>("#history-banner"),
+    status: deps.$<HTMLElement>("#history-status"),
+    sentinel: deps.$<HTMLElement>("#history-sentinel"),
+    filterInput: document.querySelector<HTMLInputElement>("#history-filter"),
+    commitInfo: document.querySelector<HTMLElement>("#history-commit-info"),
+  };
+  let activeMount = defaultMount;
+  let panel = defaultMount.panel;
+  let list = defaultMount.list;
+  let banner = defaultMount.banner;
+  let statusEl = defaultMount.status;
+  let sentinel = defaultMount.sentinel;
+  let attachedList: HTMLOListElement | null = null;
+  let attachedFilterInput: HTMLInputElement | null = null;
+  let filterTimer: ReturnType<typeof setTimeout> | null = null;
+  let observer: IntersectionObserver | null = null;
 
   let ref = "HEAD";
   let commits: HistoryCommit[] = [];
@@ -94,6 +121,41 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let generation = 0; // bumped on ref switch / re-enter to drop stale fetches
   let selectedSha = "";
   let query = "";
+  let mode: "history" | "file" = "history";
+  let routeRef = "HEAD";
+  let pathFilter = "";
+
+  type HistoryScope = {
+    mode: "history" | "file";
+    logRef: string;
+    routeRef: string;
+    pathFilter: string;
+    commit?: string;
+  };
+
+  function historyScopeFromRoute(route = deps.getRoute()): HistoryScope | null {
+    if (route.screen === "history") {
+      const nextRef = route.ref || "HEAD";
+      return {
+        mode: "history",
+        logRef: nextRef,
+        routeRef: nextRef,
+        pathFilter: "",
+        commit: route.commit,
+      };
+    }
+    if (route.screen === "file" && route.view === "history") {
+      const nextRouteRef = route.ref || "worktree";
+      return {
+        mode: "file",
+        logRef: nextRouteRef === "worktree" ? "HEAD" : nextRouteRef,
+        routeRef: nextRouteRef,
+        pathFilter: route.path,
+        commit: route.commit,
+      };
+    }
+    return null;
+  }
 
   function worktreeDiffRange() {
     return { from: "HEAD", to: "worktree" };
@@ -109,8 +171,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     statusEl.hidden = !message;
   }
 
+  function commitInfoElement(): HTMLElement | null {
+    return (
+      activeMount.commitInfo ||
+      document.querySelector<HTMLElement>("#history-commit-info")
+    );
+  }
+
   function clearCommitInfo() {
-    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    const info = commitInfoElement();
     if (!info) return;
     info.hidden = true;
     info.querySelector<HTMLElement>(".hci-head")?.removeAttribute("hidden");
@@ -147,15 +216,28 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return `${relative} (${absolute})`;
   }
 
-  function fetchPage(skip: number): Promise<HistoryLogResponse | null> {
-    const url =
-      `/_log?ref=${encodeURIComponent(ref)}&skip=${skip}&limit=${HISTORY_PAGE_SIZE}` +
-      (query ? `&q=${encodeURIComponent(query)}` : "");
+  function fetchPage(
+    skip: number,
+    requestGeneration: number,
+  ): Promise<HistoryLogResponse | null> {
+    const params = new URLSearchParams();
+    params.set("ref", ref);
+    params.set("skip", String(skip));
+    params.set("limit", String(HISTORY_PAGE_SIZE));
+    if (query) params.set("q", query);
+    if (pathFilter) {
+      params.set("path", pathFilter);
+      if (routeRef === "worktree") params.set("worktree", "1");
+    }
+    const url = `/_log?${params.toString()}`;
     return deps
       .trackLoad(
         fetch(url).then(async (r) => {
           if (!r.ok) throw new Error(await r.text());
-          return (await r.json()) as HistoryLogResponse;
+          const page = (await r.json()) as HistoryLogResponse;
+          if (page.generation !== undefined && requestGeneration !== generation)
+            return null;
+          return page;
         }),
       )
       .catch((err) => {
@@ -193,9 +275,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function renderList() {
     const now = new Date();
-    const html: string[] = [worktreeRow()];
+    const html: string[] = mode === "history" ? [worktreeRow()] : [];
     let lastGroup = "";
     for (const commit of commits) {
+      if (commit.sha === HISTORY_WORKTREE_COMMIT) {
+        html.push(worktreeRow());
+        continue;
+      }
       const group = historyGroupLabel(commit.when, now);
       if (group !== lastGroup) {
         html.push(
@@ -210,7 +296,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   async function updateCommitInfo(commit: HistoryCommit | null) {
-    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    const info = commitInfoElement();
     if (!info) return;
     if (!commit) {
       clearCommitInfo();
@@ -250,7 +336,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function updateWorktreeInfo() {
-    const info = document.querySelector<HTMLElement>("#history-commit-info");
+    const info = commitInfoElement();
     if (!info) return;
     info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
     const subject = info.querySelector<HTMLElement>(".hci-subject");
@@ -267,6 +353,50 @@ export function createHistoryView(deps: HistoryViewDeps) {
     list.querySelectorAll<HTMLElement>(".history-item").forEach((row) => {
       row.classList.toggle("active", row.dataset.sha === selectedSha);
     });
+  }
+
+  function isEditableTarget(target: EventTarget | null): boolean {
+    return (
+      typeof Element === "function" &&
+      target instanceof Element &&
+      !!target.closest(
+        'input, textarea, select, button, [contenteditable="true"]',
+      )
+    );
+  }
+
+  function selectableShas(): string[] {
+    const shas: string[] = mode === "history" ? [HISTORY_WORKTREE_COMMIT] : [];
+    for (const commit of commits) {
+      if (!shas.includes(commit.sha)) shas.push(commit.sha);
+    }
+    return shas;
+  }
+
+  async function selectSha(sha: string) {
+    if (sha === HISTORY_WORKTREE_COMMIT) {
+      await selectWorktree();
+      return;
+    }
+    const commit = commits.find((item) => item.sha === sha);
+    if (commit) await selectCommit(commit);
+  }
+
+  async function moveSelection(delta: 1 | -1) {
+    if (!historyScopeFromRoute()) return;
+    let shas = selectableShas();
+    if (shas.length === 0) return;
+    let index = selectedSha ? shas.indexOf(selectedSha) : -1;
+    if (index < 0) index = delta > 0 ? -1 : shas.length;
+    let nextIndex = index + delta;
+    if (nextIndex >= shas.length && hasMore && !loading) {
+      await loadNextPage();
+      shas = selectableShas();
+      nextIndex = Math.min(nextIndex, shas.length - 1);
+    }
+    if (nextIndex < 0 || nextIndex >= shas.length) return;
+    await selectSha(shas[nextIndex]);
+    scrollToSelected();
   }
 
   // Shared in-flight promise so concurrent callers (IntersectionObserver and
@@ -286,7 +416,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     loading = true;
     const gen = generation;
     setStatusText("loading...");
-    const page = await fetchPage(commits.length);
+    const page = await fetchPage(commits.length, gen);
     if (gen !== generation) return false;
     loading = false;
     if (!page) {
@@ -310,13 +440,30 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
-      deps.setRoute(
-        { screen: "history", ref, commit: commit.sha, range },
-        true,
-      );
+      if (mode === "file") {
+        deps.setRoute(
+          {
+            screen: "file",
+            path: pathFilter,
+            ref: routeRef,
+            view: "history",
+            commit: commit.sha,
+            range,
+          },
+          true,
+        );
+      } else {
+        deps.setRoute(
+          { screen: "history", ref, commit: commit.sha, range },
+          true,
+        );
+      }
     }
     if (gen !== generation) return;
-    await deps.applyCommitRange(commitDiffRange(commit));
+    await deps.applyCommitRange(
+      commitDiffRange(commit),
+      pathFilter || undefined,
+    );
     if (gen !== generation) return;
   }
 
@@ -327,13 +474,27 @@ export function createHistoryView(deps: HistoryViewDeps) {
     updateWorktreeInfo();
     const range = worktreeDiffRange();
     if (options.updateUrl !== false) {
-      deps.setRoute(
-        { screen: "history", ref, commit: selectedSha, range },
-        true,
-      );
+      if (mode === "file") {
+        deps.setRoute(
+          {
+            screen: "file",
+            path: pathFilter,
+            ref: routeRef,
+            view: "history",
+            commit: selectedSha,
+            range,
+          },
+          true,
+        );
+      } else {
+        deps.setRoute(
+          { screen: "history", ref, commit: selectedSha, range },
+          true,
+        );
+      }
     }
     if (gen !== generation) return;
-    await deps.applyCommitRange(range);
+    await deps.applyCommitRange(range, pathFilter || undefined);
     if (gen !== generation) return;
   }
 
@@ -409,34 +570,52 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function scrollToSelected() {
+    const escaped =
+      typeof CSS !== "undefined" && CSS.escape
+        ? CSS.escape(selectedSha)
+        : selectedSha.replace(/["\\]/g, "\\$&");
     list
-      .querySelector<HTMLElement>(
-        `.history-item[data-sha="${CSS.escape(selectedSha)}"]`,
-      )
+      .querySelector<HTMLElement>(`.history-item[data-sha="${escaped}"]`)
       ?.scrollIntoView({ block: "center" });
   }
 
   // Serialize enterHistory calls so overlapping invocations (e.g. rapid ref
   // picks plus route changes) run sequentially instead of interleaving.
   let entering: Promise<void> = Promise.resolve();
-  function enterHistory(force?: boolean): Promise<void> {
-    entering = entering
-      .then(() => doEnterHistory(force === true))
-      .catch(() => {});
+  function enterHistory(
+    mountOrForce?: HistoryViewMount | boolean,
+    forceArg?: boolean,
+  ): Promise<void> {
+    const mount =
+      typeof mountOrForce === "object"
+        ? mountOrForce
+        : mountOrForce === undefined
+          ? defaultMount
+          : activeMount;
+    const force =
+      typeof mountOrForce === "boolean" ? mountOrForce : forceArg === true;
+    activateMount(mount);
+    entering = entering.then(() => doEnterHistory(force)).catch(() => {});
     return entering;
   }
 
   // force=true treats the call like a ref change (full reset + reload) even
   // when the route's ref equals the current one.
   async function doEnterHistory(force = false) {
-    const route = deps.getRoute();
-    if (route.screen !== "history") return;
-    const nextRef = route.ref || "HEAD";
-    const refChanged = nextRef !== ref;
-    if (refChanged || force || commits.length === 0) {
+    const scope = historyScopeFromRoute();
+    if (!scope) return;
+    const scopeChanged =
+      scope.logRef !== ref ||
+      scope.routeRef !== routeRef ||
+      scope.pathFilter !== pathFilter ||
+      scope.mode !== mode;
+    if (scopeChanged || force || commits.length === 0) {
       generation++;
       const gen = generation;
-      ref = nextRef;
+      ref = scope.logRef;
+      routeRef = scope.routeRef;
+      pathFilter = scope.pathFilter;
+      mode = scope.mode;
       commits = [];
       hasMore = false;
       loading = false;
@@ -447,11 +626,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
       renderList();
       await loadNextPage();
       if (gen !== generation) return;
+    } else {
+      renderList();
     }
-    const route2 = deps.getRoute();
-    if (route2.screen !== "history") return;
-    if (route2.commit) {
-      await resolveDeepLink(route2.commit);
+    const scope2 = historyScopeFromRoute();
+    if (!scope2) return;
+    if (scope2.commit) {
+      await resolveDeepLink(scope2.commit);
     } else {
       selectedSha = "";
       updateActiveRow();
@@ -462,14 +643,27 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function onRefPicked(nextRef: string) {
     const value = nextRef && nextRef !== "worktree" ? nextRef : "HEAD";
-    deps.setRoute(
-      {
-        screen: "history",
-        ref: value,
-        range: { from: "HEAD", to: "worktree" },
-      },
-      false,
-    );
+    if (mode === "file" && pathFilter) {
+      deps.setRoute(
+        {
+          screen: "file",
+          path: pathFilter,
+          ref: nextRef || "worktree",
+          view: "history",
+          range: { from: "HEAD", to: "worktree" },
+        },
+        false,
+      );
+    } else {
+      deps.setRoute(
+        {
+          screen: "history",
+          ref: value,
+          range: { from: "HEAD", to: "worktree" },
+        },
+        false,
+      );
+    }
     // Force a reload even if the picked ref equals the current one.
     void enterHistory(true);
   }
@@ -485,7 +679,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     clearCommitInfo();
   }
 
-  list.addEventListener("click", (e) => {
+  function handleListClick(e: MouseEvent) {
     const row = (e.target as Element).closest<HTMLElement>(".history-item");
     if (!row?.dataset.sha) return;
     if (row.dataset.sha === HISTORY_WORKTREE_COMMIT) {
@@ -494,7 +688,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     const commit = commits.find((c) => c.sha === row.dataset.sha);
     if (commit) selectCommit(commit);
-  });
+  }
 
   // Server-side filter: message text by default, sha prefix for hex terms,
   // plus "author:" and "path:" prefixes. Keeps the selected commit and the
@@ -513,34 +707,83 @@ export function createHistoryView(deps: HistoryViewDeps) {
     void loadNextPage();
   }
 
-  const filterInput =
-    document.querySelector<HTMLInputElement>("#history-filter");
-  let filterTimer: ReturnType<typeof setTimeout> | null = null;
-  filterInput?.addEventListener("input", () => {
+  function handleFilterInput() {
+    if (!attachedFilterInput) return;
     if (filterTimer) clearTimeout(filterTimer);
+    const input = attachedFilterInput;
     filterTimer = setTimeout(() => {
       filterTimer = null;
-      applyFilter(filterInput.value);
+      applyFilter(input.value);
     }, 250);
-  });
-  filterInput?.addEventListener("keydown", (e) => {
+  }
+
+  function handleFilterKeydown(e: KeyboardEvent) {
+    const input = attachedFilterInput;
+    if (!input) return;
     if (isImeComposing(e)) return;
-    if (e.key === "Escape" && filterInput.value) {
-      filterInput.value = "";
+    if (e.key === "Escape" && input.value) {
+      input.value = "";
       applyFilter("");
       e.stopPropagation();
     }
+  }
+
+  function activateMount(mount: HistoryViewMount) {
+    if (activeMount === mount && attachedList === mount.list) return;
+    if (attachedList) {
+      attachedList.removeEventListener("click", handleListClick);
+      attachedList = null;
+    }
+    if (attachedFilterInput) {
+      attachedFilterInput.removeEventListener("input", handleFilterInput);
+      attachedFilterInput.removeEventListener("keydown", handleFilterKeydown);
+      attachedFilterInput = null;
+    }
+    if (filterTimer) {
+      clearTimeout(filterTimer);
+      filterTimer = null;
+    }
+    observer?.disconnect();
+
+    activeMount = mount;
+    panel = mount.panel;
+    list = mount.list;
+    banner = mount.banner;
+    statusEl = mount.status;
+    sentinel = mount.sentinel;
+
+    list.addEventListener("click", handleListClick);
+    attachedList = list;
+    const input = mount.filterInput ?? null;
+    if (input) {
+      input.value = query;
+      input.addEventListener("input", handleFilterInput);
+      input.addEventListener("keydown", handleFilterKeydown);
+      attachedFilterInput = input;
+    }
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (!historyScopeFromRoute()) return;
+        if (hasMore && !loading) loadNextPage();
+      },
+      { root: panel, rootMargin: "200px" },
+    );
+    observer.observe(sentinel);
+  }
+
+  const docWithEvents = document as Document & {
+    addEventListener?: Document["addEventListener"];
+  };
+  docWithEvents.addEventListener?.("keydown", (e) => {
+    if (isImeComposing(e) || isEditableTarget(e.target)) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (!historyScopeFromRoute()) return;
+    e.preventDefault();
+    void moveSelection(e.key === "ArrowDown" ? 1 : -1);
   });
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      if (deps.getRoute().screen !== "history") return;
-      if (hasMore && !loading) loadNextPage();
-    },
-    { root: panel, rootMargin: "200px" },
-  );
-  observer.observe(sentinel);
+  activateMount(defaultMount);
 
   return {
     enterHistory,

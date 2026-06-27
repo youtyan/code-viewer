@@ -91,6 +91,7 @@ export function createSchemaView(
       t.colNullable,
       t.colPk,
       t.colDefault,
+      t.colComment,
     ]) {
       const th = document.createElement("th");
       th.textContent = label;
@@ -122,7 +123,11 @@ export function createSchemaView(
       tdDefault.textContent = col.defaultValue ?? "";
       tdDefault.className = "db-schema-default";
 
-      tr.append(tdName, tdType, tdNull, tdPk, tdDefault);
+      const tdComment = document.createElement("td");
+      tdComment.textContent = col.comment ?? "";
+      tdComment.className = "db-schema-comment";
+
+      tr.append(tdName, tdType, tdNull, tdPk, tdDefault, tdComment);
       tbody.appendChild(tr);
     }
     colTable.append(thead, tbody);

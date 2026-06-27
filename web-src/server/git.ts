@@ -738,7 +738,15 @@ function syntheticUncommittedBlameFromWorktree(
       isUntracked: true,
       isSynthetic: true,
     };
-  } catch {
+  } catch (err) {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code?: unknown }).code === "ENOENT"
+    ) {
+      return { lines: [], commits: {}, error: "file not found" };
+    }
     return { lines: [], commits: {}, error: "file not readable" };
   }
 }
