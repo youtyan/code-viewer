@@ -677,8 +677,44 @@ export function createSourceView(deps: SourceViewDeps) {
       previewButton.textContent = "Preview";
       tabs.prepend(previewButton);
     }
+    appendFileViewExtraTabs(tabs);
     if (textValue != null) tabs.appendChild(createSourceCopyButton(textValue));
     return { tabs, codeButton, previewButton };
+  }
+
+  function appendFileViewExtraTabs(tabs: HTMLElement) {
+    const route = STATE.route;
+    if (route.screen !== "file") return;
+    const path = route.path;
+    const ref = route.ref;
+    const blameButton = document.createElement("button");
+    blameButton.type = "button";
+    blameButton.dataset.sourceTab = "blame";
+    blameButton.textContent = "Blame";
+    blameButton.addEventListener("click", () => {
+      setRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "blame",
+        range: currentRange(),
+      });
+    });
+    tabs.appendChild(blameButton);
+    const historyButton = document.createElement("button");
+    historyButton.type = "button";
+    historyButton.dataset.sourceTab = "history";
+    historyButton.textContent = "History";
+    historyButton.addEventListener("click", () => {
+      setRoute({
+        screen: "file",
+        path,
+        ref,
+        view: "history",
+        range: currentRange(),
+      });
+    });
+    tabs.appendChild(historyButton);
   }
 
   async function renderSourceText(

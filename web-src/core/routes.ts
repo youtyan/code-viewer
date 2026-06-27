@@ -23,7 +23,8 @@ export type AppRoute =
       path: string;
       ref: string;
       range: DiffRange;
-      view?: "blob" | "detail";
+      view?: "blob" | "detail" | "blame" | "history";
+      base?: "worktree" | "HEAD";
       line?: SourceLineTarget;
       virtual?: "off";
     }
@@ -136,6 +137,37 @@ export function parseRoute(
           rawSearch: search,
           range,
         };
+      const rawView = params.get("view");
+      if (rawView === "blame") {
+        const rawBase = params.get("base");
+        const defaultBase: "worktree" | "HEAD" =
+          ref === "worktree" ? "worktree" : "HEAD";
+        const base: "worktree" | "HEAD" =
+          rawBase === "HEAD"
+            ? "HEAD"
+            : rawBase === "worktree" && ref === "worktree"
+              ? "worktree"
+              : defaultBase;
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: "blame",
+          base,
+          ...(line ? { line } : {}),
+        };
+      }
+      if (rawView === "history") {
+        return {
+          screen: "file",
+          path,
+          ref,
+          range,
+          view: "history",
+          ...(line ? { line } : {}),
+        };
+      }
       return {
         screen: "file",
         path,
@@ -216,6 +248,37 @@ export function buildRoute(route: AppRoute): string {
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "") +
           (route.virtual === "off" ? "&virtual=off" : "")
+        );
+      }
+      if (route.view === "blame") {
+        const ref = route.ref || "worktree";
+        const defaultBase: "worktree" | "HEAD" =
+          ref === "worktree" ? "worktree" : "HEAD";
+        const base: "worktree" | "HEAD" = route.base ?? defaultBase;
+        const normalizedBase: "worktree" | "HEAD" =
+          base === "worktree" && ref !== "worktree" ? "HEAD" : base;
+        return (
+          "/file?path=" +
+          encodeURIComponent(route.path) +
+          "&target=" +
+          encodeURIComponent(ref) +
+          "&view=blame" +
+          (normalizedBase !== defaultBase ? `&base=${normalizedBase}` : "") +
+          (route.line
+            ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
+            : "")
+        );
+      }
+      if (route.view === "history") {
+        return (
+          "/file?path=" +
+          encodeURIComponent(route.path) +
+          "&target=" +
+          encodeURIComponent(route.ref || "worktree") +
+          "&view=history" +
+          (route.line
+            ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
+            : "")
         );
       }
       return (

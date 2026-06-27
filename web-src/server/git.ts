@@ -47,6 +47,33 @@ export type GitBranchMeta = {
   when: string;
 };
 
+// ai-dup-check: allow -- blame DTOs are intentionally narrow to avoid leaking parser state.
+export type GitBlameLine = {
+  lineNo: number;
+  sha: string;
+  isUncommitted: boolean;
+};
+
+// ai-dup-check: allow -- blame commit DTO mirrors core/blame.ts BlameCommit; server keeps a local copy to avoid a server→core import cycle.
+export type GitBlameCommit = {
+  sha: string;
+  author: string;
+  authorMail: string;
+  authorTime: number;
+  summary: string;
+  isUncommitted: boolean;
+};
+
+export type GitBlameResult = {
+  lines: GitBlameLine[];
+  commits: Record<string, GitBlameCommit>;
+  isUntracked?: boolean;
+  isSynthetic?: boolean;
+  error?: string;
+};
+
+export const BLAME_ZERO_SHA = "0000000000000000000000000000000000000000";
+
 export type GitTagMeta = {
   name: string;
   when: string;
@@ -496,7 +523,13 @@ function historyQueryArgs(query: string): {
 
 export function commitHistory(
   cwd: string,
-  options: { ref: string; skip: number; limit: number; query?: string },
+  options: {
+    ref: string;
+    skip: number;
+    limit: number;
+    query?: string;
+    path?: string;
+  },
 ): { commits: GitHistoryCommit[]; hasMore: boolean; error?: string } {
   const ref = (options.ref || "HEAD").trim();
   if (!ref || ref.startsWith("-") || ref.includes("\0"))
@@ -515,6 +548,15 @@ export function commitHistory(
   const { filterArgs, pathspec, shaTerm } = historyQueryArgs(
     options.query || "",
   );
+  const pathFilter = (options.path || "").trim();
+  // When the caller pins a path, follow renames through history. Skip --follow
+  // for directories (git --follow rejects them) by treating any path ending in
+  // "/" as a directory and not adding --follow.
+  const pathArgs: string[] = [];
+  if (pathFilter && !pathFilter.includes("\0") && !pathFilter.startsWith("-")) {
+    if (!pathFilter.endsWith("/")) pathArgs.push("--follow");
+    pathArgs.push("--", pathFilter);
+  }
   const res = run(
     [
       "git",
@@ -526,6 +568,7 @@ export function commitHistory(
       ...filterArgs,
       verified.stdout.trim(),
       ...pathspec,
+      ...pathArgs,
     ],
     cwd,
   );
@@ -641,6 +684,138 @@ export function isToolInternalPath(path: string): boolean {
   return path
     .split(/[\\/]+/)
     .some((part) => part.toLowerCase() === ".code-viewer");
+}
+
+function syntheticUncommittedBlameFromWorktree(
+  cwd: string,
+  path: string,
+): GitBlameResult {
+  const filePath = join(cwd, path);
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return { lines: [], commits: {}, error: "not a file" };
+    const text = readFileSync(filePath, "utf8");
+    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lineCount = normalized.length
+      ? normalized.endsWith("\n")
+        ? normalized.length - 1 === 0
+          ? 1
+          : normalized.split("\n").length - 1
+        : normalized.split("\n").length
+      : 1;
+    const lines: GitBlameLine[] = [];
+    for (let i = 1; i <= lineCount; i++) {
+      lines.push({ lineNo: i, sha: BLAME_ZERO_SHA, isUncommitted: true });
+    }
+    return {
+      lines,
+      commits: {
+        [BLAME_ZERO_SHA]: {
+          sha: BLAME_ZERO_SHA,
+          author: "Not Committed Yet",
+          authorMail: "",
+          authorTime: 0,
+          summary: "Working tree",
+          isUncommitted: true,
+        },
+      },
+      isUntracked: true,
+      isSynthetic: true,
+    };
+  } catch {
+    return { lines: [], commits: {}, error: "file not readable" };
+  }
+}
+
+// git blame --porcelain parser. base "worktree": blame the working copy;
+// base "HEAD": blame the committed snapshot at the given ref.
+export function blame(
+  cwd: string,
+  options: { path: string; ref: string; base: "worktree" | "HEAD" },
+): GitBlameResult {
+  const path = options.path;
+  if (!path || path.includes("\0") || path.startsWith("-")) {
+    return { lines: [], commits: {}, error: "invalid path" };
+  }
+  const args = ["git", "blame", "--porcelain"];
+  if (options.base === "HEAD") {
+    // base=HEAD means "blame the committed snapshot at this ref". The literal
+    // string "worktree" isn't a git ref, so map it to HEAD.
+    const ref =
+      options.ref === "worktree" || !options.ref ? "HEAD" : options.ref;
+    if (ref.startsWith("-") || ref.includes("\0"))
+      return { lines: [], commits: {}, error: "invalid ref" };
+    args.push(ref);
+  }
+  args.push("--", path);
+  const res = run(args, cwd);
+  if (res.code !== 0) {
+    if (options.base === "worktree") {
+      // untracked / newly added file: synthesize an all-uncommitted blame.
+      return syntheticUncommittedBlameFromWorktree(cwd, path);
+    }
+    return {
+      lines: [],
+      commits: {},
+      error: res.stderr.trim() || "blame failed",
+    };
+  }
+  const lines: GitBlameLine[] = [];
+  const commits: Record<string, GitBlameCommit> = {};
+  const rawLines = res.stdout.split("\n");
+  let i = 0;
+  while (i < rawLines.length) {
+    const headerLine = rawLines[i];
+    if (!headerLine) {
+      i++;
+      continue;
+    }
+    const headerMatch = /^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$/.exec(
+      headerLine,
+    );
+    if (!headerMatch) {
+      i++;
+      continue;
+    }
+    const sha = headerMatch[1];
+    const finalLine = Number(headerMatch[3]);
+    i++;
+    let commit = commits[sha];
+    if (!commit) {
+      commit = {
+        sha,
+        author: "",
+        authorMail: "",
+        authorTime: 0,
+        summary: "",
+        isUncommitted: sha === BLAME_ZERO_SHA,
+      };
+      commits[sha] = commit;
+    }
+    while (i < rawLines.length && !rawLines[i].startsWith("\t")) {
+      const metaLine = rawLines[i++];
+      if (!metaLine) continue;
+      const sp = metaLine.indexOf(" ");
+      const key = sp >= 0 ? metaLine.slice(0, sp) : metaLine;
+      const val = sp >= 0 ? metaLine.slice(sp + 1) : "";
+      if (key === "author" && !commit.author) commit.author = val;
+      else if (key === "author-mail" && !commit.authorMail)
+        commit.authorMail = val.replace(/^</, "").replace(/>$/, "");
+      else if (key === "author-time" && !commit.authorTime)
+        commit.authorTime = Number(val) || 0;
+      else if (key === "summary" && !commit.summary) commit.summary = val;
+    }
+    if (i < rawLines.length && rawLines[i].startsWith("\t")) i++;
+    if (Number.isFinite(finalLine) && finalLine > 0) {
+      lines.push({
+        lineNo: finalLine,
+        sha,
+        isUncommitted: sha === BLAME_ZERO_SHA,
+      });
+    }
+  }
+  lines.sort((a, b) => a.lineNo - b.lineNo);
+  return { lines, commits };
 }
 
 export function untracked(cwd: string, path = ""): string[] {

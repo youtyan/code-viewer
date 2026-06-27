@@ -50,10 +50,12 @@ import {
   type AnnotationsUi,
   createAnnotationsUi,
 } from "./views/annotations-ui";
+import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
+import { createFileHistoryView } from "./views/file-history-view";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -890,6 +892,34 @@ window.GdpExpandLogic = GdpExpandLogic;
     handleVirtualSourcePagingKeydown,
     openVirtualSourceSearchFromKeyboard,
   } = SOURCE_VIEW;
+
+  const BLAME_VIEW = createBlameView({
+    $,
+    STATE,
+    setRoute,
+    setPageMode,
+    currentRange,
+    trackLoad,
+    createFileBreadcrumb: (path, ref) =>
+      DIFF_VIEW.createFileBreadcrumb(path, ref),
+    removeStandaloneSource,
+    placeSidebarToggle,
+    escapeHtml,
+  });
+
+  const FILE_HISTORY_VIEW = createFileHistoryView({
+    $,
+    STATE,
+    setRoute,
+    setPageMode,
+    currentRange,
+    trackLoad,
+    createFileBreadcrumb: (path, ref) =>
+      DIFF_VIEW.createFileBreadcrumb(path, ref),
+    removeStandaloneSource,
+    placeSidebarToggle,
+    escapeHtml,
+  });
 
   // ---------- Repository view: extracted to repo-view.ts ----------
   const REPO_VIEW = createRepoView({
@@ -1983,6 +2013,18 @@ window.GdpExpandLogic = GdpExpandLogic;
     return route.screen === "file" && route.view === "blob";
   }
 
+  function isFileBlameRoute(
+    route: AppRoute,
+  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blame" } {
+    return route.screen === "file" && route.view === "blame";
+  }
+
+  function isFileHistoryRoute(
+    route: AppRoute,
+  ): route is Extract<AppRoute, { screen: "file" }> & { view: "history" } {
+    return route.screen === "file" && route.view === "history";
+  }
+
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
   // file once its dependencies exist; the few call sites that can run before
   // that (setRoute, lazy diff renders) go through this late-bound handle.
@@ -2857,6 +2899,35 @@ window.GdpExpandLogic = GdpExpandLogic;
         preservedDom: true,
       });
     }
+    if (isFileBlameRoute(STATE.route)) {
+      setStatus("live");
+      const blameRoute = STATE.route;
+      const base: "worktree" | "HEAD" =
+        blameRoute.base ??
+        (blameRoute.ref === "worktree" ? "worktree" : "HEAD");
+      void BLAME_VIEW.renderBlamePage(
+        { path: blameRoute.path, ref: blameRoute.ref },
+        base,
+      );
+      return Promise.resolve({
+        structureChanged: false,
+        invalidatedCards: 0,
+        preservedDom: true,
+      });
+    }
+    if (isFileHistoryRoute(STATE.route)) {
+      setStatus("live");
+      const historyRoute = STATE.route;
+      void FILE_HISTORY_VIEW.renderHistoryPage({
+        path: historyRoute.path,
+        ref: historyRoute.ref,
+      });
+      return Promise.resolve({
+        structureChanged: false,
+        invalidatedCards: 0,
+        preservedDom: true,
+      });
+    }
     if (STATE.route.screen === "repo") return loadRepo().then(() => null);
     {
       const empty = $("#empty");
@@ -2908,6 +2979,23 @@ window.GdpExpandLogic = GdpExpandLogic;
     else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
       setStatus("live");
       applySourceRouteToShell();
+    } else if (isFileBlameRoute(STATE.route)) {
+      const blameRoute = STATE.route;
+      setStatus("live");
+      const base: "worktree" | "HEAD" =
+        blameRoute.base ??
+        (blameRoute.ref === "worktree" ? "worktree" : "HEAD");
+      void BLAME_VIEW.renderBlamePage(
+        { path: blameRoute.path, ref: blameRoute.ref },
+        base,
+      );
+    } else if (isFileHistoryRoute(STATE.route)) {
+      const r = STATE.route;
+      setStatus("live");
+      void FILE_HISTORY_VIEW.renderHistoryPage({
+        path: r.path,
+        ref: r.ref,
+      });
     } else if (STATE.route.screen === "history") {
       parkRangeForHistory();
       setStatus("live");

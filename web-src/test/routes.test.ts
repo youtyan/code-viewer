@@ -326,6 +326,158 @@ describe("routes", () => {
     ).toBe("/history?commit=worktree");
   });
 
+  test("parses and builds file blame routes", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=blame",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blame",
+      base: "worktree",
+      range: fallback,
+    });
+    expect(
+      parseRoute("/file", "?path=README.md&target=main&view=blame", fallback),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blame",
+      base: "HEAD",
+      range: fallback,
+    });
+    // target=<sha> & base=worktree → base=HEAD に正規化
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=main&view=blame&base=worktree",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blame",
+      base: "HEAD",
+      range: fallback,
+    });
+    // target=worktree でも明示 base=HEAD は許可（既定と異なるので保持）
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=blame&base=HEAD",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "blame",
+      base: "HEAD",
+      range: fallback,
+    });
+    // line も保持
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=main&view=blame&line=12-15",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "main",
+      view: "blame",
+      base: "HEAD",
+      line: { start: 12, end: 15 },
+      range: fallback,
+    });
+
+    // build: 既定 base なら URL に出さない
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=worktree&view=blame");
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "main",
+        view: "blame",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=main&view=blame");
+    // build: target=worktree & base=HEAD は既定と異なるので出力
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "blame",
+        base: "HEAD",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=worktree&view=blame&base=HEAD");
+    // build: target=<sha> & base=worktree (不正組合せ) は HEAD に正規化されURLから消える
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "main",
+        view: "blame",
+        base: "worktree",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=main&view=blame");
+  });
+
+  test("parses and builds file history routes", () => {
+    const fallback = { from: "HEAD", to: "worktree" };
+    expect(
+      parseRoute(
+        "/file",
+        "?path=README.md&target=worktree&view=history",
+        fallback,
+      ),
+    ).toEqual({
+      screen: "file",
+      path: "README.md",
+      ref: "worktree",
+      view: "history",
+      range: fallback,
+    });
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "README.md",
+        ref: "worktree",
+        view: "history",
+        range: fallback,
+      }),
+    ).toBe("/file?path=README.md&target=worktree&view=history");
+    expect(
+      buildRoute({
+        screen: "file",
+        path: "web-src/app.ts",
+        ref: "main",
+        view: "history",
+        line: 42,
+        range: fallback,
+      }),
+    ).toBe("/file?path=web-src%2Fapp.ts&target=main&view=history&line=42");
+  });
+
   test("builds raw file API URLs from path and ref only", () => {
     expect(buildRawFileUrl({ path: "src/a.ts", ref: "worktree" })).toBe(
       "/_file?path=src%2Fa.ts&ref=worktree",

@@ -167,6 +167,10 @@ const sseKeepalives = new Map<
   ReturnType<typeof setInterval>
 >();
 const fileCache = new Map<string, TimedCacheEntry<{ diffText: string }>>();
+// blame result cache, keyed by base/ref/path (+mtime+size for worktree base).
+// Capped LRU to keep memory bounded across many edits and refs.
+const blameCache = new Map<string, git.GitBlameResult>();
+const BLAME_CACHE_MAX = 64;
 const metaCache = new Map<
   string,
   TimedCacheEntry<{ body: string; sig: string }>
@@ -1220,14 +1224,116 @@ function handleLog(url: URL) {
   const ref = url.searchParams.get("ref") || "HEAD";
   const skip = Number(url.searchParams.get("skip") || "0");
   const limit = Number(url.searchParams.get("limit") || "50");
+  const path = url.searchParams.get("path") || "";
+  if (path && !safePath(path)) return text("invalid path", 400);
   const result = git.commitHistory(cwd, {
     ref,
     skip: Number.isFinite(skip) ? skip : 0,
     limit: Number.isFinite(limit) ? limit : 50,
     query: url.searchParams.get("q") || "",
+    ...(path ? { path } : {}),
   });
   if (result.error) return text(result.error, 400);
-  return json({ commits: result.commits, hasMore: result.hasMore });
+  // ref=worktree (or worktree=1) with a path filter prepends a "Working tree"
+  // pseudo-commit when this path has uncommitted changes vs HEAD.
+  const wantsWorktreeHead =
+    path &&
+    skip === 0 &&
+    (ref === "worktree" || url.searchParams.get("worktree") === "1");
+  let commits: typeof result.commits = result.commits;
+  let hasWorktree = false;
+  if (wantsWorktreeHead) {
+    const status = runSync(
+      [
+        "git",
+        "-c",
+        "core.quotepath=false",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=normal",
+        "--",
+        path,
+      ],
+      cwd,
+    );
+    if (status.code === 0 && status.stdout.length > 0) {
+      // Any non-empty record means the path has uncommitted changes.
+      const parts = status.stdout.split("\0").filter(Boolean);
+      if (parts.length > 0) {
+        hasWorktree = true;
+        commits = [
+          {
+            sha: "worktree",
+            subject: "未コミット変更 (Working tree)",
+            author: "",
+            when: "",
+            parents: [],
+            body: "",
+          },
+          ...commits,
+        ];
+      }
+    }
+  }
+  return json({
+    commits,
+    hasMore: result.hasMore,
+    ...(hasWorktree ? { hasWorktree: true } : {}),
+  });
+}
+
+function blamePathKey(p: string): string {
+  try {
+    const st = statSync(join(cwd, p));
+    return `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
+function rememberBlame(key: string, value: git.GitBlameResult) {
+  if (blameCache.has(key)) blameCache.delete(key);
+  blameCache.set(key, value);
+  while (blameCache.size > BLAME_CACHE_MAX) {
+    const oldest = blameCache.keys().next();
+    if (oldest.done) break;
+    blameCache.delete(oldest.value);
+  }
+}
+
+function handleFileBlame(url: URL) {
+  const path = url.searchParams.get("path") || "";
+  if (!safePath(path)) return text("invalid path", 400);
+  const ref = url.searchParams.get("ref") || "worktree";
+  const rawBase = url.searchParams.get("base");
+  let base: "worktree" | "HEAD";
+  if (rawBase === "HEAD") base = "HEAD";
+  else if (rawBase === "worktree")
+    base = ref === "worktree" ? "worktree" : "HEAD";
+  else base = ref === "worktree" ? "worktree" : "HEAD";
+  let cacheKey: string;
+  if (base === "worktree") {
+    cacheKey = `worktree|${path}|${blamePathKey(path)}`;
+  } else {
+    const resolved = runSync(
+      ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+      cwd,
+    );
+    if (resolved.code !== 0) return text("unknown ref", 400);
+    cacheKey = `HEAD|${path}|${resolved.stdout.trim()}`;
+  }
+  const cached = blameCache.get(cacheKey);
+  if (cached) {
+    if (blameCache.has(cacheKey)) {
+      blameCache.delete(cacheKey);
+      blameCache.set(cacheKey, cached);
+    }
+    return json({ ...cached, base, ref });
+  }
+  const result = git.blame(cwd, { path, ref, base });
+  if (!result.error) rememberBlame(cacheKey, result);
+  return json({ ...result, base, ref });
 }
 
 function handleFileDiff(url: URL) {
@@ -2404,6 +2510,7 @@ const server = await startServer({
     if (url.pathname === "/_grep") return handleGrep(url);
     if (url.pathname === "/_commits") return handleRefCommits(url);
     if (url.pathname === "/_log") return handleLog(url);
+    if (url.pathname === "/_file_blame") return handleFileBlame(url);
     if (url.pathname === "/file_diff") return handleFileDiff(url);
     if (url.pathname === "/file_range") return handleFileRange(url);
     if (url.pathname === "/_file") return handleRawFile(req, url);
