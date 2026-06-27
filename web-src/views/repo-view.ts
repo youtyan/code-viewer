@@ -145,9 +145,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!input || !wrap) return;
     input.value = ref || "worktree";
-    wrap.hidden = !(
-      STATE.route.screen === "file" && STATE.route.view === "blob"
-    );
+    wrap.hidden = activeRepoTreeRef() == null;
     syncSidebarHeaderHeight();
   }
 

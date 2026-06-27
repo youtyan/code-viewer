@@ -8953,9 +8953,6 @@ body.db-resizing {
 .gdp-blame-legend-stop[data-bin="4"] {
   background: var(--blame-bin-4);
 }
-.gdp-blame-base-toggle {
-  margin: 4px 12px 0;
-}
 .gdp-blame-body {
   overflow: auto;
 }

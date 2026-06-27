@@ -24,7 +24,6 @@ export type AppRoute =
       ref: string;
       range: DiffRange;
       view?: "blob" | "detail" | "blame" | "history";
-      base?: "worktree" | "HEAD";
       line?: SourceLineTarget;
       virtual?: "off";
     }
@@ -139,22 +138,12 @@ export function parseRoute(
         };
       const rawView = params.get("view");
       if (rawView === "blame") {
-        const rawBase = params.get("base");
-        const defaultBase: "worktree" | "HEAD" =
-          ref === "worktree" ? "worktree" : "HEAD";
-        const base: "worktree" | "HEAD" =
-          rawBase === "HEAD"
-            ? "HEAD"
-            : rawBase === "worktree" && ref === "worktree"
-              ? "worktree"
-              : defaultBase;
         return {
           screen: "file",
           path,
           ref,
           range,
           view: "blame",
-          base,
           ...(line ? { line } : {}),
         };
       }
@@ -252,18 +241,12 @@ export function buildRoute(route: AppRoute): string {
       }
       if (route.view === "blame") {
         const ref = route.ref || "worktree";
-        const defaultBase: "worktree" | "HEAD" =
-          ref === "worktree" ? "worktree" : "HEAD";
-        const base: "worktree" | "HEAD" = route.base ?? defaultBase;
-        const normalizedBase: "worktree" | "HEAD" =
-          base === "worktree" && ref !== "worktree" ? "HEAD" : base;
         return (
           "/file?path=" +
           encodeURIComponent(route.path) +
           "&target=" +
           encodeURIComponent(ref) +
           "&view=blame" +
-          (normalizedBase !== defaultBase ? `&base=${normalizedBase}` : "") +
           (route.line
             ? `&line=${encodeURIComponent(formatLineTarget(route.line))}`
             : "")

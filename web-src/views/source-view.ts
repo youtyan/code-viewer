@@ -40,6 +40,7 @@ import type {
   HljsApi,
   RawFileInfo,
 } from "../core/types";
+import { createFileViewTabButton, mountFileShellCard } from "./file-shell";
 import {
   appendMediaEmbed,
   renderHtmlPreviewFrame,
@@ -67,7 +68,10 @@ export type SourceViewDeps = {
   loadRepo(): Promise<void>;
   repoRoute(ref: string, path: string): AppRoute;
   repoFileTargetFromRoute(): string | null;
-  renderRepoBlobSidebar(currentPath: string, ref: string): void;
+  renderRepoBlobSidebar(
+    currentPath: string,
+    ref: string,
+  ): Promise<unknown> | unknown;
   placeSidebarToggle(): void;
   createFileBreadcrumb(path: string, ref?: string): HTMLElement;
   createFileDetailMeta(
@@ -685,36 +689,14 @@ export function createSourceView(deps: SourceViewDeps) {
   function appendFileViewExtraTabs(tabs: HTMLElement) {
     const route = STATE.route;
     if (route.screen !== "file") return;
-    const path = route.path;
-    const ref = route.ref;
-    const blameButton = document.createElement("button");
-    blameButton.type = "button";
-    blameButton.dataset.sourceTab = "blame";
-    blameButton.textContent = "Blame";
-    blameButton.addEventListener("click", () => {
-      setRoute({
-        screen: "file",
-        path,
-        ref,
-        view: "blame",
-        range: currentRange(),
-      });
-    });
-    tabs.appendChild(blameButton);
-    const historyButton = document.createElement("button");
-    historyButton.type = "button";
-    historyButton.dataset.sourceTab = "history";
-    historyButton.textContent = "History";
-    historyButton.addEventListener("click", () => {
-      setRoute({
-        screen: "file",
-        path,
-        ref,
-        view: "history",
-        range: currentRange(),
-      });
-    });
-    tabs.appendChild(historyButton);
+    const target = { path: route.path, ref: route.ref };
+    const tabDeps = { currentRange, setRoute };
+    tabs.appendChild(
+      createFileViewTabButton(tabDeps, target, "blame", "Blame", false),
+    );
+    tabs.appendChild(
+      createFileViewTabButton(tabDeps, target, "history", "History", false),
+    );
   }
 
   async function renderSourceText(
@@ -1895,7 +1877,6 @@ export function createSourceView(deps: SourceViewDeps) {
   async function renderStandaloneSource(target: SourceFileTarget) {
     cancelActiveSourceLoad("navigation");
     const req = ++SOURCE_REQ_SEQ;
-    const root = $("#diff");
     const repoTarget = repoFileTargetFromRoute();
     setPageMode();
     removeStandaloneSource();
@@ -1983,19 +1964,15 @@ export function createSourceView(deps: SourceViewDeps) {
     detailBody.className = "gdp-file-detail-body";
     wrapper.appendChild(detailBody);
     card.appendChild(wrapper);
-    if (repoTarget) {
-      const layout = document.createElement("div");
-      layout.className = "gdp-repo-blob-layout";
-      renderRepoBlobSidebar(target.path, repoTarget);
-      layout.appendChild(card);
-      // Prepend instead of replaceChildren: the rendered diff cards stay
-      // alive (hidden via body.gdp-repo-blob-page CSS), so leaving the blob
-      // view does not force a full diff reload.
-      root.prepend(layout);
-    } else {
-      root.prepend(card);
-    }
-    placeSidebarToggle();
+    // Prepend instead of replaceChildren: the rendered diff cards stay alive
+    // (hidden via body.gdp-repo-blob-page CSS), so leaving the blob view does
+    // not force a full diff reload.
+    mountFileShellCard(
+      { $, repoFileTargetFromRoute, renderRepoBlobSidebar, placeSidebarToggle },
+      target,
+      card,
+      repoTarget,
+    );
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad("user"));

@@ -74,6 +74,22 @@ export type GitBlameResult = {
 
 export const BLAME_ZERO_SHA = "0000000000000000000000000000000000000000";
 
+export type GitBlameBase = "worktree" | "HEAD";
+
+export function normalizeBlameRef(
+  ref: string,
+  base: GitBlameBase,
+): { base: GitBlameBase; ref: string } {
+  const rawRef = ref || "worktree";
+  if (base === "worktree" && rawRef !== "worktree") {
+    return { base: "HEAD", ref: rawRef };
+  }
+  if (base === "HEAD" && rawRef === "worktree") {
+    return { base: "HEAD", ref: "HEAD" };
+  }
+  return { base, ref: rawRef };
+}
+
 export type GitTagMeta = {
   name: string;
   when: string;
@@ -731,26 +747,23 @@ function syntheticUncommittedBlameFromWorktree(
 // base "HEAD": blame the committed snapshot at the given ref.
 export function blame(
   cwd: string,
-  options: { path: string; ref: string; base: "worktree" | "HEAD" },
+  options: { path: string; ref: string; base: GitBlameBase },
 ): GitBlameResult {
   const path = options.path;
   if (!path || path.includes("\0") || path.startsWith("-")) {
     return { lines: [], commits: {}, error: "invalid path" };
   }
+  const normalized = normalizeBlameRef(options.ref, options.base);
   const args = ["git", "blame", "--porcelain"];
-  if (options.base === "HEAD") {
-    // base=HEAD means "blame the committed snapshot at this ref". The literal
-    // string "worktree" isn't a git ref, so map it to HEAD.
-    const ref =
-      options.ref === "worktree" || !options.ref ? "HEAD" : options.ref;
-    if (ref.startsWith("-") || ref.includes("\0"))
+  if (normalized.base === "HEAD") {
+    if (normalized.ref.startsWith("-") || normalized.ref.includes("\0"))
       return { lines: [], commits: {}, error: "invalid ref" };
-    args.push(ref);
+    args.push(normalized.ref);
   }
   args.push("--", path);
   const res = run(args, cwd);
   if (res.code !== 0) {
-    if (options.base === "worktree") {
+    if (normalized.base === "worktree") {
       // untracked / newly added file: synthesize an all-uncommitted blame.
       return syntheticUncommittedBlameFromWorktree(cwd, path);
     }

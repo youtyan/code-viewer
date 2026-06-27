@@ -1307,17 +1307,22 @@ function handleFileBlame(url: URL) {
   if (!safePath(path)) return text("invalid path", 400);
   const ref = url.searchParams.get("ref") || "worktree";
   const rawBase = url.searchParams.get("base");
-  let base: "worktree" | "HEAD";
-  if (rawBase === "HEAD") base = "HEAD";
-  else if (rawBase === "worktree")
-    base = ref === "worktree" ? "worktree" : "HEAD";
-  else base = ref === "worktree" ? "worktree" : "HEAD";
+  const requestedBase: git.GitBlameBase =
+    rawBase === "HEAD"
+      ? "HEAD"
+      : rawBase === "worktree"
+        ? "worktree"
+        : ref === "worktree"
+          ? "worktree"
+          : "HEAD";
+  const normalized = git.normalizeBlameRef(ref, requestedBase);
+  const { base } = normalized;
   let cacheKey: string;
   if (base === "worktree") {
     cacheKey = `worktree|${path}|${blamePathKey(path)}`;
   } else {
     const resolved = runSync(
-      ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+      ["git", "rev-parse", "--verify", `${normalized.ref}^{commit}`],
       cwd,
     );
     if (resolved.code !== 0) return text("unknown ref", 400);
@@ -1331,7 +1336,7 @@ function handleFileBlame(url: URL) {
     }
     return json({ ...cached, base, ref });
   }
-  const result = git.blame(cwd, { path, ref, base });
+  const result = git.blame(cwd, { path, ref: normalized.ref, base });
   if (!result.error) rememberBlame(cacheKey, result);
   return json({ ...result, base, ref });
 }

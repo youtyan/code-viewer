@@ -12,12 +12,12 @@ import {
   groupBlameLines,
 } from "../core/blame";
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
+import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
 import {
-  type AppRoute,
-  buildRoute,
-  type DiffRange,
-  type SourceFileTarget,
-} from "../core/routes";
+  createFileViewTabButton,
+  mountFileShellCard,
+  type RepositoryFileView,
+} from "./file-shell";
 
 export type BlameViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -30,6 +30,10 @@ export type BlameViewDeps = {
   removeStandaloneSource(): void;
   placeSidebarToggle(): void;
   escapeHtml(s: unknown): string;
+  // Repository サイドバーを再描画するためのフック。null/undefined を返すと
+  // ラッパ無しの全幅レイアウトになる（Diff Viewer 経由で開いた時など）。
+  repoFileTargetFromRoute(): string | null;
+  renderRepoBlobSidebar(path: string, ref: string): Promise<unknown> | unknown;
 };
 
 export function createBlameView(deps: BlameViewDeps) {
@@ -45,7 +49,7 @@ export function createBlameView(deps: BlameViewDeps) {
 
   function buildSticky(
     target: SourceFileTarget,
-    activeTab: "blob" | "blame" | "history",
+    activeTab: RepositoryFileView,
   ): {
     sticky: HTMLElement;
     tabsHost: HTMLElement;
@@ -77,44 +81,39 @@ export function createBlameView(deps: BlameViewDeps) {
     sticky.appendChild(header);
     const tabs = document.createElement("div");
     tabs.className = "gdp-source-tabs gdp-file-view-tabs";
+    const tabDeps = {
+      currentRange: deps.currentRange,
+      setRoute: deps.setRoute,
+    };
     tabs.appendChild(
-      makeTabButton("Code", "blob", target, activeTab === "blob"),
+      createFileViewTabButton(
+        tabDeps,
+        target,
+        "blob",
+        "Code",
+        activeTab === "blob",
+      ),
     );
     tabs.appendChild(
-      makeTabButton("Blame", "blame", target, activeTab === "blame"),
+      createFileViewTabButton(
+        tabDeps,
+        target,
+        "blame",
+        "Blame",
+        activeTab === "blame",
+      ),
     );
     tabs.appendChild(
-      makeTabButton("History", "history", target, activeTab === "history"),
+      createFileViewTabButton(
+        tabDeps,
+        target,
+        "history",
+        "History",
+        activeTab === "history",
+      ),
     );
     sticky.appendChild(tabs);
     return { sticky, tabsHost: tabs };
-  }
-
-  function makeTabButton(
-    label: string,
-    view: "blob" | "blame" | "history",
-    target: SourceFileTarget,
-    active: boolean,
-  ): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = active ? "active" : "";
-    btn.dataset.fileView = view;
-    btn.dataset.sourceTab = view;
-    btn.textContent = label;
-    btn.addEventListener("click", () => {
-      if (active) return;
-      const next: AppRoute = {
-        screen: "file",
-        path: target.path,
-        ref: target.ref,
-        view,
-        range: deps.currentRange(),
-      };
-      deps.setRoute(next);
-      // app.ts subscribes to the route change and dispatches; nothing else here.
-    });
-    return btn;
   }
 
   function colourBarFor(
@@ -149,35 +148,6 @@ export function createBlameView(deps: BlameViewDeps) {
     newer.className = "gdp-blame-legend-label";
     newer.textContent = "Newer";
     wrap.appendChild(newer);
-    return wrap;
-  }
-
-  function buildBaseToggle(
-    target: SourceFileTarget,
-    currentBase: "worktree" | "HEAD",
-  ) {
-    if (target.ref !== "worktree") return null;
-    const wrap = document.createElement("div");
-    wrap.className = "gdp-blame-base-toggle seg";
-    for (const base of ["worktree", "HEAD"] as const) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "seg-btn" + (currentBase === base ? " active" : "");
-      btn.textContent = base === "worktree" ? "Worktree" : "HEAD";
-      btn.dataset.blameBase = base;
-      btn.addEventListener("click", () => {
-        if (currentBase === base) return;
-        deps.setRoute({
-          screen: "file",
-          path: target.path,
-          ref: target.ref,
-          view: "blame",
-          base,
-          range: deps.currentRange(),
-        });
-      });
-      wrap.appendChild(btn);
-    }
     return wrap;
   }
 
@@ -316,9 +286,6 @@ export function createBlameView(deps: BlameViewDeps) {
               path: target.path,
               ref: target.ref,
               view: "blame",
-              base:
-                (deps.STATE.route.screen === "file" && deps.STATE.route.base) ||
-                undefined,
               line: lineNo,
               range: deps.currentRange(),
             },
@@ -340,15 +307,15 @@ export function createBlameView(deps: BlameViewDeps) {
     return table;
   }
 
-  async function renderBlamePage(
-    target: SourceFileTarget,
-    base: "worktree" | "HEAD",
-  ) {
+  async function renderBlamePage(target: SourceFileTarget) {
     const generation = ++activeGeneration;
+    // GitHub と同じく target ref を起点に blame する。worktree なら worktree、
+    // ブランチ/コミット指定ならその snapshot。base toggle は持たない。
+    const base: "worktree" | "HEAD" =
+      target.ref === "worktree" ? "worktree" : "HEAD";
     deps.setPageMode();
     deps.removeStandaloneSource();
     cleanup();
-    const root = deps.$<HTMLElement>("#diff");
     const card = document.createElement("article");
     card.className =
       "gdp-file-shell loaded gdp-standalone-blame gdp-blame-mode";
@@ -356,8 +323,6 @@ export function createBlameView(deps: BlameViewDeps) {
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
     const { sticky } = buildSticky(target, "blame");
-    const baseToggle = buildBaseToggle(target, base);
-    if (baseToggle) sticky.appendChild(baseToggle);
     sticky.appendChild(buildLegend());
     wrapper.appendChild(sticky);
     const body = document.createElement("div");
@@ -365,8 +330,7 @@ export function createBlameView(deps: BlameViewDeps) {
     body.appendChild(buildLoading());
     wrapper.appendChild(body);
     card.appendChild(wrapper);
-    root.prepend(card);
-    deps.placeSidebarToggle();
+    mountFileShellCard(deps, target, card);
 
     const [blameResp, srcText] = await Promise.all([
       fetchBlame(target, base),
@@ -377,8 +341,7 @@ export function createBlameView(deps: BlameViewDeps) {
     if (!blameResp || (!blameResp.lines.length && blameResp.error)) {
       const err = document.createElement("div");
       err.className = "gdp-blame-error";
-      err.textContent =
-        (blameResp && blameResp.error) || "Failed to load blame";
+      err.textContent = blameResp?.error || "Failed to load blame";
       body.appendChild(err);
       return;
     }
@@ -406,18 +369,3 @@ export function createBlameView(deps: BlameViewDeps) {
 }
 
 export type BlameViewApi = ReturnType<typeof createBlameView>;
-
-// Exported for testing — kept simple and free of DOM access.
-export function blameViewBuildRouteForView(
-  target: SourceFileTarget,
-  view: "blob" | "blame" | "history",
-  range: DiffRange,
-): string {
-  return buildRoute({
-    screen: "file",
-    path: target.path,
-    ref: target.ref,
-    view,
-    range,
-  });
-}

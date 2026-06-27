@@ -4,6 +4,7 @@
 
 import { COPY_16_PATHS, iconSvg } from "../core/icons";
 import type { AppRoute, DiffRange, SourceFileTarget } from "../core/routes";
+import { createFileViewTabButton, mountFileShellCard } from "./file-shell";
 
 type HistoryCommit = {
   sha: string;
@@ -31,6 +32,9 @@ export type FileHistoryViewDeps = {
   removeStandaloneSource(): void;
   placeSidebarToggle(): void;
   escapeHtml(s: unknown): string;
+  // Repository サイドバーの再描画フック。null/undefined 時はラッパ無し。
+  repoFileTargetFromRoute(): string | null;
+  renderRepoBlobSidebar(path: string, ref: string): Promise<unknown> | unknown;
 };
 
 const PAGE_SIZE = 50;
@@ -72,35 +76,21 @@ export function createFileHistoryView(deps: FileHistoryViewDeps) {
     sticky.appendChild(header);
     const tabs = document.createElement("div");
     tabs.className = "gdp-source-tabs";
-    tabs.appendChild(makeTabButton("Code", "blob", target, false));
-    tabs.appendChild(makeTabButton("Blame", "blame", target, false));
-    tabs.appendChild(makeTabButton("History", "history", target, true));
+    const tabDeps = {
+      currentRange: deps.currentRange,
+      setRoute: deps.setRoute,
+    };
+    tabs.appendChild(
+      createFileViewTabButton(tabDeps, target, "blob", "Code", false),
+    );
+    tabs.appendChild(
+      createFileViewTabButton(tabDeps, target, "blame", "Blame", false),
+    );
+    tabs.appendChild(
+      createFileViewTabButton(tabDeps, target, "history", "History", true),
+    );
     sticky.appendChild(tabs);
     return sticky;
-  }
-
-  function makeTabButton(
-    label: string,
-    view: "blob" | "blame" | "history",
-    target: SourceFileTarget,
-    active: boolean,
-  ): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = active ? "active" : "";
-    btn.dataset.sourceTab = view;
-    btn.textContent = label;
-    btn.addEventListener("click", () => {
-      if (active) return;
-      deps.setRoute({
-        screen: "file",
-        path: target.path,
-        ref: target.ref,
-        view,
-        range: deps.currentRange(),
-      });
-    });
-    return btn;
   }
 
   async function fetchLog(
@@ -213,7 +203,6 @@ export function createFileHistoryView(deps: FileHistoryViewDeps) {
     deps.setPageMode();
     deps.removeStandaloneSource();
     cleanup();
-    const root = deps.$<HTMLElement>("#diff");
     const card = document.createElement("article");
     card.className =
       "gdp-file-shell loaded gdp-standalone-file-history gdp-file-history-mode";
@@ -235,8 +224,7 @@ export function createFileHistoryView(deps: FileHistoryViewDeps) {
     body.appendChild(right);
     wrapper.appendChild(body);
     card.appendChild(wrapper);
-    root.prepend(card);
-    deps.placeSidebarToggle();
+    mountFileShellCard(deps, target, card);
 
     const log = await fetchLog(target);
     if (generation !== activeGeneration) return;

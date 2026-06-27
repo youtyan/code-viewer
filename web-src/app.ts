@@ -56,6 +56,7 @@ import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import { createFileHistoryView } from "./views/file-history-view";
+import { isRepositoryFileViewRoute } from "./views/file-shell";
 import {
   createHelpPage,
   helpLanguageFromRoute,
@@ -905,6 +906,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     removeStandaloneSource,
     placeSidebarToggle,
     escapeHtml,
+    repoFileTargetFromRoute,
+    renderRepoBlobSidebar: (path: string, ref: string) =>
+      REPO_VIEW.renderRepoBlobSidebar(path, ref),
   });
 
   const FILE_HISTORY_VIEW = createFileHistoryView({
@@ -919,6 +923,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     removeStandaloneSource,
     placeSidebarToggle,
     escapeHtml,
+    repoFileTargetFromRoute,
+    renderRepoBlobSidebar: (path: string, ref: string) =>
+      REPO_VIEW.renderRepoBlobSidebar(path, ref),
   });
 
   // ---------- Repository view: extracted to repo-view.ts ----------
@@ -2002,27 +2009,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function repoFileTargetFromRoute(): string | null {
-    return STATE.route.screen === "file" && STATE.route.view === "blob"
-      ? STATE.route.ref
-      : null;
-  }
-
-  function isRepoBlobRoute(
-    route: AppRoute,
-  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blob" } {
-    return route.screen === "file" && route.view === "blob";
-  }
-
-  function isFileBlameRoute(
-    route: AppRoute,
-  ): route is Extract<AppRoute, { screen: "file" }> & { view: "blame" } {
-    return route.screen === "file" && route.view === "blame";
-  }
-
-  function isFileHistoryRoute(
-    route: AppRoute,
-  ): route is Extract<AppRoute, { screen: "file" }> & { view: "history" } {
-    return route.screen === "file" && route.view === "history";
+    return isRepositoryFileViewRoute(STATE.route) ? STATE.route.ref : null;
   }
 
   // Annotations UI (annotations-ui.ts) is constructed near the end of this
@@ -2061,6 +2048,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  function dispatchFileRoute(
+    route: Extract<AppRoute, { screen: "file" }>,
+  ): boolean {
+    if (route.view === "blob") {
+      setStatus("live");
+      applySourceRouteToShell();
+      return true;
+    }
+    if (route.view === "blame") {
+      setStatus("live");
+      cancelActiveSourceLoad("navigation");
+      void BLAME_VIEW.renderBlamePage({ path: route.path, ref: route.ref });
+      return true;
+    }
+    if (route.view === "history") {
+      setStatus("live");
+      cancelActiveSourceLoad("navigation");
+      void FILE_HISTORY_VIEW.renderHistoryPage({
+        path: route.path,
+        ref: route.ref,
+      });
+      return true;
+    }
+    return false;
+  }
+
   function setRoute(route: AppRoute, replace = false) {
     const nextRoute =
       route.screen === "unknown"
@@ -2081,6 +2094,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     else history.pushState(state, "", url);
     syncHeaderMenu();
     syncLineRefPill();
+    if (nextRoute.screen === "file") dispatchFileRoute(nextRoute);
   }
 
   // ---- Query History right-panel open/close ----
@@ -2102,7 +2116,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     document.body.classList.toggle(
       "gdp-repo-blob-page",
-      STATE.route.screen === "file" && STATE.route.view === "blob",
+      STATE.route.screen === "file" &&
+        (STATE.route.view === "blob" ||
+          STATE.route.view === "blame" ||
+          STATE.route.view === "history"),
     );
     document.body.classList.toggle(
       "gdp-repo-page",
@@ -2148,10 +2165,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     document
       .querySelectorAll<HTMLAnchorElement>(".app-menu-item, .global-help-link")
       .forEach((link) => {
-        const fileRouteOwner =
-          STATE.route.screen === "file" && STATE.route.view === "blob"
-            ? "repo"
-            : "diff";
+        const fileRouteOwner = isRepositoryFileViewRoute(STATE.route)
+          ? "repo"
+          : "diff";
         const active =
           link.dataset.route === STATE.route.screen ||
           (STATE.route.screen === "file" &&
@@ -2890,38 +2906,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       return Promise.resolve(null);
     }
-    if (isRepoBlobRoute(STATE.route)) {
-      setStatus("live");
-      applySourceRouteToShell();
-      return Promise.resolve({
-        structureChanged: false,
-        invalidatedCards: 0,
-        preservedDom: true,
-      });
-    }
-    if (isFileBlameRoute(STATE.route)) {
-      setStatus("live");
-      const blameRoute = STATE.route;
-      const base: "worktree" | "HEAD" =
-        blameRoute.base ??
-        (blameRoute.ref === "worktree" ? "worktree" : "HEAD");
-      void BLAME_VIEW.renderBlamePage(
-        { path: blameRoute.path, ref: blameRoute.ref },
-        base,
-      );
-      return Promise.resolve({
-        structureChanged: false,
-        invalidatedCards: 0,
-        preservedDom: true,
-      });
-    }
-    if (isFileHistoryRoute(STATE.route)) {
-      setStatus("live");
-      const historyRoute = STATE.route;
-      void FILE_HISTORY_VIEW.renderHistoryPage({
-        path: historyRoute.path,
-        ref: historyRoute.ref,
-      });
+    if (STATE.route.screen === "file" && dispatchFileRoute(STATE.route)) {
       return Promise.resolve({
         structureChanged: false,
         invalidatedCards: 0,
@@ -2976,26 +2961,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       setStatus("live");
       renderHelpPage();
     } else if (STATE.route.screen === "repo") loadRepo();
-    else if (STATE.route.screen === "file" && STATE.route.view === "blob") {
-      setStatus("live");
-      applySourceRouteToShell();
-    } else if (isFileBlameRoute(STATE.route)) {
-      const blameRoute = STATE.route;
-      setStatus("live");
-      const base: "worktree" | "HEAD" =
-        blameRoute.base ??
-        (blameRoute.ref === "worktree" ? "worktree" : "HEAD");
-      void BLAME_VIEW.renderBlamePage(
-        { path: blameRoute.path, ref: blameRoute.ref },
-        base,
-      );
-    } else if (isFileHistoryRoute(STATE.route)) {
-      const r = STATE.route;
-      setStatus("live");
-      void FILE_HISTORY_VIEW.renderHistoryPage({
-        path: r.path,
-        ref: r.ref,
-      });
+    else if (STATE.route.screen === "file" && dispatchFileRoute(STATE.route)) {
+      // handled by dispatchFileRoute
     } else if (STATE.route.screen === "history") {
       parkRangeForHistory();
       setStatus("live");
@@ -3206,7 +3173,10 @@ window.GdpExpandLogic = GdpExpandLogic;
       load();
       return;
     }
-    applySourceRouteToShell();
+    if (dispatchFileRoute(STATE.route)) {
+      return;
+    }
+    load();
   }
   window.addEventListener("popstate", applyRouteFromLocation);
   window.addEventListener("pagehide", () => flushViewStatePatch(true));
@@ -3507,11 +3477,8 @@ window.GdpExpandLogic = GdpExpandLogic;
       hideChangeBanner();
       const route = STATE.route;
       if (!shouldAutoLoadCurrentRoute(route)) return;
-      if (isRepoBlobRoute(route)) {
-        renderStandaloneSource({
-          path: route.path,
-          ref: route.ref || "worktree",
-        });
+      if (isRepositoryFileViewRoute(route)) {
+        dispatchFileRoute(route);
         return;
       }
       doSseLoad(paths);
@@ -3553,13 +3520,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   function doSseLoad(paths: Set<string> | null) {
     const route = STATE.route;
     if (!shouldAutoLoadCurrentRoute(route)) return;
-    if (isRepoBlobRoute(route)) {
+    if (isRepositoryFileViewRoute(route)) {
       const viewingPath = route.path;
       if (paths && viewingPath && !paths.has(viewingPath)) return;
-      void renderStandaloneSource({
-        path: route.path,
-        ref: route.ref || "worktree",
-      });
+      dispatchFileRoute(route);
       return;
     }
     if (route.screen === "repo") {
@@ -3602,7 +3566,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       const paths = pendingSseChangedPaths;
       pendingSseChangedPaths = new Set();
       const route = STATE.route;
-      if (isRepoBlobRoute(route)) {
+      if (isRepositoryFileViewRoute(route)) {
         const viewingPath = route.path;
         if (paths && viewingPath && !paths.has(viewingPath)) return;
       }
