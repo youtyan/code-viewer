@@ -2096,6 +2096,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (STATE.route.screen !== "database") {
       setQueryHistoryPanelOpen(false);
     }
+
+    // Repository ビューに切り替わると hideTests を効かせない（DOM の
+    // hidden-by-tests を剥がし直す）。Diff viewer 専用機能なので。
+    applyHideTests();
   }
 
   function syncHeaderMenu() {
@@ -3185,20 +3189,23 @@ window.GdpExpandLogic = GdpExpandLogic;
   });
 
   // Hide-tests toggle: ファイル名に test|spec が含まれるエントリをフィルタ。
+  // Diff viewer 専用。Repository ビュー（gdp-repo-page / gdp-repo-blob-page）には
+  // 波及させない。
   function applyHideTests() {
     const btn = $("#hide-tests");
     if (btn) btn.classList.toggle("active", STATE.hideTests);
+    const effective = STATE.hideTests && !isRepositorySidebarMode();
     document
       .querySelectorAll<HTMLElement>(".gdp-file-shell")
       .forEach((card) => {
         const isTest = TEST_RE.test(card.dataset.path || "");
-        card.classList.toggle("hidden-by-tests", STATE.hideTests && isTest);
+        card.classList.toggle("hidden-by-tests", effective && isTest);
       });
     document
       .querySelectorAll<HTMLElement>("#filelist li[data-path]")
       .forEach((li) => {
         const isTest = TEST_RE.test(li.dataset.path || "");
-        li.classList.toggle("hidden-by-tests", STATE.hideTests && isTest);
+        li.classList.toggle("hidden-by-tests", effective && isTest);
       });
     if (isVirtualSidebarActive()) rerenderVirtualSidebar();
     else updateTreeDirVisibility();
