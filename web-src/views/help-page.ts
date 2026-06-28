@@ -333,7 +333,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "Datastores",
         title: "Datastore Viewer",
         intro:
-          "Browse SQLite files, Docker-hosted databases, Redis, Elasticsearch, and S3-compatible object stores from one local viewer.",
+          "Browse and edit SQLite files, Docker-hosted databases, Redis, Elasticsearch, and S3-compatible object stores from one local viewer.",
         groups: [
           {
             title: "Supported datastores",
@@ -343,27 +343,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "SQLite",
-                    "Automatically discovered from .db, .sqlite, .sqlite3, and .s3db files in the repository.",
+                    "Automatically discovered from .db, .sqlite, .sqlite3, and .s3db files in the repository. Inline row edit / insert / delete via the grid Edit mode (atomic per-commit batch).",
                   ],
                   [
                     "MySQL / MariaDB",
-                    "Detected from docker-compose.yml / compose.yml (or .yaml). Multiple databases per server are listed.",
+                    "Detected from docker-compose.yml / compose.yml (or .yaml). Multiple databases per server are listed. Same inline row edit / insert / delete as SQLite.",
                   ],
                   [
                     "PostgreSQL",
-                    "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening.",
+                    "Detected from compose files. Multiple databases per server, plus a schema selector for switching schemas without reopening. Same inline row edit / insert / delete as SQLite.",
                   ],
                   [
                     "Redis",
-                    "Detected from compose files. Read-only browse over DB 0-15, SCAN keys, dedicated string/hash/list panes, JSON view for set/zset/stream, and participates in snapshots and diffs.",
+                    "Detected from compose files. Browse DB 0-15, SCAN keys, dedicated string/hash/list panes, JSON view for set/zset/stream. Edit values, delete keys, and create new keys (all types) via in-pane editors. Participates in snapshots and diffs.",
                   ],
                   [
                     "Elasticsearch",
-                    "Detected from compose files. List indices, view mappings, paginate with search_after, run lucene q= or DSL queries on an allowlist, and take snapshots/diffs.",
+                    "Detected from compose files. List indices, view mappings, paginate with search_after, run lucene q= or DSL queries on an allowlist. Edit / create / delete documents with _seq_no / _primary_term optimistic concurrency. Take snapshots/diffs.",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
-                    "Detected from compose files. Folder-tree browse, prefix/filename search, updated-time sort, and previews for images, video, audio, PDF, Markdown, HTML, and text. LocalStack falls back to `docker exec curl` when no host port is published; MinIO requires a published host port.",
+                    "Detected from compose files. Folder-tree browse, prefix/filename search, updated-time sort, and previews for images, video, audio, PDF, Markdown, HTML, and text. Edit text/markdown/JSON object bodies inline, upload new objects, and delete existing ones. LocalStack falls back to `docker exec curl` when no host port is published; MinIO requires a published host port.",
                   ],
                 ],
               },
@@ -385,7 +385,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Data tab",
-                    "Paginated grid with sort, filter, cell copy, and CSV/JSON export (capped at 100k rows; export respects the current filter and sort).",
+                    "Paginated grid with sort, filter, cell copy, and CSV/JSON export (capped at 100k rows; export respects the current filter and sort). Toggle Edit mode in the prefs bar to enable inline editing — double-click a cell to edit, queue insert/delete via row actions, and commit the batch atomically. Edited rows/cells highlight in yellow until committed.",
                   ],
                   [
                     "Detail footer & related panel",
@@ -397,7 +397,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Query editor",
-                    "SQL syntax highlighting, Tab indent, auto-resize, Ctrl+Enter to run. Allowlist depends on the engine (SQLite: SELECT/PRAGMA/EXPLAIN/WITH; PostgreSQL and MySQL also accept SHOW/DESCRIBE).",
+                    "SQL syntax highlighting (shiki), Tab indent, auto-resize, Ctrl+Enter to run. Allowlist depends on the engine (SQLite: SELECT/PRAGMA/EXPLAIN/WITH; PostgreSQL and MySQL also accept SHOW/DESCRIBE).",
                   ],
                   [
                     "ER Diagram",
@@ -412,12 +412,12 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "Capture point-in-time snapshots of selected tables/indices/key spaces and diff any two to see inserts, updates, and deletes with full before/after values.",
                   ],
                   [
-                    "Query History",
-                    "Master-detail panel with history list and result preview. Each entry records whether it came from the browser or the CLI, and updates live over SSE.",
+                    "Footer dock (Query History / Session log)",
+                    "JetBrains-style bottom dock with two tabs. Query History: per-DB master/detail of saved queries, SSE-synced across tabs. Session log: every SQL the server runs in this session (read fetches, user queries, write commits) with timing, row count, and the executed SQL syntax-highlighted. Auto-follow keeps the newest entry pinned; scroll up or click a non-latest entry to pause. The active tab and open/closed state persist in tabs.json.",
                   ],
                   [
                     "Datastore explorers",
-                    "Redis / Elasticsearch / S3 keep the same Multi-DB tab UI but swap the table tree for a key-space / index-tree / folder-tree explorer.",
+                    "Redis / Elasticsearch / S3 keep the same Multi-DB tab UI but swap the table tree for a key-space / index-tree / folder-tree explorer. Each supports value editing, document/key/object creation, and deletion via in-pane editors and confirmation dialogs.",
                   ],
                 ],
               },
@@ -906,7 +906,7 @@ code-viewer annotate add-db --db app.db --tab query \\
         nav: "データストア",
         title: "データストアビューア",
         intro:
-          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、S3 互換オブジェクトストアをローカルビューアで閲覧できます。",
+          "SQLite ファイル、Docker 上のデータベース、Redis、Elasticsearch、S3 互換オブジェクトストアをローカルビューアで閲覧・編集できます。",
         groups: [
           {
             title: "対応データストア",
@@ -916,27 +916,27 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "SQLite",
-                    "リポジトリ内の .db, .sqlite, .sqlite3, .s3db ファイルを自動検出します。",
+                    "リポジトリ内の .db, .sqlite, .sqlite3, .s3db ファイルを自動検出します。グリッドの Edit モードで行のインライン編集 / 追加 / 削除に対応 (コミット単位でアトミックに適用)。",
                   ],
                   [
                     "MySQL / MariaDB",
-                    "docker-compose.yml / compose.yml (.yaml 含む) のサービスから検出。同一サーバー上の複数データベースを一覧表示します。",
+                    "docker-compose.yml / compose.yml (.yaml 含む) のサービスから検出。同一サーバー上の複数データベースを一覧表示します。SQLite と同じく Edit モードで行のインライン編集 / 追加 / 削除に対応。",
                   ],
                   [
                     "PostgreSQL",
-                    "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。",
+                    "compose ファイルから検出。同一サーバー上の複数データベースに対応し、スキーマ切替セレクターで再オープンせずスキーマを切り替えられます。SQLite と同じく行のインライン編集 / 追加 / 削除に対応。",
                   ],
                   [
                     "Redis",
-                    "compose ファイルから検出。DB 0-15 を read-only で SCAN し、string/hash/list は専用ペイン、set/zset/stream は JSON ビュー。スナップショット/差分にも参加します。",
+                    "compose ファイルから検出。DB 0-15 を SCAN し、string/hash/list は専用ペイン、set/zset/stream は JSON ビュー。値の編集 / キー削除 / 新規キー作成 (全タイプ) に対応。スナップショット/差分にも参加します。",
                   ],
                   [
                     "Elasticsearch",
-                    "compose ファイルから検出。インデックス一覧、マッピング、search_after ページング、lucene q= と許可リスト経由の DSL、スナップショット/差分に対応します。",
+                    "compose ファイルから検出。インデックス一覧、マッピング、search_after ページング、lucene q= と許可リスト経由の DSL、スナップショット/差分に対応。_seq_no / _primary_term 楽観ロックでドキュメントの編集 / 新規作成 / 削除も可能。",
                   ],
                   [
                     "S3 / MinIO / LocalStack",
-                    "compose ファイルから検出。フォルダツリー型ブラウザ、prefix/ファイル名検索、更新日時順表示、画像/動画/音声/PDF/Markdown/HTML/テキストのプレビューに対応。LocalStack はホストポート未公開時 `docker exec curl` にフォールバックしますが、MinIO はホストポート公開が必須です。",
+                    "compose ファイルから検出。フォルダツリー型ブラウザ、prefix/ファイル名検索、更新日時順表示、画像/動画/音声/PDF/Markdown/HTML/テキストのプレビューに対応。テキスト/Markdown/JSON のインライン編集、新規オブジェクトアップロード、オブジェクト削除も可能。LocalStack はホストポート未公開時 `docker exec curl` にフォールバックしますが、MinIO はホストポート公開が必須です。",
                   ],
                 ],
               },
@@ -958,7 +958,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Data タブ",
-                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSON エクスポート（最大10万行、現在のフィルター/ソートを反映）。",
+                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSON エクスポート（最大10万行、現在のフィルター/ソートを反映）。設定バーで Edit モードを ON にするとインライン編集が可能 — セルをダブルクリックで編集、行操作で挿入/削除を予約、コミット単位で一括適用。未コミットの編集行/セルは黄色でハイライト。",
                   ],
                   [
                     "詳細フッタ・関連パネル",
@@ -970,7 +970,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "クエリエディター",
-                    "SQL シンタックスハイライト、Tab インデント、自動リサイズ、Ctrl+Enter で実行。許可文は DB 種別により異なります（SQLite: SELECT/PRAGMA/EXPLAIN/WITH。PostgreSQL と MySQL は SHOW/DESCRIBE も可）。",
+                    "SQL シンタックスハイライト (shiki)、Tab インデント、自動リサイズ、Ctrl+Enter で実行。許可文は DB 種別により異なります（SQLite: SELECT/PRAGMA/EXPLAIN/WITH。PostgreSQL と MySQL は SHOW/DESCRIBE も可）。",
                   ],
                   [
                     "ER 図",
@@ -985,12 +985,12 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "選んだテーブル / インデックス / キー空間の状態を保存し、任意の 2 つの差分（insert / update / delete + before/after）を表示します。",
                   ],
                   [
-                    "クエリ履歴",
-                    "マスター/ディテール表示。各エントリは browser / CLI どちらから来たかを記録し、SSE でライブ更新されます。",
+                    "フッタ Dock (クエリ履歴 / ログ)",
+                    "JetBrains 風の常駐 bottom dock に 2 タブ。「クエリ履歴」: DB ごとに保存されたクエリのマスター/ディテール、SSE で全タブにライブ同期。「ログ」: このセッションでサーバが実行した SQL すべて (テーブル読み込み / ユーザークエリ / 編集コミット) を所要時間・行数・実行 SQL (シンタックスハイライト) 付きで時系列表示。自動追従 ON で常に最新を表示、下スクロール or 最新以外をクリックすると追従解除。アクティブタブと開閉状態は tabs.json に永続化されます。",
                   ],
                   [
                     "データストア専用エクスプローラ",
-                    "Redis / Elasticsearch / S3 はマルチ DB タブ UI を共有しつつ、テーブルツリーをキー空間ツリー / インデックスツリー / フォルダツリーに差し替えます。",
+                    "Redis / Elasticsearch / S3 はマルチ DB タブ UI を共有しつつ、テーブルツリーをキー空間ツリー / インデックスツリー / フォルダツリーに差し替えます。それぞれインライン編集ペインと確認ダイアログによる値編集 / ドキュメント・キー・オブジェクト作成 / 削除に対応。",
                   ],
                 ],
               },

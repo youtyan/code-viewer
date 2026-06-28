@@ -193,26 +193,36 @@ Services whose names collide across subdirectories are kept distinct via
 `docker:<service>@<relDir>` ids (cwd-direct compose files keep the historical
 `docker:<service>` id for backward compatibility).
 
-**Redis** support is read-only: browse DB 0–15, SCAN keys, and view values per
-type (string/hash/list as dedicated panes, set/zset/stream as JSON views). It
-also participates in snapshots and diffs.
+**Redis** support: browse DB 0–15, SCAN keys, and view values per
+type (string/hash/list as dedicated panes, set/zset/stream as JSON views).
+Edit values, delete keys, and create new keys (string/hash/list/set/zset/stream)
+with confirmation dialogs. It also participates in snapshots and diffs.
 
-**Elasticsearch** support is read-only: list indices, view mappings, paginate
+**Elasticsearch** support: list indices, view mappings, paginate
 docs with `search_after`, run lucene `q=` searches, and submit DSL queries to a
 small allowlist of `_search` / `_count` / `_msearch` / `_explain` /
-`_validate` / `_field_caps` / `_eql`. Snapshots and diffs over `_search`
-iteration are supported.
+`_validate` / `_field_caps` / `_eql`. Edit documents (with optimistic
+concurrency via `_seq_no` / `_primary_term`), create new documents, and delete
+existing ones. Snapshots and diffs over `_search` iteration are supported.
 
-**S3-compatible object storage** (MinIO, LocalStack) is read-only: browse
+**S3-compatible object storage** (MinIO, LocalStack): browse
 buckets as a folder tree, search by prefix or filename, sort scanned objects by
 update time, and preview images, video, audio, PDFs, Markdown, HTML, and text
-files. Updated-time sorting is scoped to the objects scanned for the current
-prefix/search rather than a persistent whole-bucket index. HTML previews are
-rendered in a sandboxed `srcdoc` iframe; relative subresources inside the HTML
-are not rewritten. **LocalStack** falls back to `docker exec <container> curl`
-against the container-local endpoint when the service does not publish a host
-port; **MinIO** requires a published host port (add a `9000:9000` mapping) and
-will refuse to browse otherwise.
+files. Edit text/markdown/JSON object bodies inline, upload new objects to any
+prefix, and delete existing objects. Updated-time sorting is scoped to the
+objects scanned for the current prefix/search rather than a persistent
+whole-bucket index. HTML previews are rendered in a sandboxed `srcdoc` iframe;
+relative subresources inside the HTML are not rewritten. **LocalStack** falls
+back to `docker exec <container> curl` against the container-local endpoint
+when the service does not publish a host port; **MinIO** requires a published
+host port (add a `9000:9000` mapping) and will refuse to browse otherwise.
+
+**SQL row editing** (SQLite / PostgreSQL / MySQL): toggle an Edit mode on the
+table grid to insert, update, or delete rows inline. Edits queue as pending
+changes (shown with a yellow highlight on the affected row/cell) and are
+applied as a single transaction on commit. Row updates and deletes require the
+table to have a primary key. The whole batch rolls back on the first
+constraint violation.
 
 ### Browser UI
 
@@ -226,11 +236,19 @@ Open Datastores in the global navigation to access:
   the database.
 - **Table browser** — paginated data grid with column sort, text filter, cell
   copy, and CSV/JSON export (capped at 100,000 rows; export respects current
-  filter/sort).
+  filter/sort). Double-click a cell to edit inline when Edit mode is on; the
+  whole pending edit batch commits atomically.
 - **Detail footer and related panel** — click any cell to open a resizable
   detail footer; foreign-key cells open a related panel showing the
   referenced or referencing rows, with multi-step drill-down breadcrumbs.
   Cells that match the focused row are highlighted in both panels.
+- **Footer dock with Query History & Session log** — JetBrains-style bottom
+  dock that hosts two tabs: the per-database **Query History** (master/detail
+  list of saved queries, SSE-synced across tabs) and a **Session log** that
+  records every SQL the server runs in this browser session (read fetches,
+  user queries, and write commits) with timing, row counts, and the actual
+  executed SQL syntax-highlighted with shiki. Auto-follow keeps the newest
+  entry pinned; scroll up to pause.
 - **Rails FK inference toggle** — opt-in heuristic that adds virtual foreign
   keys following Rails naming conventions (e.g. `user_id → users.id`) on top
   of the database-declared FKs.
@@ -251,9 +269,11 @@ Open Datastores in the global navigation to access:
   (or Redis key spaces, or Elasticsearch indices) and compare any two
   snapshots to see inserted, updated, and deleted rows with full before/after
   values.
-- **Datastore explorers** — first-class sidebars for Redis (DB / SCAN), 
+- **Datastore explorers** — first-class sidebars for Redis (DB / SCAN),
   Elasticsearch (indices / mappings / docs), and S3 (folder tree, kind
-  badges) so the same Multi-DB tab UI works for non-SQL stores too.
+  badges) so the same Multi-DB tab UI works for non-SQL stores too. Each
+  explorer supports value editing / document creation / object upload /
+  deletion via in-line panes and confirmation dialogs.
 
 ### CLI
 
