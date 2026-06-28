@@ -262,6 +262,12 @@ export type DbText = {
       copyFailed: string;
       unsupported: string;
       truncatedNotice: (size: string) => string;
+      newObject: string;
+      newObjectKeyPlaceholder: string;
+      contentPlaceholder: string;
+      confirmDeleteObject: (key: string) => string;
+      editTextHint: string;
+      create: string;
     };
   };
 };
@@ -510,6 +516,12 @@ const EN: DbText = {
       unsupported:
         "This object type cannot be previewed safely in the browser.",
       truncatedNotice: (size) => `Showing first ${size}.`,
+      newObject: "New object",
+      newObjectKeyPlaceholder: "object key, e.g. folder/file.txt",
+      contentPlaceholder: "object content (text)",
+      confirmDeleteObject: (key) => `Delete object "${key}"?`,
+      editTextHint: "Only text objects can be edited in the browser.",
+      create: "Create",
     },
   },
 };
@@ -760,6 +772,12 @@ const JA: DbText = {
       unsupported:
         "この種類のオブジェクトはブラウザで安全にプレビューできません。",
       truncatedNotice: (size) => `先頭 ${size} を表示中。`,
+      newObject: "新規オブジェクト",
+      newObjectKeyPlaceholder: "オブジェクトキー 例: folder/file.txt",
+      contentPlaceholder: "オブジェクトの内容 (テキスト)",
+      confirmDeleteObject: (key) => `オブジェクト "${key}" を削除しますか?`,
+      editTextHint: "ブラウザで編集できるのはテキストオブジェクトのみです。",
+      create: "作成",
     },
   },
 };

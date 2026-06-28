@@ -9069,6 +9069,45 @@ body.db-resizing {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+/* オブジェクト編集 / 新規作成フォーム。 */
+.s3-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.s3-edit-status {
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+}
+.s3-edit-textarea {
+  width: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.s3-new-object-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.s3-new-object-key {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
 }
 .s3-preview-body {
   flex: 1;

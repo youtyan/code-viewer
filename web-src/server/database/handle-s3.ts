@@ -20,6 +20,7 @@ import {
   dispatchRoutes,
   handleError,
   json,
+  parseBoundedJsonBody,
   resolveDockerExplorerAsync,
   textError,
 } from "./handle-shared";
@@ -497,6 +498,66 @@ async function handleRaw(
   }
 }
 
+// テキスト内容でのオブジェクト作成/上書き、およびオブジェクト削除。
+// バイナリ (ファイル) アップロードは将来対応。
+async function handleWrite(
+  req: Request,
+  cwd: string,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    8 * 1024 * 1024,
+    "payload too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = parsed as {
+    db?: unknown;
+    bucket?: unknown;
+    key?: unknown;
+    op?: unknown;
+    content?: unknown;
+    contentType?: unknown;
+  };
+  if (typeof body.db !== "string" || body.db === "") {
+    return textError("missing db", 400);
+  }
+  const bucket = validateBucket(
+    typeof body.bucket === "string" ? body.bucket : null,
+  );
+  if (bucket instanceof Response) return bucket;
+  const key = validateKey(typeof body.key === "string" ? body.key : null);
+  if (key instanceof Response) return key;
+  const r = await resolveS3(cwd, body.db, req.signal, omitDirNames);
+  if (r instanceof Response) return r;
+  try {
+    if (body.op === "delete") {
+      await r.explorer.deleteObjectAsync({
+        bucket,
+        key,
+        signal: req.signal,
+      });
+      return json({ ok: true });
+    }
+    // 既定は put (作成/上書き)。content はテキスト。
+    const content = typeof body.content === "string" ? body.content : "";
+    const contentType =
+      typeof body.contentType === "string" && body.contentType
+        ? body.contentType
+        : "application/octet-stream";
+    await r.explorer.putObjectAsync({
+      bucket,
+      key,
+      body: new TextEncoder().encode(content),
+      contentType,
+      signal: req.signal,
+    });
+    return json({ ok: true });
+  } catch (err) {
+    return handleError("s3", "write s3 object", err);
+  }
+}
+
 export async function handleS3Route(
   req: Request,
   url: URL,
@@ -532,6 +593,11 @@ export async function handleS3Route(
       "/_db/s3/raw": {
         methods: ["GET", "HEAD"],
         handler: () => handleRaw(cwd, req, url, omitDirNames),
+      },
+      "/_db/s3/write": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleWrite(req, cwd, omitDirNames),
       },
     },
     sideEffectAllowed,

@@ -208,7 +208,13 @@ export function createS3Explorer(
   sortKey.value = "key-asc";
   sortKey.textContent = text().sortKey;
   sortSelect.append(sortUpdated, sortKey);
-  optionRow.append(modeSeg, sortSelect);
+  const newObjectBtn = document.createElement("button");
+  newObjectBtn.type = "button";
+  newObjectBtn.className = "db-btn db-btn-sm s3-new-object-btn";
+  newObjectBtn.textContent = `＋ ${text().newObject}`;
+  newObjectBtn.title = text().newObject;
+  newObjectBtn.hidden = true;
+  optionRow.append(modeSeg, sortSelect, newObjectBtn);
   sidebarSlot.appendChild(optionRow);
 
   const objectStatus = document.createElement("div");
@@ -597,6 +603,177 @@ export function createS3Explorer(
     }
   }
 
+  function mkBtn(label: string, cls: string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.textContent = label;
+    return b;
+  }
+
+  async function postS3Write(body: Record<string, unknown>): Promise<void> {
+    const res = await fetch("/_db/s3/write", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  }
+
+  function refreshObjectList(): void {
+    if (currentView === "explorer") void loadExplorerRoot();
+    else void loadObjects(false);
+  }
+
+  // テキストオブジェクトの内容を取得して textarea 編集する。保存は PUT (上書き)。
+  async function startObjectEdit(object: S3ObjectInfo): Promise<void> {
+    if (!currentDbId || !currentBucket) return;
+    const bodyEl = previewPane.querySelector<HTMLElement>(".s3-preview-body");
+    if (!bodyEl) return;
+    setPaneStatus(bodyEl, tCommon().saving);
+    let current = "";
+    try {
+      const params = new URLSearchParams({
+        db: currentDbId,
+        bucket: currentBucket,
+        key: object.key,
+      });
+      const res = await fetch(`/_db/s3/text?${params}`);
+      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      current = ((await res.json()) as S3ObjectTextResponse).text;
+    } catch (err) {
+      setPaneStatus(
+        bodyEl,
+        tCommon().saveError(err instanceof Error ? err.message : String(err)),
+        { error: true },
+      );
+      return;
+    }
+    bodyEl.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "s3-edit-bar";
+    const save = mkBtn(tCommon().save, "db-btn db-btn-primary db-btn-sm");
+    const cancel = mkBtn(tCommon().cancel, "db-btn db-btn-sm");
+    const status = document.createElement("span");
+    status.className = "s3-edit-status";
+    bar.append(save, cancel, status);
+    const ta = document.createElement("textarea");
+    ta.className = "s3-edit-textarea";
+    ta.value = current;
+    bodyEl.append(bar, ta);
+    cancel.addEventListener("click", () => void selectObject(object));
+    save.addEventListener("click", async () => {
+      if (!currentDbId || !currentBucket) return;
+      save.disabled = true;
+      cancel.disabled = true;
+      status.textContent = tCommon().saving;
+      try {
+        await postS3Write({
+          db: currentDbId,
+          bucket: currentBucket,
+          key: object.key,
+          content: ta.value,
+          contentType: object.contentType || "text/plain",
+        });
+        await selectObject(object);
+      } catch (err) {
+        save.disabled = false;
+        cancel.disabled = false;
+        status.textContent = tCommon().saveError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+    ta.focus();
+  }
+
+  async function deleteObject(object: S3ObjectInfo): Promise<void> {
+    if (!currentDbId || !currentBucket) return;
+    if (!window.confirm(text().confirmDeleteObject(object.key))) return;
+    try {
+      await postS3Write({
+        db: currentDbId,
+        bucket: currentBucket,
+        key: object.key,
+        op: "delete",
+      });
+      currentKey = null;
+      setPaneEmpty(previewPane, text().selectObject);
+      refreshObjectList();
+    } catch (err) {
+      setPaneStatus(
+        previewPane,
+        tCommon().saveError(err instanceof Error ? err.message : String(err)),
+        { error: true },
+      );
+    }
+  }
+
+  // 新規オブジェクト (テキスト) 作成フォームを preview に表示する。
+  function showNewObjectForm(): void {
+    if (!currentBucket) {
+      setPaneStatus(previewPane, text().selectObject);
+      return;
+    }
+    previewPane.innerHTML = "";
+    const form = document.createElement("form");
+    form.className = "s3-new-object-form";
+    const keyInput = document.createElement("input");
+    keyInput.type = "text";
+    keyInput.className = "s3-new-object-key";
+    keyInput.placeholder = text().newObjectKeyPlaceholder;
+    keyInput.autocomplete = "off";
+    const ta = document.createElement("textarea");
+    ta.className = "s3-edit-textarea";
+    ta.placeholder = text().contentPlaceholder;
+    const bar = document.createElement("div");
+    bar.className = "s3-edit-bar";
+    const create = mkBtn(text().create, "db-btn db-btn-primary db-btn-sm");
+    create.type = "submit";
+    const cancel = mkBtn(tCommon().cancel, "db-btn db-btn-sm");
+    const status = document.createElement("span");
+    status.className = "s3-edit-status";
+    bar.append(create, cancel, status);
+    form.append(bar, keyInput, ta);
+    previewPane.appendChild(form);
+    keyInput.focus();
+    cancel.addEventListener("click", () =>
+      setPaneEmpty(previewPane, text().selectObject),
+    );
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentDbId || !currentBucket) return;
+      const key = keyInput.value.trim();
+      if (!key) {
+        keyInput.focus();
+        return;
+      }
+      create.disabled = true;
+      status.textContent = tCommon().saving;
+      try {
+        await postS3Write({
+          db: currentDbId,
+          bucket: currentBucket,
+          key,
+          content: ta.value,
+          contentType: "text/plain",
+        });
+        refreshObjectList();
+        setPaneEmpty(previewPane, text().selectObject);
+      } catch (err) {
+        create.disabled = false;
+        status.textContent = tCommon().saveError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+  }
+
+  newObjectBtn.addEventListener("click", () => showNewObjectForm());
+
   function renderPreviewHeader(object: S3ObjectInfo): HTMLElement {
     const header = document.createElement("div");
     header.className = "s3-preview-header";
@@ -646,6 +823,15 @@ export function createS3Explorer(
         }
       });
       actions.append(open, download, copy);
+      // テキストオブジェクトのみ編集可。削除は種類を問わず可。
+      if (sourceDisplayKind(object.key) === "text") {
+        const editBtn = mkBtn(tCommon().edit, "db-btn db-btn-sm");
+        editBtn.addEventListener("click", () => void startObjectEdit(object));
+        actions.appendChild(editBtn);
+      }
+      const delBtn = mkBtn(tCommon().delete, "db-btn db-btn-sm");
+      delBtn.addEventListener("click", () => void deleteObject(object));
+      actions.appendChild(delBtn);
     }
     header.append(title, meta, actions);
     return header;
@@ -1132,6 +1318,8 @@ export function createS3Explorer(
     currentNextToken = undefined;
     listLoaded = false;
     resetExplorer();
+    // バケット選択後は新規オブジェクト作成を許可する。
+    newObjectBtn.hidden = false;
     notifySelectionChange();
     if (currentView === "explorer") await loadExplorerRoot();
     else await loadObjects(false);
@@ -1265,6 +1453,8 @@ export function createS3Explorer(
         return;
       }
       bucketSelect.value = selected;
+      // バケットが決まったので新規オブジェクト作成を許可する。
+      newObjectBtn.hidden = false;
       suppressNotify = true;
       try {
         currentBucket = selected;
@@ -1377,6 +1567,8 @@ export function createS3Explorer(
     containsModeBtn.textContent = t.containsMode;
     sortUpdated.textContent = t.sortUpdated;
     sortKey.textContent = t.sortKey;
+    newObjectBtn.textContent = `＋ ${t.newObject}`;
+    newObjectBtn.title = t.newObject;
     moreBtn.textContent = tCommon().loadMore;
     searchInput.placeholder =
       currentMode === "prefix" ? t.prefixPlaceholder : t.containsPlaceholder;
