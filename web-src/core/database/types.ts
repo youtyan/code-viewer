@@ -75,6 +75,28 @@ export type DbTableDataResponse = {
   hasMore: boolean;
 };
 
+// --- Row writes (edit / insert / delete) ---
+
+// クライアントが書き込みのために送る 1 セルの値。value はユーザー入力の
+// 生文字列で、サーバ側が列の型に応じて型変換する (coerceDbValue)。
+// null は SQL の NULL を表す (空文字列 "" とは区別する)。
+export type DbCellInput = { column: string; value: string | null };
+
+// 1 行に対する変更。生 SQL はクライアントから送らず、テーブル名・主キー条件・
+// 列値の正規化された形だけを送る (インジェクション面を構造的に断つ)。
+export type RowMutation =
+  | { kind: "insert"; values: DbCellInput[] }
+  | { kind: "update"; pk: DbCellInput[]; values: DbCellInput[] }
+  | { kind: "delete"; pk: DbCellInput[] };
+
+export type DbMutateResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  // 影響を受けた行数の合計。
+  affected: number;
+};
+
 export type DbQueryResponse = {
   dbId: string;
   schema?: string;

@@ -5,7 +5,9 @@ import type {
   DbOrder,
   DbTableInfo,
   DbValue,
+  RowMutation,
 } from "../../../core/database/types";
+import { buildMutationStatements } from "../mutate";
 import {
   buildRowKeyJson,
   computeRowHash,
@@ -23,6 +25,7 @@ import {
 import type {
   DatabaseAdapter,
   DatabaseAdapterFactory,
+  MutationResult,
   QueryResult,
   TablePageMeta,
   TriggerInfo,
@@ -162,7 +165,20 @@ function queryColumns(db: SqliteDb, table: string): DbColumn[] {
   }));
 }
 
-function createSqliteAdapter(db: SqliteDb): SqliteSource {
+function createSqliteAdapter(
+  db: SqliteDb,
+  openWriteDb?: () => SqliteDb,
+): SqliteSource {
+  // 読み取り接続 (db) は readonly で開かれている。書き込みは別途 readonly:false
+  // の接続を遅延生成して使い回す (既存の読み取りパスは一切触らない)。
+  let writeDb: SqliteDb | null = null;
+  const getWriteDb = (): SqliteDb => {
+    if (!openWriteDb) {
+      throw new Error("writes are not supported for this connection");
+    }
+    if (!writeDb) writeDb = openWriteDb();
+    return writeDb;
+  };
   const adapter: SqliteSource = {
     kind: "sqlite",
     model: "sql",
@@ -486,7 +502,49 @@ function createSqliteAdapter(db: SqliteDb): SqliteSource {
       return this.getTriggers(table);
     },
 
+    async applyMutations(
+      table: string,
+      mutations: RowMutation[],
+    ): Promise<MutationResult> {
+      const columns = queryColumns(db, table);
+      if (columns.length === 0) {
+        throw new Error(`unknown table: ${table}`);
+      }
+      const statements = buildMutationStatements(
+        table,
+        mutations,
+        columns,
+        "sqlite",
+      );
+      const wdb = getWriteDb();
+      let affected = 0;
+      wdb.prepare("BEGIN").run();
+      try {
+        for (const stmt of statements) {
+          const result = wdb.prepare(stmt.sql).run(...stmt.params);
+          affected += result.changes ?? 0;
+        }
+        wdb.prepare("COMMIT").run();
+      } catch (err) {
+        try {
+          wdb.prepare("ROLLBACK").run();
+        } catch {
+          // ロールバック失敗は元のエラーを優先するため握りつぶす。
+        }
+        throw err;
+      }
+      return { affected };
+    },
+
     close(): void {
+      if (writeDb) {
+        try {
+          writeDb.close();
+        } catch {
+          // ignore
+        }
+        writeDb = null;
+      }
       db.close();
     },
 
@@ -535,6 +593,12 @@ export const sqliteAdapterFactory: DatabaseAdapterFactory = {
   async open(path: string): Promise<DatabaseAdapter> {
     const DbClass = await getSqliteClass();
     const db = new DbClass(path, { readonly: true, create: false });
-    return createSqliteAdapter(db);
+    // 書き込み用接続は実際に書き込みが要求されたときだけ遅延生成する。
+    // 既定 (read-write) で開く: ここに到達した時点で readonly 接続が同じファイル
+    // を開けているので必ず存在しており、create が走ることはない。driver 差
+    // (bun:sqlite と better-sqlite3 で write+no-create のオプション表現が異なる)
+    // を避けるためオプションは渡さない。
+    const openWriteDb = () => new DbClass(path);
+    return createSqliteAdapter(db, openWriteDb);
   },
 };

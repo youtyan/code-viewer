@@ -3,12 +3,14 @@ import type {
   DbColumn,
   DbFilesResponse,
   DbKind,
+  DbMutateResponse,
   DbOrder,
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
+  RowMutation,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
 import { loadDbUiState, patchDbUiState } from "../state-store";
@@ -1642,6 +1644,71 @@ async function handleClose(
   return json({ ok: true });
 }
 
+// 行の編集 / 追加 / 削除を適用する。クライアントは生 SQL ではなく正規化された
+// RowMutation[] を送り、SQL 生成と検証は adapter / mutate.ts 側で行う。
+async function handleMutate(
+  cwd: string,
+  req: Request,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    1024 * 1024,
+    "payload too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = parsed as {
+    db?: unknown;
+    schema?: unknown;
+    table?: unknown;
+    mutations?: unknown;
+  };
+  if (typeof body.db !== "string" || body.db === "") {
+    return textError("missing db", 400);
+  }
+  if (typeof body.table !== "string" || body.table === "") {
+    return textError("missing table", 400);
+  }
+  if (!Array.isArray(body.mutations) || body.mutations.length === 0) {
+    return textError("missing mutations", 400);
+  }
+  const schemaParam = typeof body.schema === "string" ? body.schema : undefined;
+  const r = await resolveDb(
+    cwd,
+    body.db,
+    omitDirNames,
+    schemaParam,
+    req.signal,
+  );
+  if (r instanceof Response) return r;
+  const adapter = await getAdapter(r, cwd, req.signal);
+  if (!adapter.applyMutations) {
+    return textError("writes are not supported for this datastore", 400);
+  }
+  try {
+    const result = await adapter.applyMutations(
+      body.table,
+      body.mutations as RowMutation[],
+      req.signal,
+    );
+    adapter.invalidateTableMetaCache?.(body.table);
+    const response: DbMutateResponse = {
+      dbId: r.dbId,
+      ...(r.schema ? { schema: r.schema } : {}),
+      table: body.table,
+      affected: result.affected,
+    };
+    return json(response);
+  } catch (err) {
+    if (isAbortLikeError(err, req.signal)) {
+      return textError("mutation aborted", 503);
+    }
+    // 検証エラー (未知のカラム/主キー欠落等) や DB 制約違反はユーザーに見せる。
+    const message = err instanceof Error ? err.message : String(err);
+    return textError(message, 400);
+  }
+}
+
 export async function handleDatabaseRoute(
   req: Request,
   url: URL,
@@ -1717,6 +1784,11 @@ export async function handleDatabaseRoute(
         methods: ["POST"],
         sideEffect: true,
         handler: () => handleQuery(cwd, req, sendSse, omitDirNames),
+      },
+      "/_db/mutate": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleMutate(cwd, req, omitDirNames),
       },
       "/_db/close": {
         methods: ["POST"],

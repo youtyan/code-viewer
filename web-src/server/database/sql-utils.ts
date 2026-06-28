@@ -1,3 +1,6 @@
+import type { DbCellInput, DbValue } from "../../core/database/types";
+import { coerceDbValue } from "./serialize";
+
 export type SqlKind = "sqlite" | "postgresql" | "mysql";
 
 export type FilterSql = {
@@ -93,4 +96,142 @@ export function filterOrderByColumns<T extends { column: string }>(
   const validColumns = new Set(columnNames);
   const filtered = orderBy.filter((order) => validColumns.has(order.column));
   return filtered.length > 0 ? filtered : undefined;
+}
+
+// --- 書き込み (INSERT / UPDATE / DELETE) 用の SQL 生成 ---
+
+export type WriteSql = { sql: string; params: DbValue[] };
+
+// SQLite は ? パラメータバインドが使えるので useParams=true。
+// PostgreSQL / MySQL は docker exec (CLI) 経由でパラメータバインドが使えない
+// ため、値をリテラルとして埋め込む (buildFilterWhere と同じ方針)。
+function useParamsFor(kind: SqlKind): boolean {
+  return kind === "sqlite";
+}
+
+// coerce 済みの DbValue を、param バインド (? に push) するか、リテラル文字列に
+// 変換して返す。
+function placeValue(
+  coerced: DbValue,
+  kind: SqlKind,
+  useParams: boolean,
+  params: DbValue[],
+): string {
+  if (useParams) {
+    params.push(coerced);
+    return "?";
+  }
+  if (coerced === null) return "NULL";
+  if (typeof coerced === "number") return String(coerced);
+  if (typeof coerced === "boolean") return coerced ? "TRUE" : "FALSE";
+  // Uint8Array は書き込み入力には現れない (テキスト系のみ対象)。到達した場合は
+  // 文字列化して安全側に倒す。
+  const text =
+    coerced instanceof Uint8Array
+      ? new TextDecoder().decode(coerced)
+      : String(coerced);
+  return escapeSqlString(text, kind);
+}
+
+function coerceCell(cell: DbCellInput, columnType: string): DbValue {
+  return coerceDbValue(cell.value, columnType);
+}
+
+export function buildInsertSql(
+  table: string,
+  cells: DbCellInput[],
+  columnTypes: Map<string, string>,
+  kind: SqlKind,
+): WriteSql {
+  if (cells.length === 0) {
+    throw new Error("insert requires at least one column value");
+  }
+  const useParams = useParamsFor(kind);
+  const params: DbValue[] = [];
+  const cols = cells.map((c) => sanitizeIdentifier(c.column, kind));
+  const placeholders = cells.map((c) =>
+    placeValue(
+      coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
+      kind,
+      useParams,
+      params,
+    ),
+  );
+  const sql = `INSERT INTO ${sanitizeIdentifier(table, kind)} (${cols.join(
+    ", ",
+  )}) VALUES (${placeholders.join(", ")})`;
+  return { sql, params };
+}
+
+export function buildUpdateSql(
+  table: string,
+  set: DbCellInput[],
+  pk: DbCellInput[],
+  columnTypes: Map<string, string>,
+  kind: SqlKind,
+): WriteSql {
+  if (set.length === 0) {
+    throw new Error("update requires at least one column to set");
+  }
+  if (pk.length === 0) {
+    throw new Error("update requires a primary key condition");
+  }
+  const useParams = useParamsFor(kind);
+  const params: DbValue[] = [];
+  const setSql = set
+    .map(
+      (c) =>
+        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
+          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
+          kind,
+          useParams,
+          params,
+        )}`,
+    )
+    .join(", ");
+  const whereSql = pk
+    .map(
+      (c) =>
+        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
+          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
+          kind,
+          useParams,
+          params,
+        )}`,
+    )
+    .join(" AND ");
+  const sql = `UPDATE ${sanitizeIdentifier(
+    table,
+    kind,
+  )} SET ${setSql} WHERE ${whereSql}`;
+  return { sql, params };
+}
+
+export function buildDeleteSql(
+  table: string,
+  pk: DbCellInput[],
+  columnTypes: Map<string, string>,
+  kind: SqlKind,
+): WriteSql {
+  if (pk.length === 0) {
+    throw new Error("delete requires a primary key condition");
+  }
+  const useParams = useParamsFor(kind);
+  const params: DbValue[] = [];
+  const whereSql = pk
+    .map(
+      (c) =>
+        `${sanitizeIdentifier(c.column, kind)} = ${placeValue(
+          coerceCell(c, columnTypes.get(c.column) ?? "TEXT"),
+          kind,
+          useParams,
+          params,
+        )}`,
+    )
+    .join(" AND ");
+  const sql = `DELETE FROM ${sanitizeIdentifier(
+    table,
+    kind,
+  )} WHERE ${whereSql}`;
+  return { sql, params };
 }

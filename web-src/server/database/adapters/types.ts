@@ -6,8 +6,14 @@ import type {
   DbOrder,
   DbTableInfo,
   DbValue,
+  RowMutation,
 } from "../../../core/database/types";
 import type { RawDbValue } from "../serialize";
+
+export type MutationResult = {
+  // 適用された全 mutation の影響行数の合計。
+  affected: number;
+};
 
 export type QueryResult = {
   columns: string[];
@@ -72,6 +78,13 @@ export type DatabaseAdapter = {
     signal?: AbortSignal,
   ): Promise<QueryResult>;
   invalidateTableMetaCache?(table?: string): void;
+  // 行の編集 / 追加 / 削除を 1 トランザクションで適用する。実装しない adapter
+  // (= 書き込み未対応のデータストア) では undefined。
+  applyMutations?(
+    table: string,
+    mutations: RowMutation[],
+    signal?: AbortSignal,
+  ): Promise<MutationResult>;
   getCreateStatementAsync(table: string, signal?: AbortSignal): Promise<string>;
   getTriggersAsync(table: string, signal?: AbortSignal): Promise<TriggerInfo[]>;
   close(): void;
