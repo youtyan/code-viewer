@@ -2,6 +2,12 @@
 // 削除 / 新規キー作成が、正しい op で POST /_db/redis/write を呼ぶことを確認する。
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import {
+  clickDialogCancel,
+  clickDialogConfirm,
+  closeOpenDialog,
+} from "./_dialog-helpers";
+import { q } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -22,7 +28,6 @@ function jsonResponse(body: unknown): Response {
 }
 
 const origFetch = globalThis.fetch;
-const origConfirm = globalThis.confirm;
 
 function installFetch() {
   writeCalls = [];
@@ -65,17 +70,11 @@ function installFetch() {
 
 afterEach(() => {
   globalThis.fetch = origFetch;
-  globalThis.confirm = origConfirm;
+  closeOpenDialog();
 });
 afterAll(() => {
   GlobalRegistrator.unregister();
 });
-
-function q<T extends Element>(root: ParentNode, sel: string): T {
-  const el = root.querySelector<T>(sel);
-  if (!el) throw new Error(`missing element: ${sel}`);
-  return el;
-}
 
 async function setupSelectedKey() {
   installFetch();
@@ -117,7 +116,6 @@ describe("redis explorer edit UI", () => {
   });
 
   test("deleting a key posts op=delete after confirm", async () => {
-    globalThis.confirm = (() => true) as (message?: string) => boolean;
     const view = await setupSelectedKey();
     const buttons = view.el.querySelectorAll<HTMLButtonElement>(
       ".redis-value-actions .db-btn",
@@ -125,19 +123,22 @@ describe("redis explorer edit UI", () => {
     // 最後のアクションが Delete
     buttons[buttons.length - 1].click();
     await tick();
+    clickDialogConfirm();
+    await tick();
     expect(writeCalls.length).toBe(1);
     expect(writeCalls[0].op).toBe("delete");
     expect(writeCalls[0].key).toBe("foo");
     view.dispose();
   });
 
-  test("delete is cancelled when confirm returns false", async () => {
-    globalThis.confirm = (() => false) as (message?: string) => boolean;
+  test("delete is cancelled when the dialog is cancelled", async () => {
     const view = await setupSelectedKey();
     const buttons = view.el.querySelectorAll<HTMLButtonElement>(
       ".redis-value-actions .db-btn",
     );
     buttons[buttons.length - 1].click();
+    await tick();
+    clickDialogCancel();
     await tick();
     expect(writeCalls.length).toBe(0);
     view.dispose();

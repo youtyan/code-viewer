@@ -1,6 +1,6 @@
 import type {
-  DbColumn,
   DbCellInput,
+  DbColumn,
   RowMutation,
 } from "../../core/database/types";
 import {

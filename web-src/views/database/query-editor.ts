@@ -1,43 +1,11 @@
 import type { DbQueryResponse, DbValue } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
+import {
+  loadShikiHighlighter,
+  type ShikiHighlighter,
+} from "../../core/shiki-loader";
 import { type DbText, dbText } from "./i18n";
-
-type ShikiHighlighter = {
-  codeToHtml: (
-    code: string,
-    options: {
-      lang: string;
-      themes: { light: string; dark: string };
-      defaultColor: false;
-    },
-  ) => string;
-};
-
-type ShikiModule = {
-  bundledLanguages?: Record<string, unknown>;
-  createHighlighter: (options: {
-    themes: string[];
-    langs: string[];
-  }) => Promise<ShikiHighlighter>;
-};
-
-let shikiPromise: Promise<ShikiHighlighter | null> | null = null;
-
-// ai-dup-check: allow -- SQL editor loads only the sql highlighter theme bundle.
-function loadShikiSql(): Promise<ShikiHighlighter | null> {
-  if (!shikiPromise) {
-    shikiPromise = import("/" + "shiki.js")
-      .then((mod: unknown) => {
-        const typed = mod as ShikiModule;
-        return typed.createHighlighter({
-          themes: ["github-light", "github-dark"],
-          langs: ["sql"],
-        });
-      })
-      .catch(() => null);
-  }
-  return shikiPromise;
-}
+import { highlightSqlToInnerHtml } from "./shiki-sql";
 
 const MAX_HISTORY = 50;
 
@@ -87,7 +55,10 @@ export function createQueryEditor(
   editorWrap.append(highlight, textarea);
 
   let shiki: ShikiHighlighter | null = null;
-  loadShikiSql().then((h) => {
+  loadShikiHighlighter({
+    themes: ["github-light", "github-dark"],
+    langs: ["sql"],
+  }).then((h) => {
     shiki = h;
     syncHighlight();
   });
@@ -106,21 +77,9 @@ export function createQueryEditor(
       syncEditorHeight();
       return;
     }
-    if (!shiki) {
-      highlight.textContent = code;
-      syncEditorHeight();
-      return;
-    }
-    const html = shiki.codeToHtml(code, {
-      lang: "sql",
-      themes: { light: "github-light", dark: "github-dark" },
-      defaultColor: false,
-    });
-    const template = document.createElement("template");
-    template.innerHTML = html;
-    const pre = template.content.querySelector("pre");
-    if (pre) {
-      highlight.innerHTML = pre.innerHTML;
+    const inner = highlightSqlToInnerHtml(code, shiki);
+    if (inner) {
+      highlight.innerHTML = inner;
     } else {
       highlight.textContent = code;
     }

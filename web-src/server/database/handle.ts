@@ -22,6 +22,7 @@ import {
   openDockerAdapterAsync,
 } from "./adapters/docker";
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
+import { captureSql } from "./adapters/sql-capture";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
 import type { DatabaseAdapter } from "./adapters/types";
 import {
@@ -305,18 +306,22 @@ async function handleSchemas(
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
     return json(body);
   }
-  const schemas = await listDockerSchemasAsync(
-    r.docker.serviceName,
-    "postgresql",
-    r.docker.env,
-    r.docker.composeDir,
-    r.docker.database,
-    signal,
+  const docker = r.docker;
+  const { result: schemas, executedSql } = await captureSql(() =>
+    listDockerSchemasAsync(
+      docker.serviceName,
+      "postgresql",
+      docker.env,
+      docker.composeDir,
+      docker.database,
+      signal,
+    ),
   );
   const body: DbSchemasResponse = {
     dbId: r.dbId,
     schemas: schemas.map((name) => ({ name })),
     selectedSchema: r.schema,
+    executedSql,
   };
   return json(body);
 }
@@ -339,43 +344,47 @@ async function handleSchema(
   const linkedAbort = createLinkedAbortController(signal);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    const db = asAsync(adapter);
-    const tables = await db.tables(linkedAbort.signal);
-    const tableNames = tables
-      .filter((t) => t.type === "table")
-      .map((t) => t.name);
-    const countMapPromise = db.tableRowCounts(tableNames, linkedAbort.signal);
-    const indexesPromise = db.indexes(linkedAbort.signal);
-    const foreignKeysPromise = db.foreignKeys(linkedAbort.signal);
-    const columnsMapPromise = includeColumns
-      ? db.columnsMulti(tableNames, linkedAbort.signal)
-      : Promise.resolve(null);
-    const schemaPromises = [
-      countMapPromise,
-      indexesPromise,
-      foreignKeysPromise,
-      columnsMapPromise,
-    ] as const;
-    const [countMap, indexes, foreignKeys, colsMap] = await Promise.all(
-      schemaPromises,
-    ).catch(async (err) => {
-      linkedAbort.abort();
-      await Promise.allSettled(schemaPromises);
-      throw err;
+    const { result, executedSql } = await captureSql(async () => {
+      const db = asAsync(adapter);
+      const tables = await db.tables(linkedAbort.signal);
+      const tableNames = tables
+        .filter((t) => t.type === "table")
+        .map((t) => t.name);
+      const countMapPromise = db.tableRowCounts(tableNames, linkedAbort.signal);
+      const indexesPromise = db.indexes(linkedAbort.signal);
+      const foreignKeysPromise = db.foreignKeys(linkedAbort.signal);
+      const columnsMapPromise = includeColumns
+        ? db.columnsMulti(tableNames, linkedAbort.signal)
+        : Promise.resolve(null);
+      const schemaPromises = [
+        countMapPromise,
+        indexesPromise,
+        foreignKeysPromise,
+        columnsMapPromise,
+      ] as const;
+      const [countMap, indexes, foreignKeys, colsMap] = await Promise.all(
+        schemaPromises,
+      ).catch(async (err) => {
+        linkedAbort.abort();
+        await Promise.allSettled(schemaPromises);
+        throw err;
+      });
+      return { tables, countMap, indexes, foreignKeys, colsMap };
     });
-    const tablesWithCount = tables.map((t) => ({
+    const tablesWithCount = result.tables.map((t) => ({
       ...t,
-      rowCount: t.type === "table" ? (countMap.get(t.name) ?? 0) : null,
+      rowCount: t.type === "table" ? (result.countMap.get(t.name) ?? 0) : null,
     }));
     const body: DbSchemaResponse = {
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
       tables: tablesWithCount,
-      indexes,
-      foreignKeys,
+      indexes: result.indexes,
+      foreignKeys: result.foreignKeys,
+      executedSql,
     };
-    if (colsMap) {
-      body.columnsMap = Object.fromEntries(colsMap);
+    if (result.colsMap) {
+      body.columnsMap = Object.fromEntries(result.colsMap);
     }
     return json(body);
   } catch (err) {
@@ -479,43 +488,28 @@ async function handleTable(
   const exact = parseExactConditions(url);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    if (filters.length > 0 || exact.length > 0) {
-      const meta = await adapter.getFilteredTablePageWithMeta(
-        table,
-        {
-          offset,
-          limit,
-          orderBy,
-          grouped: groupFiltersByValue(filters),
-          ...(exact.length > 0 ? { exact } : {}),
-        },
-        signal,
-      );
-      const colNames = new Set(meta.columns.map((c) => c.name));
-      if (sortCol && !colNames.has(sortCol)) {
-        return textError(`invalid sort column: ${sortCol}`, 400);
-      }
-      const body: DbTableDataResponse = {
-        dbId: r.dbId,
-        ...(r.schema ? { schema: r.schema } : {}),
-        table,
-        columns: meta.columns,
-        rows: serializeDbRows(meta.rows),
-        totalRows: meta.totalRows,
-        offset,
-        limit,
-        hasMore: offset + meta.rowCount < meta.totalRows,
-      };
-      return json(body);
-    }
-    const meta = await adapter.getTablePageWithMeta(
-      table,
-      {
-        offset,
-        limit,
-        orderBy,
-      },
-      signal,
+    const { result: meta, executedSql } = await captureSql(() =>
+      filters.length > 0 || exact.length > 0
+        ? adapter.getFilteredTablePageWithMeta(
+            table,
+            {
+              offset,
+              limit,
+              orderBy,
+              grouped: groupFiltersByValue(filters),
+              ...(exact.length > 0 ? { exact } : {}),
+            },
+            signal,
+          )
+        : adapter.getTablePageWithMeta(
+            table,
+            {
+              offset,
+              limit,
+              orderBy,
+            },
+            signal,
+          ),
     );
     const colNames = new Set(meta.columns.map((c) => c.name));
     if (sortCol && !colNames.has(sortCol)) {
@@ -531,6 +525,7 @@ async function handleTable(
       offset,
       limit,
       hasMore: offset + meta.rowCount < meta.totalRows,
+      executedSql,
     };
     return json(body);
   } catch (err) {
@@ -652,12 +647,13 @@ async function handleQuery(
   const start = Date.now();
   try {
     const adapter = await getAdapter(r, cwd, req.signal);
-    const db = asAsync(adapter);
-    const result = await db.readonlyQuery(
-      body.sql,
-      undefined,
-      maxRows,
-      req.signal,
+    const { result, executedSql } = await captureSql(() =>
+      asAsync(adapter).readonlyQuery(
+        body.sql ?? "",
+        undefined,
+        maxRows,
+        req.signal,
+      ),
     );
     const elapsed = Date.now() - start;
     const serializedRows = serializeDbRows(result.rows);
@@ -682,6 +678,7 @@ async function handleQuery(
       rowCount: result.rowCount,
       truncated: result.rowCount >= maxRows,
       elapsedMs: elapsed,
+      executedSql,
     };
     if (body.saveHistory) {
       const entry: QueryHistoryEntry = {
@@ -956,13 +953,15 @@ async function handleColumns(
   if (!table) return textError("missing table parameter", 400);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    const db = asAsync(adapter);
-    const columns = await db.columns(table, signal);
+    const { result: columns, executedSql } = await captureSql(() =>
+      asAsync(adapter).columns(table, signal),
+    );
     return json({
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
       table,
       columns,
+      executedSql,
     });
   } catch (err) {
     return handleError("database", "get columns", err);
@@ -987,17 +986,21 @@ async function handleDdl(
   if (!table) return textError("missing table parameter", 400);
   try {
     const adapter = await getAdapter(r, cwd, signal);
-    const db = asAsync(adapter);
-    const [sql, triggers] = await Promise.all([
-      db.createStatement(table, signal),
-      db.triggers(table, signal),
-    ]);
+    const { result, executedSql } = await captureSql(async () => {
+      const db = asAsync(adapter);
+      const [sql, triggers] = await Promise.all([
+        db.createStatement(table, signal),
+        db.triggers(table, signal),
+      ]);
+      return { sql, triggers };
+    });
     return json({
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
       table,
-      sql,
-      triggers,
+      sql: result.sql,
+      triggers: result.triggers,
+      executedSql,
     });
   } catch (err) {
     return handleError("database", "get DDL", err);
@@ -1686,17 +1689,22 @@ async function handleMutate(
     return textError("writes are not supported for this datastore", 400);
   }
   try {
-    const result = await adapter.applyMutations(
-      body.table,
-      body.mutations as RowMutation[],
-      req.signal,
+    const tableName = body.table;
+    const { result, executedSql } = await captureSql(
+      () =>
+        adapter.applyMutations?.(
+          tableName,
+          body.mutations as RowMutation[],
+          req.signal,
+        ) ?? Promise.reject(new Error("applyMutations not supported")),
     );
-    adapter.invalidateTableMetaCache?.(body.table);
+    adapter.invalidateTableMetaCache?.(tableName);
     const response: DbMutateResponse = {
       dbId: r.dbId,
       ...(r.schema ? { schema: r.schema } : {}),
-      table: body.table,
+      table: tableName,
       affected: result.affected,
+      executedSql,
     };
     return json(response);
   } catch (err) {

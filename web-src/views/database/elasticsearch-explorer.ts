@@ -8,6 +8,7 @@ import type {
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import { formatBytes } from "../../core/source-meta";
+import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
@@ -384,7 +385,12 @@ export function createElasticsearchExplorer(
 
   async function deleteDoc(resp: EsDocResponse): Promise<void> {
     if (!currentDbId || !currentIndex) return;
-    if (!window.confirm(text().es.confirmDeleteDoc(resp.id))) return;
+    const ok = await showConfirmDialog({
+      body: text().es.confirmDeleteDoc(resp.id),
+      confirmLabel: text().common.delete,
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await postEsWrite({
         db: currentDbId,

@@ -10,6 +10,7 @@ import type {
   SnapshotMeta,
   SnapshotTableSummary,
 } from "../../core/database/types";
+import { loadSqliteClass } from "./sqlite-driver";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const SNAPSHOT_DB_NAME = "db-snapshots.sqlite";
@@ -23,37 +24,6 @@ type SqliteDb = {
   exec(sql: string): void;
   close(): void;
 };
-
-type SqliteConstructor = new (
-  path: string,
-  options?: { readonly?: boolean; create?: boolean },
-) => SqliteDb;
-
-let cachedDbClass: SqliteConstructor | null = null;
-
-async function getSqliteClass(): Promise<SqliteConstructor> {
-  if (cachedDbClass) return cachedDbClass;
-  try {
-    const mod = await import("bun:sqlite");
-    cachedDbClass = mod.Database as unknown as SqliteConstructor;
-    return cachedDbClass;
-  } catch {
-    // not running in Bun
-  }
-  try {
-    // Keep this opaque to Bun's bundler; better-sqlite3 is a Node-only optional dependency.
-    const mod = await (Function(
-      'return import("better-sqlite3")',
-    )() as Promise<{ default?: unknown }>);
-    cachedDbClass = (mod.default || mod) as unknown as SqliteConstructor;
-    return cachedDbClass;
-  } catch {
-    // not installed
-  }
-  throw new Error(
-    "No SQLite driver available. Install better-sqlite3 or use the bun runtime.",
-  );
-}
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -109,7 +79,7 @@ async function getStoreDb(cwd: string): Promise<SqliteDb> {
     }
   }
   mkdirSync(join(cwd, CODE_VIEWER_DIR), { recursive: true });
-  const DbClass = await getSqliteClass();
+  const DbClass = await loadSqliteClass<SqliteDb>();
   storeDb = new DbClass(dbPath);
   storeDbPath = dbPath;
   storeDb.exec("PRAGMA journal_mode=WAL");

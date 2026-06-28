@@ -31,6 +31,12 @@ export type DbText = {
     loadingSchema: string;
     noDatastores: string;
     dockerLimitReached: string;
+    // Rails 命名規約 (<name>_id → <names>.id) からの仮想 FK 推測トグル。
+    inferFkLabel: string;
+    inferFkTitle: string;
+    // 推測 FK の右ペインリストに付ける小バッジ。
+    inferredBadge: string;
+    inferredBadgeTitle: string;
   };
   // データグリッド本体。
   grid: {
@@ -53,6 +59,7 @@ export type DbText = {
     deleteRow: string;
     undoDelete: string;
     setNull: string;
+    dblclickToEdit: string;
     pending: (n: number) => string;
     committing: string;
     commitError: (message: string) => string;
@@ -118,6 +125,25 @@ export type DbText = {
     confirmDelete: string;
     confirmClear: string;
     truncatedRows: (saved: number, total: number) => string;
+  };
+  // セッションログペイン (session 限定。SQL 実行 / 編集コミットの成否を記録)。
+  sessionLog: {
+    tabLabel: string;
+    historyTabLabel: string;
+    clear: string;
+    clearTitle: string;
+    empty: string;
+    selectPlaceholder: string;
+    statusOk: string;
+    statusError: string;
+    kindQuery: string;
+    kindMutate: string;
+    useInEditor: string;
+    copy: string;
+    copied: string;
+    autoFollow: string;
+    autoFollowTitle: string;
+    commitLabel: (changes: number) => string;
   };
   // ER 図。
   er: {
@@ -288,14 +314,19 @@ const EN: DbText = {
     searchTitle: "Search across tables",
     snapshot: "Snapshot",
     snapshotTitle: "Snapshot & Diff",
-    queryHistory: "Query History",
-    queryHistoryTitle: "Toggle query history panel",
+    // bottom dock の close ボタン (×) 用 (旧 sidebar の開閉トグルから流用)。
+    queryHistory: "Close",
+    queryHistoryTitle: "Close panel",
     newTab: "New tab",
     closeTab: (label) => `Close ${label}`,
     loadingSchema: "Loading schema…",
     noDatastores: "No datastores found",
     dockerLimitReached:
       "Docker discovery reached the service limit; some compose services may be hidden.",
+    inferFkLabel: "Rails FK inference",
+    inferFkTitle: "Infer FK from Rails-style <name>_id → <names>.id",
+    inferredBadge: "inferred",
+    inferredBadgeTitle: "Inferred from Rails-style naming, not declared in DB",
   },
   grid: {
     searchPlaceholder: "Search all columns…",
@@ -316,6 +347,7 @@ const EN: DbText = {
     deleteRow: "Mark row for deletion",
     undoDelete: "Undo deletion",
     setNull: "Set NULL",
+    dblclickToEdit: "Double-click to edit",
     pending: (n) => `${n} change(s)`,
     committing: "Saving…",
     commitError: (message) => `Save failed: ${message}`,
@@ -379,6 +411,26 @@ const EN: DbText = {
     confirmDelete: "Confirm delete",
     confirmClear: "Confirm clear",
     truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
+  },
+  sessionLog: {
+    tabLabel: "Log",
+    historyTabLabel: "Query history",
+    clear: "Clear",
+    clearTitle: "Clear the session log",
+    empty: "No entries yet. SQL executions and commits will appear here.",
+    selectPlaceholder: "Select an entry to view details.",
+    statusOk: "ok",
+    statusError: "error",
+    kindQuery: "query",
+    kindMutate: "commit",
+    useInEditor: "Open in editor",
+    copy: "Copy",
+    copied: "Copied",
+    autoFollow: "Auto-follow",
+    autoFollowTitle:
+      "Automatically scroll to the newest entry. Scroll up to pause.",
+    commitLabel: (changes) =>
+      `Commit (${changes} ${changes === 1 ? "change" : "changes"})`,
   },
   er: {
     zoomIn: "Zoom in",
@@ -543,14 +595,20 @@ const JA: DbText = {
     searchTitle: "テーブル横断検索",
     snapshot: "スナップショット",
     snapshotTitle: "スナップショットと差分",
-    queryHistory: "クエリ履歴",
-    queryHistoryTitle: "クエリ履歴パネルの表示切替",
+    // bottom dock の close ボタン (×) 用 (旧 sidebar の開閉トグルから流用)。
+    queryHistory: "閉じる",
+    queryHistoryTitle: "パネルを閉じる",
     newTab: "新しいタブ",
     closeTab: (label) => `${label} を閉じる`,
     loadingSchema: "スキーマを読み込み中…",
     noDatastores: "データストアが見つかりません",
     dockerLimitReached:
       "Docker のサービス数が上限に達しました。一部の compose サービスは表示されていない可能性があります。",
+    inferFkLabel: "Rails FK 推測",
+    inferFkTitle: "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
+    inferredBadge: "推測",
+    inferredBadgeTitle:
+      "Rails 命名規約から推測した FK (DB の宣言ではありません)",
   },
   grid: {
     searchPlaceholder: "全カラムを検索…",
@@ -571,6 +629,7 @@ const JA: DbText = {
     deleteRow: "行を削除対象にする",
     undoDelete: "削除を取り消す",
     setNull: "NULL にする",
+    dblclickToEdit: "ダブルクリックで編集",
     pending: (n) => `変更 ${n} 件`,
     committing: "保存中…",
     commitError: (message) => `保存に失敗しました: ${message}`,
@@ -634,6 +693,25 @@ const JA: DbText = {
     confirmDelete: "削除を確認",
     confirmClear: "全削除を確認",
     truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
+  },
+  sessionLog: {
+    tabLabel: "ログ",
+    historyTabLabel: "クエリ履歴",
+    clear: "クリア",
+    clearTitle: "セッションログを消去",
+    empty: "まだログはありません。SQL の実行や編集コミットがここに出ます。",
+    selectPlaceholder: "エントリを選ぶと詳細を表示します。",
+    statusOk: "成功",
+    statusError: "エラー",
+    kindQuery: "クエリ",
+    kindMutate: "コミット",
+    useInEditor: "エディタに開く",
+    copy: "コピー",
+    copied: "コピーしました",
+    autoFollow: "自動追従",
+    autoFollowTitle:
+      "新しいエントリを常に表示。下に手動スクロールすると自動解除されます。",
+    commitLabel: (changes) => `コミット (${changes} 件)`,
   },
   er: {
     zoomIn: "拡大",

@@ -51,6 +51,9 @@ export type DbSchemaResponse = {
   indexes: DbIndexInfo[];
   foreignKeys: DbForeignKey[];
   columnsMap?: Record<string, DbColumn[]>;
+  /** サーバがスキーマ列挙のために発行した SQL (sqlite_master / information_schema
+   * など)。session log 表示用。 */
+  executedSql?: string[];
 };
 
 export type DbSchemaInfo = {
@@ -61,6 +64,10 @@ export type DbSchemasResponse = {
   dbId: string;
   schemas: DbSchemaInfo[];
   selectedSchema?: string;
+  /** サーバが応答中に発行した SQL (DDL 取得・行数集計・スキーマ列挙など)。
+   * クライアントの session log 表示用。Redis/ES/S3 など SQL を発行しない
+   * データストアでは空配列もしくは undefined。 */
+  executedSql?: string[];
 };
 
 export type DbTableDataResponse = {
@@ -73,6 +80,8 @@ export type DbTableDataResponse = {
   offset: number;
   limit: number;
   hasMore: boolean;
+  /** サーバがこのページを取得するために発行した SQL (COUNT + SELECT)。 */
+  executedSql?: string[];
 };
 
 // --- Row writes (edit / insert / delete) ---
@@ -95,6 +104,10 @@ export type DbMutateResponse = {
   table: string;
   // 影響を受けた行数の合計。
   affected: number;
+  /** サーバが実際に実行した INSERT/UPDATE/DELETE 文の配列。クライアントの
+   * session log 表示用。複数 mutation を 1 トランザクションで適用するので
+   * 配列。 */
+  executedSql?: string[];
 };
 
 export type DbQueryResponse = {
@@ -107,6 +120,9 @@ export type DbQueryResponse = {
   truncated: boolean;
   elapsedMs: number;
   error?: string;
+  /** サーバが実行した SQL (通常はクライアントが POST した body.sql と同じ)。
+   * session log 表示用。 */
+  executedSql?: string[];
 };
 
 export type DbFileInfo = {
@@ -500,6 +516,9 @@ export type TabState = {
 
   // history pane の高さ。CSS pixel 表現 (例: "240px")。
   historyHeight?: string;
+
+  // history pane で開いていたタブ。default は "history" (= クエリ履歴)。
+  activeHistoryTab?: "history" | "log";
 
   // sidebar 幅。CSS pixel 表現 (例: "240px")。
   sidebarWidth?: string;

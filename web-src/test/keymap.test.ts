@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_KEY_BINDINGS,
-  resolveKeymapAction,
   type KeymapScope,
+  resolveKeymapAction,
 } from "../core/keymap";
 
 function key(

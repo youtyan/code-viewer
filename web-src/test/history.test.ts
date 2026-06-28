@@ -13,9 +13,13 @@ import {
   createHistoryView,
   HISTORY_BODY_COLLAPSE_LINES,
   HISTORY_WORKTREE_COMMIT,
-  HISTORY_WORKTREE_LABEL,
   historyBodyLineCount,
+  historyWorktreeLabel,
 } from "../views/history-view";
+import { closestFor, removeListenerFrom } from "./_fake-dom";
+import { deferred } from "./_test-helpers";
+
+const JA_WORKTREE_LABEL = historyWorktreeLabel("ja");
 
 const originalDocument = globalThis.document;
 const originalFetch = globalThis.fetch;
@@ -117,9 +121,7 @@ class FakeElement {
   }
 
   removeEventListener(event: string, listener: (event?: unknown) => void) {
-    this.listeners[event] = (this.listeners[event] || []).filter(
-      (current) => current !== listener,
-    );
+    removeListenerFrom(this.listeners, event, listener);
   }
 
   click() {
@@ -169,13 +171,8 @@ class FakeElement {
     return false;
   }
 
-  closest(selector: string) {
-    let current: FakeElement | null = this;
-    while (current) {
-      if (current.matches(selector)) return current;
-      current = current.parentElement;
-    }
-    return null;
+  closest(selector: string): FakeElement | null {
+    return closestFor<FakeElement>(this, selector);
   }
 
   querySelector(selector: string): FakeElement | null {
@@ -318,7 +315,7 @@ describe("history commit body rendering", () => {
 
     expect(historyBodyLineCount(raw)).toBe(HISTORY_BODY_COLLAPSE_LINES);
     expect(
-      buildExpandableHistoryBody(rendered as unknown as HTMLElement, raw),
+      buildExpandableHistoryBody(rendered as unknown as HTMLElement, raw, "ja"),
     ).toBe(rendered);
   });
 
@@ -333,6 +330,7 @@ describe("history commit body rendering", () => {
     const wrapped = buildExpandableHistoryBody(
       rendered as unknown as HTMLElement,
       raw,
+      "ja",
     ) as unknown as FakeElement;
     const collapsible = wrapped.children[0];
     const toggle = wrapped.children[1];
@@ -386,16 +384,6 @@ describe("history commit body rendering", () => {
     expect(html.includes("<pre><code>const value = 1;")).toBe(true);
   });
 });
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function installHistoryViewDom() {
   const panel = new FakeElement();
@@ -515,6 +503,7 @@ describe("history view lifecycle", () => {
         emptyDiffRenders++;
       },
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -525,7 +514,7 @@ describe("history view lifecycle", () => {
       HISTORY_WORKTREE_COMMIT,
       commit.sha,
     ]);
-    expect(rows[0].textContent.includes(HISTORY_WORKTREE_LABEL)).toBe(true);
+    expect(rows[0].textContent.includes(JA_WORKTREE_LABEL)).toBe(true);
     expect(emptyDiffRenders).toBe(1);
 
     list.dispatch("click", { target: rows[0] });
@@ -546,7 +535,7 @@ describe("history view lifecycle", () => {
     ]);
     expect(appliedRanges).toEqual([{ from: "HEAD", to: "worktree" }]);
     expect(head.hidden).toBe(true);
-    expect(subject.textContent).toBe(HISTORY_WORKTREE_LABEL);
+    expect(subject.textContent).toBe(JA_WORKTREE_LABEL);
     expect(body.hidden).toBe(true);
   });
 
@@ -588,6 +577,7 @@ describe("history view lifecycle", () => {
         emptyDiffRenders++;
       },
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -650,6 +640,7 @@ describe("history view lifecycle", () => {
         emptyDiffRenders++;
       },
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -725,6 +716,7 @@ describe("history view lifecycle", () => {
         emptyDiffRenders++;
       },
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -812,6 +804,7 @@ describe("history view lifecycle", () => {
       applyCommitRange: async () => {},
       showEmptyDiffPane: () => {},
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -882,6 +875,7 @@ describe("history view lifecycle", () => {
       },
       showEmptyDiffPane: () => {},
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 
@@ -986,6 +980,7 @@ describe("history view lifecycle", () => {
       applyCommitRange: async () => {},
       showEmptyDiffPane: () => {},
       getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
       trackLoad: (promise) => promise,
     });
 

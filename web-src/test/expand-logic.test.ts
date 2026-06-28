@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
-  initExpandState,
-  remainingGap,
-  isFullyExpanded,
-  upClickRange,
-  downClickRange,
-  applyUp,
   applyDown,
-  mapNewToOld,
-  shouldAttachTrailingExpand,
-  trailingExpandTargetIndex,
-  trailingClickRange,
   applyTrailingResult,
+  applyUp,
+  downClickRange,
+  initExpandState,
+  isFullyExpanded,
+  mapNewToOld,
+  remainingGap,
+  shouldAttachTrailingExpand,
+  trailingClickRange,
+  trailingExpandTargetIndex,
+  upClickRange,
 } from "../core/expand-logic";
 
 const STEP = 20;

@@ -3,6 +3,7 @@ import {
   createDatabaseView,
   TABLE_SELECT_FETCH_DELAY_MS,
 } from "../views/database/database-view";
+import { closestFor, removeListenerFrom } from "./_fake-dom";
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -241,9 +242,7 @@ class FakeElement {
     event: string,
     listener: (event: Record<string, unknown>) => unknown,
   ) {
-    this.listeners[event] = (this.listeners[event] || []).filter(
-      (current) => current !== listener,
-    );
+    removeListenerFrom(this.listeners, event, listener);
   }
 
   async click() {
@@ -290,14 +289,8 @@ class FakeElement {
     return this.tagName.toLowerCase() === selector.toLowerCase();
   }
 
-  // ai-dup-check: allow -- local fake DOM closest traversal for database view tests.
-  closest(selector: string) {
-    let node: FakeElement | null = this;
-    while (node) {
-      if (node.matches(selector)) return node;
-      node = node.parentElement;
-    }
-    return null;
+  closest(selector: string): FakeElement | null {
+    return closestFor<FakeElement>(this, selector);
   }
 
   contains(target: FakeNode | null) {

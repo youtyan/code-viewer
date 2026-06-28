@@ -172,6 +172,19 @@
       <p id="scope-omit-source"></p>
     </div>
     <div class="scope-settings-section">
+      <strong id="datastore-section-title" class="scope-settings-section-title">Datastores</strong>
+      <label class="scope-settings-toggle">
+        <input id="datastore-infer-fk" type="checkbox" />
+        <span id="datastore-infer-fk-label">Infer FK from Rails-style naming</span>
+      </label>
+      <p id="datastore-infer-fk-help" class="scope-settings-help"></p>
+      <label class="scope-settings-toggle">
+        <input id="datastore-s3-tooltip" type="checkbox" />
+        <span id="datastore-s3-tooltip-label">Show S3 object preview tooltip on hover</span>
+      </label>
+      <p id="datastore-s3-tooltip-help" class="scope-settings-help"></p>
+    </div>
+    <div class="scope-settings-section">
       <strong id="watch-section-title" class="scope-settings-section-title">File change watcher</strong>
       <label for="scope-watch-limit">Maximum directories to watch</label>
       <div class="scope-watch-limit-row">

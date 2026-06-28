@@ -16,6 +16,13 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "suspicious": {
+        // window.alert / window.confirm / window.prompt も含めて検出する。
+        // noRestrictedGlobals はグローバル名の素呼びしか拾わないので、
+        // member access (`window.confirm(...)`) を塞ぐにはこちらが必要。
+        // 代替: web-src/views/ui-dialog.ts の showConfirmDialog 等を使う。
+        "noAlert": "error"
+      },
       "style": {
         "noRestrictedGlobals": {
           "level": "error",

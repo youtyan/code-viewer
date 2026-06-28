@@ -4111,7 +4111,7 @@ body.gdp-file-detail-page #empty {
 .gdp-context-menu .danger {
   color: var(--danger);
 }
-.gdp-trash-dialog-backdrop {
+.gdp-dialog-backdrop {
   position: fixed;
   inset: 0;
   z-index: 1100;
@@ -4121,30 +4121,30 @@ body.gdp-file-detail-page #empty {
   padding-top: min(14vh, 120px);
   background: rgba(31, 35, 40, 0.18);
 }
-[data-theme="dark"] .gdp-trash-dialog-backdrop {
+[data-theme="dark"] .gdp-dialog-backdrop {
   background: rgba(1, 4, 9, 0.45);
 }
-.gdp-trash-dialog {
+.gdp-dialog {
   width: min(420px, calc(100vw - 32px));
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
   box-shadow: 0 16px 48px rgba(31, 35, 40, 0.28);
 }
-.gdp-trash-dialog-title {
+.gdp-dialog-title {
   padding: 14px 16px 0;
   color: var(--fg);
   font-size: 15px;
   font-weight: 600;
 }
-.gdp-trash-dialog-body {
+.gdp-dialog-body {
   padding: 8px 16px 14px;
   color: var(--fg-muted);
   font-size: 13px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.gdp-create-dir-input {
+.gdp-dialog-input {
   display: block;
   width: 100%;
   height: 32px;
@@ -4156,29 +4156,29 @@ body.gdp-file-detail-page #empty {
   color: var(--fg);
   font: inherit;
 }
-.gdp-create-dir-input:focus {
+.gdp-dialog-input:focus {
   outline: 2px solid var(--accent-subtle);
   border-color: var(--accent);
 }
-.gdp-create-dir-error {
+.gdp-dialog-error {
   min-height: 18px;
   margin-top: 6px;
   color: var(--danger);
   font-size: 12px;
   line-height: 18px;
 }
-.gdp-trash-dialog-actions {
+.gdp-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
-.gdp-trash-dialog-danger {
+.gdp-dialog-danger {
   border-color: var(--danger);
   color: var(--danger);
 }
-.gdp-trash-dialog-danger:hover {
+.gdp-dialog-danger:hover {
   background: var(--diff-del-bg);
 }
 .gdp-repo-empty {
@@ -4852,6 +4852,246 @@ body.query-history-panel-open #content {
 #query-history-content {
   flex: 1;
   overflow-y: auto;
+}
+/* JetBrains 風 bottom dock。「クエリ履歴 / ログ」のタブストリップは pane の
+   開閉に関わらず常時表示し、画面下端に張り付く。タブクリックで pane を開閉
+   する (アクティブタブ再クリックで閉じる)。右端の × でも閉じる。 */
+.db-history-dock {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 28px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.db-history-dock-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0 14px;
+  cursor: pointer;
+  box-shadow: inset 0 2px 0 transparent;
+}
+.db-history-dock-tab:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+/* active タブ: 上線 (accent) で「この pane を表示中」を示す。pane が閉じて
+   いるときも「最後に開いていたタブ」がうっすら active のままだと混乱するので、
+   dock.open が付いてるときだけ accent を強調する。 */
+.db-history-dock-tab.active {
+  color: var(--fg);
+  font-weight: 600;
+}
+.db-history-dock.open .db-history-dock-tab.active {
+  color: var(--accent);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.db-history-dock-spacer {
+  flex: 1;
+}
+.db-history-dock-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.db-history-dock-close:hover {
+  background: var(--bg-mute);
+  color: var(--fg);
+}
+/* pane が閉じてるときは close ボタンも意味が無いので隠す。 */
+.db-history-dock:not(.open) .db-history-dock-close {
+  visibility: hidden;
+}
+.db-history-pane-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.db-history-pane-content[hidden] { display: none; }
+/* Session ログのレイアウト: クエリ履歴と同じ列構成。CSS は共通化せず、別系統
+   として持つ (将来ストアやヘッダ構成が分岐しても影響を局所化できるように)。 */
+.db-session-log {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.db-session-log-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.db-session-log-action {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.db-session-log-action:hover {
+  background: var(--bg-mute);
+}
+/* 自動追従トグル ON 中の active 状態 (db-tool-btn.active と同じ accent 配色)。 */
+.db-session-log-action.active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.db-session-log-danger {
+  color: var(--danger, #d32f2f);
+}
+.db-session-log-body-split {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.db-session-log-list-col {
+  width: 360px;
+  min-width: 260px;
+  max-width: 500px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.db-session-log-detail-col {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.db-session-log-detail-placeholder,
+.db-session-log-empty {
+  color: var(--fg-muted);
+  text-align: center;
+  padding: 40px 16px;
+  font-size: 13px;
+}
+.db-session-log-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.db-session-log-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.db-session-log-entry {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.db-session-log-entry:hover {
+  background: var(--bg-mute);
+}
+.db-session-log-entry.selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+}
+.db-session-log-entry-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.db-session-log-badge {
+  font-weight: 600;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.db-session-log-badge-ok {
+  background: rgba(46, 160, 67, 0.15);
+  border-color: rgba(46, 160, 67, 0.4);
+  color: var(--success, #2da44e);
+}
+.db-session-log-badge-error {
+  background: rgba(207, 34, 46, 0.15);
+  border-color: rgba(207, 34, 46, 0.4);
+  color: var(--danger, #cf222e);
+}
+.db-session-log-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-subtle);
+}
+.db-session-log-time {
+  font-size: 11px;
+}
+.db-session-log-stats {
+  font-size: 11px;
+}
+.db-session-log-entry-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-session-log-sql {
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+  color: var(--fg);
+}
+/* shiki が `<span style="--shiki-light:#xxx;--shiki-dark:#yyy">` の inline
+   CSS 変数で token ごとの色を出すので、light/dark 用にそれぞれ参照する。
+   db-query-highlight と同じスキーム。 */
+.db-session-log-sql span[style] {
+  color: var(--shiki-light);
+}
+@media (prefers-color-scheme: dark) {
+  .db-session-log-sql span[style] {
+    color: var(--shiki-dark);
+  }
+}
+html[data-theme="dark"] .db-session-log-sql span[style] {
+  color: var(--shiki-dark);
+}
+.db-session-log-message {
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.db-session-log-message-error {
+  background: rgba(207, 34, 46, 0.08);
+  border: 1px solid rgba(207, 34, 46, 0.4);
+  color: var(--danger, #cf222e);
+}
+.db-session-log-message-ok {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
 }
 .db-query-history {
   height: 100%;
@@ -5723,31 +5963,6 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   border-color: var(--accent);
   font-weight: 600;
 }
-.db-history-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
-  color: var(--fg-muted);
-  font-size: var(--db-font-base);
-  font-family: inherit;
-  cursor: pointer;
-  text-align: left;
-  flex-shrink: 0;
-}
-.db-history-toggle:hover {
-  background: var(--bg-mute);
-  color: var(--fg);
-}
-.db-history-toggle.active {
-  color: var(--accent);
-  font-weight: 600;
-}
-
 /* ---------- [hidden] 属性を効かせる ---------- */
 /* `.db-*` クラスの多くが `display: flex` を主張しており、ブラウザ標準の
    `[hidden] { display: none }` (specificity 0,1,0) と CSS specificity が
@@ -5755,7 +5970,7 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 .db-tools-section[hidden],
 .db-tool-btn[hidden],
 .db-tab-bar[hidden],
-.db-history-toggle[hidden],
+.db-history-dock[hidden],
 .db-history-pane[hidden],
 .db-history-resizer[hidden],
 .db-table-list[hidden],
@@ -6341,6 +6556,22 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   padding: 0;
   position: relative;
 }
+/* 編集モードでも既定は read-only と同じ見た目の表示モード。
+   ダブルクリックで input になることを薄い枠で示す。 */
+.db-grid-cell-edit.db-grid-cell-display {
+  padding: 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-grid-cell-edit.db-grid-cell-display:not(.readonly):hover {
+  outline: 1px dashed var(--border);
+  outline-offset: -2px;
+}
+.db-grid-cell-edit.db-grid-cell-display.readonly {
+  color: var(--fg-subtle);
+  background: rgba(128, 128, 128, 0.06);
+}
 /* NULL 状態の入力欄は placeholder "NULL" を斜体・淡色で示す。 */
 .db-grid-cell-input.is-null::placeholder {
   color: var(--fg-subtle);
@@ -6395,6 +6626,17 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 /* 新規行ドラフトは accent 系で「未保存」を示す。 */
 .db-grid-row-draft {
   background: var(--accent-subtle);
+}
+/* 値を編集 (未コミット) した行は黄系の薄背景。delete マークが優先するため
+   :not で除外。draft 行とも干渉しないよう個別 selector で十分。 */
+.db-grid-row-edited:not(.db-grid-row-deleted) {
+  background: rgba(210, 153, 34, 0.10);
+}
+/* 編集したセル単体は同系のやや濃い背景 + 左端に縦バーで「ここを変更」と
+   示す。display モードと input モードの両方で適用する。 */
+.db-grid-cell-edited {
+  background: rgba(210, 153, 34, 0.22);
+  box-shadow: inset 2px 0 0 var(--attn);
 }
 .db-grid-rownum-deletable:hover {
   color: var(--danger);
@@ -6616,6 +6858,17 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 .db-schema-table tr.pk-row {
   background: var(--attention-subtle, #fff8c5);
+}
+/* ダークモードでは淡黄色だと白文字とのコントラストがきつく目が痛い。
+   accent を低彩度の背景タイルとして敷く (db-tool-btn.active と同じ
+   color-mix スキーム)。 */
+@media (prefers-color-scheme: dark) {
+  .db-schema-table tr.pk-row {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+}
+html[data-theme="dark"] .db-schema-table tr.pk-row {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .db-schema-col-name {

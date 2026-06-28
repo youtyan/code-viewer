@@ -18,6 +18,7 @@ import {
 import type { SnapshotItem } from "../sources/types";
 import {
   buildFilterWhere,
+  buildOrderClause,
   escapeSqlString,
   filterExactColumns,
   filterGroupedColumns,
@@ -30,6 +31,7 @@ import {
   resolveRunningComposeContainerNameOrThrowAsync,
 } from "./docker-utils";
 import { spawnTextAsync } from "./spawn-runner";
+import { recordSql } from "./sql-capture";
 import type {
   DatabaseAdapter,
   MutationResult,
@@ -317,6 +319,7 @@ async function execInContainerAsync(
   timeoutMs = 10000,
   signal?: AbortSignal,
 ): Promise<ExecResult> {
+  recordSql(sql);
   if (spawnSyncImpl !== spawnSync)
     return execInContainer(config, sql, timeoutMs);
   const args = buildExecArgs(config, sql);
@@ -421,19 +424,6 @@ function parseTsvOutput(
   return { columns: [], rows };
 }
 
-// ai-dup-check: allow -- sqlite 側の buildOrderClause は SQLite 専用サニタイザを使い、docker 側は kind 切替が必要なので共通化できない。
-function buildOrderClause(
-  orderBy: DbOrder[] | undefined,
-  kind: "postgresql" | "mysql",
-): string {
-  if (!orderBy?.length) return "";
-  const parts = orderBy.map(
-    (o) =>
-      `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`,
-  );
-  return ` ORDER BY ${parts.join(", ")}`;
-}
-
 const MYSQL_SPATIAL_TYPES = new Set([
   "geometry",
   "point",
@@ -517,6 +507,7 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     sql: string,
     signal?: AbortSignal,
   ): Promise<{ columns: string[]; rows: string[][] }> {
+    // recordSql は execInContainerAsync 内部で 1 度だけ呼ぶ (重複防止)。
     const result = await execInContainerAsync(config, sql, 10000, signal);
     if (result.code !== 0) {
       throw new Error(result.stderr.trim() || "query failed");
@@ -561,7 +552,13 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
     const tableLiteral = table.replace(/'/g, "''");
     if (config.kind === "postgresql") {
       const schemaLiteral = postgresSchemaLiteral();
-      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END, COALESCE(d.description, '') FROM information_schema.columns c JOIN pg_namespace n ON n.nspname = c.table_schema JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped LEFT JOIN pg_description d ON d.objoid = cls.oid AND d.objsubid = a.attnum LEFT JOIN (SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name WHERE tc.table_schema = ${schemaLiteral} AND tc.table_name = '${tableLiteral}' AND tc.constraint_type = 'PRIMARY KEY') pk ON pk.column_name = c.column_name WHERE c.table_schema = ${schemaLiteral} AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
+      // PK 検出は pg_index.indisprimary 経由 (pg_catalog) で取る。
+      // information_schema.table_constraints + key_column_usage は権限や
+      // 制約の見え方によっては取れないケースがあるため (実例: UUID PK の
+      // テーブルで PK が検出されず "table has no primary key" エラーに
+      // なる)、低レベル catalog を直接参照する。
+      // getColumnsMultiAsync (複数テーブル一括) と同じ取得方式に揃えた。
+      return `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default, CASE WHEN pk.column_name IS NULL THEN 'NO' ELSE 'YES' END, COALESCE(d.description, '') FROM information_schema.columns c JOIN pg_namespace n ON n.nspname = c.table_schema JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name AND a.attnum > 0 AND NOT a.attisdropped LEFT JOIN pg_description d ON d.objoid = cls.oid AND d.objsubid = a.attnum LEFT JOIN (SELECT att.attname AS column_name FROM pg_index ix JOIN pg_class clp ON clp.oid = ix.indrelid JOIN pg_namespace nn ON nn.oid = clp.relnamespace JOIN pg_attribute att ON att.attrelid = ix.indrelid AND att.attnum = ANY(ix.indkey) WHERE ix.indisprimary AND nn.nspname = ${schemaLiteral} AND clp.relname = '${tableLiteral}') pk ON pk.column_name = c.column_name WHERE c.table_schema = ${schemaLiteral} AND c.table_name = '${tableLiteral}' ORDER BY c.ordinal_position`;
     }
     return `SELECT column_name, column_type, is_nullable, column_default, column_key, column_comment FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${tableLiteral}' ORDER BY ordinal_position`;
   }

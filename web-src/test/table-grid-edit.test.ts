@@ -3,6 +3,7 @@
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { q } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -68,15 +69,14 @@ function setup() {
   return { grid, getCaptured: () => captured };
 }
 
-function q<T extends Element>(root: ParentNode, sel: string): T {
-  const el = root.querySelector<T>(sel);
-  if (!el) throw new Error(`missing element: ${sel}`);
-  return el;
-}
-
 function setInput(input: HTMLInputElement, value: string) {
   input.value = value;
   input.dispatchEvent(new Event("input"));
+}
+
+// 表示モードのセルをダブルクリックして入力モードに切り替える。
+function enterEdit(cell: HTMLElement) {
+  cell.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
 }
 
 describe("table-grid edit mode", () => {
@@ -84,9 +84,33 @@ describe("table-grid edit mode", () => {
     GlobalRegistrator.unregister();
   });
 
-  test("edit toggle is shown only when editable", () => {
+  test("isEditable reports true for write-capable datastores", () => {
     const { grid } = setup();
+    expect(grid.isEditable()).toBe(true);
+    // editable=true なら editWrap は editMode 関係なく出す (場所確保で
+    // レイアウトシフト回避)。子ボタンの可視性は visibility で切替。
     const wrap = q<HTMLElement>(grid.el, ".db-grid-edit-controls");
+    expect(wrap.hidden).toBe(false);
+    const newRowBtn = q<HTMLButtonElement>(wrap, ".db-grid-edit-newrow");
+    expect(newRowBtn.style.visibility).toBe("hidden");
+    grid.destroy();
+  });
+
+  test("edit controls become visible after edit mode is turned on", async () => {
+    const { grid } = setup();
+    await tick();
+    const wrap = q<HTMLElement>(grid.el, ".db-grid-edit-controls");
+    const newRowBtn = q<HTMLButtonElement>(wrap, ".db-grid-edit-newrow");
+    const commitBtn = q<HTMLButtonElement>(wrap, ".db-grid-edit-commit");
+    const discardBtn = q<HTMLButtonElement>(wrap, ".db-grid-edit-discard");
+    expect(newRowBtn.style.visibility).toBe("hidden");
+    expect(commitBtn.style.visibility).toBe("hidden");
+    expect(discardBtn.style.visibility).toBe("hidden");
+    await grid.setEditMode(true);
+    expect(newRowBtn.style.visibility).toBe("");
+    expect(commitBtn.style.visibility).toBe("");
+    expect(discardBtn.style.visibility).toBe("");
+    // wrap 自体は editable のとき常に表示 (場所確保)。
     expect(wrap.hidden).toBe(false);
     grid.destroy();
   });
@@ -96,20 +120,24 @@ describe("table-grid edit mode", () => {
     await tick();
 
     // 編集モードに入る
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
 
     const body = q<HTMLElement>(grid.el, ".db-grid-body");
-    const rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    let rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
     // 2 データ行が描画されている
     expect(rows.length >= 2).toBeTruthy();
 
-    // 行0 (id=1) の name セルを編集する。inputs[0]=id(readonly), inputs[1]=name
-    const row0Inputs = rows[0].querySelectorAll<HTMLInputElement>(
-      ".db-grid-cell-input",
-    );
-    expect(row0Inputs[0].readOnly).toBe(true); // PK は readonly
-    setInput(row0Inputs[1], "Alicia");
+    // 編集モードに入った直後の既存行は表示モード (input は無い)。
+    const row0CellsInitial =
+      rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
+    expect(row0CellsInitial[1].querySelector("input")).toBeNull();
+    // 行0 (id=1) の name セルをダブルクリックして入力モードへ。
+    enterEdit(row0CellsInitial[1]);
+    await tick();
+    rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    const nameInput = q<HTMLInputElement>(rows[0], ".db-grid-cell-input");
+    setInput(nameInput, "Alicia");
 
     // 行1 (id=2) を削除マーク
     q<HTMLElement>(rows[1], ".db-grid-rownum-deletable").click();
@@ -156,13 +184,16 @@ describe("table-grid edit mode", () => {
   test("the NULL button sets a nullable cell to SQL NULL (value: null)", async () => {
     const { grid, getCaptured } = setup();
     await tick();
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
-    const rows = q<HTMLElement>(
-      grid.el,
-      ".db-grid-body",
-    ).querySelectorAll<HTMLElement>(".db-grid-row");
-    // 行0 の name セル (nullable) には NULL ボタンが出る。
+    const body = q<HTMLElement>(grid.el, ".db-grid-body");
+    let rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    // 行0 の name セル (nullable) をダブルクリックで入力モードへ。
+    const nameCell =
+      rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    enterEdit(nameCell);
+    await tick();
+    rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
     const nullBtn = rows[0].querySelector<HTMLButtonElement>(
       ".db-grid-cell-null-btn",
     );
@@ -183,7 +214,7 @@ describe("table-grid edit mode", () => {
   test("∅ on a draft cell inserts an explicit SQL NULL (value: null)", async () => {
     const { grid, getCaptured } = setup();
     await tick();
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
     q<HTMLButtonElement>(grid.el, ".db-grid-edit-newrow").click();
     await tick();
@@ -212,17 +243,24 @@ describe("table-grid edit mode", () => {
   test("a PK (non-nullable) cell has no NULL button", async () => {
     const { grid } = setup();
     await tick();
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
-    const rows = q<HTMLElement>(
-      grid.el,
-      ".db-grid-body",
-    ).querySelectorAll<HTMLElement>(".db-grid-row");
-    // id 列セルは readonly(PK)なので NULL ボタンは無い。name 列(nullable)には有る。
-    const cells = rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
-    expect(cells[0].querySelector(".db-grid-cell-null-btn") === null).toBe(
-      true,
-    );
+    const body = q<HTMLElement>(grid.el, ".db-grid-body");
+    let rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    // id 列セルは readonly(PK)。ダブルクリックしても入力モードにならず
+    // NULL ボタンも出ない (表示モードのまま)。
+    let cells = rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
+    enterEdit(cells[0]);
+    await tick();
+    rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    cells = rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
+    expect(cells[0].querySelector("input")).toBeNull();
+    expect(cells[0].querySelector(".db-grid-cell-null-btn")).toBeNull();
+    // name 列(nullable)はダブルクリックで input + NULL ボタンが出る。
+    enterEdit(cells[1]);
+    await tick();
+    rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    cells = rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
     expect(cells[1].querySelector(".db-grid-cell-null-btn") !== null).toBe(
       true,
     );
@@ -232,12 +270,16 @@ describe("table-grid edit mode", () => {
   test("focus stays on the edited cell after a re-render (scroll)", async () => {
     const { grid } = setup();
     await tick();
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
     const body = q<HTMLElement>(grid.el, ".db-grid-body");
-    const nameInput = body
+    // ダブルクリックで name セルを入力モードへ。
+    const nameCell = body
       .querySelectorAll<HTMLElement>(".db-grid-row")[0]
-      .querySelectorAll<HTMLInputElement>(".db-grid-cell-input")[1];
+      .querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    enterEdit(nameCell);
+    await tick();
+    const nameInput = q<HTMLInputElement>(body, ".db-grid-cell-input");
     nameInput.focus();
     setInput(nameInput, "Edited");
     expect(nameInput.dataset.editRow).toBe("0");
@@ -258,13 +300,16 @@ describe("table-grid edit mode", () => {
   test("editing a cell back to its original value clears the pending change", async () => {
     const { grid, getCaptured } = setup();
     await tick();
-    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await grid.setEditMode(true);
     await tick();
     const body = q<HTMLElement>(grid.el, ".db-grid-body");
-    const rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
-    const nameInput = rows[0].querySelectorAll<HTMLInputElement>(
-      ".db-grid-cell-input",
-    )[1];
+    let rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    const nameCell =
+      rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    enterEdit(nameCell);
+    await tick();
+    rows = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    const nameInput = q<HTMLInputElement>(rows[0], ".db-grid-cell-input");
     setInput(nameInput, "Changed");
     setInput(nameInput, "Alice"); // 元に戻す
 
@@ -273,6 +318,78 @@ describe("table-grid edit mode", () => {
     commit.click();
     await tick();
     expect(getCaptured()).toBeNull();
+    grid.destroy();
+  });
+
+  test("single click on an edit-mode cell does not enter input mode", async () => {
+    const { grid } = setup();
+    await tick();
+    await grid.setEditMode(true);
+    await tick();
+    const body = q<HTMLElement>(grid.el, ".db-grid-body");
+    const nameCell = body
+      .querySelectorAll<HTMLElement>(".db-grid-row")[0]
+      .querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    // 表示モードであることを確認 (input は無い)。
+    expect(nameCell.querySelector("input")).toBeNull();
+    expect(nameCell.classList.contains("db-grid-cell-display")).toBe(true);
+    // シングルクリックでは input にならない (詳細パネル/active セル更新のみ)。
+    nameCell.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await tick();
+    const rowsAfter = body.querySelectorAll<HTMLElement>(".db-grid-row");
+    const nameCellAfter =
+      rowsAfter[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    expect(nameCellAfter.querySelector("input")).toBeNull();
+    // active セルとして強調されている。
+    expect(nameCellAfter.classList.contains("db-grid-cell-active")).toBe(true);
+    grid.destroy();
+  });
+
+  test("Escape exits input mode and returns to display", async () => {
+    const { grid } = setup();
+    await tick();
+    await grid.setEditMode(true);
+    await tick();
+    const body = q<HTMLElement>(grid.el, ".db-grid-body");
+    const nameCell = body
+      .querySelectorAll<HTMLElement>(".db-grid-row")[0]
+      .querySelectorAll<HTMLElement>(".db-grid-cell-edit")[1];
+    enterEdit(nameCell);
+    await tick();
+    // 入力モードに切り替わった。
+    const nameInput = q<HTMLInputElement>(body, ".db-grid-cell-input");
+    expect(nameInput.dataset.editCol).toBe("1");
+    // Escape で表示モードへ戻る。
+    nameInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await tick();
+    expect(body.querySelector(".db-grid-cell-input")).toBeNull();
+    grid.destroy();
+  });
+
+  test("edit mode survives a same-tab table switch (load)", async () => {
+    const { grid } = setup();
+    await tick();
+    await grid.setEditMode(true);
+    expect(grid.getEditMode()).toBe(true);
+    // 同じタブで別テーブルへ切り替え (database-view がやる load 相当)。
+    // 編集モードはタブ単位で保持する仕様 (#16) なので OFF にならない。
+    grid.load("posts", {
+      dbId: "app.db",
+      table: "posts",
+      columns: COLUMNS,
+      rows: [[10, "Hello"]],
+      totalRows: 1,
+      offset: 0,
+      limit: 200,
+      hasMore: false,
+    });
+    await tick();
+    expect(grid.getEditMode()).toBe(true);
+    // edit controls (新規行 / コミット / 破棄) も継続表示。
+    const wrap = q<HTMLElement>(grid.el, ".db-grid-edit-controls");
+    expect(wrap.hidden).toBe(false);
     grid.destroy();
   });
 });

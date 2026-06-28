@@ -7,6 +7,7 @@ import type {
   RedisValueResponse,
 } from "../../core/database/types";
 import { formatBytes } from "../../core/source-meta";
+import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
@@ -259,7 +260,12 @@ export function createRedisExplorer(
   async function deleteCurrentKey(key: string): Promise<void> {
     const base = writeBase();
     if (!base) return;
-    if (!window.confirm(text().redis.confirmDeleteKey(key))) return;
+    const ok = await showConfirmDialog({
+      body: text().redis.confirmDeleteKey(key),
+      confirmLabel: text().common.delete,
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await postRedisWrite({ ...base, key, op: "delete" });
       currentKey = null;

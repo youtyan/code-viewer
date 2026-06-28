@@ -31,18 +31,18 @@ import {
   renderHtmlPreviewFrame,
   renderUnsupportedPreview,
 } from "../source-preview-elements";
+import { showConfirmDialog } from "../ui-dialog";
 import { createAbortGuard } from "./abort-guard";
 import { type DbText, dbText } from "./i18n";
 import { setPaneEmpty, setPaneStatus } from "./pane-status";
-import { makePrefToggle } from "./pref-toggle";
 
 export type S3ExplorerCallbacks = {
   onSelectionChange?: (selection: S3ExplorerSelection) => void;
   getText?: () => DbText;
   // ホバープレビュー tooltip の ON/OFF (db-ui.json の prefs に永続化)。
-  // localStorage は使わない。callback 未指定なら ON 固定で永続化なし。
+  // 設定パネル (#datastore-s3-tooltip) からのみ操作される。callback 未指定なら
+  // ON 固定。pref 値はホバー判定のたびに毎回読まれる (= 設定の即時反映)。
   getTooltipEnabled?: () => boolean;
-  setTooltipEnabled?: (enabled: boolean) => void;
   // 書き込み fetch を共通の in-flight 追跡に乗せる。未指定なら素通し。
   trackLoad?: <T>(promise: Promise<T>) => Promise<T>;
 };
@@ -159,18 +159,9 @@ export function createS3Explorer(
   viewSeg.append(listViewBtn, explorerViewBtn);
   bucketRow.appendChild(viewSeg);
 
-  // ホバー tooltip ON/OFF。db-ui.json の prefs.s3TooltipEnabled に永続化、
-  // default ON。画像プレビュー込みで重く感じる場合のオフスイッチ。共通の
-  // .db-pref-toggle スタイルを使い、bucketRow 内で stretch しないよう
-  // .s3-tooltip-toggle で align-self を上書き。
-  const tooltipToggle = makePrefToggle({
-    title: "Toggle hover preview tooltip",
-    label: "Hover preview",
-    pathD:
-      "M8 3.5C4.5 3.5 1.7 5.7 0 8c1.7 2.3 4.5 4.5 8 4.5s6.3-2.2 8-4.5C14.3 5.7 11.5 3.5 8 3.5Zm0 7.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm0-4.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z",
-    extraClass: "s3-tooltip-toggle",
-  });
-  bucketRow.appendChild(tooltipToggle);
+  // ホバー tooltip ON/OFF はビューア設定パネル (#datastore-s3-tooltip) に
+  // 集約済み。pref 値の変動は callbacks.getTooltipEnabled() で読み取る
+  // (パネルから setDbUiPref → onDbUiPrefChange 経由でこの explorer に届く)。
   sidebarSlot.appendChild(bucketRow);
 
   // List/Explorer 共通: 検索バー / モード / sort / オブジェクトリスト /
@@ -287,22 +278,11 @@ export function createS3Explorer(
   // ----- ホバーで全パスを表示する floating tooltip -----
   // sidebar 内では key 末尾しか見えないので、行ホバーで全 key + メタを別 DOM
   // に展開する。preview pane 側へはみ出して読めるよう document.body に attach。
-  // 状態は db-ui.json の prefs.s3TooltipEnabled に集約 (localStorage は使わない)。
-  // callback 未提供時は ON 固定で永続化なし。
-  let tooltipEnabled = callbacks.getTooltipEnabled?.() ?? true;
-
-  function applyTooltipToggleState(): void {
-    tooltipToggle.classList.toggle("active", tooltipEnabled);
-    tooltipToggle.setAttribute("aria-pressed", String(tooltipEnabled));
+  // ON/OFF は db-ui.json の prefs.s3TooltipEnabled (設定パネルから操作)。
+  // callback 未提供時は ON 固定。判定はホバー時に毎回読む (反映ラグ無し)。
+  function tooltipEnabled(): boolean {
+    return callbacks.getTooltipEnabled?.() ?? true;
   }
-  applyTooltipToggleState();
-
-  tooltipToggle.addEventListener("click", () => {
-    tooltipEnabled = !tooltipEnabled;
-    callbacks.setTooltipEnabled?.(tooltipEnabled);
-    applyTooltipToggleState();
-    if (!tooltipEnabled) hideKeyTooltip();
-  });
 
   const keyTooltip = document.createElement("div");
   keyTooltip.className = "s3-key-tooltip";
@@ -326,7 +306,7 @@ export function createS3Explorer(
   }
 
   function showKeyTooltip(row: HTMLElement, object: S3ObjectInfo): void {
-    if (!tooltipEnabled) return;
+    if (!tooltipEnabled()) return;
     keyTooltip.innerHTML = "";
 
     // 画像オブジェクトのときはサムネイルを上に挟む。s3-preview の raw URL
@@ -697,7 +677,12 @@ export function createS3Explorer(
 
   async function deleteObject(object: S3ObjectInfo): Promise<void> {
     if (!currentDbId || !currentBucket) return;
-    if (!window.confirm(text().confirmDeleteObject(object.key))) return;
+    const ok = await showConfirmDialog({
+      body: text().confirmDeleteObject(object.key),
+      confirmLabel: tCommon().delete,
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await postS3Write({
         db: currentDbId,

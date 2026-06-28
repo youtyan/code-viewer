@@ -1080,6 +1080,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadsTitle: string;
         uploadEnabledLabel: string;
         uploadEnabledHelp: string;
+        datastoreTitle: string;
+        datastoreInferFkLabel: string;
+        datastoreInferFkHelp: string;
+        datastoreS3TooltipLabel: string;
+        datastoreS3TooltipHelp: string;
         watchTitle: string;
         watchLimit: string;
         watchLimitHelp: (defaultLimit: number) => string;
@@ -1189,6 +1194,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "Allow file uploads into worktree folders",
         uploadEnabledHelp:
           "Disable to make the worktree read-only for everyone using this server.",
+        datastoreTitle: "Datastores",
+        datastoreInferFkLabel:
+          "Infer FK from Rails-style naming (<name>_id → <names>.id)",
+        datastoreInferFkHelp:
+          "Show inferred foreign-key links in the related-data panel for SQL tables.",
+        datastoreS3TooltipLabel: "Show S3 object preview tooltip on hover",
+        datastoreS3TooltipHelp:
+          "Hovering an S3 object row shows the full key path and a content preview.",
         watchTitle: "File change watcher",
         watchLimit: "Maximum directories to watch",
         watchLimitHelp: (defaultLimit) =>
@@ -1298,6 +1311,14 @@ window.GdpExpandLogic = GdpExpandLogic;
         uploadEnabledLabel: "ワークツリーへのファイルアップロードを許可する",
         uploadEnabledHelp:
           "オフにすると、このサーバを使う全員に対してワークツリーは読み取り専用になります。",
+        datastoreTitle: "データストア",
+        datastoreInferFkLabel:
+          "Rails 命名規約 (<name>_id → <names>.id) から FK を推測",
+        datastoreInferFkHelp:
+          "SQL テーブルの関連データパネルに Rails 命名規約由来の仮想 FK リンクを表示します。",
+        datastoreS3TooltipLabel: "S3 オブジェクトの hover プレビューを表示",
+        datastoreS3TooltipHelp:
+          "S3 オブジェクト行にホバーすると、完全な key とコンテンツプレビューを表示します。",
         watchTitle: "ファイル変更の監視",
         watchLimit: "監視するディレクトリ数の上限",
         watchLimitHelp: (defaultLimit) =>
@@ -1443,7 +1464,25 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (settingsSections[2])
       settingsSections[2].textContent = text.settings.excludedDirectories;
     if (settingsSections[3])
-      settingsSections[3].textContent = text.settings.watchTitle;
+      settingsSections[3].textContent = text.settings.datastoreTitle;
+    if (settingsSections[4])
+      settingsSections[4].textContent = text.settings.watchTitle;
+    setElementText(
+      "#datastore-infer-fk-label",
+      text.settings.datastoreInferFkLabel,
+    );
+    setElementText(
+      "#datastore-infer-fk-help",
+      text.settings.datastoreInferFkHelp,
+    );
+    setElementText(
+      "#datastore-s3-tooltip-label",
+      text.settings.datastoreS3TooltipLabel,
+    );
+    setElementText(
+      "#datastore-s3-tooltip-help",
+      text.settings.datastoreS3TooltipHelp,
+    );
     setElementText("#upload-enabled-label", text.settings.uploadEnabledLabel);
     setElementText("#upload-help", text.settings.uploadEnabledHelp);
     setElementText("#scope-omit-dirs-help", text.settings.omitDirsHelp);
@@ -1728,6 +1767,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       document.querySelector<HTMLInputElement>("#upload-enabled");
     if (uploadToggle)
       uploadToggle.checked = APP_SETTINGS.uploadEnabled !== false;
+    syncDatastoreToggles();
     source.textContent = uiText().settings.scopeSource(
       PROJECT_NAME || "default",
       scopeOmitSourceLabel(),
@@ -2569,6 +2609,42 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#upload-enabled")?.addEventListener("change", (event) => {
     saveUploadEnabled((event.currentTarget as HTMLInputElement).checked);
   });
+  // データストアセクションのトグル: db-ui pref に直接 PATCH する。
+  // 既存ロケーション (サイドバー prefs バー / S3 explorer 内) からは取り除き、
+  // ここに集約済み。
+  $("#datastore-infer-fk")?.addEventListener("change", (event) => {
+    DATABASE_VIEW.setDbUiPref(
+      "inferFkRails",
+      (event.currentTarget as HTMLInputElement).checked,
+    );
+  });
+  $("#datastore-s3-tooltip")?.addEventListener("change", (event) => {
+    DATABASE_VIEW.setDbUiPref(
+      "s3TooltipEnabled",
+      (event.currentTarget as HTMLInputElement).checked,
+    );
+  });
+
+  // 設定パネルが開かれた時 (loadSettings 経由) に最新の pref 値で
+  // checkbox を初期化するヘルパ。DATABASE_VIEW の宣言後に実行されるので
+  // 実行時参照は安全。
+  function syncDatastoreToggles(): void {
+    const inferToggle = document.querySelector<HTMLInputElement>(
+      "#datastore-infer-fk",
+    );
+    if (inferToggle) {
+      inferToggle.checked = DATABASE_VIEW.getDbUiPref("inferFkRails", false);
+    }
+    const tooltipToggle = document.querySelector<HTMLInputElement>(
+      "#datastore-s3-tooltip",
+    );
+    if (tooltipToggle) {
+      tooltipToggle.checked = DATABASE_VIEW.getDbUiPref(
+        "s3TooltipEnabled",
+        true,
+      );
+    }
+  }
   $("#scope-omit-dirs")?.addEventListener("change", (event) => {
     saveScopeOmitDirsField((event.currentTarget as HTMLTextAreaElement).value);
   });
@@ -3071,6 +3147,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       .then((data) => {
         if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
+        applyHideTestsToMeta();
         setStatus("live");
         return result;
       })
@@ -3196,6 +3273,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     },
     getSyntaxHighlight: () => STATE.syntaxHighlight,
+    getLanguage: () => STATE.language,
     trackLoad,
   });
 
@@ -3208,6 +3286,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     getLanguage: () => STATE.language,
   });
   relocalizeDatabase = () => DATABASE_VIEW.localize();
+
+  // 他経路 (例: SSE 経由 / 別タブからの設定変更) で db-ui pref が更新された
+  // 場合、開いている設定パネルの checkbox 表示を最新値に追従させる。
+  DATABASE_VIEW.onDbUiPrefChange(() => {
+    if (
+      !document.querySelector<HTMLElement>("#scope-settings-popover")?.hidden
+    ) {
+      syncDatastoreToggles();
+    }
+  });
 
   const REF_PICKER = createRefPicker({
     $,
@@ -3434,6 +3522,27 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (isVirtualSidebarActive()) rerenderVirtualSidebar();
     else updateTreeDirVisibility();
     if (typeof applyViewedState === "function") applyViewedState();
+    applyHideTestsToMeta();
+  }
+
+  function applyHideTestsToMeta() {
+    const meta = window._lastMeta;
+    if (!meta || !meta.totals) return;
+    const effective = STATE.hideTests && !isRepositorySidebarMode();
+    if (!effective) {
+      renderMeta(meta);
+      return;
+    }
+    let additions = 0;
+    let deletions = 0;
+    let files = 0;
+    for (const f of STATE.files) {
+      if (TEST_RE.test(f.path || "")) continue;
+      additions += f.additions || 0;
+      deletions += f.deletions || 0;
+      files += 1;
+    }
+    renderMeta({ ...meta, totals: { files, additions, deletions } });
   }
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {

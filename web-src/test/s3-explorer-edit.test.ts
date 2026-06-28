@@ -2,6 +2,8 @@
 // 編集 / 削除 / 新規作成が正しい body で POST /_db/s3/write を呼ぶことを確認する。
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { clickDialogConfirm } from "./_dialog-helpers";
+import { q } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -20,7 +22,6 @@ function jsonResponse(body: unknown): Response {
 }
 
 const origFetch = globalThis.fetch;
-const origConfirm = globalThis.confirm;
 
 function installFetch() {
   writeCalls = [];
@@ -71,20 +72,13 @@ function installFetch() {
 
 afterEach(() => {
   globalThis.fetch = origFetch;
-  globalThis.confirm = origConfirm;
   // 各テストの view DOM が body に残ると次テストの querySelector が古い
-  // (dispose 済み) view にヒットするのでクリアする。
+  // (dispose 済み) view にヒットするのでクリアする (ダイアログも含まれる)。
   document.body.innerHTML = "";
 });
 afterAll(() => {
   GlobalRegistrator.unregister();
 });
-
-function q<T extends Element>(root: ParentNode, sel: string): T {
-  const el = root.querySelector<T>(sel);
-  if (!el) throw new Error(`missing element: ${sel}`);
-  return el;
-}
 
 async function setupWithObject() {
   installFetch();
@@ -120,7 +114,6 @@ describe("s3 explorer edit UI", () => {
   });
 
   test("deleting an object posts op=delete after confirm", async () => {
-    globalThis.confirm = (() => true) as (message?: string) => boolean;
     const view = await setupWithObject();
     const delBtn = Array.from(
       document.querySelectorAll<HTMLButtonElement>(
@@ -129,6 +122,8 @@ describe("s3 explorer edit UI", () => {
     ).find((b) => b.textContent === "Delete");
     expect(delBtn !== undefined).toBeTruthy();
     delBtn?.click();
+    await tick();
+    clickDialogConfirm();
     await tick();
     expect(writeCalls.length).toBe(1);
     expect(writeCalls[0].op).toBe("delete");

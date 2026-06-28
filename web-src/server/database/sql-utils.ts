@@ -1,4 +1,4 @@
-import type { DbCellInput, DbValue } from "../../core/database/types";
+import type { DbCellInput, DbOrder, DbValue } from "../../core/database/types";
 import { coerceDbValue } from "./serialize";
 
 export type SqlKind = "sqlite" | "postgresql" | "mysql";
@@ -96,6 +96,21 @@ export function filterOrderByColumns<T extends { column: string }>(
   const validColumns = new Set(columnNames);
   const filtered = orderBy.filter((order) => validColumns.has(order.column));
   return filtered.length > 0 ? filtered : undefined;
+}
+
+// ORDER BY 句を組み立てる。orderBy が空/未指定なら空文字列。kind 省略時は
+// sqlite 既定 (sanitizeIdentifier の方言切替に影響)。adapters/sqlite.ts と
+// adapters/docker.ts の両方から使う。
+export function buildOrderClause(
+  orderBy: DbOrder[] | undefined,
+  kind: SqlKind = "sqlite",
+): string {
+  if (!orderBy?.length) return "";
+  const parts = orderBy.map(
+    (o) =>
+      `${sanitizeIdentifier(o.column, kind)} ${o.direction === "desc" ? "DESC" : "ASC"}`,
+  );
+  return ` ORDER BY ${parts.join(", ")}`;
 }
 
 // --- 書き込み (INSERT / UPDATE / DELETE) 用の SQL 生成 ---
