@@ -16,6 +16,7 @@ import {
   dispatchRoutes,
   handleError,
   json,
+  parseBoundedJsonBody,
   parsePostJsonBody,
   resolveDockerExplorerAsync,
   textError,
@@ -249,6 +250,70 @@ async function handleMapping(
   }
 }
 
+async function handleWrite(
+  req: Request,
+  cwd: string,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    4 * 1024 * 1024,
+    "payload too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = parsed as {
+    db?: unknown;
+    index?: unknown;
+    id?: unknown;
+    op?: unknown;
+    source?: unknown;
+    seqNo?: unknown;
+    primaryTerm?: unknown;
+  };
+  if (typeof body.db !== "string" || body.db === "") {
+    return textError("missing db", 400);
+  }
+  if (typeof body.index !== "string" || body.index === "") {
+    return textError("missing index", 400);
+  }
+  const id = typeof body.id === "string" ? body.id : undefined;
+  const r = await resolveEs(cwd, body.db, req.signal, omitDirNames);
+  if (r instanceof Response) return r;
+  try {
+    if (body.op === "delete") {
+      if (!id) return textError("missing id", 400);
+      await r.explorer.deleteDocAsync({
+        index: body.index,
+        id,
+        signal: req.signal,
+      });
+      return json({ ok: true });
+    }
+    // 既定は put (作成 / 更新)。source は JSON オブジェクトであること。
+    if (
+      body.source === null ||
+      typeof body.source !== "object" ||
+      Array.isArray(body.source)
+    ) {
+      return textError("source must be a JSON object", 400);
+    }
+    const seqNo = typeof body.seqNo === "number" ? body.seqNo : undefined;
+    const primaryTerm =
+      typeof body.primaryTerm === "number" ? body.primaryTerm : undefined;
+    const result = await r.explorer.writeDocAsync({
+      index: body.index,
+      id,
+      source: body.source,
+      seqNo,
+      primaryTerm,
+      signal: req.signal,
+    });
+    return json({ ok: true, id: result.id, result: result.result });
+  } catch (err) {
+    return handleError("elasticsearch", "write elasticsearch doc", err);
+  }
+}
+
 export async function handleElasticsearchRoute(
   req: Request,
   url: URL,
@@ -276,6 +341,11 @@ export async function handleElasticsearchRoute(
       "/_db/elasticsearch/doc": {
         methods: ["GET"],
         handler: () => handleDoc(req, cwd, url, omitDirNames),
+      },
+      "/_db/elasticsearch/write": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleWrite(req, cwd, omitDirNames),
       },
       "/_db/elasticsearch/search": {
         methods: ["GET", "POST"],

@@ -62,8 +62,16 @@ export function createElasticsearchExplorer(
   docListPane.className = "es-doc-list-pane";
 
   const docListHeader = document.createElement("div");
-  docListHeader.className = "db-explorer-pane-header";
-  docListHeader.textContent = text().es.docs;
+  docListHeader.className = "db-explorer-pane-header es-doc-list-header";
+  const docListTitle = document.createElement("span");
+  docListTitle.textContent = text().es.docs;
+  const newDocBtn = document.createElement("button");
+  newDocBtn.type = "button";
+  newDocBtn.className = "db-btn db-btn-sm es-new-doc-btn";
+  newDocBtn.textContent = `＋ ${text().es.newDoc}`;
+  newDocBtn.title = text().es.newDoc;
+  newDocBtn.hidden = true;
+  docListHeader.append(docListTitle, newDocBtn);
   docListPane.appendChild(docListHeader);
 
   const searchBar = document.createElement("div");
@@ -300,12 +308,183 @@ export function createElasticsearchExplorer(
     mappingBody.appendChild(table);
   }
 
+  function mkBtn(label: string, cls: string): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.textContent = label;
+    return b;
+  }
+
+  async function postEsWrite(body: Record<string, unknown>): Promise<void> {
+    const res = await fetch("/_db/elasticsearch/write", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  }
+
+  // 既存ドキュメントの _source を JSON 編集する。楽観ロック用に seqNo/
+  // primaryTerm を一緒に送り、別更新との衝突を検出する。
+  function startDocEdit(resp: EsDocResponse): void {
+    docBody.innerHTML = "";
+    const bar = document.createElement("div");
+    bar.className = "es-doc-edit-bar";
+    const save = mkBtn(text().common.save, "db-btn db-btn-primary db-btn-sm");
+    const cancel = mkBtn(text().common.cancel, "db-btn db-btn-sm");
+    const status = document.createElement("span");
+    status.className = "es-doc-edit-status";
+    bar.append(save, cancel, status);
+    const ta = document.createElement("textarea");
+    ta.className = "es-doc-edit-textarea";
+    ta.value = JSON.stringify(resp.source, null, 2);
+    docBody.append(bar, ta);
+    cancel.addEventListener("click", () => renderDoc(resp));
+    save.addEventListener("click", async () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(ta.value);
+      } catch {
+        status.textContent = text().es.invalidJson;
+        return;
+      }
+      if (!currentDbId || !currentIndex) return;
+      save.disabled = true;
+      cancel.disabled = true;
+      status.textContent = text().common.saving;
+      try {
+        await postEsWrite({
+          db: currentDbId,
+          index: currentIndex,
+          id: resp.id,
+          source: parsed,
+          seqNo: resp.seqNo,
+          primaryTerm: resp.primaryTerm,
+        });
+        await selectDoc(resp.id);
+      } catch (err) {
+        save.disabled = false;
+        cancel.disabled = false;
+        status.textContent = text().common.saveError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+    ta.focus();
+  }
+
+  async function deleteDoc(resp: EsDocResponse): Promise<void> {
+    if (!currentDbId || !currentIndex) return;
+    if (!window.confirm(text().es.confirmDeleteDoc(resp.id))) return;
+    try {
+      await postEsWrite({
+        db: currentDbId,
+        index: currentIndex,
+        id: resp.id,
+        op: "delete",
+      });
+      setPaneEmpty(docBody, text().es.selectDoc);
+      lastDoc = null;
+      loadDocs(false);
+    } catch (err) {
+      setPaneStatus(
+        docBody,
+        text().common.saveError(
+          err instanceof Error ? err.message : String(err),
+        ),
+        { error: true },
+      );
+    }
+  }
+
+  // 新規ドキュメント作成フォーム。id は任意 (空なら ES が自動採番)。
+  function showNewDocForm(): void {
+    if (!currentIndex) {
+      setPaneStatus(docBody, text().es.selectIndex);
+      return;
+    }
+    setDetailTab("doc");
+    docBody.innerHTML = "";
+    const form = document.createElement("form");
+    form.className = "es-new-doc-form";
+    const idInput = document.createElement("input");
+    idInput.type = "text";
+    idInput.className = "es-new-doc-id";
+    idInput.placeholder = text().es.newDocIdPlaceholder;
+    idInput.autocomplete = "off";
+    const ta = document.createElement("textarea");
+    ta.className = "es-doc-edit-textarea";
+    ta.placeholder = text().es.sourceJsonPlaceholder;
+    const bar = document.createElement("div");
+    bar.className = "es-doc-edit-bar";
+    const create = mkBtn(text().es.create, "db-btn db-btn-primary db-btn-sm");
+    create.type = "submit";
+    const cancel = mkBtn(text().common.cancel, "db-btn db-btn-sm");
+    const status = document.createElement("span");
+    status.className = "es-doc-edit-status";
+    bar.append(create, cancel, status);
+    form.append(bar, idInput, ta);
+    docBody.append(form);
+    idInput.focus();
+    cancel.addEventListener("click", () =>
+      setPaneEmpty(docBody, text().es.selectDoc),
+    );
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentDbId || !currentIndex) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(ta.value);
+      } catch {
+        status.textContent = text().es.invalidJson;
+        return;
+      }
+      const id = idInput.value.trim();
+      create.disabled = true;
+      status.textContent = text().common.saving;
+      try {
+        await postEsWrite({
+          db: currentDbId,
+          index: currentIndex,
+          ...(id ? { id } : {}),
+          source: parsed,
+        });
+        loadDocs(false);
+        if (id) await selectDoc(id);
+        else setPaneEmpty(docBody, text().es.selectDoc);
+      } catch (err) {
+        create.disabled = false;
+        status.textContent = text().common.saveError(
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    });
+  }
+
+  newDocBtn.addEventListener("click", () => showNewDocForm());
+
   function renderDoc(resp: EsDocResponse): void {
     lastDoc = resp;
     docBody.innerHTML = "";
     const header = document.createElement("div");
     header.className = "es-doc-detail-header";
-    header.textContent = `${resp.index} / ${resp.id}`;
+    const title = document.createElement("span");
+    title.textContent = `${resp.index} / ${resp.id}`;
+    header.appendChild(title);
+    if (resp.found) {
+      const actions = document.createElement("div");
+      actions.className = "es-doc-actions";
+      const editBtn = mkBtn(text().common.edit, "db-btn db-btn-sm");
+      editBtn.addEventListener("click", () => startDocEdit(resp));
+      const delBtn = mkBtn(text().common.delete, "db-btn db-btn-sm");
+      delBtn.addEventListener("click", () => void deleteDoc(resp));
+      actions.append(editBtn, delBtn);
+      header.appendChild(actions);
+    }
     docBody.appendChild(header);
     if (!resp.found) {
       setPaneStatus(docBody, text().es.docNotFound, {
@@ -450,6 +629,8 @@ export function createElasticsearchExplorer(
     docBody.innerHTML = "";
     setPaneEmpty(docBody, text().es.selectDoc);
     setDetailTab("mapping");
+    // インデックス選択後は新規ドキュメント作成を許可する。
+    newDocBtn.hidden = false;
     await Promise.all([fetchMapping(name), loadDocs(false)]);
   }
 
@@ -680,7 +861,9 @@ export function createElasticsearchExplorer(
   function localize(): void {
     const t = text();
     indexListHeader.textContent = t.es.indices;
-    docListHeader.textContent = t.es.docs;
+    docListTitle.textContent = t.es.docs;
+    newDocBtn.textContent = `＋ ${t.es.newDoc}`;
+    newDocBtn.title = t.es.newDoc;
     searchInput.placeholder = t.es.queryPlaceholder;
     searchBtn.textContent = t.common.search;
     docMoreBtn.textContent = t.common.loadMore;

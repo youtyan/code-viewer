@@ -8502,12 +8502,63 @@ body.db-resizing {
 }
 .es-mapping-header,
 .es-doc-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--mono, monospace);
   font-size: var(--db-font-mono);
   font-weight: 600;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
+}
+.es-doc-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.es-doc-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.es-doc-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.es-doc-edit-status {
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+}
+.es-doc-edit-textarea {
+  width: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.es-new-doc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.es-new-doc-id {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
 }
 .es-doc-detail-meta {
   font-family: var(--mono, monospace);

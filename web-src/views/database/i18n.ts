@@ -236,6 +236,12 @@ export type DbText = {
       noDocs: string;
       docNotFound: string;
       loadingIndices: string;
+      newDoc: string;
+      newDocIdPlaceholder: string;
+      sourceJsonPlaceholder: string;
+      confirmDeleteDoc: (id: string) => string;
+      invalidJson: string;
+      create: string;
     };
     s3: {
       bucket: string;
@@ -477,6 +483,12 @@ const EN: DbText = {
       noDocs: "(no docs)",
       docNotFound: "(doc not found)",
       loadingIndices: "Loading indices...",
+      newDoc: "New document",
+      newDocIdPlaceholder: "document id (optional — auto-generated if blank)",
+      sourceJsonPlaceholder: '{\n  "field": "value"\n}',
+      confirmDeleteDoc: (id) => `Delete document "${id}"?`,
+      invalidJson: "Invalid JSON",
+      create: "Create",
     },
     s3: {
       bucket: "Bucket",
@@ -721,6 +733,12 @@ const JA: DbText = {
       noDocs: "(ドキュメントがありません)",
       docNotFound: "(ドキュメントが見つかりません)",
       loadingIndices: "インデックスを読み込み中...",
+      newDoc: "新規ドキュメント",
+      newDocIdPlaceholder: "ドキュメント ID (省略時は自動採番)",
+      sourceJsonPlaceholder: '{\n  "field": "value"\n}',
+      confirmDeleteDoc: (id) => `ドキュメント "${id}" を削除しますか?`,
+      invalidJson: "JSON が不正です",
+      create: "作成",
     },
     s3: {
       bucket: "バケット",

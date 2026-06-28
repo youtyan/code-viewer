@@ -23,9 +23,28 @@ type EsConfig = {
   password: string;
 };
 
+// ドキュメント書き込み。id 指定で PUT (更新/upsert)、未指定で POST (id 自動採番)。
+// seqNo/primaryTerm を渡すと楽観ロック (if_seq_no/if_primary_term) を付ける。
+export type EsWriteOps = {
+  writeDocAsync(opts: {
+    index: string;
+    id?: string;
+    source: unknown;
+    seqNo?: number;
+    primaryTerm?: number;
+    signal?: AbortSignal;
+  }): Promise<{ id: string; result: string }>;
+  deleteDocAsync(opts: {
+    index: string;
+    id: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+};
+
 export type ElasticsearchExplorer = DocSource &
   Queryable<EsQueryRequest, EsQueryResult> &
-  SnapshotIterable & {
+  SnapshotIterable &
+  EsWriteOps & {
     readonly kind: "elasticsearch";
     readonly model: "document";
     readonly capabilities: { snapshot: true; query: true };
@@ -65,9 +84,11 @@ export function quoteCurlConfigString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+type EsHttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+
 function buildEsRequestInvocation(
   config: EsConfig,
-  method: "GET" | "POST",
+  method: EsHttpMethod,
   path: string,
   body?: unknown,
 ): { args: string[]; input?: string } {
@@ -106,7 +127,7 @@ function buildEsRequestInvocation(
 
 function execEsRequestAsync(
   config: EsConfig,
-  method: "GET" | "POST",
+  method: EsHttpMethod,
   path: string,
   body?: unknown,
   timeoutMs = 15000,
@@ -153,7 +174,7 @@ function safeJsonParse<T>(stdout: string, label: string): T {
 
 function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
   async function callJsonAsync<T>(
-    method: "GET" | "POST",
+    method: EsHttpMethod,
     path: string,
     body: unknown,
     label: string,
@@ -361,6 +382,63 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     };
   }
 
+  function assertIndex(index: string): void {
+    if (!index || index.includes("/") || index.includes("?")) {
+      throw new Error(`invalid index name: ${index}`);
+    }
+  }
+
+  async function writeDocAsync(opts: {
+    index: string;
+    id?: string;
+    source: unknown;
+    seqNo?: number;
+    primaryTerm?: number;
+    signal?: AbortSignal;
+  }): Promise<{ id: string; result: string }> {
+    assertIndex(opts.index);
+    const idGiven = typeof opts.id === "string" && opts.id !== "";
+    let path: string;
+    let method: EsHttpMethod;
+    if (idGiven) {
+      path = `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(
+        opts.id as string,
+      )}`;
+      method = "PUT";
+      // 楽観ロック: 既読の seq_no/primary_term があれば衝突検出を付ける。
+      if (opts.seqNo !== undefined && opts.primaryTerm !== undefined) {
+        path += `?if_seq_no=${opts.seqNo}&if_primary_term=${opts.primaryTerm}`;
+      }
+    } else {
+      path = `/${encodeURIComponent(opts.index)}/_doc`;
+      method = "POST";
+    }
+    const resp = await callJsonAsync<{ _id?: string; result?: string }>(
+      method,
+      path,
+      opts.source,
+      "_doc write",
+      opts.signal,
+    );
+    return { id: resp._id ?? opts.id ?? "", result: resp.result ?? "" };
+  }
+
+  async function deleteDocAsync(opts: {
+    index: string;
+    id: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    assertIndex(opts.index);
+    if (!opts.id) throw new Error("missing doc id");
+    await callJsonAsync(
+      "DELETE",
+      `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(opts.id)}`,
+      undefined,
+      "_doc delete",
+      opts.signal,
+    );
+  }
+
   async function* iterateForSnapshot(
     container: string,
     signal?: AbortSignal,
@@ -464,6 +542,8 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     getMappingAsync,
     searchDocsAsync,
     getDocAsync,
+    writeDocAsync,
+    deleteDocAsync,
     iterateForSnapshot,
     listSnapshotContainers,
     query,
