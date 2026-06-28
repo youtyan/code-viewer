@@ -8138,6 +8138,58 @@ body.db-resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 値編集アクション (Edit / Delete) はヘッダ右端に寄せる。 */
+.redis-value-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* キーリストヘッダ: タイトル + 新規キーボタン。 */
+.redis-key-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* 値編集 / 新規キーフォーム。 */
+.redis-value-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.redis-value-edit-status {
+  font-size: var(--db-font-sm);
+  color: var(--fg-muted);
+}
+.redis-value-edit-textarea,
+.redis-new-key-value {
+  width: 100%;
+  min-height: 160px;
+  box-sizing: border-box;
+  font-family: var(--mono, monospace);
+  font-size: var(--db-font-mono);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.redis-new-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.redis-new-key-name {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono, monospace);
+}
 .redis-value-body {
   flex: 1;
   overflow: auto;

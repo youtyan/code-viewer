@@ -193,7 +193,16 @@ export type DbText = {
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
   explorer: {
-    common: { loadMore: string; search: string };
+    common: {
+      loadMore: string;
+      search: string;
+      edit: string;
+      save: string;
+      cancel: string;
+      delete: string;
+      saving: string;
+      saveError: (message: string) => string;
+    };
     redis: {
       databases: string;
       keys: string;
@@ -206,6 +215,11 @@ export type DbText = {
       emptyList: string;
       noKeys: string;
       keyCount: (n: string) => string;
+      newKey: string;
+      newKeyNamePlaceholder: string;
+      newKeyValuePlaceholder: string;
+      confirmDeleteKey: (key: string) => string;
+      create: string;
     };
     es: {
       indices: string;
@@ -420,7 +434,16 @@ const EN: DbText = {
     label: (date, tables, note) => `${date} (${tables} tables)${note}`,
   },
   explorer: {
-    common: { loadMore: "Load more", search: "Search" },
+    common: {
+      loadMore: "Load more",
+      search: "Search",
+      edit: "Edit",
+      save: "Save",
+      cancel: "Cancel",
+      delete: "Delete",
+      saving: "Saving…",
+      saveError: (message) => `Save failed: ${message}`,
+    },
     redis: {
       databases: "Databases",
       keys: "Keys",
@@ -433,6 +456,11 @@ const EN: DbText = {
       emptyList: "(empty list)",
       noKeys: "(no keys)",
       keyCount: (n) => `${n} keys`,
+      newKey: "New key",
+      newKeyNamePlaceholder: "key name",
+      newKeyValuePlaceholder: "value",
+      confirmDeleteKey: (key) => `Delete key "${key}"?`,
+      create: "Create",
     },
     es: {
       indices: "Indices",
@@ -650,7 +678,16 @@ const JA: DbText = {
     label: (date, tables, note) => `${date} (${tables}テーブル)${note}`,
   },
   explorer: {
-    common: { loadMore: "さらに読み込む", search: "検索" },
+    common: {
+      loadMore: "さらに読み込む",
+      search: "検索",
+      edit: "編集",
+      save: "保存",
+      cancel: "キャンセル",
+      delete: "削除",
+      saving: "保存中…",
+      saveError: (message) => `保存に失敗しました: ${message}`,
+    },
     redis: {
       databases: "データベース",
       keys: "キー",
@@ -663,6 +700,11 @@ const JA: DbText = {
       emptyList: "(空のリスト)",
       noKeys: "(キーがありません)",
       keyCount: (n) => `${n} キー`,
+      newKey: "新規キー",
+      newKeyNamePlaceholder: "キー名",
+      newKeyValuePlaceholder: "値",
+      confirmDeleteKey: (key) => `キー "${key}" を削除しますか?`,
+      create: "作成",
     },
     es: {
       indices: "インデックス",
