@@ -173,6 +173,21 @@ describe("/_db/mutate (sqlite)", () => {
     expect(data.rows.find((r) => r[0] === 5)).toBeUndefined();
   });
 
+  test("updates a nullable column to SQL NULL", async () => {
+    const { dir, db } = seedDb();
+    const res = await mutate(dir, db, "users", [
+      {
+        kind: "update",
+        pk: [{ column: "id", value: "1" }],
+        values: [{ column: "name", value: null }],
+      },
+    ]);
+    expect(res.status).toBe(200);
+    const data = await readRows(dir, db, "users");
+    const row = data.rows.find((r) => r[0] === 1);
+    expect(row?.[1]).toBeNull();
+  });
+
   test("rejects update/delete on a table without a primary key", async () => {
     const { dir, db } = seedDb();
     const res = await mutate(dir, db, "logs", [

@@ -54,20 +54,24 @@ export function coerceDbValue(
 ): DbValue {
   if (value === null) return null;
   const t = (columnType || "").toLowerCase();
-  // boolean 系。0/1 (number) に正規化しておくと、param バインドでもリテラル
-  // レンダリングでも素直に扱える。
+  // boolean 系。JS の boolean に正規化する。リテラル化 (PostgreSQL/MySQL) では
+  // TRUE/FALSE に、param バインド (SQLite) では 0/1 に変換される (placeValue 側)。
+  // 数値 1/0 を返すと PostgreSQL が "boolean なのに integer" で弾くため number に
+  // しないこと。
   if (/bool/.test(t)) {
     const v = value.trim().toLowerCase();
-    if (v === "true" || v === "t" || v === "1") return 1;
-    if (v === "false" || v === "f" || v === "0") return 0;
+    if (v === "") return null; // 空入力 = NULL (nullable 列向け)
+    if (v === "true" || v === "t" || v === "1") return true;
+    if (v === "false" || v === "f" || v === "0") return false;
     // 認識できない値は DB 側の判断に委ねる。
     return value;
   }
   // 数値系。元の文字列と数値の round-trip が一致する場合のみ数値化する
-  // ("0123" や "1e3" のような表現を勝手に書き換えないため)。
+  // ("0123" や "1e3" のような表現を勝手に書き換えないため)。空入力は NULL に
+  // する (数値列に "" を入れても意味を成さないため)。
   if (/int|serial|real|floa|doub|numeric|decimal|number/.test(t)) {
     const trimmed = value.trim();
-    if (trimmed === "") return value;
+    if (trimmed === "") return null;
     const n = Number(trimmed);
     if (Number.isFinite(n) && String(n) === trimmed) return n;
     return value;

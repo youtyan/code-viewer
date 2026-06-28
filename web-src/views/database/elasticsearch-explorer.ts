@@ -452,6 +452,7 @@ export function createElasticsearchExplorer(
           index: currentIndex,
           ...(id ? { id } : {}),
           source: parsed,
+          op: "create",
         });
         loadDocs(false);
         if (id) await selectDoc(id);

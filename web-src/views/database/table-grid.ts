@@ -402,15 +402,17 @@ export function createTableGrid(
 
   /* ---- Row editing (edit / insert / delete) ---- */
   let editMode = false;
-  // 既存行の保留編集。rowKey -> { pk セル, 変更された colIndex -> 新値文字列 }。
+  // 既存行の保留編集。rowKey -> { pk セル, 変更された colIndex -> 新値 }。
+  // 値は string (テキスト) または null (SQL NULL)。
   const pendingEdits = new Map<
     string,
-    { pk: DbCellInput[]; edits: Map<number, string> }
+    { pk: DbCellInput[]; edits: Map<number, string | null> }
   >();
   // 削除対象の既存行。rowKey -> pk セル。
   const pendingDeletes = new Map<string, DbCellInput[]>();
-  // 新規行ドラフト。各行は colIndex -> 値文字列。
-  let draftRows: Array<Map<number, string>> = [];
+  // 新規行ドラフト。各行は colIndex -> 値 (string=テキスト / null=NULL)。
+  // 未入力の列はエントリ無し (= 省略され DB デフォルトが入る)。
+  let draftRows: Array<Map<number, string | null>> = [];
 
   /* ---- Related-data panel (FK navigation) ---- */
   // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
@@ -1301,8 +1303,12 @@ export function createTableGrid(
   // 編集モードの入力セルを作る。readonly な PK/blob セルは編集不可。
   function buildEditableCell(
     colIndex: number,
-    value: string,
-    opts: { readonly: boolean; onChange: (v: string) => void },
+    value: string | null,
+    opts: {
+      readonly: boolean;
+      nullable: boolean;
+      onChange: (v: string | null) => void;
+    },
   ): HTMLElement {
     const cell = document.createElement("div");
     cell.className = "db-grid-cell db-grid-cell-edit";
@@ -1310,15 +1316,42 @@ export function createTableGrid(
     const input = document.createElement("input");
     input.type = "text";
     input.className = "db-grid-cell-input";
-    input.value = value;
+    // value===null は SQL NULL。空入力の "" (空文字列) と視覚的に区別するため、
+    // placeholder "NULL" + is-null クラスで表現する。
+    const applyNullVisual = (isNull: boolean) => {
+      input.classList.toggle("is-null", isNull);
+      input.placeholder = isNull ? "NULL" : "";
+    };
+    input.value = value === null ? "" : value;
+    applyNullVisual(value === null);
     if (opts.readonly) {
       input.readOnly = true;
       input.classList.add("readonly");
     }
-    input.addEventListener("input", () => opts.onChange(input.value));
+    input.addEventListener("input", () => {
+      // テキスト入力したら NULL 状態は解除 (空文字列 "" は NULL ではない)。
+      applyNullVisual(false);
+      opts.onChange(input.value);
+    });
     // 行選択/セル詳細クリックと衝突させない。
     input.addEventListener("click", (e) => e.stopPropagation());
     cell.appendChild(input);
+    // nullable 列には NULL ボタンを出し、明示的に SQL NULL を入れられるように
+    // する (NULL→"" の暗黙変換や NULL 設定不可の問題への対処)。
+    if (opts.nullable && !opts.readonly) {
+      const nullBtn = document.createElement("button");
+      nullBtn.type = "button";
+      nullBtn.className = "db-grid-cell-null-btn";
+      nullBtn.textContent = "∅";
+      nullBtn.title = text().edit.setNull;
+      nullBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        input.value = "";
+        applyNullVisual(true);
+        opts.onChange(null);
+      });
+      cell.appendChild(nullBtn);
+    }
     return cell;
   }
 
@@ -1370,14 +1403,17 @@ export function createTableGrid(
       const pendingForRow = key !== null ? pendingEdits.get(key) : undefined;
       for (let c = 0; c < columnNames.length; c++) {
         const original = rowData[c];
-        const originalStr =
+        // 元の表示値 (string|null)。NULL は null のまま渡して NULL 表示にする。
+        const originalShown: string | null =
           original === null
-            ? ""
+            ? null
             : original instanceof Uint8Array
               ? formatValue(original)
               : String(original);
-        const overridden = pendingForRow?.edits.get(c);
-        const shown = overridden !== undefined ? overridden : originalStr;
+        const hasOverride = pendingForRow?.edits.has(c) ?? false;
+        const shown: string | null = hasOverride
+          ? (pendingForRow?.edits.get(c) ?? null)
+          : originalShown;
         // PK・blob・PK 無し行は readonly。
         const ro =
           !editableRow ||
@@ -1386,6 +1422,7 @@ export function createTableGrid(
         row.appendChild(
           buildEditableCell(c, shown, {
             readonly: ro,
+            nullable: columns[c]?.nullable === true,
             onChange: (v) => recordEdit(rowData, c, v),
           }),
         );
@@ -1485,10 +1522,15 @@ export function createTableGrid(
     });
     row.appendChild(rowNum);
     for (let c = 0; c < columnNames.length; c++) {
+      const dv: string | null = draft.has(c)
+        ? (draft.get(c) as string | null)
+        : "";
       row.appendChild(
-        buildEditableCell(c, draft.get(c) ?? "", {
+        buildEditableCell(c, dv, {
           readonly: false,
+          nullable: columns[c]?.nullable === true,
           onChange: (v) => {
+            // "" = 未入力 (省略), null = 明示 NULL, それ以外 = 値。
             if (v === "") draft.delete(c);
             else draft.set(c, v);
             refreshEditButtons();
@@ -1773,8 +1815,10 @@ export function createTableGrid(
   }
 
   function nonEmptyDraftCount(): number {
-    return draftRows.filter((d) => Array.from(d.values()).some((v) => v !== ""))
-      .length;
+    // null (明示 NULL) または非空文字を 1 つでも持つドラフトを「入力あり」とする。
+    return draftRows.filter((d) =>
+      Array.from(d.values()).some((v) => v === null || v !== ""),
+    ).length;
   }
 
   function pendingCount(): number {
@@ -1835,7 +1879,7 @@ export function createTableGrid(
   function recordEdit(
     rowData: DbValue[],
     colIndex: number,
-    value: string,
+    value: string | null,
   ): void {
     const key = rowKeyFor(rowData);
     if (key === null) return;
@@ -1845,11 +1889,13 @@ export function createTableGrid(
       pendingEdits.set(key, entry);
     }
     const original = rowData[colIndex];
+    // 元が NULL/blob のときは originalStr=null。null vs null も「変更なし」と
+    // 判定し、元 NULL を黙って "" に書き換えてしまわないようにする。
     const originalStr =
       original === null || original instanceof Uint8Array
         ? null
         : String(original);
-    if (originalStr !== null && value === originalStr) {
+    if (value === originalStr) {
       entry.edits.delete(colIndex);
       if (entry.edits.size === 0) pendingEdits.delete(key);
     } else {
@@ -1884,8 +1930,10 @@ export function createTableGrid(
       muts.push({ kind: "update", pk: entry.pk, values });
     }
     for (const draft of draftRows) {
+      // null=明示 NULL, 非空文字=値。空文字 "" は「未入力」として省略し
+      // DB デフォルトに委ねる。
       const values: DbCellInput[] = Array.from(draft)
-        .filter(([, v]) => v !== "")
+        .filter(([, v]) => v === null || v !== "")
         .map(([c, v]) => ({ column: columnNames[c], value: v }));
       if (values.length > 0) muts.push({ kind: "insert", values });
     }

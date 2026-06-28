@@ -154,6 +154,8 @@ describe("s3 explorer edit UI", () => {
     const create = writeCalls.find((c) => c.key === "folder/new.txt");
     expect(create !== undefined).toBeTruthy();
     expect(create?.content).toBe("body");
+    // 新規作成は op:"create" を送り、サーバ側で HEAD により既存を弾く。
+    expect(create?.op).toBe("create");
     view.dispose();
   });
 });

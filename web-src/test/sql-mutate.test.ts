@@ -33,14 +33,18 @@ describe("coerceDbValue", () => {
     expect(coerceDbValue("1e3", "numeric")).toBe("1e3");
     // 非数値はそのまま (DB 側の判断に委ねる)。
     expect(coerceDbValue("abc", "integer")).toBe("abc");
-    expect(coerceDbValue("", "integer")).toBe("");
+    // 空入力は NULL (数値列に "" を入れても意味を成さない)。
+    expect(coerceDbValue("", "integer")).toBeNull();
   });
 
-  test("boolean columns normalize to 0/1", () => {
-    expect(coerceDbValue("true", "boolean")).toBe(1);
-    expect(coerceDbValue("f", "bool")).toBe(0);
-    expect(coerceDbValue("1", "boolean")).toBe(1);
+  test("boolean columns normalize to JS boolean", () => {
+    // 数値 1/0 ではなく JS boolean を返す (PostgreSQL の boolean 列で
+    // `= 1` にすると型エラーになるため)。
+    expect(coerceDbValue("true", "boolean")).toBe(true);
+    expect(coerceDbValue("f", "bool")).toBe(false);
+    expect(coerceDbValue("1", "boolean")).toBe(true);
     expect(coerceDbValue("maybe", "boolean")).toBe("maybe");
+    expect(coerceDbValue("", "boolean")).toBeNull();
   });
 
   test("text columns are left as-is", () => {
@@ -97,6 +101,25 @@ describe("buildInsertSql", () => {
       "postgresql",
     );
     expect(r.sql).toBe('INSERT INTO "users" ("name") VALUES (NULL)');
+  });
+
+  test("postgresql boolean columns render as TRUE/FALSE, not integers", () => {
+    // 回帰防止: boolean 列を `= 1` にすると PostgreSQL が型エラーで弾く。
+    const t = new Map<string, string>([["active", "boolean"]]);
+    const on = buildInsertSql(
+      "users",
+      [{ column: "active", value: "true" }],
+      t,
+      "postgresql",
+    );
+    expect(on.sql).toBe('INSERT INTO "users" ("active") VALUES (TRUE)');
+    const off = buildInsertSql(
+      "users",
+      [{ column: "active", value: "0" }],
+      t,
+      "postgresql",
+    );
+    expect(off.sql).toBe('INSERT INTO "users" ("active") VALUES (FALSE)');
   });
 });
 

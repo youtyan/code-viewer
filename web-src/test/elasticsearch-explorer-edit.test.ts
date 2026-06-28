@@ -151,6 +151,8 @@ describe("elasticsearch explorer edit UI", () => {
     expect(create !== undefined).toBeTruthy();
     expect(create?.source).toEqual({ b: 9 });
     expect(create?.seqNo).toBeUndefined();
+    // 新規作成は op:"create" を送り、サーバ側で _create により既存 id を弾く。
+    expect(create?.op).toBe("create");
     view.dispose();
   });
 });

@@ -760,6 +760,7 @@ export function createS3Explorer(
           key,
           content: ta.value,
           contentType: "text/plain",
+          op: "create",
         });
         refreshObjectList();
         setPaneEmpty(previewPane, text().selectObject);

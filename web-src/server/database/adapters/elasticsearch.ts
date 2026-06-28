@@ -32,6 +32,7 @@ export type EsWriteOps = {
     source: unknown;
     seqNo?: number;
     primaryTerm?: number;
+    create?: boolean;
     signal?: AbortSignal;
   }): Promise<{ id: string; result: string }>;
   deleteDocAsync(opts: {
@@ -394,13 +395,22 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
     source: unknown;
     seqNo?: number;
     primaryTerm?: number;
+    // 新規作成モード。id 指定時は _create を使い、既存 id があれば ES が 409 を
+    // 返す (上書きしない)。id 未指定なら POST _doc で自動採番 (本質的に新規)。
+    create?: boolean;
     signal?: AbortSignal;
   }): Promise<{ id: string; result: string }> {
     assertIndex(opts.index);
     const idGiven = typeof opts.id === "string" && opts.id !== "";
     let path: string;
     let method: EsHttpMethod;
-    if (idGiven) {
+    if (idGiven && opts.create) {
+      // 新規作成 (id 指定): _create は既存なら 409。上書き防止。
+      path = `/${encodeURIComponent(opts.index)}/_create/${encodeURIComponent(
+        opts.id as string,
+      )}`;
+      method = "PUT";
+    } else if (idGiven) {
       path = `/${encodeURIComponent(opts.index)}/_doc/${encodeURIComponent(
         opts.id as string,
       )}`;
@@ -410,6 +420,7 @@ function createElasticsearchAdapter(config: EsConfig): ElasticsearchExplorer {
         path += `?if_seq_no=${opts.seqNo}&if_primary_term=${opts.primaryTerm}`;
       }
     } else {
+      // id 未指定は自動採番 (新規)。
       path = `/${encodeURIComponent(opts.index)}/_doc`;
       method = "POST";
     }

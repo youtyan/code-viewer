@@ -118,7 +118,9 @@ function placeValue(
   params: DbValue[],
 ): string {
   if (useParams) {
-    params.push(coerced);
+    // SQLite ドライバ (better-sqlite3 / bun:sqlite) は boolean のバインドを
+    // 受け付けないことがあるので 0/1 に落とす。
+    params.push(typeof coerced === "boolean" ? (coerced ? 1 : 0) : coerced);
     return "?";
   }
   if (coerced === null) return "NULL";

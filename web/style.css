@@ -6339,6 +6339,32 @@ body[data-sidebar-font-size="xlarge"] .db-container {
 /* 編集セルは入力欄を全幅で内包する。 */
 .db-grid-cell-edit {
   padding: 0;
+  position: relative;
+}
+/* NULL 状態の入力欄は placeholder "NULL" を斜体・淡色で示す。 */
+.db-grid-cell-input.is-null::placeholder {
+  color: var(--fg-subtle);
+  font-style: italic;
+  opacity: 1;
+}
+/* セル右端の「NULL にする」ボタン。ホバー時のみ目立たせる。 */
+.db-grid-cell-null-btn {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.db-grid-cell-null-btn:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
 }
 .db-grid-cell-input {
   width: 100%;

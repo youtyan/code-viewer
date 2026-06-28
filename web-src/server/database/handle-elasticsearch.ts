@@ -306,6 +306,8 @@ async function handleWrite(
       source: body.source,
       seqNo,
       primaryTerm,
+      // op:"create" は既存 id を上書きしない (_create → 既存なら 409)。
+      create: body.op === "create",
       signal: req.signal,
     });
     return json({ ok: true, id: result.id, result: result.result });

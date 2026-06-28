@@ -52,6 +52,7 @@ export type DbText = {
     discard: string;
     deleteRow: string;
     undoDelete: string;
+    setNull: string;
     pending: (n: number) => string;
     committing: string;
     commitError: (message: string) => string;
@@ -314,6 +315,7 @@ const EN: DbText = {
     discard: "Discard",
     deleteRow: "Mark row for deletion",
     undoDelete: "Undo deletion",
+    setNull: "Set NULL",
     pending: (n) => `${n} change(s)`,
     committing: "Saving…",
     commitError: (message) => `Save failed: ${message}`,
@@ -568,6 +570,7 @@ const JA: DbText = {
     discard: "破棄",
     deleteRow: "行を削除対象にする",
     undoDelete: "削除を取り消す",
+    setNull: "NULL にする",
     pending: (n) => `変更 ${n} 件`,
     committing: "保存中…",
     commitError: (message) => `保存に失敗しました: ${message}`,

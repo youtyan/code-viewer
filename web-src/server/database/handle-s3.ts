@@ -539,7 +539,21 @@ async function handleWrite(
       });
       return json({ ok: true });
     }
-    // 既定は put (作成/上書き)。content はテキスト。
+    // op:"create" は既存オブジェクトを上書きしない。S3 には移植性のある
+    // アトミック作成が無いため、PUT 前に HEAD で存在チェックする (TOCTOU は
+    // 残るが、UI 上の「新規作成」が既存を黙って潰すのを防ぐ)。
+    if (body.op === "create") {
+      let exists = false;
+      try {
+        await r.explorer.headObject({ bucket, key, signal: req.signal });
+        exists = true;
+      } catch (err) {
+        if (isS3HttpError(err) && err.status === 404) exists = false;
+        else throw err;
+      }
+      if (exists) return textError(`object already exists: ${key}`, 409);
+    }
+    // put (作成/上書き)。content はテキスト。
     const content = typeof body.content === "string" ? body.content : "";
     const contentType =
       typeof body.contentType === "string" && body.contentType

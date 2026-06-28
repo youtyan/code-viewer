@@ -11,7 +11,10 @@ import type {
 import type { RawDbValue } from "../serialize";
 
 export type MutationResult = {
-  // 適用された全 mutation の影響行数の合計。
+  // 適用された変更件数。SQLite は実際の影響行数 (result.changes) の合計。
+  // CLI 経由の PostgreSQL/MySQL は 1 文ごとの行数を取得できないため、適用した
+  // ステートメント数を返す (= 概算。マッチ 0 行の UPDATE/DELETE も 1 と数える)。
+  // クライアントはこの値を表示用途にのみ使い、厳密な行数として扱わないこと。
   affected: number;
 };
 

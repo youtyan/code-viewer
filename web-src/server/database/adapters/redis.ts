@@ -29,6 +29,13 @@ export type RedisWriteOps = {
     value: string;
     signal?: AbortSignal;
   }): Promise<void>;
+  // 新規作成 (SET ... NX)。既存キーがあれば例外を投げ、上書きしない。
+  createStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
   setHashFieldAsync(opts: {
     db: number;
     key: string;
@@ -947,6 +954,37 @@ export function createRedisAdapter(config: RedisConfig): RedisExplorer {
     );
   }
 
+  // 新規作成。SET ... NX で既存キーがあれば書き込まない。redis-cli は NX で
+  // セットしなかった場合 nil を返す (OK は返らない) ので、それを「既に存在」
+  // として 409 相当のエラーに変換する。これにより「新規作成」が既存キー
+  // (型を問わず) を黙って上書きするのを防ぐ。
+  async function createStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const res = await execRedisCliAsync(
+      config,
+      ["-n", String(opts.db), "SET", opts.key, opts.value, "NX"],
+      10000,
+      opts.signal,
+    );
+    if (res.code !== 0) {
+      throw new Error(
+        res.stderr.trim() || res.stdout.trim() || "redis command failed",
+      );
+    }
+    const out = res.stdout.trim();
+    if (/^\(error\)/i.test(out) || /^ERR\b/i.test(out)) {
+      throw new Error(out);
+    }
+    // NX で弾かれた (既存) ときは OK が返らない。
+    if (!/\bOK\b/i.test(out)) {
+      throw new Error(`key already exists: ${opts.key}`);
+    }
+  }
+
   async function setHashFieldAsync(opts: {
     db: number;
     key: string;
@@ -989,6 +1027,7 @@ export function createRedisAdapter(config: RedisConfig): RedisExplorer {
     listKeysAsync,
     getValueAsync,
     setStringAsync,
+    createStringAsync,
     setHashFieldAsync,
     setListIndexAsync,
     deleteKeyAsync,

@@ -153,6 +153,53 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
+  test("the NULL button sets a nullable cell to SQL NULL (value: null)", async () => {
+    const { grid, getCaptured } = setup();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await tick();
+    const rows = q<HTMLElement>(
+      grid.el,
+      ".db-grid-body",
+    ).querySelectorAll<HTMLElement>(".db-grid-row");
+    // 行0 の name セル (nullable) には NULL ボタンが出る。
+    const nullBtn = rows[0].querySelector<HTMLButtonElement>(
+      ".db-grid-cell-null-btn",
+    );
+    expect(nullBtn !== null).toBeTruthy();
+    nullBtn?.click();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-commit").click();
+    await tick();
+    const muts = getCaptured() as RowMutation[];
+    expect(muts.length).toBe(1);
+    if (muts[0].kind === "update") {
+      expect(muts[0].pk).toEqual([{ column: "id", value: "1" }]);
+      expect(muts[0].values).toEqual([{ column: "name", value: null }]);
+    }
+    grid.destroy();
+  });
+
+  test("a PK (non-nullable) cell has no NULL button", async () => {
+    const { grid } = setup();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await tick();
+    const rows = q<HTMLElement>(
+      grid.el,
+      ".db-grid-body",
+    ).querySelectorAll<HTMLElement>(".db-grid-row");
+    // id 列セルは readonly(PK)なので NULL ボタンは無い。name 列(nullable)には有る。
+    const cells = rows[0].querySelectorAll<HTMLElement>(".db-grid-cell-edit");
+    expect(cells[0].querySelector(".db-grid-cell-null-btn") === null).toBe(
+      true,
+    );
+    expect(cells[1].querySelector(".db-grid-cell-null-btn") !== null).toBe(
+      true,
+    );
+    grid.destroy();
+  });
+
   test("editing a cell back to its original value clears the pending change", async () => {
     const { grid, getCaptured } = setup();
     await tick();

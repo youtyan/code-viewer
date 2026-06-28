@@ -142,8 +142,16 @@ async function handleWrite(
   const r = await resolveRedis(cwd, body.db, req.signal, omitDirNames);
   if (r instanceof Response) return r;
   try {
-    if (op === "setString" || op === "createString") {
+    if (op === "setString") {
       await r.explorer.setStringAsync({
+        db: dbIndex,
+        key: body.key,
+        value,
+        signal: req.signal,
+      });
+    } else if (op === "createString") {
+      // 新規作成は既存キーを上書きしない (SET NX)。既存なら例外 → 400。
+      await r.explorer.createStringAsync({
         db: dbIndex,
         key: body.key,
         value,
