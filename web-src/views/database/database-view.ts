@@ -588,6 +588,7 @@ function createTabPane(
   const redisExplorer = createRedisExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
   });
   redisExplorer.el.hidden = true;
   redisExplorer.sidebarSlot.hidden = true;
@@ -595,6 +596,7 @@ function createTabPane(
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
   });
   esExplorer.el.hidden = true;
   esExplorer.sidebarSlot.hidden = true;
@@ -602,6 +604,7 @@ function createTabPane(
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
     // S3 hover preview の ON/OFF。db-ui.json の prefs に永続化される。
     getTooltipEnabled: () => outerDeps.getDbUiPref("s3TooltipEnabled", true),
     setTooltipEnabled: (enabled) =>

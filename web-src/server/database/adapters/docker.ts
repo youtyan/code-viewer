@@ -1054,10 +1054,15 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
       // docker exec (CLI) はパラメータバインドが使えないので、ビルダはリテラル
       // 埋め込み (params 空) で SQL を生成する。これらを 1 トランザクションに
       // まとめて流す。途中でエラーになった場合:
-      //   - PostgreSQL: psql は ON_ERROR_STOP=1 で異常終了し、トランザクションは
-      //     中断→切断時にロールバックされる。
-      //   - MySQL: --batch は最初のエラーで停止・異常終了し、COMMIT に到達せず
-      //     切断時にロールバックされる。
+      //   - PostgreSQL: psql は ON_ERROR_STOP=1 (buildExecArgs で付与) により
+      //     最初のエラーで異常終了する。仮に走り切っても、中断されたトランザク
+      //     ション内の COMMIT は ROLLBACK 扱いになるため原子性は二重に保たれる。
+      //   - MySQL: mysql クライアントは既定でエラー時に停止・異常終了する
+      //     (--force を渡していないため。--batch は出力形式の指定でありエラー
+      //     制御ではない点に注意)。COMMIT に到達せず切断時にロールバックされる。
+      //     ※ InnoDB 等のトランザクション対応エンジン前提。MyISAM など非対応
+      //       エンジンのテーブルでは途中までの文がコミットされ得る (エンジン
+      //       固有の制約)。
       // どちらも execAsync が非ゼロ終了で throw するので原子性が保たれる。
       const body = statements.map((s) => s.sql).join(";\n");
       const wrapped =

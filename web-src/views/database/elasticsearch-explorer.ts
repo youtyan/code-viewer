@@ -17,6 +17,8 @@ export type ElasticsearchExplorerCallbacks = {
   // ごとに persist して reload 復元するために使う。
   onSelectionChange?: (selection: ElasticsearchExplorerSelection) => void;
   getText?: () => DbText;
+  // 書き込み fetch を共通の in-flight 追跡に乗せる。未指定なら素通し。
+  trackLoad?: <T>(promise: Promise<T>) => Promise<T>;
 };
 
 export type ElasticsearchExplorerView = {
@@ -317,7 +319,7 @@ export function createElasticsearchExplorer(
   }
 
   async function postEsWrite(body: Record<string, unknown>): Promise<void> {
-    const res = await fetch("/_db/elasticsearch/write", {
+    const doFetch = fetch("/_db/elasticsearch/write", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -325,6 +327,9 @@ export function createElasticsearchExplorer(
       },
       body: JSON.stringify(body),
     });
+    const res = await (callbacks.trackLoad
+      ? callbacks.trackLoad(doFetch)
+      : doFetch);
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
   }
 

@@ -180,6 +180,35 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
+  test("∅ on a draft cell inserts an explicit SQL NULL (value: null)", async () => {
+    const { grid, getCaptured } = setup();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-newrow").click();
+    await tick();
+    const draftRow = q<HTMLElement>(grid.el, ".db-grid-row-draft");
+    // id を入力し、name (nullable) は ∅ で明示 NULL にする。
+    const draftInputs = draftRow.querySelectorAll<HTMLInputElement>(
+      ".db-grid-cell-input",
+    );
+    setInput(draftInputs[0], "7");
+    q<HTMLButtonElement>(draftRow, ".db-grid-cell-null-btn").click();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-commit").click();
+    await tick();
+    const muts = getCaptured() as RowMutation[];
+    expect(muts.length).toBe(1);
+    if (muts[0].kind === "insert") {
+      // id=7 と name=NULL(明示) が含まれ、name は省略されていないこと。
+      expect(muts[0].values).toEqual([
+        { column: "id", value: "7" },
+        { column: "name", value: null },
+      ]);
+    }
+    grid.destroy();
+  });
+
   test("a PK (non-nullable) cell has no NULL button", async () => {
     const { grid } = setup();
     await tick();
@@ -197,6 +226,32 @@ describe("table-grid edit mode", () => {
     expect(cells[1].querySelector(".db-grid-cell-null-btn") !== null).toBe(
       true,
     );
+    grid.destroy();
+  });
+
+  test("focus stays on the edited cell after a re-render (scroll)", async () => {
+    const { grid } = setup();
+    await tick();
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-toggle").click();
+    await tick();
+    const body = q<HTMLElement>(grid.el, ".db-grid-body");
+    const nameInput = body
+      .querySelectorAll<HTMLElement>(".db-grid-row")[0]
+      .querySelectorAll<HTMLInputElement>(".db-grid-cell-input")[1];
+    nameInput.focus();
+    setInput(nameInput, "Edited");
+    expect(nameInput.dataset.editRow).toBe("0");
+    // 仮想スクロールの再描画 (body 作り直し) を発生させる。
+    q<HTMLElement>(grid.el, ".db-grid-viewport").dispatchEvent(
+      new Event("scroll"),
+    );
+    await tick();
+    // 再構築後も同じセル (row0/col1) にフォーカスが復元され、値も保持される。
+    const active = document.activeElement as HTMLInputElement | null;
+    expect(active?.classList.contains("db-grid-cell-input")).toBe(true);
+    expect(active?.dataset.editRow).toBe("0");
+    expect(active?.dataset.editCol).toBe("1");
+    expect(active?.value).toBe("Edited");
     grid.destroy();
   });
 

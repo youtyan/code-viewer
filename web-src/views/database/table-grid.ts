@@ -402,6 +402,9 @@ export function createTableGrid(
 
   /* ---- Row editing (edit / insert / delete) ---- */
   let editMode = false;
+  // IME 変換中フラグ。変換中は renderViewport の body 再構築をスキップして
+  // composition の中断を防ぐ (compositionend で再描画してキャッチアップ)。
+  let isComposing = false;
   // 既存行の保留編集。rowKey -> { pk セル, 変更された colIndex -> 新値 }。
   // 値は string (テキスト) または null (SQL NULL)。
   const pendingEdits = new Map<
@@ -1307,6 +1310,8 @@ export function createTableGrid(
     opts: {
       readonly: boolean;
       nullable: boolean;
+      // body 全体の再構築 (スクロール等) 後にフォーカスを復元するための行識別子。
+      rowIndex: number;
       onChange: (v: string | null) => void;
     },
   ): HTMLElement {
@@ -1316,6 +1321,8 @@ export function createTableGrid(
     const input = document.createElement("input");
     input.type = "text";
     input.className = "db-grid-cell-input";
+    input.dataset.editRow = String(opts.rowIndex);
+    input.dataset.editCol = String(colIndex);
     // value===null は SQL NULL。空入力の "" (空文字列) と視覚的に区別するため、
     // placeholder "NULL" + is-null クラスで表現する。
     const applyNullVisual = (isNull: boolean) => {
@@ -1423,6 +1430,7 @@ export function createTableGrid(
           buildEditableCell(c, shown, {
             readonly: ro,
             nullable: columns[c]?.nullable === true,
+            rowIndex: i,
             onChange: (v) => recordEdit(rowData, c, v),
           }),
         );
@@ -1529,6 +1537,7 @@ export function createTableGrid(
         buildEditableCell(c, dv, {
           readonly: false,
           nullable: columns[c]?.nullable === true,
+          rowIndex: totalRows + draftIndex,
           onChange: (v) => {
             // "" = 未入力 (省略), null = 明示 NULL, それ以外 = 値。
             if (v === "") draft.delete(c);
@@ -1545,6 +1554,9 @@ export function createTableGrid(
   function renderViewport() {
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(() => {
+      // IME 変換中は body を作り直すと入力中の composition が中断されるので、
+      // この描画はスキップする (compositionend 後に再描画でキャッチアップする)。
+      if (isComposing) return;
       const scrollTop = viewport.scrollTop;
       const viewHeight = viewport.clientHeight;
       const startRow = Math.max(
@@ -1569,6 +1581,35 @@ export function createTableGrid(
         }
       }
 
+      // 編集モードでは body 全体を作り直すとフォーカス中のセル入力が破棄され、
+      // スクロールのたびにキャレットが飛ぶ。再描画前に「どのセルを編集中か」と
+      // 選択範囲を控えておき、再構築後に同じセルへ復元する。
+      // 注意: `instanceof HTMLInputElement` は一部のテスト用 DOM シムでグローバル
+      // 未定義になり throw するため使わない。className + duck typing で判定する。
+      const active = document.activeElement as
+        | (HTMLElement & {
+            selectionStart?: number | null;
+            selectionEnd?: number | null;
+          })
+        | null;
+      let focusRestore: {
+        row: string;
+        col: string;
+        start: number | null;
+        end: number | null;
+      } | null = null;
+      if (
+        active?.classList?.contains("db-grid-cell-input") &&
+        body.contains(active)
+      ) {
+        focusRestore = {
+          row: active.dataset?.editRow ?? "",
+          col: active.dataset?.editCol ?? "",
+          start: active.selectionStart ?? null,
+          end: active.selectionEnd ?? null,
+        };
+      }
+
       body.innerHTML = "";
       body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
 
@@ -1576,6 +1617,23 @@ export function createTableGrid(
         body.appendChild(
           i < totalRows ? buildDataRow(i) : buildDraftRow(i - totalRows),
         );
+      }
+
+      if (focusRestore) {
+        const next = body.querySelector<HTMLInputElement>(
+          `.db-grid-cell-input[data-edit-row="${focusRestore.row}"][data-edit-col="${focusRestore.col}"]`,
+        );
+        if (next) {
+          next.focus?.();
+          try {
+            next.setSelectionRange?.(
+              focusRestore.start ?? next.value.length,
+              focusRestore.end ?? next.value.length,
+            );
+          } catch {
+            // 一部 input type では setSelectionRange 不可。フォーカスだけで十分。
+          }
+        }
       }
     });
   }
@@ -1730,11 +1788,25 @@ export function createTableGrid(
   };
   viewport.addEventListener("scroll", onViewportScroll, { passive: true });
 
+  // 編集セル入力の IME 変換境界を捕捉する (composition イベントは body から
+  // バブリングする)。変換中は renderViewport をスキップし、確定後に再描画する。
+  const onCompositionStart = () => {
+    isComposing = true;
+  };
+  const onCompositionEnd = () => {
+    isComposing = false;
+    renderViewport();
+  };
+  body.addEventListener("compositionstart", onCompositionStart);
+  body.addEventListener("compositionend", onCompositionEnd);
+
   function destroy() {
     clear();
     embeddedGrid?.destroy();
     embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
+    body.removeEventListener("compositionstart", onCompositionStart);
+    body.removeEventListener("compositionend", onCompositionEnd);
     // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。
     detailResizeCleanup?.();
   }

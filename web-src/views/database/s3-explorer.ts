@@ -43,6 +43,8 @@ export type S3ExplorerCallbacks = {
   // localStorage は使わない。callback 未指定なら ON 固定で永続化なし。
   getTooltipEnabled?: () => boolean;
   setTooltipEnabled?: (enabled: boolean) => void;
+  // 書き込み fetch を共通の in-flight 追跡に乗せる。未指定なら素通し。
+  trackLoad?: <T>(promise: Promise<T>) => Promise<T>;
 };
 
 export type S3ExplorerView = {
@@ -612,7 +614,7 @@ export function createS3Explorer(
   }
 
   async function postS3Write(body: Record<string, unknown>): Promise<void> {
-    const res = await fetch("/_db/s3/write", {
+    const doFetch = fetch("/_db/s3/write", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -620,6 +622,9 @@ export function createS3Explorer(
       },
       body: JSON.stringify(body),
     });
+    const res = await (callbacks.trackLoad
+      ? callbacks.trackLoad(doFetch)
+      : doFetch);
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
   }
 

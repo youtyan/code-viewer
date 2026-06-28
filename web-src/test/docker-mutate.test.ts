@@ -148,6 +148,41 @@ describe("docker applyMutations", () => {
     expect(sql).toMatch(/COMMIT$/);
   });
 
+  test("postgresql boolean column renders TRUE/FALSE through applyMutations", async () => {
+    // 回帰防止 (round-1 修正): boolean 列を `= 1` にすると PG が型エラーで弾く。
+    const PG_BOOL_COLUMNS = [
+      "id\tinteger\tNO\t\tYES",
+      "active\tboolean\tYES\t\tNO",
+    ].join(PG_RS);
+    harness = installSpawn((sql) =>
+      sql.includes("information_schema.columns")
+        ? { stdout: PG_BOOL_COLUMNS }
+        : { stdout: "" },
+    );
+    const adapter = pgAdapter();
+    await adapter.applyMutations?.("flags", [
+      {
+        kind: "insert",
+        values: [
+          { column: "id", value: "1" },
+          { column: "active", value: "true" },
+        ],
+      },
+      {
+        kind: "update",
+        pk: [{ column: "id", value: "2" }],
+        values: [{ column: "active", value: "0" }],
+      },
+    ]);
+    const write = harness.calls.find((s) => s.includes("BEGIN;")) as string;
+    expect(write).toMatch(
+      'INSERT INTO "flags" ("id", "active") VALUES (1, TRUE)',
+    );
+    expect(write).toMatch('UPDATE "flags" SET "active" = FALSE WHERE "id" = 2');
+    // 整数リテラルになっていないこと。
+    expect(/"active" = 1\b/.test(write)).toBe(false);
+  });
+
   test("a CLI error (non-zero exit) is turned into a thrown error", async () => {
     harness = installSpawn((sql) =>
       sql.includes("information_schema.columns")
