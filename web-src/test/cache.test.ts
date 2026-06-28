@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   CACHE_TTL_MS,
+  cacheFresh,
   fileDiffCacheKey,
   setTimedCacheEntry,
   type TimedCacheEntry,
-  cacheFresh,
 } from "../server/cache";
 
 describe("timed server cache", () => {

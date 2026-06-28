@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  PALETTE_RESULT_LIMIT,
   limitPaletteResults,
   movePaletteSelection,
+  PALETTE_RESULT_LIMIT,
 } from "../core/search-palette";
 
 describe("limitPaletteResults", () => {

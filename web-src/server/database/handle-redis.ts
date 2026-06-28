@@ -11,6 +11,7 @@ import {
   dispatchRoutes,
   handleError,
   json,
+  parseBoundedJsonBody,
   resolveDockerExplorerAsync,
   textError,
 } from "./handle-shared";
@@ -106,6 +107,94 @@ async function handleKeys(
   }
 }
 
+async function handleWrite(
+  req: Request,
+  cwd: string,
+  omitDirNames?: string[],
+): Promise<Response> {
+  const parsed = await parseBoundedJsonBody(
+    req,
+    1024 * 1024,
+    "payload too large",
+  );
+  if (parsed instanceof Response) return parsed;
+  const body = parsed as {
+    db?: unknown;
+    dbIndex?: unknown;
+    key?: unknown;
+    op?: unknown;
+    field?: unknown;
+    index?: unknown;
+    value?: unknown;
+  };
+  if (typeof body.db !== "string" || body.db === "") {
+    return textError("missing db", 400);
+  }
+  const dbIndex = Number(body.dbIndex);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return textError("dbIndex must be an integer in 0..15", 400);
+  }
+  if (typeof body.key !== "string" || body.key === "") {
+    return textError("missing key", 400);
+  }
+  const op = body.op;
+  const value = typeof body.value === "string" ? body.value : "";
+  const r = await resolveRedis(cwd, body.db, req.signal, omitDirNames);
+  if (r instanceof Response) return r;
+  try {
+    if (op === "setString") {
+      await r.explorer.setStringAsync({
+        db: dbIndex,
+        key: body.key,
+        value,
+        signal: req.signal,
+      });
+    } else if (op === "createString") {
+      // 新規作成は既存キーを上書きしない (SET NX)。既存なら例外 → 400。
+      await r.explorer.createStringAsync({
+        db: dbIndex,
+        key: body.key,
+        value,
+        signal: req.signal,
+      });
+    } else if (op === "setHashField") {
+      if (typeof body.field !== "string" || body.field === "") {
+        return textError("missing field", 400);
+      }
+      await r.explorer.setHashFieldAsync({
+        db: dbIndex,
+        key: body.key,
+        field: body.field,
+        value,
+        signal: req.signal,
+      });
+    } else if (op === "setListIndex") {
+      const index = Number(body.index);
+      if (!Number.isInteger(index) || index < 0) {
+        return textError("index must be a non-negative integer", 400);
+      }
+      await r.explorer.setListIndexAsync({
+        db: dbIndex,
+        key: body.key,
+        index,
+        value,
+        signal: req.signal,
+      });
+    } else if (op === "delete") {
+      await r.explorer.deleteKeyAsync({
+        db: dbIndex,
+        key: body.key,
+        signal: req.signal,
+      });
+    } else {
+      return textError(`unknown op: ${String(op)}`, 400);
+    }
+    return json({ ok: true });
+  } catch (err) {
+    return handleError("redis", "write redis value", err);
+  }
+}
+
 export async function handleRedisRoute(
   req: Request,
   url: URL,
@@ -129,6 +218,11 @@ export async function handleRedisRoute(
       "/_db/redis/value": {
         methods: ["GET"],
         handler: () => handleValue(req, cwd, url, omitDirNames),
+      },
+      "/_db/redis/write": {
+        methods: ["POST"],
+        sideEffect: true,
+        handler: () => handleWrite(req, cwd, omitDirNames),
       },
     },
     sideEffectAllowed,

@@ -1,12 +1,15 @@
 import type {
+  DbCellInput,
   DbColumn,
   DbForeignKey,
   DbOrderDirection,
   DbTableDataResponse,
   DbValue,
+  RowMutation,
 } from "../../core/database/types";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
+import { showConfirmDialog } from "../ui-dialog";
 import { type DbText, dbText } from "./i18n";
 
 const ROW_HEIGHT = 28;
@@ -97,6 +100,10 @@ export type TableGridCallbacks = {
   setDetailPanelHeight?: (height: number) => void;
   /** 現在の言語設定に応じたローカライズ文言を返す。 */
   getText?: () => DbText;
+  /** このグリッドで行編集 UI を出してよいか (書き込み対応データストアのみ)。 */
+  getEditable?: () => boolean;
+  /** 保留中の変更をサーバへ適用する。失敗時は throw (メッセージを表示する)。 */
+  applyMutations?: (mutations: RowMutation[]) => Promise<void>;
 };
 
 export type TableGridOptions = {
@@ -117,6 +124,16 @@ export type TableGrid = {
   /** getForeignKeys の返り値が変わったとき (例: 推測 FK トグル) に
    * fkColumns を作り直してヘッダー/セル表示を更新する。データは再取得しない。 */
   refreshForeignKeys: () => void;
+  /** 編集モード ON/OFF を外部 (prefs バーのトグル等) から制御する。
+   * pending changes がある状態で OFF にするとカスタムダイアログで確認する。
+   * 結果として実際に切り替わったかを返す。 */
+  setEditMode: (on: boolean) => Promise<boolean>;
+  getEditMode: () => boolean;
+  /** このグリッドが書き込み対応 (= 編集モードに入れる) か。
+   * テーブル切替で変わるので、subscribe ハンドラで都度通知する。 */
+  isEditable: () => boolean;
+  onEditableChange: (listener: (editable: boolean) => void) => () => void;
+  onEditModeChange: (listener: (on: boolean) => void) => () => void;
 };
 
 export function createTableGrid(
@@ -194,7 +211,36 @@ export function createTableGrid(
     triggerExport("json");
   });
 
-  filterBar.append(filterIcon, filterInput, filterClear, exportWrap);
+  // --- 行編集ツールバー (コミット/破棄/新規行) ---
+  // embedded (関連パネルの埋め込みグリッド) では編集 UI を出さない。
+  // 編集モード ON/OFF のトグルはサイドバー prefs バーに集約 (#16)。
+  // ここのコントロールは「編集モード ON 中だけ」表示する。
+  // editWrap 自体は editable 判定で hidden 切替 (refreshEditButtons)。
+  // 子要素は editMode で visibility 切替する (場所は確保 = レイアウトシフト
+  // 回避)。初期は editMode OFF 相当に visibility:hidden 固定で組み立てる。
+  const editWrap = document.createElement("div");
+  editWrap.className = "db-grid-edit-controls";
+  editWrap.hidden = true;
+  const newRowBtn = document.createElement("button");
+  newRowBtn.type = "button";
+  newRowBtn.className = "db-btn db-grid-edit-newrow";
+  newRowBtn.textContent = text().edit.newRow;
+  newRowBtn.style.visibility = "hidden";
+  const commitBtn = document.createElement("button");
+  commitBtn.type = "button";
+  commitBtn.className = "db-btn db-btn-primary db-grid-edit-commit";
+  commitBtn.textContent = text().edit.commit;
+  commitBtn.style.visibility = "hidden";
+  const discardBtn = document.createElement("button");
+  discardBtn.type = "button";
+  discardBtn.className = "db-btn db-grid-edit-discard";
+  discardBtn.textContent = text().edit.discard;
+  discardBtn.style.visibility = "hidden";
+  const editStatus = document.createElement("span");
+  editStatus.className = "db-grid-edit-status";
+  editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
+
+  filterBar.append(filterIcon, filterInput, filterClear, editWrap, exportWrap);
 
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
@@ -364,6 +410,30 @@ export function createTableGrid(
   let renderStartRow = 0;
   // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
   const fkColumns = new Set<string>();
+
+  /* ---- Row editing (edit / insert / delete) ---- */
+  let editMode = false;
+  // IME 変換中フラグ。変換中は renderViewport の body 再構築をスキップして
+  // composition の中断を防ぐ (compositionend で再描画してキャッチアップ)。
+  let isComposing = false;
+  // 既存行の保留編集。rowKey -> { pk セル, 変更された colIndex -> 新値 }。
+  // 値は string (テキスト) または null (SQL NULL)。
+  const pendingEdits = new Map<
+    string,
+    { pk: DbCellInput[]; edits: Map<number, string | null> }
+  >();
+  // 削除対象の既存行。rowKey -> pk セル。
+  const pendingDeletes = new Map<string, DbCellInput[]>();
+  // 新規行ドラフト。各行は colIndex -> 値 (string=テキスト / null=NULL)。
+  // 未入力の列はエントリ無し (= 省略され DB デフォルトが入る)。
+  let draftRows: Array<Map<number, string | null>> = [];
+  // 編集モードで「いま input になっている既存データセル」を覚える。
+  // 既定はデータ行も表示モードで描画し、シングルクリックは詳細パネルや FK
+  // ナビゲーションを担う。セルをダブルクリックすると editingCell* がそのセル
+  // を指し、再描画で該当セルだけ input になる。input から focus が外れたら
+  // 解除して再描画する。ドラフト行と PK/blob などの readonly セルは対象外。
+  let editingCellRow = -1;
+  let editingCellCol = -1;
 
   /* ---- Related-data panel (FK navigation) ---- */
   // 1 行が持つ外部キー参照の集合。左リストの各エントリに対応する。
@@ -572,6 +642,12 @@ export function createTableGrid(
     detailPanel.hidden = true;
     clearDetailContent();
     colWidths.clear();
+    // テーブル切替で保留中の変更はリセットする (テーブル固有のため)。
+    // 編集モード自体は同じタブ内では保持する (#16: prefs バーのトグルが現在の
+    // タブの editMode を表すため、テーブル切替で勝手に OFF にしない)。
+    clearPending();
+    setEditStatus("");
+    refreshEditButtons();
   }
 
   let relatedFirstPageController: AbortController | null = null;
@@ -906,8 +982,8 @@ export function createTableGrid(
       if (target.fk.inferred) {
         const badge = document.createElement("span");
         badge.className = "db-related-list-inferred-badge";
-        badge.textContent = "inferred";
-        badge.title = "Inferred from Rails-style naming, not declared in DB";
+        badge.textContent = text().nav.inferredBadge;
+        badge.title = text().nav.inferredBadgeTitle;
         name.appendChild(badge);
       }
       const via = document.createElement("span");
@@ -1227,7 +1303,7 @@ export function createTableGrid(
         if (gen !== loadGeneration) return;
         pageCache.set(pageStart, data.rows);
         totalRows = data.totalRows;
-        spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+        syncSpacer();
         updateStatus();
         renderViewport();
       })
@@ -1246,9 +1322,407 @@ export function createTableGrid(
     return tracked;
   }
 
+  // 編集モードのセルを作る。editing=false なら表示モード (read-only セル相当
+  // のテキスト + シングルクリックで詳細パネル/FK ナビ + ダブルクリックで input
+  // 化)、editing=true なら入力モード (input + NULL ボタン)。readonly な PK/blob
+  // 列は editing=true を渡しても入力できない (input.readOnly)。
+  function buildEditableCell(
+    colIndex: number,
+    value: string | null,
+    opts: {
+      readonly: boolean;
+      nullable: boolean;
+      editing: boolean;
+      // body 全体の再構築 (スクロール等) 後にフォーカスを復元するための行識別子。
+      rowIndex: number;
+      onChange: (v: string | null) => void;
+      // editing=false (表示モード) でセルをクリックした時 / ダブルクリックで
+      // 入力モードに切り替える時 / 入力モードから抜ける時のフック。
+      onActivate?: () => void;
+      onEnterEdit?: () => void;
+      onExitEdit?: () => void;
+    },
+  ): HTMLElement {
+    const cell = document.createElement("div");
+    cell.className = "db-grid-cell db-grid-cell-edit";
+    cell.style.width = `${getColWidth(columnNames[colIndex])}px`;
+
+    // ---- 表示モード: read-only 風のテキスト表示。ダブルクリックで input 化。
+    if (!opts.editing) {
+      cell.classList.add("db-grid-cell-display");
+      cell.textContent = value === null ? "NULL" : value === "" ? "" : value;
+      if (value === null) cell.classList.add("null");
+      else if (value === "") cell.classList.add("empty");
+      if (opts.readonly) {
+        cell.classList.add("readonly");
+      }
+      cell.style.cursor = "pointer";
+      cell.addEventListener("click", (e) => {
+        e.stopPropagation();
+        opts.onActivate?.();
+      });
+      // 読み取り専用 (PK/blob) はダブルクリックしても編集できないので、
+      // 編集 hint を出さず dblclick もバインドしない。
+      if (!opts.readonly) {
+        cell.title = text().edit.dblclickToEdit;
+        cell.addEventListener("dblclick", (e) => {
+          e.stopPropagation();
+          opts.onEnterEdit?.();
+        });
+      }
+      return cell;
+    }
+
+    // ---- 入力モード: input (NULL は placeholder "NULL" + is-null クラス)。
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "db-grid-cell-input";
+    input.dataset.editRow = String(opts.rowIndex);
+    input.dataset.editCol = String(colIndex);
+    // value===null は SQL NULL。空入力の "" (空文字列) と視覚的に区別するため、
+    // placeholder "NULL" + is-null クラスで表現する。
+    const applyNullVisual = (isNull: boolean) => {
+      input.classList.toggle("is-null", isNull);
+      input.placeholder = isNull ? "NULL" : "";
+    };
+    input.value = value === null ? "" : value;
+    applyNullVisual(value === null);
+    if (opts.readonly) {
+      input.readOnly = true;
+      input.classList.add("readonly");
+    }
+    input.addEventListener("input", () => {
+      // テキスト入力したら NULL 状態は解除 (空文字列 "" は NULL ではない)。
+      applyNullVisual(false);
+      opts.onChange(input.value);
+    });
+    // 行選択/セル詳細クリックと衝突させない。
+    input.addEventListener("click", (e) => e.stopPropagation());
+    // 入力確定で表示モードへ戻す。NULL ボタンに focus が移るケースを除く。
+    input.addEventListener("blur", (e) => {
+      const next = (e as FocusEvent).relatedTarget as Node | null;
+      if (next && cell.contains(next)) return;
+      opts.onExitEdit?.();
+    });
+    // Enter / Escape で編集を抜けて表示モードへ戻す (値は input イベントで
+    // すでに反映済み。Escape でも保留中変更を消したりはしない)。
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === "Escape") {
+        e.preventDefault();
+        opts.onExitEdit?.();
+      }
+    });
+    cell.appendChild(input);
+    // nullable 列には NULL ボタンを出し、明示的に SQL NULL を入れられるように
+    // する (NULL→"" の暗黙変換や NULL 設定不可の問題への対処)。
+    if (opts.nullable && !opts.readonly) {
+      const nullBtn = document.createElement("button");
+      nullBtn.type = "button";
+      nullBtn.className = "db-grid-cell-null-btn";
+      nullBtn.textContent = "∅";
+      nullBtn.title = text().edit.setNull;
+      // NULL ボタンを mousedown で抑止すると button へのフォーカス移譲が起き
+      // ず input の blur が走らないので、editing が解除されない。
+      nullBtn.addEventListener("mousedown", (e) => e.preventDefault());
+      nullBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        input.value = "";
+        applyNullVisual(true);
+        opts.onChange(null);
+        // クリック後も入力モードを維持するため、明示的に input へ戻す。
+        input.focus();
+      });
+      cell.appendChild(nullBtn);
+    }
+    return cell;
+  }
+
+  // 既存データ行 (read-only もしくは編集モード) を 1 行ぶん組み立てる。
+  function buildDataRow(i: number): HTMLElement {
+    const pageStart = Math.floor(i / PAGE_SIZE) * PAGE_SIZE;
+    const pageRows = pageCache.get(pageStart);
+    const rowData = pageRows ? pageRows[i - pageStart] : null;
+
+    const row = document.createElement("div");
+    row.className = "db-grid-row";
+    if (i % 2 === 1) row.classList.add("alt");
+    if (i === selectedRowIndex) row.classList.add("selected");
+    const rowIndex = i;
+
+    const rowNum = document.createElement("div");
+    rowNum.className = "db-grid-cell db-grid-rownum";
+    rowNum.textContent = String(i + 1);
+    row.appendChild(rowNum);
+
+    if (!rowData) {
+      for (let c = 0; c < columnNames.length; c++) {
+        const cell = document.createElement("div");
+        cell.className = "db-grid-cell loading";
+        cell.style.width = `${getColWidth(columnNames[c])}px`;
+        cell.textContent = "…";
+        row.appendChild(cell);
+      }
+      return row;
+    }
+
+    if (editMode) {
+      const key = rowKeyFor(rowData);
+      // PK があり値が編集可能 (null/blob でない) 行だけ更新・削除できる。
+      const editableRow = key !== null;
+      if (key !== null && pendingDeletes.has(key)) {
+        row.classList.add("db-grid-row-deleted");
+      }
+      if (editableRow) {
+        rowNum.classList.add("db-grid-rownum-deletable");
+        rowNum.title = text().edit.deleteRow;
+        rowNum.style.cursor = "pointer";
+        rowNum.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const deleted = toggleDelete(rowData);
+          row.classList.toggle("db-grid-row-deleted", deleted);
+        });
+      }
+      const pendingForRow = key !== null ? pendingEdits.get(key) : undefined;
+      // 行内に 1 つでもセル編集がある場合は行頭にマークを付ける (rownum
+      // colorize + 行全体に薄い背景)。delete マークが優先する場合は上書きされる。
+      if ((pendingForRow?.edits.size ?? 0) > 0) {
+        row.classList.add("db-grid-row-edited");
+      }
+      for (let c = 0; c < columnNames.length; c++) {
+        const original = rowData[c];
+        // 元の表示値 (string|null)。NULL は null のまま渡して NULL 表示にする。
+        const originalShown: string | null =
+          original === null
+            ? null
+            : original instanceof Uint8Array
+              ? formatValue(original)
+              : String(original);
+        const hasOverride = pendingForRow?.edits.has(c) ?? false;
+        const shown: string | null = hasOverride
+          ? (pendingForRow?.edits.get(c) ?? null)
+          : originalShown;
+        // PK・blob・PK 無し行は readonly。
+        const ro =
+          !editableRow ||
+          columns[c]?.primaryKey === true ||
+          original instanceof Uint8Array;
+        const cellColIndex = c;
+        const cellColName = columnNames[c];
+        const cellValue = original;
+        const rowValues = rowData;
+        const fkClickable =
+          fkColumns.has(cellColName) &&
+          (!embedded || !!callbacks.onForeignKeyCellClick);
+        const isEditingThisCell =
+          !ro && i === editingCellRow && c === editingCellCol;
+        // シングルクリック時のハンドラ。read-only モードと同じく、行/アクティブ
+        // セルを更新し、FK セルなら関連パネル、その他なら詳細フッタを開く。
+        const activate = () => {
+          selectedRowIndex = rowIndex;
+          body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+            r.classList.remove("selected");
+          });
+          row.classList.add("selected");
+          setActiveCell(rowIndex, cellColIndex);
+          if (fkClickable) {
+            if (embedded) {
+              callbacks.onForeignKeyCellClick?.(
+                currentTable,
+                columnNames,
+                rowValues,
+                cellColName,
+              );
+            } else {
+              openRelatedForRow(
+                currentTable,
+                columnNames,
+                rowValues,
+                cellColName,
+              );
+            }
+          } else {
+            showCellDetail(cellColIndex, cellValue);
+          }
+        };
+        // ダブルクリックで input 化。renderViewport 後に input が現れるので、
+        // rAF 後に focus + キャレットを末尾へ。
+        const enterEdit = () => {
+          editingCellRow = i;
+          editingCellCol = cellColIndex;
+          renderViewport();
+          requestAnimationFrame(() => {
+            const inp = body.querySelector<HTMLInputElement>(
+              `.db-grid-cell-input[data-edit-row="${i}"][data-edit-col="${cellColIndex}"]`,
+            );
+            if (!inp) return;
+            inp.focus?.();
+            try {
+              inp.setSelectionRange?.(inp.value.length, inp.value.length);
+            } catch {
+              // 一部 input type では setSelectionRange 不可。focus のみで十分。
+            }
+          });
+        };
+        // input の blur / Enter / Escape で表示モードへ戻す。
+        const exitEdit = () => {
+          if (editingCellRow === i && editingCellCol === cellColIndex) {
+            editingCellRow = -1;
+            editingCellCol = -1;
+            renderViewport();
+          }
+        };
+        const cellEl = buildEditableCell(c, shown, {
+          readonly: ro,
+          nullable: columns[c]?.nullable === true,
+          editing: isEditingThisCell,
+          rowIndex: i,
+          onChange: (v) => recordEdit(rowData, c, v),
+          onActivate: activate,
+          onEnterEdit: enterEdit,
+          onExitEdit: exitEdit,
+        });
+        if (fkClickable) {
+          cellEl.classList.add("db-grid-cell-fk");
+        }
+        // 編集された (pending override がある) セルに色を付ける。
+        if (hasOverride) {
+          cellEl.classList.add("db-grid-cell-edited");
+        }
+        // virtualized 再描画でも色が残るよう、render 時に state と
+        // 突合せてクラスを付ける (input モード時は focus 表示があるので不要)。
+        if (
+          !isEditingThisCell &&
+          i === activeCellRowIndex &&
+          c === activeCellColIndex
+        ) {
+          cellEl.classList.add("db-grid-cell-active");
+        }
+        row.appendChild(cellEl);
+      }
+      return row;
+    }
+
+    // --- read-only (既存挙動) ---
+    row.addEventListener("click", () => {
+      selectedRowIndex = rowIndex;
+      body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+        r.classList.remove("selected");
+      });
+      row.classList.add("selected");
+    });
+    for (let c = 0; c < columnNames.length; c++) {
+      const cell = document.createElement("div");
+      cell.className = "db-grid-cell";
+      cell.style.width = `${getColWidth(columnNames[c])}px`;
+      const val = rowData[c];
+      cell.textContent = formatValue(val);
+      if (val === null) cell.classList.add("null");
+      else if (val instanceof Uint8Array) cell.classList.add("blob");
+      else if (typeof val === "string" && val === "")
+        cell.classList.add("empty");
+      cell.style.cursor = "pointer";
+      const cellValue = val;
+      const cellColIndex = c;
+      const cellColName = columnNames[c];
+      const rowValues = rowData;
+      // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
+      // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
+      const fkClickable =
+        fkColumns.has(cellColName) &&
+        (!embedded || !!callbacks.onForeignKeyCellClick);
+      if (fkClickable) {
+        cell.classList.add("db-grid-cell-fk");
+      }
+      cell.addEventListener("click", (e) => {
+        e.stopPropagation();
+        selectedRowIndex = rowIndex;
+        body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
+          r.classList.remove("selected");
+        });
+        row.classList.add("selected");
+        // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
+        setActiveCell(rowIndex, cellColIndex);
+        // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
+        // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
+        if (fkClickable) {
+          if (embedded) {
+            callbacks.onForeignKeyCellClick?.(
+              currentTable,
+              columnNames,
+              rowValues,
+              cellColName,
+            );
+          } else {
+            openRelatedForRow(
+              currentTable,
+              columnNames,
+              rowValues,
+              cellColName,
+            );
+          }
+        } else {
+          showCellDetail(cellColIndex, cellValue);
+        }
+      });
+      // virtualized 再描画でも色が残るよう、render 時に state と
+      // 突合せてクラスを付ける。
+      if (i === activeCellRowIndex && c === activeCellColIndex) {
+        cell.classList.add("db-grid-cell-active");
+      }
+      row.appendChild(cell);
+    }
+    return row;
+  }
+
+  // 新規行ドラフト (編集モード時のみ、データ行の下に表示) を組み立てる。
+  function buildDraftRow(draftIndex: number): HTMLElement {
+    const draft = draftRows[draftIndex];
+    const row = document.createElement("div");
+    row.className = "db-grid-row db-grid-row-draft";
+    const rowNum = document.createElement("div");
+    rowNum.className = "db-grid-cell db-grid-rownum db-grid-rownum-draft";
+    rowNum.textContent = "＋";
+    rowNum.title = text().edit.newRow;
+    rowNum.style.cursor = "pointer";
+    rowNum.addEventListener("click", (e) => {
+      e.stopPropagation();
+      draftRows.splice(draftIndex, 1);
+      syncSpacer();
+      refreshEditButtons();
+      showPendingStatus();
+      renderViewport();
+    });
+    row.appendChild(rowNum);
+    for (let c = 0; c < columnNames.length; c++) {
+      const dv: string | null = draft.has(c)
+        ? (draft.get(c) as string | null)
+        : "";
+      row.appendChild(
+        buildEditableCell(c, dv, {
+          readonly: false,
+          nullable: columns[c]?.nullable === true,
+          // ドラフト行は最初から入力モード (新規入力するための行)。
+          editing: true,
+          rowIndex: totalRows + draftIndex,
+          onChange: (v) => {
+            // "" = 未入力 (省略), null = 明示 NULL, それ以外 = 値。
+            if (v === "") draft.delete(c);
+            else draft.set(c, v);
+            refreshEditButtons();
+            showPendingStatus();
+          },
+        }),
+      );
+    }
+    return row;
+  }
+
   function renderViewport() {
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(() => {
+      // IME 変換中は body を作り直すと入力中の composition が中断されるので、
+      // この描画はスキップする (compositionend 後に再描画でキャッチアップする)。
+      if (isComposing) return;
       const scrollTop = viewport.scrollTop;
       const viewHeight = viewport.clientHeight;
       const startRow = Math.max(
@@ -1257,115 +1731,75 @@ export function createTableGrid(
       );
       // setActiveCell が body 内インデックスを計算するために参照する。
       renderStartRow = startRow;
+      // 編集モードでは末尾に新規行ドラフトを足すので表示行数が増える。
       const endRow = Math.min(
-        totalRows,
+        displayRowCount(),
         Math.ceil((scrollTop + viewHeight) / ROW_HEIGHT) + OVERSCAN,
       );
 
-      const neededPageStart = Math.floor(startRow / PAGE_SIZE) * PAGE_SIZE;
-      const neededPageEnd = Math.floor(endRow / PAGE_SIZE) * PAGE_SIZE;
-      for (let p = neededPageStart; p <= neededPageEnd; p += PAGE_SIZE) {
-        ensurePage(p);
+      // ページ取得はデータ行 (< totalRows) の範囲だけ行う。
+      const dataEnd = Math.min(endRow, totalRows);
+      if (startRow < totalRows && dataEnd > startRow) {
+        const neededPageStart = Math.floor(startRow / PAGE_SIZE) * PAGE_SIZE;
+        const neededPageEnd = Math.floor((dataEnd - 1) / PAGE_SIZE) * PAGE_SIZE;
+        for (let p = neededPageStart; p <= neededPageEnd; p += PAGE_SIZE) {
+          ensurePage(p);
+        }
+      }
+
+      // 編集モードでは body 全体を作り直すとフォーカス中のセル入力が破棄され、
+      // スクロールのたびにキャレットが飛ぶ。再描画前に「どのセルを編集中か」と
+      // 選択範囲を控えておき、再構築後に同じセルへ復元する。
+      // 注意: `instanceof HTMLInputElement` は一部のテスト用 DOM シムでグローバル
+      // 未定義になり throw するため使わない。className + duck typing で判定する。
+      const active = document.activeElement as
+        | (HTMLElement & {
+            selectionStart?: number | null;
+            selectionEnd?: number | null;
+          })
+        | null;
+      let focusRestore: {
+        row: string;
+        col: string;
+        start: number | null;
+        end: number | null;
+      } | null = null;
+      if (
+        active?.classList?.contains("db-grid-cell-input") &&
+        body.contains(active)
+      ) {
+        focusRestore = {
+          row: active.dataset?.editRow ?? "",
+          col: active.dataset?.editCol ?? "",
+          start: active.selectionStart ?? null,
+          end: active.selectionEnd ?? null,
+        };
       }
 
       body.innerHTML = "";
       body.style.transform = `translateY(${startRow * ROW_HEIGHT}px)`;
 
       for (let i = startRow; i < endRow; i++) {
-        const pageStart = Math.floor(i / PAGE_SIZE) * PAGE_SIZE;
-        const pageRows = pageCache.get(pageStart);
-        const rowData = pageRows ? pageRows[i - pageStart] : null;
+        body.appendChild(
+          i < totalRows ? buildDataRow(i) : buildDraftRow(i - totalRows),
+        );
+      }
 
-        const row = document.createElement("div");
-        row.className = "db-grid-row";
-        if (i % 2 === 1) row.classList.add("alt");
-        if (i === selectedRowIndex) row.classList.add("selected");
-        const rowIndex = i;
-        row.addEventListener("click", () => {
-          selectedRowIndex = rowIndex;
-          body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
-            r.classList.remove("selected");
-          });
-          row.classList.add("selected");
-        });
-
-        const rowNum = document.createElement("div");
-        rowNum.className = "db-grid-cell db-grid-rownum";
-        rowNum.textContent = String(i + 1);
-        row.appendChild(rowNum);
-
-        if (rowData) {
-          for (let c = 0; c < columnNames.length; c++) {
-            const cell = document.createElement("div");
-            cell.className = "db-grid-cell";
-            cell.style.width = `${getColWidth(columnNames[c])}px`;
-            const val = rowData[c];
-            cell.textContent = formatValue(val);
-            if (val === null) cell.classList.add("null");
-            else if (val instanceof Uint8Array) cell.classList.add("blob");
-            else if (typeof val === "string" && val === "")
-              cell.classList.add("empty");
-            cell.style.cursor = "pointer";
-            const cellValue = val;
-            const cellColIndex = c;
-            const cellColName = columnNames[c];
-            const rowValues = rowData;
-            // FK セルはメイン/埋め込みの両方で「辿れる」セルにする。埋め込み側は
-            // 親から渡された onForeignKeyCellClick が無ければ通常セル扱い。
-            const fkClickable =
-              fkColumns.has(cellColName) &&
-              (!embedded || !!callbacks.onForeignKeyCellClick);
-            if (fkClickable) {
-              cell.classList.add("db-grid-cell-fk");
-            }
-            cell.addEventListener("click", (e) => {
-              e.stopPropagation();
-              selectedRowIndex = rowIndex;
-              body.querySelectorAll(".db-grid-row.selected").forEach((r) => {
-                r.classList.remove("selected");
-              });
-              row.classList.add("selected");
-              // 詳細フッタ / 関連パネルに表示する対象セルを覚えておく。
-              setActiveCell(rowIndex, cellColIndex);
-              // FK セルは関連テーブルをパネルに開く（埋め込みは親へ通知して
-              // 1 段潜る）。それ以外は従来どおり単一値の詳細を表示する。
-              if (fkClickable) {
-                if (embedded) {
-                  callbacks.onForeignKeyCellClick?.(
-                    currentTable,
-                    columnNames,
-                    rowValues,
-                    cellColName,
-                  );
-                } else {
-                  openRelatedForRow(
-                    currentTable,
-                    columnNames,
-                    rowValues,
-                    cellColName,
-                  );
-                }
-              } else {
-                showCellDetail(cellColIndex, cellValue);
-              }
-            });
-            // virtualized 再描画でも色が残るよう、render 時に state と
-            // 突合せてクラスを付ける。
-            if (i === activeCellRowIndex && c === activeCellColIndex) {
-              cell.classList.add("db-grid-cell-active");
-            }
-            row.appendChild(cell);
-          }
-        } else {
-          for (let c = 0; c < columnNames.length; c++) {
-            const cell = document.createElement("div");
-            cell.className = "db-grid-cell loading";
-            cell.style.width = `${getColWidth(columnNames[c])}px`;
-            cell.textContent = "…";
-            row.appendChild(cell);
+      if (focusRestore) {
+        const next = body.querySelector<HTMLInputElement>(
+          `.db-grid-cell-input[data-edit-row="${focusRestore.row}"][data-edit-col="${focusRestore.col}"]`,
+        );
+        if (next) {
+          next.focus?.();
+          try {
+            next.setSelectionRange?.(
+              focusRestore.start ?? next.value.length,
+              focusRestore.end ?? next.value.length,
+            );
+          } catch {
+            // 一部 input type では setSelectionRange 不可。フォーカスだけで十分。
           }
         }
-        body.appendChild(row);
       }
     });
   }
@@ -1444,9 +1878,12 @@ export function createTableGrid(
     }
     rebuildFkColumnsForCurrentTable();
     loadColWidths();
-    spacer.style.height = `${totalRows * ROW_HEIGHT}px`;
+    syncSpacer();
     renderHeader();
     updateStatus();
+    // テーブルが変わったので編集 UI の出し分け (書き込み対応 + PK 有無) を更新。
+    refreshEditButtons();
+    showPendingStatus();
     if (!initialData) {
       ensurePage(0);
     } else {
@@ -1517,11 +1954,25 @@ export function createTableGrid(
   };
   viewport.addEventListener("scroll", onViewportScroll, { passive: true });
 
+  // 編集セル入力の IME 変換境界を捕捉する (composition イベントは body から
+  // バブリングする)。変換中は renderViewport をスキップし、確定後に再描画する。
+  const onCompositionStart = () => {
+    isComposing = true;
+  };
+  const onCompositionEnd = () => {
+    isComposing = false;
+    renderViewport();
+  };
+  body.addEventListener("compositionstart", onCompositionStart);
+  body.addEventListener("compositionend", onCompositionEnd);
+
   function destroy() {
     clear();
     embeddedGrid?.destroy();
     embeddedGrid = null;
     viewport.removeEventListener("scroll", onViewportScroll);
+    body.removeEventListener("compositionstart", onCompositionStart);
+    body.removeEventListener("compositionend", onCompositionEnd);
     // ドラッグ中の window リスナーが残らないよう、teardown 時に外す。
     detailResizeCleanup?.();
   }
@@ -1532,6 +1983,10 @@ export function createTableGrid(
     filterInput.placeholder = t.grid.searchPlaceholder;
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
+    newRowBtn.textContent = t.edit.newRow;
+    commitBtn.textContent = t.edit.commit;
+    discardBtn.textContent = t.edit.discard;
+    showPendingStatus();
     if (relatedEmptyEl) relatedEmptyEl.textContent = t.grid.relatedEmpty;
     if (currentTable) {
       renderHeader(); // FK アイコンの title や列フィルタを再構築
@@ -1552,6 +2007,294 @@ export function createTableGrid(
       if (fk.toTable === currentTable) fkColumns.add(fk.toColumn);
     }
   }
+
+  /* ---- Row editing helpers ---- */
+  function isEditable(): boolean {
+    return (
+      !embedded &&
+      callbacks.getEditable?.() === true &&
+      typeof callbacks.applyMutations === "function"
+    );
+  }
+
+  function pkColumnIndices(): number[] {
+    const idx: number[] = [];
+    for (let i = 0; i < columns.length; i++) {
+      if (columns[i].primaryKey) idx.push(i);
+    }
+    return idx;
+  }
+
+  function hasPrimaryKey(): boolean {
+    return columns.some((c) => c.primaryKey);
+  }
+
+  // 行を一意に識別するキー (PK 値の連結)。PK が無い、または PK 値に
+  // null/blob を含む行は編集不可 (null を返す)。
+  function rowKeyFor(rowData: DbValue[]): string | null {
+    const idx = pkColumnIndices();
+    if (idx.length === 0) return null;
+    const parts: string[] = [];
+    for (const i of idx) {
+      const v = rowData[i];
+      if (v === null || v instanceof Uint8Array) return null;
+      parts.push(String(v));
+    }
+    return JSON.stringify(parts);
+  }
+
+  function pkCellsFor(rowData: DbValue[]): DbCellInput[] {
+    return pkColumnIndices().map((i) => ({
+      column: columnNames[i],
+      value: String(rowData[i]),
+    }));
+  }
+
+  function nonEmptyDraftCount(): number {
+    // null (明示 NULL) または非空文字を 1 つでも持つドラフトを「入力あり」とする。
+    return draftRows.filter((d) =>
+      Array.from(d.values()).some((v) => v === null || v !== ""),
+    ).length;
+  }
+
+  function pendingCount(): number {
+    let updates = 0;
+    for (const [key, entry] of pendingEdits) {
+      if (pendingDeletes.has(key)) continue;
+      if (entry.edits.size > 0) updates++;
+    }
+    return updates + pendingDeletes.size + nonEmptyDraftCount();
+  }
+
+  function hasPending(): boolean {
+    return pendingCount() > 0;
+  }
+
+  function clearPending(): void {
+    pendingEdits.clear();
+    pendingDeletes.clear();
+    draftRows = [];
+  }
+
+  function displayRowCount(): number {
+    return totalRows + (editMode ? draftRows.length : 0);
+  }
+
+  function syncSpacer(): void {
+    spacer.style.height = `${displayRowCount() * ROW_HEIGHT}px`;
+  }
+
+  function setEditStatus(message: string): void {
+    editStatus.textContent = message;
+  }
+
+  function refreshEditButtons(): void {
+    const editable = isEditable();
+    // 書き込み非対応データストア (Redis 等) では editWrap 自体を hidden にして
+    // 場所も奪う。書き込み対応のときは editMode の ON/OFF に関わらず editWrap
+    // の幅を確保し、子要素は visibility 切替だけにする (レイアウトシフト回避)。
+    editWrap.hidden = !editable;
+    if (!editable) {
+      notifyEditableIfChanged();
+      return;
+    }
+    const inert = !editMode;
+    setControlVisibility(newRowBtn, !inert);
+    setControlVisibility(commitBtn, !inert);
+    setControlVisibility(discardBtn, !inert);
+    setControlVisibility(editStatus, !inert);
+    const count = pendingCount();
+    commitBtn.disabled = count === 0;
+    discardBtn.disabled = count === 0;
+    notifyEditableIfChanged();
+  }
+
+  // editMode OFF のとき、ボタン/ステータスを「見せない・触れない」が「場所は
+  // 確保する」状態にするためのヘルパ。display:none / hidden だと幅が縮んで
+  // 隣の export ボタン等が右に寄る (レイアウトシフト) ため visibility 制御。
+  function setControlVisibility(el: HTMLElement, visible: boolean): void {
+    el.style.visibility = visible ? "" : "hidden";
+    // テスト用 DOM シムでは HTMLButtonElement グローバルが無いことがあるため
+    // instanceof は使わず、tabIndex プロパティの有無で判定する。
+    if ("tabIndex" in el) {
+      (el as HTMLElement & { tabIndex: number }).tabIndex = visible ? 0 : -1;
+    }
+    el.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+
+  // 外部 (database-view の prefs バー) が editable / editMode の変化を購読する
+  // ための仕組み。editToggle UI を削除した代わり、状態通知はこの listener 経由。
+  const editableListeners = new Set<(editable: boolean) => void>();
+  const editModeListeners = new Set<(on: boolean) => void>();
+  let lastEditableNotified: boolean | null = null;
+  function notifyEditableIfChanged(): void {
+    const v = isEditable();
+    if (v === lastEditableNotified) return;
+    lastEditableNotified = v;
+    for (const fn of editableListeners) fn(v);
+  }
+  function notifyEditMode(): void {
+    for (const fn of editModeListeners) fn(editMode);
+  }
+  function onEditableChange(listener: (editable: boolean) => void): () => void {
+    editableListeners.add(listener);
+    listener(isEditable());
+    return () => editableListeners.delete(listener);
+  }
+  function onEditModeChange(listener: (on: boolean) => void): () => void {
+    editModeListeners.add(listener);
+    listener(editMode);
+    return () => editModeListeners.delete(listener);
+  }
+
+  function showPendingStatus(): void {
+    const count = pendingCount();
+    setEditStatus(
+      editMode && count > 0
+        ? text().edit.pending(count)
+        : editMode && !hasPrimaryKey()
+          ? text().edit.noPrimaryKey
+          : "",
+    );
+  }
+
+  function recordEdit(
+    rowData: DbValue[],
+    colIndex: number,
+    value: string | null,
+  ): void {
+    const key = rowKeyFor(rowData);
+    if (key === null) return;
+    let entry = pendingEdits.get(key);
+    if (!entry) {
+      entry = { pk: pkCellsFor(rowData), edits: new Map() };
+      pendingEdits.set(key, entry);
+    }
+    const original = rowData[colIndex];
+    // 元が NULL/blob のときは originalStr=null。null vs null も「変更なし」と
+    // 判定し、元 NULL を黙って "" に書き換えてしまわないようにする。
+    const originalStr =
+      original === null || original instanceof Uint8Array
+        ? null
+        : String(original);
+    if (value === originalStr) {
+      entry.edits.delete(colIndex);
+      if (entry.edits.size === 0) pendingEdits.delete(key);
+    } else {
+      entry.edits.set(colIndex, value);
+    }
+    refreshEditButtons();
+    showPendingStatus();
+  }
+
+  function toggleDelete(rowData: DbValue[]): boolean {
+    const key = rowKeyFor(rowData);
+    if (key === null) return false;
+    if (pendingDeletes.has(key)) pendingDeletes.delete(key);
+    else pendingDeletes.set(key, pkCellsFor(rowData));
+    refreshEditButtons();
+    showPendingStatus();
+    return pendingDeletes.has(key);
+  }
+
+  function buildMutations(): RowMutation[] {
+    const muts: RowMutation[] = [];
+    for (const pk of pendingDeletes.values()) {
+      muts.push({ kind: "delete", pk });
+    }
+    for (const [key, entry] of pendingEdits) {
+      if (pendingDeletes.has(key)) continue;
+      if (entry.edits.size === 0) continue;
+      const values: DbCellInput[] = Array.from(entry.edits).map(([c, v]) => ({
+        column: columnNames[c],
+        value: v,
+      }));
+      muts.push({ kind: "update", pk: entry.pk, values });
+    }
+    for (const draft of draftRows) {
+      // null=明示 NULL, 非空文字=値。空文字 "" は「未入力」として省略し
+      // DB デフォルトに委ねる。
+      const values: DbCellInput[] = Array.from(draft)
+        .filter(([, v]) => v === null || v !== "")
+        .map(([c, v]) => ({ column: columnNames[c], value: v }));
+      if (values.length > 0) muts.push({ kind: "insert", values });
+    }
+    return muts;
+  }
+
+  async function setEditMode(on: boolean): Promise<boolean> {
+    if (on === editMode) return true;
+    if (!on && hasPending()) {
+      const ok = await showConfirmDialog({
+        body: text().edit.confirmDiscard,
+        confirmLabel: text().edit.discard,
+        danger: true,
+      });
+      if (!ok) return false;
+    }
+    editMode = on;
+    if (!on) clearPending();
+    notifyEditMode();
+    // 編集モード切替時は input 中のセルがあっても解除する。
+    editingCellRow = -1;
+    editingCellCol = -1;
+    syncSpacer();
+    refreshEditButtons();
+    showPendingStatus();
+    renderViewport();
+  }
+
+  async function commitPending(): Promise<void> {
+    if (!callbacks.applyMutations) return;
+    const mutations = buildMutations();
+    if (mutations.length === 0) return;
+    setEditStatus(text().edit.committing);
+    commitBtn.disabled = true;
+    discardBtn.disabled = true;
+    try {
+      await callbacks.applyMutations(mutations);
+      clearPending();
+      await invalidateData();
+      syncSpacer();
+      setEditStatus("");
+    } catch (err) {
+      setEditStatus(
+        text().edit.commitError(
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    } finally {
+      refreshEditButtons();
+    }
+  }
+
+  newRowBtn.addEventListener("click", () => {
+    draftRows.push(new Map());
+    syncSpacer();
+    refreshEditButtons();
+    showPendingStatus();
+    renderViewport();
+    // 追加した行が見えるよう末尾へスクロールしてから再描画する。
+    viewport.scrollTop = viewport.scrollHeight;
+    renderViewport();
+  });
+  discardBtn.addEventListener("click", async () => {
+    if (!hasPending()) return;
+    const ok = await showConfirmDialog({
+      body: text().edit.confirmDiscard,
+      confirmLabel: text().edit.discard,
+      danger: true,
+    });
+    if (!ok) return;
+    clearPending();
+    syncSpacer();
+    refreshEditButtons();
+    setEditStatus("");
+    renderViewport();
+  });
+  commitBtn.addEventListener("click", () => {
+    void commitPending();
+  });
 
   // 外部から FK セットの再計算を要求するエントリ。例: Rails 規約による
   // 仮想 FK のトグル切替時、データを再フェッチせずヘッダの 🔗 と
@@ -1575,6 +2318,11 @@ export function createTableGrid(
     destroy,
     localize,
     refreshForeignKeys,
+    setEditMode,
+    getEditMode: () => editMode,
+    isEditable,
+    onEditableChange,
+    onEditModeChange,
   };
 }
 

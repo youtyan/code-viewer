@@ -15,6 +15,17 @@ export type PrefToggleOptions = {
   extraClass?: string;
 };
 
+// 言語切替時にラベル / title を再適用する。
+export function localizePrefToggle(
+  btn: HTMLButtonElement,
+  label: string,
+  title: string,
+): void {
+  btn.title = title;
+  const labelEl = btn.querySelector<HTMLElement>(".db-pref-toggle-label");
+  if (labelEl) labelEl.textContent = label;
+}
+
 export function makePrefToggle(opts: PrefToggleOptions): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type = "button";

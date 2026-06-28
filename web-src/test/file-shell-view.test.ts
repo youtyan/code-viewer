@@ -7,6 +7,7 @@ import {
   type SourceLineTarget,
 } from "../core/routes";
 import type { SourceBlobTab } from "../views/file-shell";
+import { deferred, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -73,18 +74,6 @@ function installFetchMock(): void {
       return json({});
     }) as typeof fetch,
   });
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 2000,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("waitFor timed out");
 }
 
 function click(el: Element | null | undefined): void {
@@ -264,16 +253,6 @@ function testDeps(
       return Promise.resolve();
     },
   };
-}
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 beforeEach(() => {

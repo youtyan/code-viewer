@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  findMainScrollTarget,
   focusMainPanel,
   focusSidebarPanel,
-  findMainScrollTarget,
   getPanelFocusScope,
   isEditableKeyTarget,
   keymapScope,

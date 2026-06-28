@@ -11,6 +11,15 @@ import { sourceFixture } from "./source-fixture";
 const markdown = sourceFixture(
   readFileSync(new URL("../core/markdown-preview.ts", import.meta.url), "utf8"),
 );
+// shiki / mermaid の lazy load は専用 loader モジュールに切り出されている
+// (markdown-preview と er-diagram / query-editor 等から共有)。lazy 性は
+// loader 側のソースで検証する。
+const mermaidLoader = sourceFixture(
+  readFileSync(new URL("../core/mermaid-loader.ts", import.meta.url), "utf8"),
+);
+const shikiLoader = sourceFixture(
+  readFileSync(new URL("../core/shiki-loader.ts", import.meta.url), "utf8"),
+);
 const server = sourceFixture(
   readFileSync(new URL("../server/preview.ts", import.meta.url), "utf8"),
 );
@@ -236,8 +245,13 @@ describe("markdown preview", () => {
         "'/mermaid.js': ['mermaid.js', 'application/javascript; charset=utf-8']",
       ),
     ).toBe(true);
-    expect(markdown.includes("import('/' + 'mermaid.js')")).toBe(true);
-    expect(markdown.includes("securityLevel: 'strict'")).toBe(true);
+    // lazy import 本体は mermaid-loader.ts に切り出し済み。markdown-preview
+    // 側は loader を呼ぶだけで、bundle 抑止のための非リテラル import 文字列は
+    // loader にある。
+    expect(mermaidLoader.includes('"mermaid.js"')).toBe(true);
+    expect(mermaidLoader.includes('import(`/${"mermaid.js"}`)')).toBe(true);
+    expect(mermaidLoader.includes('securityLevel: "strict"')).toBe(true);
+    // mermaid の lightbox / error 描画は markdown-preview 側のまま。
     expect(markdown.includes("openMermaidLightbox")).toBe(true);
     expect(markdown.includes("renderMermaidError")).toBe(true);
   });
@@ -251,8 +265,12 @@ describe("markdown preview", () => {
         "'/shiki.js': ['shiki.js', 'application/javascript; charset=utf-8']",
       ),
     ).toBe(true);
-    expect(markdown.includes("import('/' + 'shiki.js')")).toBe(true);
-    expect(markdown.includes("'github-light', 'github-dark'")).toBe(true);
+    // lazy import 本体は shiki-loader.ts に切り出し済み。
+    expect(shikiLoader.includes('"shiki.js"')).toBe(true);
+    expect(shikiLoader.includes('import(`/${"shiki.js"}`)')).toBe(true);
+    // markdown は loader を `themes: ["github-light","github-dark"]` で
+    // 呼び出す側。
+    expect(markdown.includes('"github-light", "github-dark"')).toBe(true);
   });
 
   test("markdown preview CSS includes TOC, tables, mermaid, and lightbox styling", () => {

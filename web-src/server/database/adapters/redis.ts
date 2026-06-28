@@ -19,8 +19,47 @@ type RedisConfig = {
   password: string;
 };
 
+// Redis の書き込み操作。型ごとにコマンドが異なるため per-op のメソッドにする
+// (SQL のような汎用 mutation バッチには馴染まない)。値は UTF-8 テキストとして
+// redis-cli の argv で渡す (バイナリ値の書き込みは将来対応)。
+export type RedisWriteOps = {
+  setStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+  // 新規作成 (SET ... NX)。既存キーがあれば例外を投げ、上書きしない。
+  createStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+  setHashFieldAsync(opts: {
+    db: number;
+    key: string;
+    field: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+  setListIndexAsync(opts: {
+    db: number;
+    key: string;
+    index: number;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+  deleteKeyAsync(opts: {
+    db: number;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+};
+
 export type RedisExplorer = KvSource<RedisValue, RedisType> &
-  SnapshotIterable & {
+  SnapshotIterable &
+  RedisWriteOps & {
     readonly kind: "redis";
     readonly model: "kv";
     readonly capabilities: { snapshot: true };
@@ -173,7 +212,7 @@ function decodeHexItem(hex: string): RedisItem {
   return { binaryBase64: buf.toString("base64") };
 }
 
-function createRedisAdapter(config: RedisConfig): RedisExplorer {
+export function createRedisAdapter(config: RedisConfig): RedisExplorer {
   function parseDatabasesResult(result: {
     stdout: string;
     stderr: string;
@@ -884,6 +923,102 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     return [];
   }
 
+  // redis-cli は引数を argv で渡すのでシェル経由のインジェクションは無い。
+  // ただしコマンドエラーは exit 0 + stdout "(error) ..." で返ることがあるため
+  // stdout/stderr の両方を見て失敗を検出する。
+  async function runWriteAsync(
+    args: string[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const res = await execRedisCliAsync(config, args, 10000, signal);
+    if (res.code !== 0) {
+      throw new Error(
+        res.stderr.trim() || res.stdout.trim() || "redis command failed",
+      );
+    }
+    const out = res.stdout.trim();
+    if (/^\(error\)/i.test(out) || /^ERR\b/i.test(out)) {
+      throw new Error(out);
+    }
+  }
+
+  async function setStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    await runWriteAsync(
+      ["-n", String(opts.db), "SET", opts.key, opts.value],
+      opts.signal,
+    );
+  }
+
+  // 新規作成。SET ... NX で既存キーがあれば書き込まない。redis-cli は NX で
+  // セットしなかった場合 nil を返す (OK は返らない) ので、それを「既に存在」
+  // として 409 相当のエラーに変換する。これにより「新規作成」が既存キー
+  // (型を問わず) を黙って上書きするのを防ぐ。
+  async function createStringAsync(opts: {
+    db: number;
+    key: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const res = await execRedisCliAsync(
+      config,
+      ["-n", String(opts.db), "SET", opts.key, opts.value, "NX"],
+      10000,
+      opts.signal,
+    );
+    if (res.code !== 0) {
+      throw new Error(
+        res.stderr.trim() || res.stdout.trim() || "redis command failed",
+      );
+    }
+    const out = res.stdout.trim();
+    if (/^\(error\)/i.test(out) || /^ERR\b/i.test(out)) {
+      throw new Error(out);
+    }
+    // NX で弾かれた (既存) ときは OK が返らない。
+    if (!/\bOK\b/i.test(out)) {
+      throw new Error(`key already exists: ${opts.key}`);
+    }
+  }
+
+  async function setHashFieldAsync(opts: {
+    db: number;
+    key: string;
+    field: string;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    await runWriteAsync(
+      ["-n", String(opts.db), "HSET", opts.key, opts.field, opts.value],
+      opts.signal,
+    );
+  }
+
+  async function setListIndexAsync(opts: {
+    db: number;
+    key: string;
+    index: number;
+    value: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    await runWriteAsync(
+      ["-n", String(opts.db), "LSET", opts.key, String(opts.index), opts.value],
+      opts.signal,
+    );
+  }
+
+  async function deleteKeyAsync(opts: {
+    db: number;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    await runWriteAsync(["-n", String(opts.db), "DEL", opts.key], opts.signal);
+  }
+
   return {
     kind: "redis",
     model: "kv",
@@ -891,6 +1026,11 @@ function createRedisAdapter(config: RedisConfig): RedisExplorer {
     listDatabasesAsync,
     listKeysAsync,
     getValueAsync,
+    setStringAsync,
+    createStringAsync,
+    setHashFieldAsync,
+    setListIndexAsync,
+    deleteKeyAsync,
     iterateForSnapshot,
     listSnapshotContainers,
     close() {

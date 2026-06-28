@@ -34,6 +34,7 @@ import type {
   DiffCardElement,
   FileMeta,
 } from "../core/types";
+import { showConfirmDialog, showPromptDialog } from "./ui-dialog";
 
 export const ANNOTATION_SESSION_PARAM = "annotationSession";
 
@@ -789,9 +790,18 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         PENCIL_16_PATH,
         `rename session ${session.title}`,
       );
-      rename.addEventListener("click", () => {
-        const next = window.prompt("Rename session", session.title);
-        if (next === null || !next.trim()) return;
+      rename.addEventListener("click", async () => {
+        const next = await showPromptDialog({
+          title: "Rename session",
+          defaultValue: session.title,
+          ariaLabel: "Session name",
+          confirmLabel: "Rename",
+          validate: (v) => {
+            const trimmed = v.trim();
+            return trimmed ? trimmed : null;
+          },
+        });
+        if (next === null) return;
         void postAnnotationAction({
           action: "rename",
           id: session.id,
@@ -803,9 +813,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         TRASH_16_PATH,
         `delete session ${session.title}`,
       );
-      del.addEventListener("click", () => {
-        if (!window.confirm(`Delete annotation session "${session.title}"?`))
-          return;
+      del.addEventListener("click", async () => {
+        const ok = await showConfirmDialog({
+          title: "Delete session?",
+          body: `Delete annotation session "${session.title}"?`,
+          confirmLabel: "Delete",
+          danger: true,
+        });
+        if (!ok) return;
         void postAnnotationAction({ action: "delete", id: session.id });
       });
       head.append(title, time, rename, del);
@@ -835,13 +850,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
           TRASH_16_PATH,
           `delete annotation for ${annotationLocationLabel(entry)}`,
         );
-        remove.addEventListener("click", () => {
-          if (
-            !window.confirm(
-              `Delete annotation for ${annotationLocationLabel(entry)}?`,
-            )
-          )
-            return;
+        remove.addEventListener("click", async () => {
+          const ok = await showConfirmDialog({
+            title: "Delete annotation?",
+            body: `Delete annotation for ${annotationLocationLabel(entry)}?`,
+            confirmLabel: "Delete",
+            danger: true,
+          });
+          if (!ok) return;
           void postAnnotationAction({ action: "delete", id: entry.id });
         });
         item.append(open, remove);
@@ -1193,8 +1209,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     annotationFollow = followCheckbox.checked;
     deps.setAnnotationFollow(annotationFollow);
   });
-  $("#annotation-clear").addEventListener("click", () => {
-    if (!window.confirm("Delete all annotations?")) return;
+  $("#annotation-clear").addEventListener("click", async () => {
+    const ok = await showConfirmDialog({
+      title: "Delete all annotations?",
+      body: "Delete all annotations?",
+      confirmLabel: "Delete all",
+      danger: true,
+    });
+    if (!ok) return;
     hideAnnotationDetail();
     void postAnnotationAction({ action: "clear" });
   });

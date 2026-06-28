@@ -176,6 +176,9 @@ function sanitize(input: unknown): TabsState {
     if (typeof tab.historyOpen === "boolean") out.historyOpen = tab.historyOpen;
     const historyHeight = sanitizeCssSize(tab.historyHeight);
     if (historyHeight !== undefined) out.historyHeight = historyHeight;
+    if (tab.activeHistoryTab === "log" || tab.activeHistoryTab === "history") {
+      out.activeHistoryTab = tab.activeHistoryTab;
+    }
     const sidebarWidth = sanitizeCssSize(tab.sidebarWidth);
     if (sidebarWidth !== undefined) out.sidebarWidth = sidebarWidth;
     const relatedPanelHeight = sanitizeCssSize(tab.relatedPanelHeight);

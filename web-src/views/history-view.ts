@@ -16,7 +16,35 @@ import type { AppRoute } from "../core/routes";
 
 export const HISTORY_BODY_COLLAPSE_LINES = 10;
 export const HISTORY_WORKTREE_COMMIT = "worktree";
-export const HISTORY_WORKTREE_LABEL = "未コミット変更 (Working tree)";
+
+export type HistoryLang = "en" | "ja";
+
+export type HistoryText = {
+  worktreeLabel: string;
+  bodyExpandClose: string;
+  bodyExpandMore: (remainingLines: number) => string;
+};
+
+const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
+  en: {
+    worktreeLabel: "Uncommitted changes (Working tree)",
+    bodyExpandClose: "Collapse",
+    bodyExpandMore: (n) => `Show more (${n} lines)`,
+  },
+  ja: {
+    worktreeLabel: "未コミット変更 (Working tree)",
+    bodyExpandClose: "閉じる",
+    bodyExpandMore: (n) => `もっと見る (${n} 行)`,
+  },
+};
+
+export function historyText(lang: HistoryLang): HistoryText {
+  return HISTORY_TEXT[lang];
+}
+
+export function historyWorktreeLabel(lang: HistoryLang): string {
+  return HISTORY_TEXT[lang].worktreeLabel;
+}
 
 export type HistoryViewDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -31,6 +59,7 @@ export type HistoryViewDeps = {
   // Clears the diff pane and shows the "no commit selected" empty state.
   showEmptyDiffPane(): void;
   getSyntaxHighlight(): boolean;
+  getLanguage(): HistoryLang;
   trackLoad<T>(promise: Promise<T>): Promise<T>;
 };
 
@@ -161,6 +190,8 @@ export function installHistoryPageDom(): HistoryViewMount {
   return { ...panelDom, commitInfo };
 }
 
+// ai-dup-check: allow -- 別ドメイン(history)の独立した小ヘルパ。
+// annotation-speech.ts の関数とは引数も用途も無関係。
 export function historyBodyLineCount(rawText: string): number {
   if (!rawText) return 0;
   return rawText.split(/\r?\n/).length;
@@ -169,13 +200,16 @@ export function historyBodyLineCount(rawText: string): number {
 export function historyBodyToggleLabel(
   expanded: boolean,
   remainingLines: number,
+  lang: HistoryLang,
 ) {
-  return expanded ? "閉じる" : `もっと見る (${remainingLines} 行)`;
+  const t = HISTORY_TEXT[lang];
+  return expanded ? t.bodyExpandClose : t.bodyExpandMore(remainingLines);
 }
 
 export function buildExpandableHistoryBody(
   rendered: HTMLElement,
   rawText: string,
+  lang: HistoryLang,
 ): HTMLElement {
   const lineCount = historyBodyLineCount(rawText);
   if (lineCount <= HISTORY_BODY_COLLAPSE_LINES) return rendered;
@@ -191,7 +225,7 @@ export function buildExpandableHistoryBody(
   const remainingLines = lineCount - HISTORY_BODY_COLLAPSE_LINES;
   const sync = () => {
     const expanded = collapsible.classList.contains("expanded");
-    button.textContent = historyBodyToggleLabel(expanded, remainingLines);
+    button.textContent = historyBodyToggleLabel(expanded, remainingLines, lang);
     button.setAttribute("aria-expanded", expanded ? "true" : "false");
   };
   const toggle = () => {
@@ -381,7 +415,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const active = selectedSha === HISTORY_WORKTREE_COMMIT ? " active" : "";
     return (
       `<li class="history-item history-item-worktree${active}" data-sha="${HISTORY_WORKTREE_COMMIT}">` +
-      `<span class="subject" title="${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}">${deps.escapeHtml(HISTORY_WORKTREE_LABEL)}</span>` +
+      `<span class="subject" title="${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}">${deps.escapeHtml(historyWorktreeLabel(deps.getLanguage()))}</span>` +
       `<span class="meta2">` +
       `<span class="sha">HEAD..worktree</span>` +
       `<span class="author">Working tree</span>` +
@@ -446,7 +480,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
           { syntaxHighlight: deps.getSyntaxHighlight() },
         );
         if (gen !== generation || selectedSha !== commit.sha) return;
-        body.replaceChildren(buildExpandableHistoryBody(rendered, commit.body));
+        body.replaceChildren(
+          buildExpandableHistoryBody(rendered, commit.body, deps.getLanguage()),
+        );
       }
     }
     info.hidden = false;
@@ -457,7 +493,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (!info) return;
     info.querySelector<HTMLElement>(".hci-head")?.setAttribute("hidden", "");
     const subject = info.querySelector<HTMLElement>(".hci-subject");
-    if (subject) subject.textContent = HISTORY_WORKTREE_LABEL;
+    if (subject) {
+      subject.textContent = historyWorktreeLabel(deps.getLanguage());
+    }
     const body = info.querySelector<HTMLElement>(".hci-body");
     if (body) {
       body.hidden = true;

@@ -51,6 +51,9 @@ export type DbSchemaResponse = {
   indexes: DbIndexInfo[];
   foreignKeys: DbForeignKey[];
   columnsMap?: Record<string, DbColumn[]>;
+  /** サーバがスキーマ列挙のために発行した SQL (sqlite_master / information_schema
+   * など)。session log 表示用。 */
+  executedSql?: string[];
 };
 
 export type DbSchemaInfo = {
@@ -61,6 +64,10 @@ export type DbSchemasResponse = {
   dbId: string;
   schemas: DbSchemaInfo[];
   selectedSchema?: string;
+  /** サーバが応答中に発行した SQL (DDL 取得・行数集計・スキーマ列挙など)。
+   * クライアントの session log 表示用。Redis/ES/S3 など SQL を発行しない
+   * データストアでは空配列もしくは undefined。 */
+  executedSql?: string[];
 };
 
 export type DbTableDataResponse = {
@@ -73,6 +80,34 @@ export type DbTableDataResponse = {
   offset: number;
   limit: number;
   hasMore: boolean;
+  /** サーバがこのページを取得するために発行した SQL (COUNT + SELECT)。 */
+  executedSql?: string[];
+};
+
+// --- Row writes (edit / insert / delete) ---
+
+// クライアントが書き込みのために送る 1 セルの値。value はユーザー入力の
+// 生文字列で、サーバ側が列の型に応じて型変換する (coerceDbValue)。
+// null は SQL の NULL を表す (空文字列 "" とは区別する)。
+export type DbCellInput = { column: string; value: string | null };
+
+// 1 行に対する変更。生 SQL はクライアントから送らず、テーブル名・主キー条件・
+// 列値の正規化された形だけを送る (インジェクション面を構造的に断つ)。
+export type RowMutation =
+  | { kind: "insert"; values: DbCellInput[] }
+  | { kind: "update"; pk: DbCellInput[]; values: DbCellInput[] }
+  | { kind: "delete"; pk: DbCellInput[] };
+
+export type DbMutateResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  // 影響を受けた行数の合計。
+  affected: number;
+  /** サーバが実際に実行した INSERT/UPDATE/DELETE 文の配列。クライアントの
+   * session log 表示用。複数 mutation を 1 トランザクションで適用するので
+   * 配列。 */
+  executedSql?: string[];
 };
 
 export type DbQueryResponse = {
@@ -85,6 +120,9 @@ export type DbQueryResponse = {
   truncated: boolean;
   elapsedMs: number;
   error?: string;
+  /** サーバが実行した SQL (通常はクライアントが POST した body.sql と同じ)。
+   * session log 表示用。 */
+  executedSql?: string[];
 };
 
 export type DbFileInfo = {
@@ -478,6 +516,9 @@ export type TabState = {
 
   // history pane の高さ。CSS pixel 表現 (例: "240px")。
   historyHeight?: string;
+
+  // history pane で開いていたタブ。default は "history" (= クエリ履歴)。
+  activeHistoryTab?: "history" | "log";
 
   // sidebar 幅。CSS pixel 表現 (例: "240px")。
   sidebarWidth?: string;

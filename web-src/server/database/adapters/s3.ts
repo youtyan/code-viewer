@@ -21,11 +21,14 @@ type S3Config = {
 };
 
 type SignedRequestOptions = {
-  method: "GET" | "HEAD";
+  method: "GET" | "HEAD" | "PUT" | "DELETE";
   bucket?: string;
   key?: string;
   query?: Record<string, string | undefined>;
   headers?: Record<string, string>;
+  // PUT のリクエストボディ。Sig V4 では body の SHA256 を
+  // x-amz-content-sha256 と canonical request に含める必要がある。
+  body?: Uint8Array;
   signal?: AbortSignal;
 };
 
@@ -34,10 +37,28 @@ type S3RequestDeadline = {
   timeoutMs: number;
 };
 
-export type S3Explorer = ObjectSource & {
-  readonly kind: "s3";
-  readonly model: "object";
+// オブジェクト書き込み。put は body 付き (公開ホストポート経由のみ)、
+// delete は body 無し (docker-exec でも可)。
+export type S3WriteOps = {
+  putObjectAsync(opts: {
+    bucket: string;
+    key: string;
+    body: Uint8Array;
+    contentType?: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
+  deleteObjectAsync(opts: {
+    bucket: string;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<void>;
 };
+
+export type S3Explorer = ObjectSource &
+  S3WriteOps & {
+    readonly kind: "s3";
+    readonly model: "object";
+  };
 
 let spawnSyncImpl = spawnSync;
 let spawnSyncImplIsTestOverride = false;
@@ -116,6 +137,10 @@ function hmac(key: Buffer | string, value: string): Buffer {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function sha256Bytes(value: Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function encodeRfc3986(value: string): string {
@@ -283,7 +308,7 @@ function curlHeaderConfig(headers: Headers): string {
 
 function dockerCurlCommand(opts: {
   containerName: string;
-  method: "GET" | "HEAD";
+  method: "GET" | "HEAD" | "PUT" | "DELETE";
   url: string;
   headers: Headers;
 }): { args: string[]; input: Buffer } {
@@ -473,7 +498,7 @@ function timeoutReadableStream(
 
 async function dockerCurlFetch(opts: {
   containerName: string;
-  method: "GET" | "HEAD";
+  method: "GET" | "HEAD" | "PUT" | "DELETE";
   url: string;
   headers: Headers;
   signal?: AbortSignal;
@@ -645,9 +670,11 @@ function createS3Adapter(config: S3Config): S3Explorer {
         const path = buildPath(opts.bucket, opts.key);
         const query = canonicalQuery(opts.query);
         const url = `${config.endpoint.replace(/\/$/, "")}${path}${query ? `?${query}` : ""}`;
+        // body があればその SHA256 を署名に使う (Sig V4 必須)。無ければ空 body。
+        const payloadHash = opts.body ? sha256Bytes(opts.body) : EMPTY_SHA256;
         const headers: Record<string, string> = {
           host: endpoint.host,
-          "x-amz-content-sha256": EMPTY_SHA256,
+          "x-amz-content-sha256": payloadHash,
           "x-amz-date": requestDate,
           ...(config.sessionToken
             ? { "x-amz-security-token": config.sessionToken }
@@ -661,7 +688,7 @@ function createS3Adapter(config: S3Config): S3Explorer {
           query,
           canonicalHeaders(headers),
           signedNames,
-          EMPTY_SHA256,
+          payloadHash,
         ].join("\n");
         const scope = `${dateStamp}/${config.region}/s3/aws4_request`;
         const stringToSign = [
@@ -685,6 +712,15 @@ function createS3Adapter(config: S3Config): S3Explorer {
           `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${scope}, SignedHeaders=${signedNames}, Signature=${signature}`,
         );
         if (config.dockerContainerName) {
+          // docker exec の curl は `-K -` でヘッダ config を stdin から渡すため、
+          // body も stdin で送るのが難しい。書き込み (body 付き PUT) は公開
+          // ホストポート経由 (直 fetch) に限定する。raw streaming と同じ制約。
+          if (opts.body !== undefined) {
+            throw new S3HttpError(
+              503,
+              "S3 object writes require a published host port (docker-exec transport cannot stream a request body)",
+            );
+          }
           if (
             opts.method === "GET" &&
             opts.key &&
@@ -707,6 +743,9 @@ function createS3Adapter(config: S3Config): S3Explorer {
         return fetch(url, {
           method: opts.method,
           headers: requestHeaders,
+          ...(opts.body !== undefined
+            ? { body: opts.body as unknown as BodyInit }
+            : {}),
           signal: transportSignal,
         });
       },
@@ -880,6 +919,59 @@ function createS3Adapter(config: S3Config): S3Explorer {
     );
   }
 
+  async function putObjectAsync(opts: {
+    bucket: string;
+    key: string;
+    body: Uint8Array;
+    contentType?: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const deadline = createS3TransportDeadline(config);
+    const res = await signedFetch(
+      {
+        method: "PUT",
+        bucket: opts.bucket,
+        key: opts.key,
+        body: opts.body,
+        headers: opts.contentType
+          ? { "content-type": opts.contentType }
+          : undefined,
+        signal: opts.signal,
+      },
+      deadline,
+    );
+    if (!res.ok) {
+      throw sanitizeS3Error(
+        res.status,
+        await readResponseTextWithTimeout(res, opts.signal, deadline),
+      );
+    }
+  }
+
+  async function deleteObjectAsync(opts: {
+    bucket: string;
+    key: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const deadline = createS3TransportDeadline(config);
+    const res = await signedFetch(
+      {
+        method: "DELETE",
+        bucket: opts.bucket,
+        key: opts.key,
+        signal: opts.signal,
+      },
+      deadline,
+    );
+    // S3 DELETE は対象が無くても 204 を返す。2xx 以外のみエラー。
+    if (!res.ok) {
+      throw sanitizeS3Error(
+        res.status,
+        await readResponseTextWithTimeout(res, opts.signal, deadline),
+      );
+    }
+  }
+
   return {
     kind: "s3",
     model: "object",
@@ -889,6 +981,8 @@ function createS3Adapter(config: S3Config): S3Explorer {
     headObject,
     getObjectText,
     getObjectResponse,
+    putObjectAsync,
+    deleteObjectAsync,
   };
 }
 

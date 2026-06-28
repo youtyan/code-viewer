@@ -2,6 +2,7 @@
 // happy-dom 上で検証する。文字列存在ではなく DOM 構造と状態を確認する。
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -67,18 +68,6 @@ function installFetchMock(): void {
       return json({});
     }) as typeof fetch,
   });
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 2000,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  throw new Error("waitFor timed out");
 }
 
 function click(el: Element | null | undefined): void {

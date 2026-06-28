@@ -1,15 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createNetworkActivityTracker } from "../core/network-activity";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+import { deferred } from "./_test-helpers";
 
 describe("network activity tracker", () => {
   test("tracks raw fetch calls without explicit wrappers", async () => {

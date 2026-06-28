@@ -2,19 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { AppRoute } from "../core/routes";
 import type { RepoTreeResponse, SidebarItem } from "../core/types";
 import { createRepoView, type RepoViewDeps } from "../views/repo-view";
+import { deferred } from "./_test-helpers";
 
 const range = { from: "HEAD", to: "worktree" };
 const diffRoute: AppRoute = { screen: "diff", range };
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function treeResponse(path = "README.md"): RepoTreeResponse {
   return {

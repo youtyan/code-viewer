@@ -4,11 +4,13 @@ import type {
   DbFileInfo,
   DbFilesResponse,
   DbForeignKey,
+  DbMutateResponse,
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryState,
+  RowMutation,
   TabState,
   TabsResponse,
   TabsState,
@@ -23,12 +25,14 @@ import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { type DbLang, type DbText, dbText } from "./i18n";
 import { setPaneStatus } from "./pane-status";
-import { makePrefToggle } from "./pref-toggle";
+import { localizePrefToggle, makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
 import { createRedisExplorer } from "./redis-explorer";
 import { createS3Explorer } from "./s3-explorer";
 import { createSchemaView } from "./schema-view";
+import { createSessionLog, type SessionLogStore } from "./session-log";
+import { createSessionLogView } from "./session-log-view";
 import { createSnapshotView } from "./snapshot-view";
 import { createTableGrid, type GridFilter, type GridSort } from "./table-grid";
 import { createTableList } from "./table-list";
@@ -66,6 +70,9 @@ type DatabasePaneDeps = DatabaseViewDeps & {
   ): void;
   onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
+  // セッション限定ログ。全 tabPane が同じインスタンスを共有し、フッターの
+  // 「ログ」タブに集約表示される。SQL 実行 / 編集コミットの成否を push する。
+  sessionLog: SessionLogStore;
 };
 
 export type DatabaseView = {
@@ -82,6 +89,18 @@ export type DatabaseView = {
   handleSse: (event?: string, data?: string) => void;
   /** 言語切替時に DB ビューア配下の文言を再適用する。 */
   localize: () => void;
+  // ビューア設定パネルなど外部から db-ui pref を読み書きするための公開 API。
+  // ensureDbUiState はバックグラウンドで保証されている前提 (DatabaseView が
+  // mount された後に呼ばれる)。
+  getDbUiPref: <K extends keyof DbUiPrefs>(
+    key: K,
+    fallback: NonNullable<DbUiPrefs[K]>,
+  ) => NonNullable<DbUiPrefs[K]>;
+  setDbUiPref: <K extends keyof DbUiPrefs>(
+    key: K,
+    value: NonNullable<DbUiPrefs[K]>,
+  ) => void;
+  onDbUiPrefChange: (listener: (state: DbUiState) => void) => () => void;
 };
 
 type TabName = "data" | "query" | "schema" | "er" | "search" | "snapshot";
@@ -189,7 +208,10 @@ export const TABLE_SELECT_FETCH_DELAY_MS = 50;
 
 type DbVisibility = {
   toolsHidden: boolean;
-  historyToggleHidden: boolean;
+  // JetBrains 風 bottom dock: タブストリップ自体は SQL モードのとき常時表示
+  // (pane open/close と独立)。historyPaneHidden が pane の本体 (展開部) の
+  // 表示/非表示で、tabStrip だけ常駐させる。
+  historyTabStripHidden: boolean;
   historyPaneHidden: boolean;
   historyResizerHidden: boolean;
   tableListHidden: boolean;
@@ -215,7 +237,7 @@ function computeVisibility(
   const historyVisible = sqlMode && userPrefersHistoryOpen;
   return {
     toolsHidden: !sqlMode,
-    historyToggleHidden: !sqlMode,
+    historyTabStripHidden: !sqlMode,
     historyPaneHidden: !historyVisible,
     historyResizerHidden: !historyVisible,
     tableListHidden: !sqlMode,
@@ -430,34 +452,11 @@ function createTabPane(
     },
   });
 
-  // Rails 命名規約 (foo_id → foos.id) からの仮想 FK 推測トグル。
-  // active 状態は db-ui.json の prefs.inferFkRails に永続化。
-  // クリックで pref を反転 → grid に再計算を促す (データは再取得しない)。
-  // toolsSection の "ナビゲーション icon 並び" とは性質が違うため、
-  // ラベル付きピル形式 (S3 explorer の Hover preview toggle と同じ形) で
-  // dbToolbar 直下に独立した行として置く。
-  const inferFkToggle = makePrefToggle({
-    title: "Infer FK from Rails-style <name>_id → <names>.id",
-    label: "Rails FK 推測",
-    pathD: ICON_PATH_INFER_FK,
-  });
-  inferFkToggle.addEventListener("click", () => {
-    const next = !outerDeps.getDbUiPref("inferFkRails", false);
-    outerDeps.setDbUiPref("inferFkRails", next);
-    applyInferFkBtnState();
-    grid.refreshForeignKeys();
-  });
-  function applyInferFkBtnState() {
-    const on = outerDeps.getDbUiPref("inferFkRails", false);
-    inferFkToggle.classList.toggle("active", on);
-    inferFkToggle.setAttribute("aria-pressed", String(on));
-  }
-  applyInferFkBtnState();
-  // 戻り値の disposer を捨てると、タブ dispose 後も listener が残って
-  // destroyed grid に refreshForeignKeys が飛ぶ ("listener leak")。dispose()
-  // で必ず unsubscribe する。
+  // Rails FK 推測トグルはビューア設定パネルに集約済み (app.ts の
+  // `#datastore-infer-fk`)。pref 値が外部から変わったら grid の FK 解釈を
+  // 再計算する必要があるので、subscriber だけ残す。disposer はタブ dispose
+  // で必ず unsubscribe する (listener leak 回避)。
   const disposeInferFkPrefSub = outerDeps.onDbUiPrefChange(() => {
-    applyInferFkBtnState();
     grid.refreshForeignKeys();
   });
   reloc(() => {
@@ -470,11 +469,10 @@ function createTabPane(
 
   toolsSection.append(queryBtn, erBtn, searchBtn, snapshotBtn);
 
-  // 設定トグル (Rails FK 推測など) は icon toolbar とは別行にまとめる。
-  // SQL kind 時のみ表示。
+  // 設定トグル (Rails FK 推測など) はビューア設定パネルへ移したので、
+  // ここの prefs バーは現状空。#16 (Edit モードトグル集約) で再利用予定。
   const prefsBar = document.createElement("div");
   prefsBar.className = "db-prefs-bar";
-  prefsBar.append(inferFkToggle);
 
   // explorer (redis/es/s3) 用のサイドバースロット host。各 explorer が自前で
   // 構築した sidebarSlot をここに mount し、applyVisibility が kind ごとに
@@ -544,6 +542,36 @@ function createTabPane(
       cb.onStateChange();
     },
     getText: () => paneText(),
+    // 書き込み対応データストア (SQL 系: SQLite / PostgreSQL / MySQL) で
+    // 編集 UI を出す。これらは adapter.applyMutations + /_db/mutate に対応。
+    getEditable: () => isSqlKind(currentDbInfo?.kind),
+    applyMutations: (mutations) => applyRowMutations(mutations),
+  });
+
+  // 編集モードのトグル (#16): table-grid 内の Edit ボタンを廃止し、サイドバー
+  // prefs バーに 1 つに集約。タブ単位で grid 内 state を保持するので、テーブル
+  // 切替で再 ON 不要 (リロード時はリセット = 誤編集ガード)。
+  const editModeToggle = makePrefToggle({
+    title: paneText().edit.editModeTitle,
+    label: paneText().edit.editMode,
+    pathD: ICON_PATH_EDIT_MODE,
+    extraClass: "db-edit-mode-toggle",
+  });
+  editModeToggle.hidden = true;
+  editModeToggle.addEventListener("click", () => {
+    void grid.setEditMode(!grid.getEditMode());
+  });
+  prefsBar.append(editModeToggle);
+  grid.onEditableChange((editable) => {
+    editModeToggle.hidden = !editable;
+  });
+  grid.onEditModeChange((on) => {
+    editModeToggle.classList.toggle("active", on);
+    editModeToggle.setAttribute("aria-pressed", String(on));
+  });
+  reloc(() => {
+    const e = paneText().edit;
+    localizePrefToggle(editModeToggle, e.editMode, e.editModeTitle);
   });
 
   const queryEditor = createQueryEditor({
@@ -579,10 +607,22 @@ function createTabPane(
       setActiveTab("query");
     },
   });
+  // ログタブ用 view。store は database-view で 1 つ。各 tab pane が view を
+  // 別個に持ち、subscribe で同じデータを表示する (タブ間で複製してるように
+  // 見えるが、同じ store なので内容は常に一致)。
+  const sessionLogView = createSessionLogView({
+    store: outerDeps.sessionLog,
+    getText: () => paneText(),
+    copySqlToQuery: (sql) => {
+      queryEditor.setSql(sql);
+      setActiveTab("query");
+    },
+  });
 
   const redisExplorer = createRedisExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
   });
   redisExplorer.el.hidden = true;
   redisExplorer.sidebarSlot.hidden = true;
@@ -590,6 +630,7 @@ function createTabPane(
   const esExplorer = createElasticsearchExplorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
   });
   esExplorer.el.hidden = true;
   esExplorer.sidebarSlot.hidden = true;
@@ -597,10 +638,9 @@ function createTabPane(
   const s3Explorer = createS3Explorer({
     onSelectionChange: () => cb.onStateChange(),
     getText: () => paneText(),
+    trackLoad: (p) => deps.trackLoad(p),
     // S3 hover preview の ON/OFF。db-ui.json の prefs に永続化される。
     getTooltipEnabled: () => outerDeps.getDbUiPref("s3TooltipEnabled", true),
-    setTooltipEnabled: (enabled) =>
-      outerDeps.setDbUiPref("s3TooltipEnabled", enabled),
   });
   s3Explorer.el.hidden = true;
   s3Explorer.sidebarSlot.hidden = true;
@@ -642,7 +682,96 @@ function createTabPane(
   historyPane.className = "db-history-pane";
   // history pane の高さもタブごとに独立。initial が無ければ CSS の default。
   if (initial.historyHeight) historyPane.style.height = initial.historyHeight;
-  historyPane.appendChild(historyView.el);
+  // クエリ履歴とセッションログを「クエリ履歴 / ログ」の 2 タブで切替表示する。
+  // 両 view が pane を共有し、DOM 自体は両方積んで hidden で切替。
+  const historyTabContent = document.createElement("div");
+  historyTabContent.className = "db-history-pane-content";
+  historyTabContent.appendChild(historyView.el);
+  const logTabContent = document.createElement("div");
+  logTabContent.className = "db-history-pane-content";
+  logTabContent.hidden = true;
+  logTabContent.appendChild(sessionLogView.el);
+  historyPane.append(historyTabContent, logTabContent);
+
+  // JetBrains 風 bottom dock: タブストリップは pane の外 (常駐領域) に
+  // 置く。クリックでアクティブ切替 + pane を開く / アクティブタブ再クリック
+  // で pane を閉じる。右端の close ボタンでも閉じられる。
+  const historyDock = document.createElement("div");
+  historyDock.className = "db-history-dock";
+  historyDock.setAttribute("role", "tablist");
+  const historyTabBtn = document.createElement("button");
+  historyTabBtn.type = "button";
+  historyTabBtn.className = "db-history-dock-tab";
+  historyTabBtn.setAttribute("role", "tab");
+  historyTabBtn.textContent = paneText().sessionLog.historyTabLabel;
+  historyTabBtn.classList.add("active");
+  historyTabBtn.setAttribute("aria-selected", "true");
+  const logTabBtn = document.createElement("button");
+  logTabBtn.type = "button";
+  logTabBtn.className = "db-history-dock-tab";
+  logTabBtn.setAttribute("role", "tab");
+  logTabBtn.textContent = paneText().sessionLog.tabLabel;
+  logTabBtn.setAttribute("aria-selected", "false");
+  const historyDockSpacer = document.createElement("div");
+  historyDockSpacer.className = "db-history-dock-spacer";
+  const historyDockClose = document.createElement("button");
+  historyDockClose.type = "button";
+  historyDockClose.className = "db-history-dock-close";
+  historyDockClose.setAttribute("aria-label", paneText().nav.queryHistory);
+  historyDockClose.title = paneText().nav.queryHistoryTitle;
+  historyDockClose.textContent = "×";
+  historyDock.append(
+    historyTabBtn,
+    logTabBtn,
+    historyDockSpacer,
+    historyDockClose,
+  );
+
+  // 復元時の active タブ。`initial.activeHistoryTab` が "log" なら log を
+  // 表示済み状態で起動する (未指定なら default の history)。
+  let activeHistoryTab: "history" | "log" =
+    initial.activeHistoryTab === "log" ? "log" : "history";
+  function setActiveHistoryTab(which: "history" | "log"): void {
+    activeHistoryTab = which;
+    const isHistory = which === "history";
+    historyTabBtn.classList.toggle("active", isHistory);
+    logTabBtn.classList.toggle("active", !isHistory);
+    historyTabBtn.setAttribute("aria-selected", String(isHistory));
+    logTabBtn.setAttribute("aria-selected", String(!isHistory));
+    historyTabContent.hidden = !isHistory;
+    logTabContent.hidden = isHistory;
+  }
+  // 復元値 (initial.activeHistoryTab === "log") を DOM に反映する。
+  setActiveHistoryTab(activeHistoryTab);
+  // タブクリック: pane が閉じてれば開く + そのタブをアクティブに、
+  // 既に開いていて active なタブを再クリックしたら pane を閉じる
+  // (JetBrains の Tool Window タブと同じ挙動)。
+  function handleHistoryTabClick(which: "history" | "log"): void {
+    if (userPrefersHistoryOpen && activeHistoryTab === which) {
+      userPrefersHistoryOpen = false;
+    } else {
+      setActiveHistoryTab(which);
+      userPrefersHistoryOpen = true;
+    }
+    applyVisibility();
+    cb.onStateChange();
+  }
+  historyTabBtn.addEventListener("click", () =>
+    handleHistoryTabClick("history"),
+  );
+  logTabBtn.addEventListener("click", () => handleHistoryTabClick("log"));
+  historyDockClose.addEventListener("click", () => {
+    if (!userPrefersHistoryOpen) return;
+    userPrefersHistoryOpen = false;
+    applyVisibility();
+    cb.onStateChange();
+  });
+  reloc(() => {
+    historyTabBtn.textContent = paneText().sessionLog.historyTabLabel;
+    logTabBtn.textContent = paneText().sessionLog.tabLabel;
+    historyDockClose.setAttribute("aria-label", paneText().nav.queryHistory);
+    historyDockClose.title = paneText().nav.queryHistoryTitle;
+  });
 
   let historyResizing = false;
   historyResizer.addEventListener("mousedown", (e) => {
@@ -669,15 +798,6 @@ function createTabPane(
     window.addEventListener("mouseup", onUp);
   });
 
-  const historyToggle = document.createElement("button");
-  historyToggle.className = "db-history-toggle";
-  historyToggle.type = "button";
-  reloc(() => {
-    historyToggle.textContent = paneText().nav.queryHistory;
-    historyToggle.title = paneText().nav.queryHistoryTitle;
-  });
-  sidebar.appendChild(historyToggle);
-
   // history pane の開閉はタブごとに独立。initial が無ければ default は
   // 「開いている」状態を default にする。
   let userPrefersHistoryOpen = initial.historyOpen ?? true;
@@ -692,7 +812,7 @@ function createTabPane(
     toolsSection.hidden = visibility.toolsHidden;
     // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
     prefsBar.hidden = visibility.toolsHidden;
-    historyToggle.hidden = visibility.historyToggleHidden;
+    historyDock.hidden = visibility.historyTabStripHidden;
     historyResizer.hidden = visibility.historyResizerHidden;
     historyPane.hidden = visibility.historyPaneHidden;
     tableList.el.hidden = visibility.tableListHidden;
@@ -721,21 +841,17 @@ function createTabPane(
       searchBtn.classList.remove("active");
       snapshotBtn.classList.remove("active");
     }
-    historyToggle.classList.toggle("active", userPrefersHistoryOpen);
+    historyDock.classList.toggle("open", userPrefersHistoryOpen);
     if (!visibility.historyPaneHidden && cb.isActive()) historyView.refresh();
   }
   applyVisibility();
 
-  historyToggle.addEventListener("click", () => {
-    userPrefersHistoryOpen = !userPrefersHistoryOpen;
-    applyVisibility();
-    // タブごとに persist (tabs.json 経由)。
-    cb.onStateChange();
-  });
-
   const container = document.createElement("div");
   container.className = "db-container";
-  container.append(upperArea, historyResizer, historyPane);
+  // 下から: dock (タブストリップ常駐) → resizer (pane open 時のみ表示) → pane
+  // → 上に upperArea。表示順は flex column で上から upperArea → resizer
+  // → pane → dock。
+  container.append(upperArea, historyResizer, historyPane, historyDock);
 
   function createInnerTab(text: string, active: boolean): HTMLButtonElement {
     const btn = document.createElement("button");
@@ -855,13 +971,12 @@ function createTabPane(
   ): Promise<DbSchemasResponse> {
     const params = new URLSearchParams({ db: dbId });
     if (preferredSchema) params.set("schema", preferredSchema);
-    const res = await deps.trackLoad(fetch(`/_db/schemas?${params}`));
-    if (!res.ok) {
-      throw new Error(
-        await responseErrorMessage(res, "failed to fetch schemas"),
-      );
-    }
-    return (await res.json()) as DbSchemasResponse;
+    return logSqlFetch<DbSchemasResponse>({
+      url: `/_db/schemas?${params}`,
+      kind: "query",
+      label: `_db/schemas db=${dbId}`,
+      errorPrefix: "failed to fetch schemas",
+    });
   }
 
   function renderSchemaOptions(schemas: string[], selected?: string | null) {
@@ -885,13 +1000,12 @@ function createTabPane(
     const params = withCurrentSchema(
       new URLSearchParams({ db: dbId, includeColumns: "1" }),
     );
-    const res = await deps.trackLoad(fetch(`/_db/schema?${params}`));
-    if (!res.ok) {
-      throw new Error(
-        await responseErrorMessage(res, "failed to fetch schema"),
-      );
-    }
-    return (await res.json()) as DbSchemaResponse;
+    return logSqlFetch<DbSchemaResponse>({
+      url: `/_db/schema?${params}`,
+      kind: "query",
+      label: `_db/schema db=${dbId}`,
+      errorPrefix: "failed to fetch schema",
+    });
   }
 
   /**
@@ -925,14 +1039,15 @@ function createTabPane(
     if (eq.length > 0) {
       params.set("eq", JSON.stringify(eq));
     }
-    const res = await fetch(
-      `/_db/table?${params}`,
-      signal ? { signal } : undefined,
-    );
-    if (!res.ok) {
-      throw new Error(await responseErrorMessage(res, "failed to fetch table"));
-    }
-    return (await res.json()) as DbTableDataResponse;
+    return logSqlFetch<DbTableDataResponse>({
+      url: `/_db/table?${params}`,
+      init: signal ? { signal } : undefined,
+      kind: "query",
+      label: `SELECT FROM ${table}`,
+      trackLoad: false,
+      errorPrefix: "failed to fetch table",
+      rowCountOf: (r) => r.rows.length,
+    });
   }
 
   function fetchRelatedPage(
@@ -947,30 +1062,145 @@ function createTabPane(
     return fetchTablePage(table, offset, limit, sort, filters, signal, eq);
   }
 
+  // 全 SQL 系 fetch (query / mutate / table page / schema / columns / ddl) を
+  // 1 本化するヘルパ。session log への ok/error 登録と、サーバが返す
+  // executedSql の detail 化を 1 箇所にまとめる。
+  // - response が `executedSql: string[]` を含めば detail はそれを ";\n" で
+  //   join したものに置き換える (= 「サーバが実際に実行した SQL」)。
+  // - executedSql が無い・空のレスポンスでは fallbackDetail に fall back。
+  // - 4xx/5xx は errorPrefix で responseErrorMessage を作って throw する
+  //   (呼び出し側でメッセージ表示)。
+  // - fetch 例外 (network) は session log に error 登録して再 throw。
+  //   AbortError は無音 (user cancellation)。
+  async function logSqlFetch<T extends { executedSql?: string[] }>(opts: {
+    url: string;
+    init?: RequestInit;
+    kind: "query" | "mutate";
+    label: string;
+    fallbackDetail?: string;
+    trackLoad?: boolean;
+    errorPrefix: string;
+    rowCountOf?: (resp: T) => number | undefined;
+  }): Promise<T> {
+    const startedAt = Date.now();
+    const trackEnabled = opts.trackLoad !== false;
+    try {
+      const fetchPromise = fetch(opts.url, opts.init);
+      const res = await (trackEnabled
+        ? deps.trackLoad(fetchPromise)
+        : fetchPromise);
+      const elapsedMs = Date.now() - startedAt;
+      if (!res.ok) {
+        const message = await responseErrorMessage(res, opts.errorPrefix);
+        outerDeps.sessionLog.add({
+          kind: opts.kind,
+          status: "error",
+          label: opts.label,
+          detail: opts.fallbackDetail,
+          message,
+          elapsedMs,
+        });
+        // catch ブロックでの重複登録防止フラグ。errorPrefix で startsWith
+        // 判定する旧来方式だと throw する Error.message (= サーバ body) が
+        // prefix を含まないと弾けず 2 重登録を起こすため、明示的フラグに
+        // 切替えた。
+        const err = new Error(message);
+        (err as { __sessionLogged?: boolean }).__sessionLogged = true;
+        throw err;
+      }
+      const data = (await res.json()) as T;
+      const detail =
+        data.executedSql && data.executedSql.length > 0
+          ? data.executedSql.join(";\n")
+          : opts.fallbackDetail;
+      outerDeps.sessionLog.add({
+        kind: opts.kind,
+        status: "ok",
+        label: opts.label,
+        detail,
+        elapsedMs,
+        rowCount: opts.rowCountOf?.(data),
+      });
+      return data;
+    } catch (err) {
+      if (!(err instanceof Error)) throw err;
+      // すでに上で session log に登録済みなら素通し (2 重登録防止)。
+      if ((err as { __sessionLogged?: boolean }).__sessionLogged) throw err;
+      // ユーザー操作起因のキャンセルは無音 (画面遷移などで起きる)。
+      if (err.name === "AbortError") throw err;
+      outerDeps.sessionLog.add({
+        kind: opts.kind,
+        status: "error",
+        label: opts.label,
+        detail: opts.fallbackDetail,
+        message: err.message,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw err;
+    }
+  }
+
   async function executeQuery(sql: string): Promise<DbQueryResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
-    const res = await fetch("/_db/query", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Code-Viewer-Action": "1",
+    const label = sql.split("\n")[0]?.trim() || sql;
+    return logSqlFetch<DbQueryResponse>({
+      url: "/_db/query",
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify({
+          db: currentDbInfo.id,
+          ...(currentSchema ? { schema: currentSchema } : {}),
+          sql,
+          saveHistory: true,
+          source: "browser",
+          executedBy: "user",
+        }),
       },
-      body: JSON.stringify({
-        db: currentDbInfo.id,
-        ...(currentSchema ? { schema: currentSchema } : {}),
-        sql,
-        saveHistory: true,
-        source: "browser",
-        executedBy: "user",
-      }),
+      kind: "query",
+      label,
+      fallbackDetail: sql,
+      trackLoad: false,
+      errorPrefix: "failed to execute query",
+      rowCountOf: (r) => r.rowCount ?? r.rows.length,
     });
-    if (!res.ok) {
-      throw new Error(
-        await responseErrorMessage(res, "failed to execute query"),
-      );
-    }
-    const result = (await res.json()) as DbQueryResponse;
-    return result;
+  }
+
+  // グリッドの保留中編集をサーバへ適用する。失敗時は throw し、グリッド側が
+  // メッセージを表示する。既存の executeQuery と同じ POST 規約に従う。
+  async function applyRowMutations(mutations: RowMutation[]): Promise<void> {
+    if (!currentDbInfo) throw new Error("no database selected");
+    if (!currentTable) throw new Error("no table selected");
+    const label = paneText().sessionLog.commitLabel(mutations.length);
+    const fallback = JSON.stringify(
+      { table: currentTable, mutations },
+      null,
+      2,
+    );
+    await logSqlFetch<DbMutateResponse>({
+      url: "/_db/mutate",
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify({
+          db: currentDbInfo.id,
+          ...(currentSchema ? { schema: currentSchema } : {}),
+          table: currentTable,
+          mutations,
+        }),
+      },
+      kind: "mutate",
+      label,
+      fallbackDetail: fallback,
+      errorPrefix: "failed to save changes",
+      rowCountOf: () => mutations.length,
+    });
   }
 
   async function selectDb(
@@ -1216,12 +1446,21 @@ function createTabPane(
       return schemaCache.columnsMap[table];
     }
     if (!currentDbInfo) return [];
-    const res = await fetch(
-      `/_db/columns?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
-    );
-    if (!res.ok) return [];
-    const data = (await res.json()) as { columns: DbColumn[] };
-    return data.columns;
+    try {
+      const data = await logSqlFetch<{
+        columns: DbColumn[];
+        executedSql?: string[];
+      }>({
+        url: `/_db/columns?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+        kind: "query",
+        label: `_db/columns ${table}`,
+        trackLoad: false,
+        errorPrefix: "failed to fetch columns",
+      });
+      return data.columns;
+    } catch {
+      return [];
+    }
   }
 
   async function showSchema(table: string) {
@@ -1235,14 +1474,17 @@ function createTabPane(
     if (!currentDbInfo) return;
     setActiveTab("schema");
     try {
-      const res = await fetch(
-        `/_db/ddl?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
-      );
-      if (!res.ok) return;
-      const data = (await res.json()) as {
+      const data = await logSqlFetch<{
         sql: string;
         triggers: { name: string; sql: string }[];
-      };
+        executedSql?: string[];
+      }>({
+        url: `/_db/ddl?${withCurrentSchema(new URLSearchParams({ db: currentDbInfo.id, table }))}`,
+        kind: "query",
+        label: `_db/ddl ${table}`,
+        trackLoad: false,
+        errorPrefix: "failed to fetch DDL",
+      });
       const columns = await fetchColumns(table);
       schemaView.render(table, columns, schemaCache?.indexes || [], {
         foreignKeys: schemaCache?.foreignKeys,
@@ -1534,6 +1776,8 @@ function createTabPane(
     if (!userPrefersHistoryOpen) state.historyOpen = false;
     if (historyPane.style.height)
       state.historyHeight = historyPane.style.height;
+    // activeHistoryTab は default = "history" なので、"log" のときだけ載せる。
+    if (activeHistoryTab === "log") state.activeHistoryTab = "log";
     if (sidebar.style.width) state.sidebarWidth = sidebar.style.width;
     if (relatedPanelHeightPx != null)
       state.relatedPanelHeight = `${relatedPanelHeightPx}px`;
@@ -1686,9 +1930,9 @@ const ICON_PATH_SEARCH =
 const ICON_PATH_SNAPSHOT =
   "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
 
-// 鎖リンク icon (octicon link)。Rails 規約由来の仮想 FK 推測トグルに使う。
-const ICON_PATH_INFER_FK =
-  "M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z";
+// 鉛筆 icon (octicon pencil)。編集モードのトグル UI に使う。
+const ICON_PATH_EDIT_MODE =
+  "M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm.176 4.823L9.75 4.81l-6.286 6.287a.247.247 0 0 0-.064.108l-.558 1.953 1.953-.558a.249.249 0 0 0 .108-.064l6.286-6.286Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354L12.427 2.49Z";
 
 function makeIconButton(opts: {
   label: string;
@@ -1759,6 +2003,10 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     | null = null;
   let dbUiState: DbUiState = { version: 1, columnWidths: {} };
   let dbUiLoadPromise: Promise<void> | null = null;
+  // セッション限定のログストア (database-view 全体で共有)。SQL 実行 / 編集
+  // コミットの成否を全 tabPane が同じインスタンスに push する。各 tabPane の
+  // 履歴 pane 内「ログ」タブで時系列表示する (view は tabPane 側で生成)。
+  const sessionLog = createSessionLog();
 
   function isRestoring(): boolean {
     return restoringDepth > 0;
@@ -2313,10 +2561,11 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "db-tabs-chip-close";
-    closeBtn.title = "閉じる";
     closeBtn.tabIndex = -1;
     closeBtn.textContent = "×";
-    closeBtn.setAttribute("aria-label", outerText().nav.closeTab(initialLabel));
+    const closeTabLabel = outerText().nav.closeTab(initialLabel);
+    closeBtn.title = closeTabLabel;
+    closeBtn.setAttribute("aria-label", closeTabLabel);
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(id);
@@ -2353,6 +2602,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         setDbUiPref,
         onDbUiPrefChange,
         loadSqlHistory,
+        sessionLog,
       },
       {
         tabId: id,
@@ -2374,6 +2624,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         sqlDraft: initial?.sqlDraft,
         historyOpen: initial?.historyOpen,
         historyHeight: initial?.historyHeight,
+        activeHistoryTab: initial?.activeHistoryTab,
         sidebarWidth: initial?.sidebarWidth,
         relatedPanelHeight: initial?.relatedPanelHeight,
         detailPanelHeight: initial?.detailPanelHeight,
@@ -2805,6 +3056,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     leave,
     handleSse,
     localize,
+    getDbUiPref,
+    setDbUiPref,
+    onDbUiPrefChange,
   };
 }
 

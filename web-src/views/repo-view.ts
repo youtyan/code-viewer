@@ -14,7 +14,6 @@ import {
   PLUS_16_PATH,
   TRASH_16_PATH,
 } from "../core/icons";
-import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import {
   type AppRoute,
@@ -30,6 +29,11 @@ import type {
   UndoActionResponse,
 } from "../core/types";
 import { sidebarAncestorDirs } from "./sidebar";
+import {
+  showAlertDialog,
+  showConfirmDialog,
+  showPromptDialog,
+} from "./ui-dialog";
 
 export type RepoViewDeps = {
   setRoute(route: AppRoute, replace?: boolean): void;
@@ -176,102 +180,16 @@ export function createRepoView(deps: RepoViewDeps) {
     document.querySelector<HTMLElement>(".gdp-context-menu")?.remove();
   }
 
-  function closeTrashDialog() {
-    document.querySelector<HTMLElement>(".gdp-trash-dialog-backdrop")?.remove();
-  }
-
-  function createTrashDialog(
-    title: string,
-    body: string,
-    actions: HTMLElement[],
-  ) {
-    closeTrashDialog();
-    const backdrop = document.createElement("div");
-    backdrop.className = "gdp-trash-dialog-backdrop";
-    const dialog = document.createElement("div");
-    dialog.className = "gdp-trash-dialog";
-    const titleId = "gdp-trash-dialog-title";
-    const bodyId = "gdp-trash-dialog-body";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", titleId);
-    dialog.setAttribute("aria-describedby", bodyId);
-    const heading = document.createElement("div");
-    heading.id = titleId;
-    heading.className = "gdp-trash-dialog-title";
-    heading.textContent = title;
-    const message = document.createElement("div");
-    message.id = bodyId;
-    message.className = "gdp-trash-dialog-body";
-    message.textContent = body;
-    const actionRow = document.createElement("div");
-    actionRow.className = "gdp-trash-dialog-actions";
-    actionRow.append(...actions);
-    dialog.append(heading, message, actionRow);
-    backdrop.appendChild(dialog);
-    document.body.appendChild(backdrop);
-    return backdrop;
-  }
-
   function confirmMoveToTrash(
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<boolean> {
-    return new Promise((resolve) => {
-      const previousFocus =
-        focusReturnTarget || (document.activeElement as HTMLElement | null);
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "gdp-btn gdp-btn-sm";
-      cancel.textContent = "Cancel";
-      const move = document.createElement("button");
-      move.type = "button";
-      move.className = "gdp-btn gdp-btn-sm gdp-trash-dialog-danger";
-      move.textContent = "Move to Trash";
-      const done = (ok: boolean) => {
-        document.removeEventListener("keydown", onKeydown);
-        closeTrashDialog();
-        previousFocus?.focus?.();
-        resolve(ok);
-      };
-      const onKeydown = (event: KeyboardEvent) => {
-        if (isImeComposing(event)) return;
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          done(false);
-          return;
-        }
-        if (event.key !== "Tab") return;
-        const focusables = [cancel, move];
-        const index = focusables.indexOf(
-          document.activeElement as HTMLButtonElement,
-        );
-        if (index < 0) {
-          event.preventDefault();
-          focusables[0].focus();
-          return;
-        }
-        if (event.shiftKey && index <= 0) {
-          event.preventDefault();
-          focusables[focusables.length - 1].focus();
-        } else if (!event.shiftKey && index === focusables.length - 1) {
-          event.preventDefault();
-          focusables[0].focus();
-        }
-      };
-      cancel.addEventListener("click", () => done(false));
-      move.addEventListener("click", () => done(true));
-      const backdrop = createTrashDialog(
-        "Move to Trash?",
-        `Move "${path}" to Trash?`,
-        [cancel, move],
-      );
-      backdrop.addEventListener("pointerdown", (event) => {
-        if (event.target === backdrop) done(false);
-      });
-      document.addEventListener("keydown", onKeydown);
-      cancel.focus();
+    return showConfirmDialog({
+      title: "Move to Trash?",
+      body: `Move "${path}" to Trash?`,
+      confirmLabel: "Move to Trash",
+      danger: true,
+      focusReturnTarget,
     });
   }
 
@@ -279,99 +197,16 @@ export function createRepoView(deps: RepoViewDeps) {
     path: string,
     focusReturnTarget?: HTMLElement | null,
   ): Promise<string | null> {
-    return new Promise((resolve) => {
-      const previousFocus =
-        focusReturnTarget || (document.activeElement as HTMLElement | null);
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "gdp-btn gdp-btn-sm";
-      cancel.textContent = "Cancel";
-      const create = document.createElement("button");
-      create.type = "button";
-      create.className = "gdp-btn gdp-btn-sm";
-      create.textContent = "Create";
-      const input = document.createElement("input");
-      input.className = "gdp-create-dir-input";
-      input.type = "text";
-      input.autocomplete = "off";
-      input.placeholder = "Folder name";
-      input.setAttribute("aria-label", "Folder name");
-      const error = document.createElement("div");
-      error.className = "gdp-create-dir-error";
-      error.setAttribute("role", "alert");
-      const syncValidity = () => {
-        const valid = !!normalizeNewDirectoryName(input.value);
-        create.disabled = !valid;
-        error.textContent =
-          input.value && !valid
-            ? "Use a folder name without slashes, control characters, . or .."
-            : "";
-        return valid;
-      };
-      const done = (name: string | null) => {
-        document.removeEventListener("keydown", onKeydown);
-        closeTrashDialog();
-        previousFocus?.focus?.();
-        resolve(name);
-      };
-      const submit = () => {
-        const name = normalizeNewDirectoryName(input.value);
-        if (!name) {
-          syncValidity();
-          input.focus();
-          return;
-        }
-        done(name);
-      };
-      const onKeydown = (event: KeyboardEvent) => {
-        if (isImeComposing(event)) return;
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          done(null);
-          return;
-        }
-        if (event.key === "Enter") {
-          event.preventDefault();
-          submit();
-          return;
-        }
-        if (event.key !== "Tab") return;
-        const focusables = [input, cancel, create];
-        const index = focusables.indexOf(
-          document.activeElement as HTMLInputElement | HTMLButtonElement,
-        );
-        if (index < 0) {
-          event.preventDefault();
-          focusables[0].focus();
-          return;
-        }
-        if (event.shiftKey && index <= 0) {
-          event.preventDefault();
-          focusables[focusables.length - 1].focus();
-        } else if (!event.shiftKey && index === focusables.length - 1) {
-          event.preventDefault();
-          focusables[0].focus();
-        }
-      };
-      cancel.addEventListener("click", () => done(null));
-      create.addEventListener("click", submit);
-      input.addEventListener("input", syncValidity);
-      create.disabled = true;
-      const backdrop = createTrashDialog(
-        "New Folder",
-        `Create a folder in "${path || getProjectName() || "repository"}".`,
-        [cancel, create],
-      );
-      const body = backdrop.querySelector<HTMLElement>(
-        ".gdp-trash-dialog-body",
-      );
-      body?.append(input, error);
-      backdrop.addEventListener("pointerdown", (event) => {
-        if (event.target === backdrop) done(null);
-      });
-      document.addEventListener("keydown", onKeydown);
-      input.focus();
+    return showPromptDialog({
+      title: "New Folder",
+      body: `Create a folder in "${path || getProjectName() || "repository"}".`,
+      placeholder: "Folder name",
+      ariaLabel: "Folder name",
+      confirmLabel: "Create",
+      validate: (v) => normalizeNewDirectoryName(v),
+      invalidMessage:
+        "Use a folder name without slashes, control characters, . or ..",
+      focusReturnTarget,
     });
   }
 
@@ -463,7 +298,7 @@ export function createRepoView(deps: RepoViewDeps) {
     ref: string,
     onChanged: () => void,
   ): boolean {
-    if (document.querySelector(".gdp-trash-dialog-backdrop")) return false;
+    if (document.querySelector(".gdp-dialog-backdrop")) return false;
     if (!canTrashWorktreeRef(ref)) return false;
     if (entry.children_omitted_reason === "internal") return false;
     if (entry.type !== "tree" && entry.type !== "blob") return false;
@@ -1181,23 +1016,11 @@ export function createRepoView(deps: RepoViewDeps) {
   let creatingDirectory = false;
 
   function showTrashError(message: string) {
-    const ok = document.createElement("button");
-    ok.type = "button";
-    ok.className = "gdp-btn gdp-btn-sm";
-    ok.textContent = "OK";
-    ok.addEventListener("click", closeTrashDialog);
-    createTrashDialog("Trash failed", message, [ok]);
-    ok.focus();
+    void showAlertDialog({ title: "Trash failed", body: message });
   }
 
   function showCreateDirectoryError(message: string) {
-    const ok = document.createElement("button");
-    ok.type = "button";
-    ok.className = "gdp-btn gdp-btn-sm";
-    ok.textContent = "OK";
-    ok.addEventListener("click", closeTrashDialog);
-    createTrashDialog("New folder failed", message, [ok]);
-    ok.focus();
+    void showAlertDialog({ title: "New folder failed", body: message });
   }
 
   async function moveRepoPathToTrash(path: string) {
@@ -1222,18 +1045,12 @@ export function createRepoView(deps: RepoViewDeps) {
     const list = Array.from(files);
     if (!list.length) return;
     const label = path || getProjectName() || "repository root";
-    if (
-      !window.confirm(
-        "Upload " +
-          list.length +
-          " file" +
-          (list.length === 1 ? "" : "s") +
-          " into " +
-          label +
-          "?",
-      )
-    )
-      return;
+    const ok = await showConfirmDialog({
+      title: "Upload files?",
+      body: `Upload ${list.length} file${list.length === 1 ? "" : "s"} into ${label}?`,
+      confirmLabel: "Upload",
+    });
+    if (!ok) return;
 
     const form = new FormData();
     form.set("dir", path);

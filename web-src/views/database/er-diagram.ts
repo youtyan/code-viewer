@@ -1,40 +1,6 @@
 import type { DbColumn, DbSchemaResponse } from "../../core/database/types";
+import { loadMermaid } from "../../core/mermaid-loader";
 import { type DbText, dbText } from "./i18n";
-
-type MermaidApi = {
-  initialize(config: Record<string, unknown>): void;
-  run(options: {
-    nodes: HTMLElement[];
-    suppressErrors?: boolean;
-  }): Promise<void>;
-};
-
-type MermaidModule = { default: MermaidApi };
-
-let mermaidPromise: Promise<MermaidApi | null> | null = null;
-let mermaidInitialized = false;
-
-async function loadMermaid(): Promise<MermaidApi | null> {
-  if (!mermaidPromise) {
-    mermaidPromise = import("/" + "mermaid.js")
-      .then((mod: unknown) => {
-        const typed = mod as MermaidModule;
-        const mermaid = typed.default;
-        if (!mermaidInitialized) {
-          mermaid.initialize({
-            startOnLoad: false,
-            securityLevel: "strict",
-            theme: "default",
-            er: { useMaxWidth: false },
-          });
-          mermaidInitialized = true;
-        }
-        return mermaid;
-      })
-      .catch(() => null);
-  }
-  return mermaidPromise;
-}
 
 export type ErDiagram = {
   el: HTMLElement;

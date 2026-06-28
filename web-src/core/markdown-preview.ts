@@ -13,36 +13,12 @@ export type MarkdownPreviewOptions = {
   resolveAssetUrl?: (path: string, rawSrc: string) => string | null;
 };
 
-type MermaidApi = {
-  initialize: (config: Record<string, unknown>) => void;
-  run: (options: {
-    nodes: Element[];
-    suppressErrors?: boolean;
-  }) => Promise<void>;
-  parse?: (text: string) => Promise<unknown>;
-};
+import { loadMermaid, type MermaidApi } from "./mermaid-loader";
+import { loadShikiHighlighter, type ShikiHighlighter } from "./shiki-loader";
 
-type MermaidModule = { default: MermaidApi };
-export type ShikiHighlighter = {
-  codeToHtml: (
-    code: string,
-    options: {
-      lang: string;
-      themes: { light: string; dark: string };
-      defaultColor: false;
-    },
-  ) => string;
-};
-type ShikiModule = {
-  createHighlighter: (options: {
-    themes: string[];
-    langs: string[];
-  }) => Promise<ShikiHighlighter>;
-};
-
-let mermaidPromise: Promise<MermaidApi | null> | null = null;
-let mermaidInitialized = false;
-let shikiPromise: Promise<ShikiHighlighter | null> | null = null;
+// 後方互換のため re-export (外部 import が無いことは grep 確認済みだが、
+// 公開済み export 型を黙って削除すると下流の型推論を壊しうる)。
+export type { ShikiHighlighter };
 
 const MARKDOWN_FENCE_LANG_ALIASES: Record<string, string> = {
   sh: "bash",
@@ -102,6 +78,9 @@ const MARKDOWN_SHIKI_LANGS = Array.from(
   ]),
 );
 
+// ai-dup-check: allow -- fn(string)→string と signature が偶然一致するだけ
+// (makeId / s3ObjectName / blameShortSha 等)。本体は Markdown 見出しの
+// kebab-case slug 生成で完全に別ドメイン。
 export function markdownSlugify(text: string): string {
   return (
     text
@@ -113,6 +92,9 @@ export function markdownSlugify(text: string): string {
   );
 }
 
+// ai-dup-check: allow -- fn(string, string)→null|string と signature が
+// 偶然一致するだけ (validateDbPath 等)。本体は Markdown 内の相対 href を
+// repo-relative md ファイルパスに解決する処理で別ドメイン。
 export function resolveMarkdownRelativePath(
   currentPath: string,
   href: string,
@@ -124,6 +106,9 @@ export function resolveMarkdownRelativePath(
   return resolveRepoRelative(currentPath, decodeURIComponent(cleanHref));
 }
 
+// ai-dup-check: allow -- fn(string, string)→null|string が偶然一致するだけ。
+// 本体は Markdown 内の image/asset src を repo-relative ファイルパスに
+// 解決する別ドメイン処理。
 export function resolveMarkdownAssetPath(
   currentPath: string,
   src: string,
@@ -348,20 +333,11 @@ function splitYamlFrontmatter(
   };
 }
 
-export async function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
-  if (!shikiPromise) {
-    // Keep this non-literal so Bun does not pull Shiki into the main bundle.
-    shikiPromise = import("/" + "shiki.js")
-      .then((mod: unknown) => {
-        const typed = mod as ShikiModule;
-        return typed.createHighlighter({
-          themes: ["github-light", "github-dark"],
-          langs: MARKDOWN_SHIKI_LANGS,
-        });
-      })
-      .catch(() => null);
-  }
-  return shikiPromise;
+export function loadMarkdownHighlighter(): Promise<ShikiHighlighter | null> {
+  return loadShikiHighlighter({
+    themes: ["github-light", "github-dark"],
+    langs: MARKDOWN_SHIKI_LANGS,
+  });
 }
 
 function enhanceTaskLists(root: HTMLElement) {
@@ -604,28 +580,6 @@ async function renderMermaidDiagrams(root: HTMLElement) {
       continue;
     await renderMermaidError(node, mermaid);
   }
-}
-
-async function loadMermaid(): Promise<MermaidApi | null> {
-  if (!mermaidPromise) {
-    // Keep this non-literal so Bun does not pull Mermaid into the main bundle.
-    mermaidPromise = import("/" + "mermaid.js")
-      .then((mod: unknown) => {
-        const typed = mod as MermaidModule;
-        const mermaid = typed.default;
-        if (!mermaidInitialized) {
-          mermaid.initialize({
-            startOnLoad: false,
-            securityLevel: "strict",
-            theme: "default",
-          });
-          mermaidInitialized = true;
-        }
-        return mermaid;
-      })
-      .catch(() => null);
-  }
-  return mermaidPromise;
 }
 
 function isMermaidErrorSvg(svg: SVGSVGElement | null): boolean {
