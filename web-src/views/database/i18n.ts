@@ -43,6 +43,21 @@ export type DbText = {
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
   };
+  // 行編集 / 新規追加 / 削除。
+  edit: {
+    editMode: string;
+    editModeTitle: string;
+    newRow: string;
+    commit: string;
+    discard: string;
+    deleteRow: string;
+    undoDelete: string;
+    pending: (n: number) => string;
+    committing: string;
+    commitError: (message: string) => string;
+    confirmDiscard: string;
+    noPrimaryKey: string;
+  };
   // スキーマビュー。
   schema: {
     columns: string;
@@ -265,6 +280,21 @@ const EN: DbText = {
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
   },
+  edit: {
+    editMode: "Edit",
+    editModeTitle: "Toggle edit mode",
+    newRow: "New row",
+    commit: "Commit",
+    discard: "Discard",
+    deleteRow: "Mark row for deletion",
+    undoDelete: "Undo deletion",
+    pending: (n) => `${n} change(s)`,
+    committing: "Saving…",
+    commitError: (message) => `Save failed: ${message}`,
+    confirmDiscard: "Discard all pending changes?",
+    noPrimaryKey:
+      "This table has no primary key. Existing rows cannot be edited or deleted (you can still add new rows).",
+  },
   schema: {
     columns: "Columns",
     foreignKeys: "Foreign Keys",
@@ -477,6 +507,21 @@ const JA: DbText = {
     statusRows: (n) => `${n} 行`,
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,
+  },
+  edit: {
+    editMode: "編集",
+    editModeTitle: "編集モードの切り替え",
+    newRow: "新規行",
+    commit: "コミット",
+    discard: "破棄",
+    deleteRow: "行を削除対象にする",
+    undoDelete: "削除を取り消す",
+    pending: (n) => `変更 ${n} 件`,
+    committing: "保存中…",
+    commitError: (message) => `保存に失敗しました: ${message}`,
+    confirmDiscard: "保留中の変更をすべて破棄しますか?",
+    noPrimaryKey:
+      "このテーブルには主キーがありません。既存行の編集・削除はできません(新規行の追加は可能です)。",
   },
   schema: {
     columns: "カラム",

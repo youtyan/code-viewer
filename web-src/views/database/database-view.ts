@@ -9,6 +9,7 @@ import type {
   DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryState,
+  RowMutation,
   TabState,
   TabsResponse,
   TabsState,
@@ -544,6 +545,10 @@ function createTabPane(
       cb.onStateChange();
     },
     getText: () => paneText(),
+    // 書き込み対応データストアでのみ編集 UI を出す。現状はサーバ側で
+    // SQLite のみ /_db/mutate に対応しているため sqlite に限定する。
+    getEditable: () => currentDbInfo?.kind === "sqlite",
+    applyMutations: (mutations) => applyRowMutations(mutations),
   });
 
   const queryEditor = createQueryEditor({
@@ -971,6 +976,33 @@ function createTabPane(
     }
     const result = (await res.json()) as DbQueryResponse;
     return result;
+  }
+
+  // グリッドの保留中編集をサーバへ適用する。失敗時は throw し、グリッド側が
+  // メッセージを表示する。既存の executeQuery と同じ POST 規約に従う。
+  async function applyRowMutations(mutations: RowMutation[]): Promise<void> {
+    if (!currentDbInfo) throw new Error("no database selected");
+    if (!currentTable) throw new Error("no table selected");
+    const res = await deps.trackLoad(
+      fetch("/_db/mutate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Code-Viewer-Action": "1",
+        },
+        body: JSON.stringify({
+          db: currentDbInfo.id,
+          ...(currentSchema ? { schema: currentSchema } : {}),
+          table: currentTable,
+          mutations,
+        }),
+      }),
+    );
+    if (!res.ok) {
+      throw new Error(
+        await responseErrorMessage(res, "failed to save changes"),
+      );
+    }
   }
 
   async function selectDb(
