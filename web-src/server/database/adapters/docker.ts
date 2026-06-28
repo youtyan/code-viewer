@@ -6,7 +6,9 @@ import type {
   DbOrder,
   DbTableInfo,
   DbValue,
+  RowMutation,
 } from "../../../core/database/types";
+import { buildMutationStatements } from "../mutate";
 import {
   buildRowKeyJson,
   computeRowHash,
@@ -30,6 +32,7 @@ import {
 import { spawnTextAsync } from "./spawn-runner";
 import type {
   DatabaseAdapter,
+  MutationResult,
   QueryResult,
   TablePageMeta,
   TriggerInfo,
@@ -1031,6 +1034,44 @@ export function createDockerAdapter(config: DockerDbConfig): DockerSource {
         rows: result.rows.slice(0, maxRows).map((row) => row.map(toDbValue)),
         rowCount: Math.min(result.rows.length, maxRows),
       };
+    },
+
+    async applyMutations(
+      table: string,
+      mutations: RowMutation[],
+      signal?: AbortSignal,
+    ): Promise<MutationResult> {
+      const columns = await this.getColumnsAsync(table, signal);
+      if (columns.length === 0) {
+        throw new Error(`unknown table: ${table}`);
+      }
+      const statements = buildMutationStatements(
+        table,
+        mutations,
+        columns,
+        config.kind,
+      );
+      // docker exec (CLI) はパラメータバインドが使えないので、ビルダはリテラル
+      // 埋め込み (params 空) で SQL を生成する。これらを 1 トランザクションに
+      // まとめて流す。途中でエラーになった場合:
+      //   - PostgreSQL: psql は ON_ERROR_STOP=1 で異常終了し、トランザクションは
+      //     中断→切断時にロールバックされる。
+      //   - MySQL: --batch は最初のエラーで停止・異常終了し、COMMIT に到達せず
+      //     切断時にロールバックされる。
+      // どちらも execAsync が非ゼロ終了で throw するので原子性が保たれる。
+      const body = statements.map((s) => s.sql).join(";\n");
+      const wrapped =
+        config.kind === "postgresql"
+          ? `BEGIN; SET LOCAL search_path = ${sanitizeIdentifier(
+              currentPostgresSchema(),
+              config.kind,
+            )}; ${body}; COMMIT`
+          : `START TRANSACTION; ${body}; COMMIT`;
+      await execAsync(wrapped, signal);
+      // CLI 経由では正確な affected 行数の取得が難しいため、適用した
+      // ステートメント数を返す (各文は PK 指定でおおむね 1 行に対応)。
+      this.invalidateTableMetaCache?.(table);
+      return { affected: statements.length };
     },
 
     invalidateTableMetaCache(table?: string): void {

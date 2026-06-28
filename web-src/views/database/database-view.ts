@@ -545,9 +545,9 @@ function createTabPane(
       cb.onStateChange();
     },
     getText: () => paneText(),
-    // 書き込み対応データストアでのみ編集 UI を出す。現状はサーバ側で
-    // SQLite のみ /_db/mutate に対応しているため sqlite に限定する。
-    getEditable: () => currentDbInfo?.kind === "sqlite",
+    // 書き込み対応データストア (SQL 系: SQLite / PostgreSQL / MySQL) で
+    // 編集 UI を出す。これらは adapter.applyMutations + /_db/mutate に対応。
+    getEditable: () => isSqlKind(currentDbInfo?.kind),
     applyMutations: (mutations) => applyRowMutations(mutations),
   });
 
