@@ -8611,16 +8611,17 @@ body.db-resizing {
 /* 1 レコード境界の視覚化:
  * - updated は trBefore(snap-diff-record-start) + trAfter(snap-diff-record-end) の 2 行
  * - inserted/deleted は 1 行に snap-diff-record-start snap-diff-record-end 両方
- * record-end の下端を 1px 濃色にして、ペア間の境界を引き締める。
- * gutter (type cell) には inset box-shadow で 2px の縦印を入れる
- * (実 border ではないので列幅・border-collapse を汚さない)。 */
+ * 行間の通常 border (1px var(--border)) よりはっきり濃く太くしないと、ペア内
+ * の - と + の境目とレコード境界が区別できない。
+ *   - 横境界: 2px var(--fg-muted) (灰色の濃い線)
+ *   - gutter 縦印: inset 3px var(--fg-muted) で record の左に bracket 風
+ *     (実 border ではないので border-collapse / 列幅同期に影響しない) */
 .db-snap-diff-grid tr.snap-diff-record-end td {
-  border-bottom: 1px solid var(--border-strong);
+  border-bottom: 2px solid var(--fg-muted);
 }
 .db-snap-diff-grid tr.snap-diff-record-start td:first-child,
 .db-snap-diff-grid tr.snap-diff-record-end td:first-child {
-  box-shadow: inset 2px 0 0
-    color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow: inset 3px 0 0 var(--fg-muted);
 }
 .db-snap-diff-grid .snap-diff-type-cell {
   font-weight: 600;
