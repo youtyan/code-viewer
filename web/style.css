@@ -8495,7 +8495,8 @@ body.db-resizing {
   z-index: 1;
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
-  border-bottom: 1px solid var(--border);
+  /* thead th の border-top と二重線になるので、ここでは bottom border を持たない。
+   * テーブル名と thead の境界は thead 側の 1px に一本化する。 */
 }
 .db-snapshot-diff-table-header:hover {
   background: var(--bg-mute);
