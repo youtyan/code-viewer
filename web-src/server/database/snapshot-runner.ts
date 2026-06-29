@@ -9,6 +9,10 @@
 // 後方互換: 旧 signature `runSnapshot(cwd, adapter, dbId, tables, note, onProgress)`
 // は維持する。`adapter` は SnapshotIterable を満たす必要があり、
 // 持たない場合は明示的にエラーを返す。
+//
+// onProgress の意味:
+//   - container !== "" && done === false: そのテーブルの処理開始 (index/total 付き)
+//   - container === "" && done === true: 全体完了 (最後に 1 度だけ)
 
 import type { DbKind } from "../../core/database/types";
 import { isAbortLikeError, throwIfAborted } from "./adapters/abort";
@@ -40,13 +44,20 @@ type RunSnapshotOptions = {
   onSnapshotId?: (snapshotId: string) => void;
 };
 
+export type SnapshotProgress = {
+  container: string;
+  done: boolean;
+  index: number;
+  total: number;
+};
+
 export async function runSnapshot(
   cwd: string,
   source: MaybeSnapshotSource,
   dbId: string,
   containers: string[],
   note: string,
-  onProgress?: (container: string, done: boolean) => void,
+  onProgress?: (progress: SnapshotProgress) => void,
   options: RunSnapshotOptions = {},
 ): Promise<string> {
   if (!hasSnapshotCapability(source)) {
@@ -69,9 +80,11 @@ export async function runSnapshot(
   try {
     options.onSnapshotId?.(snapshotId);
 
-    for (const container of containers) {
+    const total = containers.length;
+    for (let i = 0; i < containers.length; i++) {
+      const container = containers[i];
       throwIfAborted(options.signal, "snapshot cancelled");
-      onProgress?.(container, false);
+      onProgress?.({ container, done: false, index: i, total });
 
       // snapshot-store の addSnapshotTableData は historically `rowKeyJson`
       // フィールド名を使うので、SnapshotItem.keyJson から rename して詰める。
@@ -130,7 +143,7 @@ export async function runSnapshot(
     }
 
     await finalizeSnapshot(cwd, snapshotId);
-    onProgress?.("", true);
+    onProgress?.({ container: "", done: true, index: total, total });
     return snapshotId;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

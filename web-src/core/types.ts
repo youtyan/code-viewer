@@ -136,6 +136,10 @@ export type DbUiState = {
   version: 1;
   columnWidths: Record<string, Record<string, Record<string, number>>>;
   expandedTables?: Record<string, string[]>;
+  /** snapshot 取得ダイアログで前回チェックしていたテーブル集合を scope 単位
+   * (dbId + schema) で覚えておくための永続キャッシュ。値は sorted unique
+   * テーブル名配列。サイズと値の sanitize は state-store 側で行う。 */
+  snapshotSelectedTables?: Record<string, string[]>;
   prefs?: DbUiPrefs;
 };
 

@@ -37,6 +37,10 @@ export type AppRoute =
       schema?: string;
       table?: string;
       tab?: "data" | "query" | "schema" | "er" | "search" | "snapshot";
+      /** snapshot タブで diff 表示中の before/after snapshot id。
+       * URL に乗せておくと、リロードしても同じ比較が復元される。 */
+      diffBefore?: string;
+      diffAfter?: string;
       range: DiffRange;
     }
   | {
@@ -226,12 +230,16 @@ export function parseRoute(
         tabRaw === "snapshot"
           ? tabRaw
           : undefined;
+      const diffBefore = params.get("diffBefore") || undefined;
+      const diffAfter = params.get("diffAfter") || undefined;
       return {
         screen: "database",
         ...(db ? { db } : {}),
         ...(schema ? { schema } : {}),
         ...(table ? { table } : {}),
         ...(tab ? { tab } : {}),
+        ...(diffBefore ? { diffBefore } : {}),
+        ...(diffAfter ? { diffAfter } : {}),
         range,
       };
     }
@@ -342,6 +350,8 @@ export function buildRoute(route: AppRoute): string {
       if (route.schema) params.set("schema", route.schema);
       if (route.table) params.set("table", route.table);
       if (route.tab) params.set("tab", route.tab);
+      if (route.diffBefore) params.set("diffBefore", route.diffBefore);
+      if (route.diffAfter) params.set("diffAfter", route.diffAfter);
       const qs = params.toString();
       return `/database${qs ? `?${qs}` : ""}`;
     }
