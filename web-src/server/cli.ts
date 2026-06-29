@@ -58,6 +58,11 @@ if (process.argv[2] === "annotate") {
 } else if (process.argv[2] === "doctor") {
   const { runDoctorCli } = await import("./doctor-cli");
   await runDoctorCli(process.argv.slice(3));
+} else if (process.argv[2] === "help") {
+  // `code-viewer help` mirrors `code-viewer --help` so we don't silently
+  // start the server when a new user types the most natural query.
+  process.argv[2] = "--help";
+  await import("./preview");
 } else {
   await import("./preview");
 }

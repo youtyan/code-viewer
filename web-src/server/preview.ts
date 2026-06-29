@@ -198,7 +198,12 @@ function parseCli() {
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
   code-viewer annotate <start|add|list|delete|clear> [options]
+  code-viewer query <run|list|clear|snapshot|diff|...> [options]
+  code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer help
+
+Subcommand guides (AI agents): code-viewer <annotate|query|skill|doctor> agent-help
 
 Examples:
   code-viewer --open
