@@ -36,6 +36,13 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Read the built-in Help page for getting started, the `.code-viewer/`
   project files, AI annotations, datastores, the agent skill, and
   keybindings.
+- Inspect the runtime with the Environment Doctor (right-side sheet,
+  toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
+  `@youtyan/code-viewer` version and execution origin (npx cache vs
+  local), SQLite driver and snapshot store, Git, discovery summary,
+  Docker / Compose health (config dry-parse + `compose ps` per service),
+  and the listening port. Useful when `npx` cache mismatch (e.g.
+  `NODE_MODULE_VERSION` errors) needs a remediation hint.
 - Open repository folders (and parent folders of files) in the OS file
   manager, create folders, and trash/restore files from localhost-only
   actions.
