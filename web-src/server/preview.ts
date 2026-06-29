@@ -51,6 +51,7 @@ import {
   type TimedCacheEntry,
 } from "./cache";
 import { startDevAssetReload } from "./dev-assets";
+import { handleDoctor } from "./doctor";
 import * as git from "./git";
 import {
   buildLineOffsetIndexFromStream,
@@ -2523,6 +2524,12 @@ const server = await startServer({
     if (staticResponse) return staticResponse;
     if (url.pathname === "/diff.json") return handleDiffJson(url);
     if (url.pathname === "/_settings") return handleSettings();
+    if (url.pathname === "/_doctor")
+      return handleDoctor({
+        cwd,
+        scopeOmitDirNames,
+        listenPort,
+      });
     if (url.pathname === "/_tree") return handleTree(url);
     if (url.pathname === "/_files") return handleFiles(url);
     if (url.pathname === "/_grep") return handleGrep(url);

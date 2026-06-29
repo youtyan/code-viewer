@@ -54,6 +54,7 @@ export const SPA_PATHS = [
   "/help",
   "/history",
   "/database",
+  "/doctor",
 ] as const;
 export const APP_ENTRY_PATHS = ["/", "/index.html"] as const;
 
@@ -194,6 +195,13 @@ export function parseRoute(
         range,
         lang: params.get("lang") || "en",
         section: params.get("section") || "overview",
+      };
+    case "/doctor":
+      return {
+        screen: "repo",
+        ref: params.get("ref") || params.get("target") || "worktree",
+        path: params.get("path") || "",
+        range,
       };
     case "/history": {
       const commit = params.get("commit") || "";
@@ -356,4 +364,25 @@ export function buildRawFileUrl(target: SourceFileTarget): string {
     "&ref=" +
     encodeURIComponent(target.ref || "worktree")
   );
+}
+
+// Doctor sheet is an overlay state independent of AppRoute.
+// `?doctor=open` (or pathname `/doctor`) marks it open; any other state
+// leaves it closed. The helper lets every screen carry the open flag
+// without bloating each AppRoute variant.
+export function parseDoctorOverlay(pathname: string, search: string): boolean {
+  if (pathname === "/doctor") return true;
+  const params = new URLSearchParams(search);
+  return params.get("doctor") === "open";
+}
+
+export function withDoctorOverlay(url: string, open: boolean): string {
+  const queryIdx = url.indexOf("?");
+  const base = queryIdx >= 0 ? url.slice(0, queryIdx) : url;
+  const query = queryIdx >= 0 ? url.slice(queryIdx + 1) : "";
+  const params = new URLSearchParams(query);
+  if (open) params.set("doctor", "open");
+  else params.delete("doctor");
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
 }

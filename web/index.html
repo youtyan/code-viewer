@@ -33,6 +33,7 @@
     <div class="global-actions">
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
+      <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor">🩺<span id="doctor-badge" class="doctor-badge" hidden></span></button>
       <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
       <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="cancel in-flight requests" disabled>stop</button>
       <button id="theme" title="toggle theme">🌗</button>
@@ -251,6 +252,8 @@
     <div id="query-history-content"></div>
   </aside>
 
+  <div id="doctor-sheet-overlay" class="doctor-sheet-overlay" hidden aria-hidden="true"></div>
+  <aside id="doctor-sheet" class="doctor-sheet" hidden aria-hidden="true" inert aria-label="environment doctor"></aside>
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">
