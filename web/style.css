@@ -8519,10 +8519,10 @@ body.db-resizing {
 .db-snapshot-diff-col-header-wrap {
   /* 列ヘッダ専用 wrap。rows-viewport (overflow-x:auto) の scrollLeft を JS で
    * 同期して、横スクロール時もデータ列と列名の位置が揃うようにする。
-   * 自身は overflow:hidden で内部 table が右にはみ出ても scrollbar を出さない。 */
+   * 自身は overflow:hidden で内部 table が右にはみ出ても scrollbar を出さない。
+   * 上端は table-header (背景同色 var(--bg-soft)) と地続きに見せたいので
+   * border-top は持たない。下端 1px だけが列ヘッダと body の境界を描く。 */
   position: sticky;
-  /* テーブル名バー直下に隙間ゼロで張り付く。1px 重ねて、境界線は
-   * 列ヘッダ wrap の border-top (= 上の sticky 帯の下端) が描く。 */
   top: calc(
     var(--snap-diff-toc-h) + var(--snap-diff-table-header-h) - 1px
   );
@@ -8531,7 +8531,6 @@ body.db-resizing {
   box-sizing: border-box;
   overflow: hidden;
   background: var(--bg-soft);
-  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 .db-snapshot-diff-rows-viewport {
@@ -8588,19 +8587,17 @@ body.db-resizing {
   table-layout: auto;
 }
 .db-snap-diff-grid th {
+  /* 列ヘッダの下端は col-header-wrap.border-bottom が描くので th 側では持たない。
+   * 縦罫線は持たない (gutter と data 列の境界は type-cell.border-right が担う)。 */
   background: var(--bg-soft);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
   padding: 4px 8px;
   font-weight: 600;
   text-align: left;
   white-space: nowrap;
 }
-.db-snap-diff-grid th:last-child {
-  border-right: 0;
-}
 .db-snap-diff-grid td {
-  border-right: 1px solid var(--border);
+  /* 縦罫線は持たない。横罫線のみで行を区切る (GitHub PR diff 同様)。
+   * gutter と data 列の境界は type-cell.border-right が担う。 */
   border-bottom: 1px solid var(--border);
   padding: 3px 8px;
   max-width: 300px;
@@ -8608,23 +8605,22 @@ body.db-resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.db-snap-diff-grid td:last-child {
-  border-right: 0;
-}
 .db-snap-diff-grid tbody tr:last-child td {
   border-bottom: 0;
 }
 /* 1 レコード境界の視覚化:
  * - updated は trBefore(snap-diff-record-start) + trAfter(snap-diff-record-end) の 2 行
  * - inserted/deleted は 1 行に snap-diff-record-start snap-diff-record-end 両方
- * record-end の下端を 2px 太線にして、ペア間の境界が静的に分かるようにする。
- * gutter (type cell) には 3px の縦線で「1 レコード=1 box」感を出す。 */
+ * record-end の下端を 1px 濃色にして、ペア間の境界を引き締める。
+ * gutter (type cell) には inset box-shadow で 2px の縦印を入れる
+ * (実 border ではないので列幅・border-collapse を汚さない)。 */
 .db-snap-diff-grid tr.snap-diff-record-end td {
-  border-bottom: 2px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
 }
 .db-snap-diff-grid tr.snap-diff-record-start td:first-child,
 .db-snap-diff-grid tr.snap-diff-record-end td:first-child {
-  border-left: 3px solid var(--border-strong);
+  box-shadow: inset 2px 0 0
+    color-mix(in srgb, var(--border-strong) 70%, transparent);
 }
 .db-snap-diff-grid .snap-diff-type-cell {
   font-weight: 600;
@@ -8633,6 +8629,9 @@ body.db-resizing {
   background: var(--bg-soft);
   text-align: center;
   min-width: 50px;
+  /* gutter と data 列の境界は唯一ここの border-right が描く。
+   * 他のセルは縦罫線を持たない。 */
+  border-right: 1px solid var(--border);
 }
 .db-snap-diff-grid tr.snap-diff-del .snap-diff-type-cell {
   color: var(--danger);
