@@ -504,6 +504,9 @@ export type DockerDbInfo = DbFileInfo & {
   relDirSlash: string;
   hostPort?: string;
   containerPort: string;
+  // compose の profiles: が指定されている場合 true。doctor は未指定 profile で
+  // `docker compose config --services` から外れるのを「正常」として扱う。
+  profiled?: boolean;
 };
 
 export type DockerDiscoveryResult = DockerDbInfo[] & { truncated?: boolean };
@@ -558,6 +561,9 @@ function parseComposeContent(
     const image = imageMatch ? imageMatch[1] : null;
     const env = parseComposeEnv(svcBlock, composeDirEnv);
     const containerPort = parseComposeContainerPort(svcBlock);
+    // profiles: が定義されていれば profile-gated。値が空でも key の存在で判定する
+    // (compose は `profiles:` だけあって中身が空の場合も警告を出さないため)。
+    const profiled = /^\s+profiles:/m.test(svcBlock);
     const kind =
       (image ? detectDbKind(image, env) : null) ??
       detectDbKindFromEnv(env) ??
@@ -620,6 +626,7 @@ function parseComposeContent(
       relDirSlash,
       ...(hostPort ? { hostPort } : {}),
       containerPort: serviceContainerPort,
+      ...(profiled ? { profiled: true } : {}),
     });
   }
 }

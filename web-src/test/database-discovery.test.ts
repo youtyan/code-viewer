@@ -459,4 +459,29 @@ services:
     expect(results[0]?.env.MYSQL_USER).toBe("app-user");
     expect(results[0]?.env.CV_TEST_UNUSED_DOTENV).toBeUndefined();
   });
+
+  test("profiles: 指定のサービスは profiled=true でフラグ立つ", async () => {
+    // profile-gated なサービス (例: 開発時のみ起動する test DB) は
+    // `docker compose config --services` から外れるので、doctor の
+    // 「missing services」warn から除外する判定材料として profiled
+    // フラグを立てる必要がある。
+    const results = await discoverFromCompose(`services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: app
+  db-test:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: app_test
+    profiles:
+      - test
+`);
+
+    expect(results).toHaveLength(2);
+    const db = results.find((r) => r.serviceName === "db");
+    const dbTest = results.find((r) => r.serviceName === "db-test");
+    expect(db?.profiled).toBeUndefined();
+    expect(dbTest?.profiled).toBe(true);
+  });
 });
