@@ -117,17 +117,29 @@ export function createDockerAdapterCache<T extends CloseableDatabaseHandle>(
   };
 }
 
-const MAX_LOGGED_ERROR_BODY = 500;
+export const MAX_LOGGED_ERROR_BODY = 500;
 
 // 4xx/5xx の Response から body を覗いてログ用文字列を抽出する。
 // 元 Response の body は消費しないよう clone してから読む。
 // Content-Type が text/plain か application/json のときだけ読む(画像など大きい body を避ける)。
-async function extractErrorReason(res: Response): Promise<string> {
+// SECURITY: handle.ts の query handler 等は SQL エラー文をそのまま 4xx body に乗せて返すため、
+// ログには SQL 抜粋・テーブル/カラム名・レコード値が混ざりうる。本プロジェクトはローカル
+// 開発ツール前提なので意図的に許容する。サーバ運用に転用する場合は redaction が必要。
+export async function extractErrorReason(res: Response): Promise<string> {
   if (res.status < 400) return "";
   const ctype = res.headers.get("content-type") ?? "";
   if (!ctype.startsWith("text/") && !ctype.includes("json")) return "";
+  // clone() は同期で取り出してから本文を読む。これを async 関数の途中で行うと、
+  // 呼出元が `void` で投げ捨てた瞬間に元 Response が消費され始めて clone 失敗する。
+  let cloned: Response;
   try {
-    const body = await res.clone().text();
+    cloned = res.clone();
+  } catch {
+    // Intentional: 既に消費された Response は理由抽出を諦める
+    return "";
+  }
+  try {
+    const body = await cloned.text();
     if (!body) return "";
     const trimmed = body.replace(/\s+/g, " ").trim();
     if (!trimmed) return "";
@@ -140,21 +152,46 @@ async function extractErrorReason(res: Response): Promise<string> {
   }
 }
 
+// アクセスログは複数リクエスト間で時系列順を保ちたい。4xx は body 読込で 1 microtask
+// 遅延するので、放置すると後続 2xx より遅れて出力される。直列キューを噛ませて
+// 投入順に console へ流す。
+let logQueue: Promise<void> = Promise.resolve();
+function enqueueLogLine(work: () => Promise<void>): void {
+  logQueue = logQueue.then(work, work);
+}
+
+export type LogResponseOptions = {
+  // url.search を出力に含める時の最大バイト数。0 で省略。
+  qsLen?: number;
+};
+
 export function logResponseWithReason(
-  tag: string,
-  method: string,
-  path: string,
-  qs: string,
+  prefix: string,
+  req: Request,
+  url: URL,
   res: Response,
   startMs: number,
+  opts: LogResponseOptions = {},
 ): void {
   const ms = Date.now() - startMs;
-  const head = `${tag} ${method} ${path}${qs} ${res.status} ${ms}ms`;
+  const qsLen = opts.qsLen ?? 0;
+  const qs = qsLen > 0 && url.search ? url.search.slice(0, qsLen) : "";
+  const head = `${prefix} ${req.method} ${url.pathname}${qs} ${res.status} ${ms}ms`;
   if (res.status < 400) {
-    console.log(head);
+    enqueueLogLine(async () => {
+      console.log(head);
+    });
     return;
   }
-  void extractErrorReason(res).then((reason) => {
+  // clone は同期で確保しないと、enqueue 後の microtask 時点で body が消費済みのことがある。
+  let cloned: Response | null = null;
+  try {
+    cloned = res.clone();
+  } catch {
+    // Intentional: clone 失敗時は理由なしでログだけ出す
+  }
+  enqueueLogLine(async () => {
+    const reason = cloned ? await extractErrorReason(cloned) : "";
     if (reason) console.warn(`${head} :: ${reason}`);
     else console.warn(head);
   });
@@ -165,18 +202,9 @@ export function createQueryStrippedLogger(
   req: Request,
   url: URL,
 ): (res: Response) => Response {
-  const path = url.pathname;
   const start = Date.now();
-  const method = req.method;
   return (res: Response): Response => {
-    logResponseWithReason(
-      `[code-viewer] ${prefix}`,
-      method,
-      path,
-      "",
-      res,
-      start,
-    );
+    logResponseWithReason(`[code-viewer] ${prefix}`, req, url, res, start);
     return res;
   };
 }
