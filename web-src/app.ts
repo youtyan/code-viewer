@@ -1156,9 +1156,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "view",
         tree: "tree",
         flat: "flat",
-        filter: "Filter files...",
+        filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Use /pattern/ for regex. Cmd/Ctrl+K focuses this field.",
+          "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
         hide: "hide sidebar",
       },
       history: {
@@ -1273,9 +1273,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "表示",
         tree: "ツリー",
         flat: "一覧",
-        filter: "ファイルを絞り込み...",
+        filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。正規表現は /pattern/。Cmd/Ctrl+K でフォーカス。",
+          "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
         hide: "サイドバーを隠す",
       },
       history: {
@@ -3036,6 +3036,22 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "toggle-theme") {
       $("#theme").click();
+      return true;
+    }
+    if (action === "open-help") {
+      cancelActiveSourceLoad("navigation");
+      setPageMode();
+      setRoute({
+        screen: "help",
+        lang:
+          STATE.route.screen === "help"
+            ? helpLanguageFromRoute(STATE.route)
+            : STATE.language,
+        section: "keybindings",
+        range: currentRange(),
+      });
+      renderHelpPage();
+      setStatus("live");
       return true;
     }
     return false;
