@@ -4,6 +4,7 @@ import {
   fileNameClipboardText,
   filePathClipboardText,
   fileReferenceClipboardText,
+  fileReferenceWithCodeClipboardText,
 } from "../core/file-path-copy";
 
 describe("filePathClipboardText", () => {
@@ -39,6 +40,38 @@ describe("fileReferenceClipboardText", () => {
 
   test("returns empty for missing path", () => {
     expect(fileReferenceClipboardText("", 1, 2)).toBe("");
+  });
+});
+
+describe("fileReferenceWithCodeClipboardText", () => {
+  test("appends a fenced code block after the ref", () => {
+    expect(
+      fileReferenceWithCodeClipboardText(
+        "web-src/app.ts",
+        10,
+        12,
+        ["const a = 1;", "const b = 2;", "const c = 3;"],
+        "typescript",
+      ),
+    ).toBe(
+      "@web-src/app.ts#10-12\n\n```typescript\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```",
+    );
+  });
+
+  test("omits the fence info string when lang is missing", () => {
+    expect(fileReferenceWithCodeClipboardText("Makefile", 1, 1, ["all:"])).toBe(
+      "@Makefile#1\n\n```\nall:\n```",
+    );
+  });
+
+  test("falls back to ref-only when no code lines are provided", () => {
+    expect(
+      fileReferenceWithCodeClipboardText("a.ts", 5, 7, [], "typescript"),
+    ).toBe("@a.ts#5-7");
+  });
+
+  test("returns empty when the path is empty", () => {
+    expect(fileReferenceWithCodeClipboardText("", 1, 1, ["x"], "ts")).toBe("");
   });
 });
 

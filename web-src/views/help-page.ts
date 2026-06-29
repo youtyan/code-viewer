@@ -641,6 +641,28 @@ code-viewer annotate add-db --db app.db --tab query \\
               },
             ],
           },
+          {
+            title: "Line selection",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "Drag on line numbers",
+                    "Highlight a range; the floating copy pill prepares @path#L1-L9",
+                  ],
+                  [
+                    "Click the pill",
+                    "Copy @path#L1-L9 to the clipboard for pasting into Claude Code / Codex",
+                  ],
+                  [
+                    "Shift+Click the pill",
+                    "Copy @path#L1-L9 plus a fenced code block of the selected lines — paste straight to an AI without re-fetching the file",
+                  ],
+                ],
+              },
+            ],
+          },
         ],
       },
     },
@@ -1224,6 +1246,28 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
                   ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
                   ["gp / gc", "Preview / Code タブへ切り替え"],
+                ],
+              },
+            ],
+          },
+          {
+            title: "行選択",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "行番号でドラッグ",
+                    "範囲をハイライトし、フロートする Copy ピルが @path#L1-L9 を用意",
+                  ],
+                  [
+                    "ピルをクリック",
+                    "@path#L1-L9 をコピー（Claude Code / Codex への貼り付け用）",
+                  ],
+                  [
+                    "Shift+ピルをクリック",
+                    "@path#L1-L9 と選択行の実コード（フェンス付き）をまとめてコピー — AI へ直接貼れて、ファイル再取得不要",
+                  ],
                 ],
               },
             ],
