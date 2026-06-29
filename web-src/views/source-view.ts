@@ -1505,6 +1505,7 @@ export function createSourceView(deps: SourceViewDeps) {
             index + 1,
           )
         ) {
+          // Intentional: appendVirtualSourceLineCode は DOM 構築の副作用が完了したら true を返すので追加処理不要
         } else if (
           hljsRef?.highlight &&
           lang &&

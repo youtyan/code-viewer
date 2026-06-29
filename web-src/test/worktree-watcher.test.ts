@@ -134,7 +134,7 @@ describe("worktree update watcher", () => {
         }
         return [];
       },
-      onUpdate: () => {},
+      onUpdate: () => undefined,
     });
 
     expect(watched).toEqual(["/repo", "/repo/src", "/repo/src/nested"]);
@@ -164,7 +164,7 @@ describe("worktree update watcher", () => {
         }
         return [];
       },
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       setTimeoutFn: ((callback: () => void) => {
         scheduled.push(callback);
         return scheduled.length;
@@ -203,7 +203,7 @@ describe("worktree update watcher", () => {
         if (path === "/repo/app") return [];
         throw new Error(`omitted directory must not be read: ${path}`);
       },
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       setTimeoutFn: ((callback: () => void) => {
         scheduled.push(callback);
         return scheduled.length;
@@ -241,7 +241,7 @@ describe("worktree update watcher", () => {
         }
         throw new Error(`watch limit must stop descendant reads: ${path}`);
       },
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       onError: (error) => {
         errors.push(error instanceof Error ? error.message : String(error));
       },
@@ -275,7 +275,7 @@ describe("worktree update watcher", () => {
       }) as WatchFn,
       readdirSync: () => [],
       isDirectory: (path) => path === "/repo/a" || path === "/repo/b",
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       onError: (error) => {
         errors.push(error instanceof Error ? error.message : String(error));
       },
@@ -304,7 +304,7 @@ describe("worktree update watcher", () => {
       }) as WatchFn,
       readdirSync: () => [],
       isDirectory: (path) => path === "/repo/a" || path === "/repo/b",
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       onWatchLimit: (limit) => {
         limits.push(limit);
       },
@@ -336,7 +336,7 @@ describe("worktree update watcher", () => {
       },
       isDirectory: (path) =>
         path === "/repo/new-dir" || path === "/repo/new-dir/child",
-      onUpdate: () => {},
+      onUpdate: () => undefined,
     });
 
     listener?.("rename", "new-dir");
@@ -368,7 +368,7 @@ describe("worktree update watcher", () => {
         return [];
       },
       isDirectory: (path) => path.startsWith("/repo/new-dir"),
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       setTimeoutFn: ((callback: () => void) => {
         scheduled.push(callback);
         return scheduled.length;
@@ -409,7 +409,7 @@ describe("worktree update watcher", () => {
         inspected++;
         return false;
       },
-      onUpdate: () => {},
+      onUpdate: () => undefined,
       setTimeoutFn: ((callback: () => void) => {
         scheduled.push(callback);
         return scheduled.length;
@@ -447,7 +447,7 @@ describe("worktree update watcher", () => {
         return [];
       },
       isDirectory: (path) => path === "/repo/sub" && exists,
-      onUpdate: () => {},
+      onUpdate: () => undefined,
     });
 
     exists = false;
@@ -480,7 +480,7 @@ describe("worktree update watcher", () => {
         return [];
       },
       isDirectory: (path) => path === "/repo/sub",
-      onUpdate: () => {},
+      onUpdate: () => undefined,
     });
 
     rootListener?.("rename", "sub");
@@ -512,7 +512,7 @@ describe("worktree update watcher", () => {
       },
       isDirectory: (path) => path === "/repo/sub",
       directorySignature: (path) => (path === "/repo/sub" ? signature : path),
-      onUpdate: () => {},
+      onUpdate: () => undefined,
     });
 
     signature = "new";

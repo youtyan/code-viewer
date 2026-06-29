@@ -157,7 +157,7 @@ export function createErDiagram(
             copyBtn.textContent = text().er.copyMermaid;
           }, 1500);
         },
-        () => {},
+        () => undefined,
       );
     }
   });

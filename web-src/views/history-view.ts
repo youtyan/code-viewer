@@ -743,7 +743,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const force = options.force === true;
     const mount = options.mount || (force ? activeMount : defaultMount);
     activateMount(mount);
-    entering = entering.then(() => doEnterHistory(force)).catch(() => {});
+    entering = entering
+      .then(() => doEnterHistory(force))
+      .catch(() => undefined);
     return entering;
   }
 

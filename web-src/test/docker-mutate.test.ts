@@ -42,7 +42,9 @@ function installSpawn(
       ),
       stdout: new Response(r.stdout ?? "").body,
       stderr: new Response(r.stderr ?? "").body,
-      kill() {},
+      kill() {
+        /* noop */
+      },
     };
   }) as SpawnLike;
   return {

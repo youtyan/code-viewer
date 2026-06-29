@@ -188,14 +188,26 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       hideTests: false,
       viewedFiles: new Set(),
     },
-    scrollToFile() {},
-    prefetchByPath() {},
+    scrollToFile() {
+      /* noop */
+    },
+    prefetchByPath() {
+      /* noop */
+    },
     fileBadge: () => new FakeElement("span") as unknown as HTMLElement,
     fileEntryIcon: () => "",
-    applyViewedState() {},
-    persistCollapsedDirs() {},
-    persistLazyExpandedDirs() {},
-    appendScopeParams() {},
+    applyViewedState() {
+      /* noop */
+    },
+    persistCollapsedDirs() {
+      /* noop */
+    },
+    persistLazyExpandedDirs() {
+      /* noop */
+    },
+    appendScopeParams() {
+      /* noop */
+    },
     createOpenPathButton: () =>
       new FakeElement("button") as unknown as HTMLElement,
     normalizeViewerFontSize: () => "regular",
@@ -203,12 +215,20 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
     persistSidebarHidden(hidden) {
       state.sidebarHidden = hidden;
     },
-    persistSidebarWidth() {},
-    scheduleMainSurfaceFocus() {},
-    setChevronIcon() {},
+    persistSidebarWidth() {
+      /* noop */
+    },
+    scheduleMainSurfaceFocus() {
+      /* noop */
+    },
+    setChevronIcon() {
+      /* noop */
+    },
     trackLoad: (promise) => promise,
     getRepoSidebarRef: () => null,
-    setRepoSidebarRef() {},
+    setRepoSidebarRef() {
+      /* noop */
+    },
     isTestPath: () => false,
     $: <T extends Element = HTMLElement>(selector: string) =>
       document.querySelector(selector) as unknown as T,
@@ -325,14 +345,28 @@ describe("sidebar toggle placement", () => {
     showEmptyHistoryDiffPane({
       diff,
       empty: null,
-      renderSidebar() {},
-      setFiles() {},
-      clearLastMeta() {},
-      renderMeta() {},
-      invalidateRepoSidebar() {},
-      clearLoadQueue() {},
+      renderSidebar() {
+        /* noop */
+      },
+      setFiles() {
+        /* noop */
+      },
+      clearLastMeta() {
+        /* noop */
+      },
+      renderMeta() {
+        /* noop */
+      },
+      invalidateRepoSidebar() {
+        /* noop */
+      },
+      clearLoadQueue() {
+        /* noop */
+      },
       placeSidebarToggle: sidebar.placeSidebarToggle,
-      setStatus() {},
+      setStatus() {
+        /* noop */
+      },
     });
 
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");

@@ -111,7 +111,9 @@ function installSpawnHarness(
       }),
       stdout: new Response(result.stdout).body,
       stderr: new Response(result.stderr || "").body,
-      kill() {},
+      kill() {
+        /* noop */
+      },
     };
   }) as SpawnLike;
   return {

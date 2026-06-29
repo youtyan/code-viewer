@@ -135,7 +135,7 @@ describe("S3 adapter", () => {
         configurable: true,
         writable: true,
         value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Promise<Response>(() => {})) as typeof fetch,
+          new Promise<Response>(() => undefined)) as typeof fetch,
       });
 
       const started = Date.now();
@@ -255,7 +255,7 @@ describe("S3 adapter", () => {
         configurable: true,
         writable: true,
         value: (async (_input: RequestInfo | URL, _init?: RequestInit) =>
-          new Promise<Response>(() => {})) as typeof fetch,
+          new Promise<Response>(() => undefined)) as typeof fetch,
       });
 
       const controller = new AbortController();

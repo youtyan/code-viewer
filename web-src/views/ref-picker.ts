@@ -65,7 +65,7 @@ export function createRefPicker(deps: RefPickerDeps) {
       .then((refs: RefResponse) => {
         Object.assign(REFS, refs);
       })
-      .catch(() => {});
+      .catch(() => undefined);
   }
   fetchRefs();
 

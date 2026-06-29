@@ -117,6 +117,49 @@ export function createDockerAdapterCache<T extends CloseableDatabaseHandle>(
   };
 }
 
+const MAX_LOGGED_ERROR_BODY = 500;
+
+// 4xx/5xx の Response から body を覗いてログ用文字列を抽出する。
+// 元 Response の body は消費しないよう clone してから読む。
+// Content-Type が text/plain か application/json のときだけ読む(画像など大きい body を避ける)。
+async function extractErrorReason(res: Response): Promise<string> {
+  if (res.status < 400) return "";
+  const ctype = res.headers.get("content-type") ?? "";
+  if (!ctype.startsWith("text/") && !ctype.includes("json")) return "";
+  try {
+    const body = await res.clone().text();
+    if (!body) return "";
+    const trimmed = body.replace(/\s+/g, " ").trim();
+    if (!trimmed) return "";
+    return trimmed.length > MAX_LOGGED_ERROR_BODY
+      ? `${trimmed.slice(0, MAX_LOGGED_ERROR_BODY)}...`
+      : trimmed;
+  } catch {
+    // Intentional: body 読取失敗時はログだけ簡略化する
+    return "";
+  }
+}
+
+export function logResponseWithReason(
+  tag: string,
+  method: string,
+  path: string,
+  qs: string,
+  res: Response,
+  startMs: number,
+): void {
+  const ms = Date.now() - startMs;
+  const head = `${tag} ${method} ${path}${qs} ${res.status} ${ms}ms`;
+  if (res.status < 400) {
+    console.log(head);
+    return;
+  }
+  void extractErrorReason(res).then((reason) => {
+    if (reason) console.warn(`${head} :: ${reason}`);
+    else console.warn(head);
+  });
+}
+
 export function createQueryStrippedLogger(
   prefix: string,
   req: Request,
@@ -126,9 +169,13 @@ export function createQueryStrippedLogger(
   const start = Date.now();
   const method = req.method;
   return (res: Response): Response => {
-    const ms = Date.now() - start;
-    console.log(
-      `[code-viewer] ${prefix} ${method} ${path} ${res.status} ${ms}ms`,
+    logResponseWithReason(
+      `[code-viewer] ${prefix}`,
+      method,
+      path,
+      "",
+      res,
+      start,
     );
     return res;
   };

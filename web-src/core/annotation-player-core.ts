@@ -117,7 +117,7 @@ export function createAnnotationPlayerCore(deps: PlayerCoreDeps) {
       index = clamped;
       emit();
       const item = deps.items()[clamped];
-      if (item) void deps.jump(item.entryId).catch(() => {});
+      if (item) void deps.jump(item.entryId).catch(() => undefined);
     }
   }
 
