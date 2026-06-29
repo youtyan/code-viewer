@@ -77,9 +77,8 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     );
   const getJson = (path: string): Promise<Response> => trackLoad(fetch(path));
   const changeTypeLabel = (type: SnapshotDiffRow["changeType"]): string => {
-    if (type === "inserted") return text().snapshot.inserted;
-    if (type === "updated") return text().snapshot.updated;
-    return text().snapshot.deleted;
+    if (type === "inserted") return "+";
+    return "−";
   };
   const snapshotLabel = (s: SnapshotMeta): string => {
     const date = new Date(s.createdAt).toLocaleString();
@@ -1190,8 +1189,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         trBefore.className = "snap-diff-del";
         const tdTypeBefore = document.createElement("td");
         tdTypeBefore.className = "snap-diff-type-cell";
-        tdTypeBefore.textContent = text().snapshot.before;
-        tdTypeBefore.rowSpan = 2;
+        tdTypeBefore.textContent = "−";
         trBefore.appendChild(tdTypeBefore);
         for (const col of columns) {
           const td = document.createElement("td");
@@ -1211,6 +1209,10 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
 
         const trAfter = document.createElement("tr");
         trAfter.className = "snap-diff-add";
+        const tdTypeAfter = document.createElement("td");
+        tdTypeAfter.className = "snap-diff-type-cell";
+        tdTypeAfter.textContent = "+";
+        trAfter.appendChild(tdTypeAfter);
         for (const col of columns) {
           const td = document.createElement("td");
           const bs =
@@ -1238,6 +1240,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
           row.changeType === "inserted" ? row.afterValues : row.beforeValues;
         for (const col of columns) {
           const td = document.createElement("td");
+          td.classList.add("snap-diff-changed-cell");
           const v = values?.[col];
           td.textContent = v == null ? "NULL" : String(v);
           tr.appendChild(td);

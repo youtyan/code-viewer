@@ -202,14 +202,10 @@ export type DbText = {
     calculatingDiff: string;
     diffError: string;
     noChanges: string;
-    before: string;
     loading: string;
     loadError: string;
     saveNote: string;
     noteInputPlaceholder: string;
-    inserted: string;
-    updated: string;
-    deleted: string;
     tableCount: (n: number) => string;
     rowCount: (n: number) => string;
     listTitle: (n: number) => string;
@@ -499,14 +495,10 @@ const EN: DbText = {
     calculatingDiff: "Computing diff…",
     diffError: "Failed to compute diff",
     noChanges: "No changes detected.",
-    before: "Before",
     loading: "Loading…",
     loadError: "Failed to load",
     saveNote: "Save",
     noteInputPlaceholder: "Enter a note",
-    inserted: "Added",
-    updated: "Updated",
-    deleted: "Deleted",
     tableCount: (n) => `${n} tables`,
     rowCount: (n) => ` (${n})`,
     listTitle: (n) => `Snapshots (${n})`,
@@ -804,14 +796,10 @@ const JA: DbText = {
     calculatingDiff: "差分を計算中...",
     diffError: "差分の計算に失敗しました",
     noChanges: "変更は検出されませんでした。",
-    before: "更新前",
     loading: "読み込み中...",
     loadError: "読み込みに失敗しました",
     saveNote: "保存",
     noteInputPlaceholder: "メモを入力",
-    inserted: "追加",
-    updated: "更新",
-    deleted: "削除",
     tableCount: (n) => `${n}テーブル`,
     rowCount: (n) => ` (${n}件)`,
     listTitle: (n) => `スナップショット (${n}件)`,

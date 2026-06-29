@@ -8474,10 +8474,11 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 .db-snapshot-diff-table {
+  /* sticky な thead/table-header が機能するように overflow:hidden は付けない。
+   * border-radius は table-header と最終 row 側で処理する。 */
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 8px;
-  overflow: hidden;
 }
 .db-snapshot-diff-table-header {
   display: flex;
@@ -8487,6 +8488,14 @@ body.db-resizing {
   background: var(--bg-soft);
   font-size: var(--db-font-base);
   cursor: pointer;
+  /* 目次バー (.db-snapshot-diff-toc, top:0 z:2) のすぐ下に張り付く。
+   * 目次バー高 (≒ 48px) + 1px (border) ぶん下げる。 */
+  position: sticky;
+  top: 48px;
+  z-index: 1;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  border-bottom: 1px solid var(--border);
 }
 .db-snapshot-diff-table-header:hover {
   background: var(--bg-mute);
@@ -8535,7 +8544,9 @@ body.db-resizing {
 }
 .db-snap-diff-grid th {
   position: sticky;
-  top: 0;
+  /* 目次バー (top:0 高さ約 48px) + テーブル名バー (sticky top:48px 高さ約 36px)
+   * の下にカラムヘッダを張り付ける。border 重なりで 1px ズレないよう -1px。 */
+  top: 83px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   padding: 4px 8px;
@@ -8552,12 +8563,6 @@ body.db-resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.db-snap-diff-grid tr.snap-diff-add {
-  background: var(--diff-add-bg);
-}
-.db-snap-diff-grid tr.snap-diff-del {
-  background: var(--diff-del-bg);
-}
 .db-snap-diff-grid .snap-diff-type-cell {
   font-weight: 600;
   white-space: nowrap;
@@ -8566,8 +8571,20 @@ body.db-resizing {
   text-align: center;
   min-width: 50px;
 }
+.db-snap-diff-grid tr.snap-diff-del .snap-diff-type-cell {
+  color: var(--danger);
+}
+.db-snap-diff-grid tr.snap-diff-add .snap-diff-type-cell {
+  color: var(--success);
+}
 .db-snap-diff-grid .snap-diff-changed-cell {
   font-weight: 600;
+}
+.db-snap-diff-grid tr.snap-diff-del .snap-diff-changed-cell {
+  background: var(--diff-del-bg);
+}
+.db-snap-diff-grid tr.snap-diff-add .snap-diff-changed-cell {
+  background: var(--diff-add-bg);
 }
 
 /* Inline dialog (replaces confirm/prompt) */
