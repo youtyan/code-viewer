@@ -2029,7 +2029,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         // の原因になる。
         applyDbUiState((await res.json()) as DbUiState);
       })
-      .catch(() => {});
+      .catch(() => undefined);
     return dbUiLoadPromise;
   }
 
@@ -2059,7 +2059,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ columnWidths: { [dbId]: { [table]: widths } } }),
-    }).catch(() => {});
+    }).catch(() => undefined);
   }
 
   function getExpandedTables(scopeKey: string): string[] {
@@ -2092,7 +2092,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
           [scopeKey]: nextTables.length > 0 ? nextTables : null,
         },
       }),
-    }).catch(() => {});
+    }).catch(() => undefined);
   }
 
   // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
@@ -2122,7 +2122,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       method: "PATCH",
       headers: actionHeaders(),
       body: JSON.stringify({ prefs: { [key]: value } }),
-    }).catch(() => {});
+    }).catch(() => undefined);
   }
   function onDbUiPrefChange(listener: (state: DbUiState) => void): () => void {
     dbUiPrefListeners.add(listener);
@@ -2236,7 +2236,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       return;
     }
     saveChain = saveChain
-      .catch(() => {})
+      .catch(() => undefined)
       .then(async () => {
         const controller = new AbortController();
         saveController = controller;
@@ -2317,7 +2317,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     if (!isRestoring()) syncActiveRoute();
     scheduleSave();
     if (mounted && !isRestoring()) {
-      void ensureInitialEnter(id)?.catch(() => {});
+      void ensureInitialEnter(id)?.catch(() => undefined);
     }
   }
 
@@ -2382,7 +2382,9 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
       "Content-Type": "application/json",
       "X-Code-Viewer-Action": "1",
     };
-    void fetch("/_db/close", { method: "POST", headers, body }).catch(() => {});
+    void fetch("/_db/close", { method: "POST", headers, body }).catch(
+      () => undefined,
+    );
   }
 
   function clearDropTarget(): void {
@@ -2973,7 +2975,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
   ): Promise<void> {
     const seq = lifecycleSeq;
     enterQueue = enterQueue
-      .catch(() => {})
+      .catch(() => undefined)
       .then(() => doEnter(seq, db, schema, table, view, options));
     await enterQueue;
   }

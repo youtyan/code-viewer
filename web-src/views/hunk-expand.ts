@@ -598,7 +598,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
           return;
         attachTrailingExpandControls(item, file, ref, refPath);
       })
-      .catch(() => {});
+      .catch(() => undefined);
   }
 
   // Insert context rows around the `@@` info row.

@@ -82,7 +82,9 @@ function makeRepoView(
     setRoute(nextRoute) {
       state.route = nextRoute;
     },
-    setPageMode() {},
+    setPageMode() {
+      /* noop */
+    },
     setStatus(status) {
       calls.statuses.push(status);
     },
@@ -92,11 +94,15 @@ function makeRepoView(
     currentRange() {
       return range;
     },
-    appendScopeParams() {},
+    appendScopeParams() {
+      /* noop */
+    },
     markActive(path) {
       calls.activePaths.push(path);
     },
-    applyFilter() {},
+    applyFilter() {
+      /* noop */
+    },
     renderSidebar(files) {
       calls.sidebarRenders.push(files);
     },
@@ -111,15 +117,23 @@ function makeRepoView(
         sidebarRows[child] = { kind: "dir", dir: { path: child } };
       }
     },
-    scrollVirtualSidebarPathIntoView() {},
+    scrollVirtualSidebarPathIntoView() {
+      /* noop */
+    },
     shouldLazyLoadSidebarDir: (dir: unknown) =>
       options.lazyDirPaths?.has((dir as { path?: string })?.path || "") ??
       false,
-    setFolderIcon() {},
+    setFolderIcon() {
+      /* noop */
+    },
     isRepositorySidebarMode: () => !!options.repoMode,
-    placeSidebarToggle() {},
+    placeSidebarToggle() {
+      /* noop */
+    },
     createOpenPathButton: () => ({}) as HTMLElement,
-    removeStandaloneSource() {},
+    removeStandaloneSource() {
+      /* noop */
+    },
     renderStandaloneSource: async () => undefined,
     repoFileTargetFromRoute: () =>
       state.route.screen === "file" && state.route.view === "blob"
@@ -130,17 +144,23 @@ function makeRepoView(
       repoSidebarRef = ref;
     },
     getSidebarOnFileClick: () =>
-      repoSidebarDomReady ? ((() => {}) as unknown) : null,
+      repoSidebarDomReady ? ((() => undefined) as unknown) : null,
     syncHeaderMenu() {
       calls.headerSyncs++;
     },
     getSidebarRowByPath: (path) => sidebarRows[path],
     getSidebarVirtualActivePath: () => null,
-    pushUndo() {},
+    pushUndo() {
+      /* noop */
+    },
     getRepoSidebarRef: () => repoSidebarRef,
     getProjectName: () => "code-viewer",
-    clearLoadQueue() {},
-    syncSidebarHeaderHeight() {},
+    clearLoadQueue() {
+      /* noop */
+    },
+    syncSidebarHeaderHeight() {
+      /* noop */
+    },
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },

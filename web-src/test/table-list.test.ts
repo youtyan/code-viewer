@@ -38,7 +38,7 @@ describe("database table list", () => {
   test("renders compact types and Japanese column comments in expanded rows", async () => {
     const changes: Array<{ table: string; expanded: boolean }> = [];
     const view = createTableList({
-      onSelectTable: () => {},
+      onSelectTable: () => undefined,
       getExpandedTables: () => ["sample_table"],
       onExpandedTableChange: (table, expanded) =>
         changes.push({ table, expanded }),

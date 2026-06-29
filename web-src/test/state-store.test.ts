@@ -360,7 +360,7 @@ describe("state store", () => {
   test("state GET returns a generic error for filesystem failures", async () => {
     await withTempProject(async (dir) => {
       const originalError = console.error;
-      console.error = () => {};
+      console.error = () => undefined;
       mkdirSync(join(dir, ".code-viewer", "settings.json"), {
         recursive: true,
       });

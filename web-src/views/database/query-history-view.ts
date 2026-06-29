@@ -202,7 +202,7 @@ export function createQueryHistoryView(
             copyBtn.textContent = text().history.copySql;
           }, 1500);
         },
-        () => {},
+        () => undefined,
       );
     });
 

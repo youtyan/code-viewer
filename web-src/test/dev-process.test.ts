@@ -44,7 +44,7 @@ describe("dev process shutdown", () => {
 
   test("escalates a stuck child to SIGKILL after the grace period", async () => {
     const originalWarn = console.warn;
-    console.warn = () => {};
+    console.warn = () => undefined;
     const exit = deferred<number>();
     const signals: string[] = [];
     let scheduled: (() => void) | null = null;
@@ -62,7 +62,7 @@ describe("dev process shutdown", () => {
             scheduled = callback;
             return 1;
           }) as typeof setTimeout,
-          clearTimeoutFn: (() => {}) as typeof clearTimeout,
+          clearTimeoutFn: (() => undefined) as typeof clearTimeout,
         },
       );
 

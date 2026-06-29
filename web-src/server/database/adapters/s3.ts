@@ -349,7 +349,7 @@ function guardedS3Transport<T>(
   let timedOut = false;
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let cleanupParent = () => {};
+  let cleanupParent = () => undefined;
 
   const abort = (err: S3HttpError, reject: (err: S3HttpError) => void) => {
     if (settled) return;
@@ -405,7 +405,7 @@ async function readStreamChunkWithTimeout(
     signal,
     (transportSignal) => {
       const cancelRead = () => {
-        void reader.cancel(transportSignal.reason).catch(() => {});
+        void reader.cancel(transportSignal.reason).catch(() => undefined);
       };
       if (transportSignal.aborted) {
         cancelRead();
@@ -975,7 +975,9 @@ function createS3Adapter(config: S3Config): S3Explorer {
   return {
     kind: "s3",
     model: "object",
-    close() {},
+    close() {
+      /* noop */
+    },
     listBuckets,
     listObjects,
     headObject,

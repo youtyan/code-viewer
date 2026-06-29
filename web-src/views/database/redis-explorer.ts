@@ -767,7 +767,7 @@ export function createRedisExplorer(
           keyRowsByName.clear();
           setPaneEmpty(mainPane, text().redis.selectKey);
           const valuePromise = initial.key
-            ? selectKey(initial.key).catch(() => {})
+            ? selectKey(initial.key).catch(() => undefined)
             : null;
           await loadKeys(false);
           if (currentDbId !== dbId) return;

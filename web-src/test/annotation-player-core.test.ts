@@ -249,8 +249,8 @@ describe("annotation-player-core", () => {
         if (callCount === 1) return Promise.reject(new Error("jump failed"));
         return Promise.resolve();
       },
-      speak: () => () => {},
-      schedule: () => () => {},
+      speak: () => () => undefined,
+      schedule: () => () => undefined,
       displayMs: () => 3000,
       speechAvailable: () => true,
       onStateChange: (s) => states.push(s),

@@ -51,6 +51,7 @@ import {
   handleError,
   json,
   jsonLoadResponse,
+  logResponseWithReason,
   parseBoundedJsonBody,
   parsePostJsonBody,
   textError,
@@ -1744,16 +1745,12 @@ export async function handleDatabaseRoute(
     const { handleS3Route } = await import("./handle-s3");
     return handleS3Route(req, url, cwd, sideEffectAllowed, omitDirNames);
   }
-  const path = url.pathname;
   const start = Date.now();
   const method = req.method;
-  const qs = url.search ? url.search.slice(0, 120) : "";
-  const log = (status: number) => {
-    const ms = Date.now() - start;
-    console.log(`[code-viewer] ${method} ${path}${qs} ${status} ${ms}ms`);
-  };
   const wrapResponse = (res: Response): Response => {
-    log(res.status);
+    logResponseWithReason("[code-viewer]", req, url, res, start, {
+      qsLen: 120,
+    });
     return res;
   };
   return dispatchRoutes(
