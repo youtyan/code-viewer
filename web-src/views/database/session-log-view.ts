@@ -260,7 +260,7 @@ export function createSessionLogView(
               copyBtn.textContent = text().sessionLog.copy;
             }, 1200);
           },
-          () => {},
+          () => undefined,
         );
       });
       actions.append(useBtn, copyBtn);

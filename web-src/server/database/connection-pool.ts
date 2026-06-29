@@ -76,7 +76,7 @@ export async function getConnection(
     adapter,
     path: resolvedPath,
     lastUsed: Date.now(),
-    timer: setTimeout(() => {}, 0),
+    timer: setTimeout(() => undefined, 0),
   };
   pool.set(resolvedPath, entry);
   scheduleEviction(resolvedPath, entry);

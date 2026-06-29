@@ -82,17 +82,19 @@ export function createJsonFileStore<T>(
 
   async function load(root: string): Promise<T> {
     const pendingWrite = queues.get(options.filePath(root));
-    if (pendingWrite) await pendingWrite.catch(() => {});
+    if (pendingWrite) await pendingWrite.catch(() => undefined);
     return loadUnqueued(root);
   }
 
   async function save(root: string, state: T): Promise<void> {
     const file = options.filePath(root);
     const previous = queues.get(file) ?? Promise.resolve();
-    const run = previous.catch(() => {}).then(() => saveUnqueued(root, state));
+    const run = previous
+      .catch(() => undefined)
+      .then(() => saveUnqueued(root, state));
     const queued = run.then(
-      () => {},
-      () => {},
+      () => undefined,
+      () => undefined,
     );
     queues.set(file, queued);
     try {
@@ -111,7 +113,7 @@ export function createJsonFileStore<T>(
     const file = options.filePath(root);
     const previous = queues.get(file) ?? Promise.resolve();
     const run = previous
-      .catch(() => {})
+      .catch(() => undefined)
       .then(async () => {
         const current = await loadUnqueued(root);
         const updated = await updater(current);
@@ -119,8 +121,8 @@ export function createJsonFileStore<T>(
         return updated.result;
       });
     const queued = run.then(
-      () => {},
-      () => {},
+      () => undefined,
+      () => undefined,
     );
     queues.set(file, queued);
     try {

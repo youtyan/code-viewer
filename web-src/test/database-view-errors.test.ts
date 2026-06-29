@@ -249,15 +249,21 @@ class FakeElement {
     const event = {
       target: this,
       button: 0,
-      preventDefault() {},
-      stopPropagation() {},
+      preventDefault() {
+        /* noop */
+      },
+      stopPropagation() {
+        /* noop */
+      },
     };
     for (const listener of this.listeners.click || []) {
       await listener(event);
     }
   }
 
-  focus() {}
+  focus() {
+    /* noop */
+  }
 
   querySelector(selector: string) {
     return this.querySelectorAll(selector)[0] || null;
@@ -337,8 +343,12 @@ function installDatabaseDom() {
     getElementById: (id: string) => body.querySelector(`#${id}`),
     querySelector: (selector: string) => body.querySelector(selector),
     querySelectorAll: (selector: string) => body.querySelectorAll(selector),
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener() {
+      /* noop */
+    },
+    removeEventListener() {
+      /* noop */
+    },
   };
   Object.defineProperty(globalThis, "document", {
     configurable: true,
@@ -380,7 +390,7 @@ function installDatabaseDom() {
   Object.defineProperty(globalThis, "cancelAnimationFrame", {
     configurable: true,
     writable: true,
-    value: () => {},
+    value: () => undefined,
   });
   Object.defineProperty(globalThis, "Node", {
     configurable: true,
@@ -425,11 +435,17 @@ function createViewForTest(
   overrides: Partial<Parameters<typeof createDatabaseView>[0]> = {},
 ) {
   return createDatabaseView({
-    setRoute() {},
-    setPageMode() {},
+    setRoute() {
+      /* noop */
+    },
+    setPageMode() {
+      /* noop */
+    },
     currentRange: () => ({ from: "HEAD", to: "worktree" }),
     trackLoad: (promise) => promise,
-    syncHeaderMenu() {},
+    syncHeaderMenu() {
+      /* noop */
+    },
     ...overrides,
   });
 }

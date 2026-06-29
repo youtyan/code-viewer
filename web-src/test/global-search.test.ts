@@ -68,7 +68,7 @@ function createSearchAdapter(): {
     },
     getCreateStatementAsync: async () => "",
     getTriggersAsync: async () => [],
-    close: () => {},
+    close: () => undefined,
   };
   return { adapter, calls };
 }

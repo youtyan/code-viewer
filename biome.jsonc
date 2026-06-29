@@ -21,7 +21,13 @@
         // noRestrictedGlobals はグローバル名の素呼びしか拾わないので、
         // member access (`window.confirm(...)`) を塞ぐにはこちらが必要。
         // 代替: web-src/views/ui-dialog.ts の showConfirmDialog 等を使う。
-        "noAlert": "error"
+        "noAlert": "error",
+        // catch のエラー握り潰し防止。
+        // - 空 catch (`catch {}` / `catch (e) {}`) は禁止
+        // - 本当に意図的に無視するケースは `// Intentional: 理由` コメントを書く
+        //   (Biome はコメントを含む block は empty と扱わない)
+        // - ログすべきエラーは console.warn / console.error すること
+        "noEmptyBlockStatements": "error"
       },
       "style": {
         "noRestrictedGlobals": {

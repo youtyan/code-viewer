@@ -373,7 +373,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       headers: actionHeaders(),
       body,
       keepalive: options.keepalive,
-    }).catch(() => {});
+    }).catch(() => undefined);
   }
 
   let pendingViewPatch: ViewPatch | null = null;
@@ -467,7 +467,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         headers: actionHeaders(),
         body,
         keepalive,
-      }).catch(() => {});
+      }).catch(() => undefined);
     };
     if (options.keepalive) {
       if (pendingViewTimer !== null) clearTimeout(pendingViewTimer);
@@ -499,7 +499,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       headers: actionHeaders(),
       body,
       keepalive,
-    }).catch(() => {});
+    }).catch(() => undefined);
   }
 
   function savedScopeOmitDirs(): string[] | null {
@@ -3250,7 +3250,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       STATE.to = range.to;
       activeHistoryPathFilter = pathFilter || null;
       syncRefInputs();
-      return load().then(() => {});
+      return load().then(() => undefined);
     },
     showEmptyDiffPane: () => {
       if (activeFileHistoryDiffHost || activeFileHistoryEmptyHost) {

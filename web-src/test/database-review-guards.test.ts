@@ -206,11 +206,19 @@ describe("docker adapter async cache", () => {
         cache,
         () => {
           openCalls++;
-          return { close() {} };
+          return {
+            close() {
+              /* noop */
+            },
+          };
         },
         [],
       );
-      const adapter = { close() {} };
+      const adapter = {
+        close() {
+          /* noop */
+        },
+      };
       resolveOpen?.(adapter);
       const resolved = await second;
       expect(resolved instanceof Response).toBe(false);
@@ -271,7 +279,9 @@ describe("docker adapter async cache", () => {
         }),
     );
     const second = cache.getOrOpenAsync("docker:db\0schema=public", () => ({
-      close() {},
+      close() {
+        /* noop */
+      },
     }));
     await Promise.resolve();
     cache.closePrefix("docker:db\0");

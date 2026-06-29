@@ -421,9 +421,15 @@ function installHistoryViewDom() {
     },
   } as unknown as Document;
   globalThis.IntersectionObserver = class {
-    observe() {}
-    disconnect() {}
-    unobserve() {}
+    observe() {
+      /* noop */
+    }
+    disconnect() {
+      /* noop */
+    }
+    unobserve() {
+      /* noop */
+    }
     takeRecords() {
       return [];
     }
@@ -607,9 +613,15 @@ describe("history view lifecycle", () => {
       createElement: () => new FakeElement(),
     } as unknown as Document;
     globalThis.IntersectionObserver = class {
-      observe() {}
-      disconnect() {}
-      unobserve() {}
+      observe() {
+        /* noop */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
       takeRecords() {
         return [];
       }
@@ -634,8 +646,8 @@ describe("history view lifecycle", () => {
       },
       escapeHtml: (value) => String(value),
       getRoute: () => route,
-      setRoute: () => {},
-      applyCommitRange: async () => {},
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
       showEmptyDiffPane: () => {
         emptyDiffRenders++;
       },
@@ -800,9 +812,9 @@ describe("history view lifecycle", () => {
       },
       escapeHtml: (value) => String(value),
       getRoute: () => route,
-      setRoute: () => {},
-      applyCommitRange: async () => {},
-      showEmptyDiffPane: () => {},
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
       getSyntaxHighlight: () => false,
       getLanguage: () => "ja",
       trackLoad: (promise) => promise,
@@ -873,7 +885,7 @@ describe("history view lifecycle", () => {
       applyCommitRange: async (range, pathFilter) => {
         applied.push({ ...range, pathFilter });
       },
-      showEmptyDiffPane: () => {},
+      showEmptyDiffPane: () => undefined,
       getSyntaxHighlight: () => false,
       getLanguage: () => "ja",
       trackLoad: (promise) => promise,
@@ -976,9 +988,9 @@ describe("history view lifecycle", () => {
       },
       escapeHtml: (value) => String(value),
       getRoute: () => route,
-      setRoute: () => {},
-      applyCommitRange: async () => {},
-      showEmptyDiffPane: () => {},
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
       getSyntaxHighlight: () => false,
       getLanguage: () => "ja",
       trackLoad: (promise) => promise,

@@ -498,7 +498,7 @@ function createTableMetaCache(now = () => Date.now()) {
 
 // A prefetch query may reject before later Promise.all joins it.
 function observeBackgroundRejection<T>(promise: Promise<T>): Promise<T> {
-  void promise.catch(() => {});
+  void promise.catch(() => undefined);
   return promise;
 }
 

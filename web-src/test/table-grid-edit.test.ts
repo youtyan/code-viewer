@@ -57,7 +57,7 @@ function setup() {
     fetchPage: async () => initialData(),
     getDbId: () => "app.db",
     getColumnWidths: () => ({}),
-    setColumnWidths: () => {},
+    setColumnWidths: () => undefined,
     getText: () => dbText("en"),
     getEditable: () => true,
     applyMutations: async (mutations) => {
