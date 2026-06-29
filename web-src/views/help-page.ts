@@ -134,6 +134,19 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               },
             ],
           },
+          {
+            title: "Environment doctor",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "Toggle the 🩺 icon in the header to slide in a diagnostic sheet from the right. It works on top of any screen (Repository, Diff, History, Datastores) and the open state is preserved in the URL as ?doctor=open so links are reproducible.",
+              },
+              {
+                kind: "paragraph",
+                text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
+              },
+            ],
+          },
         ],
       },
       storage: {
@@ -704,6 +717,19 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "大きいリポジトリではサイドバーがフォルダの中身を必要に応じて読み込みます。開いたフォルダは記憶され、次回のリロード時に同じ状態で展開し直されます。",
+              },
+            ],
+          },
+          {
+            title: "環境ドクター",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "ヘッダ右の 🩺 アイコンで、右からスライドする診断シートを開きます。Repository / Diff / History / Datastores などどの画面の上にも重ねて表示でき、開閉状態は URL の ?doctor=open に同期されるのでリンク共有で復元できます。",
+              },
+              {
+                kind: "paragraph",
+                text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) の 8 つ。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
               },
             ],
           },
