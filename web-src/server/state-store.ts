@@ -355,9 +355,17 @@ function sanitizeDbUiState(raw: unknown): DbUiState {
   if (!isRecord(raw)) return emptyDbUiState();
   const prefs = sanitizeDbUiPrefs(raw.prefs);
   const expandedTables = sanitizeDbUiExpandedTables(raw.expandedTables);
+  // snapshot 取得ダイアログの「前回どのテーブルにチェックしてたか」も
+  // expandedTables と同じ `Record<scope, string[]>` 形なので sanitize ロジック
+  // を共有する。専用ラッパは作らない。
+  const snapshotSelectedTables = sanitizeDbUiExpandedTables(
+    raw.snapshotSelectedTables,
+  );
   if (!isRecord(raw.columnWidths)) {
     const out = emptyDbUiState();
     if (expandedTables) out.expandedTables = expandedTables;
+    if (snapshotSelectedTables)
+      out.snapshotSelectedTables = snapshotSelectedTables;
     if (prefs) out.prefs = prefs;
     return out;
   }
@@ -393,6 +401,8 @@ function sanitizeDbUiState(raw: unknown): DbUiState {
   }
   const out: DbUiState = { version: 1, columnWidths };
   if (expandedTables) out.expandedTables = expandedTables;
+  if (snapshotSelectedTables)
+    out.snapshotSelectedTables = snapshotSelectedTables;
   if (prefs) out.prefs = prefs;
   return out;
 }
@@ -441,10 +451,22 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     "expandedTables" in patch
       ? mergeDbUiExpandedTables(current.expandedTables, patch.expandedTables)
       : current.expandedTables;
+  // snapshotSelectedTables も expandedTables と同じ `Record<scope, string[]>`
+  // 形なので merge ロジックを共有する。
+  const mergedSnapshotSelectedTables =
+    "snapshotSelectedTables" in patch
+      ? mergeDbUiExpandedTables(
+          current.snapshotSelectedTables,
+          patch.snapshotSelectedTables,
+        )
+      : current.snapshotSelectedTables;
   if (!isRecord(patch.columnWidths)) {
     const merged: DbUiState = { ...current, version: 1 };
     if (mergedExpandedTables) merged.expandedTables = mergedExpandedTables;
     else delete merged.expandedTables;
+    if (mergedSnapshotSelectedTables)
+      merged.snapshotSelectedTables = mergedSnapshotSelectedTables;
+    else delete merged.snapshotSelectedTables;
     if (mergedPrefs) merged.prefs = mergedPrefs;
     else delete merged.prefs;
     return sanitizeDbUiState(merged);
@@ -479,6 +501,7 @@ function mergeDbUiState(current: DbUiState, patch: unknown): DbUiState {
     ...patch,
     columnWidths,
     expandedTables: mergedExpandedTables,
+    snapshotSelectedTables: mergedSnapshotSelectedTables,
     prefs: mergedPrefs,
     version: 1,
   });

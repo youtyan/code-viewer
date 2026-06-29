@@ -17,7 +17,7 @@ import type {
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
-import type { AppRoute, DiffRange } from "../../core/routes";
+import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
 import type { AnnotationTarget, DbUiPrefs, DbUiState } from "../../core/types";
 import { createAbortGuard } from "./abort-guard";
 import { createElasticsearchExplorer } from "./elasticsearch-explorer";
@@ -58,6 +58,10 @@ type DatabasePaneDeps = DatabaseViewDeps & {
   ): void;
   getExpandedTables(scopeKey: string): string[];
   setExpandedTable(scopeKey: string, table: string, expanded: boolean): void;
+  // snapshot 取得ダイアログのチェックボックス選択を scope (dbId+schema) で
+  // 永続化する。空配列を渡すと scope を削除する。
+  getSnapshotSelectedTables(scopeKey: string): string[];
+  setSnapshotSelectedTables(scopeKey: string, tables: string[]): void;
   // db-ui.json の prefs。boolean トグル系の永続化はここに集約する
   // (localStorage を使わない)。
   getDbUiPref<K extends keyof DbUiPrefs>(
@@ -449,6 +453,7 @@ function createTabPane(
     onClick: () => {
       setActiveTab("snapshot");
       snapshotView.refresh();
+      snapshotView.restoreDiffFromRoute();
     },
   });
 
@@ -597,6 +602,51 @@ function createTabPane(
     getSchema: () => currentSchema,
     getTables: () => schemaCache?.tables || [],
     getText: () => paneText(),
+    trackLoad: deps.trackLoad,
+    getStoredSelectedTables: () => {
+      if (!currentDbInfo) return undefined;
+      const scope = dbUiTableExpansionScope(currentDbInfo.id, currentSchema);
+      return outerDeps.getSnapshotSelectedTables(scope);
+    },
+    setStoredSelectedTables: (tables) => {
+      if (!currentDbInfo) return;
+      const scope = dbUiTableExpansionScope(currentDbInfo.id, currentSchema);
+      outerDeps.setSnapshotSelectedTables(scope, tables);
+    },
+    getRouteDiff: () => {
+      // parseRoute (web-src/core/routes.ts) が AppRoute の typed フィールド
+      // として `diffBefore` / `diffAfter` を既に解釈するので、それを経由する。
+      // window.location を直読みすると URL クエリ名の規約が将来変わったとき
+      // routes.ts と此処の 2 箇所を直さないと壊れる。
+      const parsed = parseRoute(
+        window.location.pathname,
+        window.location.search,
+        deps.currentRange(),
+      );
+      if (parsed.screen !== "database") return undefined;
+      const before = parsed.diffBefore;
+      const after = parsed.diffAfter;
+      if (!before && !after) return undefined;
+      return { before, after };
+    },
+    setRouteDiff: (diff) => {
+      // URL に ?diffBefore=&diffAfter= を反映。snapshot tab 以外では呼ばない。
+      const dbId = currentDbInfo?.id;
+      if (!dbId) return;
+      deps.setRoute(
+        {
+          screen: "database",
+          db: dbId,
+          schema: currentSchema ?? undefined,
+          table: currentTable ?? undefined,
+          tab: "snapshot",
+          ...(diff?.before ? { diffBefore: diff.before } : {}),
+          ...(diff?.after ? { diffAfter: diff.after } : {}),
+          range: deps.currentRange(),
+        },
+        true,
+      );
+    },
   });
   const historyView = createQueryHistoryView({
     getDbId: () => currentDbInfo?.id || null,
@@ -1703,6 +1753,8 @@ function createTabPane(
         if (schemaCache) renderErDiagram();
       } else if (normalizedView === "snapshot") {
         snapshotView.refresh();
+        // ?diffBefore=&diffAfter= が URL にあれば inline diff を復元する。
+        snapshotView.restoreDiffFromRoute();
       }
     }
     applyAnnotationTarget(options.annotationTarget);
@@ -2062,6 +2114,38 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     }).catch(() => undefined);
   }
 
+  // dbUiState 内の `Record<scope, string[]>` 形フィールドを 1 か所で更新する
+  // ヘルパ。expandedTables / snapshotSelectedTables の両方が同じ shape なので、
+  // (1) state を mutate、(2) 結果が空なら scope を消す、(3) applyDbUiState、
+  // (4) /_db/ui に PATCH 送信、という流れを抽象化する。
+  type ScopedTableMapKey = "expandedTables" | "snapshotSelectedTables";
+  function updateScopedTableList(
+    stateKey: ScopedTableMapKey,
+    scopeKey: string,
+    mutate: (tables: Set<string>) => void,
+  ): void {
+    const current = { ...(dbUiState[stateKey] || {}) };
+    const tables = new Set(current[scopeKey] || []);
+    mutate(tables);
+    const nextTables = [...tables].sort((a, b) => a.localeCompare(b));
+    if (nextTables.length > 0) current[scopeKey] = nextTables;
+    else delete current[scopeKey];
+    const nextMap = Object.keys(current).length > 0 ? current : undefined;
+    const nextState: DbUiState = { ...dbUiState, version: 1 };
+    if (nextMap) nextState[stateKey] = nextMap;
+    else delete nextState[stateKey];
+    applyDbUiState(nextState);
+    void fetch("/_db/ui", {
+      method: "PATCH",
+      headers: actionHeaders(),
+      body: JSON.stringify({
+        [stateKey]: {
+          [scopeKey]: nextTables.length > 0 ? nextTables : null,
+        },
+      }),
+    }).catch(() => undefined);
+  }
+
   function getExpandedTables(scopeKey: string): string[] {
     return [...(dbUiState.expandedTables?.[scopeKey] || [])];
   }
@@ -2071,28 +2155,23 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     table: string,
     expanded: boolean,
   ): void {
-    const expandedTables = { ...(dbUiState.expandedTables || {}) };
-    const tables = new Set(expandedTables[scopeKey] || []);
-    if (expanded) tables.add(table);
-    else tables.delete(table);
-    const nextTables = [...tables].sort((a, b) => a.localeCompare(b));
-    if (nextTables.length > 0) expandedTables[scopeKey] = nextTables;
-    else delete expandedTables[scopeKey];
-    const nextExpanded =
-      Object.keys(expandedTables).length > 0 ? expandedTables : undefined;
-    const nextState: DbUiState = { ...dbUiState, version: 1 };
-    if (nextExpanded) nextState.expandedTables = nextExpanded;
-    else delete nextState.expandedTables;
-    applyDbUiState(nextState);
-    void fetch("/_db/ui", {
-      method: "PATCH",
-      headers: actionHeaders(),
-      body: JSON.stringify({
-        expandedTables: {
-          [scopeKey]: nextTables.length > 0 ? nextTables : null,
-        },
-      }),
-    }).catch(() => undefined);
+    updateScopedTableList("expandedTables", scopeKey, (tables) => {
+      if (expanded) tables.add(table);
+      else tables.delete(table);
+    });
+  }
+
+  // snapshot 取得ダイアログで前回チェックされていたテーブル集合を scope 単位
+  // (dbId + schema) で永続化する。
+  function getSnapshotSelectedTables(scopeKey: string): string[] {
+    return [...(dbUiState.snapshotSelectedTables?.[scopeKey] || [])];
+  }
+
+  function setSnapshotSelectedTables(scopeKey: string, tables: string[]): void {
+    updateScopedTableList("snapshotSelectedTables", scopeKey, (set) => {
+      set.clear();
+      for (const t of tables) set.add(t);
+    });
   }
 
   // prefs (boolean トグル) は dbUiState.prefs に集約。listener で UI 側にも
@@ -2326,6 +2405,18 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     const entry = tabsById.get(activeTabId);
     if (!entry) return;
     const s = entry.pane.getState();
+    // snapshot diff の URL state (?diffBefore=&diffAfter=) は pane の getState
+    // に乗っていない — setRouteDiff が直接 URL に書く設計なので、ここで再構築
+    // すると落としてしまう。snapshot タブのときだけ、現在 URL の diff 値を
+    // 引き継いで setRoute する (落とすと setRouteDiff 直後にレース的に消える)。
+    const isSnapshot = s.view === "snapshot";
+    let diffBefore: string | undefined;
+    let diffAfter: string | undefined;
+    if (isSnapshot) {
+      const url = new URL(window.location.href);
+      diffBefore = url.searchParams.get("diffBefore") ?? undefined;
+      diffAfter = url.searchParams.get("diffAfter") ?? undefined;
+    }
     deps.setRoute(
       {
         screen: "database",
@@ -2333,6 +2424,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         schema: s.schema ?? undefined,
         table: s.table ?? undefined,
         tab: s.view === "data" ? undefined : s.view,
+        ...(diffBefore ? { diffBefore } : {}),
+        ...(diffAfter ? { diffAfter } : {}),
         range: deps.currentRange(),
       },
       true,
@@ -2600,6 +2693,8 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         setColumnWidths,
         getExpandedTables,
         setExpandedTable,
+        getSnapshotSelectedTables,
+        setSnapshotSelectedTables,
         getDbUiPref,
         setDbUiPref,
         onDbUiPrefChange,

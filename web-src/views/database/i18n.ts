@@ -216,6 +216,23 @@ export type DbText = {
     diffSummary: (changed: number, unchanged: number) => string;
     showingRows: (shown: number, total: number) => string;
     label: (date: string, tables: number, note: string) => string;
+    statusRunning: string;
+    statusError: string;
+    statusDone: string;
+    progressLabel: (table: string, index: number, total: number) => string;
+    progressFinalizing: string;
+    aborted: string;
+    failed: string;
+    errorPrefix: string;
+    compareBeforeBadge: string;
+    compareAfterBadge: string;
+    diffShowing: (before: string, after: string) => string;
+    filterPlaceholder: string;
+    tableCounter: (selected: number, total: number) => string;
+    coverageBeforeOnly: string;
+    coverageAfterOnly: string;
+    coverageNoteBeforeOnly: (rows: number) => string;
+    coverageNoteAfterOnly: (rows: number) => string;
   };
   // データストアエクスプローラ (redis / elasticsearch / s3)。共通文言は
   // common に集約し、各データストア固有の文言を redis/es/s3 に分ける。
@@ -498,6 +515,28 @@ const EN: DbText = {
       (unchanged > 0 ? `, ${unchanged} unchanged` : ""),
     showingRows: (shown, total) => `Showing ${shown} of ${total}`,
     label: (date, tables, note) => `${date} (${tables} tables)${note}`,
+    statusRunning: "running",
+    statusError: "error",
+    statusDone: "done",
+    progressLabel: (table, index, total) =>
+      table
+        ? `Snapshotting ${table} (${index + 1} / ${total})`
+        : `Finalizing… (${total} / ${total})`,
+    progressFinalizing: "Finalizing…",
+    aborted: "cancelled",
+    failed: "Failed",
+    errorPrefix: "Error",
+    compareBeforeBadge: "before",
+    compareAfterBadge: "after",
+    diffShowing: (before, after) => `Showing: ${before} → ${after}`,
+    filterPlaceholder: "Filter tables…",
+    tableCounter: (selected, total) => `${selected} / ${total} selected`,
+    coverageBeforeOnly: "not snapshotted in after",
+    coverageAfterOnly: "not snapshotted in before",
+    coverageNoteBeforeOnly: (rows) =>
+      `Only in the before snapshot (${rows} rows). Not selected for the after snapshot, so no comparison.`,
+    coverageNoteAfterOnly: (rows) =>
+      `Only in the after snapshot (${rows} rows). Not selected for the before snapshot, so no comparison.`,
   },
   explorer: {
     common: {
@@ -781,6 +820,28 @@ const JA: DbText = {
       (unchanged > 0 ? `、${unchanged}テーブルは変更なし` : ""),
     showingRows: (shown, total) => `全${total}件中 ${shown}件を表示中`,
     label: (date, tables, note) => `${date} (${tables}テーブル)${note}`,
+    statusRunning: "取得中",
+    statusError: "エラー",
+    statusDone: "完了",
+    progressLabel: (table, index, total) =>
+      table
+        ? `スナップショット取得中: ${table} (${index + 1} / ${total})`
+        : `仕上げ中… (${total} / ${total})`,
+    progressFinalizing: "仕上げ中…",
+    aborted: "キャンセル",
+    failed: "失敗",
+    errorPrefix: "エラー",
+    compareBeforeBadge: "比較元",
+    compareAfterBadge: "比較先",
+    diffShowing: (before, after) => `比較中: ${before} → ${after}`,
+    filterPlaceholder: "テーブル名で絞り込み…",
+    tableCounter: (selected, total) => `${selected} / ${total} 件選択中`,
+    coverageBeforeOnly: "比較先で未取得",
+    coverageAfterOnly: "比較元で未取得",
+    coverageNoteBeforeOnly: (rows) =>
+      `比較元のみに存在 (${rows}行)。比較先では対象テーブルに選ばれていないため比較できません。`,
+    coverageNoteAfterOnly: (rows) =>
+      `比較先のみに存在 (${rows}行)。比較元では対象テーブルに選ばれていないため比較できません。`,
   },
   explorer: {
     common: {

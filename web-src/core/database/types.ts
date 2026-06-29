@@ -227,6 +227,15 @@ export type SnapshotDiffTableSummary = {
   updatedCount: number;
   deletedCount: number;
   unchangedCount: number;
+  /** どちらの snapshot に取得対象として含まれていたか。
+   *  - "both": before/after の両方で取得済み (通常の差分計算が成立)
+   *  - "before-only": before のみで取得、after は未取得 (= 比較不能)
+   *  - "after-only":  after のみで取得、before は未取得 (= 比較不能)
+   * 未取得側を「全行 insert / 全行 delete」と表示するのは誤誘導なので
+   * client 側で coverage を見て「未取得」ラベルに切り替える。 */
+  coverage?: "both" | "before-only" | "after-only";
+  /** 片側未取得の場合に、取得済み側の行数。表示用の参考値。 */
+  unsnapshottedRowCount?: number;
 };
 
 export type SnapshotDiffChangeType = "inserted" | "updated" | "deleted";

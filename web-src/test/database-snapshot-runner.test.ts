@@ -154,4 +154,123 @@ describe("database snapshot runner", () => {
       expect(message).toMatch(/different database\/schema/);
     });
   });
+
+  test("onProgress reports container/index/total + finalization", async () => {
+    await withTempProject(async (dir) => {
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          yield {
+            keyJson: JSON.stringify({ id: 1 }),
+            payloadJson: JSON.stringify({ id: 1 }),
+            rowHash: "hash",
+          };
+        },
+        async listSnapshotContainers() {
+          return [
+            { id: "users", label: "users" },
+            { id: "posts", label: "posts" },
+            { id: "comments", label: "comments" },
+          ];
+        },
+      };
+
+      const events: Array<{
+        container: string;
+        done: boolean;
+        index: number;
+        total: number;
+      }> = [];
+      await runSnapshot(
+        dir,
+        source,
+        "db.sqlite",
+        ["users", "posts", "comments"],
+        "",
+        (progress) => events.push({ ...progress }),
+      );
+
+      // テーブル開始イベント × 3 + 最終 done × 1
+      expect(events).toHaveLength(4);
+      expect(events[0]).toEqual({
+        container: "users",
+        done: false,
+        index: 0,
+        total: 3,
+      });
+      expect(events[1]).toEqual({
+        container: "posts",
+        done: false,
+        index: 1,
+        total: 3,
+      });
+      expect(events[2]).toEqual({
+        container: "comments",
+        done: false,
+        index: 2,
+        total: 3,
+      });
+      // 最終 finalize イベントは container 空 + done=true、index==total
+      expect(events[3]).toEqual({
+        container: "",
+        done: true,
+        index: 3,
+        total: 3,
+      });
+    });
+  });
+
+  test("computeDiffTables annotates coverage for one-sided snapshots", async () => {
+    await withTempProject(async (dir) => {
+      // before: users のみ取得 / after: users + posts 取得
+      // → users は両方 (coverage=both)、posts は after-only
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(
+          container: string,
+        ): AsyncIterable<SnapshotItem> {
+          yield {
+            keyJson: JSON.stringify({ table: container, id: 1 }),
+            payloadJson: JSON.stringify({ id: 1 }),
+            rowHash: `${container}-hash`,
+          };
+        },
+        async listSnapshotContainers() {
+          return [
+            { id: "users", label: "users" },
+            { id: "posts", label: "posts" },
+          ];
+        },
+      };
+
+      await runSnapshot(dir, source, "db.sqlite", ["users"], "before-snap");
+      await runSnapshot(
+        dir,
+        source,
+        "db.sqlite",
+        ["users", "posts"],
+        "after-snap",
+      );
+
+      const snapshots = await listSnapshots(dir, "db.sqlite");
+      expect(snapshots).toHaveLength(2);
+      // created_at の解像度に依存しないよう note で取得側を識別する。
+      const before = snapshots.find((s) => s.note === "before-snap");
+      const after = snapshots.find((s) => s.note === "after-snap");
+      if (!before || !after) throw new Error("snapshot note not found");
+
+      const diffs = await computeDiffTables(dir, before.id, after.id);
+      const users = diffs.find((d) => d.tableName === "users");
+      const posts = diffs.find((d) => d.tableName === "posts");
+
+      expect(users?.coverage).toBe("both");
+      expect(posts?.coverage).toBe("after-only");
+      // after-only は「全行 insert」と表示するのではなく、未取得側の row 数を
+      // 参考情報として返し、insertedCount は 0 にする (誤誘導防止)。
+      expect(posts?.insertedCount).toBe(0);
+      expect(posts?.unsnapshottedRowCount).toBe(1);
+    });
+  });
 });

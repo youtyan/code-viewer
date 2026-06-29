@@ -4916,6 +4916,11 @@ body.query-history-panel-open #content {
 }
 .db-history-pane-content {
   flex: 1;
+  /* min-height: 0 がないと、子の min-content size に引っ張られて親
+   * (.db-history-pane の固定高さ) を超えて伸び、内側の overflow-y:auto
+   * がスクロールバーを出さない (= 「クエリ履歴/ログ一覧がスクロールできない」
+   * 既存バグの根本原因)。 */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5820,6 +5825,11 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   overflow: hidden;
   border-top: 1px solid var(--border);
   background: var(--bg);
+  /* flex container にしないと、子 (.db-history-pane-content) の flex:1 が
+   * 効かず、子がコンテンツサイズに伸びて親の overflow:hidden が clip するだけ
+   * の状態になる。結果、子内部の overflow-y:auto がスクロールバーを出さない。 */
+  display: flex;
+  flex-direction: column;
 }
 .db-history-pane[hidden] { display: none; }
 .db-tools-section {
@@ -7721,14 +7731,22 @@ body.db-resizing {
 /* --- Snapshot & Diff --- */
 .db-snapshot-view {
   padding: 12px;
-  overflow-y: auto;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* hidden 属性は本来 display:none を当てるが、上の .db-snapshot-view の
+ * display:flex に specificity で負けるので明示的に再宣言する。
+ * (これを書かないと snapshot tab から離脱しても view が表示されたままになる) */
+.db-snapshot-view[hidden] {
+  display: none;
 }
 .db-snapshot-guide {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   background: var(--bg-soft);
 }
 .db-snapshot-guide-title {
@@ -7763,7 +7781,12 @@ body.db-resizing {
 .db-snapshot-toolbar {
   display: flex;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+/* tableSelector が開いている時、上の Take snapshot ボタンの「もう一回押せそう感」を消す。 */
+.db-snapshot-create-btn.is-active-dialog {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .db-snapshot-create-btn,
 .db-snapshot-refresh-btn,
@@ -7781,38 +7804,431 @@ body.db-resizing {
 .db-snapshot-job-cancel-btn:hover {
   background: var(--bg-mute);
 }
-.db-snapshot-table-selector {
+.db-snapshot-progress-area {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.db-snapshot-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 10px;
-  margin-bottom: 12px;
   background: var(--bg-soft);
+  font-size: var(--db-font-base);
+}
+.db-snapshot-progress-row.running {
+  border-color: color-mix(in srgb, var(--warning, #d29922) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning, #d29922) 8%, var(--bg-soft));
+}
+.db-snapshot-progress-row.error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-soft));
+}
+.db-snapshot-progress-row.aborted {
+  color: var(--fg-muted);
+}
+.db-snapshot-progress-row.done {
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--bg-soft));
+}
+.db-snapshot-progress-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-snapshot-progress-row .db-snapshot-job-cancel-btn {
+  padding: 2px 10px;
+  font-size: calc(var(--db-font-base) - 1px);
+}
+.db-snapshot-error-message {
+  color: var(--danger);
+  font-size: calc(var(--db-font-base) - 1px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+/* 左ペイン (snapshot 一覧 + sticky 比較プルダウン) / 右ペイン (diff) の 2 ペイン
+ * 構成。snapshot が何百件あろうとプルダウンは左ペインの上に sticky で残り、
+ * diff 結果は右ペインで独立してスクロールできる。 */
+.db-snapshot-main-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.db-snapshot-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.db-snapshot-left-pane {
+  flex: 0 0 380px;
+  min-width: 280px;
+  max-width: 50%;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.db-snapshot-right-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  /* sticky な toc を pane の左右いっぱいに広げたいので、ここでは
+   * left/right padding を取らず、内部の .db-snapshot-diff-inline 側で
+   * inset を持たせる。toc だけ pane の端まで広がる。 */
+  padding: 0;
+  /* sticky な目次バーの高さぶん、scrollIntoView の停止位置を下げる。
+   * これがないと chip クリック時に section が toc 裏に隠れて「中途半端な
+   * 位置で止まる」状態になる。 */
+  scroll-padding-top: 68px;
+}
+.db-snapshot-diff-inline {
+  padding: 0 12px 12px;
+}
+.db-snapshot-right-pane:empty::before {
+  content: attr(data-empty);
+  display: block;
+  color: var(--fg-muted);
+  font-size: var(--db-font-base);
+  padding: 16px;
+  text-align: center;
+}
+.db-snapshot-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.db-snapshot-list-section {
+  padding: 8px 10px 12px;
+}
+.db-snapshot-item.is-before {
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.db-snapshot-item.is-after {
+  border-left: 3px solid var(--success);
+  background: color-mix(in srgb, var(--success) 6%, transparent);
+}
+.db-snapshot-compare-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 10px;
+  font-size: calc(var(--db-font-base) - 1px);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+.db-snapshot-item.is-before .db-snapshot-compare-badge {
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.db-snapshot-item.is-after .db-snapshot-compare-badge {
+  background: color-mix(in srgb, var(--success) 15%, var(--bg));
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+}
+.db-snapshot-diff-header {
+  font-weight: 600;
+  font-size: var(--db-font-base);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+}
+/* 差分テーブル目次バー: 右ペイン上部に sticky 配置、横スクロールで多くの
+ * テーブルにも対応。chip クリックで該当 section へジャンプ。
+ * .db-snapshot-diff-inline の左右 padding (12px) を打ち消して、pane の
+ * 左右端まで隙間なく広げる (sticky 時に下のテーブル行が透けない)。 */
+.db-snapshot-diff-toc {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 0 -12px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--fg) 5%, transparent);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scroll-padding: 0 12px;
+}
+.db-snapshot-diff-toc-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: calc(var(--db-font-base) - 1px);
+  font-family: inherit;
+}
+.db-snapshot-diff-toc-chip:hover {
+  background: var(--bg-mute);
+}
+.db-snapshot-diff-toc-chip.active {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  font-weight: 500;
+}
+.db-snapshot-diff-toc-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.db-snapshot-diff-toc-chip-stats {
+  display: inline-flex;
+  gap: 4px;
+  font-size: calc(var(--db-font-base) - 2px);
+}
+.db-snapshot-diff-table-stats {
+  display: inline-flex;
+  gap: 6px;
+}
+/* git diff 風の色: +N 緑 / ~N 黄 / -N 赤。chip 内でも table header 内でも
+ * 同じ色を共有する。font-weight 500 で数値を読みやすく強調。 */
+.db-snapshot-diff-stat {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.db-snapshot-diff-stat.add {
+  color: var(--success);
+}
+.db-snapshot-diff-stat.upd {
+  color: var(--warning, #d29922);
+}
+.db-snapshot-diff-stat.del {
+  color: var(--danger);
+}
+/* 比較対象として片側 snapshot にしか含まれていないテーブル用のラベル。
+ * 「-N削除」と誤認させない、ニュートラル色 + 「未取得」テキスト。 */
+.db-snapshot-diff-coverage-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: calc(var(--db-font-base) - 2px);
+  font-weight: 500;
+  border: 1px dashed var(--border);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.db-snapshot-diff-coverage-note {
+  padding: 12px 14px;
+  color: var(--fg-muted);
+  font-size: calc(var(--db-font-base) - 1px);
+  background: var(--bg-soft);
+  border-top: 1px dashed var(--border);
+  line-height: 1.5;
+}
+.db-snapshot-diff-toc-chip.coverage-incomplete {
+  border-style: dashed;
+}
+/* 比較プルダウン (left pane 上部 sticky エリア) */
+.db-snapshot-diff-create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.db-snapshot-diff-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  /* min-width: 0 がないと、select の content が parent の幅を超えて押し広げる
+   * (flex item の default min-width:auto の落とし穴)。 */
+  min-width: 0;
+}
+.db-snapshot-diff-row-label {
+  /* select と同じ高さに揃え、垂直中央寄せ。padding を select に合わせる
+   * ことで微妙な「badge だけ浮いてる」ズレを消す。 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: calc(var(--db-font-base) - 1px);
+  border: 1px solid var(--border);
+  line-height: 1;
+}
+.db-snapshot-diff-row.is-before .db-snapshot-diff-row-label {
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.db-snapshot-diff-row.is-after .db-snapshot-diff-row-label {
+  background: color-mix(in srgb, var(--success) 15%, var(--bg));
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+}
+.db-snapshot-diff-row .db-snapshot-diff-select {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+/* sticky header 自体も box-sizing で枠を超えないよう保証する。 */
+.db-snapshot-sticky-header {
+  box-sizing: border-box;
+  width: 100%;
+}
+.db-snapshot-diff-create {
+  width: 100%;
+  min-width: 0;
+}
+/* sticky header 内のすべての子に box-sizing と min-width:0 を強制し、
+ * select の min-content による親の押し広げ、ボタンの stretch overflow を防ぐ。 */
+.db-snapshot-sticky-header *,
+.db-snapshot-sticky-header *::before,
+.db-snapshot-sticky-header *::after {
+  box-sizing: border-box;
+}
+.db-snapshot-sticky-header .db-snapshot-diff-create > * {
+  max-width: 100%;
+  min-width: 0;
+}
+/* ボタンは「全幅にする」のをやめ、左寄せの自然幅にする。stretch すると
+ * 親が押し広がった時に物理的にはみ出すリスクがある。 */
+.db-snapshot-diff-btn {
+  align-self: flex-start;
+}
+.db-snapshot-table-selector {
+  /* 取得ダイアログとして「いまここを操作している」感を出すため、上の toolbar
+   * から少し離して、accent 色のボーダーで強調する。 */
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: color-mix(in srgb, var(--accent) 3%, var(--bg-soft));
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .db-snapshot-table-selector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   font-weight: 600;
   margin-bottom: 8px;
   font-size: var(--db-font-base);
 }
+.db-snapshot-table-counter {
+  font-weight: 400;
+  font-size: calc(var(--db-font-base) - 1px);
+  color: var(--fg-muted);
+}
+.db-snapshot-table-filter {
+  margin-bottom: 8px;
+}
+.db-snapshot-table-filter-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: var(--db-font-base);
+  background: var(--bg);
+  color: var(--fg);
+  box-sizing: border-box;
+}
 .db-snapshot-table-checkboxes {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  flex-direction: column;
   margin-bottom: 8px;
-  max-height: 200px;
+  max-height: 280px;
   overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
 }
-.db-snapshot-table-label {
+.db-snapshot-table-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  padding: 6px 10px;
   font-size: var(--db-font-base);
   cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.db-snapshot-table-row:last-child {
+  border-bottom: none;
+}
+.db-snapshot-table-row:hover {
+  background: var(--bg-soft);
+}
+.db-snapshot-table-row-name {
+  /* 件数を name の直後にくっつけたいので flex:1 で伸ばさない。
+   * 長いテーブル名は ellipsis で詰めるが、count はその直後に密着する。 */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-snapshot-table-row-count {
+  color: var(--fg-muted);
+  font-size: calc(var(--db-font-base) - 1px);
+  flex: 0 0 auto;
+  margin-right: auto;
+}
+.db-snapshot-table-row-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: calc(var(--db-font-base) - 1px);
+}
+.db-snapshot-note-row {
+  margin-bottom: 8px;
+}
+.db-snapshot-note-row .db-snapshot-note-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.db-snapshot-note-row .db-snapshot-note-input {
+  flex: 1;
+  min-width: 0;
+}
+.db-snapshot-action-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.db-snapshot-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .db-snapshot-select-actions {
   display: flex;
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 .db-snapshot-select-actions button {
   padding: 4px 10px;
@@ -7837,10 +8253,30 @@ body.db-resizing {
   flex: 1;
   min-width: 120px;
 }
-.db-snapshot-confirm-btn {
-  background: var(--accent) !important;
-  color: #fff !important;
-  border-color: var(--accent) !important;
+/* primary action は「下線 + accent 文字」程度の subtle 強調にとどめ、
+ * 既存の toolbar 系ボタン (Take snapshot / Refresh) と高さ・形を揃える。
+ * 「独自の青塗りボタン」を避けて視覚的な統一感を出す。 */
+.db-snapshot-confirm-btn,
+.db-snapshot-cancel-btn,
+.db-snapshot-diff-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: var(--db-font-base);
+}
+.db-snapshot-confirm-btn:not(:disabled),
+.db-snapshot-diff-btn:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+  font-weight: 500;
+}
+.db-snapshot-confirm-btn:hover:not(:disabled),
+.db-snapshot-cancel-btn:hover,
+.db-snapshot-diff-btn:hover:not(:disabled) {
+  background: var(--bg-mute);
 }
 .db-snapshot-section-title {
   font-size: calc(var(--db-font-base) + 1px);
@@ -7940,18 +8376,8 @@ body.db-resizing {
   color: var(--fg);
   font-size: var(--db-font-base);
 }
-.db-snapshot-diff-btn {
-  padding: 4px 14px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-  font-size: var(--db-font-base);
-}
-.db-snapshot-diff-btn:hover {
-  opacity: 0.9;
-}
+/* diff-btn の旧独自青塗りは廃止。上の confirm/cancel と同じ neutral + accent
+ * subtle スタイル (line 8119-) を共有する。 */
 .db-snapshot-diff-section {
   margin-top: 16px;
 }
@@ -8072,77 +8498,21 @@ body.db-resizing {
   color: var(--fg-muted);
 }
 .db-snapshot-diff-rows-container {
-  max-height: 400px;
-  overflow-y: auto;
+  /* 親 (.db-snapshot-right-pane) が縦スクロール責務を一手に持つので、
+   * ここでは縦方向は visible のまま。max-height + overflow-y を持っていた
+   * 旧実装は、マウスホイールが grid に乗ると親に伝播せず「親スクロール
+   * できない」操作不能の元だった (nested scroll trap)。
+   * 横に広い diff grid のためにヨコだけ auto を残す。 */
+  overflow-x: auto;
 }
-.db-snapshot-diff-row {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--db-font-base);
-}
-.db-snapshot-diff-row:last-child {
-  border-bottom: none;
-}
-.db-snapshot-diff-row.inserted {
-  background: var(--diff-addition-bg, rgba(46, 160, 67, 0.05));
-}
-.db-snapshot-diff-row.deleted {
-  background: var(--diff-deletion-bg, rgba(248, 81, 73, 0.05));
-}
-.db-snapshot-diff-row.updated {
-  background: var(--diff-change-bg, rgba(210, 153, 34, 0.05));
-}
-.db-snapshot-diff-type {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: calc(var(--db-font-base) - 2px);
-  font-weight: 600;
-  margin-right: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.db-snapshot-diff-type.inserted {
-  background: color-mix(in srgb, var(--success) 15%, var(--bg));
-  color: var(--success);
-}
-.db-snapshot-diff-type.deleted {
-  background: color-mix(in srgb, var(--danger) 15%, var(--bg));
-  color: var(--danger);
-}
-.db-snapshot-diff-type.updated {
-  background: color-mix(in srgb, var(--warning, #d29922) 15%, var(--bg));
-  color: var(--warning, #d29922);
-}
-.db-snapshot-diff-key {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--fg-muted);
-  font-size: calc(var(--db-font-base) - 1px);
-}
-.db-snapshot-diff-changes,
-.db-snapshot-diff-values {
-  margin-top: 4px;
-  padding-left: 16px;
-}
-.db-snapshot-diff-change-row,
-.db-snapshot-diff-value-entry {
-  margin-bottom: 2px;
-  font-size: calc(var(--db-font-base) - 1px);
-  display: block;
-}
-.db-snapshot-diff-change-row .col-name,
-.db-snapshot-diff-value-entry .col-name {
-  color: var(--accent);
-  font-weight: 500;
-}
-.db-snapshot-diff-change-row .old-val,
-.db-snapshot-diff-value-entry .old-val {
-  color: var(--danger);
-  text-decoration: line-through;
-}
-.db-snapshot-diff-change-row .new-val,
-.db-snapshot-diff-value-entry .new-val {
-  color: var(--success);
-}
+/* (deleted) 旧 row-based diff レイアウトの dead CSS を削除した。
+ *   - .db-snapshot-diff-row / .db-snapshot-diff-type / .db-snapshot-diff-key
+ *   - .db-snapshot-diff-changes / .db-snapshot-diff-values
+ *   - .db-snapshot-diff-change-row / .db-snapshot-diff-value-entry
+ * 現行は <table class="db-snap-diff-grid"> での grid 描画に移行済み。
+ * 残しておくと .db-snapshot-diff-row が sticky 上部の before/after プルダウン行
+ * (snapshot-view.ts の .db-snapshot-diff-row.is-before/.is-after) と
+ * クラス名衝突して padding/border-bottom が漏れる。 */
 .db-snapshot-diff-more {
   padding: 6px 10px;
   color: var(--fg-muted);

@@ -1381,15 +1381,18 @@ async function handleSnapshotCreate(
         snapshotDbId,
         snapshotContainers,
         note,
-        (table, done) => {
+        (progress) => {
           sendSse?.(
             "db-snapshot",
             JSON.stringify({
               action: "progress",
               dbId: snapshotDbId,
               schema: body.schema,
-              table,
-              done,
+              id: activeSnapshotId,
+              table: progress.container,
+              done: progress.done,
+              index: progress.index,
+              total: progress.total,
             }),
           );
         },
@@ -1407,6 +1410,7 @@ async function handleSnapshotCreate(
                 dbId: snapshotDbId,
                 schema: body.schema,
                 id,
+                total: snapshotContainers.length,
               }),
             );
           },
@@ -1435,6 +1439,7 @@ async function handleSnapshotCreate(
           action: aborted ? "aborted" : "error",
           dbId: snapshotDbId,
           schema: body.schema,
+          id: activeSnapshotId,
           ...(aborted
             ? {}
             : { error: err instanceof Error ? err.message : String(err) }),

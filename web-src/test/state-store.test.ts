@@ -337,6 +337,69 @@ describe("state store", () => {
     });
   });
 
+  test("db ui snapshot selected tables merge by scope", async () => {
+    await withTempProject(async (dir) => {
+      // 単一 scope に書き込み
+      expect(
+        await patchDbUiState(dir, {
+          snapshotSelectedTables: {
+            "docker:postgres:app#schema=public": ["users", "projects"],
+          },
+        }),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        snapshotSelectedTables: {
+          "docker:postgres:app#schema=public": ["projects", "users"],
+        },
+      });
+
+      // 別 scope を追加、既存 scope は維持
+      expect(
+        await patchDbUiState(dir, {
+          snapshotSelectedTables: {
+            "docker:postgres:app#schema=tenant": ["accounts"],
+          },
+        }),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        snapshotSelectedTables: {
+          "docker:postgres:app#schema=public": ["projects", "users"],
+          "docker:postgres:app#schema=tenant": ["accounts"],
+        },
+      });
+
+      // null で scope 削除
+      expect(
+        await patchDbUiState(dir, {
+          snapshotSelectedTables: {
+            "docker:postgres:app#schema=public": null,
+          },
+        } as unknown as Parameters<typeof patchDbUiState>[1]),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+        snapshotSelectedTables: {
+          "docker:postgres:app#schema=tenant": ["accounts"],
+        },
+      });
+
+      // 配列以外は merge 段階で受理されるが sanitize で drop され、結果として
+      // 当該 scope が消える (expandedTables と同じ挙動)。
+      expect(
+        await patchDbUiState(dir, {
+          snapshotSelectedTables: {
+            "docker:postgres:app#schema=tenant": "not-an-array",
+          },
+        } as unknown as Parameters<typeof patchDbUiState>[1]),
+      ).toEqual({
+        version: 1,
+        columnWidths: {},
+      });
+    });
+  });
+
   test("state PATCH rejects oversized request bodies before JSON parsing", async () => {
     await withTempProject(async (dir) => {
       const req = new Request("http://localhost/_state/settings", {

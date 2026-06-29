@@ -378,17 +378,23 @@ export async function computeDiffTables(
         updatedCount: 0,
         deletedCount: 0,
         unchangedCount: b.row_count,
+        coverage: "both",
       });
       continue;
     }
 
     if (!b) {
+      // before に「対象選択されていなかった」テーブル。after には全行ある
+      // が、これを「全行 insert」と表示するのは事実誤認。比較対象外として
+      // coverage: after-only で返し、client 側で「未取得」ラベルに切り替える。
       results.push({
         tableName: table,
-        insertedCount: a ? a.row_count : 0,
+        insertedCount: 0,
         updatedCount: 0,
         deletedCount: 0,
         unchangedCount: 0,
+        coverage: "after-only",
+        unsnapshottedRowCount: a ? a.row_count : 0,
       });
       continue;
     }
@@ -398,8 +404,10 @@ export async function computeDiffTables(
         tableName: table,
         insertedCount: 0,
         updatedCount: 0,
-        deletedCount: b.row_count,
+        deletedCount: 0,
         unchangedCount: 0,
+        coverage: "before-only",
+        unsnapshottedRowCount: b.row_count,
       });
       continue;
     }
@@ -445,6 +453,7 @@ export async function computeDiffTables(
       updatedCount,
       deletedCount,
       unchangedCount: Math.max(0, unchangedCount),
+      coverage: "both",
     });
   }
 
