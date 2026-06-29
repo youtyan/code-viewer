@@ -77,9 +77,8 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     );
   const getJson = (path: string): Promise<Response> => trackLoad(fetch(path));
   const changeTypeLabel = (type: SnapshotDiffRow["changeType"]): string => {
-    if (type === "inserted") return text().snapshot.inserted;
-    if (type === "updated") return text().snapshot.updated;
-    return text().snapshot.deleted;
+    if (type === "inserted") return "+";
+    return "−";
   };
   const snapshotLabel = (s: SnapshotMeta): string => {
     const date = new Date(s.createdAt).toLocaleString();
@@ -1168,11 +1167,25 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
     }
     const columns = [...allCols];
 
-    const table = document.createElement("table");
-    table.className = "db-snap-diff-grid";
+    // 列ヘッダと body を 2 つの <table> に分け、scrollLeft + 列幅を JS で同期する
+    // 構造 (Codex 設計 / 既存 table-grid.ts の headerWrap+viewport パターンの reuse)。
+    // 1 つの <table> で thead を position:sticky にする旧構造は、内部の
+    // rows-container を overflow-x:auto にした瞬間 sticky の scroll container が
+    // 横スクロール側へ吸われて縦 sticky が殺される / 長い差分でカラム名が画面外に
+    // 消える、という構造的な破綻があった。
+    const colHeaderWrap = document.createElement("div");
+    colHeaderWrap.className = "db-snapshot-diff-col-header-wrap";
+    const colHeaderTable = document.createElement("table");
+    colHeaderTable.className = "db-snap-diff-grid";
+    const colHeaderColgroup = document.createElement("colgroup");
+    for (let i = 0; i < columns.length + 1; i++) {
+      colHeaderColgroup.appendChild(document.createElement("col"));
+    }
+    colHeaderTable.appendChild(colHeaderColgroup);
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
     const thType = document.createElement("th");
+    thType.className = "snap-diff-type-cell";
     thType.textContent = "";
     headRow.appendChild(thType);
     for (const col of columns) {
@@ -1181,17 +1194,27 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
-    table.appendChild(thead);
+    colHeaderTable.appendChild(thead);
+    colHeaderWrap.appendChild(colHeaderTable);
+
+    const rowsViewport = document.createElement("div");
+    rowsViewport.className = "db-snapshot-diff-rows-viewport";
+    const bodyTable = document.createElement("table");
+    bodyTable.className = "db-snap-diff-grid";
+    const bodyColgroup = document.createElement("colgroup");
+    for (let i = 0; i < columns.length + 1; i++) {
+      bodyColgroup.appendChild(document.createElement("col"));
+    }
+    bodyTable.appendChild(bodyColgroup);
 
     const tbody = document.createElement("tbody");
     for (const row of rows) {
       if (row.changeType === "updated" && row.beforeValues && row.afterValues) {
         const trBefore = document.createElement("tr");
-        trBefore.className = "snap-diff-del";
+        trBefore.className = "snap-diff-del snap-diff-record-start";
         const tdTypeBefore = document.createElement("td");
         tdTypeBefore.className = "snap-diff-type-cell";
-        tdTypeBefore.textContent = text().snapshot.before;
-        tdTypeBefore.rowSpan = 2;
+        tdTypeBefore.textContent = "−";
         trBefore.appendChild(tdTypeBefore);
         for (const col of columns) {
           const td = document.createElement("td");
@@ -1210,7 +1233,11 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         tbody.appendChild(trBefore);
 
         const trAfter = document.createElement("tr");
-        trAfter.className = "snap-diff-add";
+        trAfter.className = "snap-diff-add snap-diff-record-end";
+        const tdTypeAfter = document.createElement("td");
+        tdTypeAfter.className = "snap-diff-type-cell";
+        tdTypeAfter.textContent = "+";
+        trAfter.appendChild(tdTypeAfter);
         for (const col of columns) {
           const td = document.createElement("td");
           const bs =
@@ -1228,8 +1255,9 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         tbody.appendChild(trAfter);
       } else {
         const tr = document.createElement("tr");
-        tr.className =
+        const sideClass =
           row.changeType === "inserted" ? "snap-diff-add" : "snap-diff-del";
+        tr.className = `${sideClass} snap-diff-record-start snap-diff-record-end`;
         const tdType = document.createElement("td");
         tdType.className = "snap-diff-type-cell";
         tdType.textContent = changeTypeLabel(row.changeType);
@@ -1238,6 +1266,7 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
           row.changeType === "inserted" ? row.afterValues : row.beforeValues;
         for (const col of columns) {
           const td = document.createElement("td");
+          td.classList.add("snap-diff-changed-cell");
           const v = values?.[col];
           td.textContent = v == null ? "NULL" : String(v);
           tr.appendChild(td);
@@ -1245,8 +1274,35 @@ export function createSnapshotView(deps: SnapshotViewDeps): SnapshotView {
         tbody.appendChild(tr);
       }
     }
-    table.appendChild(tbody);
-    container.appendChild(table);
+    bodyTable.appendChild(tbody);
+    rowsViewport.appendChild(bodyTable);
+    container.append(colHeaderWrap, rowsViewport);
+
+    // 横スクロール時、body 側の scrollLeft を列ヘッダ側に伝搬。col-header-wrap は
+    // overflow:hidden で scrollbar を出さず、JS で scrollLeft だけを書き換える。
+    rowsViewport.addEventListener("scroll", () => {
+      colHeaderWrap.scrollLeft = rowsViewport.scrollLeft;
+    });
+
+    // 列幅同期: body table の各セル実幅を測って、両 table の <col> width に反映。
+    // border-collapse:separate + colgroup で 1px ズレなく列幅が揃う。
+    const syncColumnWidths = () => {
+      if (disposed) return;
+      const firstRow = tbody.querySelector("tr");
+      if (!firstRow) return;
+      const cells = firstRow.children;
+      const bodyCols = bodyColgroup.children;
+      const headerCols = colHeaderColgroup.children;
+      for (let i = 0; i < cells.length; i++) {
+        const w = (cells[i] as HTMLElement).offsetWidth;
+        if (bodyCols[i]) (bodyCols[i] as HTMLElement).style.width = `${w}px`;
+        if (headerCols[i])
+          (headerCols[i] as HTMLElement).style.width = `${w}px`;
+      }
+    };
+    requestAnimationFrame(syncColumnWidths);
+    const ro = new ResizeObserver(syncColumnWidths);
+    ro.observe(bodyTable);
 
     if (total > rows.length) {
       const more = document.createElement("div");

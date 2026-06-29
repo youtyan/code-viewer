@@ -7885,6 +7885,11 @@ body.db-resizing {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  /* 横スクロールはペインで受けない。各テーブルの .db-snapshot-diff-rows-viewport
+   * (overflow-x:auto) が body 行だけを横スクロールする。ペインで両軸 scroll に
+   * すると目次バー / テーブル名バー / 列ヘッダの sticky が横スクロールで全部
+   * 流れて積層がぐちゃぐちゃになるので明示的に hidden にする。 */
+  overflow-x: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -7892,12 +7897,20 @@ body.db-resizing {
    * left/right padding を取らず、内部の .db-snapshot-diff-inline 側で
    * inset を持たせる。toc だけ pane の端まで広がる。 */
   padding: 0;
-  /* sticky な目次バーの高さぶん、scrollIntoView の停止位置を下げる。
-   * これがないと chip クリック時に section が toc 裏に隠れて「中途半端な
-   * 位置で止まる」状態になる。 */
-  scroll-padding-top: 68px;
+  /* sticky 帯 (目次バー + テーブル名 + 列ヘッダ) ぶん、scrollIntoView の
+   * 停止位置を下げる。chip クリック時に section が sticky 裏に隠れて
+   * 「中途半端な位置で止まる」のを防ぐ。 */
+  scroll-padding-top: calc(
+    var(--snap-diff-toc-h) + var(--snap-diff-table-header-h) +
+      var(--snap-diff-col-header-h)
+  );
 }
 .db-snapshot-diff-inline {
+  /* sticky 3 段 (目次 / テーブル名 / 列ヘッダ) の高さを CSS 変数で持ち、
+   * top 計算と scroll-padding-top を一箇所で管理する。 */
+  --snap-diff-toc-h: 40px;
+  --snap-diff-table-header-h: 34px;
+  --snap-diff-col-header-h: 30px;
   padding: 0 12px 12px;
 }
 .db-snapshot-right-pane:empty::before {
@@ -7962,7 +7975,7 @@ body.db-resizing {
 .db-snapshot-diff-toc {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 30;
   display: flex;
   gap: 6px;
   padding: 8px 12px;
@@ -7974,6 +7987,8 @@ body.db-resizing {
   overflow-y: hidden;
   white-space: nowrap;
   scroll-padding: 0 12px;
+  height: var(--snap-diff-toc-h);
+  box-sizing: border-box;
 }
 .db-snapshot-diff-toc-chip {
   flex: 0 0 auto;
@@ -8474,10 +8489,12 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 .db-snapshot-diff-table {
+  /* 各テーブルは「テーブル名 (sticky)」「列ヘッダ (sticky, scrollLeft 同期)」
+   * 「rows-viewport (overflow-x:auto)」の 3 層構造。
+   * overflow:hidden は付けない (内部 sticky を殺す)。 */
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 8px;
-  overflow: hidden;
 }
 .db-snapshot-diff-table-header {
   display: flex;
@@ -8487,9 +8504,39 @@ body.db-resizing {
   background: var(--bg-soft);
   font-size: var(--db-font-base);
   cursor: pointer;
+  /* 目次バーのすぐ下に隙間ゼロで張り付く。 */
+  position: sticky;
+  top: var(--snap-diff-toc-h);
+  z-index: 20;
+  height: var(--snap-diff-table-header-h);
+  box-sizing: border-box;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
 }
 .db-snapshot-diff-table-header:hover {
   background: var(--bg-mute);
+}
+.db-snapshot-diff-col-header-wrap {
+  /* 列ヘッダ専用 wrap。rows-viewport (overflow-x:auto) の scrollLeft を JS で
+   * 同期して、横スクロール時もデータ列と列名の位置が揃うようにする。
+   * 自身は overflow:hidden で内部 table が右にはみ出ても scrollbar を出さない。
+   * 上端は table-header (背景同色 var(--bg-soft)) と地続きに見せたいので
+   * border-top は持たない。下端 1px だけが列ヘッダと body の境界を描く。 */
+  position: sticky;
+  top: calc(
+    var(--snap-diff-toc-h) + var(--snap-diff-table-header-h) - 1px
+  );
+  z-index: 15;
+  height: var(--snap-diff-col-header-h);
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+.db-snapshot-diff-rows-viewport {
+  /* body 行だけが横スクロール対象。縦は親 (.db-snapshot-right-pane) が受ける。 */
+  overflow-x: auto;
+  overflow-y: visible;
 }
 .db-snapshot-diff-table-name {
   font-weight: 600;
@@ -8497,14 +8544,10 @@ body.db-resizing {
 .db-snapshot-diff-table-stats {
   color: var(--fg-muted);
 }
-.db-snapshot-diff-rows-container {
-  /* 親 (.db-snapshot-right-pane) が縦スクロール責務を一手に持つので、
-   * ここでは縦方向は visible のまま。max-height + overflow-y を持っていた
-   * 旧実装は、マウスホイールが grid に乗ると親に伝播せず「親スクロール
-   * できない」操作不能の元だった (nested scroll trap)。
-   * 横に広い diff grid のためにヨコだけ auto を残す。 */
-  overflow-x: auto;
-}
+/* (旧) .db-snapshot-diff-rows-container は廃止。新構造では
+ * .db-snapshot-diff-rows-viewport (overflow-x:auto) が body 行の横スクロールを
+ * 担い、列ヘッダは .db-snapshot-diff-col-header-wrap に分離されて
+ * scrollLeft 同期で追従する。 */
 /* (deleted) 旧 row-based diff レイアウトの dead CSS を削除した。
  *   - .db-snapshot-diff-row / .db-snapshot-diff-type / .db-snapshot-diff-key
  *   - .db-snapshot-diff-changes / .db-snapshot-diff-values
@@ -8526,37 +8569,59 @@ body.db-resizing {
   font-size: var(--db-font-base);
 }
 
-/* Diff grid table */
+/* Diff grid table
+ * 構造: 各テーブルにつき 2 つの <table class="db-snap-diff-grid"> を作る。
+ * - 列ヘッダ用 (thead のみ、.db-snapshot-diff-col-header-wrap 内)
+ * - body 用 (tbody のみ、.db-snapshot-diff-rows-viewport 内)
+ * 両 table に同じ <colgroup> を入れ、JS (ResizeObserver) で body 側の各 col
+ * 実幅を測って header 側に同じ width を反映する。これで横スクロール時も
+ * 列ヘッダとデータ列が完全に揃う。
+ * border-collapse:separate にする理由: collapse だと隣接 border をセル側が
+ * 描く仕様で、sticky 化やテーブル分割と相性が悪く subpixel 透けの原因になる。 */
 .db-snap-diff-grid {
-  width: 100%;
-  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--db-font-base);
   table-layout: auto;
 }
 .db-snap-diff-grid th {
-  position: sticky;
-  top: 0;
+  /* 列ヘッダの下端は col-header-wrap.border-bottom が描くので th 側では持たない。
+   * 縦罫線は持たない (gutter と data 列の境界は type-cell.border-right が担う)。 */
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   padding: 4px 8px;
   font-weight: 600;
   text-align: left;
   white-space: nowrap;
-  z-index: 1;
 }
 .db-snap-diff-grid td {
-  border: 1px solid var(--border);
+  /* 縦罫線は持たない。横罫線のみで行を区切る (GitHub PR diff 同様)。
+   * gutter と data 列の境界は type-cell.border-right が担う。 */
+  border-bottom: 1px solid var(--border);
   padding: 3px 8px;
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.db-snap-diff-grid tr.snap-diff-add {
-  background: var(--diff-add-bg);
+.db-snap-diff-grid tbody tr:last-child td {
+  border-bottom: 0;
 }
-.db-snap-diff-grid tr.snap-diff-del {
-  background: var(--diff-del-bg);
+/* 1 レコード境界の視覚化:
+ * - updated は trBefore(snap-diff-record-start) + trAfter(snap-diff-record-end) の 2 行
+ * - inserted/deleted は 1 行に snap-diff-record-start snap-diff-record-end 両方
+ * 行間の通常 border (1px var(--border)) よりはっきり濃く太くしないと、ペア内
+ * の - と + の境目とレコード境界が区別できない。
+ *   - 横境界: 2px var(--fg-muted) (灰色の濃い線)
+ *   - gutter 縦印: inset 3px var(--fg-muted) で record の左に bracket 風
+ *     (実 border ではないので border-collapse / 列幅同期に影響しない) */
+.db-snap-diff-grid tr.snap-diff-record-end td {
+  border-bottom: 2px solid var(--fg-muted);
+}
+.db-snap-diff-grid tr.snap-diff-record-start td:first-child,
+.db-snap-diff-grid tr.snap-diff-record-end td:first-child {
+  box-shadow: inset 3px 0 0 var(--fg-muted);
 }
 .db-snap-diff-grid .snap-diff-type-cell {
   font-weight: 600;
@@ -8565,9 +8630,24 @@ body.db-resizing {
   background: var(--bg-soft);
   text-align: center;
   min-width: 50px;
+  /* gutter と data 列の境界は唯一ここの border-right が描く。
+   * 他のセルは縦罫線を持たない。 */
+  border-right: 1px solid var(--border);
+}
+.db-snap-diff-grid tr.snap-diff-del .snap-diff-type-cell {
+  color: var(--danger);
+}
+.db-snap-diff-grid tr.snap-diff-add .snap-diff-type-cell {
+  color: var(--success);
 }
 .db-snap-diff-grid .snap-diff-changed-cell {
   font-weight: 600;
+}
+.db-snap-diff-grid tr.snap-diff-del .snap-diff-changed-cell {
+  background: var(--diff-del-bg);
+}
+.db-snap-diff-grid tr.snap-diff-add .snap-diff-changed-cell {
+  background: var(--diff-add-bg);
 }
 
 /* Inline dialog (replaces confirm/prompt) */
