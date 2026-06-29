@@ -35,6 +35,13 @@ describe("parseSkillArgs", () => {
     });
   });
 
+  test("agent-help returns the agent guide kind", () => {
+    expect(parseSkillArgs(["agent-help"])).toEqual({
+      ok: true,
+      args: { kind: "agent-help" },
+    });
+  });
+
   test("install defaults to the claude agent", () => {
     expect(parseSkillArgs(["install"])).toEqual({
       ok: true,
