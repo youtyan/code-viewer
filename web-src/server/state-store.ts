@@ -7,6 +7,10 @@ import type {
   ViewState,
 } from "../core/types";
 import { createJsonFileStore } from "./json-store";
+import {
+  MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
+  MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
+} from "./worktree-watcher";
 
 const CODE_VIEWER_DIR = ".code-viewer";
 const SETTINGS_FILE_NAME = "settings.json";
@@ -180,6 +184,12 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
     pathSafe: true,
   });
   if (scopeExcludeNames) out.scopeExcludeNames = scopeExcludeNames;
+  const scopeWatchLimit = optionalNumber(
+    raw.scopeWatchLimit,
+    MIN_WORKTREE_WATCH_DIRECTORY_LIMIT,
+    MAX_WORKTREE_WATCH_DIRECTORY_LIMIT,
+  );
+  if (scopeWatchLimit !== undefined) out.scopeWatchLimit = scopeWatchLimit;
   const uploadEnabled = optionalBoolean(raw.uploadEnabled);
   if (uploadEnabled !== undefined) out.uploadEnabled = uploadEnabled;
   if (isRecord(raw.range)) {
