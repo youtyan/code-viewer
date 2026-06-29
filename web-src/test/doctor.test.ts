@@ -65,54 +65,72 @@ describe("sqlite driver diagnostics", () => {
   });
 });
 
+// buildDoctorReport spawns docker/git probes, each with their own timeout.
+// On CI runners without a docker daemon these probes wait the full
+// `docker info` budget and the test exceeds the default 5s budget.
+const DOCTOR_TEST_TIMEOUT_MS = 30_000;
+
 describe("doctor report", () => {
-  test("includes all expected diagnostic groups", async () => {
-    const report = await buildDoctorReport({
-      cwd: TEST_CWD,
-      scopeOmitDirNames: [],
-      listenPort: 12345,
-    });
-    const groupIds = new Set(report.groups.map((g) => g.id));
-    for (const id of [
-      "runtime",
-      "package",
-      "sqlite",
-      "snapshot",
-      "git",
-      "discovery",
-      "docker",
-      "server",
-    ]) {
-      expect(groupIds.has(id)).toBe(true);
-    }
-    const worst = report.worstStatus;
-    const validWorst = worst === "ok" || worst === "warn" || worst === "error";
-    expect(validWorst).toBe(true);
-  });
+  test(
+    "includes all expected diagnostic groups",
+    async () => {
+      const report = await buildDoctorReport({
+        cwd: TEST_CWD,
+        scopeOmitDirNames: [],
+        listenPort: 12345,
+      });
+      const groupIds = new Set(report.groups.map((g) => g.id));
+      for (const id of [
+        "runtime",
+        "package",
+        "sqlite",
+        "snapshot",
+        "git",
+        "discovery",
+        "docker",
+        "server",
+      ]) {
+        expect(groupIds.has(id)).toBe(true);
+      }
+      const worst = report.worstStatus;
+      const validWorst =
+        worst === "ok" || worst === "warn" || worst === "error";
+      expect(validWorst).toBe(true);
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
 
-  test("monotonically bumps generation across calls", async () => {
-    const a = await buildDoctorReport({
-      cwd: TEST_CWD,
-      scopeOmitDirNames: [],
-      listenPort: 0,
-    });
-    const b = await buildDoctorReport({
-      cwd: TEST_CWD,
-      scopeOmitDirNames: [],
-      listenPort: 0,
-    });
-    expect(b.generation > a.generation).toBe(true);
-  });
+  test(
+    "monotonically bumps generation across calls",
+    async () => {
+      const a = await buildDoctorReport({
+        cwd: TEST_CWD,
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      const b = await buildDoctorReport({
+        cwd: TEST_CWD,
+        scopeOmitDirNames: [],
+        listenPort: 0,
+      });
+      expect(b.generation > a.generation).toBe(true);
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
 
-  test("server group reports the listening port", async () => {
-    const report = await buildDoctorReport({
-      cwd: TEST_CWD,
-      scopeOmitDirNames: [],
-      listenPort: 8080,
-    });
-    const server = report.groups.find((g) => g.id === "server");
-    expect(Boolean(server)).toBe(true);
-    const portRow = server?.rows.find((r) => r.id === "server.port");
-    expect((portRow?.detail || "").includes("8080")).toBe(true);
-  });
+  test(
+    "server group reports the listening port",
+    async () => {
+      const report = await buildDoctorReport({
+        cwd: TEST_CWD,
+        scopeOmitDirNames: [],
+        listenPort: 8080,
+      });
+      const server = report.groups.find((g) => g.id === "server");
+      expect(Boolean(server)).toBe(true);
+      const portRow = server?.rows.find((r) => r.id === "server.port");
+      expect((portRow?.detail || "").includes("8080")).toBe(true);
+    },
+    DOCTOR_TEST_TIMEOUT_MS,
+  );
 });

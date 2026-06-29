@@ -3,6 +3,7 @@ declare module "bun:test" {
   export function test(
     name: string,
     fn: (() => void) | (() => Promise<void>),
+    timeoutMs?: number,
   ): void;
   export namespace test {
     function skip(name: string, fn: (() => void) | (() => Promise<void>)): void;
