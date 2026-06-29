@@ -9699,3 +9699,200 @@ body.db-resizing {
 .gdp-blame-error {
   color: var(--danger, #c33);
 }
+
+/* ===== Doctor sheet (right-side drawer) ===== */
+.doctor-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  max-width: 100vw;
+  background: var(--bg, #fff);
+  border-left: 1px solid var(--border, #d0d7de);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  z-index: 60;
+  overflow-y: auto;
+  padding: 16px 20px 32px;
+  box-sizing: border-box;
+  transform: translateX(100%);
+  transition: transform 200ms ease;
+}
+.doctor-sheet:not([hidden]) {
+  transform: translateX(0);
+}
+.doctor-sheet[hidden] {
+  display: block;
+  pointer-events: none;
+}
+.doctor-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 55;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.doctor-sheet-overlay:not([hidden]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.doctor-sheet-overlay[hidden] {
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+}
+.doctor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--border, #d0d7de);
+  margin-bottom: 16px;
+}
+.doctor-close {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted, #57606a);
+  cursor: pointer;
+}
+.doctor-close:hover {
+  background: var(--bg-mute, #eaeef2);
+  color: var(--fg, #1f2328);
+}
+.doctor-header h1 {
+  font-size: 18px;
+  margin: 0;
+  flex: 1;
+}
+.doctor-refresh {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #d0d7de);
+  background: var(--bg-soft, #f6f8fa);
+  color: var(--fg);
+  cursor: pointer;
+}
+.doctor-refresh:hover {
+  background: var(--bg-mute, #eaeef2);
+}
+.doctor-refresh[disabled] {
+  cursor: progress;
+  opacity: 0.6;
+}
+.doctor-summary {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 16px;
+}
+.doctor-group {
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--bg, #fff);
+}
+.doctor-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.doctor-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bg-mute, #eaeef2);
+  align-items: start;
+}
+.doctor-row:first-of-type {
+  border-top: 0;
+}
+.doctor-row-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-align: center;
+  align-self: start;
+  min-width: 56px;
+}
+.doctor-row-pill-ok {
+  background: rgba(46, 160, 67, 0.15);
+  border-color: rgba(46, 160, 67, 0.4);
+  color: var(--success, #2da44e);
+}
+.doctor-row-pill-warn {
+  background: rgba(212, 167, 44, 0.18);
+  border-color: rgba(212, 167, 44, 0.45);
+  color: var(--attn, #9a6700);
+}
+.doctor-row-pill-error {
+  background: rgba(207, 34, 46, 0.15);
+  border-color: rgba(207, 34, 46, 0.4);
+  color: var(--danger, #cf222e);
+}
+.doctor-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.doctor-row-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+.doctor-row-detail {
+  font-size: 12px;
+  color: var(--fg-muted);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.doctor-row-hint {
+  font-size: 12px;
+  color: var(--fg);
+  background: rgba(151, 119, 0, 0.08);
+  border-left: 3px solid var(--attn, #9a6700);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.doctor-row-pill-error ~ .doctor-row-body .doctor-row-hint {
+  background: rgba(207, 34, 46, 0.08);
+  border-left-color: var(--danger, #cf222e);
+}
+.doctor-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.doctor-badge {
+  display: inline-flex;
+  margin-left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger, #cf222e);
+}
+.doctor-badge[data-level="warn"] {
+  background: var(--attn, #9a6700);
+}

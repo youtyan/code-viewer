@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildRawFileUrl, buildRoute, parseRoute } from "../core/routes";
+import {
+  buildRawFileUrl,
+  buildRoute,
+  parseDoctorOverlay,
+  parseRoute,
+  withDoctorOverlay,
+} from "../core/routes";
 
 describe("routes", () => {
   const defaultRange = { from: "HEAD", to: "worktree" };
@@ -281,6 +287,30 @@ describe("routes", () => {
       rawSearch: "?from=main&to=worktree",
       range: { from: "main", to: "worktree" },
     });
+  });
+
+  test("treats /doctor as repo screen with overlay open", () => {
+    expect(parseRoute("/doctor", "", defaultRange)).toEqual({
+      screen: "repo",
+      ref: "worktree",
+      path: "",
+      range: defaultRange,
+    });
+    expect(parseDoctorOverlay("/doctor", "")).toBe(true);
+    expect(parseDoctorOverlay("/file", "?doctor=open")).toBe(true);
+    expect(parseDoctorOverlay("/", "")).toBe(false);
+    expect(parseDoctorOverlay("/file", "?doctor=closed")).toBe(false);
+  });
+
+  test("withDoctorOverlay adds or removes the doctor query param", () => {
+    expect(withDoctorOverlay("/", true)).toBe("/?doctor=open");
+    expect(withDoctorOverlay("/file?path=a.ts", true)).toBe(
+      "/file?path=a.ts&doctor=open",
+    );
+    expect(withDoctorOverlay("/file?path=a.ts&doctor=open", false)).toBe(
+      "/file?path=a.ts",
+    );
+    expect(withDoctorOverlay("/?doctor=open", false)).toBe("/");
   });
 
   test("parses help routes with language and section defaults", () => {

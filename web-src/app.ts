@@ -32,8 +32,10 @@ import {
   type AppRoute,
   buildRoute,
   type DiffRange,
+  parseDoctorOverlay,
   parseRoute,
   type SourceLineTarget,
+  withDoctorOverlay,
 } from "./core/routes";
 import type {
   AppSettingsState,
@@ -54,6 +56,7 @@ import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
+import { createDoctorView } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
@@ -2125,7 +2128,11 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   function replaceUrlWithCurrentRoute(): void {
-    const url = withAnnotationSessionParam(buildRoute(STATE.route));
+    const base = withAnnotationSessionParam(buildRoute(STATE.route));
+    const url = withDoctorOverlay(
+      base,
+      parseDoctorOverlay(window.location.pathname, window.location.search),
+    );
     const current = window.location.pathname + window.location.search;
     if (url !== current) {
       history.replaceState(
@@ -2220,7 +2227,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
-    const url = withAnnotationSessionParam(buildRoute(nextRoute));
+    const url = withDoctorOverlay(
+      withAnnotationSessionParam(buildRoute(nextRoute)),
+      parseDoctorOverlay(window.location.pathname, window.location.search),
+    );
     const state = historyStateForRoute(nextRoute);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
@@ -2593,6 +2603,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     setAllSidebarDirsCollapsed(true),
   );
   $("#viewer-settings")?.addEventListener("click", toggleScopeSettings);
+  $("#doctor-btn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    toggleDoctorSheet();
+  });
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
   $("#viewer-language")?.addEventListener("change", (event) => {
@@ -3180,6 +3194,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     // Deep links land here without going through setRoute; reflect a line=
     // selection in the copy pill on first paint too.
     syncLineRefPill();
+    syncDoctorSheetFromUrl();
   });
 
   // Ref picker (from / to)
@@ -3275,6 +3290,73 @@ window.GdpExpandLogic = GdpExpandLogic;
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,
     trackLoad,
+  });
+
+  const DOCTOR_VIEW = createDoctorView({
+    $: <T extends Element = HTMLElement>(sel: string) =>
+      document.querySelector<T>(sel),
+    escapeHtml,
+    trackLoad,
+    getLanguage: () => STATE.language,
+    onWorstStatusChange: (status) => {
+      const badge = document.getElementById("doctor-badge");
+      if (!badge) return;
+      if (status === "error") {
+        badge.hidden = false;
+        badge.dataset.level = "error";
+      } else if (status === "warn") {
+        badge.hidden = false;
+        badge.dataset.level = "warn";
+      } else {
+        badge.hidden = true;
+        badge.removeAttribute("data-level");
+      }
+    },
+    onCloseRequest: () => closeDoctorSheet(),
+  });
+
+  function isDoctorOverlayOpen(): boolean {
+    return parseDoctorOverlay(window.location.pathname, window.location.search);
+  }
+
+  function updateUrlForDoctorOverlay(open: boolean): void {
+    const current = window.location.pathname + window.location.search;
+    const next = withDoctorOverlay(current, open);
+    if (next !== current) {
+      history.replaceState(history.state, "", next + window.location.hash);
+    }
+  }
+
+  function openDoctorSheet(): void {
+    updateUrlForDoctorOverlay(true);
+    void DOCTOR_VIEW.open();
+  }
+
+  function closeDoctorSheet(): void {
+    DOCTOR_VIEW.close();
+    updateUrlForDoctorOverlay(false);
+  }
+
+  function toggleDoctorSheet(): void {
+    if (isDoctorOverlayOpen() || DOCTOR_VIEW.isOpen()) closeDoctorSheet();
+    else openDoctorSheet();
+  }
+
+  function syncDoctorSheetFromUrl(): void {
+    const shouldOpen = isDoctorOverlayOpen();
+    const open = DOCTOR_VIEW.isOpen();
+    if (shouldOpen && !open) void DOCTOR_VIEW.open();
+    else if (!shouldOpen && open) DOCTOR_VIEW.close();
+  }
+
+  document
+    .getElementById("doctor-sheet-overlay")
+    ?.addEventListener("click", () => closeDoctorSheet());
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!DOCTOR_VIEW.isOpen()) return;
+    event.preventDefault();
+    closeDoctorSheet();
   });
 
   const DATABASE_VIEW = createDatabaseView({
@@ -3373,6 +3455,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     syncRefInputs();
     syncHeaderMenu();
     syncLineRefPill();
+    syncDoctorSheetFromUrl();
     if (
       isSameBlobFileRoute(previousRoute, STATE.route) &&
       routeBlobPreview(previousRoute) !== routeBlobPreview(STATE.route) &&
