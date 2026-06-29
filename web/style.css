@@ -8545,9 +8545,9 @@ body.db-resizing {
 }
 .db-snap-diff-grid th {
   position: sticky;
-  /* 目次バー (top:0 高 40) + テーブル名バー (sticky top:40 高 35) の下に
-   * 隙間ゼロで張り付ける = 40 + 35 = 75px。 */
-  top: 75px;
+  /* 目次バー (top:0 高 40) + テーブル名バー (sticky top:40 高 34: border-bottom
+   * を削除したため 35 → 34) の下に隙間ゼロで張り付ける = 40 + 34 = 74px。 */
+  top: 74px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   padding: 4px 8px;
