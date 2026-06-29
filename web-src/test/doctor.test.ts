@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   _parseSqliteAbiMismatchMessage,
   describeSqliteDriver,
 } from "../server/database/sqlite-driver";
 import { buildDoctorReport, sqliteStatusToRow } from "../server/doctor";
+
+// Use a fresh empty directory as cwd so doctor's discovery (Sqlite files /
+// compose files) and docker daemon probes finish quickly inside the 5s
+// per-test budget even on CI runners where docker may be installed but
+// the daemon is down.
+const TEST_CWD = mkdtempSync(join(tmpdir(), "code-viewer-doctor-test-"));
 
 describe("sqlite driver diagnostics", () => {
   test("parses NODE_MODULE_VERSION mismatch messages", () => {
@@ -59,7 +68,7 @@ describe("sqlite driver diagnostics", () => {
 describe("doctor report", () => {
   test("includes all expected diagnostic groups", async () => {
     const report = await buildDoctorReport({
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       scopeOmitDirNames: [],
       listenPort: 12345,
     });
@@ -83,12 +92,12 @@ describe("doctor report", () => {
 
   test("monotonically bumps generation across calls", async () => {
     const a = await buildDoctorReport({
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       scopeOmitDirNames: [],
       listenPort: 0,
     });
     const b = await buildDoctorReport({
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       scopeOmitDirNames: [],
       listenPort: 0,
     });
@@ -97,7 +106,7 @@ describe("doctor report", () => {
 
   test("server group reports the listening port", async () => {
     const report = await buildDoctorReport({
-      cwd: process.cwd(),
+      cwd: TEST_CWD,
       scopeOmitDirNames: [],
       listenPort: 8080,
     });
