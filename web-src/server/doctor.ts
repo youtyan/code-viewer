@@ -517,21 +517,26 @@ function parseComposePs(stdout: string): ComposePsRow[] | null {
 
 function summarizeDockerSources(discovery: DockerDiscoveryResult): {
   total: number;
-  byComposeDir: Map<string, { compose: string; services: string[] }>;
+  byComposeDir: Map<
+    string,
+    { compose: string; services: string[]; profiledServices: Set<string> }
+  >;
   truncated: boolean;
 } {
   const byComposeDir = new Map<
     string,
-    { compose: string; services: string[] }
+    { compose: string; services: string[]; profiledServices: Set<string> }
   >();
   for (const source of discovery) {
     const entry = byComposeDir.get(source.composeDir);
     if (entry) {
       entry.services.push(source.serviceName);
+      if (source.profiled) entry.profiledServices.add(source.serviceName);
     } else {
       byComposeDir.set(source.composeDir, {
         compose: source.composeDir,
         services: [source.serviceName],
+        profiledServices: new Set(source.profiled ? [source.serviceName] : []),
       });
     }
   }
@@ -641,6 +646,7 @@ async function checkDocker(
         compose.cmd,
         composeKey,
         entry.services,
+        entry.profiledServices,
         signal,
       );
       rows.push(configRow);
@@ -661,6 +667,7 @@ async function checkComposeConfig(
   cmd: DockerCmd,
   composeDir: string,
   discoveredServices: string[],
+  profiledServices: Set<string>,
   signal: AbortSignal | undefined,
 ): Promise<DoctorRow> {
   const cacheKey = `${cmd.binary}|${composeDir}`;
@@ -736,13 +743,23 @@ async function checkComposeConfig(
     };
   }
   if (services) {
-    const missing = discoveredServices.filter((s) => !services?.includes(s));
+    // profile-gated なサービスは未指定 profile では --services から外れるのが
+    // 正常挙動なので missing に数えない (例: `profiles: [test]` の db-test)。
+    const missing = discoveredServices.filter(
+      (s) => !services?.includes(s) && !profiledServices.has(s),
+    );
+    const skippedProfiled = discoveredServices.filter(
+      (s) => profiledServices.has(s) && !services?.includes(s),
+    );
     if (missing.length === 0) {
+      const summary = skippedProfiled.length
+        ? `OK (${services.length} active, ${skippedProfiled.length} profile-gated)`
+        : `OK (${services.length} services)`;
       return {
         id: `docker.compose-config:${composeDir}`,
         title: `compose config — ${composeDir}`,
         status: "ok",
-        detail: `OK (${services.length} services)`,
+        detail: summary,
       };
     }
     return {
@@ -750,7 +767,7 @@ async function checkComposeConfig(
       title: `compose config — ${composeDir}`,
       status: "warn",
       detail: `discovered services not resolved by compose: ${missing.join(", ")}`,
-      hint: "These services were found by scanning the compose file but `docker compose config --services` did not return them. They may be guarded by an inactive profile or overridden by a sibling compose file.",
+      hint: "These services were found by scanning the compose file but `docker compose config --services` did not return them. They may be overridden by a sibling compose file. (profile-gated services with `profiles:` are intentionally ignored.)",
     };
   }
   return {

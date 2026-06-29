@@ -2617,6 +2617,13 @@ const server = await startServer({
   },
 });
 
+// startServer 後に実際にバインドされたポートを listenPort に反映する。
+// CLI 引数で --port を指定しない場合 listenPort=0 のまま startServer に渡しており、
+// OS が選んだポートは server.port にしか入らない。doctor (handleDoctor) は
+// listenPort=0 を「未バインド」として WARN を出すので、ここで同期しないと
+// npx 既定起動時に常に「port not yet bound」WARN が出てしまう。
+listenPort = server.port;
+
 if (openAfterStart) {
   openBrowser(`http://127.0.0.1:${server.port}/`);
 }
