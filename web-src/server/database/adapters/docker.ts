@@ -407,8 +407,14 @@ function parseTsvOutput(
   // 経由で呼ばれるときは PG_RECORD_SEPARATOR を渡して、行区切りを通常の
   // テキストに現れない RS (0x1E) に切り替えてある。指定が無ければ従来通り
   // 改行で割る (mysql / 既存呼び出し向け)。
+  //
+  // psql は `-R sep` を指定しても各 record の末尾には sep を付けず、stdout
+  // 末尾に必ず \n を 1 つ追加する。そのため `\n` を先に剥がしてから RS を
+  // 剥がす。これを逆順にすると 1 行クエリで `public\n` のように `\n` が
+  // 値に残り、schema 名に控えめな `\n` が紛れ込んでクライアントが
+  // `schema=public%0A` を送って 400 になる。
   const text = recordSeparator
-    ? stripFinalRecordSeparator(stdout, recordSeparator)
+    ? stripFinalRecordSeparator(stripFinalLineBreak(stdout), recordSeparator)
     : stripFinalLineBreak(stdout);
   if (text.length === 0) return { columns: [], rows: [] };
   const lines = recordSeparator
