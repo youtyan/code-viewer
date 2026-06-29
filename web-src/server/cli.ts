@@ -55,6 +55,9 @@ if (process.argv[2] === "annotate") {
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));
+} else if (process.argv[2] === "doctor") {
+  const { runDoctorCli } = await import("./doctor-cli");
+  await runDoctorCli(process.argv.slice(3));
 } else {
   await import("./preview");
 }

@@ -198,6 +198,7 @@ function parseCli() {
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
   code-viewer annotate <start|add|list|delete|clear> [options]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json]
 
 Examples:
   code-viewer --open
@@ -205,6 +206,7 @@ Examples:
   code-viewer HEAD~1 HEAD
   code-viewer --staged
   code-viewer annotate --help
+  code-viewer doctor --json
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
