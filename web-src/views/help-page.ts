@@ -145,6 +145,21 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 kind: "paragraph",
                 text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
               },
+              {
+                kind: "paragraph",
+                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
+              },
+              {
+                kind: "command",
+                title: "Doctor summary in the terminal",
+                command: "code-viewer doctor",
+              },
+              {
+                kind: "command",
+                title: "Doctor JSON for agents and CI",
+                command:
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
+              },
             ],
           },
         ],
@@ -753,6 +768,21 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) の 8 つ。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
+              },
+              {
+                kind: "paragraph",
+                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
+              },
+              {
+                kind: "command",
+                title: "ターミナル用 doctor サマリー",
+                command: "code-viewer doctor",
+              },
+              {
+                kind: "command",
+                title: "AI / CI 用 doctor JSON",
+                command:
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
               },
             ],
           },
