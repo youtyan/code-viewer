@@ -10,6 +10,11 @@ describe("parseDoctorCliArgs", () => {
   test("returns help when --help is present", () => {
     expect(parseDoctorCliArgs(["--help"])).toEqual({ kind: "help" });
     expect(parseDoctorCliArgs(["-h"])).toEqual({ kind: "help" });
+    expect(parseDoctorCliArgs(["help"])).toEqual({ kind: "help" });
+  });
+
+  test("returns agent-help when subcommand is agent-help", () => {
+    expect(parseDoctorCliArgs(["agent-help"])).toEqual({ kind: "agent-help" });
   });
 
   test("defaults port to 0 and cwd to process.cwd()", () => {

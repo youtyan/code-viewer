@@ -16,6 +16,7 @@ const DOCTOR_HELP = `code-viewer doctor — diagnose the current environment
 
 Usage:
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer doctor agent-help
 
 Options:
   --cwd <path>   Working directory to inspect (default: process.cwd()).
@@ -23,10 +24,79 @@ Options:
   --json         Print the full DoctorReport as JSON instead of a summary.
   --help, -h     Show this help.
 
+Run "code-viewer doctor agent-help" for an AI-agent oriented guide.
+
 Exit codes:
   0  worst status is "ok" or "warn"
   1  worst status is "error"
   2  invalid arguments
+`;
+
+export const DOCTOR_AGENT_HELP = `code-viewer doctor — agent guide
+
+You are an AI coding agent. Use this command to inspect the human's local
+environment in one machine-readable shot, instead of asking them to run a
+bunch of probing commands or open the 🩺 browser panel.
+
+## When to use
+
+- A previous command failed; you want to confirm Node / Bun / SQLite /
+  Docker / git state before suggesting a fix.
+- The human asks "is my environment OK", "why does install fail", or
+  similar; \`code-viewer doctor\` is the single source of truth.
+- Pre-flight before a destructive step (DB snapshot reset, npx upgrade)
+  so you can show "before" state.
+- CI: \`code-viewer doctor --json | jq\` gates a step on environment
+  readiness (exit code 1 ⇔ any row is ERROR).
+
+## How to call
+
+The same report as the 🩺 panel and \`/_doctor\` endpoint, no server
+needed:
+
+  code-viewer doctor --json
+
+To target another working directory or pretend a specific port is bound:
+
+  code-viewer doctor --cwd /path/to/repo --port 64160 --json
+
+If \`code-viewer\` is not on PATH (the human launches via npx), use:
+
+  npx -y @youtyan/code-viewer doctor --json
+
+## Report shape
+
+Stable JSON contract (see core/doctor-types.ts):
+
+  {
+    "generation": number,         // monotonic, restart resets to 1
+    "worstStatus": "ok"|"warn"|"error",
+    "groups": [
+      { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"
+            |"discovery"|"docker"|"server",
+        "title": string,
+        "rows": [
+          { "id": string, "title": string,
+            "status": "ok"|"warn"|"error",
+            "detail"?: string, "hint"?: string } ]
+      }
+    ]
+  }
+
+The exit code is 1 iff \`worstStatus === "error"\` — never on \`warn\`.
+
+## Reading guidance
+
+- Filter to actionable rows: \`.groups[].rows[] | select(.status != "ok")\`.
+- \`hint\` is the human-readable fix; quote it verbatim when reporting back.
+- A \`runtime.node\` row failing means Node < 20 — almost everything else
+  is downstream of that. Fix it first.
+- A \`sqlite.*\` row failing usually points at npx cache; the hint shows
+  the rm -rf ~/.npm/_npx workaround.
+- Docker rows are advisory — \`code-viewer\` works without Docker; warnings
+  in that group only matter if the human asked about Datastores.
+- Do not parse the human-readable output (without --json); the JSON is
+  the contract.
 `;
 
 type DoctorCliArgs = {
@@ -37,6 +107,7 @@ type DoctorCliArgs = {
 
 export type DoctorCliParseResult =
   | { kind: "help" }
+  | { kind: "agent-help" }
   | { kind: "run"; args: DoctorCliArgs }
   | { kind: "error"; message: string };
 
@@ -46,8 +117,11 @@ export function parseDoctorCliArgs(argv: string[]): DoctorCliParseResult {
   let json = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--help" || arg === "-h") {
+    if (arg === "--help" || arg === "-h" || arg === "help") {
       return { kind: "help" };
+    }
+    if (arg === "agent-help") {
+      return { kind: "agent-help" };
     }
     if (arg === "--json") {
       json = true;
@@ -126,6 +200,10 @@ export async function runDoctorCli(argv: string[]): Promise<void> {
   }
   if (parsed.kind === "help") {
     process.stdout.write(`${DOCTOR_HELP}`);
+    return;
+  }
+  if (parsed.kind === "agent-help") {
+    process.stdout.write(`${DOCTOR_AGENT_HELP}\n`);
     return;
   }
   const { cwd, port, json } = parsed.args;
