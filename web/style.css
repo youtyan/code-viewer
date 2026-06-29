@@ -8488,10 +8488,10 @@ body.db-resizing {
   background: var(--bg-soft);
   font-size: var(--db-font-base);
   cursor: pointer;
-  /* 目次バー (.db-snapshot-diff-toc, top:0 z:2) のすぐ下に張り付く。
-   * 目次バー高 (≒ 48px) + 1px (border) ぶん下げる。 */
+  /* 目次バー (.db-snapshot-diff-toc, top:0 z:2 height:40) のすぐ下に隙間ゼロで
+   * 張り付く。目次バー高 = 40px。 */
   position: sticky;
-  top: 48px;
+  top: 40px;
   z-index: 1;
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
@@ -8507,12 +8507,12 @@ body.db-resizing {
   color: var(--fg-muted);
 }
 .db-snapshot-diff-rows-container {
-  /* 親 (.db-snapshot-right-pane) が縦スクロール責務を一手に持つので、
-   * ここでは縦方向は visible のまま。max-height + overflow-y を持っていた
-   * 旧実装は、マウスホイールが grid に乗ると親に伝播せず「親スクロール
-   * できない」操作不能の元だった (nested scroll trap)。
-   * 横に広い diff grid のためにヨコだけ auto を残す。 */
-  overflow-x: auto;
+  /* 縦も横もスクロール責務を持たない。横が溢れたら親 (.db-snapshot-right-pane)
+   * で両軸スクロールさせる。ここを overflow-x:auto にすると CSS 仕様上
+   * scroll container になり、内側の thead (position:sticky top:Npx) が
+   * この container 内 sticky 扱いになる。container は縦スクロールしないので
+   * thead は静的になり、長い差分でカラム名が画面外に消える。 */
+  overflow: visible;
 }
 /* (deleted) 旧 row-based diff レイアウトの dead CSS を削除した。
  *   - .db-snapshot-diff-row / .db-snapshot-diff-type / .db-snapshot-diff-key
@@ -8544,9 +8544,9 @@ body.db-resizing {
 }
 .db-snap-diff-grid th {
   position: sticky;
-  /* 目次バー (top:0 高さ約 48px) + テーブル名バー (sticky top:48px 高さ約 36px)
-   * の下にカラムヘッダを張り付ける。border 重なりで 1px ズレないよう -1px。 */
-  top: 83px;
+  /* 目次バー (top:0 高 40) + テーブル名バー (sticky top:40 高 35) の下に
+   * 隙間ゼロで張り付ける = 40 + 35 = 75px。 */
+  top: 75px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   padding: 4px 8px;
