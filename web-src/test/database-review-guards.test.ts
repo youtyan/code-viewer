@@ -165,6 +165,18 @@ describe("database file response fault isolation", () => {
     });
   });
 
+  test("normalizes Docker discovery errors into a single line", async () => {
+    const body = await createDbFilesResponse("/workspace", [], undefined, {
+      discoverSqliteFiles: async () => [sqliteFile],
+      discoverDockerDatabases: async () => {
+        throw new Error(`compose scan${String.fromCharCode(0)}failed\nretry`);
+      },
+      listDockerDatabases: async () => [],
+    });
+
+    expect(body.dockerError).toBe("compose scan failed retry");
+  });
+
   test("keeps a Docker service visible when database listing fails", async () => {
     const body = await createDbFilesResponse("/workspace", [], undefined, {
       discoverSqliteFiles: async () => [],

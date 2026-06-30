@@ -247,7 +247,12 @@ function toFileInfo(entry: {
 }
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  const withoutControl = Array.from(raw, (ch) =>
+    hasControlCharacter(ch) ? " " : ch,
+  ).join("");
+  const normalized = withoutControl.replace(/\s+/g, " ").trim();
+  return normalized || "unknown error";
 }
 
 async function expandDockerServicesForFiles(
