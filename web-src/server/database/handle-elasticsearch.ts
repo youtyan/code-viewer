@@ -5,6 +5,7 @@ import type {
   EsMappingResponse,
   EsQueryResponse,
 } from "../../core/database/types";
+import { isAbortLikeError } from "./adapters/abort";
 import { asAsyncDoc } from "./adapters/async-facade";
 import {
   type ElasticsearchExplorer,
@@ -68,7 +69,12 @@ async function handleIndices(
     const body: EsIndicesResponse = { dbId: r.dbId, indices };
     return json(body);
   } catch (err) {
-    return handleError("elasticsearch", "list elasticsearch indices", err);
+    return handleError(
+      "elasticsearch",
+      "list elasticsearch indices",
+      err,
+      req.signal,
+    );
   }
 }
 
@@ -117,7 +123,12 @@ async function handleDocs(
     };
     return json(body);
   } catch (err) {
-    return handleError("elasticsearch", "search elasticsearch docs", err);
+    return handleError(
+      "elasticsearch",
+      "search elasticsearch docs",
+      err,
+      req.signal,
+    );
   }
 }
 
@@ -175,6 +186,9 @@ async function handleSearch(
     };
     return json(body);
   } catch (err) {
+    if (isAbortLikeError(err, req.signal)) {
+      return textError("search elasticsearch aborted", 503);
+    }
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[code-viewer] elasticsearch error:", msg);
     const body: EsQueryResponse = {
@@ -222,7 +236,12 @@ async function handleDoc(
     };
     return json(body);
   } catch (err) {
-    return handleError("elasticsearch", "get elasticsearch doc", err);
+    return handleError(
+      "elasticsearch",
+      "get elasticsearch doc",
+      err,
+      req.signal,
+    );
   }
 }
 
@@ -246,7 +265,12 @@ async function handleMapping(
     const body: EsMappingResponse = { dbId: r.dbId, mapping };
     return json(body);
   } catch (err) {
-    return handleError("elasticsearch", "read elasticsearch mapping", err);
+    return handleError(
+      "elasticsearch",
+      "read elasticsearch mapping",
+      err,
+      req.signal,
+    );
   }
 }
 
@@ -312,7 +336,12 @@ async function handleWrite(
     });
     return json({ ok: true, id: result.id, result: result.result });
   } catch (err) {
-    return handleError("elasticsearch", "write elasticsearch doc", err);
+    return handleError(
+      "elasticsearch",
+      "write elasticsearch doc",
+      err,
+      req.signal,
+    );
   }
 }
 
@@ -359,6 +388,12 @@ export async function handleElasticsearchRoute(
     },
     sideEffectAllowed,
     wrap,
-    (err) => handleError("elasticsearch", "handle elasticsearch request", err),
+    (err) =>
+      handleError(
+        "elasticsearch",
+        "handle elasticsearch request",
+        err,
+        req.signal,
+      ),
   );
 }

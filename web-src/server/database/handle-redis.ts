@@ -58,7 +58,7 @@ async function handleDatabases(
     const body: RedisDatabasesResponse = { dbId: r.dbId, databases };
     return json(body);
   } catch (err) {
-    return handleError("redis", "list redis databases", err);
+    return handleError("redis", "list redis databases", err, req.signal);
   }
 }
 
@@ -103,7 +103,7 @@ async function handleKeys(
     };
     return json(body);
   } catch (err) {
-    return handleError("redis", "list redis keys", err);
+    return handleError("redis", "list redis keys", err, req.signal);
   }
 }
 
@@ -191,7 +191,7 @@ async function handleWrite(
     }
     return json({ ok: true });
   } catch (err) {
-    return handleError("redis", "write redis value", err);
+    return handleError("redis", "write redis value", err, req.signal);
   }
 }
 
@@ -227,7 +227,7 @@ export async function handleRedisRoute(
     },
     sideEffectAllowed,
     wrap,
-    (err) => handleError("redis", "handle redis request", err),
+    (err) => handleError("redis", "handle redis request", err, req.signal),
   );
 }
 
@@ -261,6 +261,6 @@ async function handleValue(
     const body: RedisValueResponse = { dbId: r.dbId, dbIndex, key, value };
     return json(body);
   } catch (err) {
-    return handleError("redis", "read redis value", err);
+    return handleError("redis", "read redis value", err, req.signal);
   }
 }

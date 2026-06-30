@@ -9,6 +9,7 @@ import type {
   S3SortMode,
 } from "../../core/database/types";
 import { sourceDisplayKind } from "../../core/source-meta";
+import { isAbortLikeError } from "./adapters/abort";
 import {
   isS3HttpError,
   openS3ExplorerAsync,
@@ -169,9 +170,15 @@ async function scanObjects(
   };
 }
 
-function s3ErrorResponse(err: unknown, action: string): Response {
+function s3ErrorResponse(
+  err: unknown,
+  action: string,
+  signal?: AbortSignal,
+): Response {
+  if (isAbortLikeError(err, signal))
+    return handleError("s3", action, err, signal);
   if (isS3HttpError(err)) return textError(err.message, err.status);
-  return handleError("s3", action, err);
+  return handleError("s3", action, err, signal);
 }
 
 async function handleBuckets(
@@ -192,7 +199,7 @@ async function handleBuckets(
     const body: S3BucketsResponse = { dbId: r.dbId, buckets };
     return json(body);
   } catch (err) {
-    return s3ErrorResponse(err, "list s3 buckets");
+    return s3ErrorResponse(err, "list s3 buckets", req.signal);
   }
 }
 
@@ -343,7 +350,7 @@ async function handleObjects(
     };
     return json(body);
   } catch (err) {
-    return s3ErrorResponse(err, "list s3 objects");
+    return s3ErrorResponse(err, "list s3 objects", req.signal);
   }
 }
 
@@ -396,7 +403,7 @@ async function handleFolder(
     };
     return json(body);
   } catch (err) {
-    return s3ErrorResponse(err, "list s3 folder");
+    return s3ErrorResponse(err, "list s3 folder", req.signal);
   }
 }
 
@@ -426,7 +433,7 @@ async function handleHead(
     const body: S3ObjectHeadResponse = { ...head, dbId: r.dbId };
     return json(body);
   } catch (err) {
-    return s3ErrorResponse(err, "read s3 object metadata");
+    return s3ErrorResponse(err, "read s3 object metadata", req.signal);
   }
 }
 
@@ -464,7 +471,7 @@ async function handleText(
       truncated: result.truncated,
     });
   } catch (err) {
-    return s3ErrorResponse(err, "read s3 object text");
+    return s3ErrorResponse(err, "read s3 object text", req.signal);
   }
 }
 
@@ -494,7 +501,7 @@ async function handleRaw(
       signal: req.signal,
     });
   } catch (err) {
-    return s3ErrorResponse(err, "stream s3 object");
+    return s3ErrorResponse(err, "stream s3 object", req.signal);
   }
 }
 
@@ -568,7 +575,7 @@ async function handleWrite(
     });
     return json({ ok: true });
   } catch (err) {
-    return handleError("s3", "write s3 object", err);
+    return handleError("s3", "write s3 object", err, req.signal);
   }
 }
 
@@ -616,6 +623,6 @@ export async function handleS3Route(
     },
     sideEffectAllowed,
     wrap,
-    (err) => handleError("s3", "handle s3 request", err),
+    (err) => handleError("s3", "handle s3 request", err, req.signal),
   );
 }
