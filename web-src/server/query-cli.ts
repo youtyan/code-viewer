@@ -204,7 +204,10 @@ can review what you queried.
    code-viewer query ddl     --db app.db --table users --json
 3. (For saved query history, not discovery) code-viewer query list shows
    what you have previously executed. For PostgreSQL multi-schema history,
-   use --schema together with --db:
+   use --schema together with --db. list --json enriches each entries[]
+   element with a paste-safe replayCommand (--no-save so replay does not
+   re-pollute history; drop --no-save if you do want it saved), so you can
+   re-run a past query without rebuilding the call:
    code-viewer query list --db docker:pg-svc --schema analytics --json
    code-viewer query clear --db docker:pg-svc --schema analytics
 4. Execute:
@@ -315,6 +318,19 @@ browser's Database > Search tab.
   follow-up WHERE/CAST clauses, schema to confirm the resolved schema, and
   executedSql to log the exact SQL the server ran.
 - diff-rows: pretty JSON on stdout, exit 0 on success.
+- list: human-readable summary lines (default), or pretty JSON of the full
+  /_db/history response with --json. In --json each entries[] element
+  gains an additive replayCommand field — a paste-safe "code-viewer query
+  --server '<url>' exec --db '<dbId>' [--schema '<schema>'] --sql '<sql>'
+  [--title '<title>'] --no-save" string — so AI/human can re-run a past
+  query without rebuilding the call. server URL / dbId / schema / sql /
+  title are POSIX single-quoted; --title is included only when the entry
+  has one. body and --max-rows are intentionally omitted (re-author body
+  per replay, and let the AI override --max-rows based on the entry's
+  truncated flag). --no-save is fixed so replay does not re-pollute
+  history; drop it manually if you do want the replay saved. Entries
+  missing dbId or sql skip enrichment and pass through unchanged. Default
+  mode prints no command hints.
 - snapshot list: human-readable table (default), or pretty JSON with --json.
   In --json each snapshots[] element gains additive deleteCommand and
   noteCommand fields — paste-safe "code-viewer query --server '<url>'
@@ -1267,7 +1283,34 @@ async function runList(
     "list query history",
   )) as { entries: Record<string, unknown>[] };
   if (command.json) {
-    console.log(JSON.stringify(state, null, 2));
+    // snapshot list / schema / diff tables --json と同じ additive enrich
+    // pattern。各 history entry に paste-safe な replayCommand を加えて、
+    // AI/human が sql を toString で組み直さずに再走できるようにする。
+    // top-level (version など state の他フィールド、将来追加分含む) と
+    // 各 entry の既存フィールド (id / dbId / schema? / sql / title? / body? /
+    // columns / rowsPreview / rowCount / savedRows / truncated / elapsedMs /
+    // executedAt / executedBy / source) は素通し。default mode の出力は
+    // 変えない。dbId / sql が string でない malformed entry は enrich を
+    // skip して entry をそのまま残す (要件: top-level/既存 fields 素通し)。
+    const enriched = {
+      ...state,
+      entries: state.entries.map((e) => {
+        if (typeof e.dbId !== "string" || typeof e.sql !== "string") return e;
+        const schema = typeof e.schema === "string" ? e.schema : undefined;
+        const title = typeof e.title === "string" ? e.title : undefined;
+        return {
+          ...e,
+          replayCommand: buildExecReplayCommand(
+            serverUrl,
+            e.dbId,
+            schema,
+            e.sql,
+            title,
+          ),
+        };
+      }),
+    };
+    console.log(JSON.stringify(enriched, null, 2));
     return;
   }
   if (!state.entries.length) {
@@ -1408,6 +1451,26 @@ function buildSnapshotNoteCommand(
 ): string {
   const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
   return `${cli} snapshot note --id ${shellSingleQuote(id)} --note ${shellSingleQuote(note)}`;
+}
+
+// query list --json の各 entry から、同じ SQL を再走するための paste-safe な
+// exec コマンド。snapshot note / columns / ddl と同形 (--server pin + 全引数
+// single-quote)。sql は shell argument として quote するだけ ─ engine 別の
+// SQL identifier quote は責務外。--no-save を固定付与して replay
+// が history を再汚染しない設計 (paste 後に手で外す前提)。title は entry に
+// string で乗っている時だけ付与 ─ runExec の reqBody 構築と同じ
+// "undefined なら付けない" 規約。body / maxRows は意図的に付けない。
+function buildExecReplayCommand(
+  serverUrl: string,
+  dbId: string,
+  schema: string | undefined,
+  sql: string,
+  title: string | undefined,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  const schemaArg = schema ? ` --schema ${shellSingleQuote(schema)}` : "";
+  const titleArg = title ? ` --title ${shellSingleQuote(title)}` : "";
+  return `${cli} exec --db ${shellSingleQuote(dbId)}${schemaArg} --sql ${shellSingleQuote(sql)}${titleArg} --no-save`;
 }
 
 async function runSnapshotCreate(

@@ -99,6 +99,18 @@ browser's Database > Search tab, so the human can review the same workflow.
    code-viewer query list --json
    ```
 
+   `list --json` enriches each `entries[]` element with a paste-safe
+   `replayCommand` field — `code-viewer query --server '<url>' exec --db
+   '<dbId>' [--schema '<schema>'] --sql '<sql>' [--title '<title>']
+   --no-save` — so you can re-run any past query without rebuilding the
+   call. `server URL / dbId / schema / sql / title` are POSIX single-quoted;
+   `--title` is included only when the entry has one. `body` and
+   `--max-rows` are intentionally omitted (re-author `body` per replay,
+   and override `--max-rows` based on the entry's `truncated` flag).
+   `--no-save` is fixed so replay does not re-pollute history; drop it
+   manually if you want the replay saved. Default (non-JSON) mode prints
+   only the existing summary lines.
+
    For PostgreSQL multi-schema query history, pass `--schema <name>` with
    `--db` so list/clear stays scoped to that schema:
 

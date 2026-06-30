@@ -327,7 +327,13 @@ code-viewer query exec --db docker:pg-svc --schema analytics \
 code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
     --max-rows 1 --no-save
 
-# Show saved query history
+# Show saved query history. `list --json` enriches each entries[] element
+# with a paste-safe `replayCommand` — `code-viewer query --server '<url>'
+# exec --db '<dbId>' [--schema '<schema>'] --sql '<sql>' [--title '<title>']
+# --no-save` — so AI/human can re-run a past query without rebuilding the
+# call. server URL / dbId / schema / sql / title are POSIX single-quoted;
+# `--no-save` is fixed so replay does not re-pollute history (drop it if you
+# do want the replay saved).
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
 # PostgreSQL multi-schema query history: keep list/clear scoped to one schema.

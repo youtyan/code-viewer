@@ -1900,10 +1900,244 @@ describe("runQueryCli integration", () => {
     expect(harness.requests[1].url).toBe(
       `${SERVER}/_db/history?db=docker%3Apg-svc&schema=analytics`,
     );
+    // entries: [] でも top-level (version) は素通し、enrich は空配列。余計な
+    // command hint を吐かないことも確認する。
     expect(JSON.parse(harness.logs.join("\n"))).toEqual({
       version: 1,
       entries: [],
     });
+    expect(/replayCommand/.test(harness.logs.join("\n"))).toBe(false);
+  });
+
+  test("query list --json enriches each entries[] element with a paste-safe replayCommand", async () => {
+    // 3 entry を用意: SQLite no schema + title あり / PG with schema + title
+    // なし + truncated:true / SQLite no title + no schema。各 entry が独立に
+    // enrich され、title は string の時だけ --title が含まれる。top-level
+    // (version / nextCursor) と各 entry の既存 14 フィールドは素通し。
+    const payload = {
+      version: 1,
+      nextCursor: "sample-cursor",
+      entries: [
+        {
+          id: "h-1",
+          dbId: "app.db",
+          sql: "SELECT count(*) FROM sample_table",
+          title: "sample count",
+          body: "Checking row count.",
+          columns: ["count"],
+          rowsPreview: [[42]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 3,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+        {
+          id: "h-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          sql: "SELECT id, label FROM sample_events LIMIT 1000",
+          columns: ["id", "label"],
+          rowsPreview: [[1, "alpha"]],
+          rowCount: 1000,
+          savedRows: 500,
+          truncated: true,
+          elapsedMs: 47,
+          executedAt: "2026-06-30T12:05:00Z",
+          executedBy: "user",
+          source: "browser",
+        },
+        {
+          id: "h-3",
+          dbId: "app.db",
+          sql: "PRAGMA table_info(sample_table)",
+          columns: ["cid", "name", "type"],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:10:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      version: 1,
+      nextCursor: "sample-cursor",
+      entries: [
+        {
+          id: "h-1",
+          dbId: "app.db",
+          sql: "SELECT count(*) FROM sample_table",
+          title: "sample count",
+          body: "Checking row count.",
+          columns: ["count"],
+          rowsPreview: [[42]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 3,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+          // title あり / schema なし → --title が含まれ、--schema は無い。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'app.db' --sql 'SELECT count(*) FROM sample_table' --title 'sample count' --no-save",
+        },
+        {
+          id: "h-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          sql: "SELECT id, label FROM sample_events LIMIT 1000",
+          columns: ["id", "label"],
+          rowsPreview: [[1, "alpha"]],
+          rowCount: 1000,
+          savedRows: 500,
+          truncated: true,
+          elapsedMs: 47,
+          executedAt: "2026-06-30T12:05:00Z",
+          executedBy: "user",
+          source: "browser",
+          // title なし / schema あり → --schema が入り --title は無い。
+          // truncated:true でも --max-rows は意図的に埋め込まない (AI が
+          // entry.truncated を見て独自に上書きする設計)。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'docker:pg-svc' --schema 'analytics' --sql 'SELECT id, label FROM sample_events LIMIT 1000' --no-save",
+        },
+        {
+          id: "h-3",
+          dbId: "app.db",
+          sql: "PRAGMA table_info(sample_table)",
+          columns: ["cid", "name", "type"],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:10:00Z",
+          executedBy: "ai",
+          source: "cli",
+          // title なし / schema なし。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'app.db' --sql 'PRAGMA table_info(sample_table)' --no-save",
+        },
+      ],
+    });
+  });
+
+  test("query list --json single-quotes sql / title / db / schema containing spaces, single quotes, and newlines", async () => {
+    // sql は複数行になることも珍しくない。POSIX '...' は内部の改行も literal
+    // として通すので bash/zsh に paste しても 1 引数として扱われる。' は
+    // '\'' 展開で escape される。
+    const sql = "SELECT *\nFROM sample's table\nWHERE col = 'x'";
+    const title = "sample's exploration";
+    const payload = {
+      version: 1,
+      entries: [
+        {
+          id: "h-q",
+          dbId: "sample's data.db",
+          schema: "weird schema",
+          sql,
+          title,
+          columns: [],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.entries[0].replayCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' exec " +
+        "--db 'sample'\\''s data.db' " +
+        "--schema 'weird schema' " +
+        "--sql 'SELECT *\nFROM sample'\\''s table\nWHERE col = '\\''x'\\''' " +
+        "--title 'sample'\\''s exploration' " +
+        "--no-save",
+    );
+  });
+
+  test("query list (default, no --json) renders summary lines and emits no replayCommand hints", async () => {
+    // default mode は既存 summary 行 (executedAt / [AI] / title / row count /
+    // SQL 抜粋) のみ。enrich 用 command hint は --json 専用で stdout に
+    // 漏らさない (AI-parseable な要約を守る)。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              id: "h-1",
+              dbId: "app.db",
+              sql: "SELECT count(*) FROM sample_table",
+              title: "sample count",
+              columns: ["count"],
+              rowsPreview: [[42]],
+              rowCount: 1,
+              savedRows: 1,
+              truncated: false,
+              elapsedMs: 3,
+              executedAt: "2026-06-30T12:00:00Z",
+              executedBy: "ai",
+              source: "cli",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "list", "--db", "app.db"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 既存 summary 出力の挙動を回帰防止用に固定。
+    expect(out).toMatch(/2026-06-30T12:00:00Z\s+\[AI\]\s+sample count/);
+    expect(out).toMatch(/SELECT count\(\*\) FROM sample_table/);
+    // command hint が default 出力に漏れないことを negative assertion で確認。
+    expect(/replayCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
   });
 
   test("query clear --schema forwards db and schema in the POST body", async () => {
