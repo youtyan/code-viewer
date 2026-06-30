@@ -166,6 +166,10 @@ describe("diff sidebar repository target", () => {
   test("keeps the repository target visually hidden outside repository pages", () => {
     expect(repoTargetDisplayForBodyClass("gdp-repo-page")).toBe("flex");
     expect(repoTargetDisplayForBodyClass("")).toBe("none");
+    expect(repoTargetDisplayForBodyClass("gdp-diff-page")).toBe("none");
+    expect(repoTargetDisplayForBodyClass("gdp-diff-page gdp-repo-page")).toBe(
+      "none",
+    );
     expect(repoTargetDisplayForBodyClass("gdp-repo-blob-page")).toBe("none");
     expect(
       repoTargetDisplayForBodyClass("gdp-file-detail-page gdp-repo-blob-page"),

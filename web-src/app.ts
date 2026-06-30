@@ -2265,20 +2265,24 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setPageMode() {
     const historyPanelRoute = STATE.route.screen === "history";
     const fileHistoryRoute = isFileHistoryRoute(STATE.route);
+    const fileRepoBlobRoute =
+      STATE.route.screen === "file" &&
+      (STATE.route.view === "blob" ||
+        STATE.route.view === "blame" ||
+        STATE.route.view === "history");
+    const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
     document.body.classList.toggle(
       "gdp-file-detail-page",
       STATE.route.screen === "file",
     );
-    document.body.classList.toggle(
-      "gdp-repo-blob-page",
-      STATE.route.screen === "file" &&
-        (STATE.route.view === "blob" ||
-          STATE.route.view === "blame" ||
-          STATE.route.view === "history"),
-    );
+    document.body.classList.toggle("gdp-repo-blob-page", fileRepoBlobRoute);
     document.body.classList.toggle(
       "gdp-repo-page",
       STATE.route.screen === "repo",
+    );
+    document.body.classList.toggle(
+      "gdp-diff-page",
+      STATE.route.screen === "diff",
     );
     document.body.classList.toggle(
       "gdp-help-page",
@@ -2290,6 +2294,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-database-page",
       STATE.route.screen === "database",
     );
+    const repoTargetWrap =
+      document.querySelector<HTMLElement>("#repo-target-wrap");
+    if (!repoSidebarRoute && repoTargetWrap) repoTargetWrap.hidden = true;
     // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
     // pages expect it back outside as the sticky sibling. Re-place it every
     // time the page classes flip, or SPA navigation away from the repo view

@@ -581,6 +581,10 @@ body.gdp-repo-page #repo-target-wrap:not([hidden]),
 body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap:not([hidden]) {
   display: flex !important;
 }
+body.gdp-diff-page #repo-target-wrap:not([hidden]),
+body.gdp-diff-page #repo-target-wrap {
+  display: none !important;
+}
 .ref-dots {
   color: var(--fg-subtle);
   font-size: 14px;
