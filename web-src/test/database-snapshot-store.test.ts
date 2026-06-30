@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { runSnapshot } from "../server/database/snapshot-runner";
 import {
+  computeDiffTables,
   deleteSnapshot,
   listSnapshots,
 } from "../server/database/snapshot-store";
@@ -13,6 +14,7 @@ type RawSqliteDb = {
   prepare(sql: string): {
     all(...params: unknown[]): Record<string, unknown>[];
     get(...params: unknown[]): Record<string, unknown> | undefined;
+    run(...params: unknown[]): { changes: number };
   };
   close(): void;
 };
@@ -46,6 +48,54 @@ async function openStoreDb(dir: string): Promise<RawSqliteDb> {
 }
 
 describe("snapshot-store", () => {
+  test("normalizes Docker snapshot db ids and lists encoded/decoded rel dir forms together", async () => {
+    await withTempProject(async (dir) => {
+      const decoded = "docker:db-service@sample/data/postgresql:application";
+      const encoded =
+        "docker:db-service@sample%2Fdata%2Fpostgresql:application";
+      const src = () =>
+        makeSqliteSource(new Map([["1", JSON.stringify({ v: 1 })]]));
+
+      await runSnapshot(dir, src(), decoded, ["users"], "decoded-create");
+
+      const byEncoded = await listSnapshots(dir, encoded);
+      expect(byEncoded.map((s) => s.note)).toEqual(["decoded-create"]);
+      expect(byEncoded[0].dbId).toBe(encoded);
+
+      const byDecoded = await listSnapshots(dir, decoded);
+      expect(byDecoded.map((s) => s.note)).toEqual(["decoded-create"]);
+      expect(byDecoded[0].dbId).toBe(encoded);
+
+      const db = await openStoreDb(dir);
+      try {
+        db.prepare(
+          "INSERT INTO snapshots (id, db_id, schema_name, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).run(
+          "snap-legacy-decoded",
+          decoded,
+          null,
+          "postgresql",
+          "legacy-decoded",
+          "2026-07-01T00:00:00.000Z",
+          "done",
+        );
+      } finally {
+        db.close();
+      }
+
+      expect(
+        (await listSnapshots(dir, encoded)).map((s) => s.note).sort(),
+      ).toEqual(["decoded-create", "legacy-decoded"]);
+
+      const diff = await computeDiffTables(
+        dir,
+        "snap-legacy-decoded",
+        byEncoded[0].id,
+      );
+      expect(diff.map((d) => d.tableName)).toEqual(["users"]);
+    });
+  });
+
   test("deleteSnapshot removes orphan payloads but keeps payloads still referenced", async () => {
     await withTempProject(async (dir) => {
       // before: payload A (unique) + payload SHARED

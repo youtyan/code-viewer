@@ -10,6 +10,7 @@ import type {
   SnapshotMeta,
   SnapshotTableSummary,
 } from "../../core/database/types";
+import { canonicalizeDockerDbId, parseDockerDbId } from "./discovery";
 import { loadSqliteClass } from "./sqlite-driver";
 
 const CODE_VIEWER_DIR = ".code-viewer";
@@ -107,6 +108,18 @@ function hashPayload(payloadJson: string): string {
   return createHash("sha256").update(payloadJson).digest("hex");
 }
 
+function dockerDbIdFilterValues(dbId: string): string[] {
+  const values = [dbId];
+  const canonical = canonicalizeDockerDbId(dbId);
+  if (canonical) values.push(canonical);
+  const parsed = parseDockerDbId(dbId);
+  if (parsed?.relDir) {
+    const database = parsed.database ? `:${parsed.database}` : "";
+    values.push(`docker:${parsed.serviceName}@${parsed.relDir}${database}`);
+  }
+  return [...new Set(values)];
+}
+
 export async function createSnapshot(
   cwd: string,
   dbId: string,
@@ -117,11 +130,12 @@ export async function createSnapshot(
 ): Promise<string> {
   const db = await getStoreDb(cwd);
   const id = makeId("snap");
+  const storedDbId = canonicalizeDockerDbId(dbId) ?? dbId;
   db.prepare(
     "INSERT INTO snapshots (id, db_id, schema_name, kind, note, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
   ).run(
     id,
-    dbId,
+    storedDbId,
     schema ?? null,
     kind,
     note,
@@ -225,8 +239,13 @@ export async function listSnapshots(
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (dbId) {
-    conditions.push("db_id = ?");
-    params.push(dbId);
+    const dbIdValues = dockerDbIdFilterValues(dbId);
+    conditions.push(
+      dbIdValues.length === 1
+        ? "db_id = ?"
+        : `db_id IN (${dbIdValues.map(() => "?").join(", ")})`,
+    );
+    params.push(...dbIdValues);
   }
   if (schema !== undefined) {
     conditions.push("COALESCE(schema_name, 'public') = ?");
@@ -331,7 +350,9 @@ function assertSameSnapshotScope(
 ): void {
   const before = getSnapshotScope(db, beforeId);
   const after = getSnapshotScope(db, afterId);
-  if (before.dbId !== after.dbId || before.schema !== after.schema) {
+  const beforeDbId = canonicalizeDockerDbId(before.dbId) ?? before.dbId;
+  const afterDbId = canonicalizeDockerDbId(after.dbId) ?? after.dbId;
+  if (beforeDbId !== afterDbId || before.schema !== after.schema) {
     throw new Error(
       `cannot compare snapshots from different database/schema (${before.dbId}:${before.schema} vs ${after.dbId}:${after.schema})`,
     );

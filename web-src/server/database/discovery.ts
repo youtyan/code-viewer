@@ -804,6 +804,14 @@ export function parseDockerDbId(
   return { serviceName: rest, relDir: "", database };
 }
 
+export function canonicalizeDockerDbId(dbId: string): string | null {
+  const parsed = parseDockerDbId(dbId);
+  if (!parsed) return null;
+  const database = parsed.database ? `:${parsed.database}` : "";
+  if (!parsed.relDir) return `docker:${parsed.serviceName}${database}`;
+  return `docker:${parsed.serviceName}@${encodeURIComponent(parsed.relDir)}${database}`;
+}
+
 export async function findDockerServiceByDbIdAsync(
   cwd: string,
   dbId: string,
