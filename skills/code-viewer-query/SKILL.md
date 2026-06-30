@@ -52,7 +52,22 @@ browser's Database > Search tab, so the human can review the same workflow.
    appended as `# ...` comment lines so the AI can copy ids without
    stripping JSON.
 
-2. To inspect saved query history (separate from source discovery), run:
+2. Inspect tables, columns, and DDL without writing dialect-specific SQL.
+   These commands wrap the same schema endpoints as the browser, so use them
+   before guessing table names or engine-specific catalog queries.
+
+   ```sh
+   code-viewer query schemas --db docker:pg-svc --json
+   code-viewer query schema --db app.db --json
+   code-viewer query schema --db docker:pg-svc --schema analytics --with-columns --json
+   code-viewer query columns --db app.db --table users --json
+   code-viewer query ddl --db app.db --table users
+   ```
+
+   Default output is tab-separated and human-readable. Pass `--json` when the
+   next agent step should parse the full endpoint response.
+
+3. To inspect saved query history (separate from source discovery), run:
 
    ```sh
    code-viewer query list --json
@@ -66,14 +81,14 @@ browser's Database > Search tab, so the human can review the same workflow.
    code-viewer query clear --db docker:pg-svc --schema analytics
    ```
 
-3. Execute a query against an id picked from step 1:
+4. Execute a query against an id picked from step 1:
 
    ```sh
    code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
        --title "Sample user data" --body "Checking what user records look like."
    ```
 
-4. The human sees results in the browser's Database > Query History panel.
+5. The human sees results in the browser's Database > Query History panel.
 
 ## Workflow: Find a value across all tables (global search)
 
@@ -118,6 +133,9 @@ it the server uses `public` (or the first available schema).
 ## Guidelines
 
 - Always use LIMIT in `--sql`. The server caps rows but be explicit.
+- Before writing schema-discovery SQL, prefer `query schema`, `query columns`,
+  or `query ddl`; they work across SQLite, PostgreSQL, and MySQL through the
+  server's existing introspection endpoints.
 - Write `--title` for the human, not for yourself.
 - Use `--body` to explain why the query matters.
 - Do not query broad PII or secrets unless explicitly asked.

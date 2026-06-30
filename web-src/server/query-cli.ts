@@ -1,4 +1,9 @@
-import type { DbFilesResponse } from "../core/database/types";
+import type {
+  DbColumn,
+  DbFilesResponse,
+  DbSchemaResponse,
+  DbSchemasResponse,
+} from "../core/database/types";
 import { ensureServerUrl, resolveRepoRoot, takeValue } from "./cli-helpers";
 
 export type QueryCommand =
@@ -18,6 +23,30 @@ export type QueryCommand =
   // /_db/files をそのまま薄く CLI 化したもの。AI agent が DB ID を発見する
   // ためのエントリポイント。server には新 endpoint を作らず discovery を流用。
   | { kind: "sources"; json: boolean }
+  // 以下4つは /_db/schemas /_db/schema /_db/columns /_db/ddl を薄く CLI 化。
+  // table/column を方言なしで覗ける AI 用 introspection。
+  | { kind: "schemas"; db: string; json: boolean }
+  | {
+      kind: "schema";
+      db: string;
+      schema?: string;
+      withColumns: boolean;
+      json: boolean;
+    }
+  | {
+      kind: "columns";
+      db: string;
+      schema?: string;
+      table: string;
+      json: boolean;
+    }
+  | {
+      kind: "ddl";
+      db: string;
+      schema?: string;
+      table: string;
+      json: boolean;
+    }
   | {
       kind: "snapshot-create";
       db: string;
@@ -71,6 +100,10 @@ export const QUERY_HELP = `code-viewer query — execute read-only SQL queries a
 
 Usage:
   code-viewer query sources [--json]
+  code-viewer query schemas --db <path> [--json]
+  code-viewer query schema --db <path> [--schema <name>] [--with-columns] [--json]
+  code-viewer query columns --db <path> [--schema <name>] --table <name> [--json]
+  code-viewer query ddl --db <path> [--schema <name>] --table <name> [--json]
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path> [--schema <name>]]
   code-viewer query clear [--db <path> [--schema <name>]]
@@ -89,6 +122,10 @@ Global options:
 
 Examples:
   code-viewer query sources --json
+  code-viewer query schemas --db docker:pg-svc --json
+  code-viewer query schema --db app.db --json
+  code-viewer query columns --db docker:pg-svc --schema analytics --table events --json
+  code-viewer query ddl --db app.db --table users
   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
   code-viewer query list --db docker:pg-svc --schema analytics --json
   code-viewer query clear --db docker:pg-svc --schema analytics
@@ -126,15 +163,24 @@ can review what you queried.
    running server has discovered, with credentials stripped. Use the id
    field as --db on the following commands:
    code-viewer query sources --json
-2. (For saved query history, not discovery) code-viewer query list shows
+2. Introspect schema/tables/columns/DDL without writing dialect-specific
+   SQL. These wrap the same endpoints the browser uses, so you can answer
+   "what tables are in this DB?" / "what columns are in this table?"
+   without guessing whether the engine is SQLite, PostgreSQL, or MySQL:
+   code-viewer query schemas --db docker:pg-svc --json
+   code-viewer query schema  --db app.db --json
+   code-viewer query schema  --db docker:pg-svc --schema analytics --with-columns --json
+   code-viewer query columns --db app.db --table users --json
+   code-viewer query ddl     --db app.db --table users --json
+3. (For saved query history, not discovery) code-viewer query list shows
    what you have previously executed. For PostgreSQL multi-schema history,
    use --schema together with --db:
    code-viewer query list --db docker:pg-svc --schema analytics --json
    code-viewer query clear --db docker:pg-svc --schema analytics
-3. Execute:
+4. Execute:
    code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
        --title "Sample user data" --body "Checking what user records look like."
-4. The human sees results in the browser's Database > Query History tab.
+5. The human sees results in the browser's Database > Query History tab.
 
 ## Workflow: Snapshot & Diff (for testing)
 
@@ -195,6 +241,17 @@ browser's Database > Search tab.
   JSON of the full /_db/files response with --json. truncated and
   dockerError, if present, are appended to stdout as comment-prefixed lines
   (default) or kept as JSON fields (--json).
+- schemas: human-readable schema-name-per-line (default), or pretty JSON of
+  the full /_db/schemas response with --json. SQLite/MySQL/Redis/ES/S3
+  return an empty list (no multi-schema concept).
+- schema: human-readable "<table>\\t<type>\\t<rowCount>" lines (default), or
+  pretty JSON of the full /_db/schema response with --json. With
+  --with-columns the JSON includes columnsMap; default-mode output still
+  prints only one line per table to keep stdout AI-parseable.
+- columns: human-readable "<name>\\t<type>\\t<NULL|NOT NULL>\\t<PK|-> \\t<default>"
+  lines (default), or pretty JSON of the full /_db/columns response with --json.
+- ddl: raw CREATE statement on stdout (default), or pretty JSON of the full
+  /_db/ddl response (sql + triggers + executedSql) with --json.
 - exec / diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
@@ -250,6 +307,7 @@ const BOOL_FLAGS = new Set([
   "--no-save",
   "--include-non-text",
   "--wait",
+  "--with-columns",
 ]);
 
 const DEFAULT_SEARCH_TIMEOUT_SEC = 60;
@@ -340,6 +398,20 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
       },
     };
   }
+  if (
+    subcommand === "schemas" ||
+    subcommand === "schema" ||
+    subcommand === "columns" ||
+    subcommand === "ddl"
+  ) {
+    if (rest.length > 1) {
+      return {
+        ok: false,
+        error: `${subcommand} does not accept positional arguments`,
+      };
+    }
+    return parseIntrospectSubcommand(subcommand, options, flags, globalArgs);
+  }
   if (subcommand === "exec") {
     const db = options.get("--db");
     if (!db) return { ok: false, error: "exec requires --db <path>" };
@@ -407,6 +479,102 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     return parseSearchCommand(options, flags, globalArgs);
   }
   return { ok: false, error: `unknown query command: ${subcommand}` };
+}
+
+function parseIntrospectSubcommand(
+  subcommand: "schemas" | "schema" | "columns" | "ddl",
+  options: Map<string, string>,
+  flags: Set<string>,
+  globalArgs: { cwd?: string; server?: string },
+): QueryParseResult {
+  const db = options.get("--db");
+  if (!db) return { ok: false, error: `${subcommand} requires --db <path>` };
+  const schema = options.get("--schema");
+  const json = flags.has("--json");
+  if (subcommand === "schemas") {
+    const reject = rejectUnsupportedFlags(subcommand, options, flags, {
+      allowSchema: false,
+      allowTable: false,
+      allowWithColumns: false,
+    });
+    if (reject) return reject;
+    return {
+      ok: true,
+      args: { command: { kind: "schemas", db, json }, ...globalArgs },
+    };
+  }
+  if (subcommand === "schema") {
+    const reject = rejectUnsupportedFlags(subcommand, options, flags, {
+      allowSchema: true,
+      allowTable: false,
+      allowWithColumns: true,
+    });
+    if (reject) return reject;
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "schema",
+          db,
+          schema,
+          withColumns: flags.has("--with-columns"),
+          json,
+        },
+        ...globalArgs,
+      },
+    };
+  }
+  // columns / ddl は --table 必須。
+  const table = options.get("--table");
+  if (!table)
+    return { ok: false, error: `${subcommand} requires --table <name>` };
+  const reject = rejectUnsupportedFlags(subcommand, options, flags, {
+    allowSchema: true,
+    allowTable: true,
+    allowWithColumns: false,
+  });
+  if (reject) return reject;
+  return {
+    ok: true,
+    args: {
+      command:
+        subcommand === "columns"
+          ? { kind: "columns", db, schema, table, json }
+          : { kind: "ddl", db, schema, table, json },
+      ...globalArgs,
+    },
+  };
+}
+
+// introspection の各サブコマンドで「許す option / flag」を申告し、それ以外が
+// 渡されたら明示的に reject。silent drop でユーザーが「--schema 指定したのに
+// 効いてない」状態に陥らないようにする (exec の既存バグの再発防止)。
+function rejectUnsupportedFlags(
+  subcommand: string,
+  options: Map<string, string>,
+  flags: Set<string>,
+  allow: {
+    allowSchema: boolean;
+    allowTable: boolean;
+    allowWithColumns: boolean;
+  },
+): QueryParseResult | undefined {
+  const allowedOptions = new Set<string>(["--db"]);
+  if (allow.allowSchema) allowedOptions.add("--schema");
+  if (allow.allowTable) allowedOptions.add("--table");
+  for (const key of options.keys()) {
+    if (!allowedOptions.has(key)) {
+      return { ok: false, error: `${subcommand} does not accept ${key}` };
+    }
+  }
+  const allowedFlags = new Set<string>(["--json"]);
+  if (allow.allowWithColumns) allowedFlags.add("--with-columns");
+  for (const flag of flags) {
+    if (!allowedFlags.has(flag)) {
+      return { ok: false, error: `${subcommand} does not accept ${flag}` };
+    }
+  }
+  return undefined;
 }
 
 function parseSearchCommand(
@@ -677,6 +845,10 @@ export async function runQueryCli(argv: string[]): Promise<void> {
   const serverUrl = await ensureServerUrl(root, server, "/");
 
   if (command.kind === "sources") return runSources(serverUrl, command);
+  if (command.kind === "schemas") return runSchemas(serverUrl, command);
+  if (command.kind === "schema") return runSchema(serverUrl, command);
+  if (command.kind === "columns") return runColumns(serverUrl, command);
+  if (command.kind === "ddl") return runDdl(serverUrl, command);
   if (command.kind === "exec") return runExec(serverUrl, command);
   if (command.kind === "list") return runList(serverUrl, command);
   if (command.kind === "clear") return runClear(serverUrl, command);
@@ -727,6 +899,149 @@ async function runSources(
   }
   if (data.dockerError) {
     console.log(`# dockerError: ${data.dockerError}`);
+  }
+}
+
+function buildIntrospectPath(
+  base: string,
+  params: Record<string, string | undefined>,
+): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) qs.set(key, value);
+  }
+  const s = qs.toString();
+  return s ? `${base}?${s}` : base;
+}
+
+async function runSchemas(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "schemas" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/schemas", { db: command.db });
+  const data = (await request(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list schemas",
+  )) as DbSchemasResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (!data.schemas.length) {
+    console.log("no schemas (engine has no multi-schema concept)");
+    return;
+  }
+  for (const s of data.schemas) {
+    console.log(s.name);
+  }
+}
+
+async function runSchema(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "schema" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/schema", {
+    db: command.db,
+    schema: command.schema,
+    includeColumns: command.withColumns ? "1" : undefined,
+  });
+  const data = (await request(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read schema",
+  )) as DbSchemaResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (!data.tables.length) {
+    console.log("no tables");
+    return;
+  }
+  for (const t of data.tables) {
+    const rowCount = t.rowCount === null ? "-" : String(t.rowCount);
+    console.log(`${t.name}\t${t.type}\t${rowCount}`);
+  }
+}
+
+async function runColumns(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "columns" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/columns", {
+    db: command.db,
+    schema: command.schema,
+    table: command.table,
+  });
+  const data = (await request(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "get columns",
+  )) as {
+    dbId: string;
+    schema?: string;
+    table: string;
+    columns: DbColumn[];
+    executedSql?: string[];
+  };
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (!data.columns.length) {
+    console.log("no columns");
+    return;
+  }
+  for (const c of data.columns) {
+    const nullable = c.nullable ? "NULL" : "NOT NULL";
+    const pk = c.primaryKey ? "PK" : "-";
+    const def = c.defaultValue === null ? "-" : c.defaultValue;
+    console.log(`${c.name}\t${c.type}\t${nullable}\t${pk}\t${def}`);
+  }
+}
+
+async function runDdl(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "ddl" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/ddl", {
+    db: command.db,
+    schema: command.schema,
+    table: command.table,
+  });
+  const data = (await request(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "get DDL",
+  )) as {
+    dbId: string;
+    schema?: string;
+    table: string;
+    sql: string;
+    triggers: Array<{ name: string; sql: string }>;
+    executedSql?: string[];
+  };
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // 既定モードは "コピペで CREATE TABLE が取れる" を最優先。trigger は
+  // 区切り行を入れて続ける。
+  if (data.sql) console.log(data.sql);
+  for (const trig of data.triggers ?? []) {
+    if (trig.sql) {
+      console.log("");
+      console.log(trig.sql);
+    }
   }
 }
 

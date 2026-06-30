@@ -51,6 +51,130 @@ describe("parseQueryArgs", () => {
     });
   });
 
+  test("schemas requires --db and accepts only --json", () => {
+    expect(parseQueryArgs(["schemas"])).toEqual({
+      ok: false,
+      error: "schemas requires --db <path>",
+    });
+    expect(parseQueryArgs(["schemas", "extra", "--db", "x"])).toEqual({
+      ok: false,
+      error: "schemas does not accept positional arguments",
+    });
+    expect(parseQueryArgs(["schemas", "--db", "x", "--schema", "s"])).toEqual({
+      ok: false,
+      error: "schemas does not accept --schema",
+    });
+    expect(parseQueryArgs(["schemas", "--db", "x", "--wait"])).toEqual({
+      ok: false,
+      error: "schemas does not accept --wait",
+    });
+
+    const ok = parseQueryArgs(["schemas", "--db", "docker:pg-svc", "--json"]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "schemas",
+      db: "docker:pg-svc",
+      json: true,
+    });
+  });
+
+  test("schema accepts --schema/--with-columns/--json, rejects --table", () => {
+    expect(parseQueryArgs(["schema"])).toEqual({
+      ok: false,
+      error: "schema requires --db <path>",
+    });
+    expect(parseQueryArgs(["schema", "--db", "x", "--table", "t"])).toEqual({
+      ok: false,
+      error: "schema does not accept --table",
+    });
+    const ok = parseQueryArgs([
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "schema",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      withColumns: true,
+      json: true,
+    });
+
+    const minimal = parseQueryArgs(["schema", "--db", "app.db"]);
+    expect(minimal.ok).toBe(true);
+    if (!minimal.ok) throw new Error("parse failed");
+    expect(minimal.args.command).toEqual({
+      kind: "schema",
+      db: "app.db",
+      schema: undefined,
+      withColumns: false,
+      json: false,
+    });
+  });
+
+  test("columns requires --db and --table; --with-columns is rejected", () => {
+    expect(parseQueryArgs(["columns", "--db", "x"])).toEqual({
+      ok: false,
+      error: "columns requires --table <name>",
+    });
+    expect(
+      parseQueryArgs([
+        "columns",
+        "--db",
+        "x",
+        "--table",
+        "t",
+        "--with-columns",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "columns does not accept --with-columns",
+    });
+    const ok = parseQueryArgs([
+      "columns",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--table",
+      "events",
+      "--json",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "columns",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      table: "events",
+      json: true,
+    });
+  });
+
+  test("ddl requires --db and --table; mirrors columns surface", () => {
+    expect(parseQueryArgs(["ddl", "--db", "x"])).toEqual({
+      ok: false,
+      error: "ddl requires --table <name>",
+    });
+    const ok = parseQueryArgs(["ddl", "--db", "app.db", "--table", "users"]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "ddl",
+      db: "app.db",
+      schema: undefined,
+      table: "users",
+      json: false,
+    });
+  });
+
   test("exec requires --db and --sql", () => {
     expect(parseQueryArgs(["exec"])).toEqual({
       ok: false,
@@ -845,6 +969,224 @@ describe("runQueryCli integration", () => {
 
     expect(harness.exits).toEqual([]);
     expect(harness.logs).toEqual(["no datastore sources discovered"]);
+  });
+
+  test("query schemas --json emits the /_db/schemas response verbatim", async () => {
+    const payload = {
+      dbId: "docker:pg-svc",
+      schemas: [{ name: "public" }, { name: "analytics" }],
+      selectedSchema: "public",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schemas",
+      "--db",
+      "docker:pg-svc",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/schemas?db=docker%3Apg-svc`,
+    );
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(payload);
+  });
+
+  test("query schemas (default) prints one schema name per line", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schemas: [{ name: "public" }, { name: "analytics" }],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schemas",
+      "--db",
+      "docker:pg-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["public", "analytics"]);
+  });
+
+  test("query schemas notifies when the engine has no multi-schema concept", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ dbId: "app.db", schemas: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schemas", "--db", "app.db"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "no schemas (engine has no multi-schema concept)",
+    ]);
+  });
+
+  test("query schema --with-columns forwards includeColumns=1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          tables: [],
+          indexes: [],
+          foreignKeys: [],
+          columnsMap: {},
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/schema?db=docker%3Apg-svc&schema=analytics&includeColumns=1`,
+    );
+  });
+
+  test("query schema (default) prints name/type/rowCount per table", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          tables: [
+            { name: "users", type: "table", rowCount: 42 },
+            { name: "user_view", type: "view", rowCount: null },
+          ],
+          indexes: [],
+          foreignKeys: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schema", "--db", "app.db"]);
+
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/schema?db=app.db`);
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["users\ttable\t42", "user_view\tview\t-"]);
+  });
+
+  test("query columns (default) prints name/type/nullable/pk/default", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          table: "users",
+          columns: [
+            {
+              name: "id",
+              type: "INTEGER",
+              nullable: false,
+              primaryKey: true,
+              defaultValue: null,
+            },
+            {
+              name: "email",
+              type: "TEXT",
+              nullable: true,
+              primaryKey: false,
+              defaultValue: "''",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "columns",
+      "--db",
+      "app.db",
+      "--table",
+      "users",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/columns?db=app.db&table=users`,
+    );
+    expect(harness.logs).toEqual([
+      "id\tINTEGER\tNOT NULL\tPK\t-",
+      "email\tTEXT\tNULL\t-\t''",
+    ]);
+  });
+
+  test("query ddl (default) prints CREATE statement and triggers", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          table: "users",
+          sql: "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+          triggers: [{ name: "users_ai", sql: "CREATE TRIGGER users_ai ..." }],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "ddl",
+      "--db",
+      "app.db",
+      "--table",
+      "users",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/ddl?db=app.db&table=users`,
+    );
+    expect(harness.logs).toEqual([
+      "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+      "",
+      "CREATE TRIGGER users_ai ...",
+    ]);
+  });
+
+  test("query schema relays server text errors to stderr + exit 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "unknown database id: bogus",
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schema", "--db", "bogus"]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /read schema failed \(400\): unknown database id: bogus/,
+    );
   });
 
   test("query list --schema forwards db and schema in the history URL", async () => {

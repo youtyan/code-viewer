@@ -297,6 +297,13 @@ Datastores tab (Query History, Search, and Snapshot tabs).
 # docker-compose). Use the printed id as --db on every other command.
 code-viewer query sources --json
 
+# Introspect tables and columns without writing dialect-specific SQL.
+code-viewer query schemas --db docker:pg-svc --json
+code-viewer query schema --db app.db --json
+code-viewer query schema --db docker:pg-svc --schema analytics --with-columns --json
+code-viewer query columns --db app.db --table users --json
+code-viewer query ddl --db app.db --table users
+
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
 
