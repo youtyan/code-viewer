@@ -1073,6 +1073,14 @@ describe("runQueryCli integration", () => {
     expect(out).toMatch(
       /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
     );
+    // sqlite にも query history と snapshot store への paste-safe entrypoint
+    // が出る。browser tab を開かずに既存の調査履歴へ進める。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'app\.db' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'app\.db' --json$/m,
+    );
     // sqlite には schemas 行が出ない。
     expect(/query schemas --db 'app\.db'/.test(out)).toBe(false);
 
@@ -1083,14 +1091,22 @@ describe("runQueryCli integration", () => {
     expect(out).toMatch(
       /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'docker:pg-svc' --with-columns --json$/m,
     );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'docker:pg-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:pg-svc' --json$/m,
+    );
 
     expect(out).toMatch(/^# source 3: docker:s3-svc\/sample-bucket \(s3\)$/m);
     expect(out).toMatch(
       /^# s3: use the browser Datastores tab; query schema\/exec commands are SQL-only$/m,
     );
-    // s3 は SQL source ではないので schema/exec 行を出さない。
+    // s3 は SQL source ではないので schema/exec/list/snapshot 行を出さない。
     expect(/query schema --db 'docker:s3-svc/.test(out)).toBe(false);
     expect(/query exec --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query list --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query snapshot list --db 'docker:s3-svc/.test(out)).toBe(false);
 
     expect(out).toMatch(/^# source 4: docker:mysql-svc \(mysql\)$/m);
     expect(out).toMatch(
@@ -1099,6 +1115,12 @@ describe("runQueryCli integration", () => {
     expect(out).toMatch(
       /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'docker:mysql-svc' --sql "SELECT 1" --no-save$/m,
     );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'docker:mysql-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:mysql-svc' --json$/m,
+    );
     // MySQL はこの server の /_db/schemas では multi-schema 扱いしない。
     expect(/query schemas --db 'docker:mysql-svc'/.test(out)).toBe(false);
     // 全 SQL 行で --server prefix が付いていることを regression guard。
@@ -1106,8 +1128,11 @@ describe("runQueryCli integration", () => {
     const sqlLines = out
       .split("\n")
       .filter((line) => line.startsWith("code-viewer query"));
-    // postgresql=3 + sqlite=2 + mysql=2 = 7 SQL 行が出る。s3 は出ない。
-    expect(sqlLines).toHaveLength(7);
+    // postgresql=5 (schemas+schema+exec+list+snapshot list) +
+    //   sqlite=4 (schema+exec+list+snapshot list) +
+    //   mysql=4  (schema+exec+list+snapshot list) = 13 SQL 行が出る。
+    // s3 は SQL command を一切出さない。
+    expect(sqlLines).toHaveLength(13);
     const missingPrefix = sqlLines.filter(
       (line) => !line.startsWith("code-viewer query --server '"),
     );
@@ -1143,6 +1168,13 @@ describe("runQueryCli integration", () => {
     );
     expect(out).toMatch(
       /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'sample'\\''s data\.db' --sql "SELECT 1" --no-save$/m,
+    );
+    // 追加の query history / snapshot list entrypoint も同じ paste-safety を満たす。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'sample'\\''s data\.db' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'sample'\\''s data\.db' --json$/m,
     );
   });
 

@@ -179,12 +179,15 @@ can review what you queried.
    code-viewer query sources --json
    To skip the per-SQL-source "what command should I run next?" step, use
    the shortcut that emits shell-pasteable schema/exec lines for SQL sources
-   and browser-pane hints for non-SQL sources. Each emitted SQL command line
-   pins the same --server <url> that was resolved for this invocation, so
-   pasting them into a different shell does not silently fall back to
-   auto-discovery (db ids and the server URL are single-quoted so paths or
-   URLs with spaces or quotes still work). Comment metadata is collapsed to
-   one line so copied command blocks are not split by source names or errors:
+   and browser-pane hints for non-SQL sources. SQL source blocks also include
+   paste-safe list --db ... --json and snapshot list --db ... --json so you
+   can step into the existing query history and snapshot store without
+   composing those commands yourself. Each emitted SQL command line pins
+   the same --server <url> that was resolved for this invocation, so pasting
+   them into a different shell does not silently fall back to auto-discovery
+   (db ids and the server URL are single-quoted so paths or URLs with spaces
+   or quotes still work). Comment metadata is collapsed to one line so
+   copied command blocks are not split by source names or errors:
    code-viewer query sources --commands
 2. Introspect schema/tables/columns/DDL without writing dialect-specific
    SQL. These wrap the same endpoints the browser uses, so you can answer
@@ -271,11 +274,12 @@ browser's Database > Search tab.
 - sources: human-readable id/kind/name lines on stdout (default), or pretty
   JSON of the full /_db/files response with --json, or shell-pasteable
   next-step commands per SQL source with --commands (schema --with-columns +
-  exec "SELECT 1" --no-save for sqlite/postgresql/mysql, plus schemas for
-  postgresql; non-SQL sources get a browser-pane hint; every emitted SQL
-  command line pins --server <quoted-url> so the suggestion never falls back
-  to auto-discovery in a different shell; db ids and the server URL are wrapped
-  in POSIX single-quotes). --json and --commands are mutually exclusive.
+  exec "SELECT 1" --no-save + list --json + snapshot list --json for
+  sqlite/postgresql/mysql, plus schemas for postgresql; non-SQL sources get
+  a browser-pane hint; every emitted SQL command line pins --server
+  <quoted-url> so the suggestion never falls back to auto-discovery in a
+  different shell; db ids and the server URL are wrapped in POSIX
+  single-quotes). --json and --commands are mutually exclusive.
   truncated and dockerError, if present, are appended to stdout as
   comment-prefixed lines (default / --commands) or kept as JSON fields
   (--json). Comment metadata is collapsed to one line before printing.
@@ -968,10 +972,12 @@ function commentText(value: string): string {
 //   - SQL source: schema (--with-columns で columnsMap も同梱)
 //   - postgresql: schemas (multi-schema 列挙が有用)
 //   - SQL source: 安全な exec 例 (SELECT 1 + --no-save)
+//   - SQL source: query history list と snapshot list (browser tab を開かず
+//     既存の調査履歴 / snapshot を確認するエントリポイント)
 //   - non-SQL source: query CLI の schema/exec ではなく専用 pane へ誘導
 // db id と server URL は常に shellSingleQuote で囲む。空白/シングルクォート
 // /コロン/スラッシュ が含まれていても bash/zsh にそのまま貼れる形を保証する。
-// `--server` を毎行に prefix することで、--commands 起動時の resolved server
+// --server を毎行に prefix することで、--commands 起動時の resolved server
 // を pin する (auto-discovery に逸れて別 server / no server に行かないよう)。
 function buildSourceCommands(
   file: DbFilesResponse["files"][number],
@@ -998,6 +1004,8 @@ function buildSourceCommands(
   }
   lines.push(`${cli} schema --db ${quotedId} --with-columns --json`);
   lines.push(`${cli} exec --db ${quotedId} --sql "SELECT 1" --no-save`);
+  lines.push(`${cli} list --db ${quotedId} --json`);
+  lines.push(`${cli} snapshot list --db ${quotedId} --json`);
   return lines;
 }
 

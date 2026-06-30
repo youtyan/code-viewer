@@ -297,12 +297,15 @@ Datastores tab (Query History, Search, and Snapshot tabs).
 # docker-compose). Use the printed id as --db on every other command.
 code-viewer query sources --json
 # Or skip composing the next SQL call yourself: --commands prints
-# shell-pasteable schema/exec lines for SQL sources, and browser-pane hints
-# for non-SQL sources. Every emitted SQL command line pins --server '<url>'
-# to the same server URL this invocation resolved, so pasting them elsewhere
-# never silently re-runs auto-discovery. --json and --commands are mutually
-# exclusive. Notice/comment metadata is collapsed to one line so copied
-# command blocks stay intact.
+# shell-pasteable schema/exec lines for SQL sources, plus paste-safe
+# `list --db ... --json` and `snapshot list --db ... --json` so you can
+# step into the existing query history and snapshot store without
+# rebuilding those commands. Non-SQL sources get a browser-pane hint
+# instead. Every emitted SQL command line pins --server '<url>' to the
+# same server URL this invocation resolved, so pasting them elsewhere
+# never silently re-runs auto-discovery. --json and --commands are
+# mutually exclusive. Notice/comment metadata is collapsed to one line
+# so copied command blocks stay intact.
 code-viewer query sources --commands
 
 # Introspect tables and columns without writing dialect-specific SQL.
