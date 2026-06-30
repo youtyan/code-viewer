@@ -309,6 +309,10 @@ code-viewer query sources --json
 code-viewer query sources --commands
 
 # Introspect tables and columns without writing dialect-specific SQL.
+# `query schema --json` adds paste-safe `columnsCommand` / `ddlCommand` fields
+# to every tables[] element (each pins --server and single-quotes the db /
+# schema / table) so AI/human can drill into a specific table without
+# rebuilding the call.
 code-viewer query schemas --db docker:pg-svc --json
 code-viewer query schema --db app.db --json
 code-viewer query schema --db docker:pg-svc --schema analytics --with-columns --json

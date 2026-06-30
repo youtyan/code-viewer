@@ -192,7 +192,11 @@ can review what you queried.
 2. Introspect schema/tables/columns/DDL without writing dialect-specific
    SQL. These wrap the same endpoints the browser uses, so you can answer
    "what tables are in this DB?" / "what columns are in this table?"
-   without guessing whether the engine is SQLite, PostgreSQL, or MySQL:
+   without guessing whether the engine is SQLite, PostgreSQL, or MySQL.
+   query schema --json adds paste-safe columnsCommand / ddlCommand fields
+   to every tables[] element (each pins --server and single-quotes the db /
+   schema / table), so you can step into a specific table without rebuilding
+   the call:
    code-viewer query schemas --db docker:pg-svc --json
    code-viewer query schema  --db app.db --json
    code-viewer query schema  --db docker:pg-svc --schema analytics --with-columns --json
@@ -289,7 +293,13 @@ browser's Database > Search tab.
 - schema: human-readable "<table>\\t<type>\\t<rowCount>" lines (default), or
   pretty JSON of the full /_db/schema response with --json. With
   --with-columns the JSON includes columnsMap; default-mode output still
-  prints only one line per table to keep stdout AI-parseable.
+  prints only one line per table to keep stdout AI-parseable. In --json
+  each tables[] element gains additive columnsCommand and ddlCommand fields
+  — paste-safe "code-viewer query --server '<url>' columns|ddl --db '<db>'
+  [--schema '<schema>'] --table '<table>' --json" strings — so AI/human can
+  drill into each table without rebuilding the call. The chosen schema is
+  the server-resolved data.schema when the server returned it, otherwise
+  the --schema argument; default mode prints no command hints.
 - columns: human-readable "<name>\\t<type>\\t<NULL|NOT NULL>\\t<PK|-> \\t<default>"
   lines (default), or pretty JSON of the full /_db/columns response with --json.
 - ddl: raw CREATE statement on stdout (default), or pretty JSON of the full
@@ -1070,7 +1080,32 @@ async function runSchema(
     "read schema",
   )) as DbSchemaResponse;
   if (command.json) {
-    console.log(JSON.stringify(data, null, 2));
+    // diff tables --json と同じ "additive enrich" pattern。tables[] 各要素に
+    // paste-safe な columnsCommand / ddlCommand を加えて、AI/human が table
+    // 名から次コマンドを手組みしなくてよくする。top-level (dbId / schema /
+    // indexes / foreignKeys / columnsMap / executedSql) は素通し。schema は
+    // response の data.schema を優先し (server が解決した実値)、なければ
+    // command.schema にフォールバックする。default mode の出力は変えない。
+    const effectiveSchema = data.schema ?? command.schema;
+    const enriched = {
+      ...data,
+      tables: data.tables.map((t) => ({
+        ...t,
+        columnsCommand: buildColumnsCommand(
+          serverUrl,
+          command.db,
+          effectiveSchema,
+          t.name,
+        ),
+        ddlCommand: buildDdlCommand(
+          serverUrl,
+          command.db,
+          effectiveSchema,
+          t.name,
+        ),
+      })),
+    };
+    console.log(JSON.stringify(enriched, null, 2));
     return;
   }
   if (!data.tables.length) {
@@ -1311,6 +1346,34 @@ function buildDiffRowsCommand(
     `${cli} diff rows --before ${shellSingleQuote(before)} ` +
     `--after ${shellSingleQuote(after)} --table ${shellSingleQuote(table)} --json`
   );
+}
+
+// schema --json の tables[] から各 table へ深堀りするための paste-safe な
+// columns / ddl コマンド。snapshot poll / diff rows と同形:
+//   - --server を pin して auto-discovery に逸れないようにする
+//   - db / schema / table はすべて shellSingleQuote
+//   - schema は optional (multi-schema な PG 以外では omit) — schemaArg 三項は
+//     buildSnapshotPollCommand と同じ慣用
+function buildColumnsCommand(
+  serverUrl: string,
+  db: string,
+  schema: string | undefined,
+  table: string,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  const schemaArg = schema ? ` --schema ${shellSingleQuote(schema)}` : "";
+  return `${cli} columns --db ${shellSingleQuote(db)}${schemaArg} --table ${shellSingleQuote(table)} --json`;
+}
+
+function buildDdlCommand(
+  serverUrl: string,
+  db: string,
+  schema: string | undefined,
+  table: string,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  const schemaArg = schema ? ` --schema ${shellSingleQuote(schema)}` : "";
+  return `${cli} ddl --db ${shellSingleQuote(db)}${schemaArg} --table ${shellSingleQuote(table)} --json`;
 }
 
 async function runSnapshotCreate(

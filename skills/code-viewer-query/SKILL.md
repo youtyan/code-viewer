@@ -86,7 +86,12 @@ browser's Database > Search tab, so the human can review the same workflow.
    ```
 
    Default output is tab-separated and human-readable. Pass `--json` when the
-   next agent step should parse the full endpoint response.
+   next agent step should parse the full endpoint response. `query schema
+   --json` adds paste-safe `columnsCommand` and `ddlCommand` fields to every
+   `tables[]` element — each pins `--server '<url>'` and single-quotes the
+   `--db` / `--schema` / `--table` arguments — so you can step into a single
+   table without rebuilding the call. Default (non-JSON) mode prints only
+   `<table>\t<type>\t<rowCount>` lines, unchanged.
 
 3. To inspect saved query history (separate from source discovery), run:
 

@@ -1549,6 +1549,210 @@ describe("runQueryCli integration", () => {
     );
   });
 
+  test("query schema --json (sqlite, no --schema) enriches tables[] with paste-safe columns/ddl commands", async () => {
+    // SQLite なので response の schema は undefined。--schema 引数も無い。
+    // 追加される 2 コマンドには --schema が混入してはならない。top-level
+    // (dbId / indexes / foreignKeys / executedSql) は素通し。
+    const payload = {
+      dbId: "app.db",
+      tables: [
+        { name: "sample_table", type: "table", rowCount: 42 },
+        { name: "sample_view", type: "view", rowCount: null },
+      ],
+      indexes: [
+        {
+          table: "sample_table",
+          name: "sample_idx",
+          columns: ["id"],
+          unique: false,
+        },
+      ],
+      foreignKeys: [],
+      executedSql: ["SELECT ... FROM sqlite_master"],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      dbId: "app.db",
+      tables: [
+        {
+          name: "sample_table",
+          type: "table",
+          rowCount: 42,
+          columnsCommand:
+            "code-viewer query --server 'http://localhost:65535' columns --db 'app.db' --table 'sample_table' --json",
+          ddlCommand:
+            "code-viewer query --server 'http://localhost:65535' ddl --db 'app.db' --table 'sample_table' --json",
+        },
+        {
+          name: "sample_view",
+          type: "view",
+          rowCount: null,
+          columnsCommand:
+            "code-viewer query --server 'http://localhost:65535' columns --db 'app.db' --table 'sample_view' --json",
+          ddlCommand:
+            "code-viewer query --server 'http://localhost:65535' ddl --db 'app.db' --table 'sample_view' --json",
+        },
+      ],
+      indexes: [
+        {
+          table: "sample_table",
+          name: "sample_idx",
+          columns: ["id"],
+          unique: false,
+        },
+      ],
+      foreignKeys: [],
+      executedSql: ["SELECT ... FROM sqlite_master"],
+    });
+  });
+
+  test("query schema --json with --with-columns preserves columnsMap and uses data.schema for --schema pinning", async () => {
+    // PG response: server が解決した data.schema を優先する。--with-columns
+    // 経由の columnsMap は素通し。tables[] への enrich は additive で、
+    // --schema 'analytics' が columnsCommand / ddlCommand に必ず含まれる。
+    const payload = {
+      dbId: "docker:pg-svc",
+      schema: "analytics",
+      tables: [{ name: "events", type: "table", rowCount: 7 }],
+      indexes: [],
+      foreignKeys: [],
+      columnsMap: {
+        events: [
+          {
+            name: "id",
+            type: "int8",
+            nullable: false,
+            primaryKey: true,
+            defaultValue: null,
+          },
+        ],
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const parsed = JSON.parse(harness.logs[0]);
+    // top-level は素通し (columnsMap 含む)。
+    expect(parsed.dbId).toBe("docker:pg-svc");
+    expect(parsed.schema).toBe("analytics");
+    expect(parsed.columnsMap).toEqual(payload.columnsMap);
+    expect(parsed.indexes).toEqual([]);
+    expect(parsed.foreignKeys).toEqual([]);
+    // tables[] は additive enrich。table 名・既存フィールドは保存。
+    expect(parsed.tables).toEqual([
+      {
+        name: "events",
+        type: "table",
+        rowCount: 7,
+        columnsCommand:
+          "code-viewer query --server 'http://localhost:65535' columns --db 'docker:pg-svc' --schema 'analytics' --table 'events' --json",
+        ddlCommand:
+          "code-viewer query --server 'http://localhost:65535' ddl --db 'docker:pg-svc' --schema 'analytics' --table 'events' --json",
+      },
+    ]);
+  });
+
+  test("query schema --json prefers server-resolved data.schema over the --schema argument", async () => {
+    // CLI の --schema と server-resolved schema が食い違っても、
+    // response の data.schema を優先する。enrich はその
+    // 解決済み値を使う ── そうすると AI が columnsCommand を貼って実行する時
+    // も同じ schema を見に行く。
+    const payload = {
+      dbId: "docker:pg-svc",
+      schema: "public",
+      tables: [{ name: "items", type: "table", rowCount: 3 }],
+      indexes: [],
+      foreignKeys: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.tables[0].columnsCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' columns --db 'docker:pg-svc' --schema 'public' --table 'items' --json",
+    );
+    expect(parsed.tables[0].ddlCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' ddl --db 'docker:pg-svc' --schema 'public' --table 'items' --json",
+    );
+  });
+
+  test("query schema --json single-quotes db/schema/table with spaces and single quotes", async () => {
+    // db id・schema 名・table 名すべてに空白と ' が混じるケース。POSIX '...'
+    // の '\'' 展開で paste-safe になっていることを behavior で確認する。
+    const payload = {
+      dbId: "sample's data.db",
+      schema: "weird schema",
+      tables: [{ name: "sample's table", type: "table", rowCount: 1 }],
+      indexes: [],
+      foreignKeys: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.tables[0].columnsCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' columns --db 'sample'\\''s data.db' --schema 'weird schema' --table 'sample'\\''s table' --json",
+    );
+    expect(parsed.tables[0].ddlCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' ddl --db 'sample'\\''s data.db' --schema 'weird schema' --table 'sample'\\''s table' --json",
+    );
+  });
+
   test("query schema (default) prints name/type/rowCount per table", async () => {
     const harness = installRunHarness([
       { body: JSON.stringify({ files: [] }) },
@@ -1569,7 +1773,13 @@ describe("runQueryCli integration", () => {
 
     expect(harness.requests[1].url).toBe(`${SERVER}/_db/schema?db=app.db`);
     expect(harness.exits).toEqual([]);
+    // default mode は table summary line だけ。command hint は --json 専用で、
+    // default の stdout には漏らさない (AI-parseable な tab-separated 行を守る)。
     expect(harness.logs).toEqual(["users\ttable\t42", "user_view\tview\t-"]);
+    const out = harness.logs.join("\n");
+    expect(/columnsCommand/.test(out)).toBe(false);
+    expect(/ddlCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
   });
 
   test("query columns (default) prints name/type/nullable/pk/default", async () => {
