@@ -3,6 +3,10 @@ import type {
   DbFilesResponse,
   DbSchemaResponse,
   DbSchemasResponse,
+  EsDocResponse,
+  EsDocsResponse,
+  EsIndicesResponse,
+  EsMappingResponse,
   RedisDatabasesResponse,
   RedisKeysResponse,
   RedisValueResponse,
@@ -122,6 +126,27 @@ export type QueryCommand =
       dbIndex: number;
       key: string;
       json: boolean;
+    }
+  // /_db/elasticsearch/{indices,mapping,docs,doc} の read-only サブセットを
+  // CLI に薄く被せたもの。Redis と同じく write 系 (/_db/elasticsearch/write)
+  // は CLI から触らない (browser pane だけが入口)。
+  | { kind: "es-indices"; db: string; json: boolean }
+  | { kind: "es-mapping"; db: string; index: string; json: boolean }
+  | {
+      kind: "es-docs";
+      db: string;
+      index: string;
+      q?: string;
+      size?: number;
+      searchAfter?: unknown[];
+      json: boolean;
+    }
+  | {
+      kind: "es-doc";
+      db: string;
+      index: string;
+      id: string;
+      json: boolean;
     };
 
 export type QueryArgs = {
@@ -155,6 +180,10 @@ Usage:
   code-viewer query redis databases --db <id> [--json]
   code-viewer query redis keys --db <id> --db-index <0..15> [--pattern <glob>] [--cursor <cursor>] [--count <1..10000>] [--json]
   code-viewer query redis value --db <id> --db-index <0..15> --key <name> [--json]
+  code-viewer query elasticsearch indices --db <id> [--json]
+  code-viewer query elasticsearch mapping --db <id> --index <name> [--json]
+  code-viewer query elasticsearch docs --db <id> --index <name> [--q <lucene>] [--size <1..10000>] [--search-after '<json-array>'] [--json]
+  code-viewer query elasticsearch doc --db <id> --index <name> --id <doc-id> [--json]
   code-viewer query agent-help
 
 Global options:
@@ -180,6 +209,9 @@ Examples:
   code-viewer query redis databases --db docker:redis-svc --json
   code-viewer query redis keys --db docker:redis-svc --db-index 0 --pattern '*' --json
   code-viewer query redis value --db docker:redis-svc --db-index 0 --key sample:key
+  code-viewer query elasticsearch indices --db docker:es-svc --json
+  code-viewer query elasticsearch docs --db docker:es-svc --index sample-index --size 10 --json
+  code-viewer query elasticsearch doc --db docker:es-svc --index sample-index --id sample-id --json
 `;
 
 export const QUERY_AGENT_HELP = `code-viewer query — agent guide
@@ -210,8 +242,9 @@ can review what you queried.
    field as --db on the following commands:
    code-viewer query sources --json
    To skip the per-SQL-source "what command should I run next?" step, use
-   the shortcut that emits shell-pasteable schema/exec lines for SQL sources
-   and browser-pane hints for non-SQL sources. SQL source blocks also include
+   the shortcut that emits shell-pasteable schema/exec lines for SQL sources,
+   matching redis/elasticsearch CLI lines for those kinds, and a browser-pane
+   hint only for s3. SQL source blocks also include
    paste-safe list --db ... --json and snapshot list --db ... --json so you
    can step into the existing query history and snapshot store without
    composing those commands yourself. Each emitted SQL command line pins
@@ -334,14 +367,43 @@ cannot mutate keys (use the browser pane for writes).
    code-viewer query redis value --db docker:redis-svc --db-index 0 \\
        --key sample:key --json
 
+## Workflow: Elasticsearch read-only inspect
+
+Use this to look inside a discovered Elasticsearch source from the CLI
+without opening the browser Datastores tab. Only the read endpoints are
+wired (\`/_db/elasticsearch/{indices,mapping,docs,doc}\`); CLI cannot
+mutate documents (use the browser pane for writes).
+
+1. List indices with name / doc count / size / health. Use the index
+   names as --index on every following call:
+   code-viewer query elasticsearch indices --db docker:es-svc --json
+2. Inspect a single index's mapping (field types / nested properties):
+   code-viewer query elasticsearch mapping --db docker:es-svc \\
+       --index sample-index --json
+3. Search documents. --q is a Lucene-style query (forwarded to ES via
+   "_search?q=..."). --size caps hits (default = server's, hard cap
+   10000). For paging, pass --search-after with the previous response's
+   lastSort JSON array verbatim:
+   code-viewer query elasticsearch docs --db docker:es-svc \\
+       --index sample-index --q 'status:active' --size 10 --json
+   # next page (paste lastSort from previous response into --search-after):
+   code-viewer query elasticsearch docs --db docker:es-svc \\
+       --index sample-index --q 'status:active' --size 10 \\
+       --search-after '[1700000000000,"abc"]' --json
+4. Read a single doc by index/id:
+   code-viewer query elasticsearch doc --db docker:es-svc \\
+       --index sample-index --id sample-id --json
+
 ## Output contract
 
 - sources: human-readable id/kind/name lines on stdout (default), or pretty
   JSON of the full /_db/files response with --json, or shell-pasteable
   next-step commands per SQL source with --commands (schema --with-columns +
   exec "SELECT 1" --no-save + list --json + snapshot list --json for
-  sqlite/postgresql/mysql, plus schemas for postgresql; non-SQL sources get
-  a browser-pane hint; every emitted SQL command line pins --server
+  sqlite/postgresql/mysql, plus schemas for postgresql; redis sources emit
+  redis databases/keys lines, elasticsearch sources emit
+  elasticsearch indices/docs lines, and s3 sources emit a browser-pane hint;
+  every emitted SQL command line pins --server
   <quoted-url> so the suggestion never falls back to auto-discovery in a
   different shell; db ids and the server URL are wrapped in POSIX
   single-quotes). --json and --commands are mutually exclusive.
@@ -422,6 +484,21 @@ cannot mutate keys (use the browser pane for writes).
   browser value pane — binary content lands in binaryBase64 + truncated /
   fullSize). --json wraps the same RedisValue inside RedisValueResponse so
   AI also sees dbId / dbIndex / key.
+- elasticsearch indices: name<TAB>docCount<TAB>sizeBytes<TAB>health lines
+  (default; health is "?" when ES omits it), or the full EsIndicesResponse
+  pretty JSON (--json).
+- elasticsearch mapping: the raw EsMapping (\`{ index, properties }\`) as
+  pretty JSON (default; mirrors the browser mapping pane). --json wraps the
+  same mapping inside EsMappingResponse so AI also sees dbId.
+- elasticsearch docs: _id<TAB>_score lines (default; score is "?" when ES
+  omits it), followed by trailing "# lastSort: <json>" (only when ES sent a
+  sort cursor — paste it verbatim into the next call's --search-after) and
+  "# totalHits: <n> (returned <k>)". 0 hits prints "no elasticsearch hits"
+  to stderr (still exit 0). --json emits the full EsDocsResponse.
+- elasticsearch doc: the document _source as pretty JSON (default; mirrors
+  the browser doc pane). Server returns 200 with found=false when the id is
+  missing — text path prints "not found: <index>/<id>" to stderr (exit 0);
+  --json emits the full EsDocResponse including found / seqNo / primaryTerm.
 - Any error: stderr + non-zero exit. Reasons from the server arrive verbatim
   (text/plain or {error:...} JSON, whichever the server sent).
 
@@ -467,6 +544,13 @@ const VALUE_FLAGS = new Set([
   "--cursor",
   "--count",
   "--key",
+  // elasticsearch read-only サブコマンド用。--index は mapping/docs/doc 必須、
+  // --id は doc 必須、--q は docs の lucene クエリ、--size は docs の最大件数、
+  // --search-after は docs のページングカーソル (JSON array)。
+  "--index",
+  "--q",
+  "--size",
+  "--search-after",
 ]);
 
 const BOOL_FLAGS = new Set([
@@ -689,7 +773,143 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   if (subcommand === "redis") {
     return parseRedisSubcommand(rest, options, flags, globalArgs);
   }
+  if (subcommand === "elasticsearch") {
+    return parseElasticsearchSubcommand(rest, options, flags, globalArgs);
+  }
   return { ok: false, error: `unknown query command: ${subcommand}` };
+}
+
+function parseElasticsearchSubcommand(
+  rest: string[],
+  options: Map<string, string>,
+  flags: Set<string>,
+  globalArgs: { cwd?: string; server?: string },
+): QueryParseResult {
+  const action = rest[1];
+  if (!action) {
+    return {
+      ok: false,
+      error:
+        "elasticsearch requires a sub-action: indices | mapping | docs | doc",
+    };
+  }
+  if (
+    action !== "indices" &&
+    action !== "mapping" &&
+    action !== "docs" &&
+    action !== "doc"
+  ) {
+    return { ok: false, error: `unknown elasticsearch sub-action: ${action}` };
+  }
+  if (rest.length > 2) {
+    return {
+      ok: false,
+      error: `elasticsearch ${action} does not accept positional argument: ${rest[2]}`,
+    };
+  }
+  const reject = rejectUnsupportedEsFlags(action, options, flags);
+  if (reject) return reject;
+
+  const db = options.get("--db");
+  if (!db) {
+    return { ok: false, error: `elasticsearch ${action} requires --db <id>` };
+  }
+  const json = flags.has("--json");
+
+  if (action === "indices") {
+    return {
+      ok: true,
+      args: {
+        command: { kind: "es-indices", db, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // mapping / docs / doc は --index 必須。
+  const index = options.get("--index");
+  if (index === undefined || index === "") {
+    return {
+      ok: false,
+      error: `elasticsearch ${action} requires --index <name>`,
+    };
+  }
+
+  if (action === "mapping") {
+    return {
+      ok: true,
+      args: {
+        command: { kind: "es-mapping", db, index, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  if (action === "doc") {
+    const id = options.get("--id");
+    if (id === undefined || id === "") {
+      return {
+        ok: false,
+        error: "elasticsearch doc requires --id <doc-id>",
+      };
+    }
+    return {
+      ok: true,
+      args: {
+        command: { kind: "es-doc", db, index, id, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // action === "docs"
+  const q = options.get("--q");
+  const sizeRaw = options.get("--size");
+  let size: number | undefined;
+  if (sizeRaw !== undefined) {
+    const n = Number(sizeRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 10000) {
+      return {
+        ok: false,
+        error: `--size must be an integer in [1, 10000] (got ${sizeRaw})`,
+      };
+    }
+    size = n;
+  }
+  const sa = options.get("--search-after");
+  let searchAfter: unknown[] | undefined;
+  if (sa !== undefined) {
+    try {
+      const parsed = JSON.parse(sa);
+      if (!Array.isArray(parsed)) {
+        return {
+          ok: false,
+          error: "--search-after must be a JSON array (e.g. '[1700000000000]')",
+        };
+      }
+      searchAfter = parsed;
+    } catch {
+      return {
+        ok: false,
+        error: "--search-after must be valid JSON (e.g. '[1700000000000]')",
+      };
+    }
+  }
+  return {
+    ok: true,
+    args: {
+      command: {
+        kind: "es-docs",
+        db,
+        index,
+        q,
+        size,
+        searchAfter,
+        json,
+      },
+      ...globalArgs,
+    },
+  };
 }
 
 // redis サブコマンドごとに「使う option / flag」を申告し、それ以外が
@@ -816,6 +1036,43 @@ function rejectUnsupportedRedisFlags(
   return rejectUnknownQueryFlags(
     `redis ${action}`,
     REDIS_ACTION_ALLOWLIST[action],
+    options,
+    flags,
+  );
+}
+
+// elasticsearch サブコマンドごとの allowlist。redis と同じ精神で silent drop
+// を防ぐ。--cwd / --server は global なのでここでは見ない。
+const ES_ACTION_ALLOWLIST: Record<
+  "indices" | "mapping" | "docs" | "doc",
+  { options: ReadonlySet<string>; flags: ReadonlySet<string> }
+> = {
+  indices: {
+    options: new Set(["--db"]),
+    flags: new Set(["--json"]),
+  },
+  mapping: {
+    options: new Set(["--db", "--index"]),
+    flags: new Set(["--json"]),
+  },
+  docs: {
+    options: new Set(["--db", "--index", "--q", "--size", "--search-after"]),
+    flags: new Set(["--json"]),
+  },
+  doc: {
+    options: new Set(["--db", "--index", "--id"]),
+    flags: new Set(["--json"]),
+  },
+};
+
+function rejectUnsupportedEsFlags(
+  action: "indices" | "mapping" | "docs" | "doc",
+  options: Map<string, string>,
+  flags: Set<string>,
+): QueryParseResult | null {
+  return rejectUnknownQueryFlags(
+    `elasticsearch ${action}`,
+    ES_ACTION_ALLOWLIST[action],
     options,
     flags,
   );
@@ -1312,6 +1569,135 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     return runRedisDatabases(serverUrl, command);
   if (command.kind === "redis-keys") return runRedisKeys(serverUrl, command);
   if (command.kind === "redis-value") return runRedisValue(serverUrl, command);
+  if (command.kind === "es-indices") return runEsIndices(serverUrl, command);
+  if (command.kind === "es-mapping") return runEsMapping(serverUrl, command);
+  if (command.kind === "es-docs") return runEsDocs(serverUrl, command);
+  if (command.kind === "es-doc") return runEsDoc(serverUrl, command);
+}
+
+async function runEsIndices(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "es-indices" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/elasticsearch/indices", {
+    db: command.db,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list elasticsearch indices",
+  )) as EsIndicesResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: name<TAB>docCount<TAB>sizeBytes<TAB>health(or "?")
+  // AI/human が --db と次に組む command (mapping/docs) に貼りやすい形。
+  for (const idx of data.indices) {
+    console.log(
+      `${idx.name}\t${idx.docCount}\t${idx.sizeBytes}\t${idx.health ?? "?"}`,
+    );
+  }
+}
+
+async function runEsMapping(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "es-mapping" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/elasticsearch/mapping", {
+    db: command.db,
+    index: command.index,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read elasticsearch mapping",
+  )) as EsMappingResponse;
+  // mapping は元から木構造なので、default も pretty JSON で良い (text の独自
+  // 整形は誤読を招くだけ。redis value の default が RedisValue を JSON で出すのと
+  // 同じ精神)。--json で出るのは "mapping を含む full envelope"。
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  console.log(JSON.stringify(data.mapping, null, 2));
+}
+
+async function runEsDocs(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "es-docs" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/elasticsearch/docs", {
+    db: command.db,
+    index: command.index,
+    q: command.q,
+    size: command.size !== undefined ? String(command.size) : undefined,
+    searchAfter:
+      command.searchAfter !== undefined
+        ? JSON.stringify(command.searchAfter)
+        : undefined,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "search elasticsearch docs",
+  )) as EsDocsResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: 1 行 1 hit。<id>\t<score or "?"> でページング用 hint も末尾に出す。
+  if (data.hits.length === 0) {
+    console.error("no elasticsearch hits");
+  } else {
+    for (const hit of data.hits) {
+      const score =
+        hit._score === null || hit._score === undefined ? "?" : hit._score;
+      console.log(`${hit._id}\t${score}`);
+    }
+  }
+  // server は lastSort を「次の search_after にそのまま渡せる array」として返す。
+  // 0 件のときは undefined。AI がページング判定に使えるよう text にも出す。
+  if (data.lastSort !== undefined) {
+    console.log(`# lastSort: ${JSON.stringify(data.lastSort)}`);
+  }
+  // 件数のサマリを末尾に。totalHits は ES の hits.total.value。
+  console.log(`# totalHits: ${data.totalHits} (returned ${data.hits.length})`);
+}
+
+async function runEsDoc(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "es-doc" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/elasticsearch/doc", {
+    db: command.db,
+    index: command.index,
+    id: command.id,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read elasticsearch doc",
+  )) as EsDocResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (!data.found) {
+    // 404 相当を text でも明示する (server が 200 で found=false を返す経路)。
+    console.error(`not found: ${command.index}/${command.id}`);
+    return;
+  }
+  // 既定 text は _source を pretty JSON で出す (redis value と同じ精神)。
+  console.log(JSON.stringify(data.source, null, 2));
 }
 
 async function runRedisDatabases(
@@ -1475,7 +1861,10 @@ function commentText(value: string): string {
 //   - SQL source: 安全な exec 例 (SELECT 1 + --no-save)
 //   - SQL source: query history list と snapshot list (browser tab を開かず
 //     既存の調査履歴 / snapshot を確認するエントリポイント)
-//   - non-SQL source: query CLI の schema/exec ではなく専用 pane へ誘導
+//   - redis source: redis databases / keys の調査入口を生成
+//   - elasticsearch source: elasticsearch indices / docs の調査入口を生成
+//   - s3 source: query CLI の schema/exec ではなく browser pane へ誘導
+//     (read-only CLI 未対応のため)
 // db id と server URL は常に shellSingleQuote で囲む。空白/シングルクォート
 // /コロン/スラッシュ が含まれていても bash/zsh にそのまま貼れる形を保証する。
 // --server を毎行に prefix することで、--commands 起動時の resolved server
@@ -1500,7 +1889,16 @@ function buildSourceCommands(
     );
     return lines;
   }
-  if (file.kind === "elasticsearch" || file.kind === "s3") {
+  if (file.kind === "elasticsearch") {
+    // ES も SQL とは別 API。indices で名前を取り → docs で中身を見る、の最短
+    // 動線を出す。AI は <index-name> の placeholder を見て docs に流す。
+    lines.push(`${cli} elasticsearch indices --db ${quotedId} --json`);
+    lines.push(
+      `${cli} elasticsearch docs --db ${quotedId} --index <index-name> --size 10 --json`,
+    );
+    return lines;
+  }
+  if (file.kind === "s3") {
     lines.push(
       `# ${file.kind}: use the browser Datastores tab; query schema/exec commands are SQL-only`,
     );

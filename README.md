@@ -304,8 +304,10 @@ code-viewer query sources --json
 # shell-pasteable schema/exec lines for SQL sources, plus paste-safe
 # `list --db ... --json` and `snapshot list --db ... --json` so you can
 # step into the existing query history and snapshot store without
-# rebuilding those commands. Non-SQL sources get a browser-pane hint
-# instead. Every emitted SQL command line pins --server '<url>' to the
+# rebuilding those commands. Redis sources get
+# `redis databases / redis keys` lines, Elasticsearch sources get
+# `elasticsearch indices / elasticsearch docs` lines, and S3 sources still
+# get a browser-pane hint. Every emitted SQL command line pins --server '<url>' to the
 # same server URL this invocation resolved, so pasting them elsewhere
 # never silently re-runs auto-discovery. --json and --commands are
 # mutually exclusive. Notice/comment metadata is collapsed to one line
@@ -416,8 +418,44 @@ appears as a trailing `# nextCursor: <cursor>` line so pagination needs
 no JSON parsing; 0 keys prints `no redis keys` to stderr and exits 0.
 `value`'s default output is the `RedisValue` payload as pretty JSON;
 `--json` wraps the same payload in the full `RedisValueResponse`
-(dbId / dbIndex / key included). Elasticsearch and S3 sources are not
-yet CLI-wired and still go through the browser Datastores tab.
+(dbId / dbIndex / key included).
+
+For discovered Elasticsearch sources, `code-viewer query elasticsearch`
+exposes the same read-only endpoints the browser's Datastores tab uses.
+The CLI calls the existing `/_db/elasticsearch/indices`, `/mapping`,
+`/docs`, and `/doc` routes (writes stay browser-only):
+
+```sh
+# List indices: name, doc count, byte size, health.
+code-viewer query elasticsearch indices --db docker:es-svc --json
+
+# Inspect a single index's mapping (field types / nested properties).
+code-viewer query elasticsearch mapping --db docker:es-svc \
+    --index sample-index --json
+
+# Search documents with a Lucene query; --size caps hits, --search-after
+# pages by feeding back the previous response's lastSort JSON array.
+code-viewer query elasticsearch docs --db docker:es-svc \
+    --index sample-index --q 'status:active' --size 10 --json
+code-viewer query elasticsearch docs --db docker:es-svc \
+    --index sample-index --q 'status:active' --size 10 \
+    --search-after '[1700000000000,"abc"]' --json
+
+# Read a single document by id.
+code-viewer query elasticsearch doc --db docker:es-svc \
+    --index sample-index --id sample-id --json
+```
+
+Default text output is tab-separated:
+`name<TAB>docCount<TAB>sizeBytes<TAB>health` for `indices`,
+`_id<TAB>_score` per hit for `docs` (followed by `# lastSort: <json>` and
+`# totalHits: <n> (returned <k>)` trailing lines so paging needs no JSON
+parsing). `mapping` and `doc` default to pretty JSON of the inner payload
+(`EsMapping` and `_source`). 0 hits on `docs` prints `no elasticsearch
+hits` to stderr (exit 0); a missing `doc` id prints
+`not found: <index>/<id>` to stderr (exit 0). `--json` always emits the
+full server response envelope. S3 sources are not yet CLI-wired and
+still go through the browser Datastores tab.
 
 AI agents who don't yet know which subcommand they need can run
 `code-viewer agent-help` once. It prints a short index of the six

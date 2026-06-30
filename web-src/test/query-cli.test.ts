@@ -1087,6 +1087,343 @@ describe("parseQueryArgs redis", () => {
   });
 });
 
+describe("parseQueryArgs elasticsearch", () => {
+  test("elasticsearch without an action is rejected", () => {
+    expect(parseQueryArgs(["elasticsearch"])).toEqual({
+      ok: false,
+      error:
+        "elasticsearch requires a sub-action: indices | mapping | docs | doc",
+    });
+  });
+
+  test("unknown elasticsearch sub-action is rejected", () => {
+    expect(parseQueryArgs(["elasticsearch", "wat"])).toEqual({
+      ok: false,
+      error: "unknown elasticsearch sub-action: wat",
+    });
+  });
+
+  test("each action requires --db", () => {
+    for (const action of ["indices", "mapping", "docs", "doc"] as const) {
+      expect(parseQueryArgs(["elasticsearch", action])).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} requires --db <id>`,
+      });
+    }
+  });
+
+  test("indices captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-indices",
+      db: "docker:es-svc",
+      json: true,
+    });
+  });
+
+  test("mapping / docs / doc require --index", () => {
+    for (const action of ["mapping", "docs", "doc"] as const) {
+      expect(
+        parseQueryArgs(["elasticsearch", action, "--db", "docker:es-svc"]),
+      ).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} requires --index <name>`,
+      });
+    }
+  });
+
+  test("doc requires --id", () => {
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "doc",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "elasticsearch doc requires --id <doc-id>",
+    });
+  });
+
+  test("docs --size validates the [1..10000] range", () => {
+    for (const bad of ["0", "10001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "elasticsearch",
+          "docs",
+          "--db",
+          "docker:es-svc",
+          "--index",
+          "sample-index",
+          "--size",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--size must be an integer in [1, 10000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("docs --search-after rejects non-array and non-JSON inputs", () => {
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "docs",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+        "--search-after",
+        "not-json",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--search-after must be valid JSON (e.g. '[1700000000000]')",
+    });
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "docs",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+        "--search-after",
+        '{"not":"array"}',
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--search-after must be a JSON array (e.g. '[1700000000000]')",
+    });
+  });
+
+  test("docs captures --q / --size / --search-after / --json", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--q",
+      "status:active",
+      "--size",
+      "25",
+      "--search-after",
+      '[1700000000000,"abc"]',
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-docs",
+      db: "docker:es-svc",
+      index: "sample-index",
+      q: "status:active",
+      size: 25,
+      searchAfter: [1700000000000, "abc"],
+      json: true,
+    });
+  });
+
+  test("doc captures --index and --id", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-doc",
+      db: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-id",
+      json: false,
+    });
+  });
+
+  test("indices rejects options that belong to mapping / docs / doc", () => {
+    const baseArgs = ["elasticsearch", "indices", "--db", "docker:es-svc"];
+    for (const bad of ["--index", "--id", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch indices does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("mapping rejects unrelated docs/doc/redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of [
+      "--id",
+      "--q",
+      "--size",
+      "--search-after",
+      "--db-index",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch mapping does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("docs rejects --id and unrelated redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of ["--id", "--db-index", "--key", "--pattern", "--count"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch docs does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("doc rejects --q / --size / --search-after and redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ];
+    for (const bad of [
+      "--q",
+      "--size",
+      "--search-after",
+      "--db-index",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch doc does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("each action rejects stray positional arguments", () => {
+    for (const action of ["indices", "mapping", "docs", "doc"] as const) {
+      expect(
+        parseQueryArgs([
+          "elasticsearch",
+          action,
+          "extra",
+          "--db",
+          "docker:es-svc",
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} does not accept positional argument: extra`,
+      });
+    }
+  });
+});
+
+describe("parseQueryArgs rejects elasticsearch-only flags on non-elasticsearch subcommands", () => {
+  // Redis 用と同じ精神: --index / --q / --size / --search-after が SQL 系や
+  // redis 系に流入して silent ignore されるのを防ぐ。
+  test("exec rejects each elasticsearch-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("search rejects each elasticsearch-only option", () => {
+    const baseArgs = ["search", "--db", "a.db", "--term", "needle"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `search does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot create rejects each elasticsearch-only option", () => {
+    const baseArgs = ["snapshot", "create", "--db", "a.db"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot create does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff rows rejects each elasticsearch-only option", () => {
+    const baseArgs = [
+      "diff",
+      "rows",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--table",
+      "users",
+    ];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff rows does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("redis keys rejects each elasticsearch-only option", () => {
+    const baseArgs = [
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `redis keys does not accept ${bad}`,
+      });
+    }
+  });
+});
+
 describe("shellSingleQuote", () => {
   test("wraps plain values in single quotes", () => {
     expect(shellSingleQuote("app.db")).toBe("'app.db'");
@@ -4597,7 +4934,7 @@ describe("runQueryCli redis integration", () => {
     ).toBe(false);
   });
 
-  test("sources --commands keeps the browser-pane hint for elasticsearch and s3", async () => {
+  test("sources --commands emits paste-safe elasticsearch commands and keeps the browser-pane hint for s3", async () => {
     const payload = {
       files: [
         {
@@ -4626,14 +4963,369 @@ describe("runQueryCli redis integration", () => {
 
     expect(harness.exits).toEqual([]);
     const lines = harness.logs;
+    // elasticsearch is now wired in the CLI: emits paste-safe commands, not a
+    // browser-pane hint.
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' elasticsearch indices --db 'docker:es-svc' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' elasticsearch docs --db 'docker:es-svc' --index <index-name> --size 10 --json`,
+        ),
+      ),
+    ).toBe(true);
     expect(
       lines.some((line) =>
         line.includes("elasticsearch: use the browser Datastores tab"),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    // s3 is still browser-only.
     expect(
       lines.some((line) => line.includes("s3: use the browser Datastores tab")),
     ).toBe(true);
+  });
+});
+
+describe("runQueryCli elasticsearch integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("indices --json hits /_db/elasticsearch/indices and emits verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      indices: [
+        {
+          name: "sample-index",
+          docCount: 12,
+          sizeBytes: 4096,
+          health: "green",
+          status: "open",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/elasticsearch/indices?db=docker%3Aes-svc`,
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("indices default text emits name<TAB>docCount<TAB>sizeBytes<TAB>health", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      indices: [
+        {
+          name: "sample-a",
+          docCount: 3,
+          sizeBytes: 256,
+          health: "green",
+        },
+        // health is intentionally absent here to verify the "?" fallback.
+        { name: "sample-b", docCount: 0, sizeBytes: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample-a\t3\t256\tgreen",
+      "sample-b\t0\t0\t?",
+    ]);
+  });
+
+  test("mapping --json emits the full envelope; default emits just the mapping payload", async () => {
+    const mapping = {
+      index: "sample-index",
+      properties: {
+        title: { type: "text" },
+        status: { type: "keyword" },
+      },
+    };
+    const envelope = { dbId: "docker:es-svc", mapping };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(envelope) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(envelope) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe(
+      "/_db/elasticsearch/mapping",
+    );
+    expect(new URL(harness.requests[1].url).searchParams.get("index")).toBe(
+      "sample-index",
+    );
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(envelope, null, 2));
+
+    // Run again without --json to confirm default trims to the inner payload.
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(mapping, null, 2));
+  });
+
+  test("docs wires --q / --size / --search-after and prints hits + paging hints", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      hits: [
+        {
+          _index: "sample-index",
+          _id: "doc-a",
+          _score: 1.5,
+          _source: { a: 1 },
+        },
+        {
+          _index: "sample-index",
+          _id: "doc-b",
+          _score: null,
+          _source: { b: 2 },
+        },
+      ],
+      totalHits: 42,
+      lastSort: [1700000000000, "doc-b"],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--q",
+      "status:active",
+      "--size",
+      "10",
+      "--search-after",
+      '[1699999999999,"doc-z"]',
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/elasticsearch/docs");
+    expect(url.searchParams.get("db")).toBe("docker:es-svc");
+    expect(url.searchParams.get("index")).toBe("sample-index");
+    expect(url.searchParams.get("q")).toBe("status:active");
+    expect(url.searchParams.get("size")).toBe("10");
+    // search-after is forwarded as the literal JSON the AI agent supplied.
+    expect(url.searchParams.get("searchAfter")).toBe('[1699999999999,"doc-z"]');
+
+    expect(harness.logs).toEqual([
+      "doc-a\t1.5",
+      "doc-b\t?",
+      '# lastSort: [1700000000000,"doc-b"]',
+      "# totalHits: 42 (returned 2)",
+    ]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("docs with zero hits prints `no elasticsearch hits` to stderr (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      hits: [],
+      totalHits: 0,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["# totalHits: 0 (returned 0)"]);
+    expect(harness.errs).toEqual(["no elasticsearch hits"]);
+  });
+
+  test("doc --json emits the full envelope; default emits _source for found docs", async () => {
+    const source = { title: "sample", value: 7 };
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-id",
+      found: true,
+      source,
+      seqNo: 3,
+      primaryTerm: 1,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+      "--json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe(
+      "/_db/elasticsearch/doc",
+    );
+    expect(new URL(harness.requests[1].url).searchParams.get("id")).toBe(
+      "sample-id",
+    );
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(payload, null, 2));
+
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(source, null, 2)]);
+  });
+
+  test("doc with found=false prints `not found` to stderr (exit 0, default text mode)", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-missing",
+      found: false,
+      source: null,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-missing",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["not found: sample-index/sample-missing"]);
+  });
+
+  test("indices surfaces a server 4xx verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "missing dbId",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("list elasticsearch indices failed")).toBe(
+      true,
+    );
+    expect(harness.errs[0].includes("missing dbId")).toBe(true);
   });
 });
 
