@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type {
   AnnotationDatabaseTab,
   AnnotationEntry,
@@ -6,9 +6,8 @@ import type {
   AnnotationSession,
   AnnotationsState,
 } from "../core/types";
-import { parseAnnotationLine } from "./annotations";
-import * as git from "./git";
-import { readServerRegistry } from "./server-registry";
+import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
+import { ensureServerUrl, resolveRepoRoot, takeValue } from "./cli-helpers";
 
 export type AnnotateCommand =
   | { kind: "help" }
@@ -232,33 +231,10 @@ location and renders your explanation directly under the annotated lines.
   not create.
 `;
 
-function takeValue(
-  argv: string[],
-  index: number,
-  flag: string,
-): { value: string; next: number } | { error: string } {
-  const value = argv[index + 1];
-  if (value === undefined) return { error: `${flag} requires a value` };
-  return { value, next: index + 1 };
-}
-
 function parsePosition(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : Number.NaN;
-}
-
-function parseDatabaseTab(
-  value: string | undefined,
-): AnnotationDatabaseTab | undefined {
-  return value === "data" ||
-    value === "query" ||
-    value === "schema" ||
-    value === "er" ||
-    value === "search" ||
-    value === "snapshot"
-    ? value
-    : undefined;
 }
 
 function parseFilter(value: string): { column: string; value: string } | null {
@@ -413,7 +389,7 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     if (Number.isNaN(position))
       return { ok: false, error: "--position must be a positive integer" };
     const rawTab = options.get("--tab");
-    const tab = parseDatabaseTab(rawTab);
+    const tab = normalizeDatabaseTab(rawTab);
     if (rawTab !== undefined && tab === undefined)
       return {
         ok: false,
@@ -605,52 +581,6 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function resolveRepoRoot(cwdOption: string | undefined): string {
-  const base = cwdOption || process.cwd();
-  try {
-    return git.repoRoot(base) || realpathSync(base);
-  } catch {
-    console.error(`--cwd must point to an existing directory: ${base}`);
-    process.exit(1);
-  }
-}
-
-async function serverReachable(serverUrl: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${serverUrl}/_annotations`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// Reuse a running server for this repository when one is registered and
-// reachable. The CLI never starts a server itself — ask the user to run one.
-async function ensureServerUrl(
-  root: string,
-  override?: string,
-): Promise<string> {
-  if (override) {
-    const url = override.replace(/\/+$/, "");
-    if (await serverReachable(url)) return url;
-    console.error(`could not reach the code-viewer server at ${url}.`);
-    process.exit(1);
-  }
-  const registered = readServerRegistry(root);
-  if (registered) {
-    const url = registered.url.replace(/\/+$/, "");
-    if (await serverReachable(url)) return url;
-  }
-  console.error(
-    "no running code-viewer server for this repository.\n" +
-      `Start one manually (from ${root}):\n` +
-      "  code-viewer",
-  );
-  process.exit(1);
-}
-
 async function request(
   serverUrl: string,
   method: "GET" | "POST",
@@ -745,7 +675,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   const root = resolveRepoRoot(cwd);
-  const serverUrl = await ensureServerUrl(root, server);
+  const serverUrl = await ensureServerUrl(root, server, "/_annotations");
 
   if (command.kind === "start") {
     const result = (await request(serverUrl, "POST", {

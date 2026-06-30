@@ -284,10 +284,10 @@ Open Datastores in the global navigation to access:
 
 ### CLI
 
-AI agents can run read-only queries, search content across tables, and
-capture snapshots / diffs from the command line. The same operations are
-mirrored under the Datastores tab in the browser UI, and every CLI result is
-written to the per-repository history visible in the browser.
+AI agents can run read-only queries and capture snapshots / diffs from the
+command line. Global search remains available in the browser's Datastores tab.
+Query results are written to the per-repository history visible in the
+browser; snapshots are stored in the snapshot store.
 
 ```sh
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
@@ -296,11 +296,9 @@ code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
 code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
     --max-rows 1 --no-save
 
+# Show saved query history
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
-
-code-viewer query search --db app.db --term "john@example.com" \
-    --tables users,orders --include-non-text --max-hits 20
 
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test"
@@ -308,12 +306,9 @@ code-viewer query snapshot list --db app.db --json
 code-viewer query snapshot note --id snap-abc123 --note "Updated context"
 code-viewer query snapshot delete --id snap-abc123
 
-code-viewer query diff create --before snap-abc123 --after snap-def456 \
-    --note "User registration test"
-code-viewer query diff tables --id diff-xyz789
-code-viewer query diff rows --id diff-xyz789 --table users --type inserted
-code-viewer query diff list --db app.db --json
-code-viewer query diff delete --id diff-xyz789
+code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
+code-viewer query diff rows --before snap-abc123 --after snap-def456 \
+    --table users --json
 ```
 
 `code-viewer query --help` shows all command syntax. `code-viewer query

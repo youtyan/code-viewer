@@ -26,10 +26,13 @@ view, so the human can review what you queried.
 
 ## Workflow
 
-1. List available databases:
+1. Identify the database path or datastore id from the browser's Database tab,
+   current route, project fixtures, or the user's instruction.
+
+   To inspect saved query history, run:
 
    ```sh
-   code-viewer query list
+   code-viewer query list --json
    ```
 
 2. Execute a query:

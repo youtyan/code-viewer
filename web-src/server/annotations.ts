@@ -80,7 +80,9 @@ function normalizeRange(raw: unknown): { from: string; to: string } {
   return { from, to };
 }
 
-function normalizeDatabaseTab(raw: unknown): AnnotationDatabaseTab | undefined {
+export function normalizeDatabaseTab(
+  raw: unknown,
+): AnnotationDatabaseTab | undefined {
   return raw === "data" ||
     raw === "query" ||
     raw === "schema" ||
