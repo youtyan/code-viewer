@@ -1114,6 +1114,11 @@ export function createSidebar(deps: SidebarDeps) {
   ) {
     const ul = $("#filelist");
     const repoSidebar = !!onFileClick;
+    if (!repoSidebar) {
+      const repoTarget =
+        document.querySelector<HTMLElement>("#repo-target-wrap");
+      if (repoTarget) repoTarget.hidden = true;
+    }
     const treeMode = STATE.sbView === "tree" || repoSidebar;
     ul.innerHTML = "";
     ul.classList.toggle("tree", treeMode);
