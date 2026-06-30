@@ -3040,7 +3040,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
     if (action === "open-help") {
       cancelActiveSourceLoad("navigation");
-      setPageMode();
+      // Order matters: setRoute mutates STATE.route, and setPageMode reads
+      // STATE.route.screen to swap body classes. Calling setPageMode first
+      // would leave the prior layout (sidebar visible, etc.) on top of the
+      // Help page.
       setRoute({
         screen: "help",
         lang:
@@ -3050,6 +3053,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         section: "keybindings",
         range: currentRange(),
       });
+      setPageMode();
       renderHelpPage();
       setStatus("live");
       return true;
