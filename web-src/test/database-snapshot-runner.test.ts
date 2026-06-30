@@ -12,6 +12,27 @@ function withTempProject<T>(run: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe("database snapshot runner", () => {
+  test("rejects incomplete snapshot capability sources with an explicit error", async () => {
+    await withTempProject(async (dir) => {
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+      };
+
+      let message = "";
+      try {
+        await runSnapshot(dir, source, "db.sqlite", ["users"], "");
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+
+      expect(message).toBe(
+        "data source does not support snapshot (missing SnapshotIterable capability)",
+      );
+      expect(await listSnapshots(dir)).toHaveLength(0);
+    });
+  });
+
   test("passes cancellation through and finalizes the snapshot as error", async () => {
     await withTempProject(async (dir) => {
       const abort = new AbortController();
