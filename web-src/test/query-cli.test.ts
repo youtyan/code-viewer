@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   parseQueryArgs,
   QUERY_AGENT_HELP,
@@ -6,6 +8,8 @@ import {
   type QueryCommand,
   runQueryCli,
 } from "../server/query-cli";
+
+const REPO_ROOT = join(import.meta.dir, "..", "..");
 
 describe("parseQueryArgs", () => {
   test("returns help on bare invocation, --help, and -h", () => {
@@ -925,5 +929,148 @@ describe("runQueryCli search integration", () => {
       ok: false,
       error: "--timeout must be a positive integer (sec)",
     });
+  });
+});
+
+// Markdown 内のコードフェンス (```...```) からだけ抽出する。
+// 散文中の `code-viewer query ...` (バックティック付き) は人間向けの言及で
+// 構文契約の対象外なので無視する。`#` で始まる行はコメントなのでスキップ。
+function codeFenceLines(text: string): string[] {
+  const out: string[] = [];
+  let inFence = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) continue;
+    if (trimmed.startsWith("#")) continue;
+    out.push(raw);
+  }
+  return out;
+}
+
+// 行末 `\` 継続を join して 1 行コマンドにまとめる。
+function joinBackslashContinuations(lines: string[]): string[] {
+  const joined: string[] = [];
+  let acc = "";
+  for (const line of lines) {
+    if (/\\\s*$/.test(line)) {
+      acc += `${line.replace(/\\\s*$/, "")} `;
+    } else {
+      joined.push((acc + line).trim());
+      acc = "";
+    }
+  }
+  if (acc) joined.push(acc.trim());
+  return joined.filter((l) => l.length > 0);
+}
+
+// 単純なシェル風 split。"..."、'...' で囲まれた範囲のスペースは保存する。
+// バックスラッシュエスケープは double-quote 内のみで簡易対応。
+function shellSplit(s: string): string[] {
+  const result: string[] = [];
+  let buf = "";
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inSingle) {
+      if (c === "'") inSingle = false;
+      else buf += c;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false;
+      else if (c === "\\" && i + 1 < s.length) {
+        buf += s[i + 1];
+        i++;
+      } else buf += c;
+      continue;
+    }
+    if (c === "'") inSingle = true;
+    else if (c === '"') inDouble = true;
+    else if (c === " " || c === "\t") {
+      if (buf.length > 0) {
+        result.push(buf);
+        buf = "";
+      }
+    } else buf += c;
+  }
+  if (buf.length > 0) result.push(buf);
+  return result;
+}
+
+// ドキュメント本文から `code-viewer query <...>` 例を全部取り出し、
+// "code-viewer query" プレフィックス除去後の argv 配列に変換する。
+function extractDocumentedQueryInvocations(text: string): string[][] {
+  const lines = joinBackslashContinuations(codeFenceLines(text));
+  const out: string[][] = [];
+  for (const line of lines) {
+    const parts = shellSplit(line);
+    // npx -y @youtyan/code-viewer query <...> も拾う (README の install 例で
+    // 出てくる可能性に備える)。 prefix を見つけて以降を argv 化する。
+    const idx = parts.findIndex(
+      (p, i) =>
+        (p === "code-viewer" || p.endsWith("/code-viewer")) &&
+        parts[i + 1] === "query",
+    );
+    if (idx < 0) continue;
+    out.push(parts.slice(idx + 2));
+  }
+  return out;
+}
+
+describe("bundled skill + README track the CLI contract", () => {
+  // skill MD / README に書かれている `code-viewer query ...` 例を、実 CLI
+  // parser に通す。flag rename / 削除済み subcommand / typo が docs に
+  // 混入したら、文字列存在チェックではなく実 parser で落とす。
+  const docs = ["skills/code-viewer-query/SKILL.md", "README.md"] as const;
+
+  for (const doc of docs) {
+    test(`${doc}: every documented "code-viewer query ..." example parses`, () => {
+      const text = readFileSync(join(REPO_ROOT, doc), "utf8");
+      const invocations = extractDocumentedQueryInvocations(text);
+      // sanity: 抽出ロジックが完全に壊れて 0 件になっていないこと。
+      expect(invocations.length === 0).toBe(false);
+      const failures: string[] = [];
+      for (const argv of invocations) {
+        const result = parseQueryArgs(argv);
+        if (result.ok) continue;
+        // tsconfig が strictNullChecks 無効なので discriminated union narrowing が
+        // ここでは効かない。失敗バリアントを明示的に取り出して使う。
+        const failure = result as { ok: false; error: string };
+        failures.push(`\`${argv.join(" ")}\` → ${failure.error}`);
+      }
+      expect(failures).toEqual([]);
+    });
+
+    test(`${doc}: documents the search subcommand`, () => {
+      const text = readFileSync(join(REPO_ROOT, doc), "utf8");
+      const invocations = extractDocumentedQueryInvocations(text);
+      const hasSearch = invocations.some((argv) => argv[0] === "search");
+      expect(hasSearch).toBe(true);
+    });
+  }
+
+  // parse テストだけでは「必要な例がそもそも doc に無い」状態を検出できない。
+  // query skill が AI 向けに最低限持つべき subcommand はここで明示する。
+  const REQUIRED_SUBCOMMANDS_IN_QUERY_SKILL = [
+    "exec",
+    "search",
+    "list",
+  ] as const;
+
+  test("query skill mentions the non-snapshot subcommands an AI agent should know", () => {
+    const text = readFileSync(
+      join(REPO_ROOT, "skills/code-viewer-query/SKILL.md"),
+      "utf8",
+    );
+    const invocations = extractDocumentedQueryInvocations(text);
+    for (const kind of REQUIRED_SUBCOMMANDS_IN_QUERY_SKILL) {
+      const present = invocations.some((argv) => argv[0] === kind);
+      expect({ kind, present }).toEqual({ kind, present: true });
+    }
   });
 });

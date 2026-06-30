@@ -284,10 +284,12 @@ Open Datastores in the global navigation to access:
 
 ### CLI
 
-AI agents can run read-only queries and capture snapshots / diffs from the
-command line. Global search remains available in the browser's Datastores tab.
-Query results are written to the per-repository history visible in the
-browser; snapshots are stored in the snapshot store.
+AI agents can run read-only queries, search across tables, and capture
+snapshots / diffs from the command line. Query results are written to the
+per-repository history visible in the browser; search results are returned
+by the CLI and mirror the browser Search tab; snapshots are stored in the
+snapshot store. The same operations are available in the browser's
+Datastores tab (Query History, Search, and Snapshot tabs).
 
 ```sh
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
@@ -299,6 +301,12 @@ code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
 # Show saved query history
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
+
+# Locate a value across every table (default: text-like columns only).
+# Blocks until the scan finishes or --timeout (default 60s) expires.
+code-viewer query search --db app.db --term "needle@example.com" --json
+code-viewer query search --db app.db --term "needle@example.com" \
+    --tables users,orders --max-hits 20 --include-non-text --json
 
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test"
