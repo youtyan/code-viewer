@@ -574,6 +574,9 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   border-color: transparent;
   box-shadow: none;
 }
+body:not(.gdp-repo-page):not(.gdp-repo-blob-page) #repo-target-wrap {
+  display: none !important;
+}
 .ref-dots {
   color: var(--fg-subtle);
   font-size: 14px;

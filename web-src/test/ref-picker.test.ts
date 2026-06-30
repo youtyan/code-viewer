@@ -67,7 +67,7 @@ function createPickerForRoute(route: AppRoute) {
 }
 
 describe("repository ref picker", () => {
-  test("hidden repository target is not displayed in the diff sidebar", () => {
+  test("repository target is only displayed in repository sidebar modes", () => {
     const style = document.createElement("style");
     style.textContent = readFileSync("web/style.css", "utf8");
     document.head.appendChild(style);
@@ -75,13 +75,20 @@ describe("repository ref picker", () => {
     const wrap = document.createElement("span");
     wrap.id = "repo-target-wrap";
     wrap.className = "ref-selector ref-selector-in-grid";
-    wrap.hidden = true;
+    wrap.hidden = false;
     document.body.appendChild(wrap);
 
+    document.body.className = "";
     expect(getComputedStyle(wrap).display).toBe("none");
 
-    wrap.hidden = false;
+    document.body.className = "gdp-repo-page";
     expect(getComputedStyle(wrap).display).toBe("flex");
+
+    document.body.className = "gdp-file-detail-page gdp-repo-blob-page";
+    expect(getComputedStyle(wrap).display).toBe("flex");
+
+    wrap.hidden = true;
+    expect(getComputedStyle(wrap).display).toBe("none");
   });
 
   test("changing the repository target reloads the current repo path with the new ref", () => {
