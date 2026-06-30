@@ -44,9 +44,44 @@ CREATE TABLE IF NOT EXISTS snapshot_tables (
   row_count INTEGER NOT NULL DEFAULT 0,
   table_hash TEXT NOT NULL DEFAULT '',
   pk_columns_json TEXT NOT NULL DEFAULT '[]',
+  revision_id TEXT,
   PRIMARY KEY (snapshot_id, table_name),
-  FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE
+  FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE,
+  FOREIGN KEY (revision_id) REFERENCES snapshot_table_revisions(id)
 );
+
+CREATE TABLE IF NOT EXISTS snapshot_table_revisions (
+  id TEXT PRIMARY KEY,
+  source_snapshot_id TEXT,
+  db_id TEXT NOT NULL,
+  schema_name TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  row_count INTEGER NOT NULL DEFAULT 0,
+  table_hash TEXT NOT NULL DEFAULT '',
+  hash_version INTEGER NOT NULL DEFAULT 2,
+  pk_columns_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'building',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_table_revisions_lookup
+  ON snapshot_table_revisions(db_id, schema_name, table_name, hash_version, table_hash, row_count, pk_columns_json, status);
+
+CREATE TABLE IF NOT EXISTS snapshot_table_revision_rows (
+  revision_id TEXT NOT NULL,
+  row_key_hash TEXT NOT NULL,
+  row_key_json TEXT NOT NULL,
+  row_hash TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  PRIMARY KEY (revision_id, row_key_hash),
+  FOREIGN KEY (revision_id) REFERENCES snapshot_table_revisions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_table_revision_rows_revision_key
+  ON snapshot_table_revision_rows(revision_id, row_key_hash);
+
+CREATE INDEX IF NOT EXISTS idx_snapshot_table_revision_rows_payload_hash
+  ON snapshot_table_revision_rows(payload_hash);
 
 CREATE TABLE IF NOT EXISTS snapshot_rows (
   snapshot_id TEXT NOT NULL,
@@ -65,10 +100,34 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
 );
 
 -- deleteSnapshot の orphan cleanup (snapshot_payloads を残さない) は
--- snapshot_rows.payload_hash で逆引きする。index が無いと
--- snapshot_payloads 件数 × snapshot_rows 全件の相関スキャンになる。
+-- legacy rows と revision rows の payload_hash で逆引きする。index が無いと
+-- snapshot_payloads 件数 × rows 全件の相関スキャンになる。
 CREATE INDEX IF NOT EXISTS idx_snapshot_rows_payload_hash
   ON snapshot_rows(payload_hash);
+
+DROP VIEW IF EXISTS snapshot_rows_resolved;
+
+CREATE VIEW snapshot_rows_resolved AS
+  SELECT
+    st.snapshot_id AS snapshot_id,
+    st.table_name AS table_name,
+    rr.row_key_hash AS row_key_hash,
+    rr.row_key_json AS row_key_json,
+    rr.row_hash AS row_hash,
+    rr.payload_hash AS payload_hash
+  FROM snapshot_tables st
+  INNER JOIN snapshot_table_revision_rows rr
+    ON rr.revision_id = st.revision_id
+  WHERE st.revision_id IS NOT NULL
+  UNION ALL
+  SELECT
+    snapshot_id,
+    table_name,
+    row_key_hash,
+    row_key_json,
+    row_hash,
+    payload_hash
+  FROM snapshot_rows;
 
 `;
 
@@ -97,6 +156,11 @@ async function getStoreDb(cwd: string): Promise<SqliteDb> {
   } catch {
     // Column already exists in databases created after schema support was added.
   }
+  try {
+    storeDb.exec("ALTER TABLE snapshot_tables ADD COLUMN revision_id TEXT");
+  } catch {
+    // Column already exists in databases created after table revisions were added.
+  }
   return storeDb;
 }
 
@@ -106,6 +170,39 @@ function makeId(prefix: string): string {
 
 function hashPayload(payloadJson: string): string {
   return createHash("sha256").update(payloadJson).digest("hex");
+}
+
+type SnapshotRowInput = {
+  rowKeyJson: string;
+  rowHash: string;
+  payloadJson: string;
+};
+
+const SNAPSHOT_TABLE_HASH_VERSION = 2;
+const SNAPSHOT_TABLE_HASH_PREFIX = `v${SNAPSHOT_TABLE_HASH_VERSION}:`;
+const SNAPSHOT_REVISION_HASH_BATCH_SIZE = 1000;
+
+function hashLengthPrefixed(
+  hasher: ReturnType<typeof createHash>,
+  value: string,
+) {
+  hasher.update(`${Buffer.byteLength(value, "utf8")}:`);
+  hasher.update(value);
+  hasher.update("\n");
+}
+
+function deleteOrphanPayloads(db: SqliteDb) {
+  db.prepare(
+    `DELETE FROM snapshot_payloads
+     WHERE NOT EXISTS (
+       SELECT 1 FROM snapshot_rows
+       WHERE snapshot_rows.payload_hash = snapshot_payloads.payload_hash
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM snapshot_table_revision_rows
+       WHERE snapshot_table_revision_rows.payload_hash = snapshot_payloads.payload_hash
+     )`,
+  ).run();
 }
 
 function dockerDbIdFilterValues(dbId: string): string[] {
@@ -118,6 +215,19 @@ function dockerDbIdFilterValues(dbId: string): string[] {
     values.push(`docker:${parsed.serviceName}@${parsed.relDir}${database}`);
   }
   return [...new Set(values)];
+}
+
+function getSnapshotScopeRow(
+  db: SqliteDb,
+  snapshotId: string,
+): { dbId: string; schema: string } {
+  const row = db
+    .prepare(
+      "SELECT db_id, COALESCE(schema_name, 'public') AS schema_name FROM snapshots WHERE id = ?",
+    )
+    .get(snapshotId) as { db_id: string; schema_name: string } | undefined;
+  if (!row) throw new Error(`snapshot not found: ${snapshotId}`);
+  return { dbId: row.db_id, schema: row.schema_name };
 }
 
 export async function createSnapshot(
@@ -155,19 +265,73 @@ export async function addSnapshotTableData(
   snapshotId: string,
   tableName: string,
   pkColumns: string[],
-  rows: { rowKeyJson: string; rowHash: string; payloadJson: string }[],
+  rows: SnapshotRowInput[],
 ): Promise<void> {
-  const db = await getStoreDb(cwd);
+  const revisionId = await beginSnapshotTableRevision(
+    cwd,
+    snapshotId,
+    tableName,
+    pkColumns,
+  );
+  await addSnapshotTableRows(cwd, revisionId, rows);
+  await finalizeSnapshotTableRevision(cwd, snapshotId, tableName, revisionId);
+}
 
-  const tableHasher = createHash("sha256");
+export async function beginSnapshotTableRevision(
+  cwd: string,
+  snapshotId: string,
+  tableName: string,
+  pkColumns: string[],
+): Promise<string> {
+  const db = await getStoreDb(cwd);
+  const id = makeId("rev");
+  const scope = getSnapshotScopeRow(db, snapshotId);
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      "INSERT OR IGNORE INTO snapshot_tables (snapshot_id, table_name) VALUES (?, ?)",
+    ).run(snapshotId, tableName);
+    db.prepare(
+      `INSERT INTO snapshot_table_revisions
+       (id, source_snapshot_id, db_id, schema_name, table_name, row_count, table_hash, hash_version, pk_columns_json, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      snapshotId,
+      scope.dbId,
+      scope.schema,
+      tableName,
+      0,
+      "",
+      SNAPSHOT_TABLE_HASH_VERSION,
+      JSON.stringify(pkColumns),
+      "building",
+      new Date().toISOString(),
+    );
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failure; original error is more useful.
+    }
+    throw err;
+  }
+  return id;
+}
+
+export async function addSnapshotTableRows(
+  cwd: string,
+  revisionId: string,
+  rows: SnapshotRowInput[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const db = await getStoreDb(cwd);
   const insertRow = db.prepare(
-    "INSERT OR IGNORE INTO snapshot_rows (snapshot_id, table_name, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT OR IGNORE INTO snapshot_table_revision_rows (revision_id, row_key_hash, row_key_json, row_hash, payload_hash) VALUES (?, ?, ?, ?, ?)",
   );
   const insertPayload = db.prepare(
     "INSERT OR IGNORE INTO snapshot_payloads (payload_hash, payload_json) VALUES (?, ?)",
-  );
-  const updateTable = db.prepare(
-    "UPDATE snapshot_tables SET row_count = ?, table_hash = ?, pk_columns_json = ? WHERE snapshot_id = ? AND table_name = ?",
   );
 
   db.exec("BEGIN");
@@ -177,10 +341,8 @@ export async function addSnapshotTableData(
         .update(row.rowKeyJson)
         .digest("hex");
       const payloadHash = hashPayload(row.payloadJson);
-      tableHasher.update(row.rowHash);
       insertRow.run(
-        snapshotId,
-        tableName,
+        revisionId,
         rowKeyHash,
         row.rowKeyJson,
         row.rowHash,
@@ -188,12 +350,162 @@ export async function addSnapshotTableData(
       );
       insertPayload.run(payloadHash, row.payloadJson);
     }
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failure; original error is more useful.
+    }
+    throw err;
+  }
+}
 
-    const tableHash = tableHasher.digest("hex");
-    updateTable.run(
-      rows.length,
+function computeRevisionTableHash(
+  db: SqliteDb,
+  revisionId: string,
+): { rowCount: number; tableHash: string } {
+  const hasher = createHash("sha256");
+  hashLengthPrefixed(hasher, `snapshot-table-v${SNAPSHOT_TABLE_HASH_VERSION}`);
+  let rowCount = 0;
+  let last:
+    | {
+        row_key_hash: string;
+        row_key_json: string;
+      }
+    | undefined;
+  for (;;) {
+    const rows = last
+      ? (db
+          .prepare(
+            `SELECT row_key_hash, row_key_json, row_hash, payload_hash
+             FROM snapshot_table_revision_rows
+             WHERE revision_id = ?
+               AND (row_key_hash > ? OR (row_key_hash = ? AND row_key_json > ?))
+             ORDER BY row_key_hash, row_key_json
+             LIMIT ?`,
+          )
+          .all(
+            revisionId,
+            last.row_key_hash,
+            last.row_key_hash,
+            last.row_key_json,
+            SNAPSHOT_REVISION_HASH_BATCH_SIZE,
+          ) as Array<{
+          row_key_hash: string;
+          row_key_json: string;
+          row_hash: string;
+          payload_hash: string;
+        }>)
+      : (db
+          .prepare(
+            `SELECT row_key_hash, row_key_json, row_hash, payload_hash
+             FROM snapshot_table_revision_rows
+             WHERE revision_id = ?
+             ORDER BY row_key_hash, row_key_json
+             LIMIT ?`,
+          )
+          .all(revisionId, SNAPSHOT_REVISION_HASH_BATCH_SIZE) as Array<{
+          row_key_hash: string;
+          row_key_json: string;
+          row_hash: string;
+          payload_hash: string;
+        }>);
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      hashLengthPrefixed(hasher, row.row_key_hash);
+      hashLengthPrefixed(hasher, row.row_key_json);
+      hashLengthPrefixed(hasher, row.row_hash);
+      hashLengthPrefixed(hasher, row.payload_hash);
+      rowCount++;
+      last = {
+        row_key_hash: row.row_key_hash,
+        row_key_json: row.row_key_json,
+      };
+    }
+    if (rows.length < SNAPSHOT_REVISION_HASH_BATCH_SIZE) break;
+  }
+  return {
+    rowCount,
+    tableHash: `${SNAPSHOT_TABLE_HASH_PREFIX}${hasher.digest("hex")}`,
+  };
+}
+
+export async function finalizeSnapshotTableRevision(
+  cwd: string,
+  snapshotId: string,
+  tableName: string,
+  revisionId: string,
+): Promise<void> {
+  const db = await getStoreDb(cwd);
+  const revision = db
+    .prepare(
+      `SELECT db_id, schema_name, table_name, pk_columns_json
+       FROM snapshot_table_revisions
+       WHERE id = ?`,
+    )
+    .get(revisionId) as
+    | {
+        db_id: string;
+        schema_name: string;
+        table_name: string;
+        pk_columns_json: string;
+      }
+    | undefined;
+  if (!revision)
+    throw new Error(`snapshot table revision not found: ${revisionId}`);
+
+  const { rowCount, tableHash } = computeRevisionTableHash(db, revisionId);
+  const existing = db
+    .prepare(
+      `SELECT id
+       FROM snapshot_table_revisions
+       WHERE id != ?
+         AND db_id = ?
+         AND schema_name = ?
+         AND table_name = ?
+         AND hash_version = ?
+         AND table_hash = ?
+         AND row_count = ?
+         AND pk_columns_json = ?
+         AND status = 'done'
+       ORDER BY created_at ASC
+       LIMIT 1`,
+    )
+    .get(
+      revisionId,
+      revision.db_id,
+      revision.schema_name,
+      revision.table_name,
+      SNAPSHOT_TABLE_HASH_VERSION,
       tableHash,
-      JSON.stringify(pkColumns),
+      rowCount,
+      revision.pk_columns_json,
+    ) as { id: string } | undefined;
+
+  const adoptedRevisionId = existing?.id ?? revisionId;
+  db.exec("BEGIN");
+  try {
+    if (existing) {
+      db.prepare("DELETE FROM snapshot_table_revisions WHERE id = ?").run(
+        revisionId,
+      );
+    } else {
+      db.prepare(
+        `UPDATE snapshot_table_revisions
+         SET row_count = ?, table_hash = ?, status = 'done', source_snapshot_id = NULL
+         WHERE id = ?`,
+      ).run(rowCount, tableHash, revisionId);
+    }
+    db.prepare(
+      `UPDATE snapshot_tables
+       SET row_count = ?, table_hash = ?, pk_columns_json = ?, revision_id = ?
+       WHERE snapshot_id = ? AND table_name = ?`,
+    ).run(
+      rowCount,
+      tableHash,
+      revision.pk_columns_json,
+      adoptedRevisionId,
       snapshotId,
       tableName,
     );
@@ -215,9 +527,24 @@ export async function finalizeSnapshot(
 ): Promise<void> {
   const db = await getStoreDb(cwd);
   if (error) {
-    db.prepare(
-      "UPDATE snapshots SET status = 'error', error_message = ? WHERE id = ?",
-    ).run(error, snapshotId);
+    db.exec("BEGIN");
+    try {
+      db.prepare(
+        "DELETE FROM snapshot_table_revisions WHERE source_snapshot_id = ? AND status = 'building'",
+      ).run(snapshotId);
+      deleteOrphanPayloads(db);
+      db.prepare(
+        "UPDATE snapshots SET status = 'error', error_message = ? WHERE id = ?",
+      ).run(error, snapshotId);
+      db.exec("COMMIT");
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // ignore rollback failure; original error is more useful.
+      }
+      throw err;
+    }
   } else {
     db.prepare("UPDATE snapshots SET status = 'done' WHERE id = ?").run(
       snapshotId,
@@ -313,12 +640,17 @@ export async function deleteSnapshot(
   try {
     db.prepare("DELETE FROM snapshots WHERE id = ?").run(snapshotId);
     db.prepare(
-      `DELETE FROM snapshot_payloads
-       WHERE NOT EXISTS (
-         SELECT 1 FROM snapshot_rows
-         WHERE snapshot_rows.payload_hash = snapshot_payloads.payload_hash
-       )`,
+      `DELETE FROM snapshot_table_revisions
+       WHERE status = 'done'
+         AND NOT EXISTS (
+           SELECT 1 FROM snapshot_tables
+           WHERE snapshot_tables.revision_id = snapshot_table_revisions.id
+         )`,
     ).run();
+    db.prepare(
+      "DELETE FROM snapshot_table_revisions WHERE source_snapshot_id = ? AND status = 'building'",
+    ).run(snapshotId);
+    deleteOrphanPayloads(db);
     db.exec("COMMIT");
   } catch (err) {
     try {
@@ -334,13 +666,7 @@ function getSnapshotScope(
   db: SqliteDb,
   snapshotId: string,
 ): { dbId: string; schema: string } {
-  const row = db
-    .prepare(
-      "SELECT db_id, COALESCE(schema_name, 'public') AS schema_name FROM snapshots WHERE id = ?",
-    )
-    .get(snapshotId) as { db_id: string; schema_name: string } | undefined;
-  if (!row) throw new Error(`snapshot not found: ${snapshotId}`);
-  return { dbId: row.db_id, schema: row.schema_name };
+  return getSnapshotScopeRow(db, snapshotId);
 }
 
 // handleDiffTables がレスポンスに dbId/schema (= ブラウザの差分URL構築に
@@ -456,8 +782,8 @@ export async function computeDiffTables(
       db
         .prepare(
           `SELECT COUNT(*) AS cnt
-           FROM snapshot_rows a
-           LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+           FROM snapshot_rows_resolved a
+           LEFT JOIN snapshot_rows_resolved b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
            WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL`,
         )
         .get(beforeId, table, afterId, table) as { cnt: number }
@@ -467,8 +793,8 @@ export async function computeDiffTables(
       db
         .prepare(
           `SELECT COUNT(*) AS cnt
-           FROM snapshot_rows b
-           LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           FROM snapshot_rows_resolved b
+           LEFT JOIN snapshot_rows_resolved a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
            WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL`,
         )
         .get(afterId, table, beforeId, table) as { cnt: number }
@@ -478,8 +804,8 @@ export async function computeDiffTables(
       db
         .prepare(
           `SELECT COUNT(*) AS cnt
-           FROM snapshot_rows b
-           INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+           FROM snapshot_rows_resolved b
+           INNER JOIN snapshot_rows_resolved a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
            WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash`,
         )
         .get(afterId, table, beforeId, table) as { cnt: number }
@@ -531,8 +857,8 @@ export async function computeDiffRows(
   const inserted = db
     .prepare(
       `SELECT a.row_key_json, a.payload_hash
-       FROM snapshot_rows a
-       LEFT JOIN snapshot_rows b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
+       FROM snapshot_rows_resolved a
+       LEFT JOIN snapshot_rows_resolved b ON b.snapshot_id = ? AND b.table_name = ? AND b.row_key_hash = a.row_key_hash
        WHERE a.snapshot_id = ? AND a.table_name = ? AND b.row_key_hash IS NULL
        ORDER BY a.row_key_json`,
     )
@@ -553,8 +879,8 @@ export async function computeDiffRows(
   const deleted = db
     .prepare(
       `SELECT b.row_key_json, b.payload_hash
-       FROM snapshot_rows b
-       LEFT JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       FROM snapshot_rows_resolved b
+       LEFT JOIN snapshot_rows_resolved a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
        WHERE b.snapshot_id = ? AND b.table_name = ? AND a.row_key_hash IS NULL
        ORDER BY b.row_key_json`,
     )
@@ -575,8 +901,8 @@ export async function computeDiffRows(
   const updated = db
     .prepare(
       `SELECT b.row_key_json, b.payload_hash AS before_ph, a.payload_hash AS after_ph
-       FROM snapshot_rows b
-       INNER JOIN snapshot_rows a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
+       FROM snapshot_rows_resolved b
+       INNER JOIN snapshot_rows_resolved a ON a.snapshot_id = ? AND a.table_name = ? AND a.row_key_hash = b.row_key_hash
        WHERE b.snapshot_id = ? AND b.table_name = ? AND b.row_hash != a.row_hash
        ORDER BY b.row_key_json`,
     )

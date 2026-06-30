@@ -1,14 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { runSnapshot } from "../server/database/snapshot-runner";
 import {
   computeDiffTables,
   listSnapshots,
 } from "../server/database/snapshot-store";
 import type { SnapshotItem } from "../server/database/sources/types";
+import { loadSqliteClass } from "../server/database/sqlite-driver";
 import { withTempDir } from "./_test-helpers";
+
+type RawSqliteDb = {
+  prepare(sql: string): {
+    get(...params: unknown[]): Record<string, unknown> | undefined;
+  };
+  close(): void;
+};
 
 function withTempProject<T>(run: (dir: string) => Promise<T>): Promise<T> {
   return withTempDir("code-viewer-snapshot-runner-", run);
+}
+
+async function openStoreDb(dir: string): Promise<RawSqliteDb> {
+  const DbClass = await loadSqliteClass<RawSqliteDb>();
+  return new DbClass(join(dir, ".code-viewer", "db-snapshots.sqlite"));
 }
 
 describe("database snapshot runner", () => {
@@ -73,6 +87,99 @@ describe("database snapshot runner", () => {
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0].status).toBe("error");
       expect(snapshots[0].errorMessage).toBe("snapshot cancelled");
+    });
+  });
+
+  test("flushes snapshot rows in chunks before the table finishes iterating", async () => {
+    await withTempProject(async (dir) => {
+      let observedFlush = false;
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          for (let i = 0; i < 501; i++) {
+            yield {
+              keyJson: JSON.stringify({ id: i }),
+              payloadJson: JSON.stringify({ id: i, value: `sample ${i}` }),
+              rowHash: `row-hash-${i}`,
+            };
+            if (i === 499) {
+              const db = await openStoreDb(dir);
+              try {
+                const row = db
+                  .prepare(
+                    "SELECT COUNT(*) AS n FROM snapshot_table_revision_rows",
+                  )
+                  .get() as { n: number };
+                observedFlush = row.n >= 500;
+              } finally {
+                db.close();
+              }
+            }
+          }
+        },
+        async listSnapshotContainers() {
+          return [{ id: "users", label: "users" }];
+        },
+      };
+
+      await runSnapshot(dir, source, "db.sqlite", ["users"], "chunked");
+
+      expect(observedFlush).toBe(true);
+    });
+  });
+
+  test("removes flushed building revision data when a snapshot fails mid-table", async () => {
+    await withTempProject(async (dir) => {
+      const source = {
+        kind: "sqlite" as const,
+        capabilities: { snapshot: true as const },
+        async *iterateForSnapshot(): AsyncIterable<SnapshotItem> {
+          for (let i = 0; i < 500; i++) {
+            yield {
+              keyJson: JSON.stringify({ id: i }),
+              payloadJson: JSON.stringify({ id: i, value: `sample ${i}` }),
+              rowHash: `row-hash-${i}`,
+            };
+          }
+          throw new Error("source iteration failed");
+        },
+        async listSnapshotContainers() {
+          return [{ id: "users", label: "users" }];
+        },
+      };
+
+      let message = "";
+      try {
+        await runSnapshot(dir, source, "db.sqlite", ["users"], "failed");
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+
+      expect(message).toBe("source iteration failed");
+      const snapshots = await listSnapshots(dir);
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].status).toBe("error");
+
+      const db = await openStoreDb(dir);
+      try {
+        const revisions = db
+          .prepare("SELECT COUNT(*) AS n FROM snapshot_table_revisions")
+          .get() as { n: number };
+        expect(revisions.n).toBe(0);
+
+        const revisionRows = db
+          .prepare("SELECT COUNT(*) AS n FROM snapshot_table_revision_rows")
+          .get() as { n: number };
+        expect(revisionRows.n).toBe(0);
+
+        const payloads = db
+          .prepare("SELECT COUNT(*) AS n FROM snapshot_payloads")
+          .get() as { n: number };
+        expect(payloads.n).toBe(0);
+      } finally {
+        db.close();
+      }
     });
   });
 

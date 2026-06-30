@@ -19,9 +19,11 @@ import { isAbortLikeError, throwIfAborted } from "./adapters/abort";
 import { asAsync } from "./adapters/async-facade";
 import type { DatabaseAdapter } from "./adapters/types";
 import {
-  addSnapshotTableData,
+  addSnapshotTableRows,
+  beginSnapshotTableRevision,
   createSnapshot,
   finalizeSnapshot,
+  finalizeSnapshotTableRevision,
 } from "./snapshot-store";
 import type { SnapshotIterable } from "./sources/types";
 import { hasSnapshotCapability } from "./sources/types";
@@ -86,13 +88,6 @@ export async function runSnapshot(
       throwIfAborted(options.signal, "snapshot cancelled");
       onProgress?.({ container, done: false, index: i, total });
 
-      // snapshot-store の addSnapshotTableData は historically `rowKeyJson`
-      // フィールド名を使うので、SnapshotItem.keyJson から rename して詰める。
-      const collected: Array<{
-        rowKeyJson: string;
-        rowHash: string;
-        payloadJson: string;
-      }> = [];
       // Redis の iterateForSnapshot 等は async / await が混じるので、
       // 順次 yield を消費する形にする。
       // pk 列情報は SQL 系のみ意味を持つので、ここでは空配列を渡す。
@@ -113,32 +108,46 @@ export async function runSnapshot(
       }
       throwIfAborted(options.signal, "snapshot cancelled");
 
+      const revisionId = await beginSnapshotTableRevision(
+        cwd,
+        snapshotId,
+        container,
+        pkColumns,
+      );
+      // snapshot-store は historically `rowKeyJson` フィールド名を使うので、
+      // SnapshotItem.keyJson から rename して threshold ごとに流し込む。
+      const pendingRows: Array<{
+        rowKeyJson: string;
+        rowHash: string;
+        payloadJson: string;
+      }> = [];
+      const flushRows = async () => {
+        if (pendingRows.length === 0) return;
+        const rows = pendingRows.splice(0, pendingRows.length);
+        await addSnapshotTableRows(cwd, revisionId, rows);
+      };
+
       for await (const item of snapshotSource.iterateForSnapshot(
         container,
         options.signal,
       )) {
         throwIfAborted(options.signal, "snapshot cancelled");
-        collected.push({
+        pendingRows.push({
           rowKeyJson: item.keyJson,
           rowHash: item.rowHash,
           payloadJson: item.payloadJson,
         });
-        // 大量データに備えて threshold ごとに flush しても良いが、
-        // 既存 snapshot-store は table 単位で 1 回 commit する仕様なので
-        // ここではメモリに溜めてから一括書き込みする (旧実装と同じ挙動)。
+        if (pendingRows.length >= SNAPSHOT_FLUSH_THRESHOLD) {
+          await flushRows();
+        }
       }
       throwIfAborted(options.signal, "snapshot cancelled");
-
-      // SNAPSHOT_FLUSH_THRESHOLD は将来 streaming 化する際の hook。
-      // 現状は単純に全件まとめて書く。
-      void SNAPSHOT_FLUSH_THRESHOLD;
-
-      await addSnapshotTableData(
+      await flushRows();
+      await finalizeSnapshotTableRevision(
         cwd,
         snapshotId,
         container,
-        pkColumns,
-        collected,
+        revisionId,
       );
     }
 
