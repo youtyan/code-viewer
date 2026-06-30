@@ -481,7 +481,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Search across all tables",
                 command:
-                  'code-viewer query search --db app.db --term "john@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
+                  'code-viewer query search --db app.db --term "sample@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
               },
               {
                 kind: "command",
@@ -1048,7 +1048,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "テーブル横断の全文検索",
                 command:
-                  'code-viewer query search --db app.db --term "john@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
+                  'code-viewer query search --db app.db --term "sample@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
               },
               {
                 kind: "command",

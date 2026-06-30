@@ -274,6 +274,78 @@ describe("parseQueryArgs", () => {
     });
   });
 
+  test("search requires --db and --term; flags map onto SearchCommand", () => {
+    expect(parseQueryArgs(["search"])).toEqual({
+      ok: false,
+      error: "search requires --db <path>",
+    });
+    expect(parseQueryArgs(["search", "--db", "app.db"])).toEqual({
+      ok: false,
+      error: "search requires --term <text>",
+    });
+    const result = parseQueryArgs([
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "needle",
+      "--tables",
+      "users, orders",
+      "--include-non-text",
+      "--max-hits",
+      "20",
+      "--schema",
+      "public",
+      "--json",
+      "--timeout",
+      "10",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "app.db",
+      term: "needle",
+      tables: ["users", "orders"],
+      schema: "public",
+      includeNonText: true,
+      maxHits: 20,
+      timeoutSec: 10,
+      json: true,
+    });
+  });
+
+  test("search defaults: includeNonText=false, json=false, timeoutSec=60, tables/schema/maxHits undefined", () => {
+    const result = parseQueryArgs(["search", "--db", "app.db", "--term", "x"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "app.db",
+      term: "x",
+      tables: undefined,
+      schema: undefined,
+      includeNonText: false,
+      maxHits: undefined,
+      timeoutSec: 60,
+      json: false,
+    });
+  });
+
+  test("search rejects non-positive --max-hits and --timeout", () => {
+    for (const [flag, msg] of [
+      ["--max-hits", "--max-hits must be a positive integer"],
+      ["--timeout", "--timeout must be a positive integer (sec)"],
+    ] as const) {
+      expect(
+        parseQueryArgs(["search", "--db", "app.db", "--term", "x", flag, "0"]),
+      ).toEqual({ ok: false, error: msg });
+      expect(
+        parseQueryArgs(["search", "--db", "app.db", "--term", "x", flag, "-1"]),
+      ).toEqual({ ok: false, error: msg });
+    }
+  });
+
   test("unknown subcommand names are rejected", () => {
     expect(parseQueryArgs(["wat"])).toEqual({
       ok: false,
@@ -314,10 +386,10 @@ describe("parseQueryArgs", () => {
 
 describe("QUERY_HELP / QUERY_AGENT_HELP", () => {
   test("documents only the subcommands that are actually wired", () => {
-    // help text must NOT mention "diff create / diff delete / diff list /
-    // search" — those subcommands were advertised before this fix but
-    // returned `unknown query command: ...` at runtime. Keeping the docs
-    // honest is the core point of this change.
+    // help text must NOT mention "diff create / diff delete / diff list" —
+    // those subcommands were advertised before but returned
+    // `unknown query command: ...` at runtime. Keeping the docs honest is
+    // the core point of this guard.
     for (const text of [QUERY_HELP, QUERY_AGENT_HELP]) {
       expect(/diff create/.test(text)).toBe(false);
       expect(/diff delete/.test(text)).toBe(false);
@@ -327,16 +399,22 @@ describe("QUERY_HELP / QUERY_AGENT_HELP", () => {
       expect(text).toMatch(/snapshot list/);
       expect(text).toMatch(/diff tables/);
       expect(text).toMatch(/diff rows/);
+      // search is now a real subcommand — it must appear everywhere.
+      expect(text).toMatch(/code-viewer query search /);
     }
-    // QUERY_HELP (the short usage) should not list search as a callable subcommand.
-    expect(/^\s+code-viewer query search /m.test(QUERY_HELP)).toBe(false);
-    // QUERY_AGENT_HELP may still mention the search workflow as "not wired in
-    // the CLI" so the AI knows where to direct the human — that's fine.
-    expect(QUERY_AGENT_HELP).toMatch(/Not yet wired in the CLI/);
+    // QUERY_HELP (the short usage) must list search as a callable subcommand.
+    expect(/^\s+code-viewer query search /m.test(QUERY_HELP)).toBe(true);
+    // QUERY_AGENT_HELP must not claim search is unwired anymore.
+    expect(/Not yet wired in the CLI/.test(QUERY_AGENT_HELP)).toBe(false);
     expect(/list with: code-viewer query list/.test(QUERY_AGENT_HELP)).toBe(
       false,
     );
     expect(QUERY_AGENT_HELP).toMatch(/does not discover databases/);
+    // The output contract must document the search exit semantics so agents
+    // know an empty result is a clean exit 0.
+    expect(QUERY_AGENT_HELP).toMatch(
+      /search:[\s\S]*Empty result[\s\S]*exit 0/i,
+    );
   });
 });
 
@@ -580,5 +658,272 @@ describe("runQueryCli integration", () => {
     expect(err).toMatch(/snapshot not found: snap-missing/);
     // 旧実装は res.json() を直接呼んで SyntaxError で死んでいた。
     expect(/SyntaxError/.test(err)).toBe(false);
+  });
+});
+
+describe("runQueryCli search integration", () => {
+  const SERVER = "http://localhost:65535";
+  const originalPollEnv = process.env.CODE_VIEWER_SEARCH_POLL_MS;
+  const originalDateNow = Date.now;
+
+  // polling 間隔は env 経由でテスト中だけ 0 にする。テスト終了で必ず復元する。
+  function withZeroPollInterval(): void {
+    process.env.CODE_VIEWER_SEARCH_POLL_MS = "0";
+  }
+  function restorePollEnv(): void {
+    if (originalPollEnv === undefined) {
+      delete process.env.CODE_VIEWER_SEARCH_POLL_MS;
+    } else {
+      process.env.CODE_VIEWER_SEARCH_POLL_MS = originalPollEnv;
+    }
+  }
+  afterEach(() => {
+    restorePollEnv();
+    Date.now = originalDateNow;
+  });
+
+  test("posts to /_db/search/start, polls /_db/search/status until done, prints final JSON", async () => {
+    withZeroPollInterval();
+    const finalStatus = {
+      jobId: "job-1",
+      dbId: "app.db",
+      scannedTables: 2,
+      totalTables: 2,
+      hits: [
+        {
+          table: "users",
+          column: "email",
+          valuePreview: "sample@example.com",
+          rowKeyJson: '{"id":7}',
+          rowPreview: [7, "sample@example.com"],
+        },
+      ],
+      done: true,
+    };
+    const harness = installRunHarness([
+      // health probe
+      { body: JSON.stringify({ files: [] }) },
+      // start ack
+      { body: JSON.stringify({ jobId: "job-1" }) },
+      // status: still running
+      {
+        body: JSON.stringify({
+          jobId: "job-1",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 2,
+          hits: [],
+          done: false,
+          currentTable: "users",
+        }),
+      },
+      // status: done
+      { body: JSON.stringify(finalStatus) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "sample@example.com",
+      "--tables",
+      "users,orders",
+      "--max-hits",
+      "20",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[0].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[1]).toEqual({
+      url: `${SERVER}/_db/search/start`,
+      method: "POST",
+      body: {
+        db: "app.db",
+        term: "sample@example.com",
+        includeNonText: false,
+        tables: ["users", "orders"],
+        maxHitsPerTable: 20,
+      },
+    });
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/search/status?id=job-1`,
+    );
+    expect(harness.requests[2].method).toBe("GET");
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/search/status?id=job-1`,
+    );
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(finalStatus);
+  });
+
+  test("default mode (no --json) prints hit lines and a summary line", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-x" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-x",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 1,
+          hits: [
+            {
+              table: "users",
+              column: "email",
+              rowKeyJson: '{"id":7}',
+              valuePreview: "match@example.com",
+              rowPreview: [7, "match@example.com"],
+            },
+          ],
+          done: true,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "match@example.com",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/users\.email/);
+    expect(out).toMatch(/key=\{"id":7\}/);
+    expect(out).toMatch(/match@example\.com/);
+    expect(out).toMatch(/# 1 hit\(s\) across 1 table\(s\)/);
+    expect(harness.exits).toEqual([]);
+  });
+
+  test("empty result is a clean exit 0 with a 'no hits' line", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-empty" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-empty",
+          dbId: "app.db",
+          scannedTables: 3,
+          totalTables: 3,
+          hits: [],
+          done: true,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "missing",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(/no hits \(scanned 3 tables\)/);
+  });
+
+  test("server-side error status fails fast and exits 1 without polling further", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-err" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-err",
+          dbId: "app.db",
+          scannedTables: 0,
+          totalTables: 0,
+          hits: [],
+          done: true,
+          error: "boom",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "x",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(/search error: boom/);
+  });
+
+  test("timeout cancels the search job best-effort and exits with the timeout reason", async () => {
+    withZeroPollInterval();
+    const nowValues = [0, 0, 1001];
+    let nowIndex = 0;
+    Date.now = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-timeout" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-timeout",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 2,
+          hits: [],
+          done: false,
+        }),
+      },
+      { status: 500, contentType: "text/plain", body: "cancel failed" },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "x",
+      "--timeout",
+      "1",
+    ]);
+
+    expect(harness.requests[3]).toEqual({
+      url: `${SERVER}/_db/search/cancel`,
+      method: "POST",
+      body: { id: "job-timeout" },
+    });
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /search timed out after 1s \(cancelled job job-timeout\)/,
+    );
+  });
+
+  test("--timeout 0 is rejected at parse-time so the CLI never hangs forever", () => {
+    expect(
+      parseQueryArgs([
+        "search",
+        "--db",
+        "app.db",
+        "--term",
+        "x",
+        "--timeout",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--timeout must be a positive integer (sec)",
+    });
   });
 });

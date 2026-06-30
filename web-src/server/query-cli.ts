@@ -34,6 +34,19 @@ export type QueryCommand =
       limit?: number;
       offset?: number;
       json: boolean;
+    }
+  // /_db/search/{start,status,cancel} を CLI に薄く被せたもの。
+  // server 側は long-running job + polling 形で、UI と同じ endpoint を使う。
+  | {
+      kind: "search";
+      db: string;
+      term: string;
+      tables?: string[];
+      schema?: string;
+      includeNonText: boolean;
+      maxHits?: number;
+      timeoutSec: number;
+      json: boolean;
     };
 
 export type QueryArgs = {
@@ -58,6 +71,7 @@ Usage:
   code-viewer query snapshot note --id <snapshot-id> --note <text>
   code-viewer query diff tables --before <id> --after <id> [--json]
   code-viewer query diff rows --before <id> --after <id> --table <name> [--limit <n>] [--offset <n>] [--json]
+  code-viewer query search --db <path> --term <text> [--tables t1,t2,...] [--include-non-text] [--max-hits <n>] [--schema <name>] [--timeout <sec>] [--json]
   code-viewer query agent-help
 
 Global options:
@@ -70,6 +84,7 @@ Examples:
   code-viewer query snapshot list --db app.db --json
   code-viewer query diff tables --before snap-abc123 --after snap-def456
   code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users
+  code-viewer query search --db app.db --term "sample@example.com" --tables users,orders --max-hits 20
 `;
 
 export const QUERY_AGENT_HELP = `code-viewer query — agent guide
@@ -128,6 +143,21 @@ no separate stored diff entity, so you always pass both snapshot ids.
 
 The human can also view all snapshots in the browser's Database > Snapshot tab.
 
+## Workflow: Global table search
+
+Use this to locate a value (an email, a foreign key, a free-text fragment)
+when you do not yet know which table or column holds it. Mirrors the
+browser's Database > Search tab.
+
+1. Run search. It blocks until the server finishes scanning or --timeout
+   expires (default 60s); on timeout the job is cancelled and exit is 1.
+   code-viewer query search --db app.db --term "sample@example.com" \\
+       --tables users,orders --max-hits 20 --json
+
+2. Inspect hits in the output. Each hit names a table, column, row preview,
+   and (for SQL stores with a primary key) a JSON-serialized rowKey suitable
+   for a follow-up WHERE clause via query exec.
+
 ## Output contract
 
 - exec / diff-rows: pretty JSON on stdout, exit 0 on success.
@@ -136,6 +166,8 @@ The human can also view all snapshots in the browser's Database > Snapshot tab.
   scan in the background and emits "db-snapshot" SSE events; use snapshot list
   to confirm completion before diffing.
 - snapshot delete / note / clear: prints a single status line.
+- search: blocks until done; prints hit lines (default) or full status JSON
+  (--json) on stdout. Empty result is a clean exit 0.
 - Any error: stderr + non-zero exit. Reasons from the server arrive verbatim
   (text/plain or {error:...} JSON, whichever the server sent).
 
@@ -151,12 +183,9 @@ The human can also view all snapshots in the browser's Database > Snapshot tab.
 - Write meaningful --note values — the human uses them to understand context.
 - After snapshot create, briefly wait or re-poll snapshot list before diffing;
   the scan is asynchronous.
-
-## Not yet wired in the CLI
-
-- Global SQL-table search ("code-viewer query search …") is available in the
-  browser's Database > Search tab but not via this CLI. Ask the human to run
-  it in the UI when needed.
+- For search, prefer --tables when you already know which tables to scan, and
+  --max-hits to keep large hit sets bounded. Without --include-non-text the
+  server only scans text-like columns (faster, cheaper).
 `;
 
 const VALUE_FLAGS = new Set([
@@ -173,9 +202,15 @@ const VALUE_FLAGS = new Set([
   "--table",
   "--limit",
   "--offset",
+  "--term",
+  "--schema",
+  "--max-hits",
+  "--timeout",
 ]);
 
-const BOOL_FLAGS = new Set(["--json", "--no-save"]);
+const BOOL_FLAGS = new Set(["--json", "--no-save", "--include-non-text"]);
+
+const DEFAULT_SEARCH_TIMEOUT_SEC = 60;
 
 function parseCommaList(raw: string | undefined): string[] | undefined {
   if (raw === undefined) return undefined;
@@ -293,7 +328,53 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   if (subcommand === "diff") {
     return parseDiffSubcommand(rest, options, flags, globalArgs);
   }
+  if (subcommand === "search") {
+    return parseSearchCommand(options, flags, globalArgs);
+  }
   return { ok: false, error: `unknown query command: ${subcommand}` };
+}
+
+function parseSearchCommand(
+  options: Map<string, string>,
+  flags: Set<string>,
+  globalArgs: { cwd?: string; server?: string },
+): QueryParseResult {
+  const db = options.get("--db");
+  if (!db) return { ok: false, error: "search requires --db <path>" };
+  const term = options.get("--term");
+  if (!term) return { ok: false, error: "search requires --term <text>" };
+  const tables = parseCommaList(options.get("--tables"));
+  const schema = options.get("--schema");
+  const maxHitsRaw = options.get("--max-hits");
+  const maxHits = parsePositiveInt(maxHitsRaw);
+  if (maxHitsRaw !== undefined && maxHits === undefined) {
+    return { ok: false, error: "--max-hits must be a positive integer" };
+  }
+  const timeoutRaw = options.get("--timeout");
+  const timeoutSec =
+    timeoutRaw === undefined
+      ? DEFAULT_SEARCH_TIMEOUT_SEC
+      : parsePositiveInt(timeoutRaw);
+  if (timeoutSec === undefined) {
+    return { ok: false, error: "--timeout must be a positive integer (sec)" };
+  }
+  return {
+    ok: true,
+    args: {
+      command: {
+        kind: "search",
+        db,
+        term,
+        tables,
+        schema,
+        includeNonText: flags.has("--include-non-text"),
+        maxHits,
+        timeoutSec,
+        json: flags.has("--json"),
+      },
+      ...globalArgs,
+    },
+  };
 }
 
 function parseSnapshotSubcommand(
@@ -514,6 +595,7 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     return runSnapshotNote(serverUrl, command);
   if (command.kind === "diff-tables") return runDiffTables(serverUrl, command);
   if (command.kind === "diff-rows") return runDiffRows(serverUrl, command);
+  if (command.kind === "search") return runSearch(serverUrl, command);
 }
 
 async function runExec(
@@ -764,4 +846,131 @@ async function runDiffRows(
     "diff rows",
   )) as Record<string, unknown>;
   console.log(JSON.stringify(data, null, command.json ? 2 : 0));
+}
+
+type SearchHitOut = {
+  table: string;
+  column: string;
+  schema?: string;
+  rowKeyJson?: string;
+  valuePreview: string;
+  rowPreview: unknown[];
+};
+type SearchStatus = {
+  jobId: string;
+  dbId: string;
+  schema?: string;
+  scannedTables: number;
+  totalTables: number;
+  currentTable?: string;
+  hits: SearchHitOut[];
+  done: boolean;
+  error?: string;
+};
+
+// 単体テストでは polling 間隔を 0 にして同期的に進めたい。
+// CLI 表面に出すと「裏技 flag」になるので環境変数経由で受ける。
+function searchPollIntervalMs(): number {
+  const raw = process.env.CODE_VIEWER_SEARCH_POLL_MS;
+  if (raw === undefined) return 500;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 500;
+  return n;
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function cancelSearchJobBestEffort(
+  serverUrl: string,
+  jobId: string,
+): Promise<void> {
+  try {
+    await fetch(`${serverUrl}/_db/search/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: new URL(serverUrl).origin,
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify({ id: jobId }),
+    });
+  } catch {
+    // Timeout reporting is more useful than cancel failure details here.
+  }
+}
+
+async function runSearch(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "search" }>,
+): Promise<void> {
+  const startBody: Record<string, unknown> = {
+    db: command.db,
+    term: command.term,
+    includeNonText: command.includeNonText,
+  };
+  if (command.schema) startBody.schema = command.schema;
+  if (command.tables) startBody.tables = command.tables;
+  if (command.maxHits !== undefined)
+    startBody.maxHitsPerTable = command.maxHits;
+
+  const startRes = (await request(
+    serverUrl,
+    "/_db/search/start",
+    "POST",
+    startBody,
+    "search start",
+  )) as { jobId?: string };
+  const jobId = startRes.jobId;
+  if (!jobId) {
+    console.error("search start: server did not return a jobId");
+    process.exit(1);
+  }
+
+  const pollIntervalMs = searchPollIntervalMs();
+  const deadline = Date.now() + command.timeoutSec * 1000;
+  let status: SearchStatus | undefined;
+  while (true) {
+    if (Date.now() >= deadline) {
+      await cancelSearchJobBestEffort(serverUrl, jobId);
+      console.error(
+        `search timed out after ${command.timeoutSec}s (cancelled job ${jobId})`,
+      );
+      process.exit(1);
+    }
+    status = (await request(
+      serverUrl,
+      `/_db/search/status?id=${encodeURIComponent(jobId)}`,
+      "GET",
+      undefined,
+      "search status",
+    )) as SearchStatus;
+    if (status.error) {
+      console.error(`search error: ${status.error}`);
+      process.exit(1);
+    }
+    if (status.done) break;
+    await sleep(pollIntervalMs);
+  }
+
+  if (command.json) {
+    console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+  if (status.hits.length === 0) {
+    console.log(`no hits (scanned ${status.scannedTables} tables)`);
+    return;
+  }
+  for (const hit of status.hits) {
+    const schema = hit.schema ? `${hit.schema}.` : "";
+    const key = hit.rowKeyJson ? `  key=${hit.rowKeyJson}` : "";
+    console.log(
+      `${schema}${hit.table}.${hit.column}${key}  ${hit.valuePreview}`,
+    );
+  }
+  console.log(
+    `# ${status.hits.length} hit(s) across ${status.scannedTables} table(s)`,
+  );
 }
