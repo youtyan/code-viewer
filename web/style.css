@@ -528,6 +528,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
+.ref-selector[hidden] { display: none !important; }
 [data-theme="dark"] .ref-selector {
   border-color: var(--border);
   background: var(--bg-soft);

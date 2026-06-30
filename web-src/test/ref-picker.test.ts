@@ -6,6 +6,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { AppRoute } from "../core/routes";
 import { createRefPicker } from "../views/ref-picker";
@@ -20,6 +21,7 @@ afterAll(() => {
 
 afterEach(() => {
   document.body.innerHTML = "";
+  document.head.innerHTML = "";
 });
 
 function installRefPickerDom() {
@@ -65,6 +67,23 @@ function createPickerForRoute(route: AppRoute) {
 }
 
 describe("repository ref picker", () => {
+  test("hidden repository target is not displayed in the diff sidebar", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync("web/style.css", "utf8");
+    document.head.appendChild(style);
+
+    const wrap = document.createElement("span");
+    wrap.id = "repo-target-wrap";
+    wrap.className = "ref-selector ref-selector-in-grid";
+    wrap.hidden = true;
+    document.body.appendChild(wrap);
+
+    expect(getComputedStyle(wrap).display).toBe("none");
+
+    wrap.hidden = false;
+    expect(getComputedStyle(wrap).display).toBe("flex");
+  });
+
   test("changing the repository target reloads the current repo path with the new ref", () => {
     installRefPickerDom();
     const range = { from: "HEAD", to: "worktree" };
