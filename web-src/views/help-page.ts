@@ -1,6 +1,7 @@
 // Help page (keybindings reference), extracted from app.ts.
 
 import type { AppRoute } from "../core/routes";
+import { buildHelpKeybindingGroups } from "./help-keybindings";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -600,63 +601,6 @@ code-viewer annotate add-db --db app.db --tab query \\
           "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
         groups: [
           {
-            title: "Global",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+K", "Open file palette"],
-                  ["Ctrl+G", "Open grep palette"],
-                  ["/", "Focus file filter"],
-                  ["?", "Open this help (keybindings)"],
-                  ["t", "Toggle theme"],
-                  ["[ / ]", "Previous / next annotation"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Panels",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+H", "Focus sidebar"],
-                  ["Ctrl+L", "Focus main panel"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Sidebar",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "Move selection down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                  ["gg / Shift+G", "Move to top / bottom"],
-                  ["Enter", "Open selected item"],
-                  ["h / l", "Collapse / expand directory"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Main Panel",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "Move code cursor down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                  ["gg / Shift+G", "Move code cursor to top / bottom"],
-                  ["gp / gc", "Switch to Preview / Code tab"],
-                ],
-              },
-            ],
-          },
-          {
             title: "Line selection",
             blocks: [
               {
@@ -1224,63 +1168,6 @@ code-viewer annotate add-db --db app.db --tab query \\
           "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
         groups: [
           {
-            title: "グローバル",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+K", "ファイルパレットを開く"],
-                  ["Ctrl+G", "grep パレットを開く"],
-                  ["/", "ファイルフィルターへフォーカス"],
-                  ["?", "このヘルプ（キーバインド）を開く"],
-                  ["t", "テーマ切り替え"],
-                  ["[ / ]", "前 / 次の注釈へ移動"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "パネル",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+H", "サイドバーへフォーカス"],
-                  ["Ctrl+L", "メインパネルへフォーカス"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "サイドバー",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "選択を下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                  ["Enter", "選択項目を開く"],
-                  ["h / l", "ディレクトリを閉じる / 開く"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "メインパネル",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "コードカーソルを下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                  ["gp / gc", "Preview / Code タブへ切り替え"],
-                ],
-              },
-            ],
-          },
-          {
             title: "行選択",
             blocks: [
               {
@@ -1320,6 +1207,36 @@ export function helpSectionFromRoute(route: AppRoute): HelpSection {
     HELP_SECTIONS.includes(route.section as HelpSection)
     ? (route.section as HelpSection)
     : "overview";
+}
+
+export type OpenHelpKeybindingsDeps = Pick<
+  HelpPageDeps,
+  | "getRoute"
+  | "getLanguage"
+  | "currentRange"
+  | "setRoute"
+  | "setPageMode"
+  | "cancelActiveSourceLoad"
+> & {
+  renderHelpPage(): void;
+  setStatus(status: "live" | "refreshing" | "error" | null): void;
+};
+
+export function openHelpKeybindings(deps: OpenHelpKeybindingsDeps): void {
+  const route = deps.getRoute();
+  deps.cancelActiveSourceLoad("navigation");
+  deps.setRoute({
+    screen: "help",
+    lang:
+      route.screen === "help"
+        ? helpLanguageFromRoute(route)
+        : deps.getLanguage(),
+    section: "keybindings",
+    range: deps.currentRange(),
+  });
+  deps.setPageMode();
+  deps.renderHelpPage();
+  deps.setStatus("live");
 }
 
 function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
@@ -1396,6 +1313,16 @@ export function createHelpPage(deps: HelpPageDeps) {
     const section = helpSectionFromRoute(deps.getRoute());
     const content = HELP_CONTENT[lang];
     const sectionContent = content.sections[section];
+    const sectionGroups =
+      section === "keybindings"
+        ? [
+            ...buildHelpKeybindingGroups(lang).map((group) => ({
+              title: group.title,
+              blocks: [{ kind: "table" as const, rows: group.rows }],
+            })),
+            ...sectionContent.groups,
+          ]
+        : sectionContent.groups;
 
     const shell = document.createElement("section");
     shell.className = "gdp-help-shell";
@@ -1448,7 +1375,7 @@ export function createHelpPage(deps: HelpPageDeps) {
     const intro = document.createElement("p");
     intro.textContent = sectionContent.intro;
     article.append(h2, intro);
-    sectionContent.groups.forEach((group) => {
+    sectionGroups.forEach((group) => {
       const groupSection = document.createElement("section");
       groupSection.className = "gdp-help-group";
       const groupTitle = document.createElement("h3");

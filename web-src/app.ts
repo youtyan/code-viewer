@@ -67,6 +67,7 @@ import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
+  openHelpKeybindings,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
@@ -3039,23 +3040,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "open-help") {
-      cancelActiveSourceLoad("navigation");
-      // Order matters: setRoute mutates STATE.route, and setPageMode reads
-      // STATE.route.screen to swap body classes. Calling setPageMode first
-      // would leave the prior layout (sidebar visible, etc.) on top of the
-      // Help page.
-      setRoute({
-        screen: "help",
-        lang:
-          STATE.route.screen === "help"
-            ? helpLanguageFromRoute(STATE.route)
-            : STATE.language,
-        section: "keybindings",
-        range: currentRange(),
+      openHelpKeybindings({
+        getRoute: () => STATE.route,
+        getLanguage: () => STATE.language,
+        currentRange,
+        setRoute,
+        setPageMode,
+        renderHelpPage,
+        setStatus,
+        cancelActiveSourceLoad,
       });
-      setPageMode();
-      renderHelpPage();
-      setStatus("live");
       return true;
     }
     return false;
