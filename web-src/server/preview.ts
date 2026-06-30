@@ -25,8 +25,6 @@ import type {
   FileMeta,
   FileRangeResponse,
   FileSearchListResponse,
-  GrepMatch,
-  GrepResponse,
   RepoTreeResponse,
   SettingsResponse,
   UndoActionResponse,
@@ -81,17 +79,15 @@ import {
   spawnDetached,
   startServer,
 } from "./runtime";
+import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
 import {
-  buildFileSearchList,
-  buildRgArgs,
-  DEFAULT_EXCLUDE_NAMES,
-  fixedStringLineMatches,
-  GREP_MAX_FILE_BYTES,
-  isSkippableSearchPath,
-  normalizeGrepMax,
-  parseGitGrepOutput,
-  parseRgOutput,
-} from "./search";
+  grepRepo,
+  isExcludedScopePath,
+  isSafePath,
+  listRepoFiles,
+  type SearchEnv,
+  safeWorktreePath as safeWorktreePathInEnv,
+} from "./search-service";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
 import {
@@ -165,8 +161,6 @@ let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
 let scopeWatchLimit = DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
 let uploadEnabled = true;
-let rgAvailableCache: boolean | null = null;
-
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const sseKeepalives = new Map<
@@ -648,16 +642,9 @@ function handleDiffJson(url: URL) {
   });
 }
 
-function safePath(path: string) {
-  if (
-    !path ||
-    path.startsWith("/") ||
-    path.startsWith("\\") ||
-    path.includes("\0")
-  )
-    return false;
-  return !path.split(/[\\/]+/).includes("..");
-}
+// Local alias to the shared search-service guard so the rest of preview.ts
+// keeps the historical name. The actual logic lives in search-service.ts.
+const safePath = isSafePath;
 
 function safeRepoPath(path: string) {
   return path === "" || safePath(path);
@@ -777,37 +764,11 @@ function invalidScopeExcludeNamesQuery(url: URL): boolean {
   );
 }
 
-function isExcludedScopePath(path: string, excludeNames: string[]): boolean {
-  return path
-    .split(/[\\/]+/)
-    .some((part) =>
-      excludeNames.some((name) => part.toLowerCase() === name.toLowerCase()),
-    );
-}
-
+// Closure-bound view over the shared search-service safeWorktreePath. The
+// actual symlink-escape / .git / scope guard lives in search-service.ts so
+// MCP tools and HTTP routes use the same gate.
 function safeWorktreePath(path: string): string | null {
-  if (!safePath(path)) return null;
-  if (git.isGitInternalPath(path)) return null;
-  const full = join(cwd, path);
-  if (!existsSync(full)) return null;
-  let realCwd: string;
-  let realFull: string;
-  try {
-    realCwd = realpathSync(cwd);
-    realFull = realpathSync(full);
-  } catch {
-    return null;
-  }
-  const rel = relative(realCwd, realFull);
-  if (
-    rel === "" ||
-    rel.startsWith("..") ||
-    rel.startsWith("/") ||
-    rel.startsWith("\\")
-  )
-    return null;
-  if (git.isGitInternalPath(rel)) return null;
-  return realFull;
+  return safeWorktreePathInEnv(currentSearchEnv(), path);
 }
 
 function worktreePath(path: string): string {
@@ -1000,11 +961,23 @@ function worktreeWatchDirectoryLimitFromEnv(): number {
   return floored;
 }
 
+// Build the SearchEnv snapshot used by every call into search-service.
+// We do NOT cache it because scope-omit/scope-exclude can be live-edited
+// via /_state and the closure variables track that.
+function currentSearchEnv(
+  omitOverride?: string[],
+  excludeOverride?: string[],
+): SearchEnv {
+  return {
+    cwd,
+    omitDirNames: omitOverride ?? scopeOmitDirNames,
+    excludeNames: excludeOverride ?? scopeExcludeNames,
+  };
+}
+
 function handleFiles(url: URL) {
   const target =
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
-  if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
-    return text("invalid target", 400);
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
   if (invalidScopeExcludeNamesQuery(url))
     return text("invalid exclude names", 400);
@@ -1013,207 +986,14 @@ function handleFiles(url: URL) {
   const key = `${target || "worktree"}\0${omitDirNames.join("\0")}\0${excludeNames.join("\0")}`;
   const cached = fileListCache.get(key);
   if (cached && cached.generation === generation) return json(cached.body);
-  const ref = target || "worktree";
-  const entries = git
-    .listTree(ref, "", cwd, {
-      recursive: true,
-      omitDirNames,
-      excludeNames,
-    })
-    .entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
-  const body = buildFileSearchList(ref, generation, entries);
-  fileListCache.set(key, { generation, body });
-  return json(body);
-}
-
-function parseGrepPaths(
-  url: URL,
-  omitDirNames: string[],
-  excludeNames: string[],
-): string[] {
-  return url.searchParams
-    .getAll("path")
-    .filter(
-      (path) =>
-        safePath(path) &&
-        !git.isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames, excludeNames),
-    );
-}
-
-function rgAvailable(): boolean {
-  if (rgAvailableCache !== null) return rgAvailableCache;
-  const proc = runSync(["rg", "--version"], cwd);
-  rgAvailableCache = proc.code === 0;
-  return rgAvailableCache;
-}
-
-function grepWorktreeFallback(
-  query: string,
-  max: number,
-  paths: string[],
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepMatch[] {
-  const candidates = paths.length
-    ? paths
-    : git
-        .listTree("worktree", "", cwd, {
-          recursive: true,
-          omitDirNames,
-          excludeNames,
-        })
-        .entries.map((entry) => entry.path);
-  const matches: GrepMatch[] = [];
-  for (const path of candidates) {
-    if (matches.length >= max) break;
-    if (
-      !safePath(path) ||
-      git.isGitInternalPath(path) ||
-      isSkippableSearchPath(path, omitDirNames, excludeNames)
-    )
-      continue;
-    const full = safeWorktreePath(path);
-    if (!full) continue;
-    let stat: ReturnType<typeof lstatSync>;
-    try {
-      stat = lstatSync(full);
-    } catch {
-      continue;
-    }
-    if (
-      !stat.isFile() ||
-      stat.isSymbolicLink() ||
-      stat.size > GREP_MAX_FILE_BYTES
-    )
-      continue;
-    let data: Buffer;
-    try {
-      data = readFileSync(full);
-    } catch {
-      continue;
-    }
-    if (data.subarray(0, 8192).includes(0)) continue;
-    matches.push(
-      ...fixedStringLineMatches(
-        path,
-        data.toString("utf8"),
-        query,
-        max - matches.length,
-      ),
-    );
-  }
-  return matches;
-}
-
-function grepWorktree(
-  query: string,
-  max: number,
-  paths: string[],
-  regex: boolean,
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepResponse {
-  if (rgAvailable()) {
-    const safePaths = paths.filter(
-      (path) =>
-        safePath(path) &&
-        !git.isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames, excludeNames) &&
-        safeWorktreePath(path),
-    );
-    const args = buildRgArgs(
-      query,
-      max,
-      safePaths,
-      regex,
-      omitDirNames,
-      excludeNames,
-    );
-    const proc = runSync(args, cwd, { timeout: 5000 });
-    const stdout = proc.stdout;
-    const matches = parseRgOutput(
-      stdout,
-      max,
-      omitDirNames,
-      excludeNames,
-    ).filter(
-      (match) =>
-        safePath(match.path) &&
-        !git.isGitInternalPath(match.path) &&
-        !isSkippableSearchPath(match.path, omitDirNames, excludeNames) &&
-        !!safeWorktreePath(match.path),
-    );
-    return {
-      ref: "worktree",
-      engine: "rg",
-      truncated: matches.length >= max,
-      matches,
-    };
-  }
-  if (regex)
-    return {
-      ref: "worktree",
-      engine: "fallback",
-      truncated: false,
-      matches: [],
-    };
-  const matches = grepWorktreeFallback(
-    query,
-    max,
-    paths,
-    omitDirNames,
-    excludeNames,
+  const result = listRepoFiles(
+    currentSearchEnv(omitDirNames, excludeNames),
+    target,
+    generation,
   );
-  return {
-    ref: "worktree",
-    engine: "fallback",
-    truncated: matches.length >= max,
-    matches,
-  };
-}
-
-function grepTreeRef(
-  ref: string,
-  query: string,
-  max: number,
-  paths: string[],
-  regex: boolean,
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepResponse {
-  const safePaths = paths.filter(
-    (path) =>
-      safePath(path) &&
-      !git.isGitInternalPath(path) &&
-      !isSkippableSearchPath(path, omitDirNames, excludeNames),
-  );
-  const args = [
-    "git",
-    "-c",
-    "core.quotepath=false",
-    "grep",
-    "-n",
-    "--column",
-    "-i",
-    regex ? "-E" : "-F",
-    "--no-color",
-    "-e",
-    query,
-    ref,
-    "--",
-    ...safePaths,
-  ];
-  const proc = runSync(args, cwd, { timeout: 5000 });
-  const stdout = proc.stdout;
-  const matches = parseGitGrepOutput(
-    stdout,
-    ref,
-    max,
-    omitDirNames,
-    excludeNames,
-  ).slice(0, max);
-  return { ref, engine: "git", truncated: matches.length >= max, matches };
+  if (result.ok !== true) return text(result.error, 400);
+  fileListCache.set(key, { generation, body: result.value });
+  return json(result.value);
 }
 
 function handleGrep(url: URL) {
@@ -1225,23 +1005,17 @@ function handleGrep(url: URL) {
     return text("invalid exclude names", 400);
   const omitDirNames = scopeOmitDirNamesFromQuery(url);
   const excludeNames = scopeExcludeNamesFromQuery(url);
-  const paths = parseGrepPaths(url, omitDirNames, excludeNames);
+  const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
-  if (!query.trim())
-    return json({
-      ref,
-      engine: ref === "worktree" ? "fallback" : "git",
-      truncated: false,
-      matches: [],
-    } satisfies GrepResponse);
-  if (ref === "worktree" || ref === "")
-    return json(
-      grepWorktree(query, max, paths, regex, omitDirNames, excludeNames),
-    );
-  if (!git.verifyTreeRef(ref, cwd)) return text("invalid target", 400);
-  return json(
-    grepTreeRef(ref, query, max, paths, regex, omitDirNames, excludeNames),
-  );
+  const result = grepRepo(currentSearchEnv(omitDirNames, excludeNames), {
+    query,
+    ref,
+    paths,
+    regex,
+    max,
+  });
+  if (result.ok !== true) return text(result.error, 400);
+  return json(result.value);
 }
 
 function handleRefCommits(url: URL) {

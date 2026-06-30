@@ -141,6 +141,9 @@ describe("dispatchJsonRpc — tools/list", () => {
     const names = payload.tools.map((t) => t.name);
     expect(names.includes("code_viewer_agent_help")).toBe(true);
     expect(names.includes("code_viewer_status")).toBe(true);
+    expect(names.includes("code_viewer_file_show")).toBe(true);
+    expect(names.includes("code_viewer_search_files")).toBe(true);
+    expect(names.includes("code_viewer_search_code")).toBe(true);
     for (const tool of payload.tools) {
       expect(typeof tool.title).toBe("string");
       expect(tool.title.length > 0).toBe(true);
@@ -619,5 +622,574 @@ describe("/_mcp HTTP route", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
     });
     expect(response.status).toBe(403);
+  });
+
+  // The next four tests anchor the new MCP tools against the running
+  // preview process; they prove that the preview --cwd is the default
+  // root, and that /_grep and code_viewer_search_code give identical
+  // matches for the same query.
+
+  test("POST tools/call code_viewer_file_show defaults to the preview --cwd", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 21,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_file_show",
+          arguments: { path: "sample_file.ts" },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(body.result.isError).toBe(false);
+    const report = JSON.parse(body.result.content[0].text);
+    expect(report.path).toBe("sample_file.ts");
+    expect(report.ref).toBe("worktree");
+    expect(report.text).toBe("export const sample = 1;");
+    expect(report.totalLines).toBe(1);
+    expect(report.complete).toBe(true);
+    expect(report.error).toBeUndefined();
+  });
+
+  test("POST tools/call code_viewer_file_show returns isError=true with the file payload for a missing path", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 22,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_file_show",
+          arguments: { path: "no_such_sample.ts" },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(body.result.isError).toBe(true);
+    const report = JSON.parse(body.result.content[0].text);
+    expect(report.path).toBe("no_such_sample.ts");
+    expect(typeof report.error).toBe("string");
+    expect(report.totalLines).toBe(0);
+    expect(report.text).toBe("");
+  });
+
+  test("POST tools/call code_viewer_search_files ranks the preview cwd's paths", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 23,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_search_files",
+          arguments: { term: "sample" },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(body.result.isError).toBe(false);
+    const payload = JSON.parse(body.result.content[0].text);
+    expect(payload.ref).toBe("worktree");
+    expect(payload.mode).toBe("fuzzy");
+    expect(payload.query).toBe("sample");
+    expect(payload.matches.length >= 1).toBe(true);
+    expect(payload.matches[0].path).toBe("sample_file.ts");
+    // The CLI shape requires score / ranges on each match.
+    expect(typeof payload.matches[0].score).toBe("number");
+    expect(Array.isArray(payload.matches[0].ranges)).toBe(true);
+  });
+
+  test("POST tools/call code_viewer_search_code matches the /_grep response for the same query", async () => {
+    const grepResponse = await fetch(
+      `${origin()}/_grep?q=${encodeURIComponent("sample")}`,
+    );
+    expect(grepResponse.status).toBe(200);
+    const grepBody = await grepResponse.json();
+
+    const mcpResponse = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 24,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_search_code",
+          arguments: { term: "sample" },
+        },
+      }),
+    });
+    expect(mcpResponse.status).toBe(200);
+    const mcpEnvelope = (await mcpResponse.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(mcpEnvelope.result.isError).toBe(false);
+    const mcpBody = JSON.parse(mcpEnvelope.result.content[0].text);
+    // engine / truncated / ref / matches all come from the same
+    // grepRepo entry point. /_grep and MCP must agree match-for-match.
+    expect(mcpBody).toEqual(grepBody);
+  });
+});
+
+// Pure-input tool coverage for the 3 new read-only tools. We exercise
+// success and every input-validation branch without spawning preview,
+// using fixture repositories. This is the "fast" half of the test
+// matrix; the HTTP block above is the integration half.
+describe("dispatchJsonRpc — tools/call code_viewer_file_show (fixture repo)", () => {
+  let repo: string;
+  let secondSha: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-file-show-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "line one\nline two\nline three\nline four\n",
+    );
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+    secondSha = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "line one\nline two\nline three\nline four\nline five from worktree\n",
+    );
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("reads the worktree version with totalLines/complete", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_show",
+        arguments: { cwd: repo, path: "sample_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.ref).toBe("worktree");
+    expect(report.totalLines).toBe(5);
+    expect(report.complete).toBe(true);
+    expect(report.text.endsWith("line five from worktree")).toBe(true);
+  });
+
+  test("slices [start..end] and reports complete=false when shorter than total", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_show",
+        arguments: { cwd: repo, path: "sample_file.ts", start: 2, end: 3 },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.start).toBe(2);
+    expect(report.end).toBe(3);
+    expect(report.text).toBe("line two\nline three");
+    expect(report.totalLines).toBe(5);
+    expect(report.complete).toBe(false);
+  });
+
+  test("reads a committed ref instead of the worktree", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 102,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_show",
+        arguments: { cwd: repo, path: "sample_file.ts", ref: secondSha },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.ref).toBe(secondSha);
+    expect(report.totalLines).toBe(4);
+    expect(report.text.includes("line five from worktree")).toBe(false);
+  });
+
+  test("rejects unsafe path values with isError true", async () => {
+    for (const bad of [
+      { path: "", expect: /non-empty/ },
+      { path: "../escape", expect: /'\.\.' segments/ },
+      { path: "/abs", expect: /repo-relative/ },
+      { path: "-trick", expect: /must not start with '-'/ },
+      { path: "with\nnewline", expect: /single-line/ },
+    ] as const) {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: 103,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_file_show",
+          arguments: { cwd: repo, path: bad.path },
+        },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      expect(payload.content[0].text).toMatch(bad.expect);
+    }
+  });
+
+  test("rejects start without end (and vice versa) with isError true", async () => {
+    for (const args of [
+      { cwd: repo, path: "sample_file.ts", start: 1 },
+      { cwd: repo, path: "sample_file.ts", end: 3 },
+    ]) {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: 104,
+        method: "tools/call",
+        params: { name: "code_viewer_file_show", arguments: args },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      expect(payload.content[0].text).toMatch(/together/);
+    }
+  });
+
+  test("rejects end < start with isError true", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 105,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_show",
+        arguments: { cwd: repo, path: "sample_file.ts", start: 5, end: 2 },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/end must be >= start/);
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_search_files (fixture repo)", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-search-files-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
+    writeFileSync(join(repo, "other_sample.ts"), "export const other = 2;\n");
+    writeFileSync(join(repo, "unrelated.md"), "doc\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("fuzzy mode ranks file names containing the term", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 110,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_files",
+        arguments: { cwd: repo, term: "sample" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.mode).toBe("fuzzy");
+    expect(body.ref).toBe("worktree");
+    expect(body.candidateTruncated).toBe(false);
+    const paths = body.matches.map((m: { path: string }) => m.path).sort();
+    expect(paths.includes("sample_file.ts")).toBe(true);
+    expect(paths.includes("other_sample.ts")).toBe(true);
+    expect(paths.includes("unrelated.md")).toBe(false);
+  });
+
+  test("glob mode triggers on terms containing * or ?", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 111,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_files",
+        arguments: { cwd: repo, term: "*.md" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.mode).toBe("glob");
+    const paths = body.matches.map((m: { path: string }) => m.path);
+    expect(paths.includes("unrelated.md")).toBe(true);
+    expect(paths.includes("sample_file.ts")).toBe(false);
+  });
+
+  test("max above hard cap is rejected", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 112,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_files",
+        arguments: { cwd: repo, term: "sample", max: 999999 },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/max must be an integer in \[1, /);
+  });
+
+  test("empty term is rejected with isError true", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 113,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_files",
+        arguments: { cwd: repo, term: "" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/non-empty/);
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_search_code (fixture repo)", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-search-code-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "export const sample = 1;\nexport const beta = 2;\n",
+    );
+    writeFileSync(join(repo, "other_sample.ts"), "export const sample = 3;\n");
+    // Third "control" file used by the restricts-results test below to
+    // prove the paths[] filter actually drops out-of-scope files.
+    writeFileSync(
+      join(repo, "control_sample.ts"),
+      "export const sample = 999;\n",
+    );
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("returns GrepResponse with matches across files", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 120,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: { cwd: repo, term: "sample" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.ref).toBe("worktree");
+    expect(["rg", "git", "fallback"].includes(body.engine)).toBe(true);
+    expect(Array.isArray(body.matches)).toBe(true);
+    expect(body.matches.length >= 2).toBe(true);
+    // rg returns paths prefixed with "./" when scanning from cwd; git
+    // grep / fallback return bare names. Normalise both before asserting.
+    const normalize = (path: string) =>
+      path.startsWith("./") ? path.slice(2) : path;
+    const paths = new Set(
+      body.matches.map((m: { path: string }) => normalize(m.path)),
+    );
+    expect(paths.has("sample_file.ts")).toBe(true);
+    expect(paths.has("other_sample.ts")).toBe(true);
+  });
+
+  test("restricts results when paths[] is supplied", async () => {
+    // control_sample.ts contains "sample" too; omitting it from paths
+    // proves the filter actually narrows even when only one path is passed.
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 121,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: {
+          cwd: repo,
+          term: "sample",
+          paths: ["sample_file.ts"],
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    const body = JSON.parse(payload.content[0].text);
+    const paths = new Set(body.matches.map((m: { path: string }) => m.path));
+    expect(paths.has("control_sample.ts")).toBe(false);
+    expect(paths.has("sample_file.ts")).toBe(true);
+  });
+
+  test("rejects non-array paths with isError true", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 122,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: { cwd: repo, term: "sample", paths: "sample_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/array of strings/);
+  });
+
+  test("empty term is rejected with isError true", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 123,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: { cwd: repo, term: "" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/non-empty/);
+  });
+
+  test("regex flag must be a boolean", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 124,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: { cwd: repo, term: "sample", regex: "yes" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/regex must be a boolean/);
+  });
+
+  test("unknown ref returns the service's 'invalid target' error", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 125,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_search_code",
+        arguments: {
+          cwd: repo,
+          term: "sample",
+          ref: "ref-that-does-not-exist",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/invalid target/);
   });
 });

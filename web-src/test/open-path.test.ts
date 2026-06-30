@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isGitInternalPath } from "../server/git";
+import { safeWorktreePath } from "../server/search-service";
+import { runGit as git } from "./_git-fixture";
 import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
@@ -76,12 +86,6 @@ describe("open path in OS action", () => {
         "function safeOpenWorktreePath(path: string): string | null",
       ),
     ).toBe(true);
-    // `.git/*` rejection is now sourced from git.ts:isGitInternalPath
-    // (consolidated to remove the inline split predicate duplicate). We
-    // check call-sites instead of the inline regex string.
-    expect(server.includes("if (git.isGitInternalPath(rel)) return null")).toBe(
-      true,
-    );
     expect(server.includes("spawnDetached(cmd)")).toBe(true);
   });
 
@@ -99,9 +103,18 @@ describe("open path in OS action", () => {
         "if ((target === 'worktree' || target === '') && git.isGitInternalPath(path)) return text('forbidden', 403)",
       ),
     ).toBe(true);
-    expect(
-      server.includes("if (git.isGitInternalPath(path)) return null"),
-    ).toBe(true);
+    const repo = mkdtempSync(join(tmpdir(), "code-viewer-open-path-safe-"));
+    try {
+      git(repo, ["init", "-b", "main"]);
+      writeFileSync(join(repo, "sample_file.ts"), "sample\n");
+      const env = { cwd: repo, omitDirNames: [], excludeNames: [] };
+      expect(safeWorktreePath(env, ".git/config")).toBeNull();
+      expect(safeWorktreePath(env, "sample_file.ts")).toBe(
+        realpathSync(join(repo, "sample_file.ts")),
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   test("UI adds open actions to directory-oriented surfaces", () => {

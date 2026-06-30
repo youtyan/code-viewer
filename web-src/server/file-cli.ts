@@ -511,7 +511,12 @@ function runHistory(root: string, command: FileHistoryCommand): void {
   }
 }
 
-function sliceLines(
+// Slice a file's lines into [start..end] (1-indexed, inclusive). Returns
+// the `total` line count of the FULL file (not the slice) plus a
+// `complete` flag indicating whether the slice covers every line. Pure;
+// reused by the CLI's `file show --json` output and by the MCP tool
+// `code_viewer_file_show`.
+export function sliceLines(
   text: string,
   start: number | undefined,
   end: number | undefined,
@@ -533,7 +538,15 @@ function sliceLines(
   };
 }
 
-function safeWorktreePath(root: string, path: string): string | null {
+// Resolve a repo-relative path against the worktree, rejecting paths that
+// escape the repo via symlinks or "..". Returns the resolved absolute
+// path or null when the path is unsafe / missing. Exported so MCP tools
+// can perform the same gate (the closure-bound `safeWorktreePath` in
+// preview.ts has the same intent but receives `cwd` differently).
+export function safeWorktreePathFromRoot(
+  root: string,
+  path: string,
+): string | null {
   if (validatePath(path)) return null;
   const full = join(root, path);
   if (!existsSync(full)) return null;
@@ -556,14 +569,17 @@ function safeWorktreePath(root: string, path: string): string | null {
   }
 }
 
-function readShowText(
+// Read the requested ref's content. Worktree paths go through
+// safeWorktreePathFromRoot; committed refs go through git.show. Exposed
+// for `buildFileShowReport` and the MCP tool to share.
+export function readShowText(
   root: string,
   command: FileShowCommand,
 ): { code: number; stdout: string; stderr: string } {
   if (command.ref !== "worktree" && command.ref !== "") {
     return show(command.ref, command.path, root);
   }
-  const full = safeWorktreePath(root, command.path);
+  const full = safeWorktreePathFromRoot(root, command.path);
   if (!full) {
     return {
       code: 1,
@@ -582,54 +598,65 @@ function readShowText(
   }
 }
 
-function runShow(root: string, command: FileShowCommand): void {
+// JSON shape `code-viewer file show --json` emits, also returned verbatim
+// by the MCP tool `code_viewer_file_show`. Pure; never throws.
+export type FileShowReport = {
+  path: string;
+  ref: string;
+  start?: number;
+  end?: number;
+  totalLines: number;
+  complete: boolean;
+  text: string;
+  error?: string;
+};
+
+export function buildFileShowReport(
+  root: string,
+  command: FileShowCommand,
+): FileShowReport {
   const res = readShowText(root, command);
   if (res.code !== 0) {
     const detail = res.stderr.trim() || `git show exited with code ${res.code}`;
+    return {
+      path: command.path,
+      ref: command.ref,
+      ...(command.start !== undefined ? { start: command.start } : {}),
+      ...(command.end !== undefined ? { end: command.end } : {}),
+      totalLines: 0,
+      complete: false,
+      text: "",
+      error: detail,
+    };
+  }
+  const sliced = sliceLines(res.stdout, command.start, command.end);
+  return {
+    path: command.path,
+    ref: command.ref,
+    ...(command.start !== undefined ? { start: command.start } : {}),
+    ...(command.end !== undefined ? { end: command.end } : {}),
+    totalLines: sliced.total,
+    complete: sliced.complete,
+    text: sliced.lines.join("\n"),
+  };
+}
+
+function runShow(root: string, command: FileShowCommand): void {
+  const report = buildFileShowReport(root, command);
+  if (report.error !== undefined) {
     if (command.json) {
-      console.log(
-        JSON.stringify(
-          {
-            path: command.path,
-            ref: command.ref,
-            ...(command.start !== undefined ? { start: command.start } : {}),
-            ...(command.end !== undefined ? { end: command.end } : {}),
-            totalLines: 0,
-            complete: false,
-            text: "",
-            error: detail,
-          },
-          null,
-          2,
-        ),
-      );
+      console.log(JSON.stringify(report, null, 2));
     } else {
-      console.error(`show failed: ${detail}`);
+      console.error(`show failed: ${report.error}`);
     }
     process.exit(1);
   }
-  const sliced = sliceLines(res.stdout, command.start, command.end);
-  const text = sliced.lines.join("\n");
   if (command.json) {
-    console.log(
-      JSON.stringify(
-        {
-          path: command.path,
-          ref: command.ref,
-          ...(command.start !== undefined ? { start: command.start } : {}),
-          ...(command.end !== undefined ? { end: command.end } : {}),
-          totalLines: sliced.total,
-          complete: sliced.complete,
-          text,
-        },
-        null,
-        2,
-      ),
-    );
-  } else if (text.length > 0) {
+    console.log(JSON.stringify(report, null, 2));
+  } else if (report.text.length > 0) {
     // 1 行ずつ console.log で出すと、ファイル末尾以外でも改行が間に入って正しい。
     // 空 slice の場合は何も出さない (exit 0)。
-    console.log(text);
+    console.log(report.text);
   }
 }
 
