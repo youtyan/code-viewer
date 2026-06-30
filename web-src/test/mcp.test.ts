@@ -161,6 +161,8 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_datastore_sources")).toBe(true);
     expect(names.includes("code_viewer_datastore_schemas")).toBe(true);
     expect(names.includes("code_viewer_datastore_schema")).toBe(true);
+    expect(names.includes("code_viewer_datastore_columns")).toBe(true);
+    expect(names.includes("code_viewer_datastore_ddl")).toBe(true);
     for (const tool of payload.tools) {
       expect(typeof tool.title).toBe("string");
       expect(tool.title.length > 0).toBe(true);
@@ -434,6 +436,44 @@ describe("dispatchJsonRpc — tools/call datastore tools (fixture sqlite)", () =
     const body = JSON.parse(payload.content[0].text);
     expect(body.tables[0].name).toBe("sample_items");
     expect(body.columnsMap).toBeUndefined();
+  });
+
+  test("code_viewer_datastore_columns returns column metadata for a table", async () => {
+    const payload = await callDatastore("code_viewer_datastore_columns", {
+      db: dbFile,
+      table: "sample_items",
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    expect(body.table).toBe("sample_items");
+    expect(body.columns.map((col: { name: string }) => col.name)).toEqual([
+      "sample_id",
+      "sample_label",
+    ]);
+    expect(Array.isArray(body.executedSql)).toBe(true);
+  });
+
+  test("code_viewer_datastore_ddl returns create SQL and triggers for a table", async () => {
+    const payload = await callDatastore("code_viewer_datastore_ddl", {
+      db: dbFile,
+      table: "sample_items",
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    expect(body.table).toBe("sample_items");
+    expect(body.sql).toMatch(/CREATE TABLE sample_items/);
+    expect(body.triggers).toEqual([]);
+    expect(Array.isArray(body.executedSql)).toBe(true);
+  });
+
+  test("table-specific datastore tools require a table argument", async () => {
+    const payload = await callDatastore("code_viewer_datastore_columns", {
+      db: dbFile,
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/table must be a string/);
   });
 
   test("datastore tools return isError=true for invalid db ids", async () => {

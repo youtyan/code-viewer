@@ -24,7 +24,7 @@ import {
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { captureSql } from "./adapters/sql-capture";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
-import type { DatabaseAdapter } from "./adapters/types";
+import type { DatabaseAdapter, TriggerInfo } from "./adapters/types";
 import {
   closeConnection,
   getConnection,
@@ -145,6 +145,23 @@ const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
 export type DbServiceResult<T> =
   | { ok: true; value: T }
   | { ok: false; response: Response };
+
+export type DbColumnsResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  columns: DbColumn[];
+  executedSql?: string[];
+};
+
+export type DbDdlResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  sql: string;
+  triggers: TriggerInfo[];
+  executedSql?: string[];
+};
 
 const MAX_SCHEMA_NAME_LEN = 1024;
 
@@ -1062,55 +1079,87 @@ async function handleExport(
   }
 }
 
+export async function createDbColumnsResponse(
+  cwd: string,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    table: string | null;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbColumnsResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const table = opts.table;
+  if (!table)
+    return {
+      ok: false,
+      response: textError("missing table parameter", 400),
+    };
+  try {
+    const adapter = await getAdapter(r, cwd, signal);
+    const { result: columns, executedSql } = await captureSql(() =>
+      asAsync(adapter).columns(table, signal),
+    );
+    return {
+      ok: true,
+      value: {
+        dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
+        table,
+        columns,
+        executedSql,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      response: handleError("database", "get columns", err, signal),
+    };
+  }
+}
+
 async function handleColumns(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
   signal?: AbortSignal,
 ): Promise<Response> {
-  const r = await resolveDb(
+  const result = await createDbColumnsResponse(
     cwd,
-    url.searchParams.get("db"),
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      table: url.searchParams.get("table"),
+    },
     omitDirNames,
-    url.searchParams.get("schema"),
     signal,
   );
-  if (r instanceof Response) return r;
-  const table = url.searchParams.get("table");
-  if (!table) return textError("missing table parameter", 400);
-  try {
-    const adapter = await getAdapter(r, cwd, signal);
-    const { result: columns, executedSql } = await captureSql(() =>
-      asAsync(adapter).columns(table, signal),
-    );
-    return json({
-      dbId: r.dbId,
-      ...(r.schema ? { schema: r.schema } : {}),
-      table,
-      columns,
-      executedSql,
-    });
-  } catch (err) {
-    return handleError("database", "get columns", err, signal);
-  }
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
-async function handleDdl(
+export async function createDbDdlResponse(
   cwd: string,
-  url: URL,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    table: string | null;
+  },
   omitDirNames?: string[],
   signal?: AbortSignal,
-): Promise<Response> {
-  const r = await resolveDb(
-    cwd,
-    url.searchParams.get("db"),
-    omitDirNames,
-    url.searchParams.get("schema"),
-    signal,
-  );
-  if (r instanceof Response) return r;
-  const table = url.searchParams.get("table");
-  if (!table) return textError("missing table parameter", 400);
+): Promise<DbServiceResult<DbDdlResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const table = opts.table;
+  if (!table)
+    return {
+      ok: false,
+      response: textError("missing table parameter", 400),
+    };
   try {
     const adapter = await getAdapter(r, cwd, signal);
     const { result, executedSql } = await captureSql(async () => {
@@ -1121,17 +1170,43 @@ async function handleDdl(
       ]);
       return { sql, triggers };
     });
-    return json({
-      dbId: r.dbId,
-      ...(r.schema ? { schema: r.schema } : {}),
-      table,
-      sql: result.sql,
-      triggers: result.triggers,
-      executedSql,
-    });
+    return {
+      ok: true,
+      value: {
+        dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
+        table,
+        sql: result.sql,
+        triggers: result.triggers,
+        executedSql,
+      },
+    };
   } catch (err) {
-    return handleError("database", "get DDL", err, signal);
+    return {
+      ok: false,
+      response: handleError("database", "get DDL", err, signal),
+    };
   }
+}
+
+async function handleDdl(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const result = await createDbDdlResponse(
+    cwd,
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      table: url.searchParams.get("table"),
+    },
+    omitDirNames,
+    signal,
+  );
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
 // --- Global Search ---

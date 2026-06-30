@@ -29,6 +29,8 @@ import { isGlobPathQuery, rankPathMatches } from "../core/fuzzy-search";
 import { AGENT_GUIDES, buildAgentHelpIndex } from "./agent-help";
 import { resolveRepoRootSafe } from "./cli-helpers";
 import {
+  createDbColumnsResponse,
+  createDbDdlResponse,
   createDbFilesResponse,
   createDbSchemaResponse,
   createDbSchemasResponse,
@@ -388,6 +390,74 @@ export function defaultMcpTools(
       },
       run(input) {
         return runDatastoreSchemaTool(input, options);
+      },
+    },
+    {
+      name: "code_viewer_datastore_columns",
+      title: "code-viewer datastore columns",
+      description:
+        "Returns the same JSON payload `code-viewer query columns --json` and `/_db/columns` emit for one SQL table: dbId, schema, table, columns, and executedSql. Read-only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          db: {
+            type: "string",
+            description:
+              "Datastore id from code_viewer_datastore_sources, for example a repo-relative SQLite path or docker:<service>.",
+          },
+          schema: {
+            type: "string",
+            description: "Optional schema name for PostgreSQL sources.",
+          },
+          table: {
+            type: "string",
+            description: "Table or view name to inspect.",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["db", "table"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runDatastoreColumnsTool(input, options);
+      },
+    },
+    {
+      name: "code_viewer_datastore_ddl",
+      title: "code-viewer datastore DDL",
+      description:
+        "Returns the same JSON payload `code-viewer query ddl --json` and `/_db/ddl` emit for one SQL table: dbId, schema, table, sql, triggers, and executedSql. Read-only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          db: {
+            type: "string",
+            description:
+              "Datastore id from code_viewer_datastore_sources, for example a repo-relative SQLite path or docker:<service>.",
+          },
+          schema: {
+            type: "string",
+            description: "Optional schema name for PostgreSQL sources.",
+          },
+          table: {
+            type: "string",
+            description: "Table or view name to inspect.",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["db", "table"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runDatastoreDdlTool(input, options);
       },
     },
   ];
@@ -872,6 +942,92 @@ async function runDatastoreSchemaTool(
   }
 }
 
+async function runDatastoreColumnsTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
+  const params = isPlainObject(input) ? input : {};
+  const dbParsed = validateMcpDbId(params.db);
+  if (dbParsed.ok !== true) {
+    return { text: dbParsed.error, isError: true };
+  }
+  const schemaParsed = validateMcpOptionalSingleLine(params.schema, "schema");
+  if (schemaParsed.ok !== true) {
+    return { text: schemaParsed.error, isError: true };
+  }
+  const tableParsed = validateMcpRequiredSingleLine(params.table, "table");
+  if (tableParsed.ok !== true) {
+    return { text: tableParsed.error, isError: true };
+  }
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? options.cwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  try {
+    const result = await createDbColumnsResponse(
+      resolved.root,
+      {
+        db: dbParsed.value,
+        schema: schemaParsed.value,
+        table: tableParsed.value,
+      },
+      options.omitDirNames ?? [],
+    );
+    return dbServiceResultToMcpToolReturn("datastore columns", result);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `datastore columns failed: ${detail}`, isError: true };
+  }
+}
+
+async function runDatastoreDdlTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
+  const params = isPlainObject(input) ? input : {};
+  const dbParsed = validateMcpDbId(params.db);
+  if (dbParsed.ok !== true) {
+    return { text: dbParsed.error, isError: true };
+  }
+  const schemaParsed = validateMcpOptionalSingleLine(params.schema, "schema");
+  if (schemaParsed.ok !== true) {
+    return { text: schemaParsed.error, isError: true };
+  }
+  const tableParsed = validateMcpRequiredSingleLine(params.table, "table");
+  if (tableParsed.ok !== true) {
+    return { text: tableParsed.error, isError: true };
+  }
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? options.cwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  try {
+    const result = await createDbDdlResponse(
+      resolved.root,
+      {
+        db: dbParsed.value,
+        schema: schemaParsed.value,
+        table: tableParsed.value,
+      },
+      options.omitDirNames ?? [],
+    );
+    return dbServiceResultToMcpToolReturn("datastore DDL", result);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `datastore DDL failed: ${detail}`, isError: true };
+  }
+}
+
 function validateMcpDbId(
   raw: unknown,
 ): { ok: true; value: string } | { ok: false; error: string } {
@@ -883,6 +1039,23 @@ function validateMcpDbId(
     return {
       ok: false,
       error: "db must be single-line and must not contain NUL",
+    };
+  }
+  return { ok: true, value: raw };
+}
+
+function validateMcpRequiredSingleLine(
+  raw: unknown,
+  name: string,
+): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof raw !== "string") {
+    return { ok: false, error: `${name} must be a string` };
+  }
+  if (!raw) return { ok: false, error: `${name} must be a non-empty string` };
+  if (raw.includes("\0") || /[\r\n]/.test(raw)) {
+    return {
+      ok: false,
+      error: `${name} must be single-line and must not contain NUL`,
     };
   }
   return { ok: true, value: raw };
@@ -934,6 +1107,8 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_datastore_sources: discover read-only datastore source ids.",
     "  - code_viewer_datastore_schemas: list schemas for one SQL datastore.",
     "  - code_viewer_datastore_schema: inspect tables, indexes, FKs, and columns.",
+    "  - code_viewer_datastore_columns: inspect columns for one SQL table.",
+    "  - code_viewer_datastore_ddl: inspect CREATE statement and triggers.",
     "",
     "The CLI subcommands referenced by code_viewer_agent_help are:",
   ];
