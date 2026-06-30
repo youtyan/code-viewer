@@ -334,6 +334,10 @@ code-viewer query search --db app.db --term "needle@example.com" \
 
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test"
+# The no-wait output also prints a paste-safe "Poll with: ..." line that
+# pins --server '<url>' and single-quotes db/schema, so AI/human paste never
+# silently falls back to auto-discovery. The same string is available as a
+# pollCommand field in --json ack output.
 # Block until the snapshot finishes (default --timeout 120s) and emit the
 # final meta as JSON — handy when an AI agent needs the snapshot id without
 # polling snapshot list separately.

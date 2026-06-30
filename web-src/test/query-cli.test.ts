@@ -1692,13 +1692,15 @@ describe("runQueryCli integration", () => {
     const out = harness.logs.join("\n");
     expect(out).toMatch(/snapshot started/);
     expect(out).toMatch(/\[id=snap-no-wait-1\]/);
+    // poll hint も sources --commands と同じく --server を pin し、db id を
+    // single-quote で paste-safe にする。
     expect(out).toMatch(
-      /Poll with: code-viewer query snapshot list --db app.db --json/,
+      /Poll with: code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'app\.db' --json/,
     );
     expect(harness.exits).toEqual([]);
   });
 
-  test("snapshot create --json (no --wait) emits structured ack", async () => {
+  test("snapshot create --json (no --wait) emits structured ack with pollCommand", async () => {
     const harness = installRunHarness([
       { body: JSON.stringify({ files: [] }) },
       {
@@ -1725,7 +1727,45 @@ describe("runQueryCli integration", () => {
       ok: true,
       message: "snapshot started",
       snapshotId: "snap-json-1",
+      // JSON ack にも pollCommand を載せて、AI が toString 構築せず literal を
+      // 再利用できるようにする。human 行と同じ paste-safety 規則。
+      pollCommand:
+        "code-viewer query --server 'http://localhost:65535' snapshot list --db 'app.db' --json",
     });
+  });
+
+  test("snapshot create no-wait poll command single-quotes db ids and schemas containing spaces", async () => {
+    // path に空白と ' を含む db id と、空白を含む schema 名でも shell に
+    // そのまま paste できることを behavior で検証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-spaces-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--note",
+      "n",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(
+      /Poll with: code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'sample'\\''s data\.db' --schema 'weird schema' --json/,
+    );
+    expect(harness.exits).toEqual([]);
   });
 
   test("snapshot create --schema forwards schema in the POST body", async () => {
@@ -1764,9 +1804,9 @@ describe("runQueryCli integration", () => {
       schema: "analytics",
     });
     // poll hint should mirror --schema so the human re-runs list with the
-    // same scope.
+    // same scope, with --server pinned and db/schema single-quoted.
     expect(harness.logs.join("\n")).toMatch(
-      /code-viewer query snapshot list --db docker:pg-svc --schema analytics --json/,
+      /code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:pg-svc' --schema 'analytics' --json/,
     );
   });
 

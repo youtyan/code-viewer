@@ -46,8 +46,9 @@ code-viewer query snapshot create --db app.db \
 ```
 
 The ack-only form (no `--wait`) returns immediately with
-`{ ok, message, snapshotId }` and the scan runs in the background;
-use `snapshot list` to confirm completion before diffing.
+`{ ok, message, snapshotId, pollCommand }` and the scan runs in the
+background; use `snapshot list` (or paste `pollCommand` verbatim) to
+confirm completion before diffing.
 
 ### 2. Perform the operation
 
@@ -70,6 +71,11 @@ took the snapshots without `--wait`, list them to find the IDs:
 ```sh
 code-viewer query snapshot list --db app.db
 ```
+
+`snapshot create` (no-wait) also prints a paste-safe poll command that
+pins `--server '<url>'` and single-quotes db/schema, so copying it never
+silently falls back to auto-discovery. The same string is available as
+the `pollCommand` field in `--json` ack output.
 
 ### 5. View the diff
 

@@ -294,6 +294,10 @@ browser's Database > Search tab.
 - diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
+  The no-wait output also includes a paste-safe poll command that pins
+  --server '<url>' and single-quotes db/schema so AI/human paste does not
+  silently fall back to auto-discovery — emitted as the "Poll with: ..."
+  suffix in default mode, and as a "pollCommand" field in --json ack.
   Add --wait to block until the snapshot finishes (default --timeout 120s);
   done → exit 0 with final meta (use its id field), error/timeout → stderr + exit 1.
   Without --wait the scan continues in the background (SSE event "db-snapshot");
@@ -1248,6 +1252,20 @@ function buildSnapshotListPath(opts: { db?: string; schema?: string }): string {
   return qs ? `/_db/snapshot/list?${qs}` : "/_db/snapshot/list";
 }
 
+// snapshot create no-wait の "次に投げると良い poll コマンド" を組み立てる。
+// sources --commands と同じ規則: server URL / db id / schema は shellSingleQuote
+// で囲んで bash/zsh への paste-safety を担保し、--server を pin して
+// auto-discovery に逸れないようにする。
+function buildSnapshotPollCommand(
+  serverUrl: string,
+  db: string,
+  schema: string | undefined,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  const schemaArg = schema ? ` --schema ${shellSingleQuote(schema)}` : "";
+  return `${cli} snapshot list --db ${shellSingleQuote(db)}${schemaArg} --json`;
+}
+
 async function runSnapshotCreate(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
@@ -1272,17 +1290,27 @@ async function runSnapshotCreate(
     typeof data.snapshotId === "string" ? data.snapshotId : undefined;
 
   if (!command.wait) {
+    // poll コマンドも sources --commands と同じく resolved --server / db / schema
+    // を shellSingleQuote で paste-safe にし、AI/human がコピーしても
+    // auto-discovery に逸れないようにする。
+    const pollCommand = buildSnapshotPollCommand(
+      serverUrl,
+      command.db,
+      command.schema,
+    );
     if (command.json) {
       console.log(
-        JSON.stringify({ ok: true, message, snapshotId: snapshotId ?? null }),
+        JSON.stringify({
+          ok: true,
+          message,
+          snapshotId: snapshotId ?? null,
+          pollCommand,
+        }),
       );
       return;
     }
     const idSuffix = snapshotId ? ` [id=${snapshotId}]` : "";
-    const schemaHint = command.schema ? ` --schema ${command.schema}` : "";
-    console.log(
-      `${message}${idSuffix}. Poll with: code-viewer query snapshot list --db ${command.db}${schemaHint} --json`,
-    );
+    console.log(`${message}${idSuffix}. Poll with: ${pollCommand}`);
     return;
   }
 
