@@ -499,13 +499,13 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Diff two snapshots",
                 command:
-                  'code-viewer query diff create --before snap-abc123 --after snap-def456 \\\n  --note "User registration test"\ncode-viewer query diff list --db app.db --json\ncode-viewer query diff delete --id diff-xyz789',
+                  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
               },
               {
                 kind: "command",
                 title: "Inspect a diff",
                 command:
-                  "code-viewer query diff tables --id diff-xyz789\ncode-viewer query diff rows --id diff-xyz789 --table users --type inserted --limit 50",
+                  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
               },
               {
                 kind: "command",
@@ -1066,13 +1066,13 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "2 つのスナップショットを diff",
                 command:
-                  'code-viewer query diff create --before snap-abc123 --after snap-def456 \\\n  --note "ユーザー登録テストの差分"\ncode-viewer query diff list --db app.db --json\ncode-viewer query diff delete --id diff-xyz789',
+                  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
               },
               {
                 kind: "command",
                 title: "diff の中身を確認",
                 command:
-                  "code-viewer query diff tables --id diff-xyz789\ncode-viewer query diff rows --id diff-xyz789 --table users --type inserted --limit 50",
+                  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
               },
               {
                 kind: "command",

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   DEFAULT_KEY_BINDINGS,
   type KeyBinding,
@@ -6,15 +7,28 @@ import {
   resolveKeymapAction,
 } from "../core/keymap";
 import type { AppRoute } from "../core/routes";
+import { parseQueryArgs } from "../server/query-cli";
 import {
   buildHelpKeybindingGroups,
   collectHelpKeybindingCoverage,
   documentedHelpKeybindingActions,
   HIDDEN_HELP_KEYBINDING_ACTIONS,
 } from "../views/help-keybindings";
-import { openHelpKeybindings } from "../views/help-page";
+import { createHelpPage, openHelpKeybindings } from "../views/help-page";
 
 const KEYMAP_SCOPES: KeymapScope[] = ["global", "sidebar", "main"];
+const EXPECTED_QUERY_DIFF_COMMANDS = [
+  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
+  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
+];
+
+beforeAll(() => {
+  GlobalRegistrator.register();
+});
+
+afterAll(() => {
+  GlobalRegistrator.unregister();
+});
 
 function eventKeyForBinding(binding: KeyBinding): string {
   if (binding.key === "?") return "?";
@@ -98,6 +112,79 @@ describe("help page navigation", () => {
       section: "keybindings",
       range,
     });
+  });
+});
+
+describe("help page database CLI reference", () => {
+  function renderDatabaseHelp(lang: "en" | "ja"): {
+    text: string;
+    commands: string[];
+  } {
+    document.body.innerHTML = [
+      '<main id="diff"></main>',
+      '<div id="empty"></div>',
+      '<div id="meta"></div>',
+      '<div id="totals"></div>',
+      '<div id="filelist"></div>',
+    ].join("");
+    let route: AppRoute = {
+      screen: "help",
+      lang,
+      section: "database",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const page = createHelpPage({
+      $: <T extends Element = HTMLElement>(sel: string): T => {
+        const found = document.querySelector(sel);
+        if (!found) throw new Error(`missing fixture element: ${sel}`);
+        return found as T;
+      },
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+      },
+      setPageMode: () => undefined,
+      cancelActiveSourceLoad: () => true,
+      removeStandaloneSource: () => undefined,
+      clearLoadQueue: () => undefined,
+      currentRange: () => ({ from: "HEAD", to: "worktree" }),
+      syncHeaderMenu: () => undefined,
+      getLanguage: () => lang,
+      setLanguage: () => undefined,
+    });
+    page.renderHelpPage();
+    const root = document.querySelector("#diff");
+    return {
+      text: root?.textContent ?? "",
+      commands: Array.from(
+        document.querySelectorAll(".gdp-help-command code"),
+        (code) => code.textContent ?? "",
+      ),
+    };
+  }
+
+  function parseRenderedQueryCommand(command: string) {
+    const parts = command.trim().split(/\s+/);
+    expect(parts.slice(0, 2)).toEqual(["code-viewer", "query"]);
+    return parseQueryArgs(parts.slice(2));
+  }
+
+  test("documents only wired query diff CLI commands in both languages", () => {
+    for (const lang of ["en", "ja"] as const) {
+      const { text, commands } = renderDatabaseHelp(lang);
+      const diffCommands = commands.filter((command) =>
+        command.startsWith("code-viewer query diff "),
+      );
+      expect(diffCommands).toEqual(EXPECTED_QUERY_DIFF_COMMANDS);
+      for (const command of diffCommands) {
+        expect(parseRenderedQueryCommand(command).ok).toBe(true);
+      }
+      expect(text.includes("code-viewer query diff create")).toBe(false);
+      expect(text.includes("code-viewer query diff list")).toBe(false);
+      expect(text.includes("code-viewer query diff delete")).toBe(false);
+      expect(text.includes("code-viewer query diff tables --id")).toBe(false);
+      expect(text.includes("code-viewer query diff rows --id")).toBe(false);
+    }
   });
 });
 
