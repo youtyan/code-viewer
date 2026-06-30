@@ -38,7 +38,13 @@ async function preflightSqlite(subcommand: string): Promise<void> {
   process.exit(1);
 }
 
-if (process.argv[2] === "annotate") {
+if (process.argv[2] === "agent-help") {
+  // Top-level `code-viewer agent-help` is a pure stdout index — no SQLite,
+  // no server, no filesystem. It must work in any environment so an AI
+  // agent can discover the per-subcommand guides as its very first call.
+  const { runAgentHelp } = await import("./agent-help");
+  runAgentHelp(process.argv.slice(3));
+} else if (process.argv[2] === "annotate") {
   const { runAnnotateCli } = await import("./annotate-cli");
   await runAnnotateCli(process.argv.slice(3));
 } else if (process.argv[2] === "query") {

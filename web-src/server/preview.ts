@@ -201,8 +201,10 @@ Usage:
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search> [options]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer agent-help
   code-viewer help
 
+AI-agent index (start here):  code-viewer agent-help
 Subcommand guides (AI agents): code-viewer <annotate|query|skill|doctor> agent-help
 
 Examples:

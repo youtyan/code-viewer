@@ -391,6 +391,13 @@ agent-help` prints a longer guide for AI agents covering query shape and
 conventions. Both `query` and `annotate` accept `--cwd <repo>` and
 `--server <url>` for targeting a specific running server.
 
+AI agents who don't yet know which subcommand they need can run
+`code-viewer agent-help` once. It prints a short index of the four
+AI-facing entry points (`query`, `annotate`, `skill`, `doctor`) with the
+exact `code-viewer <name> agent-help` command for each full guide. The
+index runs without any preflight, so it works even before SQLite or a
+running server is set up.
+
 ## AI Code Annotations
 
 AI coding agents (Claude Code, Codex, Cursor, Gemini, and similar CLI agents)
