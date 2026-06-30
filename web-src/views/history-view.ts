@@ -270,6 +270,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let hasMore = false;
   let loading = false;
   let generation = 0; // bumped on ref switch / re-enter to drop stale fetches
+  let selectionGeneration = 0; // bumped on selection changes to drop stale async commits
   let selectedSha = "";
   let query = "";
   let mode: "history" | "file" = "history";
@@ -588,11 +589,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
     commit: HistoryCommit,
     options: { updateUrl?: boolean } = {},
   ) {
+    const selectionGen = ++selectionGeneration;
     const gen = generation;
     selectedSha = commit.sha;
     updateActiveRow();
     await updateCommitInfo(commit);
-    if (gen !== generation) return;
+    if (selectionGen !== selectionGeneration || gen !== generation) return;
     if (options.updateUrl !== false) {
       const range = commitDiffRange(commit);
       if (mode === "file") {
@@ -614,15 +616,16 @@ export function createHistoryView(deps: HistoryViewDeps) {
         );
       }
     }
-    if (gen !== generation) return;
+    if (selectionGen !== selectionGeneration || gen !== generation) return;
     await deps.applyCommitRange(
       commitDiffRange(commit),
       pathFilter || undefined,
     );
-    if (gen !== generation) return;
+    if (selectionGen !== selectionGeneration || gen !== generation) return;
   }
 
   async function selectWorktree(options: { updateUrl?: boolean } = {}) {
+    const selectionGen = ++selectionGeneration;
     const gen = generation;
     selectedSha = HISTORY_WORKTREE_COMMIT;
     updateActiveRow();
@@ -648,9 +651,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
         );
       }
     }
-    if (gen !== generation) return;
+    if (selectionGen !== selectionGeneration || gen !== generation) return;
     await deps.applyCommitRange(range, pathFilter || undefined);
-    if (gen !== generation) return;
+    if (selectionGen !== selectionGeneration || gen !== generation) return;
   }
 
   // Set when fetchSingleCommit fails for reasons other than "the server says
@@ -770,6 +773,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       hasMore = false;
       loading = false;
       inFlight = null;
+      selectionGeneration++;
       selectedSha = "";
       setBanner("");
       await updateCommitInfo(null);
@@ -784,6 +788,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (scope2.commit) {
       await resolveDeepLink(scope2.commit);
     } else {
+      selectionGeneration++;
       selectedSha = "";
       updateActiveRow();
       await updateCommitInfo(null);
@@ -822,6 +827,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     generation++;
     loading = false;
     inFlight = null;
+    selectionGeneration++;
     selectedSha = "";
     setBanner("");
     setStatusText("");
@@ -848,6 +854,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (value === query) return;
     query = value;
     generation++;
+    selectionGeneration++;
     commits = [];
     hasMore = false;
     loading = false;

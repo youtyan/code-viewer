@@ -17,7 +17,7 @@ import {
   historyWorktreeLabel,
 } from "../views/history-view";
 import { closestFor, removeListenerFrom } from "./_fake-dom";
-import { deferred } from "./_test-helpers";
+import { deferred, waitFor } from "./_test-helpers";
 
 const JA_WORKTREE_LABEL = historyWorktreeLabel("ja");
 
@@ -767,6 +767,83 @@ describe("history view lifecycle", () => {
         pathFilter: "README.md",
       },
     ]);
+  });
+
+  test("newer commit selection wins while an older commit body is still rendering", async () => {
+    const { panel, list, banner, status, sentinel } = installHistoryViewDom();
+    const slowCommit = {
+      sha: "aaa111",
+      parents: ["parent-a"],
+      subject: "slow body",
+      body: "```ts\nconst value = 1;\n```",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    const fastCommit = {
+      sha: "bbb222",
+      parents: ["parent-b"],
+      subject: "fast body",
+      body: "",
+      author: "Bob",
+      when: new Date().toISOString(),
+    };
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            commits: [slowCommit, fastCommit],
+            hasMore: false,
+          }),
+          { status: 200 },
+        ),
+      )) as unknown as typeof fetch;
+    let route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const routes: AppRoute[] = [];
+    const applied: Array<{ from: string; to: string }> = [];
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: (next) => {
+        route = next;
+        routes.push(next);
+      },
+      applyCommitRange: async (range) => {
+        applied.push(range);
+      },
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => true,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+
+    const rows = list.querySelectorAll(".history-item");
+    list.dispatch("click", { target: rows[1] });
+    list.dispatch("click", { target: rows[2] });
+
+    await waitFor(() => applied.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(
+      routes.map((item) => (item.screen === "history" ? item.commit : "")),
+    ).toEqual([fastCommit.sha]);
+    expect(applied).toEqual([{ from: "parent-b", to: fastCommit.sha }]);
+    expect(rows[1].classList.contains("active")).toBe(false);
+    expect(rows[2].classList.contains("active")).toBe(true);
   });
 
   test("re-entering the same file history scope keeps the rendered commit list", async () => {
