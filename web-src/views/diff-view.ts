@@ -488,6 +488,25 @@ export function createDiffView(deps: DiffViewDeps) {
     }
   }
 
+  function resetReusableCard(card: DiffCardElement, file: FileMeta) {
+    card.classList.remove("loaded", "loading", "error", "manual-load");
+    card.classList.add("pending");
+    card.replaceChildren();
+    const tmp = createPlaceholder(file);
+    while (tmp.firstChild) card.appendChild(tmp.firstChild);
+    card.dataset.path = file.path;
+    card.dataset.key = fileKey(file);
+    card.dataset.sizeClass = file.size_class || "small";
+    card.dataset.status = file.status || "M";
+    card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    delete card.dataset.manualRendered;
+    delete card.dataset.manualLoad;
+    delete card.dataset.manualMode;
+    card.style.minHeight = `${file.estimated_height_px || 80}px`;
+    card._diffData = null;
+    card._file = null;
+  }
+
   function renderShell(
     meta: DiffMeta,
     changedPaths?: Set<string> | null,
@@ -545,7 +564,7 @@ export function createDiffView(deps: DiffViewDeps) {
       for (const f of newFiles) {
         const key = fileKey(f);
         const oldSig = prevCardSignatures.get(key);
-        const newSig = newCardSigs.get(key)!;
+        const newSig = newCardSigs.get(key) ?? computeCardSignature(f);
         const sigChanged = oldSig !== newSig;
         const pathHint = pathsUnknown || changedPaths.has(f.path);
         if (!sigChanged && !pathHint) {
@@ -559,19 +578,7 @@ export function createDiffView(deps: DiffViewDeps) {
           card.dataset.sizeClass !== (f.size_class || "small");
         const statusChanged = card.dataset.status !== (f.status || "M");
         if (sizeChanged || statusChanged) {
-          card.classList.remove("loaded", "error");
-          card.classList.add("pending");
-          card.replaceChildren();
-          const tmp = createPlaceholder(f);
-          while (tmp.firstChild) card.appendChild(tmp.firstChild);
-          card.dataset.sizeClass = f.size_class || "small";
-          card.dataset.status = f.status || "M";
-          delete card.dataset.manualRendered;
-          delete card.dataset.manualLoad;
-          delete card.dataset.manualMode;
-          card.style.minHeight = `${f.estimated_height_px || 80}px`;
-          card._diffData = null;
-          card._file = null;
+          resetReusableCard(card, f);
           activatePendingCard(card, f);
           invalidatedCards++;
           sidebarNeedsStatsUpdate = true;
@@ -626,20 +633,11 @@ export function createDiffView(deps: DiffViewDeps) {
         oldByKey.delete(key);
         const sizeChanged = old.dataset.sizeClass !== (f.size_class || "small");
         const statusChanged = old.dataset.status !== (f.status || "M");
-        if (sizeChanged || statusChanged) {
-          old.classList.remove("loaded", "error");
-          old.classList.add("pending");
-          old.replaceChildren();
-          const tmp = createPlaceholder(f);
-          while (tmp.firstChild) old.appendChild(tmp.firstChild);
-          old.dataset.sizeClass = f.size_class || "small";
-          old.dataset.status = f.status || "M";
-          delete old.dataset.manualRendered;
-          delete old.dataset.manualLoad;
-          delete old.dataset.manualMode;
-          old.style.minHeight = `${f.estimated_height_px || 80}px`;
-          old._diffData = null;
-          old._file = null;
+        const oldSig = prevCardSignatures.get(key);
+        const newSig = newCardSigs.get(key) ?? computeCardSignature(f);
+        const sigChanged = oldSig !== newSig;
+        if (sizeChanged || statusChanged || sigChanged) {
+          resetReusableCard(old, f);
           invalidatedCards++;
         } else {
           const stats = old.querySelector(".gdp-shell-header .stats");
