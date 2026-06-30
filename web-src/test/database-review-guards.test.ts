@@ -22,8 +22,13 @@ import {
   quoteCurlConfigString,
 } from "../server/database/adapters/elasticsearch";
 import { canonicalizeRedisSnapshotContainer } from "../server/database/adapters/redis";
-import { parseDockerDbId } from "../server/database/discovery";
 import {
+  type DockerDbInfo,
+  type DockerDiscoveryResult,
+  parseDockerDbId,
+} from "../server/database/discovery";
+import {
+  createDbFilesResponse,
   handleDatabaseRoute,
   parseSelectAllTable,
 } from "../server/database/handle";
@@ -108,6 +113,80 @@ describe("Docker db id parsing", () => {
       expect(parseDockerDbId(dbId)).toBeNull();
     });
   }
+});
+
+describe("database file response fault isolation", () => {
+  const sqliteFile = {
+    path: "sample.db",
+    name: "sample.db",
+    sizeBytes: 20,
+  };
+
+  function dockerService(overrides: Partial<DockerDbInfo> = {}): DockerDbInfo {
+    return {
+      id: "docker:pg",
+      path: "docker:pg",
+      name: "pg (postgresql)",
+      sizeBytes: 0,
+      kind: "postgresql",
+      serviceName: "pg",
+      env: { POSTGRES_DB: "sample_db" },
+      composeDir: "/workspace",
+      relDirSlash: "",
+      containerPort: "5432",
+      ...overrides,
+    };
+  }
+
+  function dockerDiscovery(...services: DockerDbInfo[]): DockerDiscoveryResult {
+    return services as DockerDiscoveryResult;
+  }
+
+  test("keeps sqlite files when Docker discovery fails", async () => {
+    const body = await createDbFilesResponse("/workspace", [], undefined, {
+      discoverSqliteFiles: async () => [sqliteFile],
+      discoverDockerDatabases: async () => {
+        throw new Error("compose scan failed");
+      },
+      listDockerDatabases: async () => [],
+    });
+
+    expect(body).toEqual({
+      files: [
+        {
+          id: "sample.db",
+          path: "sample.db",
+          name: "sample.db",
+          sizeBytes: 20,
+          kind: "sqlite",
+        },
+      ],
+      dockerError: "compose scan failed",
+    });
+  });
+
+  test("keeps a Docker service visible when database listing fails", async () => {
+    const body = await createDbFilesResponse("/workspace", [], undefined, {
+      discoverSqliteFiles: async () => [],
+      discoverDockerDatabases: async () => dockerDiscovery(dockerService()),
+      listDockerDatabases: async () => {
+        throw new Error("database list failed");
+      },
+    });
+
+    expect(body).toEqual({
+      files: [
+        {
+          id: "docker:pg",
+          path: "docker:pg",
+          name: "pg (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+      ],
+      dockerError: "pg: database list failed",
+    });
+  });
 });
 
 describe("snapshot container canonicalization", () => {

@@ -32,6 +32,7 @@ import {
 } from "./connection-pool";
 import {
   type DockerDbInfo,
+  type DockerDiscoveryResult,
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
   findDockerServiceByDbIdAsync,
@@ -119,6 +120,26 @@ type ResolvedDb = {
   dbId: string;
   docker?: DockerDbInfo;
   schema?: string;
+};
+
+export type DockerDatabaseLister = (
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  env: Record<string, string>,
+  cwd: string,
+  signal?: AbortSignal,
+) => Promise<string[]>;
+
+export type DbFileDiscoveryDeps = {
+  discoverSqliteFiles: typeof discoverSqliteFilesAsync;
+  discoverDockerDatabases: typeof discoverDockerDatabasesAsync;
+  listDockerDatabases: DockerDatabaseLister;
+};
+
+const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
+  discoverSqliteFiles: discoverSqliteFilesAsync,
+  discoverDockerDatabases: discoverDockerDatabasesAsync,
+  listDockerDatabases: listDockerDatabasesAsync,
 };
 
 const MAX_SCHEMA_NAME_LEN = 1024;
@@ -225,55 +246,99 @@ function toFileInfo(entry: {
   };
 }
 
-async function handleFiles(
-  cwd: string,
-  omitDirNames: string[],
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function expandDockerServicesForFiles(
+  dockerServices: DockerDiscoveryResult,
+  listDockerDatabases: DockerDatabaseLister,
   signal?: AbortSignal,
-): Promise<Response> {
-  const [sqliteFiles, dockerServices] = await Promise.all([
-    discoverSqliteFilesAsync(cwd, omitDirNames, signal),
-    discoverDockerDatabasesAsync(cwd, omitDirNames, signal),
-  ]);
-  const dockerTruncated = dockerServices.truncated === true;
-  const dockerEntries = (
-    await Promise.all(
-      dockerServices.map(async (svc) => {
-        if (
-          svc.kind === "redis" ||
-          svc.kind === "elasticsearch" ||
-          svc.kind === "s3"
-        ) {
-          return [svc];
-        }
-        const dbs = await listDockerDatabasesAsync(
+): Promise<{ entries: DockerDbInfo[]; errors: string[] }> {
+  const chunks = await Promise.all(
+    dockerServices.map(async (svc) => {
+      if (
+        svc.kind === "redis" ||
+        svc.kind === "elasticsearch" ||
+        svc.kind === "s3"
+      ) {
+        return { entries: [svc], errors: [] };
+      }
+      let dbs: string[];
+      try {
+        dbs = await listDockerDatabases(
           svc.serviceName,
           svc.kind as "postgresql" | "mysql",
           svc.env,
           svc.composeDir,
           signal,
         );
-        if (dbs.length <= 1) {
-          return [svc];
-        } else {
-          const entries: typeof dockerServices = [];
-          for (const db of dbs) {
-            // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
-            // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
-            entries.push({
-              ...svc,
-              id: `${svc.id}:${db}`,
-              name: svc.name.replace(/\)$/, ` / ${db})`),
-              database: db,
-            });
-          }
-          return entries;
-        }
-      }),
-    )
-  ).flat();
+      } catch (err) {
+        if (isAbortLikeError(err, signal)) throw err;
+        return {
+          entries: [svc],
+          errors: [`${svc.serviceName}: ${errorMessage(err)}`],
+        };
+      }
+      if (dbs.length <= 1) {
+        return { entries: [svc], errors: [] };
+      }
+      return {
+        entries: dbs.map((db) => ({
+          ...svc,
+          id: `${svc.id}:${db}`,
+          name: svc.name.replace(/\)$/, ` / ${db})`),
+          database: db,
+        })),
+        errors: [],
+      };
+    }),
+  );
+  return {
+    entries: chunks.flatMap((chunk) => chunk.entries),
+    errors: chunks.flatMap((chunk) => chunk.errors),
+  };
+}
+
+export async function createDbFilesResponse(
+  cwd: string,
+  omitDirNames: string[],
+  signal?: AbortSignal,
+  deps: DbFileDiscoveryDeps = DEFAULT_DB_FILE_DISCOVERY_DEPS,
+): Promise<DbFilesResponse> {
+  const [sqliteSettled, dockerSettled] = await Promise.allSettled([
+    deps.discoverSqliteFiles(cwd, omitDirNames, signal),
+    deps.discoverDockerDatabases(cwd, omitDirNames, signal),
+  ]);
+  if (sqliteSettled.status === "rejected") {
+    throw sqliteSettled.reason;
+  }
+  if (
+    dockerSettled.status === "rejected" &&
+    isAbortLikeError(dockerSettled.reason, signal)
+  ) {
+    throw dockerSettled.reason;
+  }
+  const sqliteFiles = sqliteSettled.value;
+  const dockerServices =
+    dockerSettled.status === "fulfilled"
+      ? dockerSettled.value
+      : ([] as DockerDiscoveryResult);
+  const dockerErrors: string[] = [];
+  if (dockerSettled.status === "rejected") {
+    dockerErrors.push(errorMessage(dockerSettled.reason));
+  }
+  const dockerTruncated = dockerServices.truncated === true;
+  const { entries: dockerEntries, errors: listingErrors } =
+    await expandDockerServicesForFiles(
+      dockerServices,
+      deps.listDockerDatabases,
+      signal,
+    );
+  dockerErrors.push(...listingErrors);
   // Strip env / serviceName / database from the response — these contain
   // credentials and internal state that the browser must not see.
-  const body: DbFilesResponse = {
+  return {
     files: [
       ...sqliteFiles.map((f) => ({
         id: f.path,
@@ -285,8 +350,18 @@ async function handleFiles(
       ...dockerEntries.map(toFileInfo),
     ],
     ...(dockerTruncated ? { truncated: true } : {}),
+    ...(dockerErrors.length > 0
+      ? { dockerError: dockerErrors.join("; ") }
+      : {}),
   };
-  return json(body);
+}
+
+async function handleFiles(
+  cwd: string,
+  omitDirNames: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  return json(await createDbFilesResponse(cwd, omitDirNames, signal));
 }
 
 async function handleSchemas(

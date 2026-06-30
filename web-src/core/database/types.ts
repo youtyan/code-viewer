@@ -136,6 +136,8 @@ export type DbFileInfo = {
 export type DbFilesResponse = {
   files: DbFileInfo[];
   truncated?: boolean;
+  /** Docker-side discovery/listing error; other source files may still exist. */
+  dockerError?: string;
 };
 
 export type DbOrderDirection = "asc" | "desc";
