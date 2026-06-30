@@ -142,6 +142,10 @@ const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
   listDockerDatabases: listDockerDatabasesAsync,
 };
 
+export type DbServiceResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; response: Response };
+
 const MAX_SCHEMA_NAME_LEN = 1024;
 
 function normalizeSchemaParam(
@@ -311,6 +315,9 @@ export async function createDbFilesResponse(
   signal?: AbortSignal,
   deps: DbFileDiscoveryDeps = DEFAULT_DB_FILE_DISCOVERY_DEPS,
 ): Promise<DbFilesResponse> {
+  // Idempotent service entry point init. HTTP routes also call ensureInit,
+  // but MCP/CLI tests can invoke these exported helpers directly.
+  ensureInit();
   const [sqliteSettled, dockerSettled] = await Promise.allSettled([
     deps.discoverSqliteFiles(cwd, omitDirNames, signal),
     deps.discoverDockerDatabases(cwd, omitDirNames, signal),
@@ -369,23 +376,19 @@ async function handleFiles(
   return json(await createDbFilesResponse(cwd, omitDirNames, signal));
 }
 
-async function handleSchemas(
+export async function createDbSchemasResponse(
   cwd: string,
-  url: URL,
+  dbParam: string | null,
+  schemaParam?: string | null,
   omitDirNames?: string[],
   signal?: AbortSignal,
-): Promise<Response> {
-  const r = await resolveDb(
-    cwd,
-    url.searchParams.get("db"),
-    omitDirNames,
-    url.searchParams.get("schema"),
-    signal,
-  );
-  if (r instanceof Response) return r;
+): Promise<DbServiceResult<DbSchemasResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, dbParam, omitDirNames, schemaParam, signal);
+  if (r instanceof Response) return { ok: false, response: r };
   if (!r.docker || r.docker.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
-    return json(body);
+    return { ok: true, value: body };
   }
   const docker = r.docker;
   const { result: schemas, executedSql } = await captureSql(() =>
@@ -404,24 +407,40 @@ async function handleSchemas(
     selectedSchema: r.schema,
     executedSql,
   };
-  return json(body);
+  return { ok: true, value: body };
 }
 
-async function handleSchema(
+async function handleSchemas(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
   signal?: AbortSignal,
 ): Promise<Response> {
-  const r = await resolveDb(
+  const result = await createDbSchemasResponse(
     cwd,
     url.searchParams.get("db"),
-    omitDirNames,
     url.searchParams.get("schema"),
+    omitDirNames,
     signal,
   );
-  if (r instanceof Response) return r;
-  const includeColumns = url.searchParams.get("includeColumns") === "1";
+  if (result.ok !== true) return result.response;
+  return json(result.value);
+}
+
+export async function createDbSchemaResponse(
+  cwd: string,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    includeColumns?: boolean;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbSchemaResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const includeColumns = opts.includeColumns === true;
   const linkedAbort = createLinkedAbortController(signal);
   try {
     const adapter = await getAdapter(r, cwd, signal);
@@ -467,13 +486,36 @@ async function handleSchema(
     if (result.colsMap) {
       body.columnsMap = Object.fromEntries(result.colsMap);
     }
-    return json(body);
+    return { ok: true, value: body };
   } catch (err) {
     linkedAbort.abort();
-    return handleError("database", "read schema", err, signal);
+    return {
+      ok: false,
+      response: handleError("database", "read schema", err, signal),
+    };
   } finally {
     linkedAbort.cleanup();
   }
+}
+
+async function handleSchema(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const result = await createDbSchemaResponse(
+    cwd,
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      includeColumns: url.searchParams.get("includeColumns") === "1",
+    },
+    omitDirNames,
+    signal,
+  );
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
 // 条件の個数・列名/値長の上限。巨大な WHERE 生成や export 経由の DoS を防ぐ。

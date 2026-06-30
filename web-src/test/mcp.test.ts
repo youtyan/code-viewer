@@ -14,6 +14,7 @@
 // No string-presence "implementation contains foo" assertions — every
 // check verifies an observable JSON shape or HTTP behavior.
 
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,6 +38,19 @@ const INSTRUCTIONS = "test instructions text";
 
 function call(message: unknown) {
   return dispatchJsonRpc(message, { tools: TOOLS, instructions: INSTRUCTIONS });
+}
+
+function seedSampleSqlite(dir: string, fileName = "sample_data.db"): string {
+  const db = new Database(join(dir, fileName));
+  db.exec(`
+    CREATE TABLE sample_items (
+      sample_id INTEGER PRIMARY KEY,
+      sample_label TEXT NOT NULL
+    );
+    INSERT INTO sample_items (sample_label) VALUES ('alpha'), ('beta');
+  `);
+  db.close();
+  return fileName;
 }
 
 // Sample-named registry stub so reading the server registry never returns
@@ -144,6 +158,9 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_file_show")).toBe(true);
     expect(names.includes("code_viewer_search_files")).toBe(true);
     expect(names.includes("code_viewer_search_code")).toBe(true);
+    expect(names.includes("code_viewer_datastore_sources")).toBe(true);
+    expect(names.includes("code_viewer_datastore_schemas")).toBe(true);
+    expect(names.includes("code_viewer_datastore_schema")).toBe(true);
     for (const tool of payload.tools) {
       expect(typeof tool.title).toBe("string");
       expect(tool.title.length > 0).toBe(true);
@@ -316,6 +333,118 @@ describe("dispatchJsonRpc — tools/call code_viewer_status (fixture repo)", () 
   });
 });
 
+describe("dispatchJsonRpc — tools/call datastore tools (fixture sqlite)", () => {
+  let repo: string;
+  let dbFile: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-datastore-"));
+    dbFile = seedSampleSqlite(repo);
+  });
+
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  async function callDatastore(name: string, args: Record<string, unknown>) {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: `datastore-${name}`,
+      method: "tools/call",
+      params: {
+        name,
+        arguments: { cwd: repo, ...args },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    return result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+  }
+
+  test("code_viewer_datastore_schema works without a prior sources call", async () => {
+    const payload = await callDatastore("code_viewer_datastore_schema", {
+      db: dbFile,
+      includeColumns: false,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.tables[0].name).toBe("sample_items");
+  });
+
+  test("code_viewer_datastore_sources discovers the SQLite source", async () => {
+    const payload = await callDatastore("code_viewer_datastore_sources", {});
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    const source = body.files.find(
+      (file: { id: string }) => file.id === dbFile,
+    );
+    expect(source).toEqual({
+      id: dbFile,
+      path: dbFile,
+      name: dbFile,
+      sizeBytes: source.sizeBytes,
+      kind: "sqlite",
+    });
+    expect(typeof source.sizeBytes).toBe("number");
+  });
+
+  test("code_viewer_datastore_schemas returns the schemas JSON shape for SQLite", async () => {
+    const payload = await callDatastore("code_viewer_datastore_schemas", {
+      db: dbFile,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    expect(body.schemas).toEqual([]);
+    expect(body.selectedSchema).toBeUndefined();
+  });
+
+  test("code_viewer_datastore_schema includes tables and columns by default", async () => {
+    const payload = await callDatastore("code_viewer_datastore_schema", {
+      db: dbFile,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    const table = body.tables.find(
+      (entry: { name: string }) => entry.name === "sample_items",
+    );
+    expect(table).toEqual({
+      name: "sample_items",
+      type: "table",
+      rowCount: 2,
+    });
+    expect(Array.isArray(body.indexes)).toBe(true);
+    expect(Array.isArray(body.foreignKeys)).toBe(true);
+    expect(Array.isArray(body.executedSql)).toBe(true);
+    const columnNames = body.columnsMap.sample_items.map(
+      (col: { name: string }) => col.name,
+    );
+    expect(columnNames).toEqual(["sample_id", "sample_label"]);
+  });
+
+  test("code_viewer_datastore_schema can omit columnsMap for a smaller payload", async () => {
+    const payload = await callDatastore("code_viewer_datastore_schema", {
+      db: dbFile,
+      includeColumns: false,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.tables[0].name).toBe("sample_items");
+    expect(body.columnsMap).toBeUndefined();
+  });
+
+  test("datastore tools return isError=true for invalid db ids", async () => {
+    const payload = await callDatastore("code_viewer_datastore_schema", {
+      db: "../escape.db",
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/invalid database path/);
+  });
+});
+
 describe("dispatchJsonRpc — tools/call error paths", () => {
   test("unknown tool name surfaces as isError true (not JSON-RPC error)", async () => {
     const result = await call({
@@ -445,6 +574,7 @@ describe("/_mcp HTTP route", () => {
     writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
     git(repo, ["add", "sample_file.ts"]);
     git(repo, ["commit", "-m", "sample initial commit"]);
+    seedSampleSqlite(repo, "datastore.db");
 
     const { spawn } = await import("node:child_process");
     const repoRoot = join(import.meta.dir, "..", "..");
@@ -754,6 +884,36 @@ describe("/_mcp HTTP route", () => {
     // engine / truncated / ref / matches all come from the same
     // grepRepo entry point. /_grep and MCP must agree match-for-match.
     expect(mcpBody).toEqual(grepBody);
+  });
+
+  test("POST tools/call code_viewer_datastore_sources uses the server --cwd by default", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 25,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_datastore_sources",
+          arguments: {},
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const envelope = (await response.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(envelope.result.isError).toBe(false);
+    const body = JSON.parse(envelope.result.content[0].text);
+    const source = body.files.find(
+      (file: { id: string }) => file.id === "datastore.db",
+    );
+    expect(source.kind).toBe("sqlite");
+    expect(source.path).toBe("datastore.db");
   });
 });
 

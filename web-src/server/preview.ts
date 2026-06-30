@@ -2153,7 +2153,7 @@ async function handleMcp(req: Request): Promise<Response> {
     return json(parsed.response);
   }
   const dispatched = await dispatchJsonRpc(parsed.value, {
-    tools: defaultMcpTools({ cwd }),
+    tools: defaultMcpTools({ cwd, omitDirNames: scopeOmitDirNames }),
     instructions: MCP_INSTRUCTIONS,
   });
   if (dispatched.kind === "notification") {
