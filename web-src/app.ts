@@ -1,4 +1,8 @@
 import {
+  aiContextClipboardText,
+  resolveSelectionTarget,
+} from "./core/ai-context-copy";
+import {
   createCatchUpGate,
   shouldAutoLoadForRoute,
   shouldCatchUpDiff,
@@ -16,9 +20,13 @@ import {
 import { ensureTerraformHighlightLanguage } from "./core/highlight-languages";
 import {
   CHEVRON_DOWN_12_PATH,
+  COMMENT_DISCUSSION_16_PATH,
+  COPY_16_PATHS,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  MOON_16_PATH,
   OPEN_EXTERNAL_16_PATH,
+  PULSE_16_PATH,
   TRIANGLE_DOWN_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
@@ -71,7 +79,11 @@ import {
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
-import { createLineRefPill } from "./views/line-ref-pill";
+import {
+  createLineRefPill,
+  langFromPath,
+  readRenderedLines,
+} from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
@@ -1010,6 +1022,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: string;
         theme: string;
         product: string;
+        copyAiContext: string;
+        copyAiContextCopied: string;
+        copyAiContextCopiedWithCode: string;
+        copyAiContextFailed: string;
       };
       topbar: {
         resetRange: string;
@@ -1117,6 +1133,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "viewer settings",
         theme: "toggle theme",
         product: "code viewer",
+        copyAiContext: "Copy AI context (Shift+Click to include code)",
+        copyAiContextCopied: "Copied AI context",
+        copyAiContextCopiedWithCode: "Copied AI context + code",
+        copyAiContextFailed: "Copy failed",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1234,6 +1254,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "ビューア設定",
         theme: "テーマ切り替え",
         product: "code viewer",
+        copyAiContext:
+          "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
+        copyAiContextCopied: "コピーしました",
+        copyAiContextCopiedWithCode: "コピーしました（コード付き）",
+        copyAiContextFailed: "コピーに失敗しました",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1388,7 +1413,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       viewerSettings.setAttribute("aria-label", text.global.settings);
     }
     const theme = document.querySelector<HTMLButtonElement>("#theme");
-    if (theme) theme.title = text.global.theme;
+    if (theme) {
+      theme.title = text.global.theme;
+      theme.setAttribute("aria-label", text.global.theme);
+    }
+    const copyAiContext =
+      document.querySelector<HTMLButtonElement>("#copy-ai-context");
+    if (copyAiContext) {
+      copyAiContext.title = text.global.copyAiContext;
+      copyAiContext.setAttribute("aria-label", text.global.copyAiContext);
+    }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
     if (refReset) refReset.title = text.topbar.resetRange;
@@ -2590,6 +2624,37 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ---- media (image / video / audio) embedding for binary file diffs ----
   // ---- media embedding: extracted to media-embed.ts ----
 
+  // Static Octicon SVGs for the global header. Run once at init; none of
+  // these icons change with theme/language, unlike the badges that live
+  // alongside them (#annotations-count, #doctor-badge) which keep their own
+  // sibling <span> so this never clobbers them.
+  function setGlobalHeaderIcons() {
+    const annotationsIcon = document.querySelector<HTMLElement>(
+      "#annotations-toggle .goi-icon",
+    );
+    if (annotationsIcon) {
+      annotationsIcon.innerHTML = iconSvg(
+        "octicon-comment-discussion",
+        COMMENT_DISCUSSION_16_PATH,
+      );
+    }
+    const doctorIcon = document.querySelector<HTMLElement>(
+      "#doctor-btn .goi-icon",
+    );
+    if (doctorIcon) {
+      doctorIcon.innerHTML = iconSvg("octicon-pulse", PULSE_16_PATH);
+    }
+    const themeButton = document.querySelector<HTMLButtonElement>("#theme");
+    if (themeButton) {
+      themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
+    }
+    const copyAiContextButton =
+      document.querySelector<HTMLButtonElement>("#copy-ai-context");
+    if (copyAiContextButton) {
+      copyAiContextButton.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    }
+  }
+
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
@@ -2598,6 +2663,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   installHistoryPageDom();
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
+  setGlobalHeaderIcons();
   // Sidebar view toggle (tree / flat)
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
@@ -2617,6 +2683,71 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
+  });
+  let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  $("#copy-ai-context")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const feedback = document.querySelector<HTMLElement>(
+      "#copy-ai-context-feedback",
+    );
+    const selectionTarget = resolveSelectionTarget(STATE.route);
+    let selectionCode: { lines: string[]; lang?: string | null } | undefined;
+    if (event.shiftKey && selectionTarget) {
+      const renderedLines = readRenderedLines(
+        selectionTarget.path,
+        selectionTarget.start,
+        selectionTarget.end,
+      );
+      if (renderedLines.length > 0) {
+        selectionCode = {
+          lines: renderedLines,
+          lang: langFromPath(selectionTarget.path),
+        };
+      }
+    }
+    const text = aiContextClipboardText({
+      route: STATE.route,
+      pathname: window.location.pathname,
+      search: window.location.search,
+      diffFrom: STATE.from,
+      diffTo: STATE.to,
+      selectionCode,
+    });
+    const finish = (ok: boolean, withCode: boolean) => {
+      const label = ok
+        ? withCode
+          ? uiText().global.copyAiContextCopiedWithCode
+          : uiText().global.copyAiContextCopied
+        : uiText().global.copyAiContextFailed;
+      const stateClass = ok ? "copied" : "failed";
+      button.classList.remove("copied", "failed");
+      button.classList.add(stateClass);
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      if (feedback) {
+        feedback.textContent = label;
+        feedback.classList.remove("copied", "failed");
+        feedback.classList.add(stateClass);
+        feedback.hidden = false;
+      }
+      if (copyAiContextFeedbackTimer) clearTimeout(copyAiContextFeedbackTimer);
+      copyAiContextFeedbackTimer = setTimeout(() => {
+        copyAiContextFeedbackTimer = null;
+        button.classList.remove("copied", "failed");
+        button.title = uiText().global.copyAiContext;
+        button.setAttribute("aria-label", uiText().global.copyAiContext);
+        if (feedback) {
+          feedback.hidden = true;
+          feedback.classList.remove("copied", "failed");
+        }
+      }, 1200);
+    };
+    try {
+      await navigator.clipboard.writeText(text);
+      finish(true, !!selectionCode);
+    } catch {
+      finish(false, false);
+    }
   });
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);

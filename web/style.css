@@ -397,6 +397,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 }
 
 .global-actions {
+  position: relative;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -425,6 +426,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   font-size: 13px;
   transition: background 0.12s, border-color 0.12s;
 }
+.global-actions #theme svg,
 .global-icon-action svg {
   display: block;
 }
@@ -433,9 +435,46 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   background: var(--bg-mute);
   border-color: var(--border-strong);
 }
+.global-actions #theme:focus-visible,
 .global-icon-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+.global-icon-action.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.global-icon-action.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.goi-feedback {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  z-index: 70;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: gdp-banner-slide 0.15s ease;
+}
+.goi-feedback[hidden] {
+  display: none;
+}
+.goi-feedback.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.goi-feedback.failed {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 #auto-update {
   width: auto;

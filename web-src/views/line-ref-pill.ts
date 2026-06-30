@@ -27,7 +27,7 @@ const CHECK_ICON =
   '<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>' +
   "</svg>";
 
-function langFromPath(path: string): string {
+export function langFromPath(path: string): string {
   const m = path.match(/\.([^./]+)$/);
   if (!m) return "";
   return EXT_TO_LANG[m[1].toLowerCase()] || "";
@@ -37,7 +37,11 @@ function langFromPath(path: string): string {
 // whichever surface is currently shown (source/blame/history table, or
 // diff2html after-side). Returns an empty array when nothing is rendered so
 // callers degrade silently to the ref-only clipboard text.
-function readRenderedLines(path: string, start: number, end: number): string[] {
+export function readRenderedLines(
+  path: string,
+  start: number,
+  end: number,
+): string[] {
   const card = document.querySelector<HTMLElement>(
     `.gdp-file-shell[data-path="${CSS.escape(path)}"]`,
   );
