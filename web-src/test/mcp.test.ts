@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentHelpIndex } from "../server/agent-help";
+import { saveQueryHistoryAsync } from "../server/database/query-history";
 import {
   defaultMcpTools,
   dispatchJsonRpc,
@@ -164,6 +165,7 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_datastore_columns")).toBe(true);
     expect(names.includes("code_viewer_datastore_ddl")).toBe(true);
     expect(names.includes("code_viewer_datastore_query")).toBe(true);
+    expect(names.includes("code_viewer_datastore_history")).toBe(true);
     for (const tool of payload.tools) {
       expect(typeof tool.title).toBe("string");
       expect(tool.title.length > 0).toBe(true);
@@ -340,9 +342,58 @@ describe("dispatchJsonRpc — tools/call datastore tools (fixture sqlite)", () =
   let repo: string;
   let dbFile: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-datastore-"));
     dbFile = seedSampleSqlite(repo);
+    await saveQueryHistoryAsync(repo, {
+      version: 1,
+      entries: [
+        {
+          id: "history-sample-main",
+          dbId: dbFile,
+          sql: "SELECT sample_id FROM sample_items ORDER BY sample_id",
+          title: "sample lookup",
+          columns: ["sample_id"],
+          rowsPreview: [[1], [2]],
+          rowCount: 2,
+          savedRows: 2,
+          truncated: false,
+          elapsedMs: 3,
+          executedAt: "2026-01-01T00:00:00.000Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+        {
+          id: "history-sample-schema",
+          dbId: dbFile,
+          schema: "analytics",
+          sql: "SELECT count(*) FROM sample_items",
+          columns: ["count"],
+          rowsPreview: [[2]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 4,
+          executedAt: "2026-01-01T00:01:00.000Z",
+          executedBy: "user",
+          source: "browser",
+        },
+        {
+          id: "history-other-db",
+          dbId: "other.db",
+          sql: "SELECT 1",
+          columns: ["1"],
+          rowsPreview: [[1]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-01-01T00:02:00.000Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+      ],
+    });
   });
 
   afterAll(() => {
@@ -576,6 +627,53 @@ describe("dispatchJsonRpc — tools/call datastore tools (fixture sqlite)", () =
     const payload = await callDatastore("code_viewer_datastore_query", {
       db: "../escape.db",
       sql: "SELECT 1",
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/invalid database path/);
+  });
+
+  test("code_viewer_datastore_history returns saved query history", async () => {
+    const payload = await callDatastore("code_viewer_datastore_history", {});
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.version).toBe(1);
+    expect(body.entries.map((entry: { id: string }) => entry.id)).toEqual([
+      "history-sample-main",
+      "history-sample-schema",
+      "history-other-db",
+    ]);
+    expect(body.entries[0].sql).toBe(
+      "SELECT sample_id FROM sample_items ORDER BY sample_id",
+    );
+  });
+
+  test("code_viewer_datastore_history filters entries by db", async () => {
+    const payload = await callDatastore("code_viewer_datastore_history", {
+      db: dbFile,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.entries.map((entry: { id: string }) => entry.id)).toEqual([
+      "history-sample-main",
+      "history-sample-schema",
+    ]);
+  });
+
+  test("code_viewer_datastore_history filters entries by db and schema", async () => {
+    const payload = await callDatastore("code_viewer_datastore_history", {
+      db: dbFile,
+      schema: "analytics",
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.entries.map((entry: { id: string }) => entry.id)).toEqual([
+      "history-sample-schema",
+    ]);
+  });
+
+  test("code_viewer_datastore_history rejects unsafe db ids", async () => {
+    const payload = await callDatastore("code_viewer_datastore_history", {
+      db: "../escape.db",
     });
     expect(payload.isError).toBe(true);
     expect(payload.content[0].text).toMatch(/invalid database path/);

@@ -10,6 +10,7 @@ import type {
   DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
+  QueryHistoryState,
   RowMutation,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
@@ -915,21 +916,36 @@ async function handleQuery(
 }
 
 async function handleHistory(cwd: string, url: URL): Promise<Response> {
-  const dbId = url.searchParams.get("db") || undefined;
-  const schema = normalizeSchemaParam(url.searchParams.get("schema"));
-  if (schema instanceof Response) return schema;
+  const result = await createDbHistoryResponse(cwd, {
+    db: url.searchParams.get("db") || undefined,
+    schema: url.searchParams.get("schema"),
+  });
+  if (result.ok !== true) return result.response;
+  return json(result.value);
+}
+
+export async function createDbHistoryResponse(
+  cwd: string,
+  opts: { db?: string | null; schema?: string | null },
+): Promise<DbServiceResult<QueryHistoryState>> {
+  const dbId = opts.db || undefined;
+  const schema = normalizeSchemaParam(opts.schema);
+  if (schema instanceof Response) return { ok: false, response: schema };
   const state = await loadQueryHistoryAsync(cwd);
   if (dbId) {
-    return json({
-      version: 1,
-      entries: state.entries.filter((e) => {
-        if (e.dbId !== dbId) return false;
-        if (schema === undefined) return true;
-        return (e.schema || "public") === schema;
-      }),
-    });
+    return {
+      ok: true,
+      value: {
+        version: 1,
+        entries: state.entries.filter((e) => {
+          if (e.dbId !== dbId) return false;
+          if (schema === undefined) return true;
+          return (e.schema || "public") === schema;
+        }),
+      },
+    };
   }
-  return json(state);
+  return { ok: true, value: state };
 }
 
 async function handleHistoryDelete(

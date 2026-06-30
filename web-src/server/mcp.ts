@@ -32,6 +32,7 @@ import {
   createDbColumnsResponse,
   createDbDdlResponse,
   createDbFilesResponse,
+  createDbHistoryResponse,
   createDbQueryResponse,
   createDbSchemaResponse,
   createDbSchemasResponse,
@@ -502,6 +503,36 @@ export function defaultMcpTools(
       },
       run(input) {
         return runDatastoreQueryTool(input, options);
+      },
+    },
+    {
+      name: "code_viewer_datastore_history",
+      title: "code-viewer datastore history",
+      description:
+        "Returns saved datastore query history using the same JSON shape as `code-viewer query list --json` and `/_db/history`: version and entries. Optional db/schema filters mirror the browser history endpoint. Read-only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          db: {
+            type: "string",
+            description:
+              "Optional datastore id to filter by. Use ids from code_viewer_datastore_sources.",
+          },
+          schema: {
+            type: "string",
+            description:
+              "Optional schema filter, applied only when db is also supplied.",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        additionalProperties: false,
+      },
+      run(input) {
+        return runDatastoreHistoryTool(input, options);
       },
     },
   ];
@@ -1132,6 +1163,40 @@ async function runDatastoreQueryTool(
   }
 }
 
+async function runDatastoreHistoryTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
+  const params = isPlainObject(input) ? input : {};
+  const dbParsed = validateMcpOptionalDbId(params.db);
+  if (dbParsed.ok !== true) {
+    return { text: dbParsed.error, isError: true };
+  }
+  const schemaParsed = validateMcpOptionalSingleLine(params.schema, "schema");
+  if (schemaParsed.ok !== true) {
+    return { text: schemaParsed.error, isError: true };
+  }
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? options.cwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  try {
+    const result = await createDbHistoryResponse(resolved.root, {
+      db: dbParsed.value,
+      schema: schemaParsed.value,
+    });
+    return dbServiceResultToMcpToolReturn("datastore history", result);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `datastore history failed: ${detail}`, isError: true };
+  }
+}
+
 function validateMcpDbId(
   raw: unknown,
 ): { ok: true; value: string } | { ok: false; error: string } {
@@ -1146,6 +1211,19 @@ function validateMcpDbId(
     };
   }
   return { ok: true, value: raw };
+}
+
+function validateMcpOptionalDbId(
+  raw: unknown,
+): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  if (raw === undefined || raw === "") return { ok: true, value: undefined };
+  const parsed = validateMcpDbId(raw);
+  if (parsed.ok !== true) return parsed;
+  if (!parsed.value.startsWith("docker:")) {
+    const pathError = validateMcpPath(parsed.value);
+    if (pathError) return { ok: false, error: "invalid database path" };
+  }
+  return { ok: true, value: parsed.value };
 }
 
 function validateMcpRequiredSingleLine(
@@ -1214,6 +1292,7 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_datastore_columns: inspect columns for one SQL table.",
     "  - code_viewer_datastore_ddl: inspect CREATE statement and triggers.",
     "  - code_viewer_datastore_query: run read-only SELECT / PRAGMA / EXPLAIN / WITH.",
+    "  - code_viewer_datastore_history: inspect saved query history.",
     "",
     "The CLI subcommands referenced by code_viewer_agent_help are:",
   ];
