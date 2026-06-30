@@ -392,11 +392,41 @@ conventions. Both `query` and `annotate` accept `--cwd <repo>` and
 `--server <url>` for targeting a specific running server.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the four
-AI-facing entry points (`query`, `annotate`, `skill`, `doctor`) with the
-exact `code-viewer <name> agent-help` command for each full guide. The
-index runs without any preflight, so it works even before SQLite or a
-running server is set up.
+`code-viewer agent-help` once. It prints a short index of the five
+AI-facing entry points (`query`, `annotate`, `search`, `skill`,
+`doctor`) with the exact `code-viewer <name> agent-help` command for
+each full guide. The index runs without any preflight, so it works
+even before SQLite or a running server is set up.
+
+### Code search CLI
+
+`code-viewer search code` exposes the running server's `/_grep`
+endpoint — the same engine that powers the browser's `Ctrl+G` palette —
+to the command line for AI agents and shell scripts. The search uses
+ripgrep when available and falls back to git grep / fixed-string
+scanning, honours the same scope rules as the UI (`.git`,
+`.code-viewer`, scope-omit directories filtered out), and can target a
+git ref instead of the worktree.
+
+```sh
+# default: fixed-string search across the worktree, plain text output.
+code-viewer search code --term "TODO"
+
+# JSON output: { ref, engine, truncated, matches[{path,line,column,preview}] }.
+# Prefer --json from agents — column / engine / truncated drive follow-up logic.
+code-viewer search code --term "TODO" --json
+
+# extended-regex search, restricted to two subtrees, on the `main` ref.
+code-viewer search code --term "fn handler" --regex \
+    --path src --path tests --ref main --json
+```
+
+Default text output is `path:line:column<TAB>preview`, one line per
+match. An empty result prints `no matches` to stderr and exits 0.
+Parse errors and unreachable servers exit 1. `--max` accepts a positive
+integer up to the server's hard cap; `truncated=true` in the JSON
+response means more matches exist beyond the cap. Run
+`code-viewer search agent-help` for the full AI-agent guide.
 
 ## AI Code Annotations
 

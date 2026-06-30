@@ -58,6 +58,13 @@ if (process.argv[2] === "agent-help") {
   if (!helpOnly) await preflightSqlite("query");
   const { runQueryCli } = await import("./query-cli");
   await runQueryCli(process.argv.slice(3));
+} else if (process.argv[2] === "search") {
+  // `search` is a thin /_grep wrapper. help / agent-help never touch the
+  // server, so they run without preflight (mirrors the `query` branch's
+  // helpOnly handling for the SQLite driver). All other branches need a
+  // reachable code-viewer server, but no SQLite driver of their own.
+  const { runSearchCli } = await import("./search-cli");
+  await runSearchCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));

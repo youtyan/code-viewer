@@ -199,13 +199,14 @@ Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search> [options]
+  code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
   code-viewer agent-help
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <annotate|query|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <annotate|query|search|skill|doctor> agent-help
 
 Examples:
   code-viewer --open
@@ -214,6 +215,7 @@ Examples:
   code-viewer --staged
   code-viewer annotate --help
   code-viewer query --help
+  code-viewer search code --term "TODO" --json
   code-viewer doctor --json
 `);
       process.exit(0);

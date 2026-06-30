@@ -10,9 +10,10 @@ import {
 import { ANNOTATE_AGENT_HELP } from "../server/annotate-cli";
 import { DOCTOR_AGENT_HELP } from "../server/doctor-agent-help";
 import { QUERY_AGENT_HELP } from "../server/query-cli";
+import { SEARCH_AGENT_HELP } from "../server/search-cli";
 import { SKILL_AGENT_HELP } from "../server/skill-cli";
 
-const SUBCOMMANDS = ["query", "annotate", "skill", "doctor"] as const;
+const SUBCOMMANDS = ["query", "annotate", "search", "skill", "doctor"] as const;
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
 function runCli(args: string[]): Promise<{
@@ -57,6 +58,7 @@ describe("buildAgentHelpIndex", () => {
     const signatureOf = (helpText: string) => helpText.split("\n")[0];
     expect(text.includes(signatureOf(QUERY_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(ANNOTATE_AGENT_HELP))).toBe(true);
+    expect(text.includes(signatureOf(SEARCH_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(SKILL_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(DOCTOR_AGENT_HELP))).toBe(true);
   });
@@ -71,7 +73,7 @@ describe("buildAgentHelpIndex", () => {
 });
 
 describe("AGENT_GUIDES order is stable", () => {
-  test("matches the documented query / annotate / skill / doctor sequence", () => {
+  test("matches the documented query / annotate / search / skill / doctor sequence", () => {
     expect(AGENT_GUIDES.map((g) => g.name)).toEqual([...SUBCOMMANDS]);
   });
 });

@@ -261,6 +261,7 @@ describe("preview CLI", () => {
     expect(stdout).toMatch(
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search>/,
     );
+    expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(/annotate <start\|add\|list\|delete\|clear>/.test(stdout)).toBe(
       false,
     );
