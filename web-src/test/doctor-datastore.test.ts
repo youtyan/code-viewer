@@ -82,21 +82,24 @@ describe("buildDatastoreRetryHint", () => {
     );
   });
 
-  test("Redis / Elasticsearch / S3 emit a browser-tab hint, not a SQL command", () => {
+  test("Redis / Elasticsearch / S3 now emit a paste-safe read-only CLI command (no longer a browser-tab hint)", () => {
+    // Each non-SQL kind has a read-only CLI surface now, so doctor should point
+    // at the cheapest "is the connection alive?" introspect command for that
+    // kind rather than tell the user to open a browser tab.
     expect(
       buildDatastoreRetryHint(sampleFile("redis", "docker:redis-svc")),
     ).toBe(
-      "Open the browser's Datastores tab and select docker:redis-svc to inspect this source.",
+      "Retry with: code-viewer query redis databases --db 'docker:redis-svc' --json",
     );
     expect(
       buildDatastoreRetryHint(sampleFile("elasticsearch", "docker:es-svc")),
     ).toBe(
-      "Open the browser's Datastores tab and select docker:es-svc to inspect this source.",
+      "Retry with: code-viewer query elasticsearch indices --db 'docker:es-svc' --json",
     );
     expect(
       buildDatastoreRetryHint(sampleFile("s3", "docker:s3-svc/sample-bucket")),
     ).toBe(
-      "Open the browser's Datastores tab and select docker:s3-svc/sample-bucket to inspect this source.",
+      "Retry with: code-viewer query s3 buckets --db 'docker:s3-svc/sample-bucket' --json",
     );
   });
 });
@@ -200,7 +203,7 @@ describe("checkDatastoreConnectivity", () => {
     ]);
   });
 
-  test("emits warn + browser hint when a non-SQL probe fails", async () => {
+  test("emits warn + read-only CLI hint when a non-SQL probe fails", async () => {
     const files: DbFileInfo[] = [
       sampleFile("redis", "docker:redis-svc"),
       sampleFile("elasticsearch", "docker:es-svc"),
@@ -222,9 +225,12 @@ describe("checkDatastoreConnectivity", () => {
     for (const row of group.rows) {
       expect(row.status).toBe("warn");
       expect(typeof row.hint === "string").toBe(true);
-      // non-SQL は SQL command を絶対に hint に出さない。
+      // non-SQL kinds still must NOT emit a SQL schemas command, but they
+      // each now have their own paste-safe read-only CLI command instead of
+      // a legacy browser-tab hint.
       expect(/code-viewer query schemas/.test(row.hint ?? "")).toBe(false);
-      expect(/browser's Datastores tab/.test(row.hint ?? "")).toBe(true);
+      expect(/browser's Datastores tab/.test(row.hint ?? "")).toBe(false);
+      expect(/^Retry with: code-viewer query /.test(row.hint ?? "")).toBe(true);
     }
   });
 

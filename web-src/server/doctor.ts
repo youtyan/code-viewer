@@ -968,7 +968,7 @@ async function checkDiscovery(
 // in the `datastore` group. Failure rows include a paste-safe retry hint
 // (SQL: `code-viewer query schemas --db '<id>' --json` without --server,
 // since doctor does not know the server URL — the CLI's auto-discovery
-// resolves it at paste time; Redis/ES/S3: browser Datastores tab hint).
+// resolves it at paste time; Redis/ES/S3: cheapest read-only CLI command).
 //
 // `deps` is injectable so the bun:test suite can swap `listSources` and
 // `probeSource` for fakes without requiring Docker / SQLite at test time.
@@ -1231,16 +1231,21 @@ async function runProbeWithTimeout(
 // doctor cannot know the running server URL (the discovery group reports
 // what is on disk, not what is listening). The query CLI's
 // auto-discovery resolves --server at paste time.
-// Redis / ES / S3 get a browser-tab hint instead of an invalid SQL command.
+// Redis / Elasticsearch / S3 also have read-only CLI surfaces now, so we
+// point at the cheapest "is the connection alive?" introspect command for
+// each kind instead of pushing the user back to the browser tab.
 export function buildDatastoreRetryHint(file: DbFileInfo): string {
-  if (
-    file.kind === "redis" ||
-    file.kind === "elasticsearch" ||
-    file.kind === "s3"
-  ) {
-    return `Open the browser's Datastores tab and select ${file.id} to inspect this source.`;
+  const quoted = shellSingleQuote(file.id);
+  if (file.kind === "redis") {
+    return `Retry with: code-viewer query redis databases --db ${quoted} --json`;
   }
-  return `Retry with: code-viewer query schemas --db ${shellSingleQuote(file.id)} --json`;
+  if (file.kind === "elasticsearch") {
+    return `Retry with: code-viewer query elasticsearch indices --db ${quoted} --json`;
+  }
+  if (file.kind === "s3") {
+    return `Retry with: code-viewer query s3 buckets --db ${quoted} --json`;
+  }
+  return `Retry with: code-viewer query schemas --db ${quoted} --json`;
 }
 
 export async function checkDatastoreConnectivity(

@@ -306,8 +306,9 @@ code-viewer query sources --json
 # step into the existing query history and snapshot store without
 # rebuilding those commands. Redis sources get
 # `redis databases / redis keys` lines, Elasticsearch sources get
-# `elasticsearch indices / elasticsearch docs` lines, and S3 sources still
-# get a browser-pane hint. Every emitted SQL command line pins --server '<url>' to the
+# `elasticsearch indices / elasticsearch docs` lines, and S3 sources get
+# `s3 buckets / s3 objects` lines with `--bucket <bucket-name>` as a
+# placeholder. Every emitted SQL command line pins --server '<url>' to the
 # same server URL this invocation resolved, so pasting them elsewhere
 # never silently re-runs auto-discovery. --json and --commands are
 # mutually exclusive. Notice/comment metadata is collapsed to one line
@@ -454,8 +455,47 @@ parsing). `mapping` and `doc` default to pretty JSON of the inner payload
 (`EsMapping` and `_source`). 0 hits on `docs` prints `no elasticsearch
 hits` to stderr (exit 0); a missing `doc` id prints
 `not found: <index>/<id>` to stderr (exit 0). `--json` always emits the
-full server response envelope. S3 sources are not yet CLI-wired and
-still go through the browser Datastores tab.
+full server response envelope.
+
+For discovered S3 sources, `code-viewer query s3` exposes the same
+read-only endpoints the browser's Datastores tab uses. The CLI calls the
+existing `/_db/s3/buckets`, `/objects`, `/folder`, `/head`, and `/text`
+routes (writes and raw byte streams stay browser-only):
+
+```sh
+# List buckets in the source.
+code-viewer query s3 buckets --db docker:s3-svc --json
+
+# List objects in a bucket. --mode prefix walks --prefix; --mode contains
+# scans for --q across keys/basenames. Use --token to page.
+code-viewer query s3 objects --db docker:s3-svc --bucket sample-bucket \
+    --prefix logs/ --limit 50 --json
+
+# Walk one folder level (delimiter "/") — folders and files separately.
+code-viewer query s3 folder --db docker:s3-svc --bucket sample-bucket \
+    --prefix logs/ --json
+
+# Object metadata only (size / contentType / etag / updatedAt).
+code-viewer query s3 head --db docker:s3-svc --bucket sample-bucket \
+    --key logs/sample.json --json
+
+# Preview a text-shaped object's body (server caps at 512KiB and sets
+# truncated=true when it had to cut). Non-text keys return HTTP 415.
+code-viewer query s3 text --db docker:s3-svc --bucket sample-bucket \
+    --key logs/sample.json
+```
+
+Default text output is tab-separated:
+`name<TAB>createdAt-or-"?"` for `buckets`,
+`key<TAB>sizeBytes<TAB>updatedAt-or-"?"<TAB>contentType-or-"?"` per object
+for `objects` (with `# nextToken: <token>` / `# scanLimitReached: true`
+trailing lines when the server returned them), and `DIR<TAB><prefix>` /
+`OBJ<TAB><key><TAB><sizeBytes>` rows for `folder`. 0 hits on `objects`
+prints `no s3 objects` to stderr (exit 0); an empty `folder` listing
+prints `no s3 folder entries` to stderr (exit 0). `head` defaults to
+pretty JSON of `S3ObjectHeadResponse`. `text` prints the object body to
+stdout and adds `text truncated` to stderr when the server flagged
+truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
 `code-viewer agent-help` once. It prints a short index of the six

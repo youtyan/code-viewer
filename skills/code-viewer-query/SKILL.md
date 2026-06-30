@@ -60,9 +60,10 @@ browser's Database > Search tab, so the human can review the same workflow.
    `snapshot list --db <id> --json` so you can step into the existing query
    history and snapshot store without rebuilding those commands. For Redis
    sources it prints `redis databases / redis keys` lines, for Elasticsearch
-   sources it prints `elasticsearch indices / elasticsearch docs` lines, and
-   for S3 sources it prints a browser Datastores pane hint
-   (S3 has no read-only CLI yet). Every emitted SQL command line pins
+   sources it prints `elasticsearch indices / elasticsearch docs` lines,
+   and for S3 sources it prints `s3 buckets / s3 objects` lines with
+   `--bucket <bucket-name>` as a placeholder so you can step into a bucket
+   discovered via `buckets`. Every emitted SQL command line pins
    `--server '<url>'` to the same server URL this invocation resolved, so
    pasting them into a different shell never silently falls back to
    auto-discovery. Every `--db` value and the server URL are wrapped in

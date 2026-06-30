@@ -198,7 +198,7 @@ function parseCli() {
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
-  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch> [options]
+  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options]
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
   code-viewer file <blame|history|show> --path <p> [--ref <ref>] [...subcommand options] [--json]
@@ -221,6 +221,7 @@ Examples:
   code-viewer search files --term "src/**/*.test.ts" --json
   code-viewer query redis databases --db docker:redis-svc --json
   code-viewer query elasticsearch indices --db docker:es-svc --json
+  code-viewer query s3 buckets --db docker:s3-svc --json
   code-viewer file blame --path src/sample.ts --json
   code-viewer file history --path src/sample.ts --limit 10 --json
   code-viewer file show --path src/sample.ts --start 1 --end 40 --json

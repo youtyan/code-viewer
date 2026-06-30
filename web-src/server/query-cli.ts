@@ -10,6 +10,13 @@ import type {
   RedisDatabasesResponse,
   RedisKeysResponse,
   RedisValueResponse,
+  S3BucketsResponse,
+  S3FolderResponse,
+  S3ObjectHeadResponse,
+  S3ObjectsResponse,
+  S3ObjectTextResponse,
+  S3SearchMode,
+  S3SortMode,
 } from "../core/database/types";
 import {
   ensureServerUrl,
@@ -147,6 +154,47 @@ export type QueryCommand =
       index: string;
       id: string;
       json: boolean;
+    }
+  // /_db/s3/{buckets,objects,folder,head,text} の read-only サブセットを
+  // CLI に薄く被せたもの。Redis / ES と同じく write 系 (/_db/s3/write) や
+  // raw bytes ストリーム (/_db/s3/raw) は CLI から触らない (browser pane
+  // だけが入口)。--bucket / --prefix / --key 等の URL パラメータ名は
+  // handle-s3.ts のそれと一致させる (server side が token / q / limit を
+  // 受けるため CLI 側も同名で寄せる)。
+  | { kind: "s3-buckets"; db: string; json: boolean }
+  | {
+      kind: "s3-objects";
+      db: string;
+      bucket: string;
+      prefix?: string;
+      q?: string;
+      mode?: S3SearchMode;
+      sort?: S3SortMode;
+      limit?: number;
+      token?: string;
+      json: boolean;
+    }
+  | {
+      kind: "s3-folder";
+      db: string;
+      bucket: string;
+      prefix?: string;
+      token?: string;
+      json: boolean;
+    }
+  | {
+      kind: "s3-head";
+      db: string;
+      bucket: string;
+      key: string;
+      json: boolean;
+    }
+  | {
+      kind: "s3-text";
+      db: string;
+      bucket: string;
+      key: string;
+      json: boolean;
     };
 
 export type QueryArgs = {
@@ -184,6 +232,11 @@ Usage:
   code-viewer query elasticsearch mapping --db <id> --index <name> [--json]
   code-viewer query elasticsearch docs --db <id> --index <name> [--q <lucene>] [--size <1..10000>] [--search-after '<json-array>'] [--json]
   code-viewer query elasticsearch doc --db <id> --index <name> --id <doc-id> [--json]
+  code-viewer query s3 buckets --db <id> [--json]
+  code-viewer query s3 objects --db <id> --bucket <name> [--prefix <p>] [--q <term>] [--mode prefix|contains] [--sort key-asc|updated-desc] [--limit <1..1000>] [--token <nextToken>] [--json]
+  code-viewer query s3 folder --db <id> --bucket <name> [--prefix <p>] [--token <nextToken>] [--json]
+  code-viewer query s3 head --db <id> --bucket <name> --key <key> [--json]
+  code-viewer query s3 text --db <id> --bucket <name> --key <key> [--json]
   code-viewer query agent-help
 
 Global options:
@@ -212,6 +265,11 @@ Examples:
   code-viewer query elasticsearch indices --db docker:es-svc --json
   code-viewer query elasticsearch docs --db docker:es-svc --index sample-index --size 10 --json
   code-viewer query elasticsearch doc --db docker:es-svc --index sample-index --id sample-id --json
+  code-viewer query s3 buckets --db docker:s3-svc --json
+  code-viewer query s3 objects --db docker:s3-svc --bucket sample-bucket --prefix logs/ --limit 50 --json
+  code-viewer query s3 folder --db docker:s3-svc --bucket sample-bucket --prefix logs/ --json
+  code-viewer query s3 head --db docker:s3-svc --bucket sample-bucket --key logs/sample.json
+  code-viewer query s3 text --db docker:s3-svc --bucket sample-bucket --key logs/sample.json
 `;
 
 export const QUERY_AGENT_HELP = `code-viewer query — agent guide
@@ -243,8 +301,8 @@ can review what you queried.
    code-viewer query sources --json
    To skip the per-SQL-source "what command should I run next?" step, use
    the shortcut that emits shell-pasteable schema/exec lines for SQL sources,
-   matching redis/elasticsearch CLI lines for those kinds, and a browser-pane
-   hint only for s3. SQL source blocks also include
+   matching redis/elasticsearch CLI lines for those kinds, and s3
+   buckets/objects lines with a --bucket placeholder. SQL source blocks also include
    paste-safe list --db ... --json and snapshot list --db ... --json so you
    can step into the existing query history and snapshot store without
    composing those commands yourself. Each emitted SQL command line pins
@@ -394,6 +452,46 @@ mutate documents (use the browser pane for writes).
    code-viewer query elasticsearch doc --db docker:es-svc \\
        --index sample-index --id sample-id --json
 
+## Workflow: S3 read-only inspect
+
+Use this to look inside a discovered S3 source from the CLI without
+opening the browser Datastores tab. Only the read endpoints are wired
+(\`/_db/s3/{buckets,objects,folder,head,text}\`); CLI cannot mutate
+objects (use the browser pane for writes) and cannot stream the raw
+object bytes (text-shaped objects are previewable via \`s3 text\`).
+
+1. List buckets in the source. Use a bucket name as --bucket on every
+   following call:
+   code-viewer query s3 buckets --db docker:s3-svc --json
+2. List objects in a bucket. --mode prefix (default) walks the bucket
+   under --prefix; --mode contains scans up to 10 pages looking for
+   --q in the key/basename. --sort updated-desc (default) scans up to 2
+   pages and sorts newest-first; --sort key-asc returns a single
+   server-paged list ordered by key. --limit caps how many keys come
+   back (1..1000). For paging, take the response's nextToken and pass
+   it back as --token:
+   code-viewer query s3 objects --db docker:s3-svc \\
+       --bucket sample-bucket --prefix logs/ --limit 50 --json
+   # next page:
+   code-viewer query s3 objects --db docker:s3-svc \\
+       --bucket sample-bucket --prefix logs/ --limit 50 \\
+       --token <nextToken-from-previous-response> --json
+3. Walk one folder level using delimiter "/" (mirrors the browser
+   tree). Pass the prefix you want to enter (use "" for the bucket
+   root). folders[] is the child folder prefixes, objects[] is the
+   files at that level. Paginate via --token like /objects:
+   code-viewer query s3 folder --db docker:s3-svc \\
+       --bucket sample-bucket --prefix logs/ --json
+4. Read object metadata (size / content-type / etag / updatedAt):
+   code-viewer query s3 head --db docker:s3-svc \\
+       --bucket sample-bucket --key logs/sample.json --json
+5. Read a text-previewable object's body (server caps at 512KiB and
+   sets truncated=true when it had to cut). Server returns 415 when
+   the key is not text-shaped (e.g. binary archive); the CLI surfaces
+   that verbatim:
+   code-viewer query s3 text --db docker:s3-svc \\
+       --bucket sample-bucket --key logs/sample.json
+
 ## Output contract
 
 - sources: human-readable id/kind/name lines on stdout (default), or pretty
@@ -402,7 +500,9 @@ mutate documents (use the browser pane for writes).
   exec "SELECT 1" --no-save + list --json + snapshot list --json for
   sqlite/postgresql/mysql, plus schemas for postgresql; redis sources emit
   redis databases/keys lines, elasticsearch sources emit
-  elasticsearch indices/docs lines, and s3 sources emit a browser-pane hint;
+  elasticsearch indices/docs lines, and s3 sources emit s3 buckets/objects
+  lines with --bucket as a <bucket-name> placeholder so AI can step into
+  a specific bucket discovered via buckets;
   every emitted SQL command line pins --server
   <quoted-url> so the suggestion never falls back to auto-discovery in a
   different shell; db ids and the server URL are wrapped in POSIX
@@ -499,6 +599,28 @@ mutate documents (use the browser pane for writes).
   the browser doc pane). Server returns 200 with found=false when the id is
   missing — text path prints "not found: <index>/<id>" to stderr (exit 0);
   --json emits the full EsDocResponse including found / seqNo / primaryTerm.
+- s3 buckets: name<TAB>createdAt-or-"?" lines (default); --json emits the
+  full S3BucketsResponse.
+- s3 objects: key<TAB>sizeBytes<TAB>updatedAt-or-"?"<TAB>contentType-or-"?"
+  lines (default), followed by trailing "# nextToken: <token>" when the
+  server returned one (paste it verbatim into the next call's --token) and
+  "# scanLimitReached: true" when the server cut the scan at its page cap.
+  0 hits prints "no s3 objects" to stderr (still exit 0). --json emits the
+  full S3ObjectsResponse including bucket / prefix / mode / sort / search /
+  scannedObjects / scannedPages.
+- s3 folder: one line per child — "DIR<TAB><prefix>" for folders and
+  "OBJ<TAB><key><TAB><sizeBytes>" for objects (default). When --token can
+  be re-issued, trailing "# nextToken: <token>" is appended. Empty result
+  prints "no s3 folder entries" to stderr (still exit 0). --json emits the
+  full S3FolderResponse.
+- s3 head: the S3ObjectHeadResponse as pretty JSON (default; mirrors the
+  browser metadata pane). --json is identical here so AI/human get the
+  same shape either way.
+- s3 text: the object body as plain stdout text (default). When the server
+  marked truncated=true (body cut at the 512KiB preview cap) a "text
+  truncated" line is also written to stderr (still exit 0). --json emits
+  the full S3ObjectTextResponse so AI also sees dbId / bucket / key /
+  contentType / truncated / etag / sizeBytes / updatedAt.
 - Any error: stderr + non-zero exit. Reasons from the server arrive verbatim
   (text/plain or {error:...} JSON, whichever the server sent).
 
@@ -551,6 +673,15 @@ const VALUE_FLAGS = new Set([
   "--q",
   "--size",
   "--search-after",
+  // s3 read-only サブコマンド用。--bucket は buckets 以外で必須、--prefix /
+  // --token は objects / folder の任意パラメータ、--mode / --sort は
+  // objects のスキャンモード、--key は head / text の必須パラメータ。
+  // --q / --limit は他サブコマンドと共有 (allowlist で誤用は遮断)。
+  "--bucket",
+  "--prefix",
+  "--mode",
+  "--sort",
+  "--token",
 ]);
 
 const BOOL_FLAGS = new Set([
@@ -775,6 +906,9 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   }
   if (subcommand === "elasticsearch") {
     return parseElasticsearchSubcommand(rest, options, flags, globalArgs);
+  }
+  if (subcommand === "s3") {
+    return parseS3Subcommand(rest, options, flags, globalArgs);
   }
   return { ok: false, error: `unknown query command: ${subcommand}` };
 }
@@ -1076,6 +1210,208 @@ function rejectUnsupportedEsFlags(
     options,
     flags,
   );
+}
+
+// s3 サブコマンドごとの allowlist。redis / elasticsearch と同じ精神で
+// silent drop を防ぐ。--cwd / --server は global なのでここでは見ない。
+// objects は server 側 (handle-s3.ts:206-355) と同じ受付パラメータ集合に
+// 揃える: prefix / q / token / mode / sort / limit。
+type S3Action = "buckets" | "objects" | "folder" | "head" | "text";
+
+const S3_ACTION_ALLOWLIST: Record<
+  S3Action,
+  { options: ReadonlySet<string>; flags: ReadonlySet<string> }
+> = {
+  buckets: {
+    options: new Set(["--db"]),
+    flags: new Set(["--json"]),
+  },
+  objects: {
+    options: new Set([
+      "--db",
+      "--bucket",
+      "--prefix",
+      "--q",
+      "--mode",
+      "--sort",
+      "--limit",
+      "--token",
+    ]),
+    flags: new Set(["--json"]),
+  },
+  folder: {
+    options: new Set(["--db", "--bucket", "--prefix", "--token"]),
+    flags: new Set(["--json"]),
+  },
+  head: {
+    options: new Set(["--db", "--bucket", "--key"]),
+    flags: new Set(["--json"]),
+  },
+  text: {
+    options: new Set(["--db", "--bucket", "--key"]),
+    flags: new Set(["--json"]),
+  },
+};
+
+function rejectUnsupportedS3Flags(
+  action: S3Action,
+  options: Map<string, string>,
+  flags: Set<string>,
+): QueryParseResult | null {
+  return rejectUnknownQueryFlags(
+    `s3 ${action}`,
+    S3_ACTION_ALLOWLIST[action],
+    options,
+    flags,
+  );
+}
+
+function parseS3Subcommand(
+  rest: string[],
+  options: Map<string, string>,
+  flags: Set<string>,
+  globalArgs: { cwd?: string; server?: string },
+): QueryParseResult {
+  const action = rest[1];
+  if (!action) {
+    return {
+      ok: false,
+      error:
+        "s3 requires a sub-action: buckets | objects | folder | head | text",
+    };
+  }
+  if (
+    action !== "buckets" &&
+    action !== "objects" &&
+    action !== "folder" &&
+    action !== "head" &&
+    action !== "text"
+  ) {
+    return { ok: false, error: `unknown s3 sub-action: ${action}` };
+  }
+  if (rest.length > 2) {
+    return {
+      ok: false,
+      error: `s3 ${action} does not accept positional argument: ${rest[2]}`,
+    };
+  }
+  const reject = rejectUnsupportedS3Flags(action, options, flags);
+  if (reject) return reject;
+
+  const db = options.get("--db");
+  if (!db) {
+    return { ok: false, error: `s3 ${action} requires --db <id>` };
+  }
+  const json = flags.has("--json");
+
+  if (action === "buckets") {
+    return {
+      ok: true,
+      args: {
+        command: { kind: "s3-buckets", db, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // objects / folder / head / text は --bucket 必須。bucket は server 側で
+  // ascii 255 文字以内 / "/" を含まない、で validate されるが、CLI 側では
+  // 空文字だけ弾けば十分 (それ以外は server から 400 が返ってくる)。
+  const bucket = options.get("--bucket");
+  if (bucket === undefined || bucket === "") {
+    return {
+      ok: false,
+      error: `s3 ${action} requires --bucket <name>`,
+    };
+  }
+
+  if (action === "head" || action === "text") {
+    const key = options.get("--key");
+    if (key === undefined || key === "") {
+      return {
+        ok: false,
+        error: `s3 ${action} requires --key <key>`,
+      };
+    }
+    return {
+      ok: true,
+      args: {
+        command: { kind: `s3-${action}`, db, bucket, key, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  if (action === "folder") {
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "s3-folder",
+          db,
+          bucket,
+          prefix: options.get("--prefix"),
+          token: options.get("--token"),
+          json,
+        },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // action === "objects"
+  const modeRaw = options.get("--mode");
+  let mode: S3SearchMode | undefined;
+  if (modeRaw !== undefined) {
+    if (modeRaw !== "prefix" && modeRaw !== "contains") {
+      return {
+        ok: false,
+        error: `--mode must be one of: prefix | contains (got ${modeRaw})`,
+      };
+    }
+    mode = modeRaw;
+  }
+  const sortRaw = options.get("--sort");
+  let sort: S3SortMode | undefined;
+  if (sortRaw !== undefined) {
+    if (sortRaw !== "key-asc" && sortRaw !== "updated-desc") {
+      return {
+        ok: false,
+        error: `--sort must be one of: key-asc | updated-desc (got ${sortRaw})`,
+      };
+    }
+    sort = sortRaw;
+  }
+  const limitRaw = options.get("--limit");
+  let limit: number | undefined;
+  if (limitRaw !== undefined) {
+    const n = Number(limitRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 1000) {
+      return {
+        ok: false,
+        error: `--limit must be an integer in [1, 1000] (got ${limitRaw})`,
+      };
+    }
+    limit = n;
+  }
+  return {
+    ok: true,
+    args: {
+      command: {
+        kind: "s3-objects",
+        db,
+        bucket,
+        prefix: options.get("--prefix"),
+        q: options.get("--q"),
+        mode,
+        sort,
+        limit,
+        token: options.get("--token"),
+        json,
+      },
+      ...globalArgs,
+    },
+  };
 }
 
 function parseRedisSubcommand(
@@ -1573,6 +1909,11 @@ export async function runQueryCli(argv: string[]): Promise<void> {
   if (command.kind === "es-mapping") return runEsMapping(serverUrl, command);
   if (command.kind === "es-docs") return runEsDocs(serverUrl, command);
   if (command.kind === "es-doc") return runEsDoc(serverUrl, command);
+  if (command.kind === "s3-buckets") return runS3Buckets(serverUrl, command);
+  if (command.kind === "s3-objects") return runS3Objects(serverUrl, command);
+  if (command.kind === "s3-folder") return runS3Folder(serverUrl, command);
+  if (command.kind === "s3-head") return runS3Head(serverUrl, command);
+  if (command.kind === "s3-text") return runS3Text(serverUrl, command);
 }
 
 async function runEsIndices(
@@ -1698,6 +2039,161 @@ async function runEsDoc(
   }
   // 既定 text は _source を pretty JSON で出す (redis value と同じ精神)。
   console.log(JSON.stringify(data.source, null, 2));
+}
+
+async function runS3Buckets(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "s3-buckets" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/s3/buckets", { db: command.db });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list s3 buckets",
+  )) as S3BucketsResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: name<TAB>createdAt (createdAt は server / アダプタが省略するので "?")。
+  for (const bucket of data.buckets) {
+    console.log(`${bucket.name}\t${bucket.createdAt ?? "?"}`);
+  }
+}
+
+async function runS3Objects(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "s3-objects" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/s3/objects", {
+    db: command.db,
+    bucket: command.bucket,
+    prefix: command.prefix,
+    q: command.q,
+    mode: command.mode,
+    sort: command.sort,
+    limit: command.limit !== undefined ? String(command.limit) : undefined,
+    token: command.token,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list s3 objects",
+  )) as S3ObjectsResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: 1 オブジェクト 1 行。key<TAB>sizeBytes<TAB>updatedAt-or-?<TAB>
+  // contentType-or-?。0 件は stderr に "no s3 objects" を出して exit 0。
+  if (data.objects.length === 0) {
+    console.error("no s3 objects");
+  } else {
+    for (const obj of data.objects) {
+      console.log(
+        `${obj.key}\t${obj.sizeBytes}\t${obj.updatedAt ?? "?"}\t${obj.contentType ?? "?"}`,
+      );
+    }
+  }
+  // server は nextToken / scanLimitReached を必要なときだけ載せてくる。
+  // AI がページング判定に使えるよう text にも出す (--token に貼れる literal)。
+  if (data.nextToken !== undefined) {
+    console.log(`# nextToken: ${data.nextToken}`);
+  }
+  if (data.scanLimitReached === true) {
+    console.log("# scanLimitReached: true");
+  }
+}
+
+async function runS3Folder(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "s3-folder" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/s3/folder", {
+    db: command.db,
+    bucket: command.bucket,
+    prefix: command.prefix,
+    token: command.token,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list s3 folder",
+  )) as S3FolderResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: 1 行 1 エントリ。フォルダは DIR<TAB><prefix>、object は
+  // OBJ<TAB><key><TAB><sizeBytes>。tree pane と読み順を合わせる。
+  if (data.folders.length === 0 && data.objects.length === 0) {
+    console.error("no s3 folder entries");
+  } else {
+    for (const folder of data.folders) {
+      console.log(`DIR\t${folder}`);
+    }
+    for (const obj of data.objects) {
+      console.log(`OBJ\t${obj.key}\t${obj.sizeBytes}`);
+    }
+  }
+  if (data.nextToken !== undefined) {
+    console.log(`# nextToken: ${data.nextToken}`);
+  }
+}
+
+async function runS3Head(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "s3-head" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/s3/head", {
+    db: command.db,
+    bucket: command.bucket,
+    key: command.key,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read s3 object metadata",
+  )) as S3ObjectHeadResponse;
+  // head は head DTO がそのまま envelope なので default / --json で同じ
+  // pretty JSON を出す (S3 browser pane の metadata 表示と一致)。
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function runS3Text(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "s3-text" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/s3/text", {
+    db: command.db,
+    bucket: command.bucket,
+    key: command.key,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read s3 object text",
+  )) as S3ObjectTextResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // default は本文だけを stdout に。truncated のときは AI/human が cut を
+  // 拾えるよう stderr に "text truncated" を出す (exit 0 のまま)。
+  console.log(data.text);
+  if (data.truncated) {
+    console.error("text truncated");
+  }
 }
 
 async function runRedisDatabases(
@@ -1863,8 +2359,9 @@ function commentText(value: string): string {
 //     既存の調査履歴 / snapshot を確認するエントリポイント)
 //   - redis source: redis databases / keys の調査入口を生成
 //   - elasticsearch source: elasticsearch indices / docs の調査入口を生成
-//   - s3 source: query CLI の schema/exec ではなく browser pane へ誘導
-//     (read-only CLI 未対応のため)
+//   - s3 source: s3 buckets / objects の調査入口を生成 (bucket は
+//     placeholder。source id だけからは bucket 名を一意に切り出せない
+//     形式もあるので、buckets を一度叩いて差し替える前提にする)
 // db id と server URL は常に shellSingleQuote で囲む。空白/シングルクォート
 // /コロン/スラッシュ が含まれていても bash/zsh にそのまま貼れる形を保証する。
 // --server を毎行に prefix することで、--commands 起動時の resolved server
@@ -1899,8 +2396,14 @@ function buildSourceCommands(
     return lines;
   }
   if (file.kind === "s3") {
+    // S3 も SQL とは別 API。buckets で名前を取り → objects で中身を見る、の
+    // 最短動線を出す。source id 自体に bucket が含まれているケース (例:
+    // "docker:s3-svc/sample-bucket") もあるが、CLI が決め打ちで切り出すと
+    // 別 source 形式を壊しうるので、--bucket は <bucket-name> placeholder
+    // のままにする (AI / 人間が buckets 出力から拾って差し替える前提)。
+    lines.push(`${cli} s3 buckets --db ${quotedId} --json`);
     lines.push(
-      `# ${file.kind}: use the browser Datastores tab; query schema/exec commands are SQL-only`,
+      `${cli} s3 objects --db ${quotedId} --bucket <bucket-name> --limit 50 --json`,
     );
     return lines;
   }

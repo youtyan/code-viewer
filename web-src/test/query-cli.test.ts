@@ -1354,6 +1354,371 @@ describe("parseQueryArgs elasticsearch", () => {
   });
 });
 
+describe("parseQueryArgs s3", () => {
+  test("s3 without an action is rejected", () => {
+    expect(parseQueryArgs(["s3"])).toEqual({
+      ok: false,
+      error:
+        "s3 requires a sub-action: buckets | objects | folder | head | text",
+    });
+  });
+
+  test("unknown s3 sub-action is rejected", () => {
+    expect(parseQueryArgs(["s3", "wat"])).toEqual({
+      ok: false,
+      error: "unknown s3 sub-action: wat",
+    });
+  });
+
+  test("each action requires --db", () => {
+    for (const action of [
+      "buckets",
+      "objects",
+      "folder",
+      "head",
+      "text",
+    ] as const) {
+      expect(parseQueryArgs(["s3", action])).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --db <id>`,
+      });
+    }
+  });
+
+  test("buckets captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-buckets",
+      db: "docker:s3-svc",
+      json: true,
+    });
+  });
+
+  test("objects / folder / head / text require --bucket", () => {
+    for (const action of ["objects", "folder", "head", "text"] as const) {
+      expect(parseQueryArgs(["s3", action, "--db", "docker:s3-svc"])).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --bucket <name>`,
+      });
+    }
+  });
+
+  test("head / text require --key", () => {
+    for (const action of ["head", "text"] as const) {
+      expect(
+        parseQueryArgs([
+          "s3",
+          action,
+          "--db",
+          "docker:s3-svc",
+          "--bucket",
+          "sample-bucket",
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --key <key>`,
+      });
+    }
+  });
+
+  test("objects --mode rejects values outside the prefix|contains enum", () => {
+    expect(
+      parseQueryArgs([
+        "s3",
+        "objects",
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--mode",
+        "regex",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--mode must be one of: prefix | contains (got regex)",
+    });
+  });
+
+  test("objects --sort rejects values outside the key-asc|updated-desc enum", () => {
+    expect(
+      parseQueryArgs([
+        "s3",
+        "objects",
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--sort",
+        "size-desc",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--sort must be one of: key-asc | updated-desc (got size-desc)",
+    });
+  });
+
+  test("objects --limit validates the [1..1000] range", () => {
+    for (const bad of ["0", "1001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "s3",
+          "objects",
+          "--db",
+          "docker:s3-svc",
+          "--bucket",
+          "sample-bucket",
+          "--limit",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--limit must be an integer in [1, 1000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("objects captures --prefix / --q / --mode / --sort / --limit / --token / --json", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--q",
+      "needle",
+      "--mode",
+      "contains",
+      "--sort",
+      "key-asc",
+      "--limit",
+      "75",
+      "--token",
+      "next-cursor",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-objects",
+      db: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      q: "needle",
+      mode: "contains",
+      sort: "key-asc",
+      limit: 75,
+      token: "next-cursor",
+      json: true,
+    });
+  });
+
+  test("folder captures --prefix / --token", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--token",
+      "next-cursor",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-folder",
+      db: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      token: "next-cursor",
+      json: false,
+    });
+  });
+
+  test("head and text capture --key", () => {
+    for (const action of ["head", "text"] as const) {
+      const result = parseQueryArgs([
+        "s3",
+        action,
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--key",
+        "logs/sample.json",
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("parse failed");
+      expect(result.args.command).toEqual({
+        kind: `s3-${action}`,
+        db: "docker:s3-svc",
+        bucket: "sample-bucket",
+        key: "logs/sample.json",
+        json: false,
+      });
+    }
+  });
+
+  test("buckets rejects options that belong to objects / folder / head / text", () => {
+    const baseArgs = ["s3", "buckets", "--db", "docker:s3-svc"];
+    for (const bad of [
+      "--bucket",
+      "--prefix",
+      "--q",
+      "--mode",
+      "--sort",
+      "--limit",
+      "--token",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 buckets does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("objects rejects --key and unrelated redis/es options", () => {
+    const baseArgs = [
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ];
+    for (const bad of ["--key", "--db-index", "--index", "--id", "--size"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 objects does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("folder rejects search/limit/key/mode/sort options that only belong to objects/head/text", () => {
+    const baseArgs = [
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ];
+    for (const bad of ["--q", "--limit", "--key", "--mode", "--sort"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 folder does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("head rejects --prefix / --q / --limit / --mode / --sort / --token", () => {
+    const baseArgs = [
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ];
+    for (const bad of [
+      "--prefix",
+      "--q",
+      "--limit",
+      "--mode",
+      "--sort",
+      "--token",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 head does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("each action rejects stray positional arguments", () => {
+    for (const action of [
+      "buckets",
+      "objects",
+      "folder",
+      "head",
+      "text",
+    ] as const) {
+      expect(
+        parseQueryArgs(["s3", action, "extra", "--db", "docker:s3-svc"]),
+      ).toEqual({
+        ok: false,
+        error: `s3 ${action} does not accept positional argument: extra`,
+      });
+    }
+  });
+});
+
+describe("parseQueryArgs rejects s3-only flags on non-s3 subcommands", () => {
+  // --bucket / --prefix / --mode / --sort / --token は S3 専用。SQL 系 /
+  // redis / elasticsearch に流入して silent ignore されるのを防ぐ。
+  // (--q / --limit / --key は ES や Redis と共有なので、その allowlist 側で
+  // 個別に拒否される)
+  test("exec rejects each s3-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("redis keys rejects each s3-only option", () => {
+    const baseArgs = [
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `redis keys does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("elasticsearch docs rejects each s3-only option", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch docs does not accept ${bad}`,
+      });
+    }
+  });
+});
+
 describe("parseQueryArgs rejects elasticsearch-only flags on non-elasticsearch subcommands", () => {
   // Redis 用と同じ精神: --index / --q / --size / --search-after が SQL 系や
   // redis 系に流入して silent ignore されるのを防ぐ。
@@ -1805,9 +2170,17 @@ describe("runQueryCli integration", () => {
     );
 
     expect(out).toMatch(/^# source 3: docker:s3-svc\/sample-bucket \(s3\)$/m);
+    // s3 is CLI-wired: emits paste-safe `s3 buckets` and `s3 objects` lines,
+    // with --bucket as a <bucket-name> placeholder (source id is not always
+    // a "<service>/<bucket>" form, so the CLI never decides for you).
     expect(out).toMatch(
-      /^# s3: use the browser Datastores tab; query schema\/exec commands are SQL-only$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' s3 buckets --db 'docker:s3-svc\/sample-bucket' --json$/m,
     );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' s3 objects --db 'docker:s3-svc\/sample-bucket' --bucket <bucket-name> --limit 50 --json$/m,
+    );
+    // The old browser-pane hint is gone now that s3 has CLI commands.
+    expect(/# s3: use the browser Datastores tab/.test(out)).toBe(false);
     // s3 は SQL source ではないので schema/exec/list/snapshot 行を出さない。
     expect(/query schema --db 'docker:s3-svc/.test(out)).toBe(false);
     expect(/query exec --db 'docker:s3-svc/.test(out)).toBe(false);
@@ -1831,15 +2204,22 @@ describe("runQueryCli integration", () => {
     expect(/query schemas --db 'docker:mysql-svc'/.test(out)).toBe(false);
     // 全 SQL 行で --server prefix が付いていることを regression guard。
     // (auto-discovery に逸れて別 server / no server に流れない保証)
-    const sqlLines = out
+    const allQueryLines = out
       .split("\n")
       .filter((line) => line.startsWith("code-viewer query"));
+    const s3Lines = allQueryLines.filter((line) =>
+      / s3 (buckets|objects) /.test(line),
+    );
+    const sqlLines = allQueryLines.filter((line) => !s3Lines.includes(line));
     // postgresql=5 (schemas+schema+exec+list+snapshot list) +
     //   sqlite=4 (schema+exec+list+snapshot list) +
     //   mysql=4  (schema+exec+list+snapshot list) = 13 SQL 行が出る。
-    // s3 は SQL command を一切出さない。
+    // s3 行は別 prefix なので sqlLines には数えない。
     expect(sqlLines).toHaveLength(13);
-    const missingPrefix = sqlLines.filter(
+    // s3 は buckets + objects の 2 行を必ず出す。
+    expect(s3Lines).toHaveLength(2);
+    // --server prefix の regression guard は s3 行も含めて全 query 行に適用。
+    const missingPrefix = allQueryLines.filter(
       (line) => !line.startsWith("code-viewer query --server '"),
     );
     expect(missingPrefix).toEqual([]);
@@ -4934,7 +5314,7 @@ describe("runQueryCli redis integration", () => {
     ).toBe(false);
   });
 
-  test("sources --commands emits paste-safe elasticsearch commands and keeps the browser-pane hint for s3", async () => {
+  test("sources --commands emits paste-safe elasticsearch and s3 commands; the legacy browser-pane hints are gone", async () => {
     const payload = {
       files: [
         {
@@ -4984,10 +5364,26 @@ describe("runQueryCli redis integration", () => {
         line.includes("elasticsearch: use the browser Datastores tab"),
       ),
     ).toBe(false);
-    // s3 is still browser-only.
+    // s3 is now wired in the CLI as well: emits paste-safe `s3 buckets`
+    // and `s3 objects` lines with a <bucket-name> placeholder, and no
+    // longer falls back to the legacy browser-pane hint.
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' s3 buckets --db 'docker:s3-svc/example-bucket' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' s3 objects --db 'docker:s3-svc/example-bucket' --bucket <bucket-name> --limit 50 --json`,
+        ),
+      ),
+    ).toBe(true);
     expect(
       lines.some((line) => line.includes("s3: use the browser Datastores tab")),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -5326,6 +5722,428 @@ describe("runQueryCli elasticsearch integration", () => {
       true,
     );
     expect(harness.errs[0].includes("missing dbId")).toBe(true);
+  });
+});
+
+describe("runQueryCli s3 integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("buckets --json hits /_db/s3/buckets and emits verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      buckets: [
+        { name: "sample-a", createdAt: "2026-06-30T00:00:00Z" },
+        { name: "sample-b" },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/s3/buckets?db=docker%3As3-svc`,
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("buckets default text emits name<TAB>createdAt-or-? per bucket", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      buckets: [
+        { name: "sample-a", createdAt: "2026-06-30T00:00:00Z" },
+        // createdAt 省略は "?" にフォールバック (S3 のアダプタが返さないケース)。
+        { name: "sample-b" },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample-a\t2026-06-30T00:00:00Z",
+      "sample-b\t?",
+    ]);
+  });
+
+  test("objects wires --prefix / --q / --mode / --sort / --limit / --token and emits hit rows + paging hints", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      search: "needle",
+      mode: "contains",
+      sort: "key-asc",
+      objects: [
+        {
+          key: "logs/needle-a.json",
+          sizeBytes: 1024,
+          updatedAt: "2026-06-30T00:00:00Z",
+          contentType: "application/json",
+        },
+        // updatedAt / contentType が無いケースは "?" にフォールバック。
+        { key: "logs/needle-b.bin", sizeBytes: 0 },
+      ],
+      nextToken: "next-cursor",
+      truncated: true,
+      scannedObjects: 200,
+      scannedPages: 2,
+      scanLimitReached: true,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--q",
+      "needle",
+      "--mode",
+      "contains",
+      "--sort",
+      "key-asc",
+      "--limit",
+      "50",
+      "--token",
+      "prev-cursor",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/s3/objects");
+    expect(url.searchParams.get("db")).toBe("docker:s3-svc");
+    expect(url.searchParams.get("bucket")).toBe("sample-bucket");
+    expect(url.searchParams.get("prefix")).toBe("logs/");
+    expect(url.searchParams.get("q")).toBe("needle");
+    expect(url.searchParams.get("mode")).toBe("contains");
+    expect(url.searchParams.get("sort")).toBe("key-asc");
+    expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.get("token")).toBe("prev-cursor");
+
+    expect(harness.logs).toEqual([
+      "logs/needle-a.json\t1024\t2026-06-30T00:00:00Z\tapplication/json",
+      "logs/needle-b.bin\t0\t?\t?",
+      "# nextToken: next-cursor",
+      "# scanLimitReached: true",
+    ]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("objects with zero matches prints `no s3 objects` to stderr (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "",
+      search: "",
+      mode: "prefix",
+      sort: "updated-desc",
+      objects: [],
+      truncated: false,
+      scannedObjects: 0,
+      scannedPages: 0,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no s3 objects"]);
+  });
+
+  test("folder default text emits DIR / OBJ rows and the # nextToken trailer", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      folders: ["logs/sub-a/", "logs/sub-b/"],
+      objects: [
+        { key: "logs/sample.json", sizeBytes: 1024 },
+        { key: "logs/other.bin", sizeBytes: 7 },
+      ],
+      nextToken: "next-cursor",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/s3/folder");
+    expect(url.searchParams.get("prefix")).toBe("logs/");
+    expect(harness.logs).toEqual([
+      "DIR\tlogs/sub-a/",
+      "DIR\tlogs/sub-b/",
+      "OBJ\tlogs/sample.json\t1024",
+      "OBJ\tlogs/other.bin\t7",
+      "# nextToken: next-cursor",
+    ]);
+  });
+
+  test("folder with empty result prints `no s3 folder entries` to stderr", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "",
+      folders: [],
+      objects: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no s3 folder entries"]);
+  });
+
+  test("head emits the metadata envelope as pretty JSON in both default and --json modes", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 1024,
+      contentType: "application/json",
+      updatedAt: "2026-06-30T00:00:00Z",
+      etag: "deadbeef",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe("/_db/s3/head");
+    expect(new URL(harness.requests[1].url).searchParams.get("key")).toBe(
+      "logs/sample.json",
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+      "--json",
+    ]);
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("text default mode writes only the body to stdout; truncated raises a stderr line (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 512000,
+      contentType: "application/json",
+      text: "sample body content",
+      truncated: true,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe("/_db/s3/text");
+    expect(harness.logs).toEqual(["sample body content"]);
+    expect(harness.errs).toEqual(["text truncated"]);
+  });
+
+  test("text --json mode emits the full envelope without the truncated stderr line", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 19,
+      contentType: "application/json",
+      text: "sample body content",
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("buckets surfaces a server 4xx verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "missing db parameter",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("list s3 buckets failed")).toBe(true);
+    expect(harness.errs[0].includes("missing db parameter")).toBe(true);
+  });
+
+  test("text surfaces a server 415 (non-text key) verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 415,
+        contentType: "text/plain",
+        body: "object is not previewable as text",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.bin",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs[0].includes("read s3 object text failed")).toBe(true);
+    expect(harness.errs[0].includes("object is not previewable as text")).toBe(
+      true,
+    );
   });
 });
 
