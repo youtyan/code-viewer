@@ -258,7 +258,13 @@ browser's Database > Search tab.
   lines (default), or pretty JSON of the full /_db/columns response with --json.
 - ddl: raw CREATE statement on stdout (default), or pretty JSON of the full
   /_db/ddl response (sql + triggers + executedSql) with --json.
-- exec / diff-rows: pretty JSON on stdout, exit 0 on success.
+- exec: pretty JSON on stdout, exit 0 on success. The output
+  contains dbId, columns, columnTypes, rows, rowCount, truncated, elapsedMs,
+  and optional schema and executedSql fields. Use truncated to
+  decide whether to re-issue with a larger --max-rows, columnTypes to build
+  follow-up WHERE/CAST clauses, schema to confirm the resolved schema, and
+  executedSql to log the exact SQL the server ran.
+- diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
   Add --wait to block until the snapshot finishes (default --timeout 120s);
@@ -1081,18 +1087,21 @@ async function runExec(
     );
     process.exit(1);
   }
-  console.log(
-    JSON.stringify(
-      {
-        columns: data.columns,
-        rows: data.rows,
-        rowCount: data.rowCount,
-        elapsedMs: data.elapsedMs,
-      },
-      null,
-      2,
-    ),
-  );
+  // Keep the query metadata agents need for truncation checks and follow-up SQL.
+  const out: Record<string, unknown> = {
+    dbId: data.dbId,
+    ...(data.schema !== undefined ? { schema: data.schema } : {}),
+    columns: data.columns,
+    columnTypes: data.columnTypes,
+    rows: data.rows,
+    rowCount: data.rowCount,
+    truncated: data.truncated,
+    elapsedMs: data.elapsedMs,
+    ...(data.executedSql !== undefined
+      ? { executedSql: data.executedSql }
+      : {}),
+  };
+  console.log(JSON.stringify(out, null, 2));
 }
 
 async function runList(

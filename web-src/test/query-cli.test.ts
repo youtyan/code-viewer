@@ -979,10 +979,15 @@ describe("runQueryCli integration", () => {
       { body: JSON.stringify({ files: [] }) },
       {
         body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schema: "analytics",
           columns: ["id"],
-          rows: [{ id: 1 }],
+          columnTypes: ["int4"],
+          rows: [[1]],
           rowCount: 1,
+          truncated: false,
           elapsedMs: 7,
+          executedSql: ["SELECT 1"],
         }),
       },
     ]);
@@ -1014,11 +1019,109 @@ describe("runQueryCli integration", () => {
       maxRows: 5,
     });
     expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      dbId: "docker:pg-svc",
+      schema: "analytics",
       columns: ["id"],
-      rows: [{ id: 1 }],
+      columnTypes: ["int4"],
+      rows: [[1]],
       rowCount: 1,
+      truncated: false,
       elapsedMs: 7,
+      executedSql: ["SELECT 1"],
     });
+  });
+
+  test("query exec output passes through truncated/columnTypes/executedSql verbatim", async () => {
+    // server が truncated=true を返したら CLI も truncated=true を残し、
+    // AI agent が「LIMIT を拡張して再実行する」判断材料にできるかを検証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: ["id", "label"],
+          columnTypes: ["INTEGER", "TEXT"],
+          rows: [
+            [1, "alpha"],
+            [2, "beta"],
+          ],
+          rowCount: 2,
+          truncated: true,
+          elapsedMs: 12,
+          executedSql: ["SELECT id, label FROM sample_table LIMIT 2"],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT id, label FROM sample_table LIMIT 2",
+      "--no-save",
+      "--max-rows",
+      "2",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const parsed = JSON.parse(harness.logs.join("\n"));
+    expect(parsed.dbId).toBe("sample.db");
+    expect(parsed.columns).toEqual(["id", "label"]);
+    expect(parsed.columnTypes).toEqual(["INTEGER", "TEXT"]);
+    expect(parsed.rowCount).toBe(2);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.executedSql).toEqual([
+      "SELECT id, label FROM sample_table LIMIT 2",
+    ]);
+    // schema は server が返さなかったので CLI 出力にも含まれない
+    // (undefined を JSON に焼かない)。
+    expect("schema" in parsed).toBe(false);
+  });
+
+  test("query exec output omits optional fields when server did not return them", async () => {
+    // 古い server / 非 PG が schema / executedSql を返さないケース。
+    // 残りの必須フィールド (truncated 等) は素通しされ、optional は欠落するだけ。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: [],
+          columnTypes: [],
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+          elapsedMs: 1,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1 WHERE 0",
+      "--no-save",
+    ]);
+
+    const parsed = JSON.parse(harness.logs.join("\n"));
+    expect(parsed).toEqual({
+      dbId: "sample.db",
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: 1,
+    });
+    expect("schema" in parsed).toBe(false);
+    expect("executedSql" in parsed).toBe(false);
   });
 
   test("query schemas --json emits the /_db/schemas response verbatim", async () => {

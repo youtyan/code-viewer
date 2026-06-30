@@ -346,6 +346,10 @@ code-viewer query diff rows --before snap-abc123 --after snap-def456 \
     --table users --json
 ```
 
+`query exec` prints pretty JSON with `dbId`, `columns`, `columnTypes`, `rows`,
+`rowCount`, `truncated`, `elapsedMs`, and optional `schema` / `executedSql`.
+Check `truncated` before treating the result as complete.
+
 `code-viewer query --help` shows all command syntax. `code-viewer query
 agent-help` prints a longer guide for AI agents covering query shape and
 conventions. Both `query` and `annotate` accept `--cwd <repo>` and

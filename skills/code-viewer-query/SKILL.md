@@ -90,6 +90,10 @@ browser's Database > Search tab, so the human can review the same workflow.
        --sql "SELECT * FROM events LIMIT 10"
    ```
 
+   `exec` prints pretty JSON with `dbId`, `columns`, `columnTypes`, `rows`,
+   `rowCount`, `truncated`, `elapsedMs`, and optional `schema` /
+   `executedSql`. Check `truncated` before treating the result as complete.
+
 5. The human sees results in the browser's Database > Query History panel.
 
 ## Workflow: Find a value across all tables (global search)
