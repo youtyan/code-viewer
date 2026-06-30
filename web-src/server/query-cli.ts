@@ -19,11 +19,12 @@ export type QueryCommand =
       db: string;
       tables?: string[];
       note: string;
+      schema?: string;
       wait: boolean;
       timeoutSec: number;
       json: boolean;
     }
-  | { kind: "snapshot-list"; db?: string; json: boolean }
+  | { kind: "snapshot-list"; db?: string; schema?: string; json: boolean }
   | { kind: "snapshot-delete"; id: string }
   | { kind: "snapshot-note"; id: string; note: string }
   // server の snapshot diff は on-demand 計算なので "stored diff" は存在しない。
@@ -68,8 +69,8 @@ Usage:
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path>]
   code-viewer query clear [--db <path>]
-  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>] [--wait] [--timeout <sec>] [--json]
-  code-viewer query snapshot list [--json] [--db <path>]
+  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>] [--schema <name>] [--wait] [--timeout <sec>] [--json]
+  code-viewer query snapshot list [--json] [--db <path>] [--schema <name>]
   code-viewer query snapshot delete --id <snapshot-id>
   code-viewer query snapshot note --id <snapshot-id> --note <text>
   code-viewer query diff tables --before <id> --after <id> [--json]
@@ -147,6 +148,16 @@ no separate stored diff entity, so you always pass both snapshot ids.
        --table users --json
 
 The human can also view all snapshots in the browser's Database > Snapshot tab.
+
+PostgreSQL (multi-schema): pass --schema <name> to snapshot create AND to
+the matching snapshot list so the before/after pair, the polling lookup
+during --wait, and the listing all stay scoped to the same schema. Without
+--schema, snapshot create infers the schema (public or first available)
+and snapshot list returns every snapshot for the database id.
+
+   code-viewer query snapshot create --db docker:pg-svc --schema analytics \\
+       --tables events --note "Before backfill" --wait --json
+   code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
 
 ## Workflow: Global table search
 
@@ -409,6 +420,7 @@ function parseSnapshotSubcommand(
       return { ok: false, error: "snapshot create requires --db <path>" };
     const tables = parseCommaList(options.get("--tables"));
     const note = options.get("--note") ?? "";
+    const schema = options.get("--schema");
     const timeoutRaw = options.get("--timeout");
     const timeoutSec =
       timeoutRaw === undefined
@@ -425,6 +437,7 @@ function parseSnapshotSubcommand(
           db,
           tables,
           note,
+          schema,
           wait: flags.has("--wait"),
           timeoutSec,
           json: flags.has("--json"),
@@ -440,6 +453,7 @@ function parseSnapshotSubcommand(
         command: {
           kind: "snapshot-list",
           db: options.get("--db"),
+          schema: options.get("--schema"),
           json: flags.has("--json"),
         },
         ...globalArgs,
@@ -732,6 +746,16 @@ type SnapshotMetaOut = {
   errorMessage?: string;
 };
 
+// db / schema は両方とも省略可能なので URLSearchParams で組む。
+// (db なし + schema あり) のケースもサーバ側 handleSnapshotList は受け付ける。
+function buildSnapshotListPath(opts: { db?: string; schema?: string }): string {
+  const params = new URLSearchParams();
+  if (opts.db) params.set("db", opts.db);
+  if (opts.schema) params.set("schema", opts.schema);
+  const qs = params.toString();
+  return qs ? `/_db/snapshot/list?${qs}` : "/_db/snapshot/list";
+}
+
 async function runSnapshotCreate(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
@@ -741,6 +765,7 @@ async function runSnapshotCreate(
     note: command.note,
   };
   if (command.tables) reqBody.tables = command.tables;
+  if (command.schema) reqBody.schema = command.schema;
   // server は snapshot id 確定までは ack を保留してくれるので、ここで返る
   // snapshotId は metadata row 作成済みであることが保証されている。
   const data = (await request(
@@ -762,8 +787,9 @@ async function runSnapshotCreate(
       return;
     }
     const idSuffix = snapshotId ? ` [id=${snapshotId}]` : "";
+    const schemaHint = command.schema ? ` --schema ${command.schema}` : "";
     console.log(
-      `${message}${idSuffix}. Poll with: code-viewer query snapshot list --db ${command.db} --json`,
+      `${message}${idSuffix}. Poll with: code-viewer query snapshot list --db ${command.db}${schemaHint} --json`,
     );
     return;
   }
@@ -815,7 +841,7 @@ async function waitForSnapshotDone(
     }
     const listBody = (await request(
       serverUrl,
-      `/_db/snapshot/list?db=${encodeURIComponent(command.db)}`,
+      buildSnapshotListPath({ db: command.db, schema: command.schema }),
       "GET",
       undefined,
       "snapshot list",
@@ -864,10 +890,9 @@ async function runSnapshotList(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-list" }>,
 ): Promise<void> {
-  const params = command.db ? `?db=${encodeURIComponent(command.db)}` : "";
   const body = (await request(
     serverUrl,
-    `/_db/snapshot/list${params}`,
+    buildSnapshotListPath({ db: command.db, schema: command.schema }),
     "GET",
     undefined,
     "snapshot list",

@@ -89,6 +89,27 @@ code-viewer query diff rows --before snap-abc123 --after snap-def456 \
 The human can also view all snapshots and diffs in the browser's
 Database > Snapshot tab.
 
+## PostgreSQL (multi-schema)
+
+For PostgreSQL with multiple schemas, pass `--schema <name>` to BOTH
+`snapshot create` and the matching `snapshot list`. Snapshot create binds
+the snapshot to that schema, the polling lookup performed during `--wait`
+re-uses it, and `snapshot list --schema` filters to the same scope so the
+before/after pair stays consistent. Without `--schema`, snapshot create
+infers the schema (`public` or the first available) and `snapshot list`
+returns every snapshot for the database id.
+
+```sh
+code-viewer query snapshot create --db docker:pg-svc --schema analytics \
+    --tables events \
+    --note "Before backfill" \
+    --wait --json
+
+code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
+```
+
+SQLite / MySQL / Redis / S3 do not need `--schema` (single namespace).
+
 ## Managing snapshots
 
 ```sh

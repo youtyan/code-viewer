@@ -316,6 +316,11 @@ code-viewer query snapshot create --db app.db --tables users,orders \
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test" --wait --json
 code-viewer query snapshot list --db app.db --json
+# PostgreSQL multi-schema: pin both create and list to the same schema so
+# the before/after pair and --wait polling stay scoped to that schema.
+code-viewer query snapshot create --db docker:pg-svc --schema analytics \
+    --tables events --note "Before backfill" --wait --json
+code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
 code-viewer query snapshot note --id snap-abc123 --note "Updated context"
 code-viewer query snapshot delete --id snap-abc123
 

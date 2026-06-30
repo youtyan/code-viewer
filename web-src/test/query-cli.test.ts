@@ -184,6 +184,41 @@ describe("parseQueryArgs", () => {
     }
   });
 
+  test("snapshot create with --schema carries the schema onto the command", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--note",
+      "before",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    const command = result.args.command as Extract<
+      QueryCommand,
+      { kind: "snapshot-create" }
+    >;
+    expect(command.schema).toBe("analytics");
+    expect(command.db).toBe("docker:pg-svc");
+    expect(command.tables).toEqual(["events"]);
+  });
+
+  test("snapshot create without --schema leaves the field undefined (no-op for non-PG sources)", () => {
+    const result = parseQueryArgs(["snapshot", "create", "--db", "app.db"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    const command = result.args.command as Extract<
+      QueryCommand,
+      { kind: "snapshot-create" }
+    >;
+    expect(command.schema).toBeUndefined();
+  });
+
   test("snapshot list parses --db and --json", () => {
     const result = parseQueryArgs([
       "snapshot",
@@ -197,7 +232,44 @@ describe("parseQueryArgs", () => {
     expect(result.args.command).toEqual({
       kind: "snapshot-list",
       db: "app.db",
+      schema: undefined,
       json: true,
+    });
+  });
+
+  test("snapshot list accepts --schema with or without --db", () => {
+    const withBoth = parseQueryArgs([
+      "snapshot",
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+    expect(withBoth.ok).toBe(true);
+    if (!withBoth.ok) throw new Error("parse failed");
+    expect(withBoth.args.command).toEqual({
+      kind: "snapshot-list",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      json: false,
+    });
+
+    // --schema only (no --db): valid; the CLI sends ?schema=... to filter
+    // every db's snapshots down to that schema.
+    const schemaOnly = parseQueryArgs([
+      "snapshot",
+      "list",
+      "--schema",
+      "analytics",
+    ]);
+    expect(schemaOnly.ok).toBe(true);
+    if (!schemaOnly.ok) throw new Error("parse failed");
+    expect(schemaOnly.args.command).toEqual({
+      kind: "snapshot-list",
+      db: undefined,
+      schema: "analytics",
+      json: false,
     });
   });
 
@@ -650,6 +722,120 @@ describe("runQueryCli integration", () => {
       message: "snapshot started",
       snapshotId: "snap-json-1",
     });
+  });
+
+  test("snapshot create --schema forwards schema in the POST body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-pg-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--note",
+      "before",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      note: "before",
+      tables: ["events"],
+      schema: "analytics",
+    });
+    // poll hint should mirror --schema so the human re-runs list with the
+    // same scope.
+    expect(harness.logs.join("\n")).toMatch(
+      /code-viewer query snapshot list --db docker:pg-svc --schema analytics --json/,
+    );
+  });
+
+  test("snapshot create without --schema omits the field from the POST body (back-compat)", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-sqlite-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--note",
+      "n",
+    ]);
+
+    expect(harness.requests[1].body).toEqual({
+      db: "app.db",
+      note: "n",
+    });
+    // 既存 server / 旧 client にも壊さない後方互換のため、schema キー自体が
+    // 出ないことを確認 (undefined すらシリアライズしない)。tsconfig target は
+    // ES2020 なので Object.hasOwn は使わず in 演算子で見る。
+    expect("schema" in (harness.requests[1].body as object)).toBe(false);
+  });
+
+  test("snapshot list --schema appends schema to the URL (and --db is optional)", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+    ]);
+
+    // Case A: db + schema → both in the querystring.
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+
+    // Case B: schema only → ?schema=... (db absent).
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?schema=analytics`,
+    );
   });
 
   test("snapshot list (without --json) renders status / id / table count", async () => {
@@ -1106,6 +1292,62 @@ describe("runQueryCli snapshot create --wait integration", () => {
     );
     expect(harness.exits).toEqual([]);
     expect(JSON.parse(harness.logs.join("\n"))).toEqual(finalMeta);
+  });
+
+  test("--wait --schema forwards schema to the create body AND to every polling URL", async () => {
+    withZeroPollInterval();
+    const finalMeta = meta("done", { id: "snap-wait-pg" });
+    const harness = installRunHarness([
+      // health
+      { body: JSON.stringify({ files: [] }) },
+      // create ack
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-pg",
+        }),
+      },
+      // list 1: running
+      {
+        body: JSON.stringify({
+          snapshots: [meta("running", { id: "snap-wait-pg" })],
+        }),
+      },
+      // list 2: done
+      { body: JSON.stringify({ snapshots: [finalMeta] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--wait",
+      "--json",
+    ]);
+
+    // create body includes schema
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      note: "",
+      tables: ["events"],
+      schema: "analytics",
+    });
+    // both polling URLs include schema
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+    expect(harness.exits).toEqual([]);
   });
 
   test("status=error prints stderr and exits 1 (still emits final meta on --json)", async () => {

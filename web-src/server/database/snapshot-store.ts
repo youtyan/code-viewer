@@ -217,26 +217,24 @@ export async function listSnapshots(
   schema?: string,
 ): Promise<SnapshotMeta[]> {
   const db = await getStoreDb(cwd);
-  let rows: Record<string, unknown>[];
-  if (dbId && schema !== undefined) {
-    rows = db
-      .prepare(
-        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? AND COALESCE(schema_name, 'public') = ? ORDER BY created_at DESC",
-      )
-      .all(dbId, schema);
-  } else if (dbId) {
-    rows = db
-      .prepare(
-        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots WHERE db_id = ? ORDER BY created_at DESC",
-      )
-      .all(dbId);
-  } else {
-    rows = db
-      .prepare(
-        "SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots ORDER BY created_at DESC",
-      )
-      .all();
+  // 動的 WHERE: dbId / schema は独立に省略可。
+  // - dbId なし + schema なし → no filter
+  // - dbId あり + schema なし → db で絞る
+  // - dbId なし + schema あり → schema で絞る (COALESCE で NULL を 'public' 扱い)
+  // - dbId あり + schema あり → 両方で絞る
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (dbId) {
+    conditions.push("db_id = ?");
+    params.push(dbId);
   }
+  if (schema !== undefined) {
+    conditions.push("COALESCE(schema_name, 'public') = ?");
+    params.push(schema);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const sql = `SELECT id, db_id, schema_name, kind, note, created_at, status, error_message FROM snapshots ${where} ORDER BY created_at DESC`;
+  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
   return rows.map((r) => {
     const tableRows = db
       .prepare("SELECT table_name FROM snapshot_tables WHERE snapshot_id = ?")

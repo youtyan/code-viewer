@@ -105,6 +105,77 @@ describe("snapshot-store", () => {
     });
   });
 
+  test("listSnapshots filters by schema alone (dbId undefined) using COALESCE(schema_name, 'public')", async () => {
+    await withTempProject(async (dir) => {
+      const src = () =>
+        makeSqliteSource(new Map([["1", JSON.stringify({ v: 1 })]]));
+
+      // analytics schema 経由 (db.sqlite / db2.sqlite の両方に作る)
+      await runSnapshot(
+        dir,
+        src(),
+        "db.sqlite",
+        ["users"],
+        "analytics-on-db1",
+        undefined,
+        { schema: "analytics" },
+      );
+      await runSnapshot(
+        dir,
+        src(),
+        "db2.sqlite",
+        ["users"],
+        "analytics-on-db2",
+        undefined,
+        { schema: "analytics" },
+      );
+      // 別 schema
+      await runSnapshot(
+        dir,
+        src(),
+        "db.sqlite",
+        ["users"],
+        "reporting-on-db1",
+        undefined,
+        { schema: "reporting" },
+      );
+      // schema 未指定 (schema_name = NULL) → COALESCE で 'public' 扱い
+      await runSnapshot(dir, src(), "db.sqlite", ["users"], "default-on-db1");
+
+      // schema-only: analytics のみが両 db 分返る
+      const analyticsOnly = await listSnapshots(dir, undefined, "analytics");
+      expect(analyticsOnly.map((s) => s.note).sort()).toEqual([
+        "analytics-on-db1",
+        "analytics-on-db2",
+      ]);
+
+      // schema-only: 'public' は schema 未指定の snapshot (NULL) にマッチ
+      const publicOnly = await listSnapshots(dir, undefined, "public");
+      expect(publicOnly.map((s) => s.note)).toEqual(["default-on-db1"]);
+
+      // schema-only: 該当なし
+      const empty = await listSnapshots(dir, undefined, "no-such-schema");
+      expect(empty).toEqual([]);
+
+      // 既存挙動の後方互換:
+      // - 引数なし → 全件
+      expect((await listSnapshots(dir)).map((s) => s.note).sort()).toEqual([
+        "analytics-on-db1",
+        "analytics-on-db2",
+        "default-on-db1",
+        "reporting-on-db1",
+      ]);
+      // - dbId のみ → その db の全 schema
+      expect(
+        (await listSnapshots(dir, "db.sqlite")).map((s) => s.note).sort(),
+      ).toEqual(["analytics-on-db1", "default-on-db1", "reporting-on-db1"]);
+      // - dbId + schema → 両条件 AND
+      expect(
+        (await listSnapshots(dir, "db.sqlite", "analytics")).map((s) => s.note),
+      ).toEqual(["analytics-on-db1"]);
+    });
+  });
+
   test("orphan cleanup query uses idx_snapshot_rows_payload_hash via EXPLAIN QUERY PLAN", async () => {
     await withTempProject(async (dir) => {
       // store schema を起こすため snapshot を 1 回作る
