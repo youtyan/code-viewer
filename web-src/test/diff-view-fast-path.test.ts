@@ -58,8 +58,9 @@ function makeFile(
   additions: number,
   deletions: number,
   loadUrl: string,
+  key?: string,
 ): FileMeta {
-  return {
+  const file: FileMeta = {
     path,
     status: "M",
     additions,
@@ -67,6 +68,8 @@ function makeFile(
     size_class: "small",
     load_url: loadUrl,
   };
+  if (key !== undefined) file.key = key;
+  return file;
 }
 
 function makeMeta(files: FileMeta[]): DiffMeta {
@@ -286,6 +289,90 @@ describe("diff view fast path", () => {
       expect(
         reused?.querySelector(".gdp-shell-header .stats")?.textContent,
       ).toBe("+5−1");
+      expect(reused?.dataset.reqId === "123").toBe(false);
+    } finally {
+      globalThis.IntersectionObserver = originalObserver;
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+    }
+  });
+
+  test("resets fast-path cards whose production keys contain NUL separators", () => {
+    setupDiffDom();
+    const originalObserver = globalThis.IntersectionObserver;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    globalThis.IntersectionObserver = class {
+      observe() {
+        /* noop */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+    } as unknown as typeof IntersectionObserver;
+    HTMLElement.prototype.getBoundingClientRect = () =>
+      ({
+        top: 99999,
+        bottom: 100099,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 100,
+        x: 0,
+        y: 99999,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    try {
+      const { view } = createDiffViewForShellTest();
+      const path = "web-src/server/database/handle.ts";
+      const key = `M\0\0${path}`;
+      const firstFile = makeFile(
+        path,
+        99,
+        66,
+        "/file_diff?from=old&to=first&path=web-src%2Fserver%2Fdatabase%2Fhandle.ts",
+        key,
+      );
+      view.renderShell(makeMeta([firstFile]));
+      const card = document.querySelector<DiffCardElement>(".gdp-file-shell");
+      if (!card) throw new Error("missing diff card");
+      card.classList.remove("pending");
+      card.classList.add("loaded");
+      card._file = firstFile;
+      card._diffData = {
+        path,
+        status: "M",
+        diff: "stale commit diff",
+      } as never;
+      const body = card.querySelector<HTMLElement>(".gdp-shell-body");
+      if (!body) throw new Error("missing card body");
+      body.innerHTML = '<div class="d2h-wrapper">stale commit diff</div>';
+      card.dataset.reqId = "123";
+
+      const result = view.renderShell(
+        makeMeta([
+          makeFile(
+            path,
+            102,
+            27,
+            "/file_diff?from=first&to=second&path=web-src%2Fserver%2Fdatabase%2Fhandle.ts",
+            key,
+          ),
+        ]),
+      );
+
+      const reused = document.querySelector<DiffCardElement>(".gdp-file-shell");
+      expect(reused).toBe(card);
+      expect(result.structureChanged).toBe(false);
+      expect(result.invalidatedCards).toBe(1);
+      expect(reused?.classList.contains("pending")).toBe(true);
+      expect(reused?.classList.contains("loaded")).toBe(false);
+      expect(reused?.querySelector(".d2h-wrapper")).toBeNull();
+      expect(reused?.querySelector(".gdp-shell-body")?.textContent).toBe("");
+      expect(
+        reused?.querySelector(".gdp-shell-header .stats")?.textContent,
+      ).toBe("+102−27");
       expect(reused?.dataset.reqId === "123").toBe(false);
     } finally {
       globalThis.IntersectionObserver = originalObserver;

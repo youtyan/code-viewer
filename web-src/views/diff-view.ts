@@ -102,6 +102,18 @@ export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
   return !listSame || !domIntact;
 }
 
+function findDirectDiffCardByKey(
+  target: Element,
+  key: string,
+): DiffCardElement | null {
+  for (const child of Array.from(target.children)) {
+    if (!child.classList.contains("gdp-file-shell")) continue;
+    const card = child as DiffCardElement;
+    if (card.dataset.key === key) return card;
+  }
+  return null;
+}
+
 export function createDiffView(deps: DiffViewDeps) {
   const {
     $,
@@ -597,9 +609,7 @@ export function createDiffView(deps: DiffViewDeps) {
         if (!sigChanged && !pathHint) {
           continue;
         }
-        const card = target.querySelector<DiffCardElement>(
-          `.gdp-file-shell[data-key="${CSS.escape(key)}"]`,
-        );
+        const card = findDirectDiffCardByKey(target, key);
         if (!card) continue;
         const sizeChanged =
           card.dataset.sizeClass !== (f.size_class || "small");
