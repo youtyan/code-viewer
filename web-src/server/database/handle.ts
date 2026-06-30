@@ -71,6 +71,7 @@ import {
   computeDiffRows,
   computeDiffTables,
   deleteSnapshot,
+  getSnapshotScopeById,
   listSnapshots,
   updateSnapshotNote,
 } from "./snapshot-store";
@@ -1782,7 +1783,18 @@ async function handleDiffTables(cwd: string, url: URL): Promise<Response> {
     return textError("missing before or after parameter", 400);
   try {
     const tables = await computeDiffTables(cwd, beforeId, afterId);
-    return json({ beforeId, afterId, tables });
+    // computeDiffTables は両 snapshot が同一 scope であることを既に
+    // assert 済みなので、before 側の scope を代表値として返せば足りる。
+    // CLI 側 (query-cli.ts runDiffTables) はこの dbId/schema を使って
+    // ブラウザの差分ページ URL を組み立てる。
+    const scope = await getSnapshotScopeById(cwd, beforeId);
+    return json({
+      beforeId,
+      afterId,
+      dbId: scope.dbId,
+      schema: scope.schema,
+      tables,
+    });
   } catch (err) {
     return handleError("database", "compute diff", err);
   }

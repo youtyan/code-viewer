@@ -343,6 +343,21 @@ function getSnapshotScope(
   return { dbId: row.db_id, schema: row.schema_name };
 }
 
+// handleDiffTables がレスポンスに dbId/schema (= ブラウザの差分URL構築に
+// 必要な scope) を additive に乗せるための公開版。正規化前の生 dbId を返す
+// getSnapshotScope と違い、こちらは呼び出し側の利便性のため正規化済みを返す。
+export async function getSnapshotScopeById(
+  cwd: string,
+  snapshotId: string,
+): Promise<{ dbId: string; schema: string }> {
+  const db = await getStoreDb(cwd);
+  const scope = getSnapshotScope(db, snapshotId);
+  return {
+    dbId: canonicalizeDockerDbId(scope.dbId) ?? scope.dbId,
+    schema: scope.schema,
+  };
+}
+
 function assertSameSnapshotScope(
   db: SqliteDb,
   beforeId: string,
