@@ -7,6 +7,7 @@ import {
   QUERY_HELP,
   type QueryCommand,
   runQueryCli,
+  shellSingleQuote,
 } from "../server/query-cli";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -26,17 +27,29 @@ describe("parseQueryArgs", () => {
     if (result.ok) expect(result.args.command.kind).toBe("agent-help");
   });
 
-  test("sources subcommand parses with and without --json (no other flags accepted)", () => {
+  test("sources subcommand parses with and without --json/--commands (no other flags accepted)", () => {
     const bare = parseQueryArgs(["sources"]);
     expect(bare.ok).toBe(true);
     if (!bare.ok) throw new Error("parse failed");
-    expect(bare.args.command).toEqual({ kind: "sources", json: false });
+    expect(bare.args.command).toEqual({ kind: "sources", mode: "default" });
 
     const withJson = parseQueryArgs(["sources", "--json"]);
     expect(withJson.ok).toBe(true);
     if (!withJson.ok) throw new Error("parse failed");
-    expect(withJson.args.command).toEqual({ kind: "sources", json: true });
+    expect(withJson.args.command).toEqual({ kind: "sources", mode: "json" });
 
+    const withCommands = parseQueryArgs(["sources", "--commands"]);
+    expect(withCommands.ok).toBe(true);
+    if (!withCommands.ok) throw new Error("parse failed");
+    expect(withCommands.args.command).toEqual({
+      kind: "sources",
+      mode: "commands",
+    });
+
+    expect(parseQueryArgs(["sources", "--json", "--commands"])).toEqual({
+      ok: false,
+      error: "sources does not accept --json with --commands",
+    });
     expect(parseQueryArgs(["sources", "extra"])).toEqual({
       ok: false,
       error: "sources does not accept positional arguments",
@@ -705,6 +718,36 @@ describe("parseQueryArgs", () => {
   });
 });
 
+describe("shellSingleQuote", () => {
+  test("wraps plain values in single quotes", () => {
+    expect(shellSingleQuote("app.db")).toBe("'app.db'");
+    expect(shellSingleQuote("docker:pg-svc")).toBe("'docker:pg-svc'");
+    expect(shellSingleQuote("docker:s3-svc/sample-bucket")).toBe(
+      "'docker:s3-svc/sample-bucket'",
+    );
+  });
+
+  test("preserves spaces, colons, slashes, and shell metacharacters as literals", () => {
+    // POSIX '...' は内部を全て literal にするので、 $ ` \ * など shell が
+    // 通常解釈するメタも素通しになる。bash/zsh で同じ。
+    expect(shellSingleQuote("path with space")).toBe("'path with space'");
+    expect(shellSingleQuote("$VAR `cmd` \\n")).toBe("'$VAR `cmd` \\n'");
+    expect(shellSingleQuote("a*b?c|d")).toBe("'a*b?c|d'");
+  });
+
+  test("escapes embedded single quotes by closing+reopening ('\\'')", () => {
+    // 'sample's path' を表すには 'sample'\''s path' と書く必要がある。
+    // bash/zsh/sh 全てで同じ規則。
+    expect(shellSingleQuote("sample's path")).toBe("'sample'\\''s path'");
+    expect(shellSingleQuote("'")).toBe("''\\'''");
+    expect(shellSingleQuote("a'b'c")).toBe("'a'\\''b'\\''c'");
+  });
+
+  test("handles empty string", () => {
+    expect(shellSingleQuote("")).toBe("''");
+  });
+});
+
 describe("QUERY_HELP / QUERY_AGENT_HELP", () => {
   test("documents only the subcommands that are actually wired", () => {
     // help text must NOT mention "diff create / diff delete / diff list" —
@@ -972,6 +1015,170 @@ describe("runQueryCli integration", () => {
 
     expect(harness.exits).toEqual([]);
     expect(harness.logs).toEqual(["no datastore sources discovered"]);
+  });
+
+  test("query sources --commands emits shell-pasteable next-step commands per source", async () => {
+    // mixed-kind discovery: sqlite + postgresql + mysql + s3。
+    //   sqlite/mysql → schema + exec の 2 行
+    //   postgresql → schemas (multi-schema) を追加した 3 行
+    //   s3 → SQL command ではなく browser-pane hint
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 1024,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+        {
+          id: "docker:s3-svc/sample-bucket",
+          path: "docker:s3-svc/sample-bucket",
+          name: "sample-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+        {
+          id: "docker:mysql-svc",
+          path: "docker:mysql-svc",
+          name: "mysql-svc (mysql)",
+          sizeBytes: 0,
+          kind: "mysql",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.errs).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 各 source heading は # で始まり ordinal が付く。db id は必ず single-quote。
+    expect(out).toMatch(/^# source 1: app\.db \(sqlite\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query schema --db 'app\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
+    );
+    // sqlite には schemas 行が出ない。
+    expect(/code-viewer query schemas --db 'app\.db'/.test(out)).toBe(false);
+
+    expect(out).toMatch(/^# source 2: docker:pg-svc \(postgresql\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query schemas --db 'docker:pg-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query schema --db 'docker:pg-svc' --with-columns --json$/m,
+    );
+
+    expect(out).toMatch(/^# source 3: docker:s3-svc\/sample-bucket \(s3\)$/m);
+    expect(out).toMatch(
+      /^# s3: use the browser Datastores tab; query schema\/exec commands are SQL-only$/m,
+    );
+    // s3 は SQL source ではないので schema/exec 行を出さない。
+    expect(/query schema --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query exec --db 'docker:s3-svc/.test(out)).toBe(false);
+
+    expect(out).toMatch(/^# source 4: docker:mysql-svc \(mysql\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query schema --db 'docker:mysql-svc' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query exec --db 'docker:mysql-svc' --sql "SELECT 1" --no-save$/m,
+    );
+    // MySQL はこの server の /_db/schemas では multi-schema 扱いしない。
+    expect(/code-viewer query schemas --db 'docker:mysql-svc'/.test(out)).toBe(
+      false,
+    );
+  });
+
+  test("query sources --commands single-quotes ids containing spaces and quotes", async () => {
+    // path に空白と ' を含むケース。POSIX '...' 内で ' を出すには '\'' に展開。
+    const payload = {
+      files: [
+        {
+          id: "sample's data.db",
+          path: "sample's data.db",
+          name: "sample's data.db",
+          sizeBytes: 2048,
+          kind: "sqlite",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // heading は生 id (notice 用)、command は quote 済み。
+    expect(out).toMatch(/^# source 1: sample's data\.db \(sqlite\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query schema --db 'sample'\\''s data\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query exec --db 'sample'\\''s data\.db' --sql "SELECT 1" --no-save$/m,
+    );
+  });
+
+  test("query sources --commands preserves truncated / dockerError notices at the tail", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      truncated: true,
+      dockerError: "compose ps failed: docker daemon unreachable",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/^# source 1: app\.db \(sqlite\)$/m);
+    expect(out).toMatch(/^# truncated:/m);
+    expect(out).toMatch(
+      /^# dockerError: compose ps failed: docker daemon unreachable$/m,
+    );
+  });
+
+  test("query sources --commands on empty server explains why nothing is shown", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    // 空の場合は # コメント1行だけ。default mode と違って解説を含める。
+    expect(harness.logs).toEqual([
+      "# no datastore sources discovered — start a service or check docker-compose",
+    ]);
   });
 
   test("query exec --schema forwards schema in the query body", async () => {

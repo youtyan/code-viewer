@@ -296,6 +296,10 @@ Datastores tab (Query History, Search, and Snapshot tabs).
 # any PostgreSQL / MySQL / Redis / Elasticsearch / S3 services from a nearby
 # docker-compose). Use the printed id as --db on every other command.
 code-viewer query sources --json
+# Or skip composing the next SQL call yourself: --commands prints
+# shell-pasteable schema/exec lines for SQL sources, and browser-pane hints
+# for non-SQL sources. --json and --commands are mutually exclusive.
+code-viewer query sources --commands
 
 # Introspect tables and columns without writing dialect-specific SQL.
 code-viewer query schemas --db docker:pg-svc --json

@@ -52,6 +52,19 @@ browser's Database > Search tab, so the human can review the same workflow.
    appended as `# ...` comment lines so the AI can copy ids without
    stripping JSON.
 
+   To skip the per-SQL-source "what command should I run next?" step, use
+   `--commands`. For SQLite / PostgreSQL / MySQL sources it prints a small
+   block of shell-pasteable next-step commands (`schema --with-columns
+   --json`, an `exec` example with `SELECT 1 --no-save`, plus `schemas` for
+   PostgreSQL). For Redis / Elasticsearch / S3 sources it prints a browser
+   Datastores pane hint instead of invalid SQL commands. Every `--db` value
+   is wrapped in POSIX single-quotes so paths with spaces or `'` paste safely.
+   `--json` and `--commands` are mutually exclusive.
+
+   ```sh
+   code-viewer query sources --commands
+   ```
+
 2. Inspect tables, columns, and DDL without writing dialect-specific SQL.
    These commands wrap the same schema endpoints as the browser, so use them
    before guessing table names or engine-specific catalog queries.

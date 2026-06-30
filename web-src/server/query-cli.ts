@@ -28,7 +28,13 @@ export type QueryCommand =
   | { kind: "clear"; db?: string; schema?: string }
   // /_db/files をそのまま薄く CLI 化したもの。AI agent が DB ID を発見する
   // ためのエントリポイント。server には新 endpoint を作らず discovery を流用。
-  | { kind: "sources"; json: boolean }
+  // mode:
+  //   "default"  — id/kind/name tab-separated lines (既存出力)
+  //   "json"     — /_db/files 応答を pretty JSON で verbatim
+  //   "commands" — SQL source ごとに次に流す調査コマンド (schema/schemas/exec)
+  //                を shell コピペできる形で出力。id 引数は常に single-quote
+  //                で括られる。非SQL source は専用ブラウザ pane の案内を出す。
+  | { kind: "sources"; mode: "default" | "json" | "commands" }
   // 以下4つは /_db/schemas /_db/schema /_db/columns /_db/ddl を薄く CLI 化。
   // table/column を方言なしで覗ける AI 用 introspection。
   | { kind: "schemas"; db: string; json: boolean }
@@ -105,7 +111,7 @@ export type QueryParseResult =
 export const QUERY_HELP = `code-viewer query — execute read-only SQL queries and inspect snapshots
 
 Usage:
-  code-viewer query sources [--json]
+  code-viewer query sources [--json | --commands]
   code-viewer query schemas --db <path> [--json]
   code-viewer query schema --db <path> [--schema <name>] [--with-columns] [--json]
   code-viewer query columns --db <path> [--schema <name>] --table <name> [--json]
@@ -128,6 +134,7 @@ Global options:
 
 Examples:
   code-viewer query sources --json
+  code-viewer query sources --commands
   code-viewer query schemas --db docker:pg-svc --json
   code-viewer query schema --db app.db --json
   code-viewer query columns --db docker:pg-svc --schema analytics --table events --json
@@ -170,6 +177,11 @@ can review what you queried.
    running server has discovered, with credentials stripped. Use the id
    field as --db on the following commands:
    code-viewer query sources --json
+   To skip the per-SQL-source "what command should I run next?" step, use
+   the shortcut that emits shell-pasteable schema/exec lines for SQL sources
+   and browser-pane hints for non-SQL sources (db ids are single-quoted so
+   paths with spaces or quotes still work):
+   code-viewer query sources --commands
 2. Introspect schema/tables/columns/DDL without writing dialect-specific
    SQL. These wrap the same endpoints the browser uses, so you can answer
    "what tables are in this DB?" / "what columns are in this table?"
@@ -249,9 +261,14 @@ browser's Database > Search tab.
 ## Output contract
 
 - sources: human-readable id/kind/name lines on stdout (default), or pretty
-  JSON of the full /_db/files response with --json. truncated and
-  dockerError, if present, are appended to stdout as comment-prefixed lines
-  (default) or kept as JSON fields (--json).
+  JSON of the full /_db/files response with --json, or shell-pasteable
+  next-step commands per SQL source with --commands (schema --with-columns +
+  exec "SELECT 1" --no-save for sqlite/postgresql/mysql, plus schemas for
+  postgresql; non-SQL sources get a browser-pane hint; db ids are always
+  wrapped in POSIX single-quotes). --json and --commands are mutually
+  exclusive. truncated and dockerError, if present, are appended to stdout as
+  comment-prefixed lines (default / --commands) or kept as JSON fields
+  (--json).
 - schemas: human-readable schema-name-per-line (default), or pretty JSON of
   the full /_db/schemas response with --json. SQLite/MySQL/Redis/ES/S3
   return an empty list (no multi-schema concept).
@@ -325,6 +342,7 @@ const BOOL_FLAGS = new Set([
   "--include-non-text",
   "--wait",
   "--with-columns",
+  "--commands",
 ]);
 
 const DEFAULT_SEARCH_TIMEOUT_SEC = 60;
@@ -403,14 +421,31 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     if (unusedOption) {
       return { ok: false, error: `sources does not accept ${unusedOption}` };
     }
-    const unusedFlag = Array.from(flags).find((flag) => flag !== "--json");
+    const allowedFlags = new Set(["--json", "--commands"]);
+    const unusedFlag = Array.from(flags).find(
+      (flag) => !allowedFlags.has(flag),
+    );
     if (unusedFlag) {
       return { ok: false, error: `sources does not accept ${unusedFlag}` };
     }
+    // --json と --commands は出力契約 (verbatim JSON vs shell-pasteable lines)
+    // が両立しないので排他。silent drop すると AI が「片方しか効いてない」と
+    // 気付かないので、parse 段階で reject する。
+    if (flags.has("--json") && flags.has("--commands")) {
+      return {
+        ok: false,
+        error: "sources does not accept --json with --commands",
+      };
+    }
+    const mode: "default" | "json" | "commands" = flags.has("--json")
+      ? "json"
+      : flags.has("--commands")
+        ? "commands"
+        : "default";
     return {
       ok: true,
       args: {
-        command: { kind: "sources", json: flags.has("--json") },
+        command: { kind: "sources", mode },
         ...globalArgs,
       },
     };
@@ -850,8 +885,27 @@ async function runSources(
     "list sources",
   )) as DbFilesResponse;
 
-  if (command.json) {
+  if (command.mode === "json") {
     console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (command.mode === "commands") {
+    if (!data.files.length) {
+      console.log(
+        "# no datastore sources discovered — start a service or check docker-compose",
+      );
+    } else {
+      data.files.forEach((file, index) => {
+        if (index > 0) console.log("");
+        for (const line of buildSourceCommands(file, index + 1)) {
+          console.log(line);
+        }
+      });
+    }
+    // truncated / dockerError の # notice は --commands でも維持して AI が
+    // 「全 source が出ていないかも」を判断できるようにする。
+    if (data.files.length > 0) console.log("");
+    appendDiscoveryNotices(data);
     return;
   }
   if (!data.files.length) {
@@ -864,6 +918,10 @@ async function runSources(
   }
   // truncated / dockerError は stderr に出すと AI が拾い損ねるので
   // stdout の末尾にコメント風で明示する。
+  appendDiscoveryNotices(data);
+}
+
+function appendDiscoveryNotices(data: DbFilesResponse): void {
   if (data.truncated) {
     console.log(
       "# truncated: docker discovery hit the cap; some sources may be missing",
@@ -872,6 +930,47 @@ async function runSources(
   if (data.dockerError) {
     console.log(`# dockerError: ${data.dockerError}`);
   }
+}
+
+// 1 ソースぶんの "次に投げると良い調査コマンド" を生成する。
+//   - SQL source: schema (--with-columns で columnsMap も同梱)
+//   - postgresql: schemas (multi-schema 列挙が有用)
+//   - SQL source: 安全な exec 例 (SELECT 1 + --no-save)
+//   - non-SQL source: query CLI の schema/exec ではなく専用 pane へ誘導
+// db id は常に shellSingleQuote で囲む。空白/シングルクォート/コロン/スラッシュ
+// が含まれていても bash/zsh にそのまま貼れる形を保証する。
+function buildSourceCommands(
+  file: DbFilesResponse["files"][number],
+  ordinal: number,
+): string[] {
+  const lines: string[] = [];
+  const quotedId = shellSingleQuote(file.id);
+  lines.push(`# source ${ordinal}: ${file.id} (${file.kind})`);
+  if (
+    file.kind === "redis" ||
+    file.kind === "elasticsearch" ||
+    file.kind === "s3"
+  ) {
+    lines.push(
+      `# ${file.kind}: use the browser Datastores tab; query schema/exec commands are SQL-only`,
+    );
+    return lines;
+  }
+  if (file.kind === "postgresql") {
+    lines.push(`code-viewer query schemas --db ${quotedId} --json`);
+  }
+  lines.push(`code-viewer query schema --db ${quotedId} --with-columns --json`);
+  lines.push(
+    `code-viewer query exec --db ${quotedId} --sql "SELECT 1" --no-save`,
+  );
+  return lines;
+}
+
+// POSIX shell の single-quote 規則: '...' 内は何でも literal、内部の ' だけは
+// いったん閉じて \' を続けて再開する必要がある ('\'' の 4 文字)。bash/zsh/sh
+// で同じく安全。double-quote と違って backslash も $ も解釈されない。
+export function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function buildIntrospectPath(
