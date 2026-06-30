@@ -718,6 +718,375 @@ describe("parseQueryArgs", () => {
   });
 });
 
+describe("parseQueryArgs redis", () => {
+  test("redis without an action is rejected", () => {
+    expect(parseQueryArgs(["redis"])).toEqual({
+      ok: false,
+      error: "redis requires a sub-action: databases | keys | value",
+    });
+  });
+
+  test("unknown redis sub-action is rejected", () => {
+    expect(parseQueryArgs(["redis", "wat"])).toEqual({
+      ok: false,
+      error: "unknown redis sub-action: wat",
+    });
+  });
+
+  test("redis databases requires --db", () => {
+    expect(parseQueryArgs(["redis", "databases"])).toEqual({
+      ok: false,
+      error: "redis databases requires --db <id>",
+    });
+  });
+
+  test("redis databases captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-databases",
+      db: "docker:redis-svc",
+      json: true,
+    });
+  });
+
+  test("redis databases rejects an unexpected positional argument", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "extra",
+        "--db",
+        "docker:redis-svc",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept positional argument: extra",
+    });
+  });
+
+  test("redis keys requires --db-index", () => {
+    expect(
+      parseQueryArgs(["redis", "keys", "--db", "docker:redis-svc"]),
+    ).toEqual({
+      ok: false,
+      error: "redis keys requires --db-index <0..15>",
+    });
+  });
+
+  test("redis keys validates --db-index range", () => {
+    for (const bad of ["-1", "16", "1.5", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "redis",
+          "keys",
+          "--db",
+          "docker:redis-svc",
+          "--db-index",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--db-index must be an integer in [0, 15] (got ${bad})`,
+      });
+    }
+  });
+
+  test("redis keys validates --count range", () => {
+    for (const bad of ["0", "10001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "redis",
+          "keys",
+          "--db",
+          "docker:redis-svc",
+          "--db-index",
+          "0",
+          "--count",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--count must be an integer in [1, 10000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("redis keys accepts pattern / cursor / count and dbIndex 15 (boundary)", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "15",
+      "--pattern",
+      "sample:*",
+      "--cursor",
+      "42",
+      "--count",
+      "10000",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-keys",
+      db: "docker:redis-svc",
+      dbIndex: 15,
+      pattern: "sample:*",
+      cursor: "42",
+      count: 10000,
+      json: true,
+    });
+  });
+
+  test("redis value requires --db-index", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --db-index <0..15>",
+    });
+  });
+
+  test("redis value requires --key (missing and empty both rejected)", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --key <name>",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--key",
+        "",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --key <name>",
+    });
+  });
+
+  test("redis value captures --db-index 0 and --key, defaults --json off", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-value",
+      db: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      json: false,
+    });
+  });
+
+  test("redis databases rejects options that belong to keys / value", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --db-index",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --key",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--pattern",
+        "*",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --pattern",
+    });
+  });
+
+  test("redis databases rejects unrelated SQL-side flags", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--schema",
+        "analytics",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --schema",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--no-save",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --no-save",
+    });
+  });
+
+  test("redis keys rejects --key / --schema / unrelated flags", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({ ok: false, error: "redis keys does not accept --key" });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--schema",
+        "analytics",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis keys does not accept --schema",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--wait",
+      ]),
+    ).toEqual({ ok: false, error: "redis keys does not accept --wait" });
+  });
+
+  test("redis value rejects --pattern / --cursor / --count / unrelated flags", () => {
+    const baseArgs = [
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ];
+    expect(parseQueryArgs([...baseArgs, "--pattern", "*"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --pattern",
+    });
+    expect(parseQueryArgs([...baseArgs, "--cursor", "0"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --cursor",
+    });
+    expect(parseQueryArgs([...baseArgs, "--count", "10"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --count",
+    });
+    expect(parseQueryArgs([...baseArgs, "--include-non-text"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --include-non-text",
+    });
+  });
+
+  test("redis actions allow --cwd and --server (they are global args)", () => {
+    const result = parseQueryArgs([
+      "--cwd",
+      "/tmp/example",
+      "--server",
+      "http://127.0.0.1:64160",
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.cwd).toBe("/tmp/example");
+    expect(result.args.server).toBe("http://127.0.0.1:64160");
+    expect(result.args.command).toEqual({
+      kind: "redis-value",
+      db: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      json: true,
+    });
+  });
+});
+
 describe("shellSingleQuote", () => {
   test("wraps plain values in single quotes", () => {
     expect(shellSingleQuote("app.db")).toBe("'app.db'");
@@ -3571,6 +3940,702 @@ function extractDocumentedQueryInvocations(text: string): string[][] {
   }
   return out;
 }
+
+describe("parseQueryArgs rejects redis-only flags on non-redis subcommands", () => {
+  // Redis 用に --db-index / --pattern / --cursor / --count / --key を追加した
+  // 副作用で、非 Redis subcommand が黙って無視できるようになる回帰を防ぐ。
+  // ここでは「正しい必須引数を渡したうえで余分な Redis 専用フラグを混ぜる」
+  // テストにし、parse error が必須引数チェックではなく allowlist で出ている
+  // ことを保証する。
+  test("exec rejects each redis-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("list rejects each redis-only option", () => {
+    const baseArgs = ["list", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `list does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("clear rejects each redis-only option and even --json (clear has no JSON output)", () => {
+    const baseArgs = ["clear", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `clear does not accept ${bad}`,
+      });
+    }
+    expect(parseQueryArgs([...baseArgs, "--json"])).toEqual({
+      ok: false,
+      error: "clear does not accept --json",
+    });
+  });
+
+  test("search rejects each redis-only option", () => {
+    const baseArgs = ["search", "--db", "a.db", "--term", "needle"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `search does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot create rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "create", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot create does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot list rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "list"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot list does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot delete rejects each redis-only option (and --json — delete has no JSON output)", () => {
+    const baseArgs = ["snapshot", "delete", "--id", "snap-1"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot delete does not accept ${bad}`,
+      });
+    }
+    expect(parseQueryArgs([...baseArgs, "--json"])).toEqual({
+      ok: false,
+      error: "snapshot delete does not accept --json",
+    });
+  });
+
+  test("snapshot note rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "note", "--id", "snap-1", "--note", "hi"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot note does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff tables rejects each redis-only option", () => {
+    const baseArgs = [
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff tables does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff rows rejects each redis-only option", () => {
+    const baseArgs = [
+      "diff",
+      "rows",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--table",
+      "users",
+    ];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff rows does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("exec still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "exec",
+      "--db",
+      "a.db",
+      "--schema",
+      "public",
+      "--sql",
+      "SELECT 1",
+      "--title",
+      "smoke",
+      "--body",
+      "looking",
+      "--max-rows",
+      "5",
+      "--no-save",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "exec",
+      db: "a.db",
+      sql: "SELECT 1",
+      schema: "public",
+      title: "smoke",
+      body: "looking",
+      save: false,
+      maxRows: 5,
+    });
+  });
+
+  test("search still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "search",
+      "--db",
+      "a.db",
+      "--term",
+      "needle",
+      "--tables",
+      "users,orders",
+      "--schema",
+      "public",
+      "--max-hits",
+      "20",
+      "--timeout",
+      "30",
+      "--include-non-text",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "a.db",
+      term: "needle",
+      tables: ["users", "orders"],
+      schema: "public",
+      maxHits: 20,
+      timeoutSec: 30,
+      includeNonText: true,
+      json: true,
+    });
+  });
+
+  test("snapshot create still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "a.db",
+      "--schema",
+      "public",
+      "--tables",
+      "users,orders",
+      "--note",
+      "before",
+      "--timeout",
+      "150",
+      "--wait",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-create",
+      db: "a.db",
+      schema: "public",
+      tables: ["users", "orders"],
+      note: "before",
+      timeoutSec: 150,
+      wait: true,
+      json: true,
+    });
+  });
+});
+
+describe("runQueryCli redis integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("redis databases --json hits /_db/redis/databases and prints verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      databases: [
+        { index: 0, keyCount: 3 },
+        { index: 1, keyCount: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/redis/databases?db=docker%3Aredis-svc`,
+    );
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis databases default text emits index<TAB>keyCount per row", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      databases: [
+        { index: 0, keyCount: 2 },
+        { index: 1, keyCount: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["0\t2", "1\t0"]);
+  });
+
+  test("redis keys --json wires all wire params and emits RedisKeysResponse verbatim", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [
+        { name: "sample:a", type: "string" },
+        { name: "sample:b", type: "hash" },
+      ],
+      nextCursor: "42",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--pattern",
+      "sample:*",
+      "--cursor",
+      "0",
+      "--count",
+      "500",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/redis/keys");
+    expect(url.searchParams.get("db")).toBe("docker:redis-svc");
+    expect(url.searchParams.get("dbIndex")).toBe("0");
+    expect(url.searchParams.get("pattern")).toBe("sample:*");
+    expect(url.searchParams.get("cursor")).toBe("0");
+    expect(url.searchParams.get("count")).toBe("500");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis keys default text appends nextCursor footer only when SCAN is not done", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [
+        { name: "sample:a", type: "string" },
+        { name: "sample:b", type: "hash" },
+      ],
+      nextCursor: "17",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample:a\tstring",
+      "sample:b\thash",
+      "# nextCursor: 17",
+    ]);
+  });
+
+  test("redis keys default text omits cursor footer when SCAN is complete", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [{ name: "sample:a", type: "string" }],
+      nextCursor: "0",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["sample:a\tstring"]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("redis keys with zero matches prints `no redis keys` to stderr, exit 0", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [],
+      nextCursor: "0",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no redis keys"]);
+  });
+
+  test("redis keys with zero matches still emits a non-terminal cursor footer", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [],
+      nextCursor: "99",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["# nextCursor: 99"]);
+    expect(harness.errs).toEqual(["no redis keys"]);
+  });
+
+  test("redis value --json wires db/dbIndex/key and emits the full RedisValueResponse", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      value: {
+        type: "string",
+        value: "sample-value",
+        truncated: false,
+        fullSize: 12,
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/redis/value");
+    expect(url.searchParams.get("db")).toBe("docker:redis-svc");
+    expect(url.searchParams.get("dbIndex")).toBe("0");
+    expect(url.searchParams.get("key")).toBe("sample:key");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis value default text prints only the RedisValue payload as pretty JSON", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      value: {
+        type: "string",
+        value: "sample-value",
+        truncated: false,
+        fullSize: 12,
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(payload.value, null, 2)]);
+  });
+
+  test("redis value surfaces a server 404 verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 404,
+        contentType: "text/plain",
+        body: "redis key not found: sample:missing",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:missing",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("read redis value failed")).toBe(true);
+    expect(harness.errs[0].includes("redis key not found")).toBe(true);
+  });
+
+  test("sources --commands emits paste-safe redis commands instead of a browser hint", async () => {
+    const payload = {
+      files: [
+        {
+          id: "docker:redis-svc",
+          path: "docker:redis-svc",
+          name: "redis-svc (redis)",
+          sizeBytes: 0,
+          kind: "redis",
+        },
+      ],
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' redis databases --db 'docker:redis-svc' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' redis keys --db 'docker:redis-svc' --db-index 0 --pattern '*' --json`,
+        ),
+      ),
+    ).toBe(true);
+    // 旧 browser-pane 誘導行は redis に対しては出さない (es/s3 は維持される)。
+    expect(
+      lines.some((line) =>
+        line.includes("redis: use the browser Datastores tab"),
+      ),
+    ).toBe(false);
+  });
+
+  test("sources --commands keeps the browser-pane hint for elasticsearch and s3", async () => {
+    const payload = {
+      files: [
+        {
+          id: "docker:es-svc",
+          path: "docker:es-svc",
+          name: "es-svc (elasticsearch)",
+          sizeBytes: 0,
+          kind: "elasticsearch",
+        },
+        {
+          id: "docker:s3-svc/example-bucket",
+          path: "docker:s3-svc/example-bucket",
+          name: "example-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+      ],
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    expect(
+      lines.some((line) =>
+        line.includes("elasticsearch: use the browser Datastores tab"),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) => line.includes("s3: use the browser Datastores tab")),
+    ).toBe(true);
+  });
+});
 
 describe("bundled skill + README track the CLI contract", () => {
   // skill MD / README に書かれている `code-viewer query ...` 例を、実 CLI

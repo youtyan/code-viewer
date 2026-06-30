@@ -391,6 +391,34 @@ agent-help` prints a longer guide for AI agents covering query shape and
 conventions. Both `query` and `annotate` accept `--cwd <repo>` and
 `--server <url>` for targeting a specific running server.
 
+For discovered Redis sources, `code-viewer query redis` exposes the same
+read-only endpoints the browser's Datastores tab uses, so AI agents and
+shell scripts can look inside without opening a browser. The CLI calls
+the existing `/_db/redis/databases`, `/_db/redis/keys`, and
+`/_db/redis/value` routes (writes stay browser-only):
+
+```sh
+# List the 16 logical DBs and their key counts.
+code-viewer query redis databases --db docker:redis-svc --json
+
+# SCAN-style key paging — re-issue with the returned nextCursor until "0".
+code-viewer query redis keys --db docker:redis-svc --db-index 0 \
+    --pattern '*' --count 500 --json
+
+# Read a single key's value. Binary content surfaces as binaryBase64.
+code-viewer query redis value --db docker:redis-svc --db-index 0 \
+    --key sample:key --json
+```
+
+Default text output is tab-separated (`index<TAB>keyCount` for
+databases, `name<TAB>type` for keys). For `keys` a non-terminal cursor
+appears as a trailing `# nextCursor: <cursor>` line so pagination needs
+no JSON parsing; 0 keys prints `no redis keys` to stderr and exits 0.
+`value`'s default output is the `RedisValue` payload as pretty JSON;
+`--json` wraps the same payload in the full `RedisValueResponse`
+(dbId / dbIndex / key included). Elasticsearch and S3 sources are not
+yet CLI-wired and still go through the browser Datastores tab.
+
 AI agents who don't yet know which subcommand they need can run
 `code-viewer agent-help` once. It prints a short index of the six
 AI-facing entry points (`query`, `annotate`, `search`, `file`,

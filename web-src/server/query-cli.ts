@@ -3,6 +3,9 @@ import type {
   DbFilesResponse,
   DbSchemaResponse,
   DbSchemasResponse,
+  RedisDatabasesResponse,
+  RedisKeysResponse,
+  RedisValueResponse,
 } from "../core/database/types";
 import {
   ensureServerUrl,
@@ -99,6 +102,26 @@ export type QueryCommand =
       maxHits?: number;
       timeoutSec: number;
       json: boolean;
+    }
+  // /_db/redis/{databases,keys,value} の read-only サブセットを CLI に薄く被せ
+  // たもの。SQL とは形が違うので独立 kind にする。write 系 (/_db/redis/write)
+  // は CLI から触らない (browser pane だけが入口)。
+  | { kind: "redis-databases"; db: string; json: boolean }
+  | {
+      kind: "redis-keys";
+      db: string;
+      dbIndex: number;
+      pattern?: string;
+      cursor?: string;
+      count?: number;
+      json: boolean;
+    }
+  | {
+      kind: "redis-value";
+      db: string;
+      dbIndex: number;
+      key: string;
+      json: boolean;
     };
 
 export type QueryArgs = {
@@ -129,6 +152,9 @@ Usage:
   code-viewer query diff tables --before <id> --after <id> [--json]
   code-viewer query diff rows --before <id> --after <id> --table <name> [--limit <n>] [--offset <n>] [--json]
   code-viewer query search --db <path> --term <text> [--tables t1,t2,...] [--include-non-text] [--max-hits <n>] [--schema <name>] [--timeout <sec>] [--json]
+  code-viewer query redis databases --db <id> [--json]
+  code-viewer query redis keys --db <id> --db-index <0..15> [--pattern <glob>] [--cursor <cursor>] [--count <1..10000>] [--json]
+  code-viewer query redis value --db <id> --db-index <0..15> --key <name> [--json]
   code-viewer query agent-help
 
 Global options:
@@ -151,6 +177,9 @@ Examples:
   code-viewer query diff tables --before snap-abc123 --after snap-def456
   code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users
   code-viewer query search --db app.db --term "sample@example.com" --tables users,orders --max-hits 20
+  code-viewer query redis databases --db docker:redis-svc --json
+  code-viewer query redis keys --db docker:redis-svc --db-index 0 --pattern '*' --json
+  code-viewer query redis value --db docker:redis-svc --db-index 0 --key sample:key
 `;
 
 export const QUERY_AGENT_HELP = `code-viewer query — agent guide
@@ -283,6 +312,28 @@ browser's Database > Search tab.
    and (for SQL stores with a primary key) a JSON-serialized rowKey suitable
    for a follow-up WHERE clause via query exec.
 
+## Workflow: Redis read-only inspect
+
+Use this to look inside a discovered Redis source from the CLI without
+opening the browser Datastores tab. Only read endpoints are wired
+(\`/_db/redis/databases\`, \`/_db/redis/keys\`, \`/_db/redis/value\`); CLI
+cannot mutate keys (use the browser pane for writes).
+
+1. List the 16 logical DBs and their key counts. Use the dbId field as
+   --db on every following call:
+   code-viewer query redis databases --db docker:redis-svc --json
+2. Page through keys in one DB. SCAN-style: pass --cursor "0" the first
+   time, then re-issue with the response's nextCursor until it becomes
+   "0". --count is a server-side hint (default 200, hard cap 10000);
+   --pattern is the SCAN MATCH glob:
+   code-viewer query redis keys --db docker:redis-svc --db-index 0 \\
+       --pattern '*' --count 500 --json
+3. Read a single key. The value DTO matches the browser's value pane —
+   binary content surfaces as binaryBase64 + truncated/fullSize fields,
+   so AI can safely decode without inferring encoding:
+   code-viewer query redis value --db docker:redis-svc --db-index 0 \\
+       --key sample:key --json
+
 ## Output contract
 
 - sources: human-readable id/kind/name lines on stdout (default), or pretty
@@ -361,6 +412,16 @@ browser's Database > Search tab.
 - snapshot delete / note / clear: prints a single status line.
 - search: blocks until done; prints hit lines (default) or full status JSON
   (--json) on stdout. Empty result is a clean exit 0.
+- redis databases: index<TAB>keyCount lines (default), or RedisDatabasesResponse
+  pretty JSON (--json).
+- redis keys: name<TAB>type lines (default); when the SCAN cursor has not
+  reached the end, a trailing "# nextCursor: <cursor>" line is appended so AI
+  can paginate without parsing JSON. 0 keys prints "no redis keys" to stderr
+  (still exit 0). --json emits the full RedisKeysResponse.
+- redis value: the RedisValue payload as pretty JSON (default; mirrors the
+  browser value pane — binary content lands in binaryBase64 + truncated /
+  fullSize). --json wraps the same RedisValue inside RedisValueResponse so
+  AI also sees dbId / dbIndex / key.
 - Any error: stderr + non-zero exit. Reasons from the server arrive verbatim
   (text/plain or {error:...} JSON, whichever the server sent).
 
@@ -399,6 +460,13 @@ const VALUE_FLAGS = new Set([
   "--schema",
   "--max-hits",
   "--timeout",
+  // redis read-only サブコマンド用。--db-index は keys / value 必須、
+  // --key は value 必須、--count は 1..10000 で server 側の上限と一致。
+  "--db-index",
+  "--pattern",
+  "--cursor",
+  "--count",
+  "--key",
 ]);
 
 const BOOL_FLAGS = new Set([
@@ -530,6 +598,13 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     return parseIntrospectSubcommand(subcommand, options, flags, globalArgs);
   }
   if (subcommand === "exec") {
+    const reject = rejectUnknownQueryFlags(
+      "exec",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST.exec,
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const db = options.get("--db");
     if (!db) return { ok: false, error: "exec requires --db <path>" };
     const sql = options.get("--sql");
@@ -558,6 +633,13 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     };
   }
   if (subcommand === "list") {
+    const reject = rejectUnknownQueryFlags(
+      "list",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST.list,
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const db = options.get("--db");
     const schema = options.get("--schema");
     if (schema && !db)
@@ -576,6 +658,13 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     };
   }
   if (subcommand === "clear") {
+    const reject = rejectUnknownQueryFlags(
+      "clear",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST.clear,
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const db = options.get("--db");
     const schema = options.get("--schema");
     if (schema && !db)
@@ -597,7 +686,242 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   if (subcommand === "search") {
     return parseSearchCommand(options, flags, globalArgs);
   }
+  if (subcommand === "redis") {
+    return parseRedisSubcommand(rest, options, flags, globalArgs);
+  }
   return { ok: false, error: `unknown query command: ${subcommand}` };
+}
+
+// redis サブコマンドごとに「使う option / flag」を申告し、それ以外が
+// 渡されたら reject。silent ignore で「--key 指定したのに databases では
+// 効いてない」のようなサイレント誤用を防ぐ (sources / introspect の rejectUnsupportedFlags
+// と同じ精神)。--cwd / --server は global なのでここでは見ない。
+const REDIS_ACTION_ALLOWLIST: Record<
+  "databases" | "keys" | "value",
+  { options: Set<string>; flags: Set<string> }
+> = {
+  databases: {
+    options: new Set(["--db"]),
+    flags: new Set(["--json"]),
+  },
+  keys: {
+    options: new Set([
+      "--db",
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+    ]),
+    flags: new Set(["--json"]),
+  },
+  value: {
+    options: new Set(["--db", "--db-index", "--key"]),
+    flags: new Set(["--json"]),
+  },
+};
+
+// 任意の subcommand label について、許可された option / flag 以外が渡された
+// ら明示 reject する汎用ヘルパ。silent drop で「フラグが効いてない」状態に
+// 陥らないようにする (exec / list / clear / snapshot / diff / search / redis
+// すべてで使う)。--cwd / --server は global なのでここでは見ない。
+type QueryFlagAllowlist = {
+  options: ReadonlySet<string>;
+  flags: ReadonlySet<string>;
+};
+
+function rejectUnknownQueryFlags(
+  label: string,
+  allow: QueryFlagAllowlist,
+  options: Map<string, string>,
+  flags: Set<string>,
+): QueryParseResult | null {
+  for (const opt of options.keys()) {
+    if (!allow.options.has(opt)) {
+      return { ok: false, error: `${label} does not accept ${opt}` };
+    }
+  }
+  for (const flag of flags) {
+    if (!allow.flags.has(flag)) {
+      return { ok: false, error: `${label} does not accept ${flag}` };
+    }
+  }
+  return null;
+}
+
+// 非 redis subcommand 用の allowlist 表。silent drop の再発防止に効く。
+// `--json` を含むか / `--no-save` 等の固有 flag を持つかは、各 run* 関数が
+// 実際に flags.has() で参照するセットと一致させる。
+const NON_REDIS_SUBCOMMAND_ALLOWLIST: Record<string, QueryFlagAllowlist> = {
+  exec: {
+    options: new Set([
+      "--db",
+      "--sql",
+      "--schema",
+      "--title",
+      "--body",
+      "--max-rows",
+    ]),
+    flags: new Set(["--no-save"]),
+  },
+  list: {
+    options: new Set(["--db", "--schema"]),
+    flags: new Set(["--json"]),
+  },
+  clear: {
+    options: new Set(["--db", "--schema"]),
+    flags: new Set<string>(),
+  },
+  search: {
+    options: new Set([
+      "--db",
+      "--term",
+      "--tables",
+      "--schema",
+      "--max-hits",
+      "--timeout",
+    ]),
+    flags: new Set(["--include-non-text", "--json"]),
+  },
+  "snapshot create": {
+    options: new Set(["--db", "--tables", "--note", "--schema", "--timeout"]),
+    flags: new Set(["--wait", "--json"]),
+  },
+  "snapshot list": {
+    options: new Set(["--db", "--schema"]),
+    flags: new Set(["--json"]),
+  },
+  "snapshot delete": {
+    options: new Set(["--id"]),
+    flags: new Set<string>(),
+  },
+  "snapshot note": {
+    options: new Set(["--id", "--note"]),
+    flags: new Set<string>(),
+  },
+  "diff tables": {
+    options: new Set(["--before", "--after"]),
+    flags: new Set(["--json"]),
+  },
+  "diff rows": {
+    options: new Set(["--before", "--after", "--table", "--limit", "--offset"]),
+    flags: new Set(["--json"]),
+  },
+};
+
+function rejectUnsupportedRedisFlags(
+  action: "databases" | "keys" | "value",
+  options: Map<string, string>,
+  flags: Set<string>,
+): QueryParseResult | null {
+  return rejectUnknownQueryFlags(
+    `redis ${action}`,
+    REDIS_ACTION_ALLOWLIST[action],
+    options,
+    flags,
+  );
+}
+
+function parseRedisSubcommand(
+  rest: string[],
+  options: Map<string, string>,
+  flags: Set<string>,
+  globalArgs: { cwd?: string; server?: string },
+): QueryParseResult {
+  const action = rest[1];
+  if (!action) {
+    return {
+      ok: false,
+      error: "redis requires a sub-action: databases | keys | value",
+    };
+  }
+  if (action !== "databases" && action !== "keys" && action !== "value") {
+    return { ok: false, error: `unknown redis sub-action: ${action}` };
+  }
+  if (rest.length > 2) {
+    return {
+      ok: false,
+      error: `redis ${action} does not accept positional argument: ${rest[2]}`,
+    };
+  }
+  const reject = rejectUnsupportedRedisFlags(action, options, flags);
+  if (reject) return reject;
+
+  const db = options.get("--db");
+  if (!db) {
+    return { ok: false, error: `redis ${action} requires --db <id>` };
+  }
+  const json = flags.has("--json");
+
+  if (action === "databases") {
+    return {
+      ok: true,
+      args: {
+        command: { kind: "redis-databases", db, json },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // keys / value は --db-index 0..15 必須。
+  const dbIndexRaw = options.get("--db-index");
+  if (dbIndexRaw === undefined) {
+    return {
+      ok: false,
+      error: `redis ${action} requires --db-index <0..15>`,
+    };
+  }
+  const dbIndex = Number(dbIndexRaw);
+  if (!Number.isInteger(dbIndex) || dbIndex < 0 || dbIndex > 15) {
+    return {
+      ok: false,
+      error: `--db-index must be an integer in [0, 15] (got ${dbIndexRaw})`,
+    };
+  }
+
+  if (action === "keys") {
+    const pattern = options.get("--pattern");
+    const cursor = options.get("--cursor");
+    const countRaw = options.get("--count");
+    let count: number | undefined;
+    if (countRaw !== undefined) {
+      const n = Number(countRaw);
+      if (!Number.isInteger(n) || n < 1 || n > 10000) {
+        return {
+          ok: false,
+          error: `--count must be an integer in [1, 10000] (got ${countRaw})`,
+        };
+      }
+      count = n;
+    }
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "redis-keys",
+          db,
+          dbIndex,
+          pattern,
+          cursor,
+          count,
+          json,
+        },
+        ...globalArgs,
+      },
+    };
+  }
+
+  // action === "value"
+  const key = options.get("--key");
+  if (key === undefined || key === "") {
+    return { ok: false, error: "redis value requires --key <name>" };
+  }
+  return {
+    ok: true,
+    args: {
+      command: { kind: "redis-value", db, dbIndex, key, json },
+      ...globalArgs,
+    },
+  };
 }
 
 function parseIntrospectSubcommand(
@@ -701,6 +1025,13 @@ function parseSearchCommand(
   flags: Set<string>,
   globalArgs: { cwd?: string; server?: string },
 ): QueryParseResult {
+  const reject = rejectUnknownQueryFlags(
+    "search",
+    NON_REDIS_SUBCOMMAND_ALLOWLIST.search,
+    options,
+    flags,
+  );
+  if (reject) return reject;
   const db = options.get("--db");
   if (!db) return { ok: false, error: "search requires --db <path>" };
   const term = options.get("--term");
@@ -753,6 +1084,13 @@ function parseSnapshotSubcommand(
     };
   }
   if (action === "create") {
+    const reject = rejectUnknownQueryFlags(
+      "snapshot create",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["snapshot create"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const db = options.get("--db");
     if (!db)
       return { ok: false, error: "snapshot create requires --db <path>" };
@@ -785,6 +1123,13 @@ function parseSnapshotSubcommand(
     };
   }
   if (action === "list") {
+    const reject = rejectUnknownQueryFlags(
+      "snapshot list",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["snapshot list"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     return {
       ok: true,
       args: {
@@ -799,6 +1144,13 @@ function parseSnapshotSubcommand(
     };
   }
   if (action === "delete") {
+    const reject = rejectUnknownQueryFlags(
+      "snapshot delete",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["snapshot delete"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const id = options.get("--id");
     if (!id)
       return {
@@ -811,6 +1163,13 @@ function parseSnapshotSubcommand(
     };
   }
   if (action === "note") {
+    const reject = rejectUnknownQueryFlags(
+      "snapshot note",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["snapshot note"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const id = options.get("--id");
     if (!id)
       return { ok: false, error: "snapshot note requires --id <snapshot-id>" };
@@ -837,6 +1196,13 @@ function parseDiffSubcommand(
     return { ok: false, error: "diff requires a subcommand (tables|rows)" };
   }
   if (action === "tables") {
+    const reject = rejectUnknownQueryFlags(
+      "diff tables",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["diff tables"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const before = options.get("--before");
     const after = options.get("--after");
     if (!before || !after) {
@@ -859,6 +1225,13 @@ function parseDiffSubcommand(
     };
   }
   if (action === "rows") {
+    const reject = rejectUnknownQueryFlags(
+      "diff rows",
+      NON_REDIS_SUBCOMMAND_ALLOWLIST["diff rows"],
+      options,
+      flags,
+    );
+    if (reject) return reject;
     const before = options.get("--before");
     const after = options.get("--after");
     const table = options.get("--table");
@@ -935,6 +1308,94 @@ export async function runQueryCli(argv: string[]): Promise<void> {
   if (command.kind === "diff-tables") return runDiffTables(serverUrl, command);
   if (command.kind === "diff-rows") return runDiffRows(serverUrl, command);
   if (command.kind === "search") return runSearch(serverUrl, command);
+  if (command.kind === "redis-databases")
+    return runRedisDatabases(serverUrl, command);
+  if (command.kind === "redis-keys") return runRedisKeys(serverUrl, command);
+  if (command.kind === "redis-value") return runRedisValue(serverUrl, command);
+}
+
+async function runRedisDatabases(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "redis-databases" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/redis/databases", { db: command.db });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list redis databases",
+  )) as RedisDatabasesResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: index<TAB>keyCount。0 件でも databases は常に 16 件返るのが普通なので、
+  // 空配列のときも黙って何も出さない (server 側で空応答なら理由は分からない)。
+  for (const db of data.databases) {
+    console.log(`${db.index}\t${db.keyCount}`);
+  }
+}
+
+async function runRedisKeys(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "redis-keys" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/redis/keys", {
+    db: command.db,
+    dbIndex: String(command.dbIndex),
+    pattern: command.pattern,
+    cursor: command.cursor,
+    count: command.count !== undefined ? String(command.count) : undefined,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "list redis keys",
+  )) as RedisKeysResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // text: name<TAB>type。0 件は stderr に no redis keys (exit 0)。
+  // nextCursor は SCAN の続行カーソルで、"0" 以外なら末尾に # nextCursor を出す。
+  if (data.keys.length === 0) {
+    console.error("no redis keys");
+  } else {
+    for (const entry of data.keys) {
+      console.log(`${entry.name}\t${entry.type}`);
+    }
+  }
+  if (data.nextCursor !== "0") {
+    console.log(`# nextCursor: ${data.nextCursor}`);
+  }
+}
+
+async function runRedisValue(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "redis-value" }>,
+): Promise<void> {
+  const path = buildIntrospectPath("/_db/redis/value", {
+    db: command.db,
+    dbIndex: String(command.dbIndex),
+    key: command.key,
+  });
+  const data = (await requestJson(
+    serverUrl,
+    path,
+    "GET",
+    undefined,
+    "read redis value",
+  )) as RedisValueResponse;
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  // 既定 text は RedisValue (binary base64 / truncated を含む) を pretty JSON。
+  // dbId / dbIndex / key は --json 経路にのみ載せる (text は値そのものに集中)。
+  console.log(JSON.stringify(data.value, null, 2));
 }
 
 async function runSources(
@@ -1029,11 +1490,17 @@ function buildSourceCommands(
   const quotedServer = shellSingleQuote(serverUrl);
   const cli = `code-viewer query --server ${quotedServer}`;
   lines.push(`# source ${ordinal}: ${commentText(file.id)} (${file.kind})`);
-  if (
-    file.kind === "redis" ||
-    file.kind === "elasticsearch" ||
-    file.kind === "s3"
-  ) {
+  if (file.kind === "redis") {
+    // SQL の schema/exec とは API 形が違うので別系統。AI は --commands を見て
+    // 「Redis に対しては databases/keys/value を読む」と判別できる。dbIndex 0
+    // は最初に触りやすい既定。
+    lines.push(`${cli} redis databases --db ${quotedId} --json`);
+    lines.push(
+      `${cli} redis keys --db ${quotedId} --db-index 0 --pattern '*' --json`,
+    );
+    return lines;
+  }
+  if (file.kind === "elasticsearch" || file.kind === "s3") {
     lines.push(
       `# ${file.kind}: use the browser Datastores tab; query schema/exec commands are SQL-only`,
     );

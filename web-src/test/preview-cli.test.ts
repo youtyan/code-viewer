@@ -259,7 +259,7 @@ describe("preview CLI", () => {
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
     );
     expect(stdout).toMatch(
-      /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search>/,
+      /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis>/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(
