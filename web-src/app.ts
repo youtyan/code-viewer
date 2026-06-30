@@ -3270,6 +3270,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     getRoute: () => STATE.route,
     setRoute,
     applyCommitRange: (range, pathFilter) => {
+      cancelInFlightRequests();
+      DIFF_VIEW.clearLoadQueue();
       STATE.from = range.from;
       STATE.to = range.to;
       activeHistoryPathFilter = pathFilter || null;

@@ -75,6 +75,7 @@ type LoadQueueItem = {
   file: FileMeta;
   card: DiffCardElement;
   priority: number;
+  epoch: number;
 };
 
 export type RenderResult = {
@@ -382,6 +383,7 @@ export function createDiffView(deps: DiffViewDeps) {
   const LOAD_QUEUE: LoadQueueItem[] = [];
 
   let ACTIVE_LOADS = 0;
+  let LOAD_EPOCH = 0;
 
   const MAX_PARALLEL = 2;
 
@@ -389,6 +391,12 @@ export function createDiffView(deps: DiffViewDeps) {
   let scrollSpyInstalled = false;
   let prevListSignature = "";
   let prevCardSignatures = new Map<string, string>();
+
+  function resetLoadScheduling() {
+    LOAD_EPOCH++;
+    LOAD_QUEUE.length = 0;
+    ACTIVE_LOADS = 0;
+  }
 
   function fileKey(f: FileMeta): string {
     return f.key || f.path;
@@ -456,9 +464,14 @@ export function createDiffView(deps: DiffViewDeps) {
     file: FileMeta,
     changedPaths: Set<string> | null,
   ): boolean {
-    if (!card.classList.contains("loaded")) return false;
+    if (
+      !card.classList.contains("loaded") &&
+      !card.classList.contains("loading")
+    )
+      return false;
     if (changedPaths && !changedPaths.has(file.path)) return false;
-    card.classList.remove("loaded", "error");
+    card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    card.classList.remove("loaded", "loading", "error");
     card.classList.add("pending");
     card._diffData = null;
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
@@ -539,7 +552,7 @@ export function createDiffView(deps: DiffViewDeps) {
         empty.classList.remove("hidden");
         target.replaceChildren();
       }
-      LOAD_QUEUE.length = 0;
+      resetLoadScheduling();
       return {
         structureChanged: sidebarNeedsRender,
         invalidatedCards: 0,
@@ -552,6 +565,20 @@ export function createDiffView(deps: DiffViewDeps) {
     for (const f of newFiles) {
       newCardSigs.set(fileKey(f), computeCardSignature(f));
     }
+    const pathsUnknown = !changedPaths;
+    const contentMayNeedReload =
+      !listSame ||
+      pathsUnknown ||
+      (changedPaths
+        ? newFiles.some((file) => {
+            const key = fileKey(file);
+            return (
+              prevCardSignatures.get(key) !== newCardSigs.get(key) ||
+              changedPaths.has(file.path)
+            );
+          })
+        : false);
+    if (contentMayNeedReload) resetLoadScheduling();
 
     let invalidatedCards = 0;
 
@@ -598,6 +625,12 @@ export function createDiffView(deps: DiffViewDeps) {
             ? invalidateLoadedCard(card, f, null)
             : invalidateLoadedCard(card, f, changedPaths);
           if (didInvalidate) invalidatedCards++;
+          else if (
+            (sigChanged || pathHint) &&
+            card.classList.contains("pending")
+          ) {
+            activatePendingCard(card, f);
+          }
           if (sigChanged) sidebarNeedsStatsUpdate = true;
         }
       }
@@ -776,8 +809,16 @@ export function createDiffView(deps: DiffViewDeps) {
       renderManualLoadPlaceholder(card, file);
       return;
     }
-    if (LOAD_QUEUE.find((item) => item.card === card)) return;
-    LOAD_QUEUE.push({ file, card, priority: priority || 0 });
+    if (
+      LOAD_QUEUE.find((item) => item.card === card && item.epoch === LOAD_EPOCH)
+    )
+      return;
+    LOAD_QUEUE.push({
+      file,
+      card,
+      priority: priority || 0,
+      epoch: LOAD_EPOCH,
+    });
     LOAD_QUEUE.sort((a, b) => b.priority - a.priority);
     pumpQueue();
   }
@@ -785,6 +826,7 @@ export function createDiffView(deps: DiffViewDeps) {
   function pumpQueue() {
     while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
       const item = LOAD_QUEUE.shift();
+      if (item.epoch !== LOAD_EPOCH) continue;
       if (
         item.card.classList.contains("loaded") ||
         item.card.classList.contains("loading")
@@ -792,7 +834,9 @@ export function createDiffView(deps: DiffViewDeps) {
         continue;
       ACTIVE_LOADS++;
       loadFile(item.file, item.card).finally(() => {
-        ACTIVE_LOADS--;
+        if (item.epoch === LOAD_EPOCH) {
+          ACTIVE_LOADS = Math.max(0, ACTIVE_LOADS - 1);
+        }
         pumpQueue();
       });
     }
@@ -1567,7 +1611,7 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function clearLoadQueue() {
-    LOAD_QUEUE.length = 0;
+    resetLoadScheduling();
   }
 
   return {

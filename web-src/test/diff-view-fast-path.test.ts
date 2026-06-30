@@ -14,6 +14,7 @@ import {
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
+import { deferred, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -289,6 +290,100 @@ describe("diff view fast path", () => {
     } finally {
       globalThis.IntersectionObserver = originalObserver;
       HTMLElement.prototype.getBoundingClientRect = originalRect;
+    }
+  });
+
+  test("starts new visible loads when previous fast-path loads are still in flight", async () => {
+    setupDiffDom();
+    const originalObserver = globalThis.IntersectionObserver;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    const pending = new Map<string, ReturnType<typeof deferred<Response>>>();
+    globalThis.IntersectionObserver = class {
+      observe() {
+        /* noop */
+      }
+      disconnect() {
+        /* noop */
+      }
+      unobserve() {
+        /* noop */
+      }
+    } as unknown as typeof IntersectionObserver;
+    HTMLElement.prototype.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        bottom: 100,
+        left: 0,
+        right: 0,
+        width: 100,
+        height: 100,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      const response = deferred<Response>();
+      pending.set(url, response);
+      return response.promise;
+    }) as typeof fetch;
+    try {
+      const { view } = createDiffViewForShellTest();
+      view.renderShell(
+        makeMeta([
+          makeFile(
+            "README.md",
+            1,
+            0,
+            "/file_diff?from=base&to=first&path=README.md",
+          ),
+          makeFile(
+            "src/a.ts",
+            1,
+            0,
+            "/file_diff?from=base&to=first&path=src/a.ts",
+          ),
+        ]),
+      );
+      await waitFor(() => requests.length === 2);
+      const readme = document.querySelector<DiffCardElement>(
+        '.gdp-file-shell[data-path="README.md"]',
+      );
+      if (!readme) throw new Error("missing README card");
+      const firstReqId = readme.dataset.reqId;
+
+      view.renderShell(
+        makeMeta([
+          makeFile(
+            "README.md",
+            2,
+            0,
+            "/file_diff?from=base&to=second&path=README.md",
+          ),
+          makeFile(
+            "src/a.ts",
+            2,
+            0,
+            "/file_diff?from=base&to=second&path=src/a.ts",
+          ),
+        ]),
+      );
+
+      await waitFor(() => requests.length === 4);
+      expect(requests.slice(2)).toEqual([
+        "/file_diff?from=base&to=second&path=README.md",
+        "/file_diff?from=base&to=second&path=src/a.ts",
+      ]);
+      expect(readme.dataset.reqId === firstReqId).toBe(false);
+      expect(readme.classList.contains("loading")).toBe(true);
+      expect(pending.size).toBe(4);
+    } finally {
+      globalThis.IntersectionObserver = originalObserver;
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+      globalThis.fetch = originalFetch;
     }
   });
 });
