@@ -828,7 +828,7 @@ async function request(
   const isJson = ctype.includes("json");
   if (!res.ok) {
     const text = await res.text();
-    const detail = text.trim() || `HTTP ${res.status}`;
+    const detail = extractErrorDetail(text, isJson, res.status);
     console.error(`${action} failed (${res.status}): ${detail}`);
     process.exit(1);
   }
@@ -837,6 +837,30 @@ async function request(
     return await res.text();
   }
   return await res.json();
+}
+
+function extractErrorDetail(
+  rawBody: string,
+  isJson: boolean,
+  status: number,
+): string {
+  const trimmed = rawBody.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (!isJson) return trimmed;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as { error?: unknown }).error === "string"
+    ) {
+      return (parsed as { error: string }).error;
+    }
+  } catch {
+    // Fall back to the raw body for malformed JSON.
+  }
+  return trimmed;
 }
 
 export async function runQueryCli(argv: string[]): Promise<void> {

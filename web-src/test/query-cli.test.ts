@@ -1684,6 +1684,155 @@ describe("runQueryCli integration", () => {
     // 旧実装は res.json() を直接呼んで SyntaxError で死んでいた。
     expect(/SyntaxError/.test(err)).toBe(false);
   });
+
+  test("non-2xx application/json bodies with {error:string} surface the error text only", async () => {
+    // server (/_db/query) は失敗時に 400 + DbQueryResponse {dbId, columns:[],
+    // ..., error:"<reason>"} を返す。CLI は JSON 丸出しでなく error 文字列
+    // だけを stderr に書き、AI agent が原因を 1 行で読めるようにする。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: [],
+          columnTypes: [],
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+          elapsedMs: 0,
+          error: "sample failure",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(400\): sample failure$/m);
+    // 生 JSON を吐かない — dbId 等の他フィールドは stderr に漏れない。
+    expect(/dbId/.test(err)).toBe(false);
+    expect(/columnTypes/.test(err)).toBe(false);
+    expect(/SyntaxError/.test(err)).toBe(false);
+    // 失敗時は stdout に何も出さない。
+    expect(harness.logs).toEqual([]);
+  });
+
+  test("non-2xx application/json bodies without {error} fall back to the raw body text", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ reason: "no error field" }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(
+      /^query failed \(400\): \{"reason":"no error field"\}$/m,
+    );
+    expect(/SyntaxError/.test(err)).toBe(false);
+  });
+
+  test("non-2xx application/json bodies with malformed JSON keep the raw text fallback", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 500,
+        contentType: "application/json",
+        body: "not even json",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(500\): not even json$/m);
+    expect(/SyntaxError/.test(err)).toBe(false);
+  });
+
+  test("non-2xx application/json bodies with {error:<non-string>} fall back to raw text", async () => {
+    // {error: 123} のように error が文字列でない場合は安全に raw を出す。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: 123 }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(400\): \{"error":123\}$/m);
+  });
+
+  test("non-2xx responses with empty bodies fall back to HTTP <status>", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { status: 500, contentType: "application/json", body: "" },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(500\): HTTP 500$/m);
+  });
 });
 
 describe("runQueryCli search integration", () => {
