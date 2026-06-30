@@ -17,6 +17,9 @@ export type ServerRegistryEntry = {
 };
 
 function registryDir(): string {
+  // Test-only override; keeps registry tests from writing to the user's cache.
+  const override = process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+  if (override) return override;
   return join(homedir(), ".cache", "code-viewer", "servers");
 }
 

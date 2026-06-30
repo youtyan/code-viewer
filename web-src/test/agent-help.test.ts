@@ -13,8 +13,10 @@ import { FILE_AGENT_HELP } from "../server/file-cli";
 import { QUERY_AGENT_HELP } from "../server/query-cli";
 import { SEARCH_AGENT_HELP } from "../server/search-cli";
 import { SKILL_AGENT_HELP } from "../server/skill-cli";
+import { STATUS_AGENT_HELP } from "../server/status-cli";
 
 const SUBCOMMANDS = [
+  "status",
   "query",
   "annotate",
   "search",
@@ -64,6 +66,7 @@ describe("buildAgentHelpIndex", () => {
   test("includes each subcommand AGENT_HELP signature line by reference", () => {
     const text = buildAgentHelpIndex();
     const signatureOf = (helpText: string) => helpText.split("\n")[0];
+    expect(text.includes(signatureOf(STATUS_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(QUERY_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(ANNOTATE_AGENT_HELP))).toBe(true);
     expect(text.includes(signatureOf(SEARCH_AGENT_HELP))).toBe(true);
@@ -82,7 +85,7 @@ describe("buildAgentHelpIndex", () => {
 });
 
 describe("AGENT_GUIDES order is stable", () => {
-  test("matches the documented query / annotate / search / file / skill / doctor sequence", () => {
+  test("matches the documented status / query / annotate / search / file / skill / doctor sequence", () => {
     expect(AGENT_GUIDES.map((g) => g.name)).toEqual([...SUBCOMMANDS]);
   });
 });

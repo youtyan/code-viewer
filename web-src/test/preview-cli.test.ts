@@ -256,10 +256,16 @@ describe("preview CLI", () => {
     }
 
     expect(stdout).toMatch(
+      /code-viewer status \[--cwd <repo>\] \[--ref <ref>\] \[--limit <N>\] \[--json\]/,
+    );
+    expect(stdout).toMatch(
       /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
     );
     expect(stdout).toMatch(
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis\|elasticsearch\|s3>/,
+    );
+    expect(stdout).toMatch(
+      /code-viewer <status\|annotate\|query\|search\|file\|skill\|doctor> agent-help/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(/code-viewer search files --term <pattern>/);

@@ -1,7 +1,7 @@
 // Top-level `code-viewer agent-help` aggregator. Lets an AI coding agent
-// discover every AI-facing subcommand guide (query / annotate / search /
-// file / skill / doctor) by running ONE command, instead of guessing which
-// subcommand to agent-help into first.
+// discover every AI-facing subcommand guide (status / query / annotate /
+// search / file / skill / doctor) by running ONE command, instead of
+// guessing which subcommand to agent-help into first.
 //
 // Implementation rule: we MUST NOT copy any text from the subcommand guides.
 // The signature line of each *_AGENT_HELP is imported and rendered through
@@ -14,9 +14,17 @@ import { FILE_AGENT_HELP } from "./file-cli";
 import { QUERY_AGENT_HELP } from "./query-cli";
 import { SEARCH_AGENT_HELP } from "./search-cli";
 import { SKILL_AGENT_HELP } from "./skill-cli";
+import { STATUS_AGENT_HELP } from "./status-cli";
 
 export type AgentGuideEntry = {
-  name: "query" | "annotate" | "search" | "file" | "skill" | "doctor";
+  name:
+    | "status"
+    | "query"
+    | "annotate"
+    | "search"
+    | "file"
+    | "skill"
+    | "doctor";
   signature: string;
   rerun: string;
 };
@@ -29,6 +37,14 @@ function firstLine(text: string): string {
 }
 
 export const AGENT_GUIDES: readonly AgentGuideEntry[] = [
+  // `status` is intentionally first: it is the "orient me" snapshot an
+  // AI agent should run BEFORE picking which other guide to consult,
+  // so it appears at the head of the index instead of buried later.
+  {
+    name: "status",
+    signature: firstLine(STATUS_AGENT_HELP),
+    rerun: "code-viewer status agent-help",
+  },
   {
     name: "query",
     signature: firstLine(QUERY_AGENT_HELP),

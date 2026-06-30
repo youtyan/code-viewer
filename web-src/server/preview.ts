@@ -197,6 +197,7 @@ function parseCli() {
 
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
+  code-viewer status [--cwd <repo>] [--ref <ref>] [--limit <N>] [--json]
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options]
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
@@ -208,13 +209,14 @@ Usage:
   code-viewer help
 
 AI-agent index (start here):  code-viewer agent-help
-Subcommand guides (AI agents): code-viewer <annotate|query|search|file|skill|doctor> agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|query|search|file|skill|doctor> agent-help
 
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
   code-viewer HEAD~1 HEAD
   code-viewer --staged
+  code-viewer status --json
   code-viewer annotate --help
   code-viewer query --help
   code-viewer search code --term "TODO" --json
@@ -777,14 +779,9 @@ function isExcludedScopePath(path: string, excludeNames: string[]): boolean {
     );
 }
 
-// ai-dup-check: allow -- ".git" path predicate mirrors git.isToolInternalPath for the git metadata directory.
-function isGitInternalPath(path: string): boolean {
-  return path.split(/[\\/]+/).some((part) => part.toLowerCase() === ".git");
-}
-
 function safeWorktreePath(path: string): string | null {
   if (!safePath(path)) return null;
-  if (isGitInternalPath(path)) return null;
+  if (git.isGitInternalPath(path)) return null;
   const full = join(cwd, path);
   if (!existsSync(full)) return null;
   let realCwd: string;
@@ -803,7 +800,7 @@ function safeWorktreePath(path: string): string | null {
     rel.startsWith("\\")
   )
     return null;
-  if (isGitInternalPath(rel)) return null;
+  if (git.isGitInternalPath(rel)) return null;
   return realFull;
 }
 
@@ -815,7 +812,7 @@ function safeOpenWorktreePath(path: string): string | null {
   if (path === "") {
     try {
       const realCwd = realpathSync(cwd);
-      if (isGitInternalPath(realCwd)) return null;
+      if (git.isGitInternalPath(realCwd)) return null;
       return realCwd;
     } catch {
       return null;
@@ -935,7 +932,7 @@ function handleTree(url: URL) {
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   const path = (url.searchParams.get("path") || "").replace(/^\/+|\/+$/g, "");
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if ((target === "worktree" || target === "") && isGitInternalPath(path))
+  if ((target === "worktree" || target === "") && git.isGitInternalPath(path))
     return text("forbidden", 403);
   if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
     return text("invalid target", 400);
@@ -1033,7 +1030,7 @@ function parseGrepPaths(
     .filter(
       (path) =>
         safePath(path) &&
-        !isGitInternalPath(path) &&
+        !git.isGitInternalPath(path) &&
         !isSkippableSearchPath(path, omitDirNames, excludeNames),
     );
 }
@@ -1066,7 +1063,7 @@ function grepWorktreeFallback(
     if (matches.length >= max) break;
     if (
       !safePath(path) ||
-      isGitInternalPath(path) ||
+      git.isGitInternalPath(path) ||
       isSkippableSearchPath(path, omitDirNames, excludeNames)
     )
       continue;
@@ -1115,7 +1112,7 @@ function grepWorktree(
     const safePaths = paths.filter(
       (path) =>
         safePath(path) &&
-        !isGitInternalPath(path) &&
+        !git.isGitInternalPath(path) &&
         !isSkippableSearchPath(path, omitDirNames, excludeNames) &&
         safeWorktreePath(path),
     );
@@ -1137,7 +1134,7 @@ function grepWorktree(
     ).filter(
       (match) =>
         safePath(match.path) &&
-        !isGitInternalPath(match.path) &&
+        !git.isGitInternalPath(match.path) &&
         !isSkippableSearchPath(match.path, omitDirNames, excludeNames) &&
         !!safeWorktreePath(match.path),
     );
@@ -1182,7 +1179,7 @@ function grepTreeRef(
   const safePaths = paths.filter(
     (path) =>
       safePath(path) &&
-      !isGitInternalPath(path) &&
+      !git.isGitInternalPath(path) &&
       !isSkippableSearchPath(path, omitDirNames, excludeNames),
   );
   const args = [
@@ -1857,7 +1854,8 @@ function safeUploadFileName(name: string): string | null {
   )
     return null;
   if (trimmed === "." || trimmed === "..") return null;
-  if (isGitInternalPath(trimmed) || isForbiddenUploadName(trimmed)) return null;
+  if (git.isGitInternalPath(trimmed) || isForbiddenUploadName(trimmed))
+    return null;
   if (!SAFE_UPLOAD_EXTENSIONS.has(extname(trimmed).toLowerCase())) return null;
   return trimmed;
 }
@@ -1896,7 +1894,7 @@ async function handleUploadFiles(req: Request) {
 
   const dir = String(form.get("dir") || "").replace(/^\/+|\/+$/g, "");
   if (!safeRepoPath(dir)) return text("invalid dir", 400);
-  if (dir && isGitInternalPath(dir)) return text("forbidden", 403);
+  if (dir && git.isGitInternalPath(dir)) return text("forbidden", 403);
   const realDir = safeOpenWorktreePath(dir);
   if (!realDir) return text("not found", 404);
   const stats = statSync(realDir) as unknown as { isDirectory(): boolean };
@@ -2190,7 +2188,7 @@ async function handleOpenPath(req: Request) {
     return text("invalid kind", 400);
   if (kind === "file-parent" && !path) return text("invalid path", 400);
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if (path && isGitInternalPath(path)) return text("forbidden", 403);
+  if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 
   const targetPath = kind === "file-parent" ? parentRepoPath(path) : path;
   const target = safeOpenWorktreePath(targetPath);
@@ -2224,7 +2222,7 @@ async function handleTrashPath(req: Request) {
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
   if (!path) return text("invalid path", 400);
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if (isGitInternalPath(path)) return text("forbidden", 403);
+  if (git.isGitInternalPath(path)) return text("forbidden", 403);
   const originalFullPath = safeWorktreePath(path);
   if (!originalFullPath) return text("not found", 404);
   const moved = movePathToTrash(worktreePath(path));
@@ -2269,14 +2267,14 @@ async function handleCreateDirectory(req: Request) {
       : "";
   const name = normalizeNewDirectoryName(body.name);
   if (!safeRepoPath(dir)) return text("invalid dir", 400);
-  if (dir && isGitInternalPath(dir)) return text("forbidden", 403);
+  if (dir && git.isGitInternalPath(dir)) return text("forbidden", 403);
   if (!name) return text("invalid name", 400);
   const parent = safeOpenWorktreePath(dir);
   if (!parent) return text("not found", 404);
   const stats = statSync(parent) as unknown as { isDirectory(): boolean };
   if (!stats.isDirectory()) return text("not a directory", 400);
   const targetPath = dir ? `${dir}/${name}` : name;
-  if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
+  if (!safeRepoPath(targetPath) || git.isGitInternalPath(targetPath))
     return text("invalid target", 400);
   const target = join(parent, name);
   if (existsSync(target)) return text("already exists", 409);
@@ -2316,7 +2314,7 @@ async function handleRestoreTrash(req: Request) {
   const trashPath = typeof body.trashPath === "string" ? body.trashPath : "";
   if (!originalPath || !safeRepoPath(originalPath))
     return text("invalid restore target", 400);
-  if (isGitInternalPath(originalPath)) return text("forbidden", 403);
+  if (git.isGitInternalPath(originalPath)) return text("forbidden", 403);
   const restored = restoreTrashPath(originalPath, trashPath || undefined);
   if (!restored.ok) return text(restored.error || "undo failed", 409);
   triggerUpdate();
@@ -2383,7 +2381,7 @@ async function handleAnnotations(req: Request) {
       typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
     if (!target) {
       if (!path || !safeRepoPath(path)) return text("invalid path", 400);
-      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+      if (git.isGitInternalPath(path) || isCodeViewerInternalPath(path))
         return text("forbidden", 403);
     }
     const result = addAnnotationEntry(

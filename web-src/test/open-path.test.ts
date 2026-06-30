@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { isGitInternalPath } from "../server/git";
 import { sourceFixture } from "./source-fixture";
 
 const app = sourceFixture(
@@ -75,29 +76,32 @@ describe("open path in OS action", () => {
         "function safeOpenWorktreePath(path: string): string | null",
       ),
     ).toBe(true);
-    expect(
-      server.includes(
-        "path.split(/[\\\\/]+/).some((part) => part.toLowerCase() === '.git')",
-      ),
-    ).toBe(true);
-    expect(server.includes("if (isGitInternalPath(rel)) return null")).toBe(
+    // `.git/*` rejection is now sourced from git.ts:isGitInternalPath
+    // (consolidated to remove the inline split predicate duplicate). We
+    // check call-sites instead of the inline regex string.
+    expect(server.includes("if (git.isGitInternalPath(rel)) return null")).toBe(
       true,
     );
     expect(server.includes("spawnDetached(cmd)")).toBe(true);
   });
 
   test("server forbids browsing Git internal tree paths", () => {
-    expect(
-      server.includes("function isGitInternalPath(path: string): boolean"),
-    ).toBe(true);
+    // Behaviour-level guard: git.ts exports isGitInternalPath and preview.ts
+    // uses it both at /_open_path entry and inside safeWorktreePath. The
+    // predicate must return true for `.git/*` paths and false for normal
+    // worktree paths. UI/Test Discipline: don't grep for the implementation
+    // string — assert the contract on the actual function.
+    expect(isGitInternalPath(".git/config")).toBe(true);
+    expect(isGitInternalPath("nested/.git/HEAD")).toBe(true);
+    expect(isGitInternalPath("src/sample.ts")).toBe(false);
     expect(
       server.includes(
-        "if ((target === 'worktree' || target === '') && isGitInternalPath(path)) return text('forbidden', 403)",
+        "if ((target === 'worktree' || target === '') && git.isGitInternalPath(path)) return text('forbidden', 403)",
       ),
     ).toBe(true);
-    expect(server.includes("if (isGitInternalPath(path)) return null")).toBe(
-      true,
-    );
+    expect(
+      server.includes("if (git.isGitInternalPath(path)) return null"),
+    ).toBe(true);
   });
 
   test("UI adds open actions to directory-oriented surfaces", () => {

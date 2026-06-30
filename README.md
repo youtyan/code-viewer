@@ -498,11 +498,38 @@ stdout and adds `text truncated` to stderr when the server flagged
 truncation. `--json` always emits the full server response envelope.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the six
-AI-facing entry points (`query`, `annotate`, `search`, `file`,
-`skill`, `doctor`) with the exact `code-viewer <name> agent-help`
-command for each full guide. The index runs without any preflight,
-so it works even before SQLite or a running server is set up.
+`code-viewer agent-help` once. It prints a short index of the seven
+AI-facing entry points (`status`, `query`, `annotate`, `search`,
+`file`, `skill`, `doctor`) with the exact `code-viewer <name>
+agent-help` command for each full guide. The index runs without any
+preflight, so it works even before SQLite or a running server is set
+up.
+
+### Workspace status CLI
+
+`code-viewer status` prints a one-shot snapshot of the current repo so
+an AI agent (or you) can orient yourself in a single call: current
+branch, remote URL, every file that differs from HEAD (staged +
+unstaged + untracked), the staged subset, the most recent commits, and
+a paste-safe shortlist of follow-up `code-viewer` commands. It runs
+locally over `git` — no running server, no SQLite preflight — so it is
+safe to call as the first command after entering any repository.
+
+```sh
+# Human-readable summary.
+code-viewer status
+
+# Structured payload for agents.
+code-viewer status --json
+
+# Override the ref / depth used for "recent commits".
+code-viewer status --ref main --limit 20 --json
+```
+
+The `nextCommands` field pins `--server '<url>'` automatically for
+server-backed follow-ups when a code-viewer server is registered for
+the repo; local follow-ups stay bare. With no server, the snapshot
+itself still succeeds.
 
 ### Code search CLI
 

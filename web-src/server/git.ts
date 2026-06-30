@@ -695,11 +695,24 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
   return files;
 }
 
-// ai-dup-check: allow -- server subsystems need a shared predicate for code-viewer metadata paths.
+// Shared "does this path contain segment X?" predicate, case-insensitive.
+// Used to detect `.code-viewer` (tool metadata) and `.git` (git metadata)
+// reliably across subsystems without each module reimplementing the same
+// `split(/[\\/]+/).some(...)` loop. Pre-existing duplicates in file-cli /
+// preview were both this same loop with only the excluded segment name
+// differing; that's what triggered ai-dup-check before this helper was
+// added.
+function pathHasSegment(path: string, segment: string): boolean {
+  const target = segment.toLowerCase();
+  return path.split(/[\\/]+/).some((part) => part.toLowerCase() === target);
+}
+
 export function isToolInternalPath(path: string): boolean {
-  return path
-    .split(/[\\/]+/)
-    .some((part) => part.toLowerCase() === ".code-viewer");
+  return pathHasSegment(path, ".code-viewer");
+}
+
+export function isGitInternalPath(path: string): boolean {
+  return pathHasSegment(path, ".git");
 }
 
 function syntheticUncommittedBlameFromWorktree(

@@ -71,6 +71,13 @@ if (process.argv[2] === "agent-help") {
   // preflight entirely.
   const { runFileCli } = await import("./file-cli");
   await runFileCli(process.argv.slice(3));
+} else if (process.argv[2] === "status") {
+  // `status` mirrors the `file` branch: pure git.ts read, no SQLite, no
+  // running server. AI agents are expected to call it as their FIRST
+  // CLI command when they enter a repository, so it must run in any
+  // environment the user can `npx @youtyan/code-viewer status` into.
+  const { runStatusCli } = await import("./status-cli");
+  runStatusCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));

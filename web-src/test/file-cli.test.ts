@@ -18,6 +18,7 @@ import {
   runFileCli,
 } from "../server/file-cli";
 import { runGit as git } from "./_git-fixture";
+import { captureIo, catchExitAsync, restoreIo } from "./_io-fixture";
 
 describe("parseFileArgs", () => {
   test("bare invocation returns help", () => {
@@ -332,56 +333,14 @@ describe("FILE_HELP / FILE_AGENT_HELP", () => {
 });
 
 // --- runFileCli integration (fixture repo + log/exit capture) ---
-
-class ExitMarker extends Error {
-  constructor(public code: number) {
-    super(`process.exit(${code})`);
-  }
-}
-
-type Captured = { logs: string[]; errs: string[]; exits: number[] };
-
-let originalExit: typeof process.exit | null = null;
-let originalLog: typeof console.log | null = null;
-let originalErr: typeof console.error | null = null;
-
-function captureIo(): Captured {
-  const logs: string[] = [];
-  const errs: string[] = [];
-  const exits: number[] = [];
-  originalExit = process.exit;
-  process.exit = ((code?: number) => {
-    exits.push(typeof code === "number" ? code : 0);
-    throw new ExitMarker(code ?? 0);
-  }) as typeof process.exit;
-  originalLog = console.log;
-  console.log = (...args: unknown[]) => {
-    logs.push(
-      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
-    );
-  };
-  originalErr = console.error;
-  console.error = (...args: unknown[]) => {
-    errs.push(
-      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
-    );
-  };
-  return { logs, errs, exits };
-}
+// captureIo / ExitMarker / catchExitAsync は `_io-fixture` に集約済み。
 
 afterEach(() => {
-  if (originalExit) process.exit = originalExit;
-  if (originalLog) console.log = originalLog;
-  if (originalErr) console.error = originalErr;
+  restoreIo();
 });
 
 async function runAndCatchExit(argv: string[]): Promise<void> {
-  try {
-    await runFileCli(argv);
-  } catch (err) {
-    if (err instanceof ExitMarker) return;
-    throw err;
-  }
+  await catchExitAsync(() => runFileCli(argv));
 }
 
 describe("runFileCli help and agent-help", () => {

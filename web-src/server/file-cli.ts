@@ -11,7 +11,12 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { resolveRepoRoot, takeValue } from "./cli-helpers";
+import {
+  resolveRepoRoot,
+  takeValue,
+  validateRefValue,
+  validateRepoRelativePathValue,
+} from "./cli-helpers";
 import {
   BLAME_ZERO_SHA,
   blame,
@@ -20,7 +25,6 @@ import {
   type GitBlameLine,
   type GitBlameResult,
   type GitHistoryCommit,
-  isToolInternalPath,
   show,
 } from "./git";
 
@@ -214,36 +218,8 @@ const DEFAULT_BLAME_BASE: GitBlameBase = "worktree";
 const DEFAULT_HISTORY_REF = "HEAD";
 const DEFAULT_SHOW_REF = "worktree";
 
-function isUnsafeText(value: string): boolean {
-  if (value.includes("\0")) return true;
-  if (/[\r\n]/.test(value)) return true;
-  return false;
-}
-
 function validatePath(value: string): string | undefined {
-  if (!value) return "--path requires a non-empty value";
-  if (isUnsafeText(value))
-    return "--path must be single-line and must not contain NUL";
-  if (value.startsWith("-")) return "--path must not start with '-'";
-  if (value.startsWith("/") || value.startsWith("\\"))
-    return "--path must be repo-relative";
-  const parts = value.split(/[\\/]+/);
-  if (parts.includes("..")) return "--path must not contain '..' segments";
-  if (parts.some((part) => part.toLowerCase() === ".git")) {
-    return "--path must not target git metadata";
-  }
-  if (isToolInternalPath(value)) {
-    return "--path must not target code-viewer metadata";
-  }
-  return undefined;
-}
-
-function validateRef(value: string): string | undefined {
-  if (!value) return "--ref requires a non-empty value";
-  if (isUnsafeText(value))
-    return "--ref must be single-line and must not contain NUL";
-  if (value.startsWith("-")) return "--ref must not start with '-'";
-  return undefined;
+  return validateRepoRelativePathValue(value, "--path");
 }
 
 function parseIntegerInRange(
@@ -322,7 +298,7 @@ export function parseFileArgs(argv: string[]): FileParseResult {
 
   const rawRef = options.get("--ref");
   if (rawRef !== undefined) {
-    const refError = validateRef(rawRef);
+    const refError = validateRefValue(rawRef, "--ref");
     if (refError) return { ok: false, error: refError };
   }
   const json = flags.has("--json");
@@ -557,13 +533,8 @@ function sliceLines(
   };
 }
 
-function isGitInternalPath(path: string): boolean {
-  return path.split(/[\\/]+/).some((part) => part.toLowerCase() === ".git");
-}
-
 function safeWorktreePath(root: string, path: string): string | null {
   if (validatePath(path)) return null;
-  if (isGitInternalPath(path) || isToolInternalPath(path)) return null;
   const full = join(root, path);
   if (!existsSync(full)) return null;
   try {
@@ -578,7 +549,7 @@ function safeWorktreePath(root: string, path: string): string | null {
     ) {
       return null;
     }
-    if (isGitInternalPath(rel) || isToolInternalPath(rel)) return null;
+    if (validatePath(rel)) return null;
     return realFull;
   } catch {
     return null;

@@ -25,6 +25,52 @@ export function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+// CLI 引数として受け取った文字列に NUL や改行が混ざっていないかの判定。
+// shell の引数注入対策ではなく、git ref / path のような single-line で扱う
+// CLI 値が複数行に膨らんで以降の引数解析が崩れるのを防ぐためのガード。
+// 元は file-cli の private helper として置かれていたが、status-cli からも
+// 同じ規則で参照したいので集約。
+export function isUnsafeText(value: string): boolean {
+  if (value.includes("\0")) return true;
+  if (/[\r\n]/.test(value)) return true;
+  return false;
+}
+
+// `--ref <value>` の典型的なバリデーション。empty / NUL / 改行 / leading
+// dash を rejectする。file-cli と status-cli の両方で `--ref` という名前で
+// ref を受けるので、flag 名は引数で受けて両者でメッセージを共有する。
+export function validateRefValue(
+  value: string,
+  flag: string,
+): string | undefined {
+  if (!value) return `${flag} requires a non-empty value`;
+  if (isUnsafeText(value))
+    return `${flag} must be single-line and must not contain NUL`;
+  if (value.startsWith("-")) return `${flag} must not start with '-'`;
+  return undefined;
+}
+
+export function validateRepoRelativePathValue(
+  value: string,
+  flag: string,
+): string | undefined {
+  if (!value) return `${flag} requires a non-empty value`;
+  if (isUnsafeText(value))
+    return `${flag} must be single-line and must not contain NUL`;
+  if (value.startsWith("-")) return `${flag} must not start with '-'`;
+  if (value.startsWith("/") || value.startsWith("\\"))
+    return `${flag} must be repo-relative`;
+  const parts = value.split(/[\\/]+/);
+  if (parts.includes("..")) return `${flag} must not contain '..' segments`;
+  if (git.isGitInternalPath(value)) {
+    return `${flag} must not target git metadata`;
+  }
+  if (git.isToolInternalPath(value)) {
+    return `${flag} must not target code-viewer metadata`;
+  }
+  return undefined;
+}
+
 // `--cwd` 指定 (なければ process.cwd()) から repo root を返す。
 // repo 外なら realpath にフォールバックし、それすら無効なら exit 1。
 export function resolveRepoRoot(cwdOption: string | undefined): string {
