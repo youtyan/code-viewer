@@ -352,6 +352,9 @@ code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
 code-viewer query snapshot note --id snap-abc123 --note "Updated context"
 code-viewer query snapshot delete --id snap-abc123
 
+# diff tables prints per-table summary lines plus a paste-safe "# diff rows: ..."
+# hint per table, and --json adds a diffRowsCommand field to each tables[] element
+# so AI/human can copy the exact row-detail command without rebuilding it.
 code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
 code-viewer query diff rows --before snap-abc123 --after snap-def456 \
     --table users --json

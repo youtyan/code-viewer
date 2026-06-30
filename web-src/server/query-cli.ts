@@ -229,7 +229,11 @@ no separate stored diff entity, so you always pass both snapshot ids.
 4. (If you skipped --wait) list snapshots to get IDs:
    code-viewer query snapshot list --db app.db --json
 
-5. View the diff (per-table summary, then per-row detail):
+5. View the diff (per-table summary, then per-row detail). diff tables
+   prints each per-table summary line plus a paste-safe "# diff rows: ..."
+   hint right below it, and --json adds a diffRowsCommand field to each
+   tables[] element, so you can drill into row detail without rebuilding
+   the command yourself:
    code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
    code-viewer query diff rows  --before snap-abc123 --after snap-def456 \\
        --table users --json
@@ -292,7 +296,14 @@ browser's Database > Search tab.
   follow-up WHERE/CAST clauses, schema to confirm the resolved schema, and
   executedSql to log the exact SQL the server ran.
 - diff-rows: pretty JSON on stdout, exit 0 on success.
-- snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
+- snapshot list: human-readable table (default), or pretty JSON with --json.
+- diff tables: human-readable lines (default) plus a paste-safe
+  "# diff rows: code-viewer query --server '<url>' diff rows --before '<id>'
+  --after '<id>' --table '<table>' --json" comment line right below each table,
+  so AI/human can drill into row detail without rebuilding the command. With
+  --json the full /_db/snapshot/diff/tables payload is emitted and each
+  tables[] element gains an additive diffRowsCommand field with the same
+  literal. server URL / snapshot ids / table names are POSIX single-quoted.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
   The no-wait output also includes a paste-safe poll command that pins
   --server '<url>' and single-quotes db/schema so AI/human paste does not
@@ -1266,6 +1277,22 @@ function buildSnapshotPollCommand(
   return `${cli} snapshot list --db ${shellSingleQuote(db)}${schemaArg} --json`;
 }
 
+// diff tables の各行から row 詳細を見るための paste-safe な diff rows コマンド。
+// snapshot poll と同形 (--server pin + 全引数 single-quote)。table 名に空白や
+// ' が含まれても bash/zsh に貼れる。
+function buildDiffRowsCommand(
+  serverUrl: string,
+  before: string,
+  after: string,
+  table: string,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  return (
+    `${cli} diff rows --before ${shellSingleQuote(before)} ` +
+    `--after ${shellSingleQuote(after)} --table ${shellSingleQuote(table)} --json`
+  );
+}
+
 async function runSnapshotCreate(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
@@ -1499,19 +1526,37 @@ async function runDiffTables(
       unsnapshottedRowCount?: number;
     }>;
   };
+  // per-table の diffRowsCommand を additive に付与する。--json でも default
+  // でも、AI/human が table 行から row 詳細へ 1 step で進めるようにする。
+  // server URL / before / after / table はすべて shellSingleQuote 済み。
+  const enriched = {
+    ...body,
+    tables: body.tables.map((t) => ({
+      ...t,
+      diffRowsCommand: buildDiffRowsCommand(
+        serverUrl,
+        body.beforeId,
+        body.afterId,
+        t.tableName,
+      ),
+    })),
+  };
   if (command.json) {
-    console.log(JSON.stringify(body, null, 2));
+    console.log(JSON.stringify(enriched, null, 2));
     return;
   }
-  if (!body.tables.length) {
+  if (!enriched.tables.length) {
     console.log("no tables in diff");
     return;
   }
-  for (const t of body.tables) {
+  for (const t of enriched.tables) {
     const cov = t.coverage === "both" ? "" : `  (${t.coverage})`;
     console.log(
       `${t.tableName}  +${t.insertedCount} ~${t.updatedCount} -${t.deletedCount} =${t.unchangedCount}${cov}`,
     );
+    // 行頭 tableName で grep する既存 consumer を壊さないよう、hint は
+    // 直下に "# diff rows: ..." コメント行として置く。
+    console.log(`# diff rows: ${t.diffRowsCommand}`);
   }
 }
 

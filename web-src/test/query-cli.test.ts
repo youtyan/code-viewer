@@ -1918,17 +1918,25 @@ describe("runQueryCli integration", () => {
     expect(out).toMatch(/before/);
   });
 
-  test("diff tables (--json) returns the server payload verbatim", async () => {
+  test("diff tables (--json) enriches each tables[] element with a paste-safe diffRowsCommand", async () => {
     const payload = {
       beforeId: "snap-a",
       afterId: "snap-b",
       tables: [
         {
-          tableName: "users",
+          tableName: "sample_table",
           insertedCount: 1,
           updatedCount: 0,
           deletedCount: 0,
           unchangedCount: 9,
+          coverage: "both",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
           coverage: "both",
         },
       ],
@@ -1953,7 +1961,160 @@ describe("runQueryCli integration", () => {
     expect(harness.requests[1].url).toBe(
       `${SERVER}/_db/snapshot/diff/tables?before=snap-a&after=snap-b`,
     );
-    expect(JSON.parse(harness.logs[0])).toEqual(payload);
+    // top-level fields preserved; tables[] elements gain diffRowsCommand.
+    // server URL / before / after / table はすべて single-quoted。
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      beforeId: "snap-a",
+      afterId: "snap-b",
+      tables: [
+        {
+          tableName: "sample_table",
+          insertedCount: 1,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 9,
+          coverage: "both",
+          diffRowsCommand:
+            "code-viewer query --server 'http://localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_table' --json",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
+          coverage: "both",
+          diffRowsCommand:
+            "code-viewer query --server 'http://localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_archive' --json",
+        },
+      ],
+    });
+  });
+
+  test("diff tables (default) prints the summary line and a paste-safe diff rows hint per table", async () => {
+    const payload = {
+      beforeId: "snap-a",
+      afterId: "snap-b",
+      tables: [
+        {
+          tableName: "sample_table",
+          insertedCount: 1,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 9,
+          coverage: "both",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
+          coverage: "after-only",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 既存 summary 行は保持。直下に "# diff rows: ..." hint を出す。
+    expect(out).toMatch(/^sample_table {2}\+1 ~0 -0 =9$/m);
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_table' --json$/m,
+    );
+    expect(out).toMatch(/^sample_archive {2}\+0 ~3 -1 =42 {2}\(after-only\)$/m);
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_archive' --json$/m,
+    );
+    // hint 行は必ず summary 行の直下に来る (table ごとに対応関係を担保)。
+    const lines = out.split("\n");
+    const idxSampleTable = lines.indexOf("sample_table  +1 ~0 -0 =9");
+    expect(lines[idxSampleTable + 1].startsWith("# diff rows:")).toBe(true);
+    const idxSampleArchive = lines.indexOf(
+      "sample_archive  +0 ~3 -1 =42  (after-only)",
+    );
+    expect(lines[idxSampleArchive + 1].startsWith("# diff rows:")).toBe(true);
+  });
+
+  test("diff tables single-quotes table names and snapshot ids containing spaces and quotes", async () => {
+    // table 名・snapshot id に空白と ' を含むケース。POSIX '...' の '\''
+    // 展開が効いて paste-safe であることを behavior で検証する。
+    const payload = {
+      beforeId: "snap with space",
+      afterId: "snap's after",
+      tables: [
+        {
+          tableName: "sample's table",
+          insertedCount: 2,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 0,
+          coverage: "both",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap with space",
+      "--after",
+      "snap's after",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap with space' --after 'snap'\\''s after' --table 'sample'\\''s table' --json$/m,
+    );
+  });
+
+  test("diff tables on empty result keeps the existing notice without hints", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          beforeId: "snap-a",
+          afterId: "snap-b",
+          tables: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["no tables in diff"]);
   });
 
   test("non-2xx responses with text/plain bodies are surfaced as readable errors (not SyntaxError)", async () => {

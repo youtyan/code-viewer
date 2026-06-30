@@ -85,6 +85,12 @@ Compare table-level summary (which tables changed and how many rows):
 code-viewer query diff tables --before snap-abc123 --after snap-def456
 ```
 
+Each table summary line is followed by a paste-safe
+`# diff rows: code-viewer query --server '<url>' diff rows --before '<id>'
+--after '<id>' --table '<table>' --json` comment line, so you can copy the
+exact next command per table without rebuilding it. With `--json`, the same
+literal is exposed as a `diffRowsCommand` field on each `tables[]` element.
+
 Drill into row-level changes for a specific table:
 
 ```sh
