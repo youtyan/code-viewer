@@ -19,6 +19,12 @@ export function takeValue(
   return { value, next: index + 1 };
 }
 
+// POSIX shell の single-quote 規則: '...' 内は literal、内部の ' だけ
+// '\'' で閉じて再開する。bash/zsh/sh で貼り付け安全な CLI 引数を作る。
+export function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 // `--cwd` 指定 (なければ process.cwd()) から repo root を返す。
 // repo 外なら realpath にフォールバックし、それすら無効なら exit 1。
 export function resolveRepoRoot(cwdOption: string | undefined): string {

@@ -73,7 +73,7 @@ Stable JSON contract (see core/doctor-types.ts):
     "worstStatus": "ok"|"warn"|"error",
     "groups": [
       { "id": "runtime"|"package"|"sqlite"|"snapshot"|"git"
-            |"discovery"|"docker"|"server",
+            |"discovery"|"datastore"|"docker"|"server",
         "title": string,
         "rows": [
           { "id": string, "title": string,
@@ -82,6 +82,18 @@ Stable JSON contract (see core/doctor-types.ts):
       }
     ]
   }
+
+The "datastore" group runs a minimal read round-trip against every
+source discovered by /_db/files (SQLite open + tables, docker SQL
+getTables, Redis listDatabases, Elasticsearch listIndices, S3
+listBuckets). Each source becomes one row; success = ok, connection
+failure or 2s timeout = warn. Failure rows include a paste-safe hint:
+SQL sources get a "code-viewer query schemas --db '<id>' --json"
+command (no --server: the query CLI auto-discovery resolves it at
+paste time); Redis / Elasticsearch / S3 point at the browser's
+Datastores tab. When nothing was discovered the group is still
+emitted with one informative "datastore.none" row (status ok) instead
+of disappearing.
 
 The exit code is 1 iff \`worstStatus === "error"\` — never on \`warn\`.
 

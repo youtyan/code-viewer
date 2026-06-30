@@ -40,9 +40,13 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
   local), SQLite driver and snapshot store, Git, discovery summary,
+  per-source datastore connectivity (each discovered SQLite / docker
+  SQL / Redis / Elasticsearch / S3 source gets one row with a 2s
+  minimal-read probe; failure rows include a paste-safe retry hint),
   Docker / Compose health (config dry-parse + `compose ps` per service),
   and the listening port. Useful when `npx` cache mismatch (e.g.
-  `NODE_MODULE_VERSION` errors) needs a remediation hint.
+  `NODE_MODULE_VERSION` errors) needs a remediation hint, or when a
+  docker compose datastore is discovered but unreachable.
 - Open repository folders (and parent folders of files) in the OS file
   manager, create folders, and trash/restore files from localhost-only
   actions.

@@ -8,8 +8,11 @@ import {
   ensureServerUrl,
   requestJson,
   resolveRepoRoot,
+  shellSingleQuote,
   takeValue,
 } from "./cli-helpers";
+
+export { shellSingleQuote } from "./cli-helpers";
 
 export type QueryCommand =
   | { kind: "help" }
@@ -1044,13 +1047,6 @@ function buildSourceCommands(
   lines.push(`${cli} list --db ${quotedId} --json`);
   lines.push(`${cli} snapshot list --db ${quotedId} --json`);
   return lines;
-}
-
-// POSIX shell の single-quote 規則: '...' 内は何でも literal、内部の ' だけは
-// いったん閉じて \' を続けて再開する必要がある ('\'' の 4 文字)。bash/zsh/sh
-// で同じく安全。double-quote と違って backslash も $ も解釈されない。
-export function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function buildIntrospectPath(
