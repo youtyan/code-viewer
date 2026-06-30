@@ -13,6 +13,7 @@ export type QueryCommand =
       kind: "exec";
       db: string;
       sql: string;
+      schema?: string;
       title?: string;
       body?: string;
       save: boolean;
@@ -104,7 +105,7 @@ Usage:
   code-viewer query schema --db <path> [--schema <name>] [--with-columns] [--json]
   code-viewer query columns --db <path> [--schema <name>] --table <name> [--json]
   code-viewer query ddl --db <path> [--schema <name>] --table <name> [--json]
-  code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
+  code-viewer query exec --db <path> [--schema <name>] --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path> [--schema <name>]]
   code-viewer query clear [--db <path> [--schema <name>]]
   code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>] [--schema <name>] [--wait] [--timeout <sec>] [--json]
@@ -126,6 +127,7 @@ Examples:
   code-viewer query schema --db app.db --json
   code-viewer query columns --db docker:pg-svc --schema analytics --table events --json
   code-viewer query ddl --db app.db --table users
+  code-viewer query exec --db docker:pg-svc --schema analytics --sql "SELECT * FROM events LIMIT 10"
   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
   code-viewer query list --db docker:pg-svc --schema analytics --json
   code-viewer query clear --db docker:pg-svc --schema analytics
@@ -180,6 +182,10 @@ can review what you queried.
 4. Execute:
    code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
        --title "Sample user data" --body "Checking what user records look like."
+   For PostgreSQL multi-schema databases, pass --schema with the same schema
+   you inspected:
+   code-viewer query exec --db docker:pg-svc --schema analytics \\
+       --sql "SELECT * FROM events LIMIT 10"
 5. The human sees results in the browser's Database > Query History tab.
 
 ## Workflow: Snapshot & Diff (for testing)
@@ -417,6 +423,7 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     if (!db) return { ok: false, error: "exec requires --db <path>" };
     const sql = options.get("--sql");
     if (!sql) return { ok: false, error: "exec requires --sql <sql>" };
+    const schema = options.get("--schema");
     const maxRowsRaw = options.get("--max-rows");
     const maxRows = parsePositiveInt(maxRowsRaw);
     if (maxRowsRaw !== undefined && maxRows === undefined) {
@@ -429,6 +436,7 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
           kind: "exec",
           db,
           sql,
+          schema,
           title: options.get("--title"),
           body: options.get("--body"),
           save: !flags.has("--no-save"),
@@ -1056,6 +1064,7 @@ async function runExec(
     executedBy: "ai",
     source: "cli",
   };
+  if (command.schema) reqBody.schema = command.schema;
   if (command.title) reqBody.title = command.title;
   if (command.body) reqBody.body = command.body;
   if (command.maxRows) reqBody.maxRows = command.maxRows;

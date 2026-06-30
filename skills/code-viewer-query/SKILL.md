@@ -86,6 +86,8 @@ browser's Database > Search tab, so the human can review the same workflow.
    ```sh
    code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
        --title "Sample user data" --body "Checking what user records look like."
+   code-viewer query exec --db docker:pg-svc --schema analytics \
+       --sql "SELECT * FROM events LIMIT 10"
    ```
 
 5. The human sees results in the browser's Database > Query History panel.
@@ -136,6 +138,8 @@ it the server uses `public` (or the first available schema).
 - Before writing schema-discovery SQL, prefer `query schema`, `query columns`,
   or `query ddl`; they work across SQLite, PostgreSQL, and MySQL through the
   server's existing introspection endpoints.
+- When using PostgreSQL schemas, pass the same `--schema` to `query exec` that
+  you used for introspection.
 - Write `--title` for the human, not for yourself.
 - Use `--body` to explain why the query matters.
 - Do not query broad PII or secrets unless explicitly asked.

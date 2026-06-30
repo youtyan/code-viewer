@@ -306,6 +306,8 @@ code-viewer query ddl --db app.db --table users
 
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
+code-viewer query exec --db docker:pg-svc --schema analytics \
+    --sql "SELECT * FROM events LIMIT 10"
 
 code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
     --max-rows 1 --no-save

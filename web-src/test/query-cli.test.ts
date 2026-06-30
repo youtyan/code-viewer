@@ -191,6 +191,8 @@ describe("parseQueryArgs", () => {
       "exec",
       "--db",
       "a.db",
+      "--schema",
+      "analytics",
       "--sql",
       "SELECT 1",
       "--title",
@@ -207,6 +209,7 @@ describe("parseQueryArgs", () => {
       kind: "exec",
       db: "a.db",
       sql: "SELECT 1",
+      schema: "analytics",
       title: "T",
       body: "B",
       save: false,
@@ -969,6 +972,53 @@ describe("runQueryCli integration", () => {
 
     expect(harness.exits).toEqual([]);
     expect(harness.logs).toEqual(["no datastore sources discovered"]);
+  });
+
+  test("query exec --schema forwards schema in the query body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          columns: ["id"],
+          rows: [{ id: 1 }],
+          rowCount: 1,
+          elapsedMs: 7,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+      "--max-rows",
+      "5",
+    ]);
+
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/query`);
+    expect(harness.requests[1].method).toBe("POST");
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      schema: "analytics",
+      sql: "SELECT 1",
+      saveHistory: false,
+      executedBy: "ai",
+      source: "cli",
+      maxRows: 5,
+    });
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      columns: ["id"],
+      rows: [{ id: 1 }],
+      rowCount: 1,
+      elapsedMs: 7,
+    });
   });
 
   test("query schemas --json emits the /_db/schemas response verbatim", async () => {
