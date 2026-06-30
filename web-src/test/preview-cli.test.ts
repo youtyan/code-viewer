@@ -270,7 +270,7 @@ describe("preview CLI", () => {
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
     expect(stdout).toMatch(/code-viewer search files --term <pattern>/);
     expect(stdout).toMatch(
-      /code-viewer file <blame\|history\|show> --path <p>/,
+      /code-viewer file <blame\|history\|show\|diff> --path <p>/,
     );
     expect(/annotate <start\|add\|list\|delete\|clear>/.test(stdout)).toBe(
       false,

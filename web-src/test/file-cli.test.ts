@@ -51,9 +51,9 @@ describe("parseFileArgs", () => {
   });
 
   test("unknown top-level subcommand is rejected", () => {
-    expect(parseFileArgs(["diff"])).toEqual({
+    expect(parseFileArgs(["nope"])).toEqual({
       ok: false,
-      error: "unknown file subcommand: diff",
+      error: "unknown file subcommand: nope",
     });
   });
 
@@ -296,6 +296,186 @@ describe("parseFileArgs", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.args.cwd).toBe("/tmp/example");
   });
+
+  test("diff defaults from=HEAD, to=worktree, preview mode with default caps", () => {
+    const result = parseFileArgs([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.args.command).toEqual({
+      kind: "diff",
+      path: "sample_file.ts",
+      from: "HEAD",
+      to: "worktree",
+      untracked: false,
+      ignoreWs: false,
+      ignoreBlank: false,
+      mode: "preview",
+      maxHunks: 3,
+      maxLines: 1200,
+      json: true,
+    });
+  });
+
+  test("diff --full forces full mode and rejects --max-hunks combined with --full", () => {
+    const okFull = parseFileArgs([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--full",
+    ]);
+    expect(okFull.ok).toBe(true);
+    if (okFull.ok && okFull.args.command.kind === "diff") {
+      expect(okFull.args.command.mode).toBe("full");
+    }
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--full",
+        "--max-hunks",
+        "5",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--max-hunks cannot be combined with --full",
+    });
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--full",
+        "--max-lines",
+        "5000",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--max-lines cannot be combined with --full",
+    });
+  });
+
+  test("diff rejects --ref (must use --from/--to)", () => {
+    expect(
+      parseFileArgs(["diff", "--path", "sample_file.ts", "--ref", "HEAD"]),
+    ).toEqual({
+      ok: false,
+      error: "file diff does not accept --ref; use --from / --to instead",
+    });
+  });
+
+  test("diff --untracked requires --to worktree", () => {
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--untracked",
+        "--to",
+        "HEAD",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--untracked requires --to worktree (or --to omitted)",
+    });
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--untracked",
+        "--from",
+        "HEAD",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--untracked cannot be combined with --from",
+    });
+    const ok = parseFileArgs([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--untracked",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.args.command.kind === "diff") {
+      expect(ok.args.command.untracked).toBe(true);
+      expect(ok.args.command.to).toBe("worktree");
+    }
+  });
+
+  test("diff --max-hunks / --max-lines validate ranges", () => {
+    expect(
+      parseFileArgs(["diff", "--path", "sample_file.ts", "--max-hunks", "0"]),
+    ).toEqual({
+      ok: false,
+      error: "--max-hunks must be an integer in [1, 100] (got 0)",
+    });
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--max-lines",
+        "9999999",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--max-lines must be an integer in [1, 100000] (got 9999999)",
+    });
+  });
+
+  test("diff --old-path validates the rename source path", () => {
+    expect(
+      parseFileArgs([
+        "diff",
+        "--path",
+        "sample_file.ts",
+        "--old-path",
+        "../escape",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--old-path must not contain '..' segments",
+    });
+    const ok = parseFileArgs([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--old-path",
+      "previous_sample.ts",
+      "--from",
+      "HEAD~1",
+      "--to",
+      "HEAD",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.args.command.kind === "diff") {
+      expect(ok.args.command.oldPath).toBe("previous_sample.ts");
+      expect(ok.args.command.from).toBe("HEAD~1");
+      expect(ok.args.command.to).toBe("HEAD");
+    }
+  });
+
+  test("diff toggles ignoreWs / ignoreBlank", () => {
+    const ok = parseFileArgs([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--ignore-ws",
+      "--ignore-blank",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (ok.ok && ok.args.command.kind === "diff") {
+      expect(ok.args.command.ignoreWs).toBe(true);
+      expect(ok.args.command.ignoreBlank).toBe(true);
+    }
+  });
 });
 
 describe("FILE_HELP / FILE_AGENT_HELP", () => {
@@ -306,16 +486,26 @@ describe("FILE_HELP / FILE_AGENT_HELP", () => {
     );
   });
 
-  test("FILE_HELP documents blame/history/show with their key flags", () => {
+  test("FILE_HELP documents blame/history/show/diff with their key flags", () => {
     expect(FILE_HELP).toMatch(/code-viewer file blame/);
     expect(FILE_HELP).toMatch(/code-viewer file history/);
     expect(FILE_HELP).toMatch(/code-viewer file show/);
+    expect(FILE_HELP).toMatch(/code-viewer file diff/);
     expect(FILE_HELP).toMatch(/--path/);
     expect(FILE_HELP).toMatch(/--ref/);
     expect(FILE_HELP).toMatch(/--base/);
     expect(FILE_HELP).toMatch(/--limit/);
     expect(FILE_HELP).toMatch(/--start/);
     expect(FILE_HELP).toMatch(/--end/);
+    expect(FILE_HELP).toMatch(/--from/);
+    expect(FILE_HELP).toMatch(/--to/);
+    expect(FILE_HELP).toMatch(/--old-path/);
+    expect(FILE_HELP).toMatch(/--untracked/);
+    expect(FILE_HELP).toMatch(/--ignore-ws/);
+    expect(FILE_HELP).toMatch(/--ignore-blank/);
+    expect(FILE_HELP).toMatch(/--max-hunks/);
+    expect(FILE_HELP).toMatch(/--max-lines/);
+    expect(FILE_HELP).toMatch(/--full/);
     expect(FILE_HELP).toMatch(/--json/);
     expect(FILE_HELP).toMatch(/agent-help/);
   });
@@ -324,11 +514,15 @@ describe("FILE_HELP / FILE_AGENT_HELP", () => {
     expect(FILE_AGENT_HELP).toMatch(/blame:/);
     expect(FILE_AGENT_HELP).toMatch(/history:/);
     expect(FILE_AGENT_HELP).toMatch(/show:/);
+    expect(FILE_AGENT_HELP).toMatch(/diff:/);
     expect(FILE_AGENT_HELP).toMatch(/GitBlameResult/);
     expect(FILE_AGENT_HELP).toMatch(/GitHistoryCommit/);
     expect(FILE_AGENT_HELP).toMatch(/totalLines/);
     expect(FILE_AGENT_HELP).toMatch(/complete/);
     expect(FILE_AGENT_HELP).toMatch(/no history/);
+    expect(FILE_AGENT_HELP).toMatch(/hunk_count/);
+    expect(FILE_AGENT_HELP).toMatch(/rendered_hunk_count/);
+    expect(FILE_AGENT_HELP).toMatch(/preview/);
   });
 });
 
@@ -664,5 +858,187 @@ describe("runFileCli against a fixture repo", () => {
     await runAndCatchExit(["blame", "--path", ""]);
     expect(io.exits).toEqual([1]);
     expect(io.errs[0]).toBe("--path requires a non-empty value");
+  });
+});
+
+describe("runFileCli file diff against a sample fixture repo", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-file-cli-diff-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author@example.invalid"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "alpha\nbeta\ngamma\ndelta\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+    // Worktree-only edit so the default range (HEAD..worktree) shows a diff.
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "alpha\nBETA\ngamma\ndelta\nepsilon\n",
+    );
+    // Untracked file used by --untracked tests.
+    writeFileSync(join(repo, "sample_untracked.ts"), "fresh\nfile\n");
+  });
+
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("diff --json defaults to HEAD..worktree and returns a non-empty unified diff", async () => {
+    const io = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--cwd",
+      repo,
+      "--json",
+    ]);
+    expect(io.exits).toEqual([]);
+    expect(io.logs.length).toBe(1);
+    const payload = JSON.parse(io.logs[0]);
+    expect(payload.path).toBe("sample_file.ts");
+    expect(payload.from).toBe("HEAD");
+    expect(payload.to).toBe("worktree");
+    expect(payload.mode).toBe("preview");
+    expect(payload.max_hunks).toBe(3);
+    expect(payload.max_lines).toBe(1200);
+    expect(payload.untracked).toBe(false);
+    expect(payload.binary).toBe(false);
+    expect(payload.error).toBeUndefined();
+    expect(payload.diff).toMatch(/diff --git/);
+    expect(payload.diff).toMatch(/-beta/);
+    expect(payload.diff).toMatch(/\+BETA/);
+    expect(payload.diff).toMatch(/\+epsilon/);
+    expect(payload.hunk_count > 0).toBe(true);
+    expect(payload.rendered_hunk_count).toBe(payload.hunk_count);
+    expect(payload.truncated).toBe(false);
+    expect(payload.line_count > 0).toBe(true);
+  });
+
+  test("diff with same-worktree range short-circuits without spawning git", async () => {
+    const io = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_file.ts",
+      "--from",
+      "worktree",
+      "--to",
+      "worktree",
+      "--cwd",
+      repo,
+      "--json",
+    ]);
+    expect(io.exits).toEqual([]);
+    const payload = JSON.parse(io.logs[0]);
+    expect(payload.from).toBe("worktree");
+    expect(payload.to).toBe("worktree");
+    expect(payload.diff).toBe("");
+    expect(payload.hunk_count).toBe(0);
+    expect(payload.rendered_hunk_count).toBe(0);
+    expect(payload.line_count).toBe(0);
+    expect(payload.truncated).toBe(false);
+    expect(payload.binary).toBe(false);
+  });
+
+  test("diff --max-hunks=1 truncates to one hunk and sets truncated=true", async () => {
+    const baseLines = Array.from(
+      { length: 45 },
+      (_, index) => `stable-line-${index + 1}`,
+    );
+    writeFileSync(join(repo, "sample_multi.ts"), `${baseLines.join("\n")}\n`);
+    git(repo, ["add", "sample_multi.ts"]);
+    git(repo, ["commit", "-m", "sample add multi-hunk file"]);
+    const editedLines = [...baseLines];
+    for (const index of [0, 10, 20, 30]) {
+      editedLines[index] = `edited-line-${index + 1}`;
+    }
+    writeFileSync(join(repo, "sample_multi.ts"), `${editedLines.join("\n")}\n`);
+
+    const fullIo = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_multi.ts",
+      "--cwd",
+      repo,
+      "--full",
+      "--json",
+    ]);
+    expect(fullIo.exits).toEqual([]);
+    const fullPayload = JSON.parse(fullIo.logs[0]);
+    expect(fullPayload.mode).toBe("full");
+    expect(fullPayload.max_hunks).toBe(null);
+    expect(fullPayload.max_lines).toBe(null);
+    expect(fullPayload.hunk_count >= 4).toBe(true);
+    expect(fullPayload.rendered_hunk_count).toBe(fullPayload.hunk_count);
+    expect(fullPayload.truncated).toBe(false);
+    restoreIo();
+
+    const cappedIo = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_multi.ts",
+      "--cwd",
+      repo,
+      "--max-hunks",
+      "1",
+      "--json",
+    ]);
+    expect(cappedIo.exits).toEqual([]);
+    const cappedPayload = JSON.parse(cappedIo.logs[0]);
+    expect(cappedPayload.mode).toBe("preview");
+    expect(cappedPayload.max_hunks).toBe(1);
+    expect(cappedPayload.rendered_hunk_count).toBe(1);
+    expect(cappedPayload.hunk_count > 1).toBe(true);
+    expect(cappedPayload.truncated).toBe(true);
+  });
+
+  test("diff --untracked compares an untracked worktree file to /dev/null", async () => {
+    const io = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_untracked.ts",
+      "--untracked",
+      "--cwd",
+      repo,
+      "--json",
+    ]);
+    expect(io.exits).toEqual([]);
+    const payload = JSON.parse(io.logs[0]);
+    expect(payload.untracked).toBe(true);
+    expect(payload.from).toBe("/dev/null");
+    expect(payload.to).toBe("worktree");
+    expect(payload.diff).toMatch(/\+fresh/);
+    expect(payload.diff).toMatch(/\+file/);
+  });
+
+  test("diff for a missing path reports a git error and exits 1", async () => {
+    const io = captureIo();
+    await runAndCatchExit([
+      "diff",
+      "--path",
+      "sample_does_not_exist.ts",
+      "--untracked",
+      "--cwd",
+      repo,
+      "--json",
+    ]);
+    expect(io.exits).toEqual([1]);
+    const payload = JSON.parse(io.logs[0]);
+    expect(typeof payload.error).toBe("string");
+    expect(payload.error.length > 0).toBe(true);
+  });
+
+  test("diff text mode prints the unified diff verbatim", async () => {
+    const io = captureIo();
+    await runAndCatchExit(["diff", "--path", "sample_file.ts", "--cwd", repo]);
+    expect(io.exits).toEqual([]);
+    expect(io.logs.length).toBe(1);
+    expect(io.logs[0]).toMatch(/diff --git/);
   });
 });

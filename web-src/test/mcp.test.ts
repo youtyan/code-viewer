@@ -159,6 +159,7 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_file_show")).toBe(true);
     expect(names.includes("code_viewer_file_blame")).toBe(true);
     expect(names.includes("code_viewer_file_history")).toBe(true);
+    expect(names.includes("code_viewer_file_diff")).toBe(true);
     expect(names.includes("code_viewer_search_files")).toBe(true);
     expect(names.includes("code_viewer_search_code")).toBe(true);
     expect(names.includes("code_viewer_datastore_sources")).toBe(true);
@@ -1627,6 +1628,293 @@ describe("dispatchJsonRpc — tools/call code_viewer_file_history (fixture repo)
     };
     expect(queryPayload.isError).toBe(true);
     expect(queryPayload.content[0].text).toMatch(/single-line/);
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_file_diff (fixture repo)", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-file-diff-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author@example.invalid"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "alpha\nbeta\ngamma\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+    writeFileSync(join(repo, "sample_file.ts"), "alpha\nBETA\ngamma\ndelta\n");
+    writeFileSync(join(repo, "sample_untracked.ts"), "fresh\nfile\n");
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("default range (HEAD..worktree) returns a preview diff with caps echoed", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 400,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: { cwd: repo, path: "sample_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.path).toBe("sample_file.ts");
+    expect(report.from).toBe("HEAD");
+    expect(report.to).toBe("worktree");
+    expect(report.mode).toBe("preview");
+    expect(report.max_hunks).toBe(3);
+    expect(report.max_lines).toBe(1200);
+    expect(report.untracked).toBe(false);
+    expect(report.binary).toBe(false);
+    expect(report.error).toBeUndefined();
+    expect(report.diff).toMatch(/diff --git/);
+    expect(report.diff).toMatch(/\+BETA/);
+    expect(report.diff).toMatch(/\+delta/);
+    expect(report.truncated).toBe(false);
+  });
+
+  test("worktree==worktree range short-circuits with empty diff and no error", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 401,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_file.ts",
+          from: "worktree",
+          to: "worktree",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.from).toBe("worktree");
+    expect(report.to).toBe("worktree");
+    expect(report.diff).toBe("");
+    expect(report.hunk_count).toBe(0);
+    expect(report.rendered_hunk_count).toBe(0);
+    expect(report.truncated).toBe(false);
+  });
+
+  test("untracked=true diffs the new file against /dev/null", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 402,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_untracked.ts",
+          untracked: true,
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.untracked).toBe(true);
+    expect(report.from).toBe("/dev/null");
+    expect(report.to).toBe("worktree");
+    expect(report.diff).toMatch(/\+fresh/);
+    expect(report.diff).toMatch(/\+file/);
+  });
+
+  test("untracked=true with to!='worktree' is rejected with isError", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 403,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_untracked.ts",
+          untracked: true,
+          to: "HEAD",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/worktree/);
+  });
+
+  test("untracked=true with from is rejected with isError", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 409,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_untracked.ts",
+          untracked: true,
+          from: "HEAD",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/untracked/);
+    expect(payload.content[0].text).toMatch(/from/);
+  });
+
+  test("mode must be 'preview' or 'full' and max_hunks bounds are enforced", async () => {
+    const badMode = await call({
+      jsonrpc: "2.0",
+      id: 404,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: { cwd: repo, path: "sample_file.ts", mode: "raw" },
+      },
+    });
+    if (badMode.kind !== "response") throw new Error("expected response");
+    const badModePayload = badMode.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(badModePayload.isError).toBe(true);
+    expect(badModePayload.content[0].text).toMatch(/mode must be/);
+
+    const overCap = await call({
+      jsonrpc: "2.0",
+      id: 405,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: { cwd: repo, path: "sample_file.ts", max_hunks: 99999 },
+      },
+    });
+    if (overCap.kind !== "response") throw new Error("expected response");
+    const overPayload = overCap.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(overPayload.isError).toBe(true);
+    expect(overPayload.content[0].text).toMatch(/max_hunks/);
+
+    const cappedFull = await call({
+      jsonrpc: "2.0",
+      id: 408,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_file.ts",
+          mode: "full",
+          max_hunks: 1,
+        },
+      },
+    });
+    if (cappedFull.kind !== "response") throw new Error("expected response");
+    const cappedFullPayload = cappedFull.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(cappedFullPayload.isError).toBe(true);
+    expect(cappedFullPayload.content[0].text).toMatch(/mode='full'/);
+  });
+
+  test("mode='full' reports null caps because no preview cap is applied", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 410,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: { cwd: repo, path: "sample_file.ts", mode: "full" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.mode).toBe("full");
+    expect(report.max_hunks).toBe(null);
+    expect(report.max_lines).toBe(null);
+    expect(report.truncated).toBe(false);
+  });
+
+  test("old_path validation surfaces an old_path-prefixed error (not path-prefixed)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 406,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_diff",
+        arguments: {
+          cwd: repo,
+          path: "sample_file.ts",
+          old_path: "../escape",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/^old_path/);
+    expect(payload.content[0].text).toMatch(/'\.\.' segments/);
+  });
+
+  test("rejects unsafe path values (shared with file_show)", async () => {
+    for (const bad of [
+      { path: "../escape", expect: /'\.\.' segments/ },
+      { path: "-trick", expect: /must not start with '-'/ },
+    ] as const) {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: 407,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_file_diff",
+          arguments: { cwd: repo, path: bad.path },
+        },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      expect(payload.content[0].text).toMatch(bad.expect);
+    }
   });
 });
 

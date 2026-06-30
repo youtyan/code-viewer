@@ -42,11 +42,17 @@ import {
 } from "./database/handle";
 import {
   buildFileBlameReport,
+  buildFileDiffReport,
   buildFileHistoryReport,
   buildFileShowReport,
   FILE_DEFAULT_HISTORY_LIMIT,
+  FILE_DIFF_DEFAULT_MAX_HUNKS,
+  FILE_DIFF_DEFAULT_MAX_LINES,
+  FILE_DIFF_HUNK_HARD_CAP,
+  FILE_DIFF_LINE_HARD_CAP,
   FILE_HISTORY_HARD_CAP,
   type FileBlameCommand,
+  type FileDiffCommand,
   type FileHistoryCommand,
   type FileShowCommand,
 } from "./file-cli";
@@ -316,6 +322,80 @@ export function defaultMcpTools(
       },
       run(input) {
         return runFileHistoryTool(input, options.cwd);
+      },
+    },
+    {
+      name: "code_viewer_file_diff",
+      title: "code-viewer file diff",
+      description:
+        "Returns the same snake_case diff payload as `code-viewer file diff --json`; it matches the preview server's /file_diff shape except for browser-only status/generation fields. Fields: path, optional old_path, from, to, untracked, ignore_ws, ignore_blank, mode ('preview' | 'full'), max_hunks, max_lines, diff (unified diff text), hunk_count, rendered_hunk_count, line_count, truncated, binary, and an optional error string. Read-only. Defaults to from='HEAD' and to='worktree' (uncommitted changes) in preview mode (3 hunks / 1200 lines) to protect agent context. Set mode='full' only when the file diff is safe to return without caps; max_hunks/max_lines are null in the response.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Repo-relative file path (single-line, no NUL / '..' segments / leading '-' / leading slash). Required.",
+          },
+          from: {
+            type: "string",
+            description:
+              "Range start ref. Default 'HEAD'. The literal 'worktree' means the working tree.",
+          },
+          to: {
+            type: "string",
+            description:
+              "Range end ref. Default 'worktree'. The literal 'worktree' means the working tree.",
+          },
+          old_path: {
+            type: "string",
+            description:
+              "Previous repo-relative path when the file was renamed inside the range. Same validation as `path`.",
+          },
+          untracked: {
+            type: "boolean",
+            description:
+              "Diff an untracked worktree file against /dev/null. Cannot be combined with `from`; only valid when `to` is 'worktree' (or omitted).",
+          },
+          ignore_ws: {
+            type: "boolean",
+            description:
+              "Pass -w to git diff (ignore all whitespace changes). Defaults to false.",
+          },
+          ignore_blank: {
+            type: "boolean",
+            description:
+              "Pass --ignore-blank-lines to git diff. Defaults to false.",
+          },
+          mode: {
+            type: "string",
+            enum: ["preview", "full"],
+            description:
+              "Truncation mode. 'preview' (default) caps the diff at max_hunks / max_lines. 'full' returns the whole diff and rejects max_hunks / max_lines.",
+          },
+          max_hunks: {
+            type: "integer",
+            minimum: 1,
+            maximum: FILE_DIFF_HUNK_HARD_CAP,
+            description: `Maximum hunks to render in preview mode. Clamped to [1, ${FILE_DIFF_HUNK_HARD_CAP}]. Default ${FILE_DIFF_DEFAULT_MAX_HUNKS}. Cannot be combined with mode='full'.`,
+          },
+          max_lines: {
+            type: "integer",
+            minimum: 1,
+            maximum: FILE_DIFF_LINE_HARD_CAP,
+            description: `Maximum total lines (header + hunks) in preview mode. Clamped to [1, ${FILE_DIFF_LINE_HARD_CAP}]. Default ${FILE_DIFF_DEFAULT_MAX_LINES}. Cannot be combined with mode='full'.`,
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runFileDiffTool(input, options.cwd);
       },
     },
     {
@@ -982,6 +1062,149 @@ function runFileHistoryTool(
   }
 }
 
+function runFileDiffTool(
+  input: unknown,
+  defaultCwd?: string,
+): McpToolRunReturn {
+  const params = isPlainObject(input) ? input : {};
+  const pathRaw = params.path;
+  if (typeof pathRaw !== "string") {
+    return { text: "path must be a string", isError: true };
+  }
+  const pathError = validateMcpPath(pathRaw);
+  if (pathError) return { text: pathError, isError: true };
+
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+
+  const fromParsed = validateMcpRef(params.from, "HEAD");
+  if (fromParsed.ok !== true) {
+    return { text: fromParsed.error, isError: true };
+  }
+  const toParsed = validateMcpRef(params.to, "worktree");
+  if (toParsed.ok !== true) {
+    return { text: toParsed.error, isError: true };
+  }
+
+  let oldPath: string | undefined;
+  const oldPathRaw = params.old_path;
+  if (oldPathRaw !== undefined) {
+    if (typeof oldPathRaw !== "string") {
+      return { text: "old_path must be a string", isError: true };
+    }
+    const oldPathError = validateMcpPath(oldPathRaw);
+    if (oldPathError) {
+      // 既存 validateMcpPath メッセージは "path ..." で始まるので、AI が
+      // どちらの引数を直すか判別できるよう old_path 用に prefix を貼り替える。
+      return {
+        text: oldPathError.replace(/^path /, "old_path "),
+        isError: true,
+      };
+    }
+    oldPath = oldPathRaw;
+  }
+
+  const untrackedRaw = params.untracked;
+  if (untrackedRaw !== undefined && typeof untrackedRaw !== "boolean") {
+    return { text: "untracked must be a boolean", isError: true };
+  }
+  const untracked = untrackedRaw === true;
+  if (untracked && params.from !== undefined) {
+    return {
+      text: "untracked cannot be combined with from",
+      isError: true,
+    };
+  }
+  if (untracked && toParsed.ref !== "worktree") {
+    return {
+      text: "untracked requires to='worktree' (or omitted)",
+      isError: true,
+    };
+  }
+
+  const ignoreWsRaw = params.ignore_ws;
+  if (ignoreWsRaw !== undefined && typeof ignoreWsRaw !== "boolean") {
+    return { text: "ignore_ws must be a boolean", isError: true };
+  }
+  const ignoreWs = ignoreWsRaw === true;
+  const ignoreBlankRaw = params.ignore_blank;
+  if (ignoreBlankRaw !== undefined && typeof ignoreBlankRaw !== "boolean") {
+    return { text: "ignore_blank must be a boolean", isError: true };
+  }
+  const ignoreBlank = ignoreBlankRaw === true;
+
+  let mode: "preview" | "full" = "preview";
+  const modeRaw = params.mode;
+  if (modeRaw !== undefined) {
+    if (modeRaw !== "preview" && modeRaw !== "full") {
+      return { text: "mode must be 'preview' or 'full'", isError: true };
+    }
+    mode = modeRaw;
+  }
+  if (
+    mode === "full" &&
+    (params.max_hunks !== undefined || params.max_lines !== undefined)
+  ) {
+    return {
+      text: "max_hunks and max_lines cannot be combined with mode='full'",
+      isError: true,
+    };
+  }
+
+  const maxHunksParsed = validateMcpIntegerLimit(
+    params.max_hunks,
+    FILE_DIFF_DEFAULT_MAX_HUNKS,
+    1,
+    FILE_DIFF_HUNK_HARD_CAP,
+    "max_hunks",
+  );
+  if (maxHunksParsed.ok !== true) {
+    return { text: maxHunksParsed.error, isError: true };
+  }
+  const maxLinesParsed = validateMcpIntegerLimit(
+    params.max_lines,
+    FILE_DIFF_DEFAULT_MAX_LINES,
+    1,
+    FILE_DIFF_LINE_HARD_CAP,
+    "max_lines",
+  );
+  if (maxLinesParsed.ok !== true) {
+    return { text: maxLinesParsed.error, isError: true };
+  }
+
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? defaultCwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  const command: FileDiffCommand = {
+    kind: "diff",
+    path: pathRaw,
+    ...(oldPath !== undefined ? { oldPath } : {}),
+    from: fromParsed.ref,
+    to: toParsed.ref,
+    untracked,
+    ignoreWs,
+    ignoreBlank,
+    mode,
+    maxHunks: maxHunksParsed.value,
+    maxLines: maxLinesParsed.value,
+    json: true,
+  };
+  try {
+    const report = buildFileDiffReport(resolved.root, command);
+    return {
+      text: JSON.stringify(report, null, 2),
+      isError: report.error !== undefined,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `file diff failed: ${detail}`, isError: true };
+  }
+}
+
 function runSearchFilesTool(
   input: unknown,
   defaultCwd?: string,
@@ -1516,6 +1739,7 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_file_show: read a file (or a line range) at any ref.",
     "  - code_viewer_file_blame: per-line blame (sha / author / time / summary).",
     "  - code_viewer_file_history: commit history for one path (follows renames).",
+    "  - code_viewer_file_diff: unified diff for one path (preview-capped by default).",
     "  - code_viewer_search_files: rank repo paths by fuzzy or glob match.",
     "  - code_viewer_search_code: grep the repo (rg / git grep / fallback).",
     "  - code_viewer_datastore_sources: discover read-only datastore source ids.",

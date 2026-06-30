@@ -4,10 +4,10 @@
 //   blame   → git.blame   (uses git.normalizeBlameRef for ref/base handling)
 //   history → git.commitHistory
 //   show    → worktree read or git.show for committed refs
+//   diff    → git.fileDiffText / git.untrackedFileDiff
 //
-// No new git command is constructed here — committed reads still go through
-// `git.ts`, so this CLI can never drift from the browser's blame / history /
-// source views.
+// Git invocations stay in `git.ts`, so this CLI can never drift from the
+// browser's per-file inspection views.
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -21,12 +21,16 @@ import {
   BLAME_ZERO_SHA,
   blame,
   commitHistory,
+  fileDiffText,
   type GitBlameBase,
   type GitBlameLine,
   type GitBlameResult,
   type GitHistoryCommit,
   show,
+  truncateToNHunks,
+  untrackedFileDiff,
 } from "./git";
+import { isSameWorktreeRange } from "./range";
 
 export type FileBlameCommand = {
   kind: "blame";
@@ -55,12 +59,28 @@ export type FileShowCommand = {
   json: boolean;
 };
 
+export type FileDiffCommand = {
+  kind: "diff";
+  path: string;
+  oldPath?: string;
+  from: string;
+  to: string;
+  untracked: boolean;
+  ignoreWs: boolean;
+  ignoreBlank: boolean;
+  mode: "preview" | "full";
+  maxHunks: number;
+  maxLines: number;
+  json: boolean;
+};
+
 export type FileCommand =
   | { kind: "help" }
   | { kind: "agent-help" }
   | FileBlameCommand
   | FileHistoryCommand
-  | FileShowCommand;
+  | FileShowCommand
+  | FileDiffCommand;
 
 export type FileArgs = {
   command: FileCommand;
@@ -73,13 +93,19 @@ export type FileParseResult =
 
 export const FILE_DEFAULT_HISTORY_LIMIT = 20;
 export const FILE_HISTORY_HARD_CAP = 200;
+export const FILE_DIFF_DEFAULT_MAX_HUNKS = 3;
+export const FILE_DIFF_DEFAULT_MAX_LINES = 1200;
+export const FILE_DIFF_HUNK_HARD_CAP = 100;
+export const FILE_DIFF_LINE_HARD_CAP = 100_000;
 
-export const FILE_HELP = `code-viewer file — inspect a path's blame, history, or contents
+export const FILE_HELP = `code-viewer file — inspect a path's blame, history, contents, or diff
 
 Usage:
   code-viewer file blame   --path <path> [--ref <ref>] [--base <worktree|HEAD>] [--json] [--cwd <dir>]
   code-viewer file history --path <path> [--ref <ref>] [--limit <n>] [--skip <n>] [--query <text>] [--json] [--cwd <dir>]
   code-viewer file show    --path <path> [--ref <ref>] [--start <line>] [--end <line>] [--json] [--cwd <dir>]
+  code-viewer file diff    --path <path> [--from <ref>] [--to <ref>] [--old-path <path>] [--untracked]
+                           [--ignore-ws] [--ignore-blank] [--max-hunks <n>] [--max-lines <n>] [--full] [--json] [--cwd <dir>]
   code-viewer file --help
   code-viewer file agent-help
 
@@ -108,6 +134,25 @@ show options:
   --end <line>    1-indexed end line (inclusive). Requires --start.
                   --start / --end must satisfy 1 <= start <= end.
 
+diff options:
+  --from <ref>    Range start ref. Default: HEAD. The literal "worktree" means
+                  the working tree.
+  --to <ref>      Range end ref. Default: worktree.
+  --old-path <p>  Previous path when the file was renamed inside the range.
+                  Same path validation rules as --path.
+  --untracked     Diff an untracked worktree file against /dev/null.
+                  Cannot be combined with --from; only valid when --to is
+                  worktree (or omitted).
+  --ignore-ws     Pass -w to git diff (ignore all whitespace changes).
+  --ignore-blank  Pass --ignore-blank-lines to git diff.
+  --max-hunks <n> Maximum hunks to render in preview mode. Clamped to
+                  [1, ${FILE_DIFF_HUNK_HARD_CAP}]. Default ${FILE_DIFF_DEFAULT_MAX_HUNKS}.
+  --max-lines <n> Maximum total lines (header + hunks) to render in preview
+                  mode. Clamped to [1, ${FILE_DIFF_LINE_HARD_CAP}]. Default
+                  ${FILE_DIFF_DEFAULT_MAX_LINES}.
+  --full          Disable the preview hunk/line caps and return the entire
+                  diff. Use with care — large diffs blow up AI context.
+
 Run "code-viewer file agent-help" for an AI-agent oriented guide.
 
 Exit codes:
@@ -121,13 +166,15 @@ You are an AI coding agent. After locating a path with
 "code-viewer search code" or by reading a diff, use this command to
 investigate that path WITHOUT shelling out to git yourself. The CLI
 reuses the same git/worktree read paths the browser uses, so blame /
-history / show match the on-screen Blame, History, and Source tabs.
+history / show / diff match the on-screen Blame, History, Source, and
+Diff Viewer views.
 
 ## When to use
 
 - "Who wrote this line?" → file blame.
 - "What changed on this path recently?" → file history.
 - "Read the file (or a line range) as of a ref" → file show.
+- "Show me the actual diff for this path between two refs" → file diff.
 - Pre-flight for "code-viewer annotate add" — confirm the line range
   you are about to annotate is the one you mean.
 
@@ -147,6 +194,11 @@ history / show match the on-screen Blame, History, and Source tabs.
   code-viewer file show --path src/sample.ts --json
   code-viewer file show --path src/sample.ts --start 100 --end 150 --json
   code-viewer file show --path src/sample.ts --ref main --json
+  code-viewer file diff --path src/sample.ts --json
+  code-viewer file diff --path src/sample.ts --from main --to HEAD --json
+  code-viewer file diff --path src/sample.ts --full --json
+  code-viewer file diff --path new_sample.ts --untracked --json
+  code-viewer file diff --path renamed.ts --old-path original.ts --from HEAD~1 --to HEAD --json
 
 ## Output contract
 
@@ -178,6 +230,26 @@ history / show match the on-screen Blame, History, and Source tabs.
       "complete": boolean,     // true when the returned text covers the whole file
       "text": string
     }
+  diff:
+    {
+      "path": string,
+      "old_path"?: string,
+      "from": string,                  // "/dev/null" when untracked is true
+      "to": string,
+      "untracked": boolean,
+      "ignore_ws": boolean,
+      "ignore_blank": boolean,
+      "mode": "preview"|"full",
+      "max_hunks": number|null,        // null in full mode
+      "max_lines": number|null,        // null in full mode
+      "diff": string,                  // unified diff text
+      "hunk_count": number,            // total hunks before truncation
+      "rendered_hunk_count": number,   // hunks actually included in diff
+      "line_count": number,            // total newlines in the returned diff
+      "truncated": boolean,            // true when preview dropped hunks/lines
+      "binary": boolean,               // git emitted "Binary files ..."
+      "error"?: string                 // git stderr (also exits 1)
+    }
 
 Default (non --json) output:
 
@@ -186,6 +258,8 @@ Default (non --json) output:
   history:  one line per commit       →  <shortSha><TAB><whenISO><TAB><author><TAB><subject>
             0 commits prints "no history" to stderr, exit 0.
   show:     the file (or sliced lines) as text. 0-byte files succeed (exit 0).
+  diff:     unified diff text (the same bytes the JSON "diff" field carries).
+            Empty (or worktree==worktree) returns nothing on stdout, exit 0.
 
 ## Tips
 
@@ -197,8 +271,14 @@ Default (non --json) output:
   when you need a committed snapshot.
 - A non-fatal git failure (e.g. unknown ref, unsafe path) returns the
   error string inside the JSON "result.error" / "error" field AND exits 1.
+- file diff defaults to preview mode (${FILE_DIFF_DEFAULT_MAX_HUNKS} hunks /
+  ${FILE_DIFF_DEFAULT_MAX_LINES} lines). Use --full only when you need every
+  hunk — preview matches the browser's initial paint and is almost always
+  enough context for an LLM. In full mode, max_hunks / max_lines are null in
+  JSON because no preview cap is applied. Worktree == Worktree range returns
+  "" instantly.
 - Use "code-viewer search code" to discover the path first, then drill
-  in with blame / history / show.
+  in with blame / history / show / diff.
 `;
 
 const VALUE_FLAGS = new Set([
@@ -210,13 +290,26 @@ const VALUE_FLAGS = new Set([
   "--query",
   "--start",
   "--end",
+  "--from",
+  "--to",
+  "--old-path",
+  "--max-hunks",
+  "--max-lines",
 ]);
-const BOOL_FLAGS = new Set(["--json"]);
+const BOOL_FLAGS = new Set([
+  "--json",
+  "--untracked",
+  "--ignore-ws",
+  "--ignore-blank",
+  "--full",
+]);
 
 const DEFAULT_BLAME_REF = "worktree";
 const DEFAULT_BLAME_BASE: GitBlameBase = "worktree";
 const DEFAULT_HISTORY_REF = "HEAD";
 const DEFAULT_SHOW_REF = "worktree";
+const DEFAULT_DIFF_FROM = "HEAD";
+const DEFAULT_DIFF_TO = "worktree";
 
 function validatePath(value: string): string | undefined {
   return validateRepoRelativePathValue(value, "--path");
@@ -287,7 +380,8 @@ export function parseFileArgs(argv: string[]): FileParseResult {
   if (
     subcommand !== "blame" &&
     subcommand !== "history" &&
-    subcommand !== "show"
+    subcommand !== "show" &&
+    subcommand !== "diff"
   ) {
     return { ok: false, error: `unknown file subcommand: ${subcommand}` };
   }
@@ -373,47 +467,152 @@ export function parseFileArgs(argv: string[]): FileParseResult {
     };
   }
 
-  // subcommand === "show"
-  const hasStart = options.has("--start");
-  const hasEnd = options.has("--end");
-  if (hasStart !== hasEnd) {
-    return { ok: false, error: "--start and --end must be used together" };
+  if (subcommand === "show") {
+    const hasStart = options.has("--start");
+    const hasEnd = options.has("--end");
+    if (hasStart !== hasEnd) {
+      return { ok: false, error: "--start and --end must be used together" };
+    }
+    let start: number | undefined;
+    let end: number | undefined;
+    if (hasStart && hasEnd) {
+      const s = parseIntegerInRange(
+        options.get("--start") ?? "",
+        "--start",
+        1,
+        Number.MAX_SAFE_INTEGER,
+      );
+      if ("error" in s) return { ok: false, error: s.error };
+      const e = parseIntegerInRange(
+        options.get("--end") ?? "",
+        "--end",
+        1,
+        Number.MAX_SAFE_INTEGER,
+      );
+      if ("error" in e) return { ok: false, error: e.error };
+      if (s.value > e.value) {
+        return {
+          ok: false,
+          error: `--start (${s.value}) must be <= --end (${e.value})`,
+        };
+      }
+      start = s.value;
+      end = e.value;
+    }
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "show",
+          path,
+          ref: rawRef ?? DEFAULT_SHOW_REF,
+          start,
+          end,
+          json,
+        },
+        cwd,
+      },
+    };
   }
-  let start: number | undefined;
-  let end: number | undefined;
-  if (hasStart && hasEnd) {
-    const s = parseIntegerInRange(
-      options.get("--start") ?? "",
-      "--start",
-      1,
-      Number.MAX_SAFE_INTEGER,
+
+  // subcommand === "diff"
+  // `--ref` は diff の意味で曖昧なので明示的に拒否する。AI 側のミスを早期に
+  // 拾えるよう、サイレントに無視せずエラーにする。from/to を使う。
+  if (options.has("--ref")) {
+    return {
+      ok: false,
+      error: "file diff does not accept --ref; use --from / --to instead",
+    };
+  }
+  const rawFrom = options.get("--from");
+  if (rawFrom !== undefined) {
+    const fromError = validateRefValue(rawFrom, "--from");
+    if (fromError) return { ok: false, error: fromError };
+  }
+  const rawTo = options.get("--to");
+  if (rawTo !== undefined) {
+    const toError = validateRefValue(rawTo, "--to");
+    if (toError) return { ok: false, error: toError };
+  }
+  const from = rawFrom ?? DEFAULT_DIFF_FROM;
+  const to = rawTo ?? DEFAULT_DIFF_TO;
+
+  const oldPathRaw = options.get("--old-path");
+  if (oldPathRaw !== undefined) {
+    const oldPathError = validateRepoRelativePathValue(
+      oldPathRaw,
+      "--old-path",
     );
-    if ("error" in s) return { ok: false, error: s.error };
-    const e = parseIntegerInRange(
-      options.get("--end") ?? "",
-      "--end",
-      1,
-      Number.MAX_SAFE_INTEGER,
-    );
-    if ("error" in e) return { ok: false, error: e.error };
-    if (s.value > e.value) {
+    if (oldPathError) return { ok: false, error: oldPathError };
+  }
+
+  const untracked = flags.has("--untracked");
+  if (untracked && rawFrom !== undefined) {
+    return {
+      ok: false,
+      error: "--untracked cannot be combined with --from",
+    };
+  }
+  if (untracked && to !== "worktree") {
+    return {
+      ok: false,
+      error: "--untracked requires --to worktree (or --to omitted)",
+    };
+  }
+  const ignoreWs = flags.has("--ignore-ws");
+  const ignoreBlank = flags.has("--ignore-blank");
+  const full = flags.has("--full");
+
+  let maxHunks = FILE_DIFF_DEFAULT_MAX_HUNKS;
+  if (options.has("--max-hunks")) {
+    if (full) {
       return {
         ok: false,
-        error: `--start (${s.value}) must be <= --end (${e.value})`,
+        error: "--max-hunks cannot be combined with --full",
       };
     }
-    start = s.value;
-    end = e.value;
+    const parsed = parseIntegerInRange(
+      options.get("--max-hunks") ?? "",
+      "--max-hunks",
+      1,
+      FILE_DIFF_HUNK_HARD_CAP,
+    );
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    maxHunks = parsed.value;
   }
+  let maxLines = FILE_DIFF_DEFAULT_MAX_LINES;
+  if (options.has("--max-lines")) {
+    if (full) {
+      return {
+        ok: false,
+        error: "--max-lines cannot be combined with --full",
+      };
+    }
+    const parsed = parseIntegerInRange(
+      options.get("--max-lines") ?? "",
+      "--max-lines",
+      1,
+      FILE_DIFF_LINE_HARD_CAP,
+    );
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    maxLines = parsed.value;
+  }
+
   return {
     ok: true,
     args: {
       command: {
-        kind: "show",
+        kind: "diff",
         path,
-        ref: rawRef ?? DEFAULT_SHOW_REF,
-        start,
-        end,
+        ...(oldPathRaw !== undefined ? { oldPath: oldPathRaw } : {}),
+        from,
+        to,
+        untracked,
+        ignoreWs,
+        ignoreBlank,
+        mode: full ? "full" : "preview",
+        maxHunks,
+        maxLines,
         json,
       },
       cwd,
@@ -687,6 +886,134 @@ function runShow(root: string, command: FileShowCommand): void {
   }
 }
 
+// JSON shape `code-viewer file diff --json` emits, also returned verbatim
+// by the MCP tool `code_viewer_file_diff`. Pure; never throws — git failures
+// are surfaced via the `error` field.
+//
+// Field naming follows the existing /file_diff HTTP payload (snake_case)
+// emitted by preview.ts:handleFileDiff so AI agents can reuse most parsing.
+// Browser-only fields (`status`, `generation`) are intentionally omitted.
+export type FileDiffReport = {
+  path: string;
+  old_path?: string;
+  from: string;
+  to: string;
+  untracked: boolean;
+  ignore_ws: boolean;
+  ignore_blank: boolean;
+  mode: "preview" | "full";
+  max_hunks: number | null;
+  max_lines: number | null;
+  diff: string;
+  hunk_count: number;
+  rendered_hunk_count: number;
+  line_count: number;
+  truncated: boolean;
+  binary: boolean;
+  error?: string;
+};
+
+// Mirrors preview.ts:buildRangeArgs: a ref of "worktree" (or empty) drops
+// out of the git diff arg list so the working tree implicitly fills that
+// side. Pure; consumed only by buildFileDiffReport.
+function buildFileDiffRangeArgs(from: string, to: string): string[] {
+  const refs: string[] = [];
+  if (from && from !== "worktree") refs.push(from);
+  if (to && to !== "worktree") refs.push(to);
+  return refs;
+}
+
+export function buildFileDiffReport(
+  root: string,
+  command: FileDiffCommand,
+): FileDiffReport {
+  const base: FileDiffReport = {
+    path: command.path,
+    ...(command.oldPath !== undefined ? { old_path: command.oldPath } : {}),
+    from: command.untracked ? "/dev/null" : command.from,
+    to: command.to,
+    untracked: command.untracked,
+    ignore_ws: command.ignoreWs,
+    ignore_blank: command.ignoreBlank,
+    mode: command.mode,
+    max_hunks: command.mode === "preview" ? command.maxHunks : null,
+    max_lines: command.mode === "preview" ? command.maxLines : null,
+    diff: "",
+    hunk_count: 0,
+    rendered_hunk_count: 0,
+    line_count: 0,
+    truncated: false,
+    binary: false,
+  };
+
+  // Same-worktree range is a no-op: same as preview.ts:handleFileDiff.
+  // Short-circuit avoids spawning a git process to print nothing.
+  if (
+    !command.untracked &&
+    isSameWorktreeRange({ from: command.from, to: command.to })
+  ) {
+    return base;
+  }
+
+  const extras: string[] = [];
+  if (command.ignoreWs) extras.push("-w");
+  if (command.ignoreBlank) extras.push("--ignore-blank-lines");
+
+  let diffText = "";
+  let errText = "";
+  if (command.untracked) {
+    const res = untrackedFileDiff(extras, command.path, root);
+    diffText = res.stdout || "";
+    if (res.code !== 0) errText = res.stderr.trim();
+  } else {
+    const args = [
+      ...extras,
+      ...buildFileDiffRangeArgs(command.from, command.to),
+    ];
+    const paths =
+      command.oldPath !== undefined
+        ? [command.oldPath, command.path]
+        : command.path;
+    const res = fileDiffText(args, paths, root);
+    diffText = res.stdout || "";
+    if (res.code !== 0) errText = res.stderr.trim();
+  }
+
+  const truncated =
+    command.mode === "preview"
+      ? truncateToNHunks(diffText, command.maxHunks, command.maxLines)
+      : truncateToNHunks(diffText, 1e9);
+  const previewTruncated =
+    command.mode === "preview" &&
+    (truncated.totalHunks > truncated.renderedHunks || truncated.lineTruncated);
+
+  return {
+    ...base,
+    diff: truncated.text,
+    hunk_count: truncated.totalHunks,
+    rendered_hunk_count: truncated.renderedHunks,
+    line_count: truncated.lineCount,
+    truncated: previewTruncated,
+    binary: diffText.includes("Binary files"),
+    ...(errText ? { error: errText } : {}),
+  };
+}
+
+function runDiff(root: string, command: FileDiffCommand): void {
+  const report = buildFileDiffReport(root, command);
+  if (command.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else if (report.diff.length > 0) {
+    // text 出力モードでは git diff そのままを stdout に流す。truncated/binary
+    // 情報は --json でだけ意味があるので、ここでは header を増やさない。
+    console.log(report.diff);
+  }
+  if (report.error !== undefined) {
+    console.error(`diff failed: ${report.error}`);
+    process.exit(1);
+  }
+}
+
 export async function runFileCli(argv: string[]): Promise<void> {
   const parsed = parseFileArgs(argv);
   if (parsed.ok === false) {
@@ -707,4 +1034,5 @@ export async function runFileCli(argv: string[]): Promise<void> {
   if (command.kind === "blame") return runBlame(root, command);
   if (command.kind === "history") return runHistory(root, command);
   if (command.kind === "show") return runShow(root, command);
+  if (command.kind === "diff") return runDiff(root, command);
 }

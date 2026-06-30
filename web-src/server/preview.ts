@@ -202,7 +202,7 @@ Usage:
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options]
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
   code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
-  code-viewer file <blame|history|show> --path <p> [--ref <ref>] [...subcommand options] [--json]
+  code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
   code-viewer agent-help
