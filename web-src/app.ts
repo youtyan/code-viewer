@@ -3399,6 +3399,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     setRange,
     setRoute,
+    loadRepo,
     renderStandaloneSource,
     getFrom: () => STATE.from,
     getTo: () => STATE.to,
