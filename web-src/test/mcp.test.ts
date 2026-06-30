@@ -157,6 +157,8 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_agent_help")).toBe(true);
     expect(names.includes("code_viewer_status")).toBe(true);
     expect(names.includes("code_viewer_file_show")).toBe(true);
+    expect(names.includes("code_viewer_file_blame")).toBe(true);
+    expect(names.includes("code_viewer_file_history")).toBe(true);
     expect(names.includes("code_viewer_search_files")).toBe(true);
     expect(names.includes("code_viewer_search_code")).toBe(true);
     expect(names.includes("code_viewer_datastore_sources")).toBe(true);
@@ -1315,6 +1317,316 @@ describe("dispatchJsonRpc — tools/call code_viewer_file_show (fixture repo)", 
     };
     expect(payload.isError).toBe(true);
     expect(payload.content[0].text).toMatch(/end must be >= start/);
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_file_blame (fixture repo)", () => {
+  let repo: string;
+  let firstSha: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-file-blame-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author@example.invalid"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "line one\nline two\nline three\n",
+    );
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+    firstSha = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "line one\nline two\nline three\nline four from worktree\n",
+    );
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("blames the worktree and exposes uncommitted lines as the zero sha", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 200,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_blame",
+        arguments: { cwd: repo, path: "sample_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.path).toBe("sample_file.ts");
+    expect(report.ref).toBe("worktree");
+    expect(report.base).toBe("worktree");
+    expect(Array.isArray(report.result.lines)).toBe(true);
+    expect(report.result.lines).toHaveLength(4);
+    const firstThree = report.result.lines.slice(0, 3);
+    for (const line of firstThree) {
+      expect(line.sha).toBe(firstSha);
+      expect(line.isUncommitted).toBe(false);
+    }
+    const worktreeLine = report.result.lines[3];
+    expect(worktreeLine.isUncommitted).toBe(true);
+    expect(worktreeLine.sha).toBe("0000000000000000000000000000000000000000");
+  });
+
+  test("base=HEAD ignores the worktree and resolves committed shas only", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 201,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_blame",
+        arguments: { cwd: repo, path: "sample_file.ts", base: "HEAD" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.base).toBe("HEAD");
+    expect(report.result.lines).toHaveLength(3);
+    for (const line of report.result.lines) {
+      expect(line.sha).toBe(firstSha);
+      expect(line.isUncommitted).toBe(false);
+    }
+    expect(report.result.commits[firstSha].author).toBe("sample-author");
+  });
+
+  test("base must be 'worktree' or 'HEAD' (isError on garbage)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 202,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_blame",
+        arguments: { cwd: repo, path: "sample_file.ts", base: "INDEX" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/base must be/);
+  });
+
+  test("rejects unsafe path values with isError true (shared with file_show)", async () => {
+    for (const bad of [
+      { path: "../escape", expect: /'\.\.' segments/ },
+      { path: "/abs", expect: /repo-relative/ },
+      { path: "-trick", expect: /must not start with '-'/ },
+      { path: "with\nnewline", expect: /single-line/ },
+    ] as const) {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: 203,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_file_blame",
+          arguments: { cwd: repo, path: bad.path },
+        },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      expect(payload.content[0].text).toMatch(bad.expect);
+    }
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_file_history (fixture repo)", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-file-history-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author@example.invalid"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "v1\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample first commit"]);
+    writeFileSync(join(repo, "sample_file.ts"), "v2\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample second commit"]);
+    writeFileSync(join(repo, "sample_file.ts"), "v3\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample third commit"]);
+    writeFileSync(join(repo, "untracked_file.ts"), "no commits\n");
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("default ref=HEAD returns all commits for a tracked path", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 300,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: { cwd: repo, path: "sample_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.path).toBe("sample_file.ts");
+    expect(report.ref).toBe("HEAD");
+    expect(report.limit).toBe(20);
+    expect(report.skip).toBe(0);
+    expect(report.query).toBeUndefined();
+    expect(report.result.commits).toHaveLength(3);
+    expect(report.result.hasMore).toBe(false);
+    expect(report.result.commits[0].subject).toBe("sample third commit");
+    expect(report.result.commits[2].subject).toBe("sample first commit");
+  });
+
+  test("limit + skip paginate and set hasMore correctly", async () => {
+    const first = await call({
+      jsonrpc: "2.0",
+      id: 301,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: { cwd: repo, path: "sample_file.ts", limit: 2, skip: 0 },
+      },
+    });
+    if (first.kind !== "response") throw new Error("expected response");
+    const firstPayload = first.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(firstPayload.isError).toBe(false);
+    const firstReport = JSON.parse(firstPayload.content[0].text);
+    expect(firstReport.result.commits).toHaveLength(2);
+    expect(firstReport.result.hasMore).toBe(true);
+
+    const second = await call({
+      jsonrpc: "2.0",
+      id: 302,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: { cwd: repo, path: "sample_file.ts", limit: 2, skip: 2 },
+      },
+    });
+    if (second.kind !== "response") throw new Error("expected response");
+    const secondPayload = second.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(secondPayload.isError).toBe(false);
+    const secondReport = JSON.parse(secondPayload.content[0].text);
+    expect(secondReport.result.commits).toHaveLength(1);
+    expect(secondReport.result.hasMore).toBe(false);
+    expect(secondReport.result.commits[0].subject).toBe("sample first commit");
+  });
+
+  test("query is echoed back and filters commits by author", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 303,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: {
+          cwd: repo,
+          path: "sample_file.ts",
+          query: "author:nobody-matches-this-author",
+        },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.query).toBe("author:nobody-matches-this-author");
+    expect(report.result.commits).toHaveLength(0);
+    expect(report.result.hasMore).toBe(false);
+    expect(report.result.error).toBeUndefined();
+  });
+
+  test("path with no history succeeds with empty commits (CLI parity)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 304,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: { cwd: repo, path: "untracked_file.ts" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.result.commits).toHaveLength(0);
+    expect(report.result.error).toBeUndefined();
+  });
+
+  test("limit out of range and non-string query are rejected with isError", async () => {
+    const overLimit = await call({
+      jsonrpc: "2.0",
+      id: 305,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: { cwd: repo, path: "sample_file.ts", limit: 99999 },
+      },
+    });
+    if (overLimit.kind !== "response") throw new Error("expected response");
+    const overPayload = overLimit.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(overPayload.isError).toBe(true);
+    expect(overPayload.content[0].text).toMatch(/limit must be an integer/);
+
+    const badQuery = await call({
+      jsonrpc: "2.0",
+      id: 306,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_file_history",
+        arguments: {
+          cwd: repo,
+          path: "sample_file.ts",
+          query: "has\nnewline",
+        },
+      },
+    });
+    if (badQuery.kind !== "response") throw new Error("expected response");
+    const queryPayload = badQuery.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(queryPayload.isError).toBe(true);
+    expect(queryPayload.content[0].text).toMatch(/single-line/);
   });
 });
 

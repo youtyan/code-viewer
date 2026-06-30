@@ -447,35 +447,48 @@ function formatHistoryText(commits: GitHistoryCommit[]): string[] {
   );
 }
 
-function runBlame(root: string, command: FileBlameCommand): void {
+// JSON shape `code-viewer file blame --json` emits, also returned verbatim
+// by the MCP tool `code_viewer_file_blame`. Pure; never throws — git.blame
+// already surfaces failures as `result.error`.
+export type FileBlameReport = {
+  path: string;
+  ref: string;
+  base: GitBlameBase;
+  result: GitBlameResult;
+};
+
+export function buildFileBlameReport(
+  root: string,
+  command: FileBlameCommand,
+): FileBlameReport {
   const result = blame(root, {
     path: command.path,
     ref: command.ref,
     base: command.base,
   });
-  if (command.json) {
-    console.log(
-      JSON.stringify(
-        {
-          path: command.path,
-          ref: command.ref,
-          base: command.base,
-          result,
-        },
-        null,
-        2,
-      ),
-    );
-  } else {
-    for (const line of formatBlameText(result)) console.log(line);
-  }
-  if (result.error) {
-    console.error(`blame failed: ${result.error}`);
-    process.exit(1);
-  }
+  return {
+    path: command.path,
+    ref: command.ref,
+    base: command.base,
+    result,
+  };
 }
 
-function runHistory(root: string, command: FileHistoryCommand): void {
+// JSON shape `code-viewer file history --json` emits, also returned
+// verbatim by the MCP tool `code_viewer_file_history`. Pure; never throws.
+export type FileHistoryReport = {
+  path: string;
+  ref: string;
+  limit: number;
+  skip: number;
+  query?: string;
+  result: { commits: GitHistoryCommit[]; hasMore: boolean; error?: string };
+};
+
+export function buildFileHistoryReport(
+  root: string,
+  command: FileHistoryCommand,
+): FileHistoryReport {
   const result = commitHistory(root, {
     ref: command.ref,
     skip: command.skip,
@@ -483,30 +496,44 @@ function runHistory(root: string, command: FileHistoryCommand): void {
     query: command.query,
     path: command.path,
   });
+  return {
+    path: command.path,
+    ref: command.ref,
+    limit: command.limit,
+    skip: command.skip,
+    ...(command.query !== undefined ? { query: command.query } : {}),
+    result,
+  };
+}
+
+function runBlame(root: string, command: FileBlameCommand): void {
+  const report = buildFileBlameReport(root, command);
   if (command.json) {
-    console.log(
-      JSON.stringify(
-        {
-          path: command.path,
-          ref: command.ref,
-          limit: command.limit,
-          skip: command.skip,
-          ...(command.query !== undefined ? { query: command.query } : {}),
-          result,
-        },
-        null,
-        2,
-      ),
-    );
-  } else if (result.commits.length === 0) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const line of formatBlameText(report.result)) console.log(line);
+  }
+  if (report.result.error) {
+    console.error(`blame failed: ${report.result.error}`);
+    process.exit(1);
+  }
+}
+
+function runHistory(root: string, command: FileHistoryCommand): void {
+  const report = buildFileHistoryReport(root, command);
+  if (command.json) {
+    console.log(JSON.stringify(report, null, 2));
+  } else if (report.result.commits.length === 0) {
     // history のデフォルト出力で 0 件は no history を stderr、stdout は空、exit 0。
     // (file blame と違って、commit が無い path は "失敗" ではない)
-    if (!result.error) console.error("no history");
+    if (!report.result.error) console.error("no history");
   } else {
-    for (const line of formatHistoryText(result.commits)) console.log(line);
+    for (const line of formatHistoryText(report.result.commits)) {
+      console.log(line);
+    }
   }
-  if (result.error) {
-    console.error(`history failed: ${result.error}`);
+  if (report.result.error) {
+    console.error(`history failed: ${report.result.error}`);
     process.exit(1);
   }
 }

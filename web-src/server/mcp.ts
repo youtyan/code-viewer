@@ -40,7 +40,16 @@ import {
   DB_QUERY_HARD_CAP_MAX_ROWS,
   type DbServiceResult,
 } from "./database/handle";
-import { buildFileShowReport, type FileShowCommand } from "./file-cli";
+import {
+  buildFileBlameReport,
+  buildFileHistoryReport,
+  buildFileShowReport,
+  FILE_DEFAULT_HISTORY_LIMIT,
+  FILE_HISTORY_HARD_CAP,
+  type FileBlameCommand,
+  type FileHistoryCommand,
+  type FileShowCommand,
+} from "./file-cli";
 import { ROOT } from "./root";
 import {
   DEFAULT_EXCLUDE_NAMES,
@@ -223,6 +232,90 @@ export function defaultMcpTools(
       },
       run(input) {
         return runFileShowTool(input, options.cwd);
+      },
+    },
+    {
+      name: "code_viewer_file_blame",
+      title: "code-viewer file blame",
+      description:
+        "Returns the same JSON payload `code-viewer file blame --json` emits: path, ref, base ('worktree' | 'HEAD'), and result (GitBlameResult with lines, commits keyed by sha, optional isUntracked / isSynthetic / error). Read-only. ref defaults to 'worktree'; base defaults to 'worktree' (uncommitted edits show as the zero sha). Pair with code_viewer_file_show to ground a change in the commit that introduced it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Repo-relative file path (single-line, no NUL / '..' segments / leading '-' / leading slash). Required.",
+          },
+          ref: {
+            type: "string",
+            description:
+              "Git ref. Defaults to 'worktree'. Pass HEAD / a branch / a commit / a tag for a committed blame. Used only when base is 'HEAD'.",
+          },
+          base: {
+            type: "string",
+            enum: ["worktree", "HEAD"],
+            description:
+              "Blame base. 'worktree' (default) keeps uncommitted edits visible as the zero sha; 'HEAD' forces a committed-only blame against `ref` (or HEAD when ref is omitted).",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runFileBlameTool(input, options.cwd);
+      },
+    },
+    {
+      name: "code_viewer_file_history",
+      title: "code-viewer file history",
+      description:
+        "Returns the same JSON payload `code-viewer file history --json` emits: path, ref, limit, skip, optional query, and result (commits with sha/author/when/subject, hasMore, optional error). Read-only. ref defaults to 'HEAD'. Follows renames for file paths. Use `query` for the same 'author:' / 'path:' / sha-prefix filters the browser history view accepts.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Repo-relative file path (single-line, no NUL / '..' segments / leading '-' / leading slash). Required. Trailing '/' is treated as a directory (no --follow).",
+          },
+          ref: {
+            type: "string",
+            description:
+              "Git ref to walk. Defaults to 'HEAD'. Pass a branch / commit / tag to inspect a different tip.",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: FILE_HISTORY_HARD_CAP,
+            description: `Maximum commits to return. Clamped to [1, ${FILE_HISTORY_HARD_CAP}]. Default ${FILE_DEFAULT_HISTORY_LIMIT}. \`result.hasMore: true\` indicates more commits are available; bump \`skip\` to paginate.`,
+          },
+          skip: {
+            type: "integer",
+            minimum: 0,
+            description: "Non-negative pagination offset. Default 0.",
+          },
+          query: {
+            type: "string",
+            description:
+              "Optional git log filter, passed verbatim to commitHistory. Supports the 'author:' and 'path:' prefixes the browser history view uses. Single-line, no NUL.",
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runFileHistoryTool(input, options.cwd);
       },
     },
     {
@@ -749,6 +842,143 @@ function runFileShowTool(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { text: `file show failed: ${detail}`, isError: true };
+  }
+}
+
+function runFileBlameTool(
+  input: unknown,
+  defaultCwd?: string,
+): McpToolRunReturn {
+  const params = isPlainObject(input) ? input : {};
+  const pathRaw = params.path;
+  if (typeof pathRaw !== "string") {
+    return { text: "path must be a string", isError: true };
+  }
+  const pathError = validateMcpPath(pathRaw);
+  if (pathError) return { text: pathError, isError: true };
+
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const refParsed = validateMcpRef(params.ref, "worktree");
+  if (refParsed.ok !== true) {
+    return { text: refParsed.error, isError: true };
+  }
+
+  const baseRaw = params.base;
+  let base: "worktree" | "HEAD" = "worktree";
+  if (baseRaw !== undefined) {
+    if (baseRaw !== "worktree" && baseRaw !== "HEAD") {
+      return { text: "base must be 'worktree' or 'HEAD'", isError: true };
+    }
+    base = baseRaw;
+  }
+
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? defaultCwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  const command: FileBlameCommand = {
+    kind: "blame",
+    path: pathRaw,
+    ref: refParsed.ref,
+    base,
+    json: true,
+  };
+  try {
+    const report = buildFileBlameReport(resolved.root, command);
+    return {
+      text: JSON.stringify(report, null, 2),
+      isError: report.result.error !== undefined,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `file blame failed: ${detail}`, isError: true };
+  }
+}
+
+function runFileHistoryTool(
+  input: unknown,
+  defaultCwd?: string,
+): McpToolRunReturn {
+  const params = isPlainObject(input) ? input : {};
+  const pathRaw = params.path;
+  if (typeof pathRaw !== "string") {
+    return { text: "path must be a string", isError: true };
+  }
+  const pathError = validateMcpPath(pathRaw);
+  if (pathError) return { text: pathError, isError: true };
+
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const refParsed = validateMcpRef(params.ref, "HEAD");
+  if (refParsed.ok !== true) {
+    return { text: refParsed.error, isError: true };
+  }
+
+  const limitParsed = validateMcpIntegerLimit(
+    params.limit,
+    FILE_DEFAULT_HISTORY_LIMIT,
+    1,
+    FILE_HISTORY_HARD_CAP,
+    "limit",
+  );
+  if (limitParsed.ok !== true) {
+    return { text: limitParsed.error, isError: true };
+  }
+  const skipParsed = validateMcpIntegerLimit(
+    params.skip,
+    0,
+    0,
+    Number.MAX_SAFE_INTEGER,
+    "skip",
+  );
+  if (skipParsed.ok !== true) {
+    return { text: skipParsed.error, isError: true };
+  }
+
+  let query: string | undefined;
+  const queryRaw = params.query;
+  if (queryRaw !== undefined) {
+    if (typeof queryRaw !== "string") {
+      return { text: "query must be a string", isError: true };
+    }
+    if (queryRaw.includes("\0") || /[\r\n]/.test(queryRaw)) {
+      return {
+        text: "query must be single-line and must not contain NUL",
+        isError: true,
+      };
+    }
+    query = queryRaw;
+  }
+
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? defaultCwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  const command: FileHistoryCommand = {
+    kind: "history",
+    path: pathRaw,
+    ref: refParsed.ref,
+    limit: limitParsed.value,
+    skip: skipParsed.value,
+    ...(query !== undefined ? { query } : {}),
+    json: true,
+  };
+  try {
+    const report = buildFileHistoryReport(resolved.root, command);
+    return {
+      text: JSON.stringify(report, null, 2),
+      isError: report.result.error !== undefined,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `file history failed: ${detail}`, isError: true };
   }
 }
 
@@ -1284,6 +1514,8 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_agent_help: discover every AI-facing CLI subcommand.",
     "  - code_viewer_status: orient yourself inside the current repository.",
     "  - code_viewer_file_show: read a file (or a line range) at any ref.",
+    "  - code_viewer_file_blame: per-line blame (sha / author / time / summary).",
+    "  - code_viewer_file_history: commit history for one path (follows renames).",
     "  - code_viewer_search_files: rank repo paths by fuzzy or glob match.",
     "  - code_viewer_search_code: grep the repo (rg / git grep / fallback).",
     "  - code_viewer_datastore_sources: discover read-only datastore source ids.",
