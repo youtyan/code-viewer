@@ -65,6 +65,12 @@ if (process.argv[2] === "agent-help") {
   // reachable code-viewer server, but no SQLite driver of their own.
   const { runSearchCli } = await import("./search-cli");
   await runSearchCli(process.argv.slice(3));
+} else if (process.argv[2] === "file") {
+  // `file` delegates blame / history / show straight to git.ts — no SQLite
+  // and no running code-viewer server are needed, so the dispatch skips
+  // preflight entirely.
+  const { runFileCli } = await import("./file-cli");
+  await runFileCli(process.argv.slice(3));
 } else if (process.argv[2] === "skill") {
   const { runSkillCli } = await import("./skill-cli");
   runSkillCli(process.argv.slice(3));

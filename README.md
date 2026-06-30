@@ -392,11 +392,11 @@ conventions. Both `query` and `annotate` accept `--cwd <repo>` and
 `--server <url>` for targeting a specific running server.
 
 AI agents who don't yet know which subcommand they need can run
-`code-viewer agent-help` once. It prints a short index of the five
-AI-facing entry points (`query`, `annotate`, `search`, `skill`,
-`doctor`) with the exact `code-viewer <name> agent-help` command for
-each full guide. The index runs without any preflight, so it works
-even before SQLite or a running server is set up.
+`code-viewer agent-help` once. It prints a short index of the six
+AI-facing entry points (`query`, `annotate`, `search`, `file`,
+`skill`, `doctor`) with the exact `code-viewer <name> agent-help`
+command for each full guide. The index runs without any preflight,
+so it works even before SQLite or a running server is set up.
 
 ### Code search CLI
 
@@ -427,6 +427,45 @@ Parse errors and unreachable servers exit 1. `--max` accepts a positive
 integer up to the server's hard cap; `truncated=true` in the JSON
 response means more matches exist beyond the cap. Run
 `code-viewer search agent-help` for the full AI-agent guide.
+
+### File inspect CLI
+
+After `search` locates a path, `code-viewer file` drills into it
+from git refs or the worktree. The CLI reuses the same read paths the
+browser uses for the Blame, History, and Source tabs, so output matches
+the on-screen views. **No running code-viewer server is required** —
+these commands run locally, which makes them safe to use before the
+server has started (or from CI).
+
+```sh
+# "Who wrote this line?" — porcelain blame for a path, JSON DTO output.
+code-viewer file blame --path src/sample.ts --json
+
+# Force a committed-only blame against an explicit ref.
+code-viewer file blame --path src/sample.ts --base HEAD --ref main --json
+
+# "What changed on this path recently?" — paginated commit log.
+code-viewer file history --path src/sample.ts --limit 10 --json
+code-viewer file history --path src/sample.ts --query "author:tester" --json
+
+# Read the file (or a line range) as of a ref. AI-friendly JSON output
+# includes totalLines / complete so the caller knows what was sliced.
+code-viewer file show --path src/sample.ts --json
+code-viewer file show --path src/sample.ts --start 100 --end 150 --json
+code-viewer file show --path src/sample.ts --ref main --json
+```
+
+Default (non-`--json`) output is tab-separated and easy to grep:
+
+- `blame` — `<line><TAB><shortSha or "worktree"><TAB><summary>`. Lines
+  with uncommitted edits show `worktree` and `<uncommitted>`.
+- `history` — `<shortSha><TAB><whenISO><TAB><author><TAB><subject>`.
+  A path with zero commits prints `no history` to stderr and exits 0.
+- `show` — the worktree file (or sliced lines) by default. Pass `--ref`
+  for a committed snapshot. Empty slices succeed.
+
+Run `code-viewer file agent-help` for the full AI-agent guide
+including the JSON contract for each subcommand.
 
 ## AI Code Annotations
 
