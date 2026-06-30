@@ -262,6 +262,7 @@ describe("preview CLI", () => {
       /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search\|redis>/,
     );
     expect(stdout).toMatch(/code-viewer search code --term <text>/);
+    expect(stdout).toMatch(/code-viewer search files --term <pattern>/);
     expect(stdout).toMatch(
       /code-viewer file <blame\|history\|show> --path <p>/,
     );

@@ -4,14 +4,25 @@
 // introduced — `web-src/server/preview.ts:handleGrep` and
 // `web-src/server/search.ts` remain the single source of truth.
 
-import type { GrepResponse } from "../core/types";
+import {
+  type FuzzyRange,
+  isGlobPathQuery,
+  rankPathMatches,
+} from "../core/fuzzy-search";
+import type { FileSearchListResponse, GrepResponse } from "../core/types";
 import {
   ensureServerUrl,
   requestJson,
   resolveRepoRoot,
   takeValue,
 } from "./cli-helpers";
-import { GREP_ABSOLUTE_MAX, GREP_DEFAULT_MAX } from "./search";
+import {
+  FILE_SEARCH_ABSOLUTE_MAX,
+  GREP_ABSOLUTE_MAX,
+  GREP_DEFAULT_MAX,
+} from "./search";
+
+export const FILE_NAME_SEARCH_DEFAULT_MAX = 50;
 
 export type SearchCommand =
   | { kind: "help" }
@@ -24,7 +35,34 @@ export type SearchCommand =
       regex: boolean;
       max?: number;
       json: boolean;
+    }
+  // Sibling to `search code`: fetch the ref's file list from /_files, then
+  // rank paths locally with the same matcher used by the browser palette.
+  | {
+      kind: "files";
+      term: string;
+      ref?: string;
+      max: number;
+      json: boolean;
     };
+
+// JSON output for `search files`. The raw FileSearchListResponse can contain
+// up to the server cap, so the CLI emits a ranked and sliced shape instead.
+export type FileNameSearchJsonResult = {
+  ref: string;
+  generation: number;
+  query: string;
+  mode: "fuzzy" | "glob";
+  truncated: boolean;
+  candidateTruncated: boolean;
+  totalCandidates: number;
+  totalMatches: number;
+  matches: Array<{
+    path: string;
+    score: number;
+    ranges: FuzzyRange[];
+  }>;
+};
 
 export type SearchArgs = {
   command: SearchCommand;
@@ -36,29 +74,43 @@ export type SearchParseResult =
   | { ok: true; args: SearchArgs }
   | { ok: false; error: string };
 
-export const SEARCH_HELP = `code-viewer search — code text search across the worktree or a git ref
+export const SEARCH_HELP = `code-viewer search — text and filename search across the worktree or a git ref
 
 Usage:
   code-viewer search code --term <text> [--ref <ref>] [--path <path>...]
                           [--regex] [--max <n>] [--json]
                           [--cwd <dir>] [--server <url>]
+  code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
+                           [--cwd <dir>] [--server <url>]
   code-viewer search --help
   code-viewer search agent-help
 
-Options:
-  --term <text>     Search term (required for "search code"). Single line.
+Common options:
+  --term <text>     Search term (required). Single line.
   --ref <ref>       Git ref to search (default: worktree). Branch / commit / tag.
-  --path <path>     Restrict the search to a sub-path. Repeatable.
-  --regex           Treat --term as an extended regex instead of a fixed string.
-  --max <n>         Maximum matches (default: ${GREP_DEFAULT_MAX}, hard cap: ${GREP_ABSOLUTE_MAX}).
-  --json            Emit the raw GrepResponse JSON instead of plain lines.
+  --max <n>         Maximum results.
+                    code:  default ${GREP_DEFAULT_MAX}, hard cap ${GREP_ABSOLUTE_MAX}.
+                    files: default ${FILE_NAME_SEARCH_DEFAULT_MAX}, hard cap ${FILE_SEARCH_ABSOLUTE_MAX}.
+  --json            Emit a structured JSON payload instead of plain lines.
   --cwd <dir>       Repository to target (default: process.cwd()).
   --server <url>    code-viewer server URL (default: auto-discover).
   --help, -h        Show this help.
 
-Default output (one line per match):
-  path:line:column\\tpreview
-An empty result prints "no matches" to stderr and exits 0.
+search code only:
+  --path <path>     Restrict the search to a sub-path. Repeatable.
+  --regex           Treat --term as an extended regex instead of a fixed string.
+
+search files:
+  --term auto-switches between fuzzy and glob matching:
+    fuzzy: bare words / camelCase fragments (e.g. "auth", "userId").
+    glob:  patterns containing * or ? (e.g. "src/**/*.test.ts", "*.md").
+  The mode used is reported in --json as "mode": "fuzzy" | "glob".
+
+Default output:
+  search code:  path:line:column\\tpreview (one line per match).
+                Empty result prints "no matches" to stderr and exits 0.
+  search files: path (one line per ranked match, best first).
+                Empty result prints "no matching files" to stderr and exits 0.
 
 Run "code-viewer search agent-help" for an AI-agent oriented guide.
 
@@ -97,9 +149,14 @@ environments. Results are NOT persisted on the server; this is a pure read.
   code-viewer search code --term "config" --path src --path tests --json
   code-viewer search code --term "release" --ref main --json
 
+  code-viewer search files --term "sample"
+  code-viewer search files --term "userId" --json
+  code-viewer search files --term "src/**/*.test.ts" --max 200 --json
+  code-viewer search files --term "config" --ref main --json
+
 ## Output contract
 
---json prints the GrepResponse verbatim (see core/types.ts):
+search code --json prints the GrepResponse verbatim (see core/types.ts):
 
   {
     "ref": "worktree" | "<git-ref>",
@@ -110,24 +167,52 @@ environments. Results are NOT persisted on the server; this is a pure read.
     ]
   }
 
-Default text output is one line per match:
+search code default text output is one line per match:
 
   path:line:column<TAB>preview
 
 When there are zero matches the command exits 0 and writes "no matches"
-to stderr. Parse failures and unreachable servers exit 1.
+to stderr.
+
+search files --json prints a CLI-specific ranked payload:
+
+  {
+    "ref": "worktree" | "<git-ref>",
+    "generation": number,         // monotonic server tree generation
+    "query": "<your --term>",
+    "mode": "fuzzy" | "glob",
+    "truncated": boolean,         // true when totalMatches > --max
+    "candidateTruncated": boolean,// true when /_files hit its server cap
+    "totalCandidates": number,    // file count returned by /_files for <ref>
+    "totalMatches": number,       // ranking hits before slicing to --max
+    "matches": [
+      { "path": string, "score": number, "ranges": [ { "start": n, "end": n } ] }
+    ]
+  }
+
+search files default text output is one path per line, best first.
+Empty result prints "no matching files" to stderr and exits 0.
+
+Parse failures and unreachable servers exit 1.
 
 ## Tips
 
-- Prefer --json. line / column / engine / truncated are all required to
-  decide whether you need a follow-up scan.
-- truncated=true means more matches exist beyond --max. Re-run with a
-  tighter --path or a higher --max (capped at ${GREP_ABSOLUTE_MAX}).
-- --regex uses extended regex (rg / git grep -E semantics). Anchor with
-  ^ / $ and escape literal metacharacters as needed.
-- engine=fallback with regex=true returns zero matches by design — the
-  fallback path does not support regex. Install ripgrep or use a fixed
-  string instead.
+- Prefer --json. For "code", line / column / engine / truncated drive
+  follow-up scans. For "files", score / mode / ranges let you reason
+  about why a match ranked where it did before opening it.
+- search code: truncated=true means more matches exist beyond --max.
+  Re-run with a tighter --path or a higher --max (capped at ${GREP_ABSOLUTE_MAX}).
+- search code: engine=fallback with regex=true returns zero matches by
+  design — the fallback path does not support regex. Install ripgrep or
+  use a fixed string instead.
+- search files: --term containing * or ? triggers glob mode (e.g.
+  "src/**/*.test.ts"). Bare words use fuzzy ranking (e.g. "auth",
+  "userId"). The /_files list is shared with the browser Ctrl+K palette,
+  so .git / .code-viewer / scope-omit directories are filtered out the
+  same way.
+- search files truncated=true on the response means the ranking pool
+  had more hits than --max; widen --max (hard cap ${FILE_SEARCH_ABSOLUTE_MAX}) or
+  tighten --term to surface fewer candidates.
 `;
 
 const VALUE_FLAGS = new Set(["--term", "--ref", "--max"]);
@@ -182,24 +267,73 @@ export function parseSearchArgs(argv: string[]): SearchParseResult {
     return { ok: true, args: { command: { kind: "agent-help" } } };
   }
 
-  if (subcommand !== "code") {
+  if (subcommand !== "code" && subcommand !== "files") {
     return { ok: false, error: `unknown search subcommand: ${subcommand}` };
   }
   if (rest.length > 1) {
     return {
       ok: false,
-      error: `search code does not accept positional argument: ${rest[1]}`,
+      error: `search ${subcommand} does not accept positional argument: ${rest[1]}`,
     };
   }
 
   const term = options.get("--term") ?? "";
   if (!term) {
-    return { ok: false, error: "search code requires --term <text>" };
+    return { ok: false, error: `search ${subcommand} requires --term <text>` };
   }
   if (/[\r\n]/.test(term)) {
     return { ok: false, error: "--term must be a single line" };
   }
 
+  if (subcommand === "files") {
+    // Reject code-only flags explicitly so command mix-ups are visible.
+    if (flags.has("--regex")) {
+      return {
+        ok: false,
+        error: "search files does not accept --regex",
+      };
+    }
+    if (paths.length > 0) {
+      return {
+        ok: false,
+        error: "search files does not accept --path",
+      };
+    }
+    const maxRaw = options.get("--max");
+    let max = FILE_NAME_SEARCH_DEFAULT_MAX;
+    if (maxRaw !== undefined) {
+      const n = Number(maxRaw);
+      if (!Number.isInteger(n) || n <= 0) {
+        return {
+          ok: false,
+          error: `--max must be a positive integer (got ${maxRaw})`,
+        };
+      }
+      if (n > FILE_SEARCH_ABSOLUTE_MAX) {
+        return {
+          ok: false,
+          error: `--max must be <= ${FILE_SEARCH_ABSOLUTE_MAX} (got ${n})`,
+        };
+      }
+      max = n;
+    }
+    return {
+      ok: true,
+      args: {
+        command: {
+          kind: "files",
+          term,
+          ref: options.get("--ref"),
+          max,
+          json: flags.has("--json"),
+        },
+        cwd,
+        server,
+      },
+    };
+  }
+
+  // subcommand === "code"
   const maxRaw = options.get("--max");
   let max: number | undefined;
   if (maxRaw !== undefined) {
@@ -263,6 +397,76 @@ function formatMatchLine(match: {
   return `${match.path}:${match.line}:${match.column}\t${preview}`;
 }
 
+function buildFilesPath(
+  command: Extract<SearchCommand, { kind: "files" }>,
+): string {
+  // Do not send the term to /_files; ranking happens in this CLI with the
+  // shared browser palette matcher.
+  const params = new URLSearchParams();
+  if (command.ref) params.set("ref", command.ref);
+  const qs = params.toString();
+  return qs ? `/_files?${qs}` : "/_files";
+}
+
+async function runFiles(
+  serverUrl: string,
+  command: Extract<SearchCommand, { kind: "files" }>,
+): Promise<void> {
+  const data = (await requestJson(
+    serverUrl,
+    buildFilesPath(command),
+    "GET",
+    undefined,
+    "file name search",
+  )) as FileSearchListResponse;
+
+  const mode: "fuzzy" | "glob" = isGlobPathQuery(command.term)
+    ? "glob"
+    : "fuzzy";
+  const ranked = rankPathMatches(command.term, data.files);
+  const totalMatches = ranked.length;
+  const truncated = ranked.length > command.max;
+  const sliced = truncated ? ranked.slice(0, command.max) : ranked;
+
+  if (command.json) {
+    const payload: FileNameSearchJsonResult = {
+      ref: data.ref,
+      generation: data.generation,
+      query: command.term,
+      mode,
+      truncated,
+      candidateTruncated: data.truncated,
+      totalCandidates: data.files.length,
+      totalMatches,
+      matches: sliced.map((m) => ({
+        path: m.item.path,
+        score: m.score,
+        ranges: m.ranges,
+      })),
+    };
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  if (!sliced.length) {
+    console.error("no matching files");
+    return;
+  }
+  for (const m of sliced) {
+    console.log(m.item.path);
+  }
+  if (truncated) {
+    console.error(
+      `truncated: showing the top ${sliced.length} of ${totalMatches} matches ` +
+        `(re-run with --max <= ${FILE_SEARCH_ABSOLUTE_MAX} to widen).`,
+    );
+  }
+  if (data.truncated) {
+    console.error(
+      `note: server file list was truncated at ${data.files.length} candidates; some paths may not appear.`,
+    );
+  }
+}
+
 async function runCode(
   serverUrl: string,
   command: Extract<SearchCommand, { kind: "code" }>,
@@ -313,4 +517,5 @@ export async function runSearchCli(argv: string[]): Promise<void> {
   const root = resolveRepoRoot(cwd);
   const serverUrl = await ensureServerUrl(root, server, "/");
   if (command.kind === "code") return runCode(serverUrl, command);
+  if (command.kind === "files") return runFiles(serverUrl, command);
 }

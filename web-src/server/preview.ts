@@ -200,6 +200,7 @@ Usage:
   code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
   code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis> [options]
   code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
+  code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
   code-viewer file <blame|history|show> --path <p> [--ref <ref>] [...subcommand options] [--json]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
@@ -217,6 +218,7 @@ Examples:
   code-viewer annotate --help
   code-viewer query --help
   code-viewer search code --term "TODO" --json
+  code-viewer search files --term "src/**/*.test.ts" --json
   code-viewer query redis databases --db docker:redis-svc --json
   code-viewer file blame --path src/sample.ts --json
   code-viewer file history --path src/sample.ts --limit 10 --json

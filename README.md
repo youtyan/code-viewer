@@ -456,6 +456,37 @@ integer up to the server's hard cap; `truncated=true` in the JSON
 response means more matches exist beyond the cap. Run
 `code-viewer search agent-help` for the full AI-agent guide.
 
+`code-viewer search files` is the sister command for **filename**
+lookups — the CLI mirror of the browser's `Ctrl+K` palette. It calls
+`/_files` for the ref's full tree, then ranks paths with the same
+`fuzzy + glob` algorithm the palette uses. `--term` auto-switches
+between modes: bare words (e.g. `"auth"`, `"userId"`) use fuzzy
+ranking; patterns containing `*` or `?` (e.g. `"src/**/*.test.ts"`) use
+glob matching, and the mode used is reported in `--json`. The `.git`,
+`.code-viewer`, and scope-omit directories are filtered out just like in
+the palette.
+
+```sh
+# Fuzzy search across the worktree, top 50 paths printed one per line.
+code-viewer search files --term "userId"
+
+# Glob: ranked JSON with score / ranges / mode for AI agents.
+code-viewer search files --term "src/**/*.test.ts" --max 200 --json
+
+# Look at a specific ref instead of the worktree.
+code-viewer search files --term "config" --ref main --json
+```
+
+Default text output is one path per line, best first. An empty result
+prints `no matching files` to stderr and exits 0. `--json` emits a
+ranked payload `{ ref, generation, query, mode, truncated,
+candidateTruncated, totalCandidates, totalMatches,
+matches[{ path, score, ranges }] }`. `truncated` means the ranked
+matches were sliced by `--max`; `candidateTruncated` means the server
+file-list cap was reached before ranking. The default `--max` is `50`
+(intentionally smaller than `search code` so the result fits an AI
+agent's context window); raise it up to the server-side cap when needed.
+
 ### File inspect CLI
 
 After `search` locates a path, `code-viewer file` drills into it
