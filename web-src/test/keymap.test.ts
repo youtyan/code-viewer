@@ -133,6 +133,18 @@ describe("keymap action resolution", () => {
     ).toBe("open-grep-palette");
   });
 
+  test("opens help with Shift+? in every scope, blocked while editable", () => {
+    expect(action("?", "main", { shift: true })).toBe("open-help");
+    expect(action("?", "sidebar", { shift: true })).toBe("open-help");
+    expect(action("?", "global", { shift: true })).toBe("open-help");
+    expect(
+      resolveKeymapAction(key("?", { shift: true }), {
+        scope: "main",
+        editable: true,
+      }),
+    ).toBe(null);
+  });
+
   test("keeps default bindings as data for future customization", () => {
     expect(
       DEFAULT_KEY_BINDINGS.some(

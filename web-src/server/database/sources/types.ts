@@ -185,14 +185,21 @@ export type Queryable<Q, R> = {
 
 // ---------- 型ガード ----------
 
-// capabilities.snapshot を持つかを runtime / type の両方でチェックする。
+// capabilities.snapshot と snapshot 用メソッドを runtime / type の両方でチェックする。
 // snapshot-runner.ts はこれを使って generic に source を扱う。
 export function hasSnapshotCapability<T extends { capabilities?: unknown }>(
   source: T,
 ): source is T & SnapshotIterable {
-  const caps = (source as { capabilities?: { snapshot?: boolean } })
-    .capabilities;
-  return !!caps?.snapshot;
+  const candidate = source as {
+    capabilities?: { snapshot?: boolean };
+    iterateForSnapshot?: unknown;
+    listSnapshotContainers?: unknown;
+  };
+  return (
+    !!candidate.capabilities?.snapshot &&
+    typeof candidate.iterateForSnapshot === "function" &&
+    typeof candidate.listSnapshotContainers === "function"
+  );
 }
 
 // ---------- 後方互換のための再 export ----------

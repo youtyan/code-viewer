@@ -1,19 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BLAME_ZERO_SHA, blame, commitHistory } from "../server/git";
-
-function git(cwd: string, args: string[]) {
-  const proc = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (proc.status !== 0) {
-    throw new Error(
-      `git ${args.join(" ")} failed: ${proc.stderr || proc.stdout}`,
-    );
-  }
-  return proc;
-}
+import { runGit as git } from "./_git-fixture";
 
 describe("blame", () => {
   let repo: string;

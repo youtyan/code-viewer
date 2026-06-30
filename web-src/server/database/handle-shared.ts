@@ -414,7 +414,12 @@ export function handleError(
   prefix: string,
   action: string,
   err: unknown,
+  signal?: AbortSignal,
 ): Response {
+  // クライアント起因の中断はサーバ障害として記録しない。
+  if (isAbortLikeError(err, signal)) {
+    return textError(`${action} aborted`, 503);
+  }
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[code-viewer] ${prefix} error:`, message);
   if (isDockerComposeServiceUnavailableError(err)) {

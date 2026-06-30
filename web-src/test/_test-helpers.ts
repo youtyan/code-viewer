@@ -41,3 +41,22 @@ export async function waitFor(
   }
   throw new Error("waitFor timed out");
 }
+
+// mkdtempSync + try/finally rmSync の頻出パターン。snapshot-runner /
+// snapshot-store 等で同形ヘルパが並んでいたので集約。
+// prefix は os.tmpdir() 直下に作るディレクトリ名の接頭辞 (末尾 "-" 推奨)。
+// run の戻り値はそのまま返し、finally で rmSync する。
+export async function withTempDir<T>(
+  prefix: string,
+  run: (dir: string) => Promise<T>,
+): Promise<T> {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  try {
+    return await run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

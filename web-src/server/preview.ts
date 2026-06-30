@@ -25,8 +25,6 @@ import type {
   FileMeta,
   FileRangeResponse,
   FileSearchListResponse,
-  GrepMatch,
-  GrepResponse,
   RepoTreeResponse,
   SettingsResponse,
   UndoActionResponse,
@@ -54,6 +52,12 @@ import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import * as git from "./git";
 import {
+  buildMcpInstructions,
+  defaultMcpTools,
+  dispatchJsonRpc,
+  parseJsonRpcBody,
+} from "./mcp";
+import {
   buildLineOffsetIndexFromStream,
   collectByteRangeFromStream,
   collectBytesWithLineOffsetIndexFromStream,
@@ -75,17 +79,15 @@ import {
   spawnDetached,
   startServer,
 } from "./runtime";
+import { DEFAULT_EXCLUDE_NAMES, normalizeGrepMax } from "./search";
 import {
-  buildFileSearchList,
-  buildRgArgs,
-  DEFAULT_EXCLUDE_NAMES,
-  fixedStringLineMatches,
-  GREP_MAX_FILE_BYTES,
-  isSkippableSearchPath,
-  normalizeGrepMax,
-  parseGitGrepOutput,
-  parseRgOutput,
-} from "./search";
+  grepRepo,
+  isExcludedScopePath,
+  isSafePath,
+  listRepoFiles,
+  type SearchEnv,
+  safeWorktreePath as safeWorktreePathInEnv,
+} from "./search-service";
 import { removeServerRegistry, writeServerRegistry } from "./server-registry";
 import { loadAppSettingsState } from "./state-store";
 import {
@@ -159,8 +161,6 @@ let scopeOmitDirCliOverride: string[] | null = null;
 let scopeExcludeNames = DEFAULT_EXCLUDE_NAMES;
 let scopeWatchLimit = DEFAULT_WORKTREE_WATCH_DIRECTORY_LIMIT;
 let uploadEnabled = true;
-let rgAvailableCache: boolean | null = null;
-
 const enc = new TextEncoder();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const sseKeepalives = new Map<
@@ -197,14 +197,37 @@ function parseCli() {
 
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
-  code-viewer annotate <start|add|list|delete|clear> [options]
+  code-viewer status [--cwd <repo>] [--ref <ref>] [--limit <N>] [--json]
+  code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
+  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search|redis|elasticsearch|s3> [options]
+  code-viewer search code --term <text> [--ref <ref>] [--path <p>...] [--regex] [--max <n>] [--json]
+  code-viewer search files --term <pattern> [--ref <ref>] [--max <n>] [--json]
+  code-viewer file <blame|history|show|diff> --path <p> [--ref <ref>] [...subcommand options] [--json]
+  code-viewer skill install [--agent <list>] [--global]
+  code-viewer doctor [--cwd <path>] [--port <N>] [--json]
+  code-viewer agent-help
+  code-viewer help
+
+AI-agent index (start here):  code-viewer agent-help
+Subcommand guides (AI agents): code-viewer <status|annotate|query|search|file|skill|doctor> agent-help
 
 Examples:
   code-viewer --open
   code-viewer --cwd /path/to/repo --open
   code-viewer HEAD~1 HEAD
   code-viewer --staged
+  code-viewer status --json
   code-viewer annotate --help
+  code-viewer query --help
+  code-viewer search code --term "TODO" --json
+  code-viewer search files --term "src/**/*.test.ts" --json
+  code-viewer query redis databases --db docker:redis-svc --json
+  code-viewer query elasticsearch indices --db docker:es-svc --json
+  code-viewer query s3 buckets --db docker:s3-svc --json
+  code-viewer file blame --path src/sample.ts --json
+  code-viewer file history --path src/sample.ts --limit 10 --json
+  code-viewer file show --path src/sample.ts --start 1 --end 40 --json
+  code-viewer doctor --json
 `);
       process.exit(0);
     } else if (arg === "--version" || arg === "-v") {
@@ -619,16 +642,9 @@ function handleDiffJson(url: URL) {
   });
 }
 
-function safePath(path: string) {
-  if (
-    !path ||
-    path.startsWith("/") ||
-    path.startsWith("\\") ||
-    path.includes("\0")
-  )
-    return false;
-  return !path.split(/[\\/]+/).includes("..");
-}
+// Local alias to the shared search-service guard so the rest of preview.ts
+// keeps the historical name. The actual logic lives in search-service.ts.
+const safePath = isSafePath;
 
 function safeRepoPath(path: string) {
   return path === "" || safePath(path);
@@ -748,42 +764,11 @@ function invalidScopeExcludeNamesQuery(url: URL): boolean {
   );
 }
 
-function isExcludedScopePath(path: string, excludeNames: string[]): boolean {
-  return path
-    .split(/[\\/]+/)
-    .some((part) =>
-      excludeNames.some((name) => part.toLowerCase() === name.toLowerCase()),
-    );
-}
-
-// ai-dup-check: allow -- ".git" path predicate mirrors git.isToolInternalPath for the git metadata directory.
-function isGitInternalPath(path: string): boolean {
-  return path.split(/[\\/]+/).some((part) => part.toLowerCase() === ".git");
-}
-
+// Closure-bound view over the shared search-service safeWorktreePath. The
+// actual symlink-escape / .git / scope guard lives in search-service.ts so
+// MCP tools and HTTP routes use the same gate.
 function safeWorktreePath(path: string): string | null {
-  if (!safePath(path)) return null;
-  if (isGitInternalPath(path)) return null;
-  const full = join(cwd, path);
-  if (!existsSync(full)) return null;
-  let realCwd: string;
-  let realFull: string;
-  try {
-    realCwd = realpathSync(cwd);
-    realFull = realpathSync(full);
-  } catch {
-    return null;
-  }
-  const rel = relative(realCwd, realFull);
-  if (
-    rel === "" ||
-    rel.startsWith("..") ||
-    rel.startsWith("/") ||
-    rel.startsWith("\\")
-  )
-    return null;
-  if (isGitInternalPath(rel)) return null;
-  return realFull;
+  return safeWorktreePathInEnv(currentSearchEnv(), path);
 }
 
 function worktreePath(path: string): string {
@@ -794,7 +779,7 @@ function safeOpenWorktreePath(path: string): string | null {
   if (path === "") {
     try {
       const realCwd = realpathSync(cwd);
-      if (isGitInternalPath(realCwd)) return null;
+      if (git.isGitInternalPath(realCwd)) return null;
       return realCwd;
     } catch {
       return null;
@@ -914,7 +899,7 @@ function handleTree(url: URL) {
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
   const path = (url.searchParams.get("path") || "").replace(/^\/+|\/+$/g, "");
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if ((target === "worktree" || target === "") && isGitInternalPath(path))
+  if ((target === "worktree" || target === "") && git.isGitInternalPath(path))
     return text("forbidden", 403);
   if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
     return text("invalid target", 400);
@@ -976,11 +961,23 @@ function worktreeWatchDirectoryLimitFromEnv(): number {
   return floored;
 }
 
+// Build the SearchEnv snapshot used by every call into search-service.
+// We do NOT cache it because scope-omit/scope-exclude can be live-edited
+// via /_state and the closure variables track that.
+function currentSearchEnv(
+  omitOverride?: string[],
+  excludeOverride?: string[],
+): SearchEnv {
+  return {
+    cwd,
+    omitDirNames: omitOverride ?? scopeOmitDirNames,
+    excludeNames: excludeOverride ?? scopeExcludeNames,
+  };
+}
+
 function handleFiles(url: URL) {
   const target =
     url.searchParams.get("ref") || url.searchParams.get("target") || "worktree";
-  if (target !== "worktree" && !git.verifyTreeRef(target, cwd))
-    return text("invalid target", 400);
   if (invalidScopeOmitDirNamesQuery(url)) return text("invalid omit dirs", 400);
   if (invalidScopeExcludeNamesQuery(url))
     return text("invalid exclude names", 400);
@@ -989,207 +986,14 @@ function handleFiles(url: URL) {
   const key = `${target || "worktree"}\0${omitDirNames.join("\0")}\0${excludeNames.join("\0")}`;
   const cached = fileListCache.get(key);
   if (cached && cached.generation === generation) return json(cached.body);
-  const ref = target || "worktree";
-  const entries = git
-    .listTree(ref, "", cwd, {
-      recursive: true,
-      omitDirNames,
-      excludeNames,
-    })
-    .entries.filter((entry) => !isExcludedScopePath(entry.path, excludeNames));
-  const body = buildFileSearchList(ref, generation, entries);
-  fileListCache.set(key, { generation, body });
-  return json(body);
-}
-
-function parseGrepPaths(
-  url: URL,
-  omitDirNames: string[],
-  excludeNames: string[],
-): string[] {
-  return url.searchParams
-    .getAll("path")
-    .filter(
-      (path) =>
-        safePath(path) &&
-        !isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames, excludeNames),
-    );
-}
-
-function rgAvailable(): boolean {
-  if (rgAvailableCache !== null) return rgAvailableCache;
-  const proc = runSync(["rg", "--version"], cwd);
-  rgAvailableCache = proc.code === 0;
-  return rgAvailableCache;
-}
-
-function grepWorktreeFallback(
-  query: string,
-  max: number,
-  paths: string[],
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepMatch[] {
-  const candidates = paths.length
-    ? paths
-    : git
-        .listTree("worktree", "", cwd, {
-          recursive: true,
-          omitDirNames,
-          excludeNames,
-        })
-        .entries.map((entry) => entry.path);
-  const matches: GrepMatch[] = [];
-  for (const path of candidates) {
-    if (matches.length >= max) break;
-    if (
-      !safePath(path) ||
-      isGitInternalPath(path) ||
-      isSkippableSearchPath(path, omitDirNames, excludeNames)
-    )
-      continue;
-    const full = safeWorktreePath(path);
-    if (!full) continue;
-    let stat: ReturnType<typeof lstatSync>;
-    try {
-      stat = lstatSync(full);
-    } catch {
-      continue;
-    }
-    if (
-      !stat.isFile() ||
-      stat.isSymbolicLink() ||
-      stat.size > GREP_MAX_FILE_BYTES
-    )
-      continue;
-    let data: Buffer;
-    try {
-      data = readFileSync(full);
-    } catch {
-      continue;
-    }
-    if (data.subarray(0, 8192).includes(0)) continue;
-    matches.push(
-      ...fixedStringLineMatches(
-        path,
-        data.toString("utf8"),
-        query,
-        max - matches.length,
-      ),
-    );
-  }
-  return matches;
-}
-
-function grepWorktree(
-  query: string,
-  max: number,
-  paths: string[],
-  regex: boolean,
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepResponse {
-  if (rgAvailable()) {
-    const safePaths = paths.filter(
-      (path) =>
-        safePath(path) &&
-        !isGitInternalPath(path) &&
-        !isSkippableSearchPath(path, omitDirNames, excludeNames) &&
-        safeWorktreePath(path),
-    );
-    const args = buildRgArgs(
-      query,
-      max,
-      safePaths,
-      regex,
-      omitDirNames,
-      excludeNames,
-    );
-    const proc = runSync(args, cwd, { timeout: 5000 });
-    const stdout = proc.stdout;
-    const matches = parseRgOutput(
-      stdout,
-      max,
-      omitDirNames,
-      excludeNames,
-    ).filter(
-      (match) =>
-        safePath(match.path) &&
-        !isGitInternalPath(match.path) &&
-        !isSkippableSearchPath(match.path, omitDirNames, excludeNames) &&
-        !!safeWorktreePath(match.path),
-    );
-    return {
-      ref: "worktree",
-      engine: "rg",
-      truncated: matches.length >= max,
-      matches,
-    };
-  }
-  if (regex)
-    return {
-      ref: "worktree",
-      engine: "fallback",
-      truncated: false,
-      matches: [],
-    };
-  const matches = grepWorktreeFallback(
-    query,
-    max,
-    paths,
-    omitDirNames,
-    excludeNames,
+  const result = listRepoFiles(
+    currentSearchEnv(omitDirNames, excludeNames),
+    target,
+    generation,
   );
-  return {
-    ref: "worktree",
-    engine: "fallback",
-    truncated: matches.length >= max,
-    matches,
-  };
-}
-
-function grepTreeRef(
-  ref: string,
-  query: string,
-  max: number,
-  paths: string[],
-  regex: boolean,
-  omitDirNames: string[],
-  excludeNames: string[],
-): GrepResponse {
-  const safePaths = paths.filter(
-    (path) =>
-      safePath(path) &&
-      !isGitInternalPath(path) &&
-      !isSkippableSearchPath(path, omitDirNames, excludeNames),
-  );
-  const args = [
-    "git",
-    "-c",
-    "core.quotepath=false",
-    "grep",
-    "-n",
-    "--column",
-    "-i",
-    regex ? "-E" : "-F",
-    "--no-color",
-    "-e",
-    query,
-    ref,
-    "--",
-    ...safePaths,
-  ];
-  const proc = runSync(args, cwd, { timeout: 5000 });
-  const stdout = proc.stdout;
-  const matches = parseGitGrepOutput(
-    stdout,
-    ref,
-    max,
-    omitDirNames,
-    excludeNames,
-  ).slice(0, max);
-  return { ref, engine: "git", truncated: matches.length >= max, matches };
+  if (result.ok !== true) return text(result.error, 400);
+  fileListCache.set(key, { generation, body: result.value });
+  return json(result.value);
 }
 
 function handleGrep(url: URL) {
@@ -1201,23 +1005,17 @@ function handleGrep(url: URL) {
     return text("invalid exclude names", 400);
   const omitDirNames = scopeOmitDirNamesFromQuery(url);
   const excludeNames = scopeExcludeNamesFromQuery(url);
-  const paths = parseGrepPaths(url, omitDirNames, excludeNames);
+  const paths = url.searchParams.getAll("path");
   const regex = url.searchParams.get("regex") === "1";
-  if (!query.trim())
-    return json({
-      ref,
-      engine: ref === "worktree" ? "fallback" : "git",
-      truncated: false,
-      matches: [],
-    } satisfies GrepResponse);
-  if (ref === "worktree" || ref === "")
-    return json(
-      grepWorktree(query, max, paths, regex, omitDirNames, excludeNames),
-    );
-  if (!git.verifyTreeRef(ref, cwd)) return text("invalid target", 400);
-  return json(
-    grepTreeRef(ref, query, max, paths, regex, omitDirNames, excludeNames),
-  );
+  const result = grepRepo(currentSearchEnv(omitDirNames, excludeNames), {
+    query,
+    ref,
+    paths,
+    regex,
+    max,
+  });
+  if (result.ok !== true) return text(result.error, 400);
+  return json(result.value);
 }
 
 function handleRefCommits(url: URL) {
@@ -1836,7 +1634,8 @@ function safeUploadFileName(name: string): string | null {
   )
     return null;
   if (trimmed === "." || trimmed === "..") return null;
-  if (isGitInternalPath(trimmed) || isForbiddenUploadName(trimmed)) return null;
+  if (git.isGitInternalPath(trimmed) || isForbiddenUploadName(trimmed))
+    return null;
   if (!SAFE_UPLOAD_EXTENSIONS.has(extname(trimmed).toLowerCase())) return null;
   return trimmed;
 }
@@ -1875,7 +1674,7 @@ async function handleUploadFiles(req: Request) {
 
   const dir = String(form.get("dir") || "").replace(/^\/+|\/+$/g, "");
   if (!safeRepoPath(dir)) return text("invalid dir", 400);
-  if (dir && isGitInternalPath(dir)) return text("forbidden", 403);
+  if (dir && git.isGitInternalPath(dir)) return text("forbidden", 403);
   const realDir = safeOpenWorktreePath(dir);
   if (!realDir) return text("not found", 404);
   const stats = statSync(realDir) as unknown as { isDirectory(): boolean };
@@ -2169,7 +1968,7 @@ async function handleOpenPath(req: Request) {
     return text("invalid kind", 400);
   if (kind === "file-parent" && !path) return text("invalid path", 400);
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if (path && isGitInternalPath(path)) return text("forbidden", 403);
+  if (path && git.isGitInternalPath(path)) return text("forbidden", 403);
 
   const targetPath = kind === "file-parent" ? parentRepoPath(path) : path;
   const target = safeOpenWorktreePath(targetPath);
@@ -2203,7 +2002,7 @@ async function handleTrashPath(req: Request) {
     typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
   if (!path) return text("invalid path", 400);
   if (!safeRepoPath(path)) return text("invalid path", 400);
-  if (isGitInternalPath(path)) return text("forbidden", 403);
+  if (git.isGitInternalPath(path)) return text("forbidden", 403);
   const originalFullPath = safeWorktreePath(path);
   if (!originalFullPath) return text("not found", 404);
   const moved = movePathToTrash(worktreePath(path));
@@ -2248,14 +2047,14 @@ async function handleCreateDirectory(req: Request) {
       : "";
   const name = normalizeNewDirectoryName(body.name);
   if (!safeRepoPath(dir)) return text("invalid dir", 400);
-  if (dir && isGitInternalPath(dir)) return text("forbidden", 403);
+  if (dir && git.isGitInternalPath(dir)) return text("forbidden", 403);
   if (!name) return text("invalid name", 400);
   const parent = safeOpenWorktreePath(dir);
   if (!parent) return text("not found", 404);
   const stats = statSync(parent) as unknown as { isDirectory(): boolean };
   if (!stats.isDirectory()) return text("not a directory", 400);
   const targetPath = dir ? `${dir}/${name}` : name;
-  if (!safeRepoPath(targetPath) || isGitInternalPath(targetPath))
+  if (!safeRepoPath(targetPath) || git.isGitInternalPath(targetPath))
     return text("invalid target", 400);
   const target = join(parent, name);
   if (existsSync(target)) return text("already exists", 409);
@@ -2295,7 +2094,7 @@ async function handleRestoreTrash(req: Request) {
   const trashPath = typeof body.trashPath === "string" ? body.trashPath : "";
   if (!originalPath || !safeRepoPath(originalPath))
     return text("invalid restore target", 400);
-  if (isGitInternalPath(originalPath)) return text("forbidden", 403);
+  if (git.isGitInternalPath(originalPath)) return text("forbidden", 403);
   const restored = restoreTrashPath(originalPath, trashPath || undefined);
   if (!restored.ok) return text(restored.error || "undo failed", 409);
   triggerUpdate();
@@ -2311,6 +2110,59 @@ function annotationSse(
     "annotation",
     JSON.stringify({ kind, session_id: sessionId, entry_id: entryId }),
   );
+}
+
+// MCP Streamable HTTP entry point. Single endpoint, JSON-RPC 2.0 in,
+// `application/json` out (we do not advertise SSE in this version). The
+// transport rules are intentionally narrow:
+//   - POST only. GET / other methods return 405 with an Allow header
+//     so MCP clients fall back gracefully instead of opening an SSE
+//     channel they can never read.
+//   - localhost / same-origin guard via requestAllowed (mirrors every
+//     other /_* route here).
+//   - Content-Type must be application/json. Anything else is 415.
+//   - Body size capped at 1 MiB; oversize is 413.
+//   - notifications/responses return HTTP 202 no body per MCP 2025-06-18.
+//   - All semantic errors travel as JSON-RPC error envelopes, NOT HTTP
+//     non-2xx, so clients can pair them with their pending request id.
+const MCP_MAX_BODY_BYTES = 1_048_576;
+const MCP_INSTRUCTIONS = buildMcpInstructions();
+
+async function handleMcp(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("method not allowed", {
+      status: 405,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        Allow: "POST",
+      },
+    });
+  }
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType)) {
+    return text("unsupported media type", 415);
+  }
+  const declared = Number(req.headers.get("content-length") || "0");
+  if (declared > MCP_MAX_BODY_BYTES) return text("payload too large", 413);
+  const raw = await req.text();
+  if (raw.length > MCP_MAX_BODY_BYTES) return text("payload too large", 413);
+
+  const parsed = parseJsonRpcBody(raw);
+  if (parsed.ok !== true) {
+    return json(parsed.response);
+  }
+  const dispatched = await dispatchJsonRpc(parsed.value, {
+    tools: defaultMcpTools({ cwd, omitDirNames: scopeOmitDirNames }),
+    instructions: MCP_INSTRUCTIONS,
+  });
+  if (dispatched.kind === "notification") {
+    return new Response(null, {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  return json(dispatched.body);
 }
 
 async function handleAnnotations(req: Request) {
@@ -2362,7 +2214,7 @@ async function handleAnnotations(req: Request) {
       typeof body.path === "string" ? body.path.replace(/^\/+|\/+$/g, "") : "";
     if (!target) {
       if (!path || !safeRepoPath(path)) return text("invalid path", 400);
-      if (isGitInternalPath(path) || isCodeViewerInternalPath(path))
+      if (git.isGitInternalPath(path) || isCodeViewerInternalPath(path))
         return text("forbidden", 403);
     }
     const result = addAnnotationEntry(
@@ -2568,6 +2420,7 @@ const server = await startServer({
       );
       if (stateResponse) return stateResponse;
     }
+    if (url.pathname === "/_mcp") return handleMcp(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {

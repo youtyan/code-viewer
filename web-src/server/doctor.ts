@@ -1,21 +1,32 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { DbFileInfo, DbFilesResponse } from "../core/database/types";
 import type {
   DoctorGroup,
   DoctorReport,
   DoctorRow,
   DoctorStatus,
 } from "../core/doctor-types";
+import { shellSingleQuote } from "./cli-helpers";
+import { openDockerAdapterAsync } from "./database/adapters/docker";
+import { openElasticsearchAdapterAsync } from "./database/adapters/elasticsearch";
+import { openRedisExplorerAsync } from "./database/adapters/redis";
+import { openS3ExplorerAsync } from "./database/adapters/s3";
 import {
   type SpawnTextResult,
   spawnTextAsync,
 } from "./database/adapters/spawn-runner";
+import { sqliteAdapterFactory } from "./database/adapters/sqlite";
 import {
   type DockerDiscoveryResult,
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
+  findDockerServiceByDbIdAsync,
+  parseDockerDbId,
+  validateDbPath,
 } from "./database/discovery";
+import { createDbFilesResponse } from "./database/handle";
 import {
   describeSqliteDriver,
   loadSqliteClass,
@@ -950,6 +961,365 @@ async function checkDiscovery(
   };
 }
 
+// --- Datastore connectivity probe -----------------------------------------
+//
+// Each discovered source (sqlite / docker SQL / redis / es / s3) gets a
+// minimal read round-trip with a 2s timeout. Result becomes one DoctorRow
+// in the `datastore` group. Failure rows include a paste-safe retry hint
+// (SQL: `code-viewer query schemas --db '<id>' --json` without --server,
+// since doctor does not know the server URL — the CLI's auto-discovery
+// resolves it at paste time; Redis/ES/S3: cheapest read-only CLI command).
+//
+// `deps` is injectable so the bun:test suite can swap `listSources` and
+// `probeSource` for fakes without requiring Docker / SQLite at test time.
+
+const DEFAULT_DATASTORE_PROBE_TIMEOUT_MS = 2000;
+
+export type DatastoreProbe = (
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+) => Promise<void>;
+
+export type DatastoreConnectivityDeps = {
+  listSources: (
+    cwd: string,
+    omitDirNames: readonly string[],
+    signal?: AbortSignal,
+  ) => Promise<DbFilesResponse>;
+  probeSource: DatastoreProbe;
+  timeoutMs: number;
+};
+
+export const DEFAULT_DATASTORE_CONNECTIVITY_DEPS: DatastoreConnectivityDeps = {
+  listSources: (cwd, omitDirNames, signal) =>
+    createDbFilesResponse(cwd, [...omitDirNames], signal),
+  probeSource: defaultDatastoreProbe,
+  timeoutMs: DEFAULT_DATASTORE_PROBE_TIMEOUT_MS,
+};
+
+async function defaultDatastoreProbe(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  switch (file.kind) {
+    case "sqlite":
+      return probeSqliteSource(file, cwd, signal);
+    case "postgresql":
+    case "mysql":
+      return probeDockerSqlSource(file, cwd, signal);
+    case "redis":
+      return probeRedisSource(file, cwd, signal);
+    case "elasticsearch":
+      return probeEsSource(file, cwd, signal);
+    case "s3":
+      return probeS3Source(file, cwd, signal);
+  }
+}
+
+async function probeSqliteSource(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const resolved = validateDbPath(cwd, file.path);
+  if (!resolved) throw new Error("path validation failed");
+  signal.throwIfAborted();
+  const adapter = await sqliteAdapterFactory.open(resolved);
+  try {
+    signal.throwIfAborted();
+    await adapter.getTablesAsync(signal);
+  } finally {
+    try {
+      adapter.close();
+    } catch {
+      // best-effort cleanup; the original probe error wins.
+    }
+  }
+}
+
+async function probeDockerSqlSource(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (file.kind !== "postgresql" && file.kind !== "mysql") {
+    throw new Error(`unexpected kind for docker SQL probe: ${file.kind}`);
+  }
+  const parsed = parseDockerDbId(file.id);
+  if (!parsed) throw new Error("invalid docker db id");
+  const info = await findDockerServiceByDbIdAsync(
+    cwd,
+    file.id,
+    file.kind,
+    undefined,
+    signal,
+  );
+  if (!info) throw new Error("docker service not found");
+  const database = parsed.database ?? info.database;
+  const adapter = await openDockerAdapterAsync(
+    info.serviceName,
+    file.kind,
+    info.env,
+    info.composeDir,
+    database,
+    undefined,
+    signal,
+  );
+  try {
+    signal.throwIfAborted();
+    await adapter.getTablesAsync(signal);
+  } finally {
+    try {
+      adapter.close();
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+async function probeRedisSource(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const info = await findDockerServiceByDbIdAsync(
+    cwd,
+    file.id,
+    "redis",
+    undefined,
+    signal,
+  );
+  if (!info) throw new Error("docker service not found");
+  const explorer = await openRedisExplorerAsync(
+    info.serviceName,
+    info.env,
+    info.composeDir,
+    signal,
+  );
+  try {
+    signal.throwIfAborted();
+    await explorer.listDatabasesAsync(signal);
+  } finally {
+    try {
+      explorer.close();
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+async function probeEsSource(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const info = await findDockerServiceByDbIdAsync(
+    cwd,
+    file.id,
+    "elasticsearch",
+    undefined,
+    signal,
+  );
+  if (!info) throw new Error("docker service not found");
+  const explorer = await openElasticsearchAdapterAsync(
+    info.serviceName,
+    info.env,
+    info.composeDir,
+    signal,
+  );
+  try {
+    signal.throwIfAborted();
+    await explorer.listIndicesAsync(signal);
+  } finally {
+    try {
+      explorer.close();
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+async function probeS3Source(
+  file: DbFileInfo,
+  cwd: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const info = await findDockerServiceByDbIdAsync(
+    cwd,
+    file.id,
+    "s3",
+    undefined,
+    signal,
+  );
+  if (!info) throw new Error("docker service not found");
+  const explorer = await openS3ExplorerAsync(info, signal);
+  try {
+    signal.throwIfAborted();
+    await explorer.listBuckets(signal);
+  } finally {
+    try {
+      explorer.close();
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+type ProbeOutcome =
+  | { kind: "ok" }
+  | { kind: "fail"; reason: string; timedOut: boolean };
+
+// Promise.race + child AbortController. The child signal is wired both to
+// the parent (so parent cancellation propagates) and to the timeout (so the
+// probe observes abort and tears down its open connection). Even if the
+// underlying adapter ignores signal.abort (e.g. a blocking native call),
+// race returns the timeout result and we move on; the orphan probe's
+// finally still runs its close() best-effort.
+async function runProbeWithTimeout(
+  probe: DatastoreProbe,
+  file: DbFileInfo,
+  cwd: string,
+  timeoutMs: number,
+  parentSignal: AbortSignal | undefined,
+): Promise<ProbeOutcome> {
+  if (parentSignal?.aborted) {
+    return { kind: "fail", reason: "parent aborted", timedOut: false };
+  }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let parentAbortListener: (() => void) | null = null;
+  if (parentSignal) {
+    parentAbortListener = () => controller.abort();
+    parentSignal.addEventListener("abort", parentAbortListener);
+  }
+  const probePromise: Promise<ProbeOutcome> = probe(
+    file,
+    cwd,
+    controller.signal,
+  ).then(
+    () => ({ kind: "ok" }) as const,
+    (err) =>
+      ({
+        kind: "fail",
+        reason: err instanceof Error ? err.message : String(err),
+        timedOut: false,
+      }) as const,
+  );
+  const timeoutPromise = new Promise<ProbeOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({
+        kind: "fail",
+        reason: `timed out after ${timeoutMs}ms`,
+        timedOut: true,
+      });
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([probePromise, timeoutPromise]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    if (parentAbortListener && parentSignal) {
+      parentSignal.removeEventListener("abort", parentAbortListener);
+    }
+  }
+}
+
+// SQL sources get a paste-safe retry CLI line — without --server, since
+// doctor cannot know the running server URL (the discovery group reports
+// what is on disk, not what is listening). The query CLI's
+// auto-discovery resolves --server at paste time.
+// Redis / Elasticsearch / S3 also have read-only CLI surfaces now, so we
+// point at the cheapest "is the connection alive?" introspect command for
+// each kind instead of pushing the user back to the browser tab.
+export function buildDatastoreRetryHint(file: DbFileInfo): string {
+  const quoted = shellSingleQuote(file.id);
+  if (file.kind === "redis") {
+    return `Retry with: code-viewer query redis databases --db ${quoted} --json`;
+  }
+  if (file.kind === "elasticsearch") {
+    return `Retry with: code-viewer query elasticsearch indices --db ${quoted} --json`;
+  }
+  if (file.kind === "s3") {
+    return `Retry with: code-viewer query s3 buckets --db ${quoted} --json`;
+  }
+  return `Retry with: code-viewer query schemas --db ${quoted} --json`;
+}
+
+export async function checkDatastoreConnectivity(
+  cwd: string,
+  omitDirNames: readonly string[],
+  signal: AbortSignal | undefined,
+  deps: DatastoreConnectivityDeps = DEFAULT_DATASTORE_CONNECTIVITY_DEPS,
+): Promise<DoctorGroup> {
+  let files: DbFileInfo[];
+  try {
+    const response = await deps.listSources(cwd, omitDirNames, signal);
+    files = response.files;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      id: "datastore",
+      title: "Datastore connectivity",
+      rows: [
+        {
+          id: "datastore.discovery",
+          title: "Source discovery",
+          status: "warn",
+          detail: `source discovery failed: ${reason}`,
+        },
+      ],
+    };
+  }
+  if (files.length === 0) {
+    return {
+      id: "datastore",
+      title: "Datastore connectivity",
+      rows: [
+        {
+          id: "datastore.none",
+          title: "No discovered sources",
+          status: "ok",
+          detail:
+            "no datastore sources to probe (no SQLite files and no docker compose datastores discovered)",
+        },
+      ],
+    };
+  }
+  const results = await Promise.all(
+    files.map(async (file) => {
+      const outcome = await runProbeWithTimeout(
+        deps.probeSource,
+        file,
+        cwd,
+        deps.timeoutMs,
+        signal,
+      );
+      return { file, outcome };
+    }),
+  );
+  const rows: DoctorRow[] = results.map(({ file, outcome }) => {
+    if (outcome.kind === "ok") {
+      return {
+        id: `datastore.${file.id}`,
+        title: `${file.kind}:${file.id}`,
+        status: "ok",
+        detail: `connect + minimal read succeeded (${file.kind})`,
+      };
+    }
+    return {
+      id: `datastore.${file.id}`,
+      title: `${file.kind}:${file.id}`,
+      status: "warn",
+      detail: `probe failed: ${outcome.reason}`,
+      hint: buildDatastoreRetryHint(file),
+    };
+  });
+  return { id: "datastore", title: "Datastore connectivity", rows };
+}
+
 function checkServer(listenPort: number): DoctorGroup {
   const rows: DoctorRow[] = [
     {
@@ -981,6 +1351,15 @@ export async function buildDoctorReport(
     ctx.signal,
   );
   const docker = await checkDocker(ctx.signal, discovery.dockerResult);
+  // datastore probe re-uses createDbFilesResponse, so it runs its own
+  // discovery underneath. It is placed between discovery and docker in the
+  // output so AI/human reads "discover -> connect -> compose health" in a
+  // natural top-down order. Additive: existing 8 groups stay untouched.
+  const datastore = await checkDatastoreConnectivity(
+    ctx.cwd,
+    ctx.scopeOmitDirNames,
+    ctx.signal,
+  );
   const server = checkServer(ctx.listenPort);
   const groups: DoctorGroup[] = [
     runtime,
@@ -989,6 +1368,7 @@ export async function buildDoctorReport(
     snapshot,
     git,
     discovery.group,
+    datastore,
     docker,
     server,
   ];

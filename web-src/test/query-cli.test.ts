@@ -1,0 +1,6212 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  parseQueryArgs,
+  QUERY_AGENT_HELP,
+  QUERY_HELP,
+  type QueryCommand,
+  runQueryCli,
+  shellSingleQuote,
+} from "../server/query-cli";
+
+const REPO_ROOT = join(import.meta.dir, "..", "..");
+
+describe("parseQueryArgs", () => {
+  test("returns help on bare invocation, --help, and -h", () => {
+    for (const argv of [[], ["--help"], ["-h"]]) {
+      const result = parseQueryArgs(argv);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.args.command.kind).toBe("help");
+    }
+  });
+
+  test("returns agent-help for the agent-help subcommand", () => {
+    const result = parseQueryArgs(["agent-help"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.args.command.kind).toBe("agent-help");
+  });
+
+  test("sources subcommand parses with and without --json/--commands (no other flags accepted)", () => {
+    const bare = parseQueryArgs(["sources"]);
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) throw new Error("parse failed");
+    expect(bare.args.command).toEqual({ kind: "sources", mode: "default" });
+
+    const withJson = parseQueryArgs(["sources", "--json"]);
+    expect(withJson.ok).toBe(true);
+    if (!withJson.ok) throw new Error("parse failed");
+    expect(withJson.args.command).toEqual({ kind: "sources", mode: "json" });
+
+    const withCommands = parseQueryArgs(["sources", "--commands"]);
+    expect(withCommands.ok).toBe(true);
+    if (!withCommands.ok) throw new Error("parse failed");
+    expect(withCommands.args.command).toEqual({
+      kind: "sources",
+      mode: "commands",
+    });
+
+    expect(parseQueryArgs(["sources", "--json", "--commands"])).toEqual({
+      ok: false,
+      error: "sources does not accept --json with --commands",
+    });
+    expect(parseQueryArgs(["sources", "extra"])).toEqual({
+      ok: false,
+      error: "sources does not accept positional arguments",
+    });
+    expect(parseQueryArgs(["sources", "--db", "app.db"])).toEqual({
+      ok: false,
+      error: "sources does not accept --db",
+    });
+    expect(parseQueryArgs(["sources", "--wait"])).toEqual({
+      ok: false,
+      error: "sources does not accept --wait",
+    });
+  });
+
+  test("schemas requires --db and accepts only --json", () => {
+    expect(parseQueryArgs(["schemas"])).toEqual({
+      ok: false,
+      error: "schemas requires --db <path>",
+    });
+    expect(parseQueryArgs(["schemas", "extra", "--db", "x"])).toEqual({
+      ok: false,
+      error: "schemas does not accept positional arguments",
+    });
+    expect(parseQueryArgs(["schemas", "--db", "x", "--schema", "s"])).toEqual({
+      ok: false,
+      error: "schemas does not accept --schema",
+    });
+    expect(parseQueryArgs(["schemas", "--db", "x", "--wait"])).toEqual({
+      ok: false,
+      error: "schemas does not accept --wait",
+    });
+
+    const ok = parseQueryArgs(["schemas", "--db", "docker:pg-svc", "--json"]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "schemas",
+      db: "docker:pg-svc",
+      json: true,
+    });
+  });
+
+  test("schema accepts --schema/--with-columns/--json, rejects --table", () => {
+    expect(parseQueryArgs(["schema"])).toEqual({
+      ok: false,
+      error: "schema requires --db <path>",
+    });
+    expect(parseQueryArgs(["schema", "--db", "x", "--table", "t"])).toEqual({
+      ok: false,
+      error: "schema does not accept --table",
+    });
+    const ok = parseQueryArgs([
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "schema",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      withColumns: true,
+      json: true,
+    });
+
+    const minimal = parseQueryArgs(["schema", "--db", "app.db"]);
+    expect(minimal.ok).toBe(true);
+    if (!minimal.ok) throw new Error("parse failed");
+    expect(minimal.args.command).toEqual({
+      kind: "schema",
+      db: "app.db",
+      schema: undefined,
+      withColumns: false,
+      json: false,
+    });
+  });
+
+  test("columns requires --db and --table; --with-columns is rejected", () => {
+    expect(parseQueryArgs(["columns", "--db", "x"])).toEqual({
+      ok: false,
+      error: "columns requires --table <name>",
+    });
+    expect(
+      parseQueryArgs([
+        "columns",
+        "--db",
+        "x",
+        "--table",
+        "t",
+        "--with-columns",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "columns does not accept --with-columns",
+    });
+    const ok = parseQueryArgs([
+      "columns",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--table",
+      "events",
+      "--json",
+    ]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "columns",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      table: "events",
+      json: true,
+    });
+  });
+
+  test("ddl requires --db and --table; mirrors columns surface", () => {
+    expect(parseQueryArgs(["ddl", "--db", "x"])).toEqual({
+      ok: false,
+      error: "ddl requires --table <name>",
+    });
+    const ok = parseQueryArgs(["ddl", "--db", "app.db", "--table", "users"]);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) throw new Error("parse failed");
+    expect(ok.args.command).toEqual({
+      kind: "ddl",
+      db: "app.db",
+      schema: undefined,
+      table: "users",
+      json: false,
+    });
+  });
+
+  test("exec requires --db and --sql", () => {
+    expect(parseQueryArgs(["exec"])).toEqual({
+      ok: false,
+      error: "exec requires --db <path>",
+    });
+    expect(parseQueryArgs(["exec", "--db", "a.db"])).toEqual({
+      ok: false,
+      error: "exec requires --sql <sql>",
+    });
+  });
+
+  test("exec parses optional title, body, --no-save, and --max-rows", () => {
+    const result = parseQueryArgs([
+      "exec",
+      "--db",
+      "a.db",
+      "--schema",
+      "analytics",
+      "--sql",
+      "SELECT 1",
+      "--title",
+      "T",
+      "--body",
+      "B",
+      "--no-save",
+      "--max-rows",
+      "5",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "exec",
+      db: "a.db",
+      sql: "SELECT 1",
+      schema: "analytics",
+      title: "T",
+      body: "B",
+      save: false,
+      maxRows: 5,
+    });
+  });
+
+  test("exec rejects non-positive-integer --max-rows", () => {
+    expect(
+      parseQueryArgs([
+        "exec",
+        "--db",
+        "a.db",
+        "--sql",
+        "SELECT 1",
+        "--max-rows",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--max-rows must be a positive integer",
+    });
+    expect(
+      parseQueryArgs([
+        "exec",
+        "--db",
+        "a.db",
+        "--sql",
+        "SELECT 1",
+        "--max-rows",
+        "-3",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--max-rows must be a positive integer",
+    });
+  });
+
+  test("list and clear accept --schema only when scoped by --db", () => {
+    const list = parseQueryArgs([
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(list.ok).toBe(true);
+    if (!list.ok) throw new Error("parse failed");
+    expect(list.args.command).toEqual({
+      kind: "list",
+      json: true,
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+
+    const clear = parseQueryArgs([
+      "clear",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+    expect(clear.ok).toBe(true);
+    if (!clear.ok) throw new Error("parse failed");
+    expect(clear.args.command).toEqual({
+      kind: "clear",
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+    expect(parseQueryArgs(["list", "--schema", "analytics"])).toEqual({
+      ok: false,
+      error: "list --schema requires --db <path>",
+    });
+    expect(parseQueryArgs(["clear", "--schema", "analytics"])).toEqual({
+      ok: false,
+      error: "clear --schema requires --db <path>",
+    });
+  });
+
+  test("snapshot create requires --db, splits --tables on commas, --note is optional", () => {
+    expect(parseQueryArgs(["snapshot", "create"])).toEqual({
+      ok: false,
+      error: "snapshot create requires --db <path>",
+    });
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      " users , orders , ,",
+      "--note",
+      "before",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-create",
+      db: "app.db",
+      tables: ["users", "orders"],
+      note: "before",
+      wait: false,
+      timeoutSec: 120,
+      json: false,
+    });
+  });
+
+  test("snapshot create without --tables omits the field (server scans every table)", () => {
+    const result = parseQueryArgs(["snapshot", "create", "--db", "app.db"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    const command = result.args.command as Extract<
+      QueryCommand,
+      { kind: "snapshot-create" }
+    >;
+    expect(command.tables).toBeUndefined();
+    expect(command.note).toBe("");
+    // defaults for the new wait-related flags
+    expect(command.wait).toBe(false);
+    expect(command.timeoutSec).toBe(120);
+    expect(command.json).toBe(false);
+  });
+
+  test("snapshot create --wait --json --timeout 30 maps cleanly to the SnapshotCreate command", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      "users",
+      "--wait",
+      "--json",
+      "--timeout",
+      "30",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-create",
+      db: "app.db",
+      tables: ["users"],
+      note: "",
+      wait: true,
+      timeoutSec: 30,
+      json: true,
+    });
+  });
+
+  test("snapshot create rejects non-positive --timeout at parse time", () => {
+    for (const bad of ["0", "-5"]) {
+      expect(
+        parseQueryArgs([
+          "snapshot",
+          "create",
+          "--db",
+          "app.db",
+          "--timeout",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: "--timeout must be a positive integer (sec)",
+      });
+    }
+  });
+
+  test("snapshot create with --schema carries the schema onto the command", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--note",
+      "before",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    const command = result.args.command as Extract<
+      QueryCommand,
+      { kind: "snapshot-create" }
+    >;
+    expect(command.schema).toBe("analytics");
+    expect(command.db).toBe("docker:pg-svc");
+    expect(command.tables).toEqual(["events"]);
+  });
+
+  test("snapshot create without --schema leaves the field undefined (no-op for non-PG sources)", () => {
+    const result = parseQueryArgs(["snapshot", "create", "--db", "app.db"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    const command = result.args.command as Extract<
+      QueryCommand,
+      { kind: "snapshot-create" }
+    >;
+    expect(command.schema).toBeUndefined();
+  });
+
+  test("snapshot list parses --db and --json", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-list",
+      db: "app.db",
+      schema: undefined,
+      json: true,
+    });
+  });
+
+  test("snapshot list accepts --schema with or without --db", () => {
+    const withBoth = parseQueryArgs([
+      "snapshot",
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+    expect(withBoth.ok).toBe(true);
+    if (!withBoth.ok) throw new Error("parse failed");
+    expect(withBoth.args.command).toEqual({
+      kind: "snapshot-list",
+      db: "docker:pg-svc",
+      schema: "analytics",
+      json: false,
+    });
+
+    // --schema only (no --db): valid; the CLI sends ?schema=... to filter
+    // every db's snapshots down to that schema.
+    const schemaOnly = parseQueryArgs([
+      "snapshot",
+      "list",
+      "--schema",
+      "analytics",
+    ]);
+    expect(schemaOnly.ok).toBe(true);
+    if (!schemaOnly.ok) throw new Error("parse failed");
+    expect(schemaOnly.args.command).toEqual({
+      kind: "snapshot-list",
+      db: undefined,
+      schema: "analytics",
+      json: false,
+    });
+  });
+
+  test("snapshot delete requires --id", () => {
+    expect(parseQueryArgs(["snapshot", "delete"])).toEqual({
+      ok: false,
+      error: "snapshot delete requires --id <snapshot-id>",
+    });
+    const result = parseQueryArgs(["snapshot", "delete", "--id", "snap-1"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-delete",
+      id: "snap-1",
+    });
+  });
+
+  test("snapshot note requires both --id and --note (empty string allowed)", () => {
+    expect(parseQueryArgs(["snapshot", "note", "--id", "snap-1"])).toEqual({
+      ok: false,
+      error: "snapshot note requires --note <text>",
+    });
+    const result = parseQueryArgs([
+      "snapshot",
+      "note",
+      "--id",
+      "snap-1",
+      "--note",
+      "",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-note",
+      id: "snap-1",
+      note: "",
+    });
+  });
+
+  test("diff tables requires --before and --after", () => {
+    expect(parseQueryArgs(["diff", "tables"])).toEqual({
+      ok: false,
+      error: "diff tables requires --before <id> and --after <id>",
+    });
+    const result = parseQueryArgs([
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "diff-tables",
+      before: "snap-a",
+      after: "snap-b",
+      json: true,
+    });
+  });
+
+  test("diff rows requires --before, --after, and --table; limit/offset are validated", () => {
+    expect(
+      parseQueryArgs(["diff", "rows", "--before", "a", "--after", "b"]),
+    ).toEqual({
+      ok: false,
+      error: "diff rows requires --before <id>, --after <id>, --table <name>",
+    });
+    expect(
+      parseQueryArgs([
+        "diff",
+        "rows",
+        "--before",
+        "a",
+        "--after",
+        "b",
+        "--table",
+        "users",
+        "--limit",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--limit must be a positive integer",
+    });
+    expect(
+      parseQueryArgs([
+        "diff",
+        "rows",
+        "--before",
+        "a",
+        "--after",
+        "b",
+        "--table",
+        "users",
+        "--offset",
+        "-1",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--offset must be a non-negative integer",
+    });
+    const result = parseQueryArgs([
+      "diff",
+      "rows",
+      "--before",
+      "a",
+      "--after",
+      "b",
+      "--table",
+      "users",
+      "--limit",
+      "50",
+      "--offset",
+      "10",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "diff-rows",
+      before: "a",
+      after: "b",
+      table: "users",
+      limit: 50,
+      offset: 10,
+      json: false,
+    });
+  });
+
+  test("search requires --db and --term; flags map onto SearchCommand", () => {
+    expect(parseQueryArgs(["search"])).toEqual({
+      ok: false,
+      error: "search requires --db <path>",
+    });
+    expect(parseQueryArgs(["search", "--db", "app.db"])).toEqual({
+      ok: false,
+      error: "search requires --term <text>",
+    });
+    const result = parseQueryArgs([
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "needle",
+      "--tables",
+      "users, orders",
+      "--include-non-text",
+      "--max-hits",
+      "20",
+      "--schema",
+      "public",
+      "--json",
+      "--timeout",
+      "10",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "app.db",
+      term: "needle",
+      tables: ["users", "orders"],
+      schema: "public",
+      includeNonText: true,
+      maxHits: 20,
+      timeoutSec: 10,
+      json: true,
+    });
+  });
+
+  test("search defaults: includeNonText=false, json=false, timeoutSec=60, tables/schema/maxHits undefined", () => {
+    const result = parseQueryArgs(["search", "--db", "app.db", "--term", "x"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "app.db",
+      term: "x",
+      tables: undefined,
+      schema: undefined,
+      includeNonText: false,
+      maxHits: undefined,
+      timeoutSec: 60,
+      json: false,
+    });
+  });
+
+  test("search rejects non-positive --max-hits and --timeout", () => {
+    for (const [flag, msg] of [
+      ["--max-hits", "--max-hits must be a positive integer"],
+      ["--timeout", "--timeout must be a positive integer (sec)"],
+    ] as const) {
+      expect(
+        parseQueryArgs(["search", "--db", "app.db", "--term", "x", flag, "0"]),
+      ).toEqual({ ok: false, error: msg });
+      expect(
+        parseQueryArgs(["search", "--db", "app.db", "--term", "x", flag, "-1"]),
+      ).toEqual({ ok: false, error: msg });
+    }
+  });
+
+  test("unknown subcommand names are rejected", () => {
+    expect(parseQueryArgs(["wat"])).toEqual({
+      ok: false,
+      error: "unknown query command: wat",
+    });
+    expect(parseQueryArgs(["snapshot", "wat"])).toEqual({
+      ok: false,
+      error: "unknown snapshot subcommand: wat",
+    });
+    expect(parseQueryArgs(["diff", "wat"])).toEqual({
+      ok: false,
+      error: "unknown diff subcommand: wat",
+    });
+  });
+
+  test("--cwd and --server are absorbed as global options without affecting subcommand parsing", () => {
+    const result = parseQueryArgs([
+      "--cwd",
+      "/tmp/x",
+      "--server",
+      "http://localhost:9999",
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.cwd).toBe("/tmp/x");
+    expect(result.args.server).toBe("http://localhost:9999");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-list",
+      db: "app.db",
+      json: false,
+    });
+  });
+});
+
+describe("parseQueryArgs redis", () => {
+  test("redis without an action is rejected", () => {
+    expect(parseQueryArgs(["redis"])).toEqual({
+      ok: false,
+      error: "redis requires a sub-action: databases | keys | value",
+    });
+  });
+
+  test("unknown redis sub-action is rejected", () => {
+    expect(parseQueryArgs(["redis", "wat"])).toEqual({
+      ok: false,
+      error: "unknown redis sub-action: wat",
+    });
+  });
+
+  test("redis databases requires --db", () => {
+    expect(parseQueryArgs(["redis", "databases"])).toEqual({
+      ok: false,
+      error: "redis databases requires --db <id>",
+    });
+  });
+
+  test("redis databases captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-databases",
+      db: "docker:redis-svc",
+      json: true,
+    });
+  });
+
+  test("redis databases rejects an unexpected positional argument", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "extra",
+        "--db",
+        "docker:redis-svc",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept positional argument: extra",
+    });
+  });
+
+  test("redis keys requires --db-index", () => {
+    expect(
+      parseQueryArgs(["redis", "keys", "--db", "docker:redis-svc"]),
+    ).toEqual({
+      ok: false,
+      error: "redis keys requires --db-index <0..15>",
+    });
+  });
+
+  test("redis keys validates --db-index range", () => {
+    for (const bad of ["-1", "16", "1.5", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "redis",
+          "keys",
+          "--db",
+          "docker:redis-svc",
+          "--db-index",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--db-index must be an integer in [0, 15] (got ${bad})`,
+      });
+    }
+  });
+
+  test("redis keys validates --count range", () => {
+    for (const bad of ["0", "10001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "redis",
+          "keys",
+          "--db",
+          "docker:redis-svc",
+          "--db-index",
+          "0",
+          "--count",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--count must be an integer in [1, 10000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("redis keys accepts pattern / cursor / count and dbIndex 15 (boundary)", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "15",
+      "--pattern",
+      "sample:*",
+      "--cursor",
+      "42",
+      "--count",
+      "10000",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-keys",
+      db: "docker:redis-svc",
+      dbIndex: 15,
+      pattern: "sample:*",
+      cursor: "42",
+      count: 10000,
+      json: true,
+    });
+  });
+
+  test("redis value requires --db-index", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --db-index <0..15>",
+    });
+  });
+
+  test("redis value requires --key (missing and empty both rejected)", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --key <name>",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "value",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--key",
+        "",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis value requires --key <name>",
+    });
+  });
+
+  test("redis value captures --db-index 0 and --key, defaults --json off", () => {
+    const result = parseQueryArgs([
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "redis-value",
+      db: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      json: false,
+    });
+  });
+
+  test("redis databases rejects options that belong to keys / value", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --db-index",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --key",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--pattern",
+        "*",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --pattern",
+    });
+  });
+
+  test("redis databases rejects unrelated SQL-side flags", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--schema",
+        "analytics",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --schema",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "databases",
+        "--db",
+        "docker:redis-svc",
+        "--no-save",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis databases does not accept --no-save",
+    });
+  });
+
+  test("redis keys rejects --key / --schema / unrelated flags", () => {
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--key",
+        "sample:key",
+      ]),
+    ).toEqual({ ok: false, error: "redis keys does not accept --key" });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--schema",
+        "analytics",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "redis keys does not accept --schema",
+    });
+    expect(
+      parseQueryArgs([
+        "redis",
+        "keys",
+        "--db",
+        "docker:redis-svc",
+        "--db-index",
+        "0",
+        "--wait",
+      ]),
+    ).toEqual({ ok: false, error: "redis keys does not accept --wait" });
+  });
+
+  test("redis value rejects --pattern / --cursor / --count / unrelated flags", () => {
+    const baseArgs = [
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ];
+    expect(parseQueryArgs([...baseArgs, "--pattern", "*"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --pattern",
+    });
+    expect(parseQueryArgs([...baseArgs, "--cursor", "0"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --cursor",
+    });
+    expect(parseQueryArgs([...baseArgs, "--count", "10"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --count",
+    });
+    expect(parseQueryArgs([...baseArgs, "--include-non-text"])).toEqual({
+      ok: false,
+      error: "redis value does not accept --include-non-text",
+    });
+  });
+
+  test("redis actions allow --cwd and --server (they are global args)", () => {
+    const result = parseQueryArgs([
+      "--cwd",
+      "/tmp/example",
+      "--server",
+      "http://127.0.0.1:64160",
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.cwd).toBe("/tmp/example");
+    expect(result.args.server).toBe("http://127.0.0.1:64160");
+    expect(result.args.command).toEqual({
+      kind: "redis-value",
+      db: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      json: true,
+    });
+  });
+});
+
+describe("parseQueryArgs elasticsearch", () => {
+  test("elasticsearch without an action is rejected", () => {
+    expect(parseQueryArgs(["elasticsearch"])).toEqual({
+      ok: false,
+      error:
+        "elasticsearch requires a sub-action: indices | mapping | docs | doc",
+    });
+  });
+
+  test("unknown elasticsearch sub-action is rejected", () => {
+    expect(parseQueryArgs(["elasticsearch", "wat"])).toEqual({
+      ok: false,
+      error: "unknown elasticsearch sub-action: wat",
+    });
+  });
+
+  test("each action requires --db", () => {
+    for (const action of ["indices", "mapping", "docs", "doc"] as const) {
+      expect(parseQueryArgs(["elasticsearch", action])).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} requires --db <id>`,
+      });
+    }
+  });
+
+  test("indices captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-indices",
+      db: "docker:es-svc",
+      json: true,
+    });
+  });
+
+  test("mapping / docs / doc require --index", () => {
+    for (const action of ["mapping", "docs", "doc"] as const) {
+      expect(
+        parseQueryArgs(["elasticsearch", action, "--db", "docker:es-svc"]),
+      ).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} requires --index <name>`,
+      });
+    }
+  });
+
+  test("doc requires --id", () => {
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "doc",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "elasticsearch doc requires --id <doc-id>",
+    });
+  });
+
+  test("docs --size validates the [1..10000] range", () => {
+    for (const bad of ["0", "10001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "elasticsearch",
+          "docs",
+          "--db",
+          "docker:es-svc",
+          "--index",
+          "sample-index",
+          "--size",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--size must be an integer in [1, 10000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("docs --search-after rejects non-array and non-JSON inputs", () => {
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "docs",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+        "--search-after",
+        "not-json",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--search-after must be valid JSON (e.g. '[1700000000000]')",
+    });
+    expect(
+      parseQueryArgs([
+        "elasticsearch",
+        "docs",
+        "--db",
+        "docker:es-svc",
+        "--index",
+        "sample-index",
+        "--search-after",
+        '{"not":"array"}',
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--search-after must be a JSON array (e.g. '[1700000000000]')",
+    });
+  });
+
+  test("docs captures --q / --size / --search-after / --json", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--q",
+      "status:active",
+      "--size",
+      "25",
+      "--search-after",
+      '[1700000000000,"abc"]',
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-docs",
+      db: "docker:es-svc",
+      index: "sample-index",
+      q: "status:active",
+      size: 25,
+      searchAfter: [1700000000000, "abc"],
+      json: true,
+    });
+  });
+
+  test("doc captures --index and --id", () => {
+    const result = parseQueryArgs([
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "es-doc",
+      db: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-id",
+      json: false,
+    });
+  });
+
+  test("indices rejects options that belong to mapping / docs / doc", () => {
+    const baseArgs = ["elasticsearch", "indices", "--db", "docker:es-svc"];
+    for (const bad of ["--index", "--id", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch indices does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("mapping rejects unrelated docs/doc/redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of [
+      "--id",
+      "--q",
+      "--size",
+      "--search-after",
+      "--db-index",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch mapping does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("docs rejects --id and unrelated redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of ["--id", "--db-index", "--key", "--pattern", "--count"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch docs does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("doc rejects --q / --size / --search-after and redis options", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ];
+    for (const bad of [
+      "--q",
+      "--size",
+      "--search-after",
+      "--db-index",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch doc does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("each action rejects stray positional arguments", () => {
+    for (const action of ["indices", "mapping", "docs", "doc"] as const) {
+      expect(
+        parseQueryArgs([
+          "elasticsearch",
+          action,
+          "extra",
+          "--db",
+          "docker:es-svc",
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `elasticsearch ${action} does not accept positional argument: extra`,
+      });
+    }
+  });
+});
+
+describe("parseQueryArgs s3", () => {
+  test("s3 without an action is rejected", () => {
+    expect(parseQueryArgs(["s3"])).toEqual({
+      ok: false,
+      error:
+        "s3 requires a sub-action: buckets | objects | folder | head | text",
+    });
+  });
+
+  test("unknown s3 sub-action is rejected", () => {
+    expect(parseQueryArgs(["s3", "wat"])).toEqual({
+      ok: false,
+      error: "unknown s3 sub-action: wat",
+    });
+  });
+
+  test("each action requires --db", () => {
+    for (const action of [
+      "buckets",
+      "objects",
+      "folder",
+      "head",
+      "text",
+    ] as const) {
+      expect(parseQueryArgs(["s3", action])).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --db <id>`,
+      });
+    }
+  });
+
+  test("buckets captures --db and --json", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-buckets",
+      db: "docker:s3-svc",
+      json: true,
+    });
+  });
+
+  test("objects / folder / head / text require --bucket", () => {
+    for (const action of ["objects", "folder", "head", "text"] as const) {
+      expect(parseQueryArgs(["s3", action, "--db", "docker:s3-svc"])).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --bucket <name>`,
+      });
+    }
+  });
+
+  test("head / text require --key", () => {
+    for (const action of ["head", "text"] as const) {
+      expect(
+        parseQueryArgs([
+          "s3",
+          action,
+          "--db",
+          "docker:s3-svc",
+          "--bucket",
+          "sample-bucket",
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `s3 ${action} requires --key <key>`,
+      });
+    }
+  });
+
+  test("objects --mode rejects values outside the prefix|contains enum", () => {
+    expect(
+      parseQueryArgs([
+        "s3",
+        "objects",
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--mode",
+        "regex",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--mode must be one of: prefix | contains (got regex)",
+    });
+  });
+
+  test("objects --sort rejects values outside the key-asc|updated-desc enum", () => {
+    expect(
+      parseQueryArgs([
+        "s3",
+        "objects",
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--sort",
+        "size-desc",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--sort must be one of: key-asc | updated-desc (got size-desc)",
+    });
+  });
+
+  test("objects --limit validates the [1..1000] range", () => {
+    for (const bad of ["0", "1001", "-3", "abc"]) {
+      expect(
+        parseQueryArgs([
+          "s3",
+          "objects",
+          "--db",
+          "docker:s3-svc",
+          "--bucket",
+          "sample-bucket",
+          "--limit",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: `--limit must be an integer in [1, 1000] (got ${bad})`,
+      });
+    }
+  });
+
+  test("objects captures --prefix / --q / --mode / --sort / --limit / --token / --json", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--q",
+      "needle",
+      "--mode",
+      "contains",
+      "--sort",
+      "key-asc",
+      "--limit",
+      "75",
+      "--token",
+      "next-cursor",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-objects",
+      db: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      q: "needle",
+      mode: "contains",
+      sort: "key-asc",
+      limit: 75,
+      token: "next-cursor",
+      json: true,
+    });
+  });
+
+  test("folder captures --prefix / --token", () => {
+    const result = parseQueryArgs([
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--token",
+      "next-cursor",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "s3-folder",
+      db: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      token: "next-cursor",
+      json: false,
+    });
+  });
+
+  test("head and text capture --key", () => {
+    for (const action of ["head", "text"] as const) {
+      const result = parseQueryArgs([
+        "s3",
+        action,
+        "--db",
+        "docker:s3-svc",
+        "--bucket",
+        "sample-bucket",
+        "--key",
+        "logs/sample.json",
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("parse failed");
+      expect(result.args.command).toEqual({
+        kind: `s3-${action}`,
+        db: "docker:s3-svc",
+        bucket: "sample-bucket",
+        key: "logs/sample.json",
+        json: false,
+      });
+    }
+  });
+
+  test("buckets rejects options that belong to objects / folder / head / text", () => {
+    const baseArgs = ["s3", "buckets", "--db", "docker:s3-svc"];
+    for (const bad of [
+      "--bucket",
+      "--prefix",
+      "--q",
+      "--mode",
+      "--sort",
+      "--limit",
+      "--token",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 buckets does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("objects rejects --key and unrelated redis/es options", () => {
+    const baseArgs = [
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ];
+    for (const bad of ["--key", "--db-index", "--index", "--id", "--size"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 objects does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("folder rejects search/limit/key/mode/sort options that only belong to objects/head/text", () => {
+    const baseArgs = [
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ];
+    for (const bad of ["--q", "--limit", "--key", "--mode", "--sort"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 folder does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("head rejects --prefix / --q / --limit / --mode / --sort / --token", () => {
+    const baseArgs = [
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ];
+    for (const bad of [
+      "--prefix",
+      "--q",
+      "--limit",
+      "--mode",
+      "--sort",
+      "--token",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `s3 head does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("each action rejects stray positional arguments", () => {
+    for (const action of [
+      "buckets",
+      "objects",
+      "folder",
+      "head",
+      "text",
+    ] as const) {
+      expect(
+        parseQueryArgs(["s3", action, "extra", "--db", "docker:s3-svc"]),
+      ).toEqual({
+        ok: false,
+        error: `s3 ${action} does not accept positional argument: extra`,
+      });
+    }
+  });
+});
+
+describe("parseQueryArgs rejects s3-only flags on non-s3 subcommands", () => {
+  // --bucket / --prefix / --mode / --sort / --token は S3 専用。SQL 系 /
+  // redis / elasticsearch に流入して silent ignore されるのを防ぐ。
+  // (--q / --limit / --key は ES や Redis と共有なので、その allowlist 側で
+  // 個別に拒否される)
+  test("exec rejects each s3-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("redis keys rejects each s3-only option", () => {
+    const baseArgs = [
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `redis keys does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("elasticsearch docs rejects each s3-only option", () => {
+    const baseArgs = [
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ];
+    for (const bad of ["--bucket", "--prefix", "--mode", "--sort", "--token"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `elasticsearch docs does not accept ${bad}`,
+      });
+    }
+  });
+});
+
+describe("parseQueryArgs rejects elasticsearch-only flags on non-elasticsearch subcommands", () => {
+  // Redis 用と同じ精神: --index / --q / --size / --search-after が SQL 系や
+  // redis 系に流入して silent ignore されるのを防ぐ。
+  test("exec rejects each elasticsearch-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("search rejects each elasticsearch-only option", () => {
+    const baseArgs = ["search", "--db", "a.db", "--term", "needle"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `search does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot create rejects each elasticsearch-only option", () => {
+    const baseArgs = ["snapshot", "create", "--db", "a.db"];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot create does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff rows rejects each elasticsearch-only option", () => {
+    const baseArgs = [
+      "diff",
+      "rows",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--table",
+      "users",
+    ];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff rows does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("redis keys rejects each elasticsearch-only option", () => {
+    const baseArgs = [
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ];
+    for (const bad of ["--index", "--q", "--size", "--search-after"]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `redis keys does not accept ${bad}`,
+      });
+    }
+  });
+});
+
+describe("shellSingleQuote", () => {
+  test("wraps plain values in single quotes", () => {
+    expect(shellSingleQuote("app.db")).toBe("'app.db'");
+    expect(shellSingleQuote("docker:pg-svc")).toBe("'docker:pg-svc'");
+    expect(shellSingleQuote("docker:s3-svc/sample-bucket")).toBe(
+      "'docker:s3-svc/sample-bucket'",
+    );
+  });
+
+  test("preserves spaces, colons, slashes, and shell metacharacters as literals", () => {
+    // POSIX '...' は内部を全て literal にするので、 $ ` \ * など shell が
+    // 通常解釈するメタも素通しになる。bash/zsh で同じ。
+    expect(shellSingleQuote("path with space")).toBe("'path with space'");
+    expect(shellSingleQuote("$VAR `cmd` \\n")).toBe("'$VAR `cmd` \\n'");
+    expect(shellSingleQuote("a*b?c|d")).toBe("'a*b?c|d'");
+  });
+
+  test("escapes embedded single quotes by closing+reopening ('\\'')", () => {
+    // 'sample's path' を表すには 'sample'\''s path' と書く必要がある。
+    // bash/zsh/sh 全てで同じ規則。
+    expect(shellSingleQuote("sample's path")).toBe("'sample'\\''s path'");
+    expect(shellSingleQuote("'")).toBe("''\\'''");
+    expect(shellSingleQuote("a'b'c")).toBe("'a'\\''b'\\''c'");
+  });
+
+  test("handles empty string", () => {
+    expect(shellSingleQuote("")).toBe("''");
+  });
+});
+
+describe("QUERY_HELP / QUERY_AGENT_HELP", () => {
+  test("documents only the subcommands that are actually wired", () => {
+    // help text must NOT mention "diff create / diff delete / diff list" —
+    // those subcommands were advertised before but returned
+    // `unknown query command: ...` at runtime. Keeping the docs honest is
+    // the core point of this guard.
+    for (const text of [QUERY_HELP, QUERY_AGENT_HELP]) {
+      expect(/diff create/.test(text)).toBe(false);
+      expect(/diff delete/.test(text)).toBe(false);
+      expect(/diff list/.test(text)).toBe(false);
+      // The implemented commands MUST appear.
+      expect(text).toMatch(/snapshot create/);
+      expect(text).toMatch(/snapshot list/);
+      expect(text).toMatch(/diff tables/);
+      expect(text).toMatch(/diff rows/);
+      // search is now a real subcommand — it must appear everywhere.
+      expect(text).toMatch(/code-viewer query search /);
+    }
+    // QUERY_HELP (the short usage) must list search as a callable subcommand.
+    expect(/^\s+code-viewer query search /m.test(QUERY_HELP)).toBe(true);
+    // QUERY_AGENT_HELP must not claim search is unwired anymore.
+    expect(/Not yet wired in the CLI/.test(QUERY_AGENT_HELP)).toBe(false);
+    expect(/list with: code-viewer query list/.test(QUERY_AGENT_HELP)).toBe(
+      false,
+    );
+    // Source discovery is now a wired subcommand. The previous guard asserted
+    // that `query list` is described as NOT being a discovery path; that
+    // intent is now expressed as a positive guard: the agent guide must point
+    // at `code-viewer query sources` as the discovery entry point.
+    expect(QUERY_AGENT_HELP).toMatch(/code-viewer query sources/);
+    // Both helps must list `sources` as a real subcommand.
+    for (const text of [QUERY_HELP, QUERY_AGENT_HELP]) {
+      expect(text).toMatch(/code-viewer query sources/);
+    }
+    // The output contract must document the search exit semantics so agents
+    // know an empty result is a clean exit 0.
+    expect(QUERY_AGENT_HELP).toMatch(
+      /search:[\s\S]*Empty result[\s\S]*exit 0/i,
+    );
+  });
+});
+
+// --- runQueryCli integration tests (fetch mocked) ---
+
+type RequestRecord = {
+  url: string;
+  method: string;
+  body: unknown;
+};
+
+type CapturedExit = number;
+
+const originalFetch = globalThis.fetch;
+let originalExit: typeof process.exit | null = null;
+let originalLog: typeof console.log | null = null;
+let originalErr: typeof console.error | null = null;
+
+function installRunHarness(
+  responses: Array<{ status?: number; contentType?: string; body: string }>,
+): {
+  requests: RequestRecord[];
+  logs: string[];
+  errs: string[];
+  exits: CapturedExit[];
+} {
+  const requests: RequestRecord[] = [];
+  const logs: string[] = [];
+  const errs: string[] = [];
+  const exits: CapturedExit[] = [];
+
+  // 順番に消費する fake fetch。server health probe を最初に消費する。
+  let index = 0;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: async (input: string | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const bodyText = init?.body as string | undefined;
+      const body = bodyText ? JSON.parse(bodyText) : undefined;
+      requests.push({ url, method: init?.method ?? "GET", body });
+      const next = responses[index++];
+      if (!next) throw new Error(`unexpected extra fetch: ${url}`);
+      return new Response(next.body, {
+        status: next.status ?? 200,
+        headers: {
+          "Content-Type": next.contentType ?? "application/json",
+        },
+      });
+    },
+  });
+
+  originalExit = process.exit;
+  // `process.exit` is typed as `(code?: number) => never`. The harness needs
+  // to short-circuit without actually terminating the test process, so we
+  // throw a marker that the test can catch — TypeScript still sees `never`
+  // because we satisfy the signature.
+  process.exit = ((code?: number) => {
+    exits.push(typeof code === "number" ? code : 0);
+    throw new ExitMarker(code ?? 0);
+  }) as typeof process.exit;
+
+  originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(
+      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
+    );
+  };
+  originalErr = console.error;
+  console.error = (...args: unknown[]) => {
+    errs.push(
+      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
+    );
+  };
+
+  return { requests, logs, errs, exits };
+}
+
+class ExitMarker extends Error {
+  constructor(public code: number) {
+    super(`process.exit(${code})`);
+  }
+}
+
+afterEach(() => {
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: originalFetch,
+  });
+  if (originalExit) process.exit = originalExit;
+  if (originalLog) console.log = originalLog;
+  if (originalErr) console.error = originalErr;
+});
+
+async function runAndCatchExit(argv: string[]): Promise<void> {
+  try {
+    await runQueryCli(argv);
+  } catch (err) {
+    if (err instanceof ExitMarker) return;
+    throw err;
+  }
+}
+
+describe("runQueryCli integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  // sources は ensureServerUrl の cheap health probe と body の双方で fetch する。
+  // /_db/files discovery 自体は body fetch の 1 回だけに抑える。
+  test("query sources --json emits the /_db/files response verbatim", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 1024,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+        {
+          id: "docker:s3-svc/sample-bucket",
+          path: "docker:s3-svc/sample-bucket",
+          name: "sample-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      // health probe (ensureServerUrl)
+      { body: JSON.stringify({ files: [] }) },
+      // body fetch
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--json"]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(payload);
+  });
+
+  test("query sources (default) prints id/kind/name lines for each source", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    // 2 sources → 2 行。順序はサーバ応答順を保つ。
+    expect(lines).toEqual([
+      "app.db\tsqlite\tapp.db",
+      "docker:pg-svc\tpostgresql\tpg-svc (postgresql)",
+    ]);
+  });
+
+  test("query sources surfaces truncated / dockerError as stdout '#' notes (default mode)", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      truncated: true,
+      dockerError: "compose ps failed: docker daemon unreachable",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.errs).toEqual([]);
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/^app\.db\tsqlite\tapp\.db$/m);
+    expect(out).toMatch(/^# truncated:/m);
+    expect(out).toMatch(
+      /^# dockerError: compose ps failed: docker daemon unreachable$/m,
+    );
+  });
+
+  test("query sources (default) on empty server prints a no-sources notice and exits 0", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["no datastore sources discovered"]);
+  });
+
+  test("query sources --commands emits shell-pasteable next-step commands per source", async () => {
+    // mixed-kind discovery: sqlite + postgresql + mysql + s3。
+    //   sqlite/mysql → schema + exec の 2 行
+    //   postgresql → schemas (multi-schema) を追加した 3 行
+    //   s3 → SQL command ではなく browser-pane hint
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 1024,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+        {
+          id: "docker:s3-svc/sample-bucket",
+          path: "docker:s3-svc/sample-bucket",
+          name: "sample-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+        {
+          id: "docker:mysql-svc",
+          path: "docker:mysql-svc",
+          name: "mysql-svc (mysql)",
+          sizeBytes: 0,
+          kind: "mysql",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.errs).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 各 source heading は # で始まり ordinal が付く。db id と server URL は
+    // 必ず single-quote。各 SQL 行は --server '<SERVER>' を pin する。
+    expect(out).toMatch(/^# source 1: app\.db \(sqlite\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'app\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
+    );
+    // sqlite にも query history と snapshot store への paste-safe entrypoint
+    // が出る。browser tab を開かずに既存の調査履歴へ進める。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'app\.db' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'app\.db' --json$/m,
+    );
+    // sqlite には schemas 行が出ない。
+    expect(/query schemas --db 'app\.db'/.test(out)).toBe(false);
+
+    expect(out).toMatch(/^# source 2: docker:pg-svc \(postgresql\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' schemas --db 'docker:pg-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'docker:pg-svc' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'docker:pg-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:pg-svc' --json$/m,
+    );
+
+    expect(out).toMatch(/^# source 3: docker:s3-svc\/sample-bucket \(s3\)$/m);
+    // s3 is CLI-wired: emits paste-safe `s3 buckets` and `s3 objects` lines,
+    // with --bucket as a <bucket-name> placeholder (source id is not always
+    // a "<service>/<bucket>" form, so the CLI never decides for you).
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' s3 buckets --db 'docker:s3-svc\/sample-bucket' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' s3 objects --db 'docker:s3-svc\/sample-bucket' --bucket <bucket-name> --limit 50 --json$/m,
+    );
+    // The old browser-pane hint is gone now that s3 has CLI commands.
+    expect(/# s3: use the browser Datastores tab/.test(out)).toBe(false);
+    // s3 は SQL source ではないので schema/exec/list/snapshot 行を出さない。
+    expect(/query schema --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query exec --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query list --db 'docker:s3-svc/.test(out)).toBe(false);
+    expect(/query snapshot list --db 'docker:s3-svc/.test(out)).toBe(false);
+
+    expect(out).toMatch(/^# source 4: docker:mysql-svc \(mysql\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'docker:mysql-svc' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'docker:mysql-svc' --sql "SELECT 1" --no-save$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'docker:mysql-svc' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:mysql-svc' --json$/m,
+    );
+    // MySQL はこの server の /_db/schemas では multi-schema 扱いしない。
+    expect(/query schemas --db 'docker:mysql-svc'/.test(out)).toBe(false);
+    // 全 SQL 行で --server prefix が付いていることを regression guard。
+    // (auto-discovery に逸れて別 server / no server に流れない保証)
+    const allQueryLines = out
+      .split("\n")
+      .filter((line) => line.startsWith("code-viewer query"));
+    const s3Lines = allQueryLines.filter((line) =>
+      / s3 (buckets|objects) /.test(line),
+    );
+    const sqlLines = allQueryLines.filter((line) => !s3Lines.includes(line));
+    // postgresql=5 (schemas+schema+exec+list+snapshot list) +
+    //   sqlite=4 (schema+exec+list+snapshot list) +
+    //   mysql=4  (schema+exec+list+snapshot list) = 13 SQL 行が出る。
+    // s3 行は別 prefix なので sqlLines には数えない。
+    expect(sqlLines).toHaveLength(13);
+    // s3 は buckets + objects の 2 行を必ず出す。
+    expect(s3Lines).toHaveLength(2);
+    // --server prefix の regression guard は s3 行も含めて全 query 行に適用。
+    const missingPrefix = allQueryLines.filter(
+      (line) => !line.startsWith("code-viewer query --server '"),
+    );
+    expect(missingPrefix).toEqual([]);
+  });
+
+  test("query sources --commands single-quotes ids containing spaces and quotes", async () => {
+    // path に空白と ' を含むケース。POSIX '...' 内で ' を出すには '\'' に展開。
+    const payload = {
+      files: [
+        {
+          id: "sample's data.db",
+          path: "sample's data.db",
+          name: "sample's data.db",
+          sizeBytes: 2048,
+          kind: "sqlite",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // heading は生 id (notice 用)、command は quote 済み。--server prefix も付く。
+    expect(out).toMatch(/^# source 1: sample's data\.db \(sqlite\)$/m);
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'sample'\\''s data\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'sample'\\''s data\.db' --sql "SELECT 1" --no-save$/m,
+    );
+    // 追加の query history / snapshot list entrypoint も同じ paste-safety を満たす。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' list --db 'sample'\\''s data\.db' --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'sample'\\''s data\.db' --json$/m,
+    );
+  });
+
+  test("query sources --commands single-quotes the server URL itself when it contains spaces", async () => {
+    // --server URL に空白を含むケース。ensureServerUrl は trailing slash を
+    // 剥がすだけで、内部 path はそのまま resolved serverUrl に渡される。
+    // shellSingleQuote が URL にも効いて貼り付け安全になることを検証する。
+    const SERVER_WITH_SPACE = "http://localhost:65535/with space/";
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          files: [
+            {
+              id: "app.db",
+              path: "app.db",
+              name: "app.db",
+              sizeBytes: 1024,
+              kind: "sqlite",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER_WITH_SPACE,
+      "sources",
+      "--commands",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // trailing slash は ensureServerUrl で剥がされ "http://localhost:65535/with space"
+    // が resolved serverUrl になる。space を含む URL も single-quote 内で literal。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535\/with space' schema --db 'app\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535\/with space' exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
+    );
+  });
+
+  test("query sources --commands preserves truncated / dockerError notices at the tail", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      truncated: true,
+      dockerError: "compose ps failed: docker daemon unreachable",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/^# source 1: app\.db \(sqlite\)$/m);
+    expect(out).toMatch(/^# truncated:/m);
+    expect(out).toMatch(
+      /^# dockerError: compose ps failed: docker daemon unreachable$/m,
+    );
+  });
+
+  test("query sources --commands keeps source notices single-line for pasted command blocks", async () => {
+    const payload = {
+      files: [
+        {
+          id: "sample\tdata.db",
+          path: "sample\tdata.db",
+          name: "sample\tdata.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      dockerError: "compose ps failed\nsecond line\twith tab",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs.join("\n").split("\n");
+    expect(lines.includes("# source 1: sample data.db (sqlite)")).toBe(true);
+    expect(
+      lines.includes("# dockerError: compose ps failed second line with tab"),
+    ).toBe(true);
+    expect(lines.includes("second line\twith tab")).toBe(false);
+    expect(
+      lines.every(
+        (line) =>
+          line === "" ||
+          line.startsWith("#") ||
+          line.startsWith("code-viewer query"),
+      ),
+    ).toBe(true);
+  });
+
+  test("query sources --commands on empty server explains why nothing is shown", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    // 空の場合は # コメント1行だけ。default mode と違って解説を含める。
+    expect(harness.logs).toEqual([
+      "# no datastore sources discovered — start a service or check docker-compose",
+    ]);
+  });
+
+  test("query exec --schema forwards schema in the query body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          columns: ["id"],
+          columnTypes: ["int4"],
+          rows: [[1]],
+          rowCount: 1,
+          truncated: false,
+          elapsedMs: 7,
+          executedSql: ["SELECT 1"],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+      "--max-rows",
+      "5",
+    ]);
+
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/query`);
+    expect(harness.requests[1].method).toBe("POST");
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      schema: "analytics",
+      sql: "SELECT 1",
+      saveHistory: false,
+      executedBy: "ai",
+      source: "cli",
+      maxRows: 5,
+    });
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      dbId: "docker:pg-svc",
+      schema: "analytics",
+      columns: ["id"],
+      columnTypes: ["int4"],
+      rows: [[1]],
+      rowCount: 1,
+      truncated: false,
+      elapsedMs: 7,
+      executedSql: ["SELECT 1"],
+    });
+  });
+
+  test("query exec output passes through truncated/columnTypes/executedSql verbatim", async () => {
+    // server が truncated=true を返したら CLI も truncated=true を残し、
+    // AI agent が「LIMIT を拡張して再実行する」判断材料にできるかを検証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: ["id", "label"],
+          columnTypes: ["INTEGER", "TEXT"],
+          rows: [
+            [1, "alpha"],
+            [2, "beta"],
+          ],
+          rowCount: 2,
+          truncated: true,
+          elapsedMs: 12,
+          executedSql: ["SELECT id, label FROM sample_table LIMIT 2"],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT id, label FROM sample_table LIMIT 2",
+      "--no-save",
+      "--max-rows",
+      "2",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const parsed = JSON.parse(harness.logs.join("\n"));
+    expect(parsed.dbId).toBe("sample.db");
+    expect(parsed.columns).toEqual(["id", "label"]);
+    expect(parsed.columnTypes).toEqual(["INTEGER", "TEXT"]);
+    expect(parsed.rowCount).toBe(2);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.executedSql).toEqual([
+      "SELECT id, label FROM sample_table LIMIT 2",
+    ]);
+    // schema は server が返さなかったので CLI 出力にも含まれない
+    // (undefined を JSON に焼かない)。
+    expect("schema" in parsed).toBe(false);
+  });
+
+  test("query exec output omits optional fields when server did not return them", async () => {
+    // 古い server / 非 PG が schema / executedSql を返さないケース。
+    // 残りの必須フィールド (truncated 等) は素通しされ、optional は欠落するだけ。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: [],
+          columnTypes: [],
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+          elapsedMs: 1,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1 WHERE 0",
+      "--no-save",
+    ]);
+
+    const parsed = JSON.parse(harness.logs.join("\n"));
+    expect(parsed).toEqual({
+      dbId: "sample.db",
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: 1,
+    });
+    expect("schema" in parsed).toBe(false);
+    expect("executedSql" in parsed).toBe(false);
+  });
+
+  test("query schemas --json emits the /_db/schemas response verbatim", async () => {
+    const payload = {
+      dbId: "docker:pg-svc",
+      schemas: [{ name: "public" }, { name: "analytics" }],
+      selectedSchema: "public",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schemas",
+      "--db",
+      "docker:pg-svc",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/schemas?db=docker%3Apg-svc`,
+    );
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(payload);
+  });
+
+  test("query schemas (default) prints one schema name per line", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schemas: [{ name: "public" }, { name: "analytics" }],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schemas",
+      "--db",
+      "docker:pg-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["public", "analytics"]);
+  });
+
+  test("query schemas notifies when the engine has no multi-schema concept", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ dbId: "app.db", schemas: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schemas", "--db", "app.db"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "no schemas (engine has no multi-schema concept)",
+    ]);
+  });
+
+  test("query schema --with-columns forwards includeColumns=1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          tables: [],
+          indexes: [],
+          foreignKeys: [],
+          columnsMap: {},
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/schema?db=docker%3Apg-svc&schema=analytics&includeColumns=1`,
+    );
+  });
+
+  test("query schema --json (sqlite, no --schema) enriches tables[] with paste-safe columns/ddl commands", async () => {
+    // SQLite なので response の schema は undefined。--schema 引数も無い。
+    // 追加される 2 コマンドには --schema が混入してはならない。top-level
+    // (dbId / indexes / foreignKeys / executedSql) は素通し。
+    const payload = {
+      dbId: "app.db",
+      tables: [
+        { name: "sample_table", type: "table", rowCount: 42 },
+        { name: "sample_view", type: "view", rowCount: null },
+      ],
+      indexes: [
+        {
+          table: "sample_table",
+          name: "sample_idx",
+          columns: ["id"],
+          unique: false,
+        },
+      ],
+      foreignKeys: [],
+      executedSql: ["SELECT ... FROM sqlite_master"],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      dbId: "app.db",
+      tables: [
+        {
+          name: "sample_table",
+          type: "table",
+          rowCount: 42,
+          columnsCommand:
+            "code-viewer query --server 'http://localhost:65535' columns --db 'app.db' --table 'sample_table' --json",
+          ddlCommand:
+            "code-viewer query --server 'http://localhost:65535' ddl --db 'app.db' --table 'sample_table' --json",
+        },
+        {
+          name: "sample_view",
+          type: "view",
+          rowCount: null,
+          columnsCommand:
+            "code-viewer query --server 'http://localhost:65535' columns --db 'app.db' --table 'sample_view' --json",
+          ddlCommand:
+            "code-viewer query --server 'http://localhost:65535' ddl --db 'app.db' --table 'sample_view' --json",
+        },
+      ],
+      indexes: [
+        {
+          table: "sample_table",
+          name: "sample_idx",
+          columns: ["id"],
+          unique: false,
+        },
+      ],
+      foreignKeys: [],
+      executedSql: ["SELECT ... FROM sqlite_master"],
+    });
+  });
+
+  test("query schema --json with --with-columns preserves columnsMap and uses data.schema for --schema pinning", async () => {
+    // PG response: server が解決した data.schema を優先する。--with-columns
+    // 経由の columnsMap は素通し。tables[] への enrich は additive で、
+    // --schema 'analytics' が columnsCommand / ddlCommand に必ず含まれる。
+    const payload = {
+      dbId: "docker:pg-svc",
+      schema: "analytics",
+      tables: [{ name: "events", type: "table", rowCount: 7 }],
+      indexes: [],
+      foreignKeys: [],
+      columnsMap: {
+        events: [
+          {
+            name: "id",
+            type: "int8",
+            nullable: false,
+            primaryKey: true,
+            defaultValue: null,
+          },
+        ],
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--with-columns",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const parsed = JSON.parse(harness.logs[0]);
+    // top-level は素通し (columnsMap 含む)。
+    expect(parsed.dbId).toBe("docker:pg-svc");
+    expect(parsed.schema).toBe("analytics");
+    expect(parsed.columnsMap).toEqual(payload.columnsMap);
+    expect(parsed.indexes).toEqual([]);
+    expect(parsed.foreignKeys).toEqual([]);
+    // tables[] は additive enrich。table 名・既存フィールドは保存。
+    expect(parsed.tables).toEqual([
+      {
+        name: "events",
+        type: "table",
+        rowCount: 7,
+        columnsCommand:
+          "code-viewer query --server 'http://localhost:65535' columns --db 'docker:pg-svc' --schema 'analytics' --table 'events' --json",
+        ddlCommand:
+          "code-viewer query --server 'http://localhost:65535' ddl --db 'docker:pg-svc' --schema 'analytics' --table 'events' --json",
+      },
+    ]);
+  });
+
+  test("query schema --json prefers server-resolved data.schema over the --schema argument", async () => {
+    // CLI の --schema と server-resolved schema が食い違っても、
+    // response の data.schema を優先する。enrich はその
+    // 解決済み値を使う ── そうすると AI が columnsCommand を貼って実行する時
+    // も同じ schema を見に行く。
+    const payload = {
+      dbId: "docker:pg-svc",
+      schema: "public",
+      tables: [{ name: "items", type: "table", rowCount: 3 }],
+      indexes: [],
+      foreignKeys: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.tables[0].columnsCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' columns --db 'docker:pg-svc' --schema 'public' --table 'items' --json",
+    );
+    expect(parsed.tables[0].ddlCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' ddl --db 'docker:pg-svc' --schema 'public' --table 'items' --json",
+    );
+  });
+
+  test("query schema --json single-quotes db/schema/table with spaces and single quotes", async () => {
+    // db id・schema 名・table 名すべてに空白と ' が混じるケース。POSIX '...'
+    // の '\'' 展開で paste-safe になっていることを behavior で確認する。
+    const payload = {
+      dbId: "sample's data.db",
+      schema: "weird schema",
+      tables: [{ name: "sample's table", type: "table", rowCount: 1 }],
+      indexes: [],
+      foreignKeys: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "schema",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.tables[0].columnsCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' columns --db 'sample'\\''s data.db' --schema 'weird schema' --table 'sample'\\''s table' --json",
+    );
+    expect(parsed.tables[0].ddlCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' ddl --db 'sample'\\''s data.db' --schema 'weird schema' --table 'sample'\\''s table' --json",
+    );
+  });
+
+  test("query schema (default) prints name/type/rowCount per table", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          tables: [
+            { name: "users", type: "table", rowCount: 42 },
+            { name: "user_view", type: "view", rowCount: null },
+          ],
+          indexes: [],
+          foreignKeys: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schema", "--db", "app.db"]);
+
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/schema?db=app.db`);
+    expect(harness.exits).toEqual([]);
+    // default mode は table summary line だけ。command hint は --json 専用で、
+    // default の stdout には漏らさない (AI-parseable な tab-separated 行を守る)。
+    expect(harness.logs).toEqual(["users\ttable\t42", "user_view\tview\t-"]);
+    const out = harness.logs.join("\n");
+    expect(/columnsCommand/.test(out)).toBe(false);
+    expect(/ddlCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
+  });
+
+  test("query columns (default) prints name/type/nullable/pk/default", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          table: "users",
+          columns: [
+            {
+              name: "id",
+              type: "INTEGER",
+              nullable: false,
+              primaryKey: true,
+              defaultValue: null,
+            },
+            {
+              name: "email",
+              type: "TEXT",
+              nullable: true,
+              primaryKey: false,
+              defaultValue: "''",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "columns",
+      "--db",
+      "app.db",
+      "--table",
+      "users",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/columns?db=app.db&table=users`,
+    );
+    expect(harness.logs).toEqual([
+      "id\tINTEGER\tNOT NULL\tPK\t-",
+      "email\tTEXT\tNULL\t-\t''",
+    ]);
+  });
+
+  test("query ddl (default) prints CREATE statement and triggers", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          dbId: "app.db",
+          table: "users",
+          sql: "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+          triggers: [{ name: "users_ai", sql: "CREATE TRIGGER users_ai ..." }],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "ddl",
+      "--db",
+      "app.db",
+      "--table",
+      "users",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/ddl?db=app.db&table=users`,
+    );
+    expect(harness.logs).toEqual([
+      "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+      "",
+      "CREATE TRIGGER users_ai ...",
+    ]);
+  });
+
+  test("query schema relays server text errors to stderr + exit 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "unknown database id: bogus",
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "schema", "--db", "bogus"]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /read schema failed \(400\): unknown database id: bogus/,
+    );
+  });
+
+  test("query list --schema forwards db and schema in the history URL", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ version: 1, entries: [] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/history?db=docker%3Apg-svc&schema=analytics`,
+    );
+    // entries: [] でも top-level (version) は素通し、enrich は空配列。余計な
+    // command hint を吐かないことも確認する。
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      version: 1,
+      entries: [],
+    });
+    expect(/replayCommand/.test(harness.logs.join("\n"))).toBe(false);
+  });
+
+  test("query list --json enriches each entries[] element with a paste-safe replayCommand", async () => {
+    // 3 entry を用意: SQLite no schema + title あり / PG with schema + title
+    // なし + truncated:true / SQLite no title + no schema。各 entry が独立に
+    // enrich され、title は string の時だけ --title が含まれる。top-level
+    // (version / nextCursor) と各 entry の既存 14 フィールドは素通し。
+    const payload = {
+      version: 1,
+      nextCursor: "sample-cursor",
+      entries: [
+        {
+          id: "h-1",
+          dbId: "app.db",
+          sql: "SELECT count(*) FROM sample_table",
+          title: "sample count",
+          body: "Checking row count.",
+          columns: ["count"],
+          rowsPreview: [[42]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 3,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+        {
+          id: "h-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          sql: "SELECT id, label FROM sample_events LIMIT 1000",
+          columns: ["id", "label"],
+          rowsPreview: [[1, "alpha"]],
+          rowCount: 1000,
+          savedRows: 500,
+          truncated: true,
+          elapsedMs: 47,
+          executedAt: "2026-06-30T12:05:00Z",
+          executedBy: "user",
+          source: "browser",
+        },
+        {
+          id: "h-3",
+          dbId: "app.db",
+          sql: "PRAGMA table_info(sample_table)",
+          columns: ["cid", "name", "type"],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:10:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      version: 1,
+      nextCursor: "sample-cursor",
+      entries: [
+        {
+          id: "h-1",
+          dbId: "app.db",
+          sql: "SELECT count(*) FROM sample_table",
+          title: "sample count",
+          body: "Checking row count.",
+          columns: ["count"],
+          rowsPreview: [[42]],
+          rowCount: 1,
+          savedRows: 1,
+          truncated: false,
+          elapsedMs: 3,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+          // title あり / schema なし → --title が含まれ、--schema は無い。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'app.db' --sql 'SELECT count(*) FROM sample_table' --title 'sample count' --no-save",
+        },
+        {
+          id: "h-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          sql: "SELECT id, label FROM sample_events LIMIT 1000",
+          columns: ["id", "label"],
+          rowsPreview: [[1, "alpha"]],
+          rowCount: 1000,
+          savedRows: 500,
+          truncated: true,
+          elapsedMs: 47,
+          executedAt: "2026-06-30T12:05:00Z",
+          executedBy: "user",
+          source: "browser",
+          // title なし / schema あり → --schema が入り --title は無い。
+          // truncated:true でも --max-rows は意図的に埋め込まない (AI が
+          // entry.truncated を見て独自に上書きする設計)。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'docker:pg-svc' --schema 'analytics' --sql 'SELECT id, label FROM sample_events LIMIT 1000' --no-save",
+        },
+        {
+          id: "h-3",
+          dbId: "app.db",
+          sql: "PRAGMA table_info(sample_table)",
+          columns: ["cid", "name", "type"],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:10:00Z",
+          executedBy: "ai",
+          source: "cli",
+          // title なし / schema なし。
+          replayCommand:
+            "code-viewer query --server 'http://localhost:65535' exec --db 'app.db' --sql 'PRAGMA table_info(sample_table)' --no-save",
+        },
+      ],
+    });
+  });
+
+  test("query list --json single-quotes sql / title / db / schema containing spaces, single quotes, and newlines", async () => {
+    // sql は複数行になることも珍しくない。POSIX '...' は内部の改行も literal
+    // として通すので bash/zsh に paste しても 1 引数として扱われる。' は
+    // '\'' 展開で escape される。
+    const sql = "SELECT *\nFROM sample's table\nWHERE col = 'x'";
+    const title = "sample's exploration";
+    const payload = {
+      version: 1,
+      entries: [
+        {
+          id: "h-q",
+          dbId: "sample's data.db",
+          schema: "weird schema",
+          sql,
+          title,
+          columns: [],
+          rowsPreview: [],
+          rowCount: 0,
+          savedRows: 0,
+          truncated: false,
+          elapsedMs: 1,
+          executedAt: "2026-06-30T12:00:00Z",
+          executedBy: "ai",
+          source: "cli",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.entries[0].replayCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' exec " +
+        "--db 'sample'\\''s data.db' " +
+        "--schema 'weird schema' " +
+        "--sql 'SELECT *\nFROM sample'\\''s table\nWHERE col = '\\''x'\\''' " +
+        "--title 'sample'\\''s exploration' " +
+        "--no-save",
+    );
+  });
+
+  test("query list (default, no --json) renders summary lines and emits no replayCommand hints", async () => {
+    // default mode は既存 summary 行 (executedAt / [AI] / title / row count /
+    // SQL 抜粋) のみ。enrich 用 command hint は --json 専用で stdout に
+    // 漏らさない (AI-parseable な要約を守る)。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              id: "h-1",
+              dbId: "app.db",
+              sql: "SELECT count(*) FROM sample_table",
+              title: "sample count",
+              columns: ["count"],
+              rowsPreview: [[42]],
+              rowCount: 1,
+              savedRows: 1,
+              truncated: false,
+              elapsedMs: 3,
+              executedAt: "2026-06-30T12:00:00Z",
+              executedBy: "ai",
+              source: "cli",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "list", "--db", "app.db"]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 既存 summary 出力の挙動を回帰防止用に固定。
+    expect(out).toMatch(/2026-06-30T12:00:00Z\s+\[AI\]\s+sample count/);
+    expect(out).toMatch(/SELECT count\(\*\) FROM sample_table/);
+    // command hint が default 出力に漏れないことを negative assertion で確認。
+    expect(/replayCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
+  });
+
+  test("query clear --schema forwards db and schema in the POST body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ ok: true }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "clear",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/history/clear`);
+    expect(harness.requests[1].method).toBe("POST");
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+    expect(harness.logs.join("\n")).toBe("cleared query history");
+  });
+
+  test("snapshot create (no --wait) prints the message + snapshotId + poll hint", async () => {
+    const harness = installRunHarness([
+      // health probe
+      { body: JSON.stringify({ files: [] }) },
+      // snapshot create ack (new contract: server returns snapshotId)
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-no-wait-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      "users,orders",
+      "--note",
+      "n",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
+    expect(harness.requests[1].method).toBe("POST");
+    expect(harness.requests[1].body).toEqual({
+      db: "app.db",
+      note: "n",
+      tables: ["users", "orders"],
+    });
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/snapshot started/);
+    expect(out).toMatch(/\[id=snap-no-wait-1\]/);
+    // poll hint も sources --commands と同じく --server を pin し、db id を
+    // single-quote で paste-safe にする。
+    expect(out).toMatch(
+      /Poll with: code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'app\.db' --json/,
+    );
+    expect(harness.exits).toEqual([]);
+  });
+
+  test("snapshot create --json (no --wait) emits structured ack with pollCommand", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-json-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      ok: true,
+      message: "snapshot started",
+      snapshotId: "snap-json-1",
+      // JSON ack にも pollCommand を載せて、AI が toString 構築せず literal を
+      // 再利用できるようにする。human 行と同じ paste-safety 規則。
+      pollCommand:
+        "code-viewer query --server 'http://localhost:65535' snapshot list --db 'app.db' --json",
+    });
+  });
+
+  test("snapshot create no-wait poll command single-quotes db ids and schemas containing spaces", async () => {
+    // path に空白と ' を含む db id と、空白を含む schema 名でも shell に
+    // そのまま paste できることを behavior で検証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-spaces-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "sample's data.db",
+      "--schema",
+      "weird schema",
+      "--note",
+      "n",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(
+      /Poll with: code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'sample'\\''s data\.db' --schema 'weird schema' --json/,
+    );
+    expect(harness.exits).toEqual([]);
+  });
+
+  test("snapshot create --schema forwards schema in the POST body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-pg-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--note",
+      "before",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      note: "before",
+      tables: ["events"],
+      schema: "analytics",
+    });
+    // poll hint should mirror --schema so the human re-runs list with the
+    // same scope, with --server pinned and db/schema single-quoted.
+    expect(harness.logs.join("\n")).toMatch(
+      /code-viewer query --server 'http:\/\/localhost:65535' snapshot list --db 'docker:pg-svc' --schema 'analytics' --json/,
+    );
+  });
+
+  test("snapshot create without --schema omits the field from the POST body (back-compat)", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-sqlite-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--note",
+      "n",
+    ]);
+
+    expect(harness.requests[1].body).toEqual({
+      db: "app.db",
+      note: "n",
+    });
+    // 既存 server / 旧 client にも壊さない後方互換のため、schema キー自体が
+    // 出ないことを確認 (undefined すらシリアライズしない)。tsconfig target は
+    // ES2020 なので Object.hasOwn は使わず in 演算子で見る。
+    expect("schema" in (harness.requests[1].body as object)).toBe(false);
+  });
+
+  test("snapshot list --schema appends schema to the URL (and --db is optional)", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+    ]);
+
+    // Case A: db + schema → both in the querystring.
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+
+    // Case B: schema only → ?schema=... (db absent).
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?schema=analytics`,
+    );
+  });
+
+  test("snapshot list (without --json) renders status / id / table count", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          snapshots: [
+            {
+              id: "snap-1",
+              dbId: "app.db",
+              kind: "sqlite",
+              note: "before",
+              createdAt: "2026-06-30T12:00:00Z",
+              tables: ["users", "orders"],
+              status: "done",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/snap-1/);
+    expect(out).toMatch(/\[done\]/);
+    expect(out).toMatch(/\(2 tables\)/);
+    expect(out).toMatch(/before/);
+    // default mode は要約行だけ。enrich 用 command hint は --json 専用で、
+    // default の stdout には漏らさない (AI-parseable な行を守る)。
+    expect(/deleteCommand/.test(out)).toBe(false);
+    expect(/noteCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
+  });
+
+  test("snapshot list --json enriches each snapshots[] element with paste-safe delete/note commands", async () => {
+    // 複数 snapshot で id / note の組み合わせを変えて、各 entry が独立して
+    // enrich されることを確認する。top-level (snapshots 以外) と既存フィールド
+    // (dbId / schema / kind / note / createdAt / tables / status / errorMessage)
+    // は素通し。
+    const payload = {
+      version: 1,
+      snapshots: [
+        {
+          id: "snap-1",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "before sample run",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table", "sample_archive"],
+          status: "done",
+        },
+        {
+          id: "snap-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          kind: "postgresql",
+          note: "",
+          createdAt: "2026-06-30T12:05:00Z",
+          tables: ["events"],
+          status: "error",
+          errorMessage: "table not found",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      version: 1,
+      snapshots: [
+        {
+          id: "snap-1",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "before sample run",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table", "sample_archive"],
+          status: "done",
+          deleteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap-1'",
+          noteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap-1' --note 'before sample run'",
+        },
+        {
+          id: "snap-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          kind: "postgresql",
+          note: "",
+          createdAt: "2026-06-30T12:05:00Z",
+          tables: ["events"],
+          status: "error",
+          errorMessage: "table not found",
+          deleteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap-2'",
+          // 空文字 note は --note '' になる。snapshot note parser は空文字を
+          // 許容するので paste したそのままが parser を通る。
+          noteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap-2' --note ''",
+        },
+      ],
+    });
+  });
+
+  test("snapshot list --json single-quotes ids and notes containing spaces and single quotes", async () => {
+    // POSIX '...' の '\'' 展開で、id にも note text にも空白や ' が含まれる
+    // ケースで paste-safe になることを behavior で確認する。
+    const payload = {
+      snapshots: [
+        {
+          id: "snap with 'quote'",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "sample's edit note",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table"],
+          status: "done",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.snapshots[0].deleteCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap with '\\''quote'\\'''",
+    );
+    expect(parsed.snapshots[0].noteCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap with '\\''quote'\\''' --note 'sample'\\''s edit note'",
+    );
+  });
+
+  test("snapshot list --json on empty result keeps the top-level shape and emits no command hints", async () => {
+    // empty result でも JSON 分岐は素通し (no snapshots) + enrich は空配列。
+    // 余計な command hint を吐かないことを保証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({ snapshots: [] });
+    expect(/deleteCommand/.test(harness.logs.join("\n"))).toBe(false);
+    expect(/noteCommand/.test(harness.logs.join("\n"))).toBe(false);
+  });
+
+  test("diff tables (--json) enriches each tables[] element with a paste-safe diffRowsCommand", async () => {
+    const payload = {
+      beforeId: "snap-a",
+      afterId: "snap-b",
+      tables: [
+        {
+          tableName: "sample_table",
+          insertedCount: 1,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 9,
+          coverage: "both",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
+          coverage: "both",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--json",
+    ]);
+
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/snapshot/diff/tables?before=snap-a&after=snap-b`,
+    );
+    // top-level fields preserved; tables[] elements gain diffRowsCommand.
+    // server URL / before / after / table はすべて single-quoted。
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      beforeId: "snap-a",
+      afterId: "snap-b",
+      tables: [
+        {
+          tableName: "sample_table",
+          insertedCount: 1,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 9,
+          coverage: "both",
+          diffRowsCommand:
+            "code-viewer query --server 'http://localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_table' --json",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
+          coverage: "both",
+          diffRowsCommand:
+            "code-viewer query --server 'http://localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_archive' --json",
+        },
+      ],
+    });
+  });
+
+  test("diff tables (default) prints the summary line and a paste-safe diff rows hint per table", async () => {
+    const payload = {
+      beforeId: "snap-a",
+      afterId: "snap-b",
+      tables: [
+        {
+          tableName: "sample_table",
+          insertedCount: 1,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 9,
+          coverage: "both",
+        },
+        {
+          tableName: "sample_archive",
+          insertedCount: 0,
+          updatedCount: 3,
+          deletedCount: 1,
+          unchangedCount: 42,
+          coverage: "after-only",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // 既存 summary 行は保持。直下に "# diff rows: ..." hint を出す。
+    expect(out).toMatch(/^sample_table {2}\+1 ~0 -0 =9$/m);
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_table' --json$/m,
+    );
+    expect(out).toMatch(/^sample_archive {2}\+0 ~3 -1 =42 {2}\(after-only\)$/m);
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap-a' --after 'snap-b' --table 'sample_archive' --json$/m,
+    );
+    // hint 行は必ず summary 行の直下に来る (table ごとに対応関係を担保)。
+    const lines = out.split("\n");
+    const idxSampleTable = lines.indexOf("sample_table  +1 ~0 -0 =9");
+    expect(lines[idxSampleTable + 1].startsWith("# diff rows:")).toBe(true);
+    const idxSampleArchive = lines.indexOf(
+      "sample_archive  +0 ~3 -1 =42  (after-only)",
+    );
+    expect(lines[idxSampleArchive + 1].startsWith("# diff rows:")).toBe(true);
+  });
+
+  test("diff tables single-quotes table names and snapshot ids containing spaces and quotes", async () => {
+    // table 名・snapshot id に空白と ' を含むケース。POSIX '...' の '\''
+    // 展開が効いて paste-safe であることを behavior で検証する。
+    const payload = {
+      beforeId: "snap with space",
+      afterId: "snap's after",
+      tables: [
+        {
+          tableName: "sample's table",
+          insertedCount: 2,
+          updatedCount: 0,
+          deletedCount: 0,
+          unchangedCount: 0,
+          coverage: "both",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap with space",
+      "--after",
+      "snap's after",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(
+      /^# diff rows: code-viewer query --server 'http:\/\/localhost:65535' diff rows --before 'snap with space' --after 'snap'\\''s after' --table 'sample'\\''s table' --json$/m,
+    );
+  });
+
+  test("diff tables on empty result keeps the existing notice without hints", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          beforeId: "snap-a",
+          afterId: "snap-b",
+          tables: [],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["no tables in diff"]);
+  });
+
+  test("non-2xx responses with text/plain bodies are surfaced as readable errors (not SyntaxError)", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 404,
+        contentType: "text/plain",
+        body: "snapshot not found: snap-missing",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "delete",
+      "--id",
+      "snap-missing",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/snapshot delete failed \(404\)/);
+    expect(err).toMatch(/snapshot not found: snap-missing/);
+    // 旧実装は res.json() を直接呼んで SyntaxError で死んでいた。
+    expect(/SyntaxError/.test(err)).toBe(false);
+  });
+
+  test("non-2xx application/json bodies with {error:string} surface the error text only", async () => {
+    // server (/_db/query) は失敗時に 400 + DbQueryResponse {dbId, columns:[],
+    // ..., error:"<reason>"} を返す。CLI は JSON 丸出しでなく error 文字列
+    // だけを stderr に書き、AI agent が原因を 1 行で読めるようにする。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          dbId: "sample.db",
+          columns: [],
+          columnTypes: [],
+          rows: [],
+          rowCount: 0,
+          truncated: false,
+          elapsedMs: 0,
+          error: "sample failure",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(400\): sample failure$/m);
+    // 生 JSON を吐かない — dbId 等の他フィールドは stderr に漏れない。
+    expect(/dbId/.test(err)).toBe(false);
+    expect(/columnTypes/.test(err)).toBe(false);
+    expect(/SyntaxError/.test(err)).toBe(false);
+    // 失敗時は stdout に何も出さない。
+    expect(harness.logs).toEqual([]);
+  });
+
+  test("non-2xx application/json bodies without {error} fall back to the raw body text", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ reason: "no error field" }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(
+      /^query failed \(400\): \{"reason":"no error field"\}$/m,
+    );
+    expect(/SyntaxError/.test(err)).toBe(false);
+  });
+
+  test("non-2xx application/json bodies with malformed JSON keep the raw text fallback", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 500,
+        contentType: "application/json",
+        body: "not even json",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(500\): not even json$/m);
+    expect(/SyntaxError/.test(err)).toBe(false);
+  });
+
+  test("non-2xx application/json bodies with {error:<non-string>} fall back to raw text", async () => {
+    // {error: 123} のように error が文字列でない場合は安全に raw を出す。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: 123 }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(400\): \{"error":123\}$/m);
+  });
+
+  test("non-2xx responses with empty bodies fall back to HTTP <status>", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { status: 500, contentType: "application/json", body: "" },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "exec",
+      "--db",
+      "sample.db",
+      "--sql",
+      "SELECT 1",
+      "--no-save",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^query failed \(500\): HTTP 500$/m);
+  });
+});
+
+describe("runQueryCli search integration", () => {
+  const SERVER = "http://localhost:65535";
+  const originalPollEnv = process.env.CODE_VIEWER_SEARCH_POLL_MS;
+  const originalDateNow = Date.now;
+
+  // polling 間隔は env 経由でテスト中だけ 0 にする。テスト終了で必ず復元する。
+  function withZeroPollInterval(): void {
+    process.env.CODE_VIEWER_SEARCH_POLL_MS = "0";
+  }
+  function restorePollEnv(): void {
+    if (originalPollEnv === undefined) {
+      delete process.env.CODE_VIEWER_SEARCH_POLL_MS;
+    } else {
+      process.env.CODE_VIEWER_SEARCH_POLL_MS = originalPollEnv;
+    }
+  }
+  afterEach(() => {
+    restorePollEnv();
+    Date.now = originalDateNow;
+  });
+
+  test("posts to /_db/search/start, polls /_db/search/status until done, prints final JSON", async () => {
+    withZeroPollInterval();
+    const finalStatus = {
+      jobId: "job-1",
+      dbId: "app.db",
+      scannedTables: 2,
+      totalTables: 2,
+      hits: [
+        {
+          table: "users",
+          column: "email",
+          valuePreview: "sample@example.com",
+          rowKeyJson: '{"id":7}',
+          rowPreview: [7, "sample@example.com"],
+        },
+      ],
+      done: true,
+    };
+    const harness = installRunHarness([
+      // health probe
+      { body: JSON.stringify({ files: [] }) },
+      // start ack
+      { body: JSON.stringify({ jobId: "job-1" }) },
+      // status: still running
+      {
+        body: JSON.stringify({
+          jobId: "job-1",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 2,
+          hits: [],
+          done: false,
+          currentTable: "users",
+        }),
+      },
+      // status: done
+      { body: JSON.stringify(finalStatus) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "sample@example.com",
+      "--tables",
+      "users,orders",
+      "--max-hits",
+      "20",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
+    expect(harness.requests[1]).toEqual({
+      url: `${SERVER}/_db/search/start`,
+      method: "POST",
+      body: {
+        db: "app.db",
+        term: "sample@example.com",
+        includeNonText: false,
+        tables: ["users", "orders"],
+        maxHitsPerTable: 20,
+      },
+    });
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/search/status?id=job-1`,
+    );
+    expect(harness.requests[2].method).toBe("GET");
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/search/status?id=job-1`,
+    );
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(finalStatus);
+  });
+
+  test("default mode (no --json) prints hit lines and a summary line", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-x" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-x",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 1,
+          hits: [
+            {
+              table: "users",
+              column: "email",
+              rowKeyJson: '{"id":7}',
+              valuePreview: "match@example.com",
+              rowPreview: [7, "match@example.com"],
+            },
+          ],
+          done: true,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "match@example.com",
+    ]);
+
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/users\.email/);
+    expect(out).toMatch(/key=\{"id":7\}/);
+    expect(out).toMatch(/match@example\.com/);
+    expect(out).toMatch(/# 1 hit\(s\) across 1 table\(s\)/);
+    expect(harness.exits).toEqual([]);
+  });
+
+  test("empty result is a clean exit 0 with a 'no hits' line", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-empty" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-empty",
+          dbId: "app.db",
+          scannedTables: 3,
+          totalTables: 3,
+          hits: [],
+          done: true,
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "missing",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs.join("\n")).toMatch(/no hits \(scanned 3 tables\)/);
+  });
+
+  test("server-side error status fails fast and exits 1 without polling further", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-err" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-err",
+          dbId: "app.db",
+          scannedTables: 0,
+          totalTables: 0,
+          hits: [],
+          done: true,
+          error: "boom",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "x",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(/search error: boom/);
+  });
+
+  test("timeout cancels the search job best-effort and exits with the timeout reason", async () => {
+    withZeroPollInterval();
+    const nowValues = [0, 0, 1001];
+    let nowIndex = 0;
+    Date.now = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ jobId: "job-timeout" }) },
+      {
+        body: JSON.stringify({
+          jobId: "job-timeout",
+          dbId: "app.db",
+          scannedTables: 1,
+          totalTables: 2,
+          hits: [],
+          done: false,
+        }),
+      },
+      { status: 500, contentType: "text/plain", body: "cancel failed" },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "search",
+      "--db",
+      "app.db",
+      "--term",
+      "x",
+      "--timeout",
+      "1",
+    ]);
+
+    expect(harness.requests[3]).toEqual({
+      url: `${SERVER}/_db/search/cancel`,
+      method: "POST",
+      body: { id: "job-timeout" },
+    });
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /search timed out after 1s \(cancelled job job-timeout\)/,
+    );
+  });
+
+  test("--timeout 0 is rejected at parse-time so the CLI never hangs forever", () => {
+    expect(
+      parseQueryArgs([
+        "search",
+        "--db",
+        "app.db",
+        "--term",
+        "x",
+        "--timeout",
+        "0",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--timeout must be a positive integer (sec)",
+    });
+  });
+});
+
+describe("runQueryCli snapshot create --wait integration", () => {
+  const SERVER = "http://localhost:65535";
+  const originalPollEnv = process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
+
+  function withZeroPollInterval(): void {
+    process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = "0";
+  }
+  function restorePollEnv(): void {
+    if (originalPollEnv === undefined) {
+      delete process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
+    } else {
+      process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = originalPollEnv;
+    }
+  }
+  afterEach(restorePollEnv);
+
+  // 共通のスナップショット meta builder (テスト用 placeholder のみ)。
+  function meta(
+    status: "running" | "done" | "error",
+    overrides: Partial<{
+      id: string;
+      tables: string[];
+      errorMessage: string;
+    }> = {},
+  ) {
+    return {
+      id: overrides.id ?? "snap-wait-1",
+      dbId: "app.db",
+      kind: "sqlite",
+      note: "n",
+      createdAt: "2026-06-30T12:00:00Z",
+      tables: overrides.tables ?? ["users", "orders"],
+      status,
+      ...(overrides.errorMessage
+        ? { errorMessage: overrides.errorMessage }
+        : {}),
+    };
+  }
+
+  test("polls snapshot list until status=done, prints final meta as JSON when --json", async () => {
+    withZeroPollInterval();
+    const finalMeta = meta("done");
+    const harness = installRunHarness([
+      // health
+      { body: JSON.stringify({ files: [] }) },
+      // create ack with snapshotId
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-1",
+        }),
+      },
+      // list response 1: still running
+      { body: JSON.stringify({ snapshots: [meta("running")] }) },
+      // list response 2: done
+      { body: JSON.stringify({ snapshots: [finalMeta] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      "users,orders",
+      "--note",
+      "n",
+      "--wait",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=app.db`,
+    );
+    expect(harness.requests[2].method).toBe("GET");
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=app.db`,
+    );
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(finalMeta);
+  });
+
+  test("--wait --schema forwards schema to the create body AND to every polling URL", async () => {
+    withZeroPollInterval();
+    const finalMeta = meta("done", { id: "snap-wait-pg" });
+    const harness = installRunHarness([
+      // health
+      { body: JSON.stringify({ files: [] }) },
+      // create ack
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-pg",
+        }),
+      },
+      // list 1: running
+      {
+        body: JSON.stringify({
+          snapshots: [meta("running", { id: "snap-wait-pg" })],
+        }),
+      },
+      // list 2: done
+      { body: JSON.stringify({ snapshots: [finalMeta] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--tables",
+      "events",
+      "--wait",
+      "--json",
+    ]);
+
+    // create body includes schema
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      note: "",
+      tables: ["events"],
+      schema: "analytics",
+    });
+    // both polling URLs include schema
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=docker%3Apg-svc&schema=analytics`,
+    );
+    expect(harness.exits).toEqual([]);
+  });
+
+  test("status=error prints stderr and exits 1 (still emits final meta on --json)", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-err",
+        }),
+      },
+      {
+        body: JSON.stringify({
+          snapshots: [
+            meta("error", {
+              id: "snap-wait-err",
+              errorMessage: "table not found",
+            }),
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot snap-wait-err failed: table not found/,
+    );
+    // --json は失敗時も meta を 1 度出してから exit 1 する契約。
+    expect(JSON.parse(harness.logs.join("\n")).status).toBe("error");
+  });
+
+  test("timeout cancels the snapshot via /_db/snapshot/cancel and exits 1", async () => {
+    // poll interval を --timeout 1s より十分長くすれば、1 回 list して sleep
+    // した後の次 iter で必ず deadline 突破 → cancel に入る (耐レース)。
+    process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = "1500";
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-timeout",
+        }),
+      },
+      {
+        body: JSON.stringify({
+          snapshots: [meta("running", { id: "snap-wait-timeout" })],
+        }),
+      },
+      // cancel ack
+      { body: JSON.stringify({ ok: true }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+      "--timeout",
+      "1",
+    ]);
+
+    // health + create + list (1 度走った後 sleep) + cancel = 4
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[3]).toEqual({
+      url: `${SERVER}/_db/snapshot/cancel`,
+      method: "POST",
+      body: { id: "snap-wait-timeout" },
+    });
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot create timed out after 1s \(cancelled snap-wait-timeout\)/,
+    );
+  }, 5000);
+
+  test("old server (no snapshotId in ack) with --wait fails fast with a clear error", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      // 旧 server 互換: snapshotId 未返却
+      { body: JSON.stringify({ ok: true, message: "snapshot started" }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot create --wait: server did not return snapshotId/,
+    );
+  });
+});
+
+// Markdown 内のコードフェンス (```...```) からだけ抽出する。
+// 散文中の `code-viewer query ...` (バックティック付き) は人間向けの言及で
+// 構文契約の対象外なので無視する。`#` で始まる行はコメントなのでスキップ。
+function codeFenceLines(text: string): string[] {
+  const out: string[] = [];
+  let inFence = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) continue;
+    if (trimmed.startsWith("#")) continue;
+    out.push(raw);
+  }
+  return out;
+}
+
+// 行末 `\` 継続を join して 1 行コマンドにまとめる。
+function joinBackslashContinuations(lines: string[]): string[] {
+  const joined: string[] = [];
+  let acc = "";
+  for (const line of lines) {
+    if (/\\\s*$/.test(line)) {
+      acc += `${line.replace(/\\\s*$/, "")} `;
+    } else {
+      joined.push((acc + line).trim());
+      acc = "";
+    }
+  }
+  if (acc) joined.push(acc.trim());
+  return joined.filter((l) => l.length > 0);
+}
+
+// 単純なシェル風 split。"..."、'...' で囲まれた範囲のスペースは保存する。
+// バックスラッシュエスケープは double-quote 内のみで簡易対応。
+function shellSplit(s: string): string[] {
+  const result: string[] = [];
+  let buf = "";
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inSingle) {
+      if (c === "'") inSingle = false;
+      else buf += c;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false;
+      else if (c === "\\" && i + 1 < s.length) {
+        buf += s[i + 1];
+        i++;
+      } else buf += c;
+      continue;
+    }
+    if (c === "'") inSingle = true;
+    else if (c === '"') inDouble = true;
+    else if (c === " " || c === "\t") {
+      if (buf.length > 0) {
+        result.push(buf);
+        buf = "";
+      }
+    } else buf += c;
+  }
+  if (buf.length > 0) result.push(buf);
+  return result;
+}
+
+// ドキュメント本文から `code-viewer query <...>` 例を全部取り出し、
+// "code-viewer query" プレフィックス除去後の argv 配列に変換する。
+function extractDocumentedQueryInvocations(text: string): string[][] {
+  const lines = joinBackslashContinuations(codeFenceLines(text));
+  const out: string[][] = [];
+  for (const line of lines) {
+    const parts = shellSplit(line);
+    // npx -y @youtyan/code-viewer query <...> も拾う (README の install 例で
+    // 出てくる可能性に備える)。 prefix を見つけて以降を argv 化する。
+    const idx = parts.findIndex(
+      (p, i) =>
+        (p === "code-viewer" || p.endsWith("/code-viewer")) &&
+        parts[i + 1] === "query",
+    );
+    if (idx < 0) continue;
+    out.push(parts.slice(idx + 2));
+  }
+  return out;
+}
+
+describe("parseQueryArgs rejects redis-only flags on non-redis subcommands", () => {
+  // Redis 用に --db-index / --pattern / --cursor / --count / --key を追加した
+  // 副作用で、非 Redis subcommand が黙って無視できるようになる回帰を防ぐ。
+  // ここでは「正しい必須引数を渡したうえで余分な Redis 専用フラグを混ぜる」
+  // テストにし、parse error が必須引数チェックではなく allowlist で出ている
+  // ことを保証する。
+  test("exec rejects each redis-only option", () => {
+    const baseArgs = ["exec", "--db", "a.db", "--sql", "SELECT 1"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `exec does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("list rejects each redis-only option", () => {
+    const baseArgs = ["list", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `list does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("clear rejects each redis-only option and even --json (clear has no JSON output)", () => {
+    const baseArgs = ["clear", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `clear does not accept ${bad}`,
+      });
+    }
+    expect(parseQueryArgs([...baseArgs, "--json"])).toEqual({
+      ok: false,
+      error: "clear does not accept --json",
+    });
+  });
+
+  test("search rejects each redis-only option", () => {
+    const baseArgs = ["search", "--db", "a.db", "--term", "needle"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `search does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot create rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "create", "--db", "a.db"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot create does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot list rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "list"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot list does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("snapshot delete rejects each redis-only option (and --json — delete has no JSON output)", () => {
+    const baseArgs = ["snapshot", "delete", "--id", "snap-1"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot delete does not accept ${bad}`,
+      });
+    }
+    expect(parseQueryArgs([...baseArgs, "--json"])).toEqual({
+      ok: false,
+      error: "snapshot delete does not accept --json",
+    });
+  });
+
+  test("snapshot note rejects each redis-only option", () => {
+    const baseArgs = ["snapshot", "note", "--id", "snap-1", "--note", "hi"];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `snapshot note does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff tables rejects each redis-only option", () => {
+    const baseArgs = [
+      "diff",
+      "tables",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+    ];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff tables does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("diff rows rejects each redis-only option", () => {
+    const baseArgs = [
+      "diff",
+      "rows",
+      "--before",
+      "snap-a",
+      "--after",
+      "snap-b",
+      "--table",
+      "users",
+    ];
+    for (const bad of [
+      "--db-index",
+      "--pattern",
+      "--cursor",
+      "--count",
+      "--key",
+    ]) {
+      expect(parseQueryArgs([...baseArgs, bad, "x"])).toEqual({
+        ok: false,
+        error: `diff rows does not accept ${bad}`,
+      });
+    }
+  });
+
+  test("exec still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "exec",
+      "--db",
+      "a.db",
+      "--schema",
+      "public",
+      "--sql",
+      "SELECT 1",
+      "--title",
+      "smoke",
+      "--body",
+      "looking",
+      "--max-rows",
+      "5",
+      "--no-save",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "exec",
+      db: "a.db",
+      sql: "SELECT 1",
+      schema: "public",
+      title: "smoke",
+      body: "looking",
+      save: false,
+      maxRows: 5,
+    });
+  });
+
+  test("search still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "search",
+      "--db",
+      "a.db",
+      "--term",
+      "needle",
+      "--tables",
+      "users,orders",
+      "--schema",
+      "public",
+      "--max-hits",
+      "20",
+      "--timeout",
+      "30",
+      "--include-non-text",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "search",
+      db: "a.db",
+      term: "needle",
+      tables: ["users", "orders"],
+      schema: "public",
+      maxHits: 20,
+      timeoutSec: 30,
+      includeNonText: true,
+      json: true,
+    });
+  });
+
+  test("snapshot create still accepts its full legitimate flag set", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "a.db",
+      "--schema",
+      "public",
+      "--tables",
+      "users,orders",
+      "--note",
+      "before",
+      "--timeout",
+      "150",
+      "--wait",
+      "--json",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-create",
+      db: "a.db",
+      schema: "public",
+      tables: ["users", "orders"],
+      note: "before",
+      timeoutSec: 150,
+      wait: true,
+      json: true,
+    });
+  });
+});
+
+describe("runQueryCli redis integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("redis databases --json hits /_db/redis/databases and prints verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      databases: [
+        { index: 0, keyCount: 3 },
+        { index: 1, keyCount: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/redis/databases?db=docker%3Aredis-svc`,
+    );
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis databases default text emits index<TAB>keyCount per row", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      databases: [
+        { index: 0, keyCount: 2 },
+        { index: 1, keyCount: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "databases",
+      "--db",
+      "docker:redis-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["0\t2", "1\t0"]);
+  });
+
+  test("redis keys --json wires all wire params and emits RedisKeysResponse verbatim", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [
+        { name: "sample:a", type: "string" },
+        { name: "sample:b", type: "hash" },
+      ],
+      nextCursor: "42",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--pattern",
+      "sample:*",
+      "--cursor",
+      "0",
+      "--count",
+      "500",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/redis/keys");
+    expect(url.searchParams.get("db")).toBe("docker:redis-svc");
+    expect(url.searchParams.get("dbIndex")).toBe("0");
+    expect(url.searchParams.get("pattern")).toBe("sample:*");
+    expect(url.searchParams.get("cursor")).toBe("0");
+    expect(url.searchParams.get("count")).toBe("500");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis keys default text appends nextCursor footer only when SCAN is not done", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [
+        { name: "sample:a", type: "string" },
+        { name: "sample:b", type: "hash" },
+      ],
+      nextCursor: "17",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample:a\tstring",
+      "sample:b\thash",
+      "# nextCursor: 17",
+    ]);
+  });
+
+  test("redis keys default text omits cursor footer when SCAN is complete", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [{ name: "sample:a", type: "string" }],
+      nextCursor: "0",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["sample:a\tstring"]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("redis keys with zero matches prints `no redis keys` to stderr, exit 0", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [],
+      nextCursor: "0",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no redis keys"]);
+  });
+
+  test("redis keys with zero matches still emits a non-terminal cursor footer", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      keys: [],
+      nextCursor: "99",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "keys",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["# nextCursor: 99"]);
+    expect(harness.errs).toEqual(["no redis keys"]);
+  });
+
+  test("redis value --json wires db/dbIndex/key and emits the full RedisValueResponse", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      value: {
+        type: "string",
+        value: "sample-value",
+        truncated: false,
+        fullSize: 12,
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/redis/value");
+    expect(url.searchParams.get("db")).toBe("docker:redis-svc");
+    expect(url.searchParams.get("dbIndex")).toBe("0");
+    expect(url.searchParams.get("key")).toBe("sample:key");
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("redis value default text prints only the RedisValue payload as pretty JSON", async () => {
+    const payload = {
+      dbId: "docker:redis-svc",
+      dbIndex: 0,
+      key: "sample:key",
+      value: {
+        type: "string",
+        value: "sample-value",
+        truncated: false,
+        fullSize: 12,
+      },
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:key",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(payload.value, null, 2)]);
+  });
+
+  test("redis value surfaces a server 404 verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 404,
+        contentType: "text/plain",
+        body: "redis key not found: sample:missing",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "redis",
+      "value",
+      "--db",
+      "docker:redis-svc",
+      "--db-index",
+      "0",
+      "--key",
+      "sample:missing",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("read redis value failed")).toBe(true);
+    expect(harness.errs[0].includes("redis key not found")).toBe(true);
+  });
+
+  test("sources --commands emits paste-safe redis commands instead of a browser hint", async () => {
+    const payload = {
+      files: [
+        {
+          id: "docker:redis-svc",
+          path: "docker:redis-svc",
+          name: "redis-svc (redis)",
+          sizeBytes: 0,
+          kind: "redis",
+        },
+      ],
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' redis databases --db 'docker:redis-svc' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' redis keys --db 'docker:redis-svc' --db-index 0 --pattern '*' --json`,
+        ),
+      ),
+    ).toBe(true);
+    // 旧 browser-pane 誘導行は redis に対しては出さない (es/s3 は維持される)。
+    expect(
+      lines.some((line) =>
+        line.includes("redis: use the browser Datastores tab"),
+      ),
+    ).toBe(false);
+  });
+
+  test("sources --commands emits paste-safe elasticsearch and s3 commands; the legacy browser-pane hints are gone", async () => {
+    const payload = {
+      files: [
+        {
+          id: "docker:es-svc",
+          path: "docker:es-svc",
+          name: "es-svc (elasticsearch)",
+          sizeBytes: 0,
+          kind: "elasticsearch",
+        },
+        {
+          id: "docker:s3-svc/example-bucket",
+          path: "docker:s3-svc/example-bucket",
+          name: "example-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+      ],
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    // elasticsearch is now wired in the CLI: emits paste-safe commands, not a
+    // browser-pane hint.
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' elasticsearch indices --db 'docker:es-svc' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' elasticsearch docs --db 'docker:es-svc' --index <index-name> --size 10 --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes("elasticsearch: use the browser Datastores tab"),
+      ),
+    ).toBe(false);
+    // s3 is now wired in the CLI as well: emits paste-safe `s3 buckets`
+    // and `s3 objects` lines with a <bucket-name> placeholder, and no
+    // longer falls back to the legacy browser-pane hint.
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' s3 buckets --db 'docker:s3-svc/example-bucket' --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes(
+          `code-viewer query --server '${SERVER}' s3 objects --db 'docker:s3-svc/example-bucket' --bucket <bucket-name> --limit 50 --json`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      lines.some((line) => line.includes("s3: use the browser Datastores tab")),
+    ).toBe(false);
+  });
+});
+
+describe("runQueryCli elasticsearch integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("indices --json hits /_db/elasticsearch/indices and emits verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      indices: [
+        {
+          name: "sample-index",
+          docCount: 12,
+          sizeBytes: 4096,
+          health: "green",
+          status: "open",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/elasticsearch/indices?db=docker%3Aes-svc`,
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("indices default text emits name<TAB>docCount<TAB>sizeBytes<TAB>health", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      indices: [
+        {
+          name: "sample-a",
+          docCount: 3,
+          sizeBytes: 256,
+          health: "green",
+        },
+        // health is intentionally absent here to verify the "?" fallback.
+        { name: "sample-b", docCount: 0, sizeBytes: 0 },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample-a\t3\t256\tgreen",
+      "sample-b\t0\t0\t?",
+    ]);
+  });
+
+  test("mapping --json emits the full envelope; default emits just the mapping payload", async () => {
+    const mapping = {
+      index: "sample-index",
+      properties: {
+        title: { type: "text" },
+        status: { type: "keyword" },
+      },
+    };
+    const envelope = { dbId: "docker:es-svc", mapping };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(envelope) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(envelope) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe(
+      "/_db/elasticsearch/mapping",
+    );
+    expect(new URL(harness.requests[1].url).searchParams.get("index")).toBe(
+      "sample-index",
+    );
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(envelope, null, 2));
+
+    // Run again without --json to confirm default trims to the inner payload.
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "mapping",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(mapping, null, 2));
+  });
+
+  test("docs wires --q / --size / --search-after and prints hits + paging hints", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      hits: [
+        {
+          _index: "sample-index",
+          _id: "doc-a",
+          _score: 1.5,
+          _source: { a: 1 },
+        },
+        {
+          _index: "sample-index",
+          _id: "doc-b",
+          _score: null,
+          _source: { b: 2 },
+        },
+      ],
+      totalHits: 42,
+      lastSort: [1700000000000, "doc-b"],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--q",
+      "status:active",
+      "--size",
+      "10",
+      "--search-after",
+      '[1699999999999,"doc-z"]',
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/elasticsearch/docs");
+    expect(url.searchParams.get("db")).toBe("docker:es-svc");
+    expect(url.searchParams.get("index")).toBe("sample-index");
+    expect(url.searchParams.get("q")).toBe("status:active");
+    expect(url.searchParams.get("size")).toBe("10");
+    // search-after is forwarded as the literal JSON the AI agent supplied.
+    expect(url.searchParams.get("searchAfter")).toBe('[1699999999999,"doc-z"]');
+
+    expect(harness.logs).toEqual([
+      "doc-a\t1.5",
+      "doc-b\t?",
+      '# lastSort: [1700000000000,"doc-b"]',
+      "# totalHits: 42 (returned 2)",
+    ]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("docs with zero hits prints `no elasticsearch hits` to stderr (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      hits: [],
+      totalHits: 0,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "docs",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["# totalHits: 0 (returned 0)"]);
+    expect(harness.errs).toEqual(["no elasticsearch hits"]);
+  });
+
+  test("doc --json emits the full envelope; default emits _source for found docs", async () => {
+    const source = { title: "sample", value: 7 };
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-id",
+      found: true,
+      source,
+      seqNo: 3,
+      primaryTerm: 1,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+      "--json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe(
+      "/_db/elasticsearch/doc",
+    );
+    expect(new URL(harness.requests[1].url).searchParams.get("id")).toBe(
+      "sample-id",
+    );
+    expect(harness.logs.length).toBe(1);
+    expect(harness.logs[0]).toBe(JSON.stringify(payload, null, 2));
+
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-id",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(source, null, 2)]);
+  });
+
+  test("doc with found=false prints `not found` to stderr (exit 0, default text mode)", async () => {
+    const payload = {
+      dbId: "docker:es-svc",
+      index: "sample-index",
+      id: "sample-missing",
+      found: false,
+      source: null,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "doc",
+      "--db",
+      "docker:es-svc",
+      "--index",
+      "sample-index",
+      "--id",
+      "sample-missing",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["not found: sample-index/sample-missing"]);
+  });
+
+  test("indices surfaces a server 4xx verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "missing dbId",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "elasticsearch",
+      "indices",
+      "--db",
+      "docker:es-svc",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("list elasticsearch indices failed")).toBe(
+      true,
+    );
+    expect(harness.errs[0].includes("missing dbId")).toBe(true);
+  });
+});
+
+describe("runQueryCli s3 integration", () => {
+  const SERVER = "http://localhost:65535";
+
+  test("buckets --json hits /_db/s3/buckets and emits verbatim JSON", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      buckets: [
+        { name: "sample-a", createdAt: "2026-06-30T00:00:00Z" },
+        { name: "sample-b" },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/s3/buckets?db=docker%3As3-svc`,
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("buckets default text emits name<TAB>createdAt-or-? per bucket", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      buckets: [
+        { name: "sample-a", createdAt: "2026-06-30T00:00:00Z" },
+        // createdAt 省略は "?" にフォールバック (S3 のアダプタが返さないケース)。
+        { name: "sample-b" },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([
+      "sample-a\t2026-06-30T00:00:00Z",
+      "sample-b\t?",
+    ]);
+  });
+
+  test("objects wires --prefix / --q / --mode / --sort / --limit / --token and emits hit rows + paging hints", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      search: "needle",
+      mode: "contains",
+      sort: "key-asc",
+      objects: [
+        {
+          key: "logs/needle-a.json",
+          sizeBytes: 1024,
+          updatedAt: "2026-06-30T00:00:00Z",
+          contentType: "application/json",
+        },
+        // updatedAt / contentType が無いケースは "?" にフォールバック。
+        { key: "logs/needle-b.bin", sizeBytes: 0 },
+      ],
+      nextToken: "next-cursor",
+      truncated: true,
+      scannedObjects: 200,
+      scannedPages: 2,
+      scanLimitReached: true,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+      "--q",
+      "needle",
+      "--mode",
+      "contains",
+      "--sort",
+      "key-asc",
+      "--limit",
+      "50",
+      "--token",
+      "prev-cursor",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/s3/objects");
+    expect(url.searchParams.get("db")).toBe("docker:s3-svc");
+    expect(url.searchParams.get("bucket")).toBe("sample-bucket");
+    expect(url.searchParams.get("prefix")).toBe("logs/");
+    expect(url.searchParams.get("q")).toBe("needle");
+    expect(url.searchParams.get("mode")).toBe("contains");
+    expect(url.searchParams.get("sort")).toBe("key-asc");
+    expect(url.searchParams.get("limit")).toBe("50");
+    expect(url.searchParams.get("token")).toBe("prev-cursor");
+
+    expect(harness.logs).toEqual([
+      "logs/needle-a.json\t1024\t2026-06-30T00:00:00Z\tapplication/json",
+      "logs/needle-b.bin\t0\t?\t?",
+      "# nextToken: next-cursor",
+      "# scanLimitReached: true",
+    ]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("objects with zero matches prints `no s3 objects` to stderr (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "",
+      search: "",
+      mode: "prefix",
+      sort: "updated-desc",
+      objects: [],
+      truncated: false,
+      scannedObjects: 0,
+      scannedPages: 0,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "objects",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no s3 objects"]);
+  });
+
+  test("folder default text emits DIR / OBJ rows and the # nextToken trailer", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "logs/",
+      folders: ["logs/sub-a/", "logs/sub-b/"],
+      objects: [
+        { key: "logs/sample.json", sizeBytes: 1024 },
+        { key: "logs/other.bin", sizeBytes: 7 },
+      ],
+      nextToken: "next-cursor",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--prefix",
+      "logs/",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const url = new URL(harness.requests[1].url);
+    expect(url.pathname).toBe("/_db/s3/folder");
+    expect(url.searchParams.get("prefix")).toBe("logs/");
+    expect(harness.logs).toEqual([
+      "DIR\tlogs/sub-a/",
+      "DIR\tlogs/sub-b/",
+      "OBJ\tlogs/sample.json\t1024",
+      "OBJ\tlogs/other.bin\t7",
+      "# nextToken: next-cursor",
+    ]);
+  });
+
+  test("folder with empty result prints `no s3 folder entries` to stderr", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      prefix: "",
+      folders: [],
+      objects: [],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "folder",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([]);
+    expect(harness.errs).toEqual(["no s3 folder entries"]);
+  });
+
+  test("head emits the metadata envelope as pretty JSON in both default and --json modes", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 1024,
+      contentType: "application/json",
+      updatedAt: "2026-06-30T00:00:00Z",
+      etag: "deadbeef",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ]);
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe("/_db/s3/head");
+    expect(new URL(harness.requests[1].url).searchParams.get("key")).toBe(
+      "logs/sample.json",
+    );
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+
+    harness.logs.length = 0;
+    harness.errs.length = 0;
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "head",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+      "--json",
+    ]);
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+  });
+
+  test("text default mode writes only the body to stdout; truncated raises a stderr line (exit 0)", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 512000,
+      contentType: "application/json",
+      text: "sample body content",
+      truncated: true,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(new URL(harness.requests[1].url).pathname).toBe("/_db/s3/text");
+    expect(harness.logs).toEqual(["sample body content"]);
+    expect(harness.errs).toEqual(["text truncated"]);
+  });
+
+  test("text --json mode emits the full envelope without the truncated stderr line", async () => {
+    const payload = {
+      dbId: "docker:s3-svc",
+      bucket: "sample-bucket",
+      key: "logs/sample.json",
+      sizeBytes: 19,
+      contentType: "application/json",
+      text: "sample body content",
+      truncated: false,
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.json",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual([JSON.stringify(payload, null, 2)]);
+    expect(harness.errs).toEqual([]);
+  });
+
+  test("buckets surfaces a server 4xx verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "missing db parameter",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "buckets",
+      "--db",
+      "docker:s3-svc",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.length >= 1).toBe(true);
+    expect(harness.errs[0].includes("list s3 buckets failed")).toBe(true);
+    expect(harness.errs[0].includes("missing db parameter")).toBe(true);
+  });
+
+  test("text surfaces a server 415 (non-text key) verbatim and exits 1", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        status: 415,
+        contentType: "text/plain",
+        body: "object is not previewable as text",
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "s3",
+      "text",
+      "--db",
+      "docker:s3-svc",
+      "--bucket",
+      "sample-bucket",
+      "--key",
+      "logs/sample.bin",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs[0].includes("read s3 object text failed")).toBe(true);
+    expect(harness.errs[0].includes("object is not previewable as text")).toBe(
+      true,
+    );
+  });
+});
+
+describe("bundled skill + README track the CLI contract", () => {
+  // skill MD / README に書かれている `code-viewer query ...` 例を、実 CLI
+  // parser に通す。flag rename / 削除済み subcommand / typo が docs に
+  // 混入したら、文字列存在チェックではなく実 parser で落とす。
+  const docs = [
+    "skills/code-viewer-query/SKILL.md",
+    "skills/code-viewer-snapshot/SKILL.md",
+    "README.md",
+  ] as const;
+
+  for (const doc of docs) {
+    test(`${doc}: every documented "code-viewer query ..." example parses`, () => {
+      const text = readFileSync(join(REPO_ROOT, doc), "utf8");
+      const invocations = extractDocumentedQueryInvocations(text);
+      // sanity: 抽出ロジックが完全に壊れて 0 件になっていないこと。
+      expect(invocations.length === 0).toBe(false);
+      const failures: string[] = [];
+      for (const argv of invocations) {
+        const result = parseQueryArgs(argv);
+        if (result.ok) continue;
+        // tsconfig が strictNullChecks 無効なので discriminated union narrowing が
+        // ここでは効かない。失敗バリアントを明示的に取り出して使う。
+        const failure = result as { ok: false; error: string };
+        failures.push(`\`${argv.join(" ")}\` → ${failure.error}`);
+      }
+      expect(failures).toEqual([]);
+    });
+  }
+
+  const searchDocs = [
+    "skills/code-viewer-query/SKILL.md",
+    "README.md",
+  ] as const;
+
+  for (const doc of searchDocs) {
+    test(`${doc}: documents the search subcommand`, () => {
+      const text = readFileSync(join(REPO_ROOT, doc), "utf8");
+      const invocations = extractDocumentedQueryInvocations(text);
+      const hasSearch = invocations.some((argv) => argv[0] === "search");
+      expect(hasSearch).toBe(true);
+    });
+  }
+
+  // parse テストだけでは「必要な例がそもそも doc に無い」状態を検出できない。
+  // query skill が AI 向けに最低限持つべき subcommand はここで明示する。
+  const REQUIRED_SUBCOMMANDS_IN_QUERY_SKILL = [
+    "exec",
+    "search",
+    "list",
+  ] as const;
+
+  test("query skill mentions the non-snapshot subcommands an AI agent should know", () => {
+    const text = readFileSync(
+      join(REPO_ROOT, "skills/code-viewer-query/SKILL.md"),
+      "utf8",
+    );
+    const invocations = extractDocumentedQueryInvocations(text);
+    for (const kind of REQUIRED_SUBCOMMANDS_IN_QUERY_SKILL) {
+      const present = invocations.some((argv) => argv[0] === kind);
+      expect({ kind, present }).toEqual({ kind, present: true });
+    }
+  });
+});

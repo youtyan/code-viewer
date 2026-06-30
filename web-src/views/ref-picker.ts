@@ -12,6 +12,7 @@ export type RefPickerDeps = {
   currentRange(): DiffRange;
   setRange(from: string, to: string): void;
   setRoute(route: AppRoute, replace?: boolean): void;
+  loadRepo(): Promise<unknown>;
   renderStandaloneSource(target: {
     path: string;
     ref: string;
@@ -346,6 +347,11 @@ export function createRefPicker(deps: RefPickerDeps) {
   );
   wireRefSelectorInput(deps.$<HTMLInputElement>("#repo-target"), (ref) => {
     const route = deps.getRoute();
+    if (route.screen === "repo") {
+      deps.setRoute({ ...route, ref, range: deps.currentRange() });
+      void deps.loadRepo();
+      return;
+    }
     if (route.screen !== "file") return;
     const nextRoute: AppRoute = {
       ...route,

@@ -40,14 +40,21 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   toggled by the 🩺 icon in the header): runtime (Node / Bun / ABI),
   `@youtyan/code-viewer` version and execution origin (npx cache vs
   local), SQLite driver and snapshot store, Git, discovery summary,
+  per-source datastore connectivity (each discovered SQLite / docker
+  SQL / Redis / Elasticsearch / S3 source gets one row with a 2s
+  minimal-read probe; failure rows include a paste-safe retry hint),
   Docker / Compose health (config dry-parse + `compose ps` per service),
   and the listening port. Useful when `npx` cache mismatch (e.g.
-  `NODE_MODULE_VERSION` errors) needs a remediation hint.
+  `NODE_MODULE_VERSION` errors) needs a remediation hint, or when a
+  docker compose datastore is discovered but unreachable.
 - Open repository folders (and parent folders of files) in the OS file
   manager, create folders, and trash/restore files from localhost-only
   actions.
 - Upload files into worktree folders. Uploads are enabled by default for
   worktree targets; toggle them off from Viewer Settings.
+- Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
+  AI agents can call status, file, search, and datastore tools directly
+  over JSON-RPC instead of spawning CLI subprocesses.
 
 ## Usage
 
@@ -284,42 +291,376 @@ Open Datastores in the global navigation to access:
 
 ### CLI
 
-AI agents can run read-only queries, search content across tables, and
-capture snapshots / diffs from the command line. The same operations are
-mirrored under the Datastores tab in the browser UI, and every CLI result is
-written to the per-repository history visible in the browser.
+AI agents can run read-only queries, search across tables, and capture
+snapshots / diffs from the command line. Query results are written to the
+per-repository history visible in the browser; search results are returned
+by the CLI and mirror the browser Search tab; snapshots are stored in the
+snapshot store. The same operations are available in the browser's
+Datastores tab (Query History, Search, and Snapshot tabs).
 
 ```sh
+# Discover datastore ids the running server has detected (SQLite files plus
+# any PostgreSQL / MySQL / Redis / Elasticsearch / S3 services from a nearby
+# docker-compose). Use the printed id as --db on every other command.
+code-viewer query sources --json
+# Or skip composing the next SQL call yourself: --commands prints
+# shell-pasteable schema/exec lines for SQL sources, plus paste-safe
+# `list --db ... --json` and `snapshot list --db ... --json` so you can
+# step into the existing query history and snapshot store without
+# rebuilding those commands. Redis sources get
+# `redis databases / redis keys` lines, Elasticsearch sources get
+# `elasticsearch indices / elasticsearch docs` lines, and S3 sources get
+# `s3 buckets / s3 objects` lines with `--bucket <bucket-name>` as a
+# placeholder. Every emitted SQL command line pins --server '<url>' to the
+# same server URL this invocation resolved, so pasting them elsewhere
+# never silently re-runs auto-discovery. --json and --commands are
+# mutually exclusive. Notice/comment metadata is collapsed to one line
+# so copied command blocks stay intact.
+code-viewer query sources --commands
+
+# Introspect tables and columns without writing dialect-specific SQL.
+# `query schema --json` adds paste-safe `columnsCommand` / `ddlCommand` fields
+# to every tables[] element (each pins --server and single-quotes the db /
+# schema / table) so AI/human can drill into a specific table without
+# rebuilding the call.
+code-viewer query schemas --db docker:pg-svc --json
+code-viewer query schema --db app.db --json
+code-viewer query schema --db docker:pg-svc --schema analytics --with-columns --json
+code-viewer query columns --db app.db --table users --json
+code-viewer query ddl --db app.db --table users
+
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
+code-viewer query exec --db docker:pg-svc --schema analytics \
+    --sql "SELECT * FROM events LIMIT 10"
 
 code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
     --max-rows 1 --no-save
 
+# Show saved query history. `list --json` enriches each entries[] element
+# with a paste-safe `replayCommand` — `code-viewer query --server '<url>'
+# exec --db '<dbId>' [--schema '<schema>'] --sql '<sql>' [--title '<title>']
+# --no-save` — so AI/human can re-run a past query without rebuilding the
+# call. server URL / dbId / schema / sql / title are POSIX single-quoted;
+# `--no-save` is fixed so replay does not re-pollute history (drop it if you
+# do want the replay saved).
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
+# PostgreSQL multi-schema query history: keep list/clear scoped to one schema.
+code-viewer query list --db docker:pg-svc --schema analytics --json
+code-viewer query clear --db docker:pg-svc --schema analytics
 
-code-viewer query search --db app.db --term "john@example.com" \
-    --tables users,orders --include-non-text --max-hits 20
+# Locate a value across every table (default: text-like columns only).
+# Blocks until the scan finishes or --timeout (default 60s) expires.
+code-viewer query search --db app.db --term "needle@example.com" --json
+code-viewer query search --db app.db --term "needle@example.com" \
+    --tables users,orders --max-hits 20 --include-non-text --json
 
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test"
+# The no-wait output also prints a paste-safe "Poll with: ..." line that
+# pins --server '<url>' and single-quotes db/schema, so AI/human paste never
+# silently falls back to auto-discovery. The same string is available as a
+# pollCommand field in --json ack output.
+# Block until the snapshot finishes (default --timeout 120s) and emit the
+# final meta as JSON — handy when an AI agent needs the snapshot id without
+# polling snapshot list separately.
+code-viewer query snapshot create --db app.db --tables users,orders \
+    --note "Before user registration test" --wait --json
+# `snapshot list --json` enriches each snapshots[] element with paste-safe
+# `deleteCommand` and `noteCommand` fields. Each pins --server '<url>' and
+# single-quotes the snapshot id; `noteCommand` quotes the current note as-is
+# so AI/human can paste and edit the value to update.
 code-viewer query snapshot list --db app.db --json
+# PostgreSQL multi-schema: pin both create and list to the same schema so
+# the before/after pair and --wait polling stay scoped to that schema.
+code-viewer query snapshot create --db docker:pg-svc --schema analytics \
+    --tables events --note "Before backfill" --wait --json
+code-viewer query snapshot list --db docker:pg-svc --schema analytics --json
 code-viewer query snapshot note --id snap-abc123 --note "Updated context"
 code-viewer query snapshot delete --id snap-abc123
 
-code-viewer query diff create --before snap-abc123 --after snap-def456 \
-    --note "User registration test"
-code-viewer query diff tables --id diff-xyz789
-code-viewer query diff rows --id diff-xyz789 --table users --type inserted
-code-viewer query diff list --db app.db --json
-code-viewer query diff delete --id diff-xyz789
+# diff tables prints per-table summary lines plus a paste-safe "# diff rows: ..."
+# hint per table, and --json adds a diffRowsCommand field to each tables[] element
+# so AI/human can copy the exact row-detail command without rebuilding it.
+code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
+code-viewer query diff rows --before snap-abc123 --after snap-def456 \
+    --table users --json
 ```
+
+`query exec` prints pretty JSON with `dbId`, `columns`, `columnTypes`, `rows`,
+`rowCount`, `truncated`, `elapsedMs`, and optional `schema` / `executedSql`.
+Check `truncated` before treating the result as complete.
 
 `code-viewer query --help` shows all command syntax. `code-viewer query
 agent-help` prints a longer guide for AI agents covering query shape and
 conventions. Both `query` and `annotate` accept `--cwd <repo>` and
 `--server <url>` for targeting a specific running server.
+
+For discovered Redis sources, `code-viewer query redis` exposes the same
+read-only endpoints the browser's Datastores tab uses, so AI agents and
+shell scripts can look inside without opening a browser. The CLI calls
+the existing `/_db/redis/databases`, `/_db/redis/keys`, and
+`/_db/redis/value` routes (writes stay browser-only):
+
+```sh
+# List the 16 logical DBs and their key counts.
+code-viewer query redis databases --db docker:redis-svc --json
+
+# SCAN-style key paging — re-issue with the returned nextCursor until "0".
+code-viewer query redis keys --db docker:redis-svc --db-index 0 \
+    --pattern '*' --count 500 --json
+
+# Read a single key's value. Binary content surfaces as binaryBase64.
+code-viewer query redis value --db docker:redis-svc --db-index 0 \
+    --key sample:key --json
+```
+
+Default text output is tab-separated (`index<TAB>keyCount` for
+databases, `name<TAB>type` for keys). For `keys` a non-terminal cursor
+appears as a trailing `# nextCursor: <cursor>` line so pagination needs
+no JSON parsing; 0 keys prints `no redis keys` to stderr and exits 0.
+`value`'s default output is the `RedisValue` payload as pretty JSON;
+`--json` wraps the same payload in the full `RedisValueResponse`
+(dbId / dbIndex / key included).
+
+For discovered Elasticsearch sources, `code-viewer query elasticsearch`
+exposes the same read-only endpoints the browser's Datastores tab uses.
+The CLI calls the existing `/_db/elasticsearch/indices`, `/mapping`,
+`/docs`, and `/doc` routes (writes stay browser-only):
+
+```sh
+# List indices: name, doc count, byte size, health.
+code-viewer query elasticsearch indices --db docker:es-svc --json
+
+# Inspect a single index's mapping (field types / nested properties).
+code-viewer query elasticsearch mapping --db docker:es-svc \
+    --index sample-index --json
+
+# Search documents with a Lucene query; --size caps hits, --search-after
+# pages by feeding back the previous response's lastSort JSON array.
+code-viewer query elasticsearch docs --db docker:es-svc \
+    --index sample-index --q 'status:active' --size 10 --json
+code-viewer query elasticsearch docs --db docker:es-svc \
+    --index sample-index --q 'status:active' --size 10 \
+    --search-after '[1700000000000,"abc"]' --json
+
+# Read a single document by id.
+code-viewer query elasticsearch doc --db docker:es-svc \
+    --index sample-index --id sample-id --json
+```
+
+Default text output is tab-separated:
+`name<TAB>docCount<TAB>sizeBytes<TAB>health` for `indices`,
+`_id<TAB>_score` per hit for `docs` (followed by `# lastSort: <json>` and
+`# totalHits: <n> (returned <k>)` trailing lines so paging needs no JSON
+parsing). `mapping` and `doc` default to pretty JSON of the inner payload
+(`EsMapping` and `_source`). 0 hits on `docs` prints `no elasticsearch
+hits` to stderr (exit 0); a missing `doc` id prints
+`not found: <index>/<id>` to stderr (exit 0). `--json` always emits the
+full server response envelope.
+
+For discovered S3 sources, `code-viewer query s3` exposes the same
+read-only endpoints the browser's Datastores tab uses. The CLI calls the
+existing `/_db/s3/buckets`, `/objects`, `/folder`, `/head`, and `/text`
+routes (writes and raw byte streams stay browser-only):
+
+```sh
+# List buckets in the source.
+code-viewer query s3 buckets --db docker:s3-svc --json
+
+# List objects in a bucket. --mode prefix walks --prefix; --mode contains
+# scans for --q across keys/basenames. Use --token to page.
+code-viewer query s3 objects --db docker:s3-svc --bucket sample-bucket \
+    --prefix logs/ --limit 50 --json
+
+# Walk one folder level (delimiter "/") — folders and files separately.
+code-viewer query s3 folder --db docker:s3-svc --bucket sample-bucket \
+    --prefix logs/ --json
+
+# Object metadata only (size / contentType / etag / updatedAt).
+code-viewer query s3 head --db docker:s3-svc --bucket sample-bucket \
+    --key logs/sample.json --json
+
+# Preview a text-shaped object's body (server caps at 512KiB and sets
+# truncated=true when it had to cut). Non-text keys return HTTP 415.
+code-viewer query s3 text --db docker:s3-svc --bucket sample-bucket \
+    --key logs/sample.json
+```
+
+Default text output is tab-separated:
+`name<TAB>createdAt-or-"?"` for `buckets`,
+`key<TAB>sizeBytes<TAB>updatedAt-or-"?"<TAB>contentType-or-"?"` per object
+for `objects` (with `# nextToken: <token>` / `# scanLimitReached: true`
+trailing lines when the server returned them), and `DIR<TAB><prefix>` /
+`OBJ<TAB><key><TAB><sizeBytes>` rows for `folder`. 0 hits on `objects`
+prints `no s3 objects` to stderr (exit 0); an empty `folder` listing
+prints `no s3 folder entries` to stderr (exit 0). `head` defaults to
+pretty JSON of `S3ObjectHeadResponse`. `text` prints the object body to
+stdout and adds `text truncated` to stderr when the server flagged
+truncation. `--json` always emits the full server response envelope.
+
+AI agents who don't yet know which subcommand they need can run
+`code-viewer agent-help` once. It prints a short index of the seven
+AI-facing entry points (`status`, `query`, `annotate`, `search`,
+`file`, `skill`, `doctor`) with the exact `code-viewer <name>
+agent-help` command for each full guide. The index runs without any
+preflight, so it works even before SQLite or a running server is set
+up.
+
+### Workspace status CLI
+
+`code-viewer status` prints a one-shot snapshot of the current repo so
+an AI agent (or you) can orient yourself in a single call: current
+branch, remote URL, every file that differs from HEAD (staged +
+unstaged + untracked), the staged subset, the most recent commits, and
+a paste-safe shortlist of follow-up `code-viewer` commands. It runs
+locally over `git` — no running server, no SQLite preflight — so it is
+safe to call as the first command after entering any repository.
+
+```sh
+# Human-readable summary.
+code-viewer status
+
+# Structured payload for agents.
+code-viewer status --json
+
+# Override the ref / depth used for "recent commits".
+code-viewer status --ref main --limit 20 --json
+```
+
+The `nextCommands` field pins `--server '<url>'` automatically for
+server-backed follow-ups when a code-viewer server is registered for
+the repo; local follow-ups stay bare. With no server, the snapshot
+itself still succeeds.
+
+### Code search CLI
+
+`code-viewer search code` exposes the running server's `/_grep`
+endpoint — the same engine that powers the browser's `Ctrl+G` palette —
+to the command line for AI agents and shell scripts. The search uses
+ripgrep when available and falls back to git grep / fixed-string
+scanning, honours the same scope rules as the UI (`.git`,
+`.code-viewer`, scope-omit directories filtered out), and can target a
+git ref instead of the worktree.
+
+```sh
+# default: fixed-string search across the worktree, plain text output.
+code-viewer search code --term "TODO"
+
+# JSON output: { ref, engine, truncated, matches[{path,line,column,preview}] }.
+# Prefer --json from agents — column / engine / truncated drive follow-up logic.
+code-viewer search code --term "TODO" --json
+
+# extended-regex search, restricted to two subtrees, on the `main` ref.
+code-viewer search code --term "fn handler" --regex \
+    --path src --path tests --ref main --json
+```
+
+Default text output is `path:line:column<TAB>preview`, one line per
+match. An empty result prints `no matches` to stderr and exits 0.
+Parse errors and unreachable servers exit 1. `--max` accepts a positive
+integer up to the server's hard cap; `truncated=true` in the JSON
+response means more matches exist beyond the cap. Run
+`code-viewer search agent-help` for the full AI-agent guide.
+
+`code-viewer search files` is the sister command for **filename**
+lookups — the CLI mirror of the browser's `Ctrl+K` palette. It calls
+`/_files` for the ref's full tree, then ranks paths with the same
+`fuzzy + glob` algorithm the palette uses. `--term` auto-switches
+between modes: bare words (e.g. `"auth"`, `"userId"`) use fuzzy
+ranking; patterns containing `*` or `?` (e.g. `"src/**/*.test.ts"`) use
+glob matching, and the mode used is reported in `--json`. The `.git`,
+`.code-viewer`, and scope-omit directories are filtered out just like in
+the palette.
+
+```sh
+# Fuzzy search across the worktree, top 50 paths printed one per line.
+code-viewer search files --term "userId"
+
+# Glob: ranked JSON with score / ranges / mode for AI agents.
+code-viewer search files --term "src/**/*.test.ts" --max 200 --json
+
+# Look at a specific ref instead of the worktree.
+code-viewer search files --term "config" --ref main --json
+```
+
+Default text output is one path per line, best first. An empty result
+prints `no matching files` to stderr and exits 0. `--json` emits a
+ranked payload `{ ref, generation, query, mode, truncated,
+candidateTruncated, totalCandidates, totalMatches,
+matches[{ path, score, ranges }] }`. `truncated` means the ranked
+matches were sliced by `--max`; `candidateTruncated` means the server
+file-list cap was reached before ranking. The default `--max` is `50`
+(intentionally smaller than `search code` so the result fits an AI
+agent's context window); raise it up to the server-side cap when needed.
+
+### File inspect CLI
+
+After `search` locates a path, `code-viewer file` drills into it
+from git refs or the worktree. The CLI reuses the same read paths the
+browser uses for the Blame, History, and Diff tabs and the source viewer,
+so output matches the on-screen views. **No running code-viewer server is
+required** — these commands run locally, which makes them safe to use
+before the server has started (or from CI).
+
+```sh
+# "Who wrote this line?" — porcelain blame for a path, JSON DTO output.
+code-viewer file blame --path src/sample.ts --json
+
+# Force a committed-only blame against an explicit ref.
+code-viewer file blame --path src/sample.ts --base HEAD --ref main --json
+
+# "What changed on this path recently?" — paginated commit log.
+code-viewer file history --path src/sample.ts --limit 10 --json
+code-viewer file history --path src/sample.ts --query "author:tester" --json
+
+# Read the file (or a line range) as of a ref. AI-friendly JSON output
+# includes totalLines / complete so the caller knows what was sliced.
+code-viewer file show --path src/sample.ts --json
+code-viewer file show --path src/sample.ts --start 100 --end 150 --json
+code-viewer file show --path src/sample.ts --ref main --json
+
+# Unified diff for one path. Defaults to HEAD..worktree and a preview cap
+# (hunks/lines); pass --full for the entire diff.
+code-viewer file diff --path src/sample.ts --json
+code-viewer file diff --path src/sample.ts --from HEAD~1 --to HEAD --full --json
+code-viewer file diff --path new_sample.ts --untracked --json
+```
+
+Default (non-`--json`) output is tab-separated and easy to grep:
+
+- `blame` — `<line><TAB><shortSha or "worktree"><TAB><summary>`. Lines
+  with uncommitted edits show `worktree` and `<uncommitted>`.
+- `history` — `<shortSha><TAB><whenISO><TAB><author><TAB><subject>`.
+  A path with zero commits prints `no history` to stderr and exits 0.
+- `show` — the worktree file (or sliced lines) by default. Pass `--ref`
+  for a committed snapshot. Empty slices succeed.
+- `diff` — the unified diff text. An empty (or worktree == worktree)
+  range prints nothing on stdout and exits 0.
+
+Run `code-viewer file agent-help` for the full AI-agent guide
+including the JSON contract for each subcommand.
+
+### Doctor CLI
+
+The same diagnostic report behind the Environment Doctor sheet (see
+Features above) is available from the terminal without a browser, so AI
+agents and CI can introspect the runtime, SQLite driver, Git, Docker
+discovery, and snapshot store status directly.
+
+```sh
+# Human-readable status summary.
+code-viewer doctor
+
+# Full DoctorReport JSON (matches the /_doctor endpoint).
+code-viewer doctor --json
+code-viewer doctor --cwd /path/to/repo --port 64160 --json
+```
+
+The exit code is `1` iff the worst check status is `"error"` (never on
+`"warn"`), so it doubles as a CI gate. Run `code-viewer doctor agent-help`
+for the full AI-agent guide.
 
 ## AI Code Annotations
 
@@ -421,6 +762,41 @@ npx -y @youtyan/code-viewer skill install --agent all           # claude, codex,
 (`~/.claude/skills/`, `~/.codex/skills/`, …) instead of the current project,
 and `--cwd <dir>` to target a specific repository. Running the same command
 again updates an existing installation in place.
+
+## MCP Server
+
+While `code-viewer` is running, the same server also exposes a local MCP
+(Model Context Protocol) endpoint at `/_mcp` — for example
+`http://127.0.0.1:<port>/_mcp`, where `<port>` is the port printed at
+startup. It speaks JSON-RPC 2.0 over the Streamable HTTP transport
+(`initialize`, `ping`, `tools/list`, `tools/call`; POST only,
+`application/json`) and is guarded by the same localhost/same-origin check
+as every other route, so MCP clients can call it directly instead of
+spawning `code-viewer` CLI subprocesses.
+
+All tools are read-only:
+
+| Tool | What it does |
+| --- | --- |
+| `code_viewer_agent_help` | Index of every AI-facing CLI subcommand. |
+| `code_viewer_status` | Branch, remote, changed files, and recent commits. |
+| `code_viewer_file_show` | Read a file (optionally a line range) at any ref. |
+| `code_viewer_file_blame` | Per-line blame (sha / author / time / summary). |
+| `code_viewer_file_history` | Commit history for one path (follows renames). |
+| `code_viewer_file_diff` | Unified diff for one path (preview-capped by default). |
+| `code_viewer_search_files` | Rank repository paths by fuzzy or glob match. |
+| `code_viewer_search_code` | Grep the repository (`rg` / `git grep` / fallback). |
+| `code_viewer_datastore_sources` | Discover read-only datastore source ids. |
+| `code_viewer_datastore_schemas` | List schemas for one SQL datastore. |
+| `code_viewer_datastore_schema` | Inspect tables, indexes, FKs, and columns. |
+| `code_viewer_datastore_columns` | Inspect columns for one SQL table. |
+| `code_viewer_datastore_ddl` | Inspect the `CREATE` statement and triggers. |
+| `code_viewer_datastore_query` | Run a read-only `SELECT` / `PRAGMA` / `EXPLAIN` / `WITH`. |
+| `code_viewer_datastore_history` | Inspect saved query history. |
+
+Point any MCP-compatible client (Claude Code, Codex, etc.) at the endpoint
+URL above as a Streamable HTTP MCP server; no separate install step or
+extra process is needed beyond `code-viewer` already running.
 
 ## Development
 

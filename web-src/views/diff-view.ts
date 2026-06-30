@@ -75,6 +75,7 @@ type LoadQueueItem = {
   file: FileMeta;
   card: DiffCardElement;
   priority: number;
+  epoch: number;
 };
 
 export type RenderResult = {
@@ -99,6 +100,18 @@ export function isDiffShellDomIntact(
 
 export function shouldRenderDiffSidebar(listSame: boolean, domIntact: boolean) {
   return !listSame || !domIntact;
+}
+
+function findDirectDiffCardByKey(
+  target: Element,
+  key: string,
+): DiffCardElement | null {
+  for (const child of Array.from(target.children)) {
+    if (!child.classList.contains("gdp-file-shell")) continue;
+    const card = child as DiffCardElement;
+    if (card.dataset.key === key) return card;
+  }
+  return null;
 }
 
 export function createDiffView(deps: DiffViewDeps) {
@@ -382,6 +395,7 @@ export function createDiffView(deps: DiffViewDeps) {
   const LOAD_QUEUE: LoadQueueItem[] = [];
 
   let ACTIVE_LOADS = 0;
+  let LOAD_EPOCH = 0;
 
   const MAX_PARALLEL = 2;
 
@@ -389,6 +403,12 @@ export function createDiffView(deps: DiffViewDeps) {
   let scrollSpyInstalled = false;
   let prevListSignature = "";
   let prevCardSignatures = new Map<string, string>();
+
+  function resetLoadScheduling() {
+    LOAD_EPOCH++;
+    LOAD_QUEUE.length = 0;
+    ACTIVE_LOADS = 0;
+  }
 
   function fileKey(f: FileMeta): string {
     return f.key || f.path;
@@ -456,9 +476,14 @@ export function createDiffView(deps: DiffViewDeps) {
     file: FileMeta,
     changedPaths: Set<string> | null,
   ): boolean {
-    if (!card.classList.contains("loaded")) return false;
+    if (
+      !card.classList.contains("loaded") &&
+      !card.classList.contains("loading")
+    )
+      return false;
     if (changedPaths && !changedPaths.has(file.path)) return false;
-    card.classList.remove("loaded", "error");
+    card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    card.classList.remove("loaded", "loading", "error");
     card.classList.add("pending");
     card._diffData = null;
     const body = card.querySelector<HTMLElement>(".gdp-shell-body");
@@ -486,6 +511,25 @@ export function createDiffView(deps: DiffViewDeps) {
         }
       }
     }
+  }
+
+  function resetReusableCard(card: DiffCardElement, file: FileMeta) {
+    card.classList.remove("loaded", "loading", "error", "manual-load");
+    card.classList.add("pending");
+    card.replaceChildren();
+    const tmp = createPlaceholder(file);
+    while (tmp.firstChild) card.appendChild(tmp.firstChild);
+    card.dataset.path = file.path;
+    card.dataset.key = fileKey(file);
+    card.dataset.sizeClass = file.size_class || "small";
+    card.dataset.status = file.status || "M";
+    card.dataset.reqId = String(++CLIENT_REQ_SEQ);
+    delete card.dataset.manualRendered;
+    delete card.dataset.manualLoad;
+    delete card.dataset.manualMode;
+    card.style.minHeight = `${file.estimated_height_px || 80}px`;
+    card._diffData = null;
+    card._file = null;
   }
 
   function renderShell(
@@ -520,7 +564,7 @@ export function createDiffView(deps: DiffViewDeps) {
         empty.classList.remove("hidden");
         target.replaceChildren();
       }
-      LOAD_QUEUE.length = 0;
+      resetLoadScheduling();
       return {
         structureChanged: sidebarNeedsRender,
         invalidatedCards: 0,
@@ -533,6 +577,20 @@ export function createDiffView(deps: DiffViewDeps) {
     for (const f of newFiles) {
       newCardSigs.set(fileKey(f), computeCardSignature(f));
     }
+    const pathsUnknown = !changedPaths;
+    const contentMayNeedReload =
+      !listSame ||
+      pathsUnknown ||
+      (changedPaths
+        ? newFiles.some((file) => {
+            const key = fileKey(file);
+            return (
+              prevCardSignatures.get(key) !== newCardSigs.get(key) ||
+              changedPaths.has(file.path)
+            );
+          })
+        : false);
+    if (contentMayNeedReload) resetLoadScheduling();
 
     let invalidatedCards = 0;
 
@@ -545,33 +603,19 @@ export function createDiffView(deps: DiffViewDeps) {
       for (const f of newFiles) {
         const key = fileKey(f);
         const oldSig = prevCardSignatures.get(key);
-        const newSig = newCardSigs.get(key)!;
+        const newSig = newCardSigs.get(key) ?? computeCardSignature(f);
         const sigChanged = oldSig !== newSig;
         const pathHint = pathsUnknown || changedPaths.has(f.path);
         if (!sigChanged && !pathHint) {
           continue;
         }
-        const card = target.querySelector<DiffCardElement>(
-          `.gdp-file-shell[data-key="${CSS.escape(key)}"]`,
-        );
+        const card = findDirectDiffCardByKey(target, key);
         if (!card) continue;
         const sizeChanged =
           card.dataset.sizeClass !== (f.size_class || "small");
         const statusChanged = card.dataset.status !== (f.status || "M");
         if (sizeChanged || statusChanged) {
-          card.classList.remove("loaded", "error");
-          card.classList.add("pending");
-          card.replaceChildren();
-          const tmp = createPlaceholder(f);
-          while (tmp.firstChild) card.appendChild(tmp.firstChild);
-          card.dataset.sizeClass = f.size_class || "small";
-          card.dataset.status = f.status || "M";
-          delete card.dataset.manualRendered;
-          delete card.dataset.manualLoad;
-          delete card.dataset.manualMode;
-          card.style.minHeight = `${f.estimated_height_px || 80}px`;
-          card._diffData = null;
-          card._file = null;
+          resetReusableCard(card, f);
           activatePendingCard(card, f);
           invalidatedCards++;
           sidebarNeedsStatsUpdate = true;
@@ -591,6 +635,12 @@ export function createDiffView(deps: DiffViewDeps) {
             ? invalidateLoadedCard(card, f, null)
             : invalidateLoadedCard(card, f, changedPaths);
           if (didInvalidate) invalidatedCards++;
+          else if (
+            (sigChanged || pathHint) &&
+            card.classList.contains("pending")
+          ) {
+            activatePendingCard(card, f);
+          }
           if (sigChanged) sidebarNeedsStatsUpdate = true;
         }
       }
@@ -626,20 +676,11 @@ export function createDiffView(deps: DiffViewDeps) {
         oldByKey.delete(key);
         const sizeChanged = old.dataset.sizeClass !== (f.size_class || "small");
         const statusChanged = old.dataset.status !== (f.status || "M");
-        if (sizeChanged || statusChanged) {
-          old.classList.remove("loaded", "error");
-          old.classList.add("pending");
-          old.replaceChildren();
-          const tmp = createPlaceholder(f);
-          while (tmp.firstChild) old.appendChild(tmp.firstChild);
-          old.dataset.sizeClass = f.size_class || "small";
-          old.dataset.status = f.status || "M";
-          delete old.dataset.manualRendered;
-          delete old.dataset.manualLoad;
-          delete old.dataset.manualMode;
-          old.style.minHeight = `${f.estimated_height_px || 80}px`;
-          old._diffData = null;
-          old._file = null;
+        const oldSig = prevCardSignatures.get(key);
+        const newSig = newCardSigs.get(key) ?? computeCardSignature(f);
+        const sigChanged = oldSig !== newSig;
+        if (sizeChanged || statusChanged || sigChanged) {
+          resetReusableCard(old, f);
           invalidatedCards++;
         } else {
           const stats = old.querySelector(".gdp-shell-header .stats");
@@ -778,8 +819,16 @@ export function createDiffView(deps: DiffViewDeps) {
       renderManualLoadPlaceholder(card, file);
       return;
     }
-    if (LOAD_QUEUE.find((item) => item.card === card)) return;
-    LOAD_QUEUE.push({ file, card, priority: priority || 0 });
+    if (
+      LOAD_QUEUE.find((item) => item.card === card && item.epoch === LOAD_EPOCH)
+    )
+      return;
+    LOAD_QUEUE.push({
+      file,
+      card,
+      priority: priority || 0,
+      epoch: LOAD_EPOCH,
+    });
     LOAD_QUEUE.sort((a, b) => b.priority - a.priority);
     pumpQueue();
   }
@@ -787,6 +836,7 @@ export function createDiffView(deps: DiffViewDeps) {
   function pumpQueue() {
     while (ACTIVE_LOADS < MAX_PARALLEL && LOAD_QUEUE.length) {
       const item = LOAD_QUEUE.shift();
+      if (item.epoch !== LOAD_EPOCH) continue;
       if (
         item.card.classList.contains("loaded") ||
         item.card.classList.contains("loading")
@@ -794,7 +844,9 @@ export function createDiffView(deps: DiffViewDeps) {
         continue;
       ACTIVE_LOADS++;
       loadFile(item.file, item.card).finally(() => {
-        ACTIVE_LOADS--;
+        if (item.epoch === LOAD_EPOCH) {
+          ACTIVE_LOADS = Math.max(0, ACTIVE_LOADS - 1);
+        }
         pumpQueue();
       });
     }
@@ -1569,7 +1621,7 @@ export function createDiffView(deps: DiffViewDeps) {
   }
 
   function clearLoadQueue() {
-    LOAD_QUEUE.length = 0;
+    resetLoadScheduling();
   }
 
   return {

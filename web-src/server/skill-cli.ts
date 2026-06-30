@@ -21,6 +21,7 @@ export const SKILL_HELP = `code-viewer skill — manage the bundled agent skills
 
 Usage:
   code-viewer skill install [--agent <list>] [--global] [--cwd <dir>]
+  code-viewer skill agent-help
 
 Installs every bundled skill (each SKILL.md directory under the package's
 skills/) into the skills directory of each selected agent in the current
@@ -34,14 +35,73 @@ Options:
   --global        install into the home directory (~/.claude/skills/ etc)
   --cwd <dir>     project directory to install into (ignored with --global)
 
+Run "code-viewer skill agent-help" for an AI-agent oriented guide.
+
 Examples:
   code-viewer skill install
   code-viewer skill install --agent claude,codex,gemini
   code-viewer skill install --agent all --global
 `;
 
+export const SKILL_AGENT_HELP = `code-viewer skill — agent guide
+
+You are an AI coding agent. Use this command to install (or refresh) the
+code-viewer-bundled skill packs into the human's repository or home
+directory, so the next session of any supported AI agent picks them up
+without manual setup.
+
+## When to use
+
+- First time the human runs code-viewer in a repo: install per-project
+  skills so the team gets a consistent agent walkthrough convention.
+- The human upgrades code-viewer and wants the latest skill content
+  reflected in their agent setup.
+- The human asks "can you make my AI agent know about this tool" — that
+  is exactly what \`code-viewer skill install\` does.
+
+## Behaviour
+
+- Discovers every SKILL.md folder bundled with code-viewer (under the
+  package's \`skills/\` directory) and copies each into the agent's
+  conventional skills directory (e.g. \`.claude/skills/<name>/\`).
+- Re-run is safe and idempotent: it overwrites files, so it doubles as
+  an "update to latest" command.
+- \`--global\` writes under \`~/.claude/skills/\`, \`~/.codex/skills/\`,
+  etc. instead of the current repo.
+
+## How to call
+
+  code-viewer skill install                # default agent = claude, into cwd
+  code-viewer skill install --agent all    # claude + codex + gemini + cursor + agents
+  code-viewer skill install --agent all --global
+  code-viewer skill install --agent codex --cwd /path/to/repo
+
+If \`code-viewer\` is not on PATH (the human launches via npx), use:
+
+  npx -y @youtyan/code-viewer skill install --agent claude
+
+## Output contract
+
+Each line of stdout is one outcome:
+
+  installed (<agent>/<skill>): <absolute target path>
+  updated   (<agent>/<skill>): <absolute target path>
+
+Parse the "<action> (<agent>/<skill>)" prefix if you need to summarize.
+Exit code 0 on success, 1 on any error (unknown agent, copy failure,
+missing bundled skills).
+
+## What gets installed
+
+The bundled set covers code-viewer's own AI workflows (annotation
+walkthroughs, doctor introspection, query/snapshot inspection). After
+install, ask the AI to use \`code-viewer annotate\` and the related
+skills will guide it.
+`;
+
 export type SkillArgs =
   | { kind: "help" }
+  | { kind: "agent-help" }
   | { kind: "install"; agents: AgentName[]; global: boolean; cwd?: string };
 
 export type SkillParseResult =
@@ -67,6 +127,9 @@ function parseAgentList(value: string): AgentName[] | null {
 export function parseSkillArgs(argv: string[]): SkillParseResult {
   if (argv.length === 0 || argv.includes("--help") || argv[0] === "help") {
     return { ok: true, args: { kind: "help" } };
+  }
+  if (argv[0] === "agent-help") {
+    return { ok: true, args: { kind: "agent-help" } };
   }
   const [command, ...rest] = argv;
   if (command !== "install") {
@@ -177,6 +240,10 @@ export function runSkillCli(argv: string[]): void {
   }
   if (parsed.args.kind === "help") {
     console.log(SKILL_HELP);
+    return;
+  }
+  if (parsed.args.kind === "agent-help") {
+    console.log(SKILL_AGENT_HELP);
     return;
   }
   const result = installSkill(parsed.args, {

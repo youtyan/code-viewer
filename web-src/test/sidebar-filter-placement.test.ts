@@ -40,6 +40,12 @@ describe("sidebar filter placement on navigation", () => {
     expect(body.includes("syncSidebarHeaderHeight()")).toBe(true);
   });
 
+  test("setPageMode marks diff pages and clears stale repository target", () => {
+    const body = functionBody(appSource, "setPageMode");
+    expect(body.includes('"gdp-diff-page"')).toBe(true);
+    expect(body.includes("repoTargetWrap.hidden = true")).toBe(true);
+  });
+
   // The base .sb-filter-wrap rule is sticky with top: var(--sidebar-head-h);
   // the repo-grid override switches to relative and must zero out that top
   // offset, or the filter renders below the .sb-head grid row.

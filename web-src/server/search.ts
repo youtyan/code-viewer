@@ -96,15 +96,18 @@ export function buildRgArgs(
     "--glob",
     `!**/${name}`,
   ]);
+  const matchMode = regex ? [] : ["--fixed-strings"];
   const args = [
     "rg",
     "--no-config",
     "--line-number",
     "--column",
     "--no-heading",
+    "--with-filename",
     "--color",
     "never",
     "--smart-case",
+    ...matchMode,
     "--max-count",
     String(max),
     "--max-filesize",
@@ -116,7 +119,6 @@ export function buildRgArgs(
     "--",
     ...safePaths,
   ];
-  if (!regex) args.splice(8, 0, "--fixed-strings");
   return args;
 }
 

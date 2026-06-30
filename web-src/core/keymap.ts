@@ -27,7 +27,8 @@ export type KeymapAction =
   | "layout-split"
   | "toggle-theme"
   | "annotation-next"
-  | "annotation-previous";
+  | "annotation-previous"
+  | "open-help";
 
 export type KeyEventLike = {
   key: string;
@@ -167,6 +168,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "layout-unified", key: "u" },
   { action: "layout-split", key: "s" },
   { action: "toggle-theme", key: "t" },
+  { action: "open-help", key: "?", shift: true },
 ];
 
 export function resolveKeymapAction(

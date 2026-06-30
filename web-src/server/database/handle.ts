@@ -10,6 +10,7 @@ import type {
   DbSchemasResponse,
   DbTableDataResponse,
   QueryHistoryEntry,
+  QueryHistoryState,
   RowMutation,
 } from "../../core/database/types";
 import { makeId } from "../../core/id";
@@ -24,7 +25,7 @@ import {
 import { isDockerComposeServiceUnavailableError } from "./adapters/docker-utils";
 import { captureSql } from "./adapters/sql-capture";
 import { sqliteAdapterFactory } from "./adapters/sqlite";
-import type { DatabaseAdapter } from "./adapters/types";
+import type { DatabaseAdapter, TriggerInfo } from "./adapters/types";
 import {
   closeConnection,
   getConnection,
@@ -32,6 +33,7 @@ import {
 } from "./connection-pool";
 import {
   type DockerDbInfo,
+  type DockerDiscoveryResult,
   discoverDockerDatabasesAsync,
   discoverSqliteFilesAsync,
   findDockerServiceByDbIdAsync,
@@ -119,6 +121,47 @@ type ResolvedDb = {
   dbId: string;
   docker?: DockerDbInfo;
   schema?: string;
+};
+
+export type DockerDatabaseLister = (
+  serviceName: string,
+  kind: "postgresql" | "mysql",
+  env: Record<string, string>,
+  cwd: string,
+  signal?: AbortSignal,
+) => Promise<string[]>;
+
+export type DbFileDiscoveryDeps = {
+  discoverSqliteFiles: typeof discoverSqliteFilesAsync;
+  discoverDockerDatabases: typeof discoverDockerDatabasesAsync;
+  listDockerDatabases: DockerDatabaseLister;
+};
+
+const DEFAULT_DB_FILE_DISCOVERY_DEPS: DbFileDiscoveryDeps = {
+  discoverSqliteFiles: discoverSqliteFilesAsync,
+  discoverDockerDatabases: discoverDockerDatabasesAsync,
+  listDockerDatabases: listDockerDatabasesAsync,
+};
+
+export type DbServiceResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; response: Response };
+
+export type DbColumnsResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  columns: DbColumn[];
+  executedSql?: string[];
+};
+
+export type DbDdlResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  sql: string;
+  triggers: TriggerInfo[];
+  executedSql?: string[];
 };
 
 const MAX_SCHEMA_NAME_LEN = 1024;
@@ -225,55 +268,107 @@ function toFileInfo(entry: {
   };
 }
 
-async function handleFiles(
-  cwd: string,
-  omitDirNames: string[],
+function errorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const withoutControl = Array.from(raw, (ch) =>
+    hasControlCharacter(ch) ? " " : ch,
+  ).join("");
+  const normalized = withoutControl.replace(/\s+/g, " ").trim();
+  return normalized || "unknown error";
+}
+
+async function expandDockerServicesForFiles(
+  dockerServices: DockerDiscoveryResult,
+  listDockerDatabases: DockerDatabaseLister,
   signal?: AbortSignal,
-): Promise<Response> {
-  const [sqliteFiles, dockerServices] = await Promise.all([
-    discoverSqliteFilesAsync(cwd, omitDirNames, signal),
-    discoverDockerDatabasesAsync(cwd, omitDirNames, signal),
-  ]);
-  const dockerTruncated = dockerServices.truncated === true;
-  const dockerEntries = (
-    await Promise.all(
-      dockerServices.map(async (svc) => {
-        if (
-          svc.kind === "redis" ||
-          svc.kind === "elasticsearch" ||
-          svc.kind === "s3"
-        ) {
-          return [svc];
-        }
-        const dbs = await listDockerDatabasesAsync(
+): Promise<{ entries: DockerDbInfo[]; errors: string[] }> {
+  const chunks = await Promise.all(
+    dockerServices.map(async (svc) => {
+      if (
+        svc.kind === "redis" ||
+        svc.kind === "elasticsearch" ||
+        svc.kind === "s3"
+      ) {
+        return { entries: [svc], errors: [] };
+      }
+      let dbs: string[];
+      try {
+        dbs = await listDockerDatabases(
           svc.serviceName,
           svc.kind as "postgresql" | "mysql",
           svc.env,
           svc.composeDir,
           signal,
         );
-        if (dbs.length <= 1) {
-          return [svc];
-        } else {
-          const entries: typeof dockerServices = [];
-          for (const db of dbs) {
-            // svc.id は subdir compose の場合 `docker:<svc>@<encoded>` 形式に
-            // なっているので、それに `:<db>` を後ろから足すだけで一意になる。
-            entries.push({
-              ...svc,
-              id: `${svc.id}:${db}`,
-              name: svc.name.replace(/\)$/, ` / ${db})`),
-              database: db,
-            });
-          }
-          return entries;
-        }
-      }),
-    )
-  ).flat();
+      } catch (err) {
+        if (isAbortLikeError(err, signal)) throw err;
+        return {
+          entries: [svc],
+          errors: [`${svc.serviceName}: ${errorMessage(err)}`],
+        };
+      }
+      if (dbs.length <= 1) {
+        return { entries: [svc], errors: [] };
+      }
+      return {
+        entries: dbs.map((db) => ({
+          ...svc,
+          id: `${svc.id}:${db}`,
+          name: svc.name.replace(/\)$/, ` / ${db})`),
+          database: db,
+        })),
+        errors: [],
+      };
+    }),
+  );
+  return {
+    entries: chunks.flatMap((chunk) => chunk.entries),
+    errors: chunks.flatMap((chunk) => chunk.errors),
+  };
+}
+
+export async function createDbFilesResponse(
+  cwd: string,
+  omitDirNames: string[],
+  signal?: AbortSignal,
+  deps: DbFileDiscoveryDeps = DEFAULT_DB_FILE_DISCOVERY_DEPS,
+): Promise<DbFilesResponse> {
+  // Idempotent service entry point init. HTTP routes also call ensureInit,
+  // but MCP/CLI tests can invoke these exported helpers directly.
+  ensureInit();
+  const [sqliteSettled, dockerSettled] = await Promise.allSettled([
+    deps.discoverSqliteFiles(cwd, omitDirNames, signal),
+    deps.discoverDockerDatabases(cwd, omitDirNames, signal),
+  ]);
+  if (sqliteSettled.status === "rejected") {
+    throw sqliteSettled.reason;
+  }
+  if (
+    dockerSettled.status === "rejected" &&
+    isAbortLikeError(dockerSettled.reason, signal)
+  ) {
+    throw dockerSettled.reason;
+  }
+  const sqliteFiles = sqliteSettled.value;
+  const dockerServices =
+    dockerSettled.status === "fulfilled"
+      ? dockerSettled.value
+      : ([] as DockerDiscoveryResult);
+  const dockerErrors: string[] = [];
+  if (dockerSettled.status === "rejected") {
+    dockerErrors.push(errorMessage(dockerSettled.reason));
+  }
+  const dockerTruncated = dockerServices.truncated === true;
+  const { entries: dockerEntries, errors: listingErrors } =
+    await expandDockerServicesForFiles(
+      dockerServices,
+      deps.listDockerDatabases,
+      signal,
+    );
+  dockerErrors.push(...listingErrors);
   // Strip env / serviceName / database from the response — these contain
   // credentials and internal state that the browser must not see.
-  const body: DbFilesResponse = {
+  return {
     files: [
       ...sqliteFiles.map((f) => ({
         id: f.path,
@@ -285,27 +380,33 @@ async function handleFiles(
       ...dockerEntries.map(toFileInfo),
     ],
     ...(dockerTruncated ? { truncated: true } : {}),
+    ...(dockerErrors.length > 0
+      ? { dockerError: dockerErrors.join("; ") }
+      : {}),
   };
-  return json(body);
 }
 
-async function handleSchemas(
+async function handleFiles(
   cwd: string,
-  url: URL,
-  omitDirNames?: string[],
+  omitDirNames: string[],
   signal?: AbortSignal,
 ): Promise<Response> {
-  const r = await resolveDb(
-    cwd,
-    url.searchParams.get("db"),
-    omitDirNames,
-    url.searchParams.get("schema"),
-    signal,
-  );
-  if (r instanceof Response) return r;
+  return json(await createDbFilesResponse(cwd, omitDirNames, signal));
+}
+
+export async function createDbSchemasResponse(
+  cwd: string,
+  dbParam: string | null,
+  schemaParam?: string | null,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbSchemasResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, dbParam, omitDirNames, schemaParam, signal);
+  if (r instanceof Response) return { ok: false, response: r };
   if (!r.docker || r.docker.kind !== "postgresql") {
     const body: DbSchemasResponse = { dbId: r.dbId, schemas: [] };
-    return json(body);
+    return { ok: true, value: body };
   }
   const docker = r.docker;
   const { result: schemas, executedSql } = await captureSql(() =>
@@ -324,24 +425,40 @@ async function handleSchemas(
     selectedSchema: r.schema,
     executedSql,
   };
-  return json(body);
+  return { ok: true, value: body };
 }
 
-async function handleSchema(
+async function handleSchemas(
   cwd: string,
   url: URL,
   omitDirNames?: string[],
   signal?: AbortSignal,
 ): Promise<Response> {
-  const r = await resolveDb(
+  const result = await createDbSchemasResponse(
     cwd,
     url.searchParams.get("db"),
-    omitDirNames,
     url.searchParams.get("schema"),
+    omitDirNames,
     signal,
   );
-  if (r instanceof Response) return r;
-  const includeColumns = url.searchParams.get("includeColumns") === "1";
+  if (result.ok !== true) return result.response;
+  return json(result.value);
+}
+
+export async function createDbSchemaResponse(
+  cwd: string,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    includeColumns?: boolean;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbSchemaResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const includeColumns = opts.includeColumns === true;
   const linkedAbort = createLinkedAbortController(signal);
   try {
     const adapter = await getAdapter(r, cwd, signal);
@@ -387,13 +504,36 @@ async function handleSchema(
     if (result.colsMap) {
       body.columnsMap = Object.fromEntries(result.colsMap);
     }
-    return json(body);
+    return { ok: true, value: body };
   } catch (err) {
     linkedAbort.abort();
-    return handleError("database", "read schema", err);
+    return {
+      ok: false,
+      response: handleError("database", "read schema", err, signal),
+    };
   } finally {
     linkedAbort.cleanup();
   }
+}
+
+async function handleSchema(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const result = await createDbSchemaResponse(
+    cwd,
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      includeColumns: url.searchParams.get("includeColumns") === "1",
+    },
+    omitDirNames,
+    signal,
+  );
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
 // 条件の個数・列名/値長の上限。巨大な WHERE 生成や export 経由の DoS を防ぐ。
@@ -530,7 +670,7 @@ async function handleTable(
     };
     return json(body);
   } catch (err) {
-    return handleError("database", "read table", err);
+    return handleError("database", "read table", err, signal);
   }
 }
 
@@ -617,6 +757,103 @@ async function inferEmptyQueryColumns(
   }
 }
 
+export const DB_QUERY_DEFAULT_MAX_ROWS = 1000;
+export const DB_QUERY_HARD_CAP_MAX_ROWS = 10000;
+
+function clampDbQueryMaxRows(value: number | undefined | null): number {
+  return Math.min(
+    DB_QUERY_HARD_CAP_MAX_ROWS,
+    Math.max(1, value || DB_QUERY_DEFAULT_MAX_ROWS),
+  );
+}
+
+// Shared read-only execution for /_db/query and MCP. HTTP-only history/SSE
+// handling remains in handleQuery.
+export async function createDbQueryResponse(
+  cwd: string,
+  opts: {
+    db: string | null | undefined;
+    sql: string | null | undefined;
+    schema?: string | null;
+    maxRows?: number;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbQueryResponse>> {
+  if (!opts.db || !opts.sql) {
+    return { ok: false, response: textError("missing db or sql", 400) };
+  }
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const maxRows = clampDbQueryMaxRows(opts.maxRows);
+  const start = Date.now();
+  try {
+    const adapter = await getAdapter(r, cwd, signal);
+    const { result, executedSql } = await captureSql(() =>
+      asAsync(adapter).readonlyQuery(
+        opts.sql ?? "",
+        undefined,
+        maxRows,
+        signal,
+      ),
+    );
+    const elapsed = Date.now() - start;
+    const serializedRows = serializeDbRows(result.rows);
+    const inferredColumns =
+      result.columns.length === 0 && result.rows.length === 0
+        ? await inferEmptyQueryColumns(adapter, opts.sql, r.schema, signal)
+        : [];
+    const columns =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.name)
+        : result.columns;
+    const columnTypes =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.type)
+        : result.columnTypes;
+    const response: DbQueryResponse = {
+      dbId: opts.db,
+      ...(r.schema ? { schema: r.schema } : {}),
+      columns,
+      columnTypes,
+      rows: serializedRows,
+      rowCount: result.rowCount,
+      truncated: result.rowCount >= maxRows,
+      elapsedMs: elapsed,
+      executedSql,
+    };
+    return { ok: true, value: response };
+  } catch (err) {
+    // クライアント起因の中断はサーバ障害として記録しない。
+    if (isAbortLikeError(err, signal)) {
+      return { ok: false, response: textError("query aborted", 503) };
+    }
+    if (isDockerComposeServiceUnavailableError(err)) {
+      return {
+        ok: false,
+        response: handleError("database", "execute query", err),
+      };
+    }
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    const elapsed = Date.now() - start;
+    const errorResponse: DbQueryResponse = {
+      dbId: opts.db,
+      ...(r.schema ? { schema: r.schema } : {}),
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: elapsed,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    return { ok: false, response: json(errorResponse, 400) };
+  }
+}
+
 async function handleQuery(
   cwd: string,
   req: Request,
@@ -635,125 +872,80 @@ async function handleQuery(
     source?: "cli" | "browser";
   }>(req);
   if (body instanceof Response) return body;
-  if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = await resolveDb(
+  const result = await createDbQueryResponse(
     cwd,
-    body.db,
+    { db: body.db, sql: body.sql, schema: body.schema, maxRows: body.maxRows },
     omitDirNames,
-    body.schema,
     req.signal,
   );
-  if (r instanceof Response) return r;
-  const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
-  const start = Date.now();
-  try {
-    const adapter = await getAdapter(r, cwd, req.signal);
-    const { result, executedSql } = await captureSql(() =>
-      asAsync(adapter).readonlyQuery(
-        body.sql ?? "",
-        undefined,
-        maxRows,
-        req.signal,
-      ),
-    );
-    const elapsed = Date.now() - start;
-    const serializedRows = serializeDbRows(result.rows);
-    const inferredColumns =
-      result.columns.length === 0 && result.rows.length === 0
-        ? await inferEmptyQueryColumns(adapter, body.sql, r.schema, req.signal)
-        : [];
-    const columns =
-      inferredColumns.length > 0
-        ? inferredColumns.map((col) => col.name)
-        : result.columns;
-    const columnTypes =
-      inferredColumns.length > 0
-        ? inferredColumns.map((col) => col.type)
-        : result.columnTypes;
-    const response: DbQueryResponse = {
+  if (result.ok !== true) return result.response;
+  const response = result.value;
+  if (body.saveHistory && body.db && body.sql) {
+    const entry: QueryHistoryEntry = {
+      id: makeHistoryId(),
       dbId: body.db,
-      ...(r.schema ? { schema: r.schema } : {}),
-      columns,
-      columnTypes,
-      rows: serializedRows,
-      rowCount: result.rowCount,
-      truncated: result.rowCount >= maxRows,
-      elapsedMs: elapsed,
-      executedSql,
+      ...(response.schema ? { schema: response.schema } : {}),
+      sql: body.sql,
+      title: body.title,
+      body: body.body,
+      columns: response.columns,
+      rowsPreview: response.rows,
+      rowCount: response.rowCount,
+      savedRows: response.rows.length,
+      truncated: response.truncated,
+      elapsedMs: response.elapsedMs,
+      executedAt: new Date().toISOString(),
+      executedBy: body.executedBy || "user",
+      source: body.source || "browser",
     };
-    if (body.saveHistory) {
-      const entry: QueryHistoryEntry = {
-        id: makeHistoryId(),
+    await updateQueryHistoryAsync(cwd, (state) => ({
+      state: addQueryHistoryEntry(state, entry),
+      result: undefined,
+    }));
+    sendSse?.(
+      "db-query",
+      JSON.stringify({
+        action: "add",
         dbId: body.db,
-        ...(r.schema ? { schema: r.schema } : {}),
-        sql: body.sql,
-        title: body.title,
-        body: body.body,
-        columns,
-        rowsPreview: serializedRows,
-        rowCount: result.rowCount,
-        savedRows: serializedRows.length,
-        truncated: result.rowCount >= maxRows,
-        elapsedMs: elapsed,
-        executedAt: new Date().toISOString(),
-        executedBy: body.executedBy || "user",
-        source: body.source || "browser",
-      };
-      await updateQueryHistoryAsync(cwd, (state) => ({
-        state: addQueryHistoryEntry(state, entry),
-        result: undefined,
-      }));
-      sendSse?.(
-        "db-query",
-        JSON.stringify({
-          action: "add",
-          dbId: body.db,
-          schema: r.schema,
-          id: entry.id,
-        }),
-      );
-    }
-    return json(response);
-  } catch (err) {
-    if (isDockerComposeServiceUnavailableError(err)) {
-      return handleError("database", "execute query", err);
-    }
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
+        schema: response.schema,
+        id: entry.id,
+      }),
     );
-    const elapsed = Date.now() - start;
-    const response: DbQueryResponse = {
-      dbId: body.db,
-      ...(r.schema ? { schema: r.schema } : {}),
-      columns: [],
-      columnTypes: [],
-      rows: [],
-      rowCount: 0,
-      truncated: false,
-      elapsedMs: elapsed,
-      error: err instanceof Error ? err.message : String(err),
-    };
-    return json(response, 400);
   }
+  return json(response);
 }
 
 async function handleHistory(cwd: string, url: URL): Promise<Response> {
-  const dbId = url.searchParams.get("db") || undefined;
-  const schema = normalizeSchemaParam(url.searchParams.get("schema"));
-  if (schema instanceof Response) return schema;
+  const result = await createDbHistoryResponse(cwd, {
+    db: url.searchParams.get("db") || undefined,
+    schema: url.searchParams.get("schema"),
+  });
+  if (result.ok !== true) return result.response;
+  return json(result.value);
+}
+
+export async function createDbHistoryResponse(
+  cwd: string,
+  opts: { db?: string | null; schema?: string | null },
+): Promise<DbServiceResult<QueryHistoryState>> {
+  const dbId = opts.db || undefined;
+  const schema = normalizeSchemaParam(opts.schema);
+  if (schema instanceof Response) return { ok: false, response: schema };
   const state = await loadQueryHistoryAsync(cwd);
   if (dbId) {
-    return json({
-      version: 1,
-      entries: state.entries.filter((e) => {
-        if (e.dbId !== dbId) return false;
-        if (schema === undefined) return true;
-        return (e.schema || "public") === schema;
-      }),
-    });
+    return {
+      ok: true,
+      value: {
+        version: 1,
+        entries: state.entries.filter((e) => {
+          if (e.dbId !== dbId) return false;
+          if (schema === undefined) return true;
+          return (e.schema || "public") === schema;
+        }),
+      },
+    };
   }
-  return json(state);
+  return { ok: true, value: state };
 }
 
 async function handleHistoryDelete(
@@ -932,7 +1124,49 @@ async function handleExport(
       },
     });
   } catch (err) {
-    return handleError("database", "export table", err);
+    return handleError("database", "export table", err, signal);
+  }
+}
+
+export async function createDbColumnsResponse(
+  cwd: string,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    table: string | null;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbColumnsResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const table = opts.table;
+  if (!table)
+    return {
+      ok: false,
+      response: textError("missing table parameter", 400),
+    };
+  try {
+    const adapter = await getAdapter(r, cwd, signal);
+    const { result: columns, executedSql } = await captureSql(() =>
+      asAsync(adapter).columns(table, signal),
+    );
+    return {
+      ok: true,
+      value: {
+        dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
+        table,
+        columns,
+        executedSql,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      response: handleError("database", "get columns", err, signal),
+    };
   }
 }
 
@@ -942,49 +1176,39 @@ async function handleColumns(
   omitDirNames?: string[],
   signal?: AbortSignal,
 ): Promise<Response> {
-  const r = await resolveDb(
+  const result = await createDbColumnsResponse(
     cwd,
-    url.searchParams.get("db"),
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      table: url.searchParams.get("table"),
+    },
     omitDirNames,
-    url.searchParams.get("schema"),
     signal,
   );
-  if (r instanceof Response) return r;
-  const table = url.searchParams.get("table");
-  if (!table) return textError("missing table parameter", 400);
-  try {
-    const adapter = await getAdapter(r, cwd, signal);
-    const { result: columns, executedSql } = await captureSql(() =>
-      asAsync(adapter).columns(table, signal),
-    );
-    return json({
-      dbId: r.dbId,
-      ...(r.schema ? { schema: r.schema } : {}),
-      table,
-      columns,
-      executedSql,
-    });
-  } catch (err) {
-    return handleError("database", "get columns", err);
-  }
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
-async function handleDdl(
+export async function createDbDdlResponse(
   cwd: string,
-  url: URL,
+  opts: {
+    db: string | null;
+    schema?: string | null;
+    table: string | null;
+  },
   omitDirNames?: string[],
   signal?: AbortSignal,
-): Promise<Response> {
-  const r = await resolveDb(
-    cwd,
-    url.searchParams.get("db"),
-    omitDirNames,
-    url.searchParams.get("schema"),
-    signal,
-  );
-  if (r instanceof Response) return r;
-  const table = url.searchParams.get("table");
-  if (!table) return textError("missing table parameter", 400);
+): Promise<DbServiceResult<DbDdlResponse>> {
+  ensureInit();
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const table = opts.table;
+  if (!table)
+    return {
+      ok: false,
+      response: textError("missing table parameter", 400),
+    };
   try {
     const adapter = await getAdapter(r, cwd, signal);
     const { result, executedSql } = await captureSql(async () => {
@@ -995,17 +1219,43 @@ async function handleDdl(
       ]);
       return { sql, triggers };
     });
-    return json({
-      dbId: r.dbId,
-      ...(r.schema ? { schema: r.schema } : {}),
-      table,
-      sql: result.sql,
-      triggers: result.triggers,
-      executedSql,
-    });
+    return {
+      ok: true,
+      value: {
+        dbId: r.dbId,
+        ...(r.schema ? { schema: r.schema } : {}),
+        table,
+        sql: result.sql,
+        triggers: result.triggers,
+        executedSql,
+      },
+    };
   } catch (err) {
-    return handleError("database", "get DDL", err);
+    return {
+      ok: false,
+      response: handleError("database", "get DDL", err, signal),
+    };
   }
+}
+
+async function handleDdl(
+  cwd: string,
+  url: URL,
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<Response> {
+  const result = await createDbDdlResponse(
+    cwd,
+    {
+      db: url.searchParams.get("db"),
+      schema: url.searchParams.get("schema"),
+      table: url.searchParams.get("table"),
+    },
+    omitDirNames,
+    signal,
+  );
+  if (result.ok !== true) return result.response;
+  return json(result.value);
 }
 
 // --- Global Search ---
@@ -1373,6 +1623,18 @@ async function handleSnapshotCreate(
   };
   let activeSnapshotId: string | undefined;
 
+  // ack response に snapshotId を含めるため、id が確定する onSnapshotId 発火
+  // までは response を保留する。id が出る前に runSnapshot が throw した場合
+  // (createSnapshot 失敗等) は reject 側に流して 500 を返す。
+  // id 取得後の進行中エラーは別経路 (SSE / snapshot list status) で観測可能なので
+  // ack 後の IIFE の error は HTTP には伝播しない。
+  let resolveIdAck!: (id: string) => void;
+  let rejectIdAck!: (err: unknown) => void;
+  const idAck = new Promise<string>((resolve, reject) => {
+    resolveIdAck = resolve;
+    rejectIdAck = reject;
+  });
+
   (async () => {
     try {
       const snapshotId = await runSnapshot(
@@ -1403,6 +1665,7 @@ async function handleSnapshotCreate(
             activeSnapshotId = id;
             snapshotJob.snapshotId = id;
             snapshotJobs.set(id, snapshotJob);
+            resolveIdAck(id);
             sendSse?.(
               "db-snapshot",
               JSON.stringify({
@@ -1433,6 +1696,8 @@ async function handleSnapshotCreate(
           err instanceof Error ? err.message : String(err),
         );
       }
+      // id 確定前に死んだ場合は ack も失敗にする (id 確定後の Promise は no-op)。
+      rejectIdAck(err);
       sendSse?.(
         "db-snapshot",
         JSON.stringify({
@@ -1460,7 +1725,14 @@ async function handleSnapshotCreate(
     }
   })();
 
-  return json({ ok: true, message: "snapshot started" });
+  let snapshotId: string;
+  try {
+    snapshotId = await idAck;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return textError(`failed to start snapshot: ${message}`, 500);
+  }
+  return json({ ok: true, message: "snapshot started", snapshotId });
 }
 
 async function handleSnapshotCancel(req: Request, url: URL): Promise<Response> {

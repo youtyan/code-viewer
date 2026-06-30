@@ -67,6 +67,7 @@ import {
   createHelpPage,
   helpLanguageFromRoute,
   helpSectionFromRoute,
+  openHelpKeybindings,
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
@@ -1156,9 +1157,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "view",
         tree: "tree",
         flat: "flat",
-        filter: "Filter files...",
+        filter: "Filter files…  /  ⌘K",
         filterTitle:
-          "Filter files. Use /pattern/ for regex. Cmd/Ctrl+K focuses this field.",
+          "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
         hide: "hide sidebar",
       },
       history: {
@@ -1273,9 +1274,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "表示",
         tree: "ツリー",
         flat: "一覧",
-        filter: "ファイルを絞り込み...",
+        filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
-          "ファイルを絞り込みます。正規表現は /pattern/。Cmd/Ctrl+K でフォーカス。",
+          "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
         hide: "サイドバーを隠す",
       },
       history: {
@@ -2264,20 +2265,24 @@ window.GdpExpandLogic = GdpExpandLogic;
   function setPageMode() {
     const historyPanelRoute = STATE.route.screen === "history";
     const fileHistoryRoute = isFileHistoryRoute(STATE.route);
+    const fileRepoBlobRoute =
+      STATE.route.screen === "file" &&
+      (STATE.route.view === "blob" ||
+        STATE.route.view === "blame" ||
+        STATE.route.view === "history");
+    const repoSidebarRoute = STATE.route.screen === "repo" || fileRepoBlobRoute;
     document.body.classList.toggle(
       "gdp-file-detail-page",
       STATE.route.screen === "file",
     );
-    document.body.classList.toggle(
-      "gdp-repo-blob-page",
-      STATE.route.screen === "file" &&
-        (STATE.route.view === "blob" ||
-          STATE.route.view === "blame" ||
-          STATE.route.view === "history"),
-    );
+    document.body.classList.toggle("gdp-repo-blob-page", fileRepoBlobRoute);
     document.body.classList.toggle(
       "gdp-repo-page",
       STATE.route.screen === "repo",
+    );
+    document.body.classList.toggle(
+      "gdp-diff-page",
+      STATE.route.screen === "diff",
     );
     document.body.classList.toggle(
       "gdp-help-page",
@@ -2289,6 +2294,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       "gdp-database-page",
       STATE.route.screen === "database",
     );
+    const repoTargetWrap =
+      document.querySelector<HTMLElement>("#repo-target-wrap");
+    if (!repoSidebarRoute && repoTargetWrap) {
+      repoTargetWrap.hidden = true;
+      repoTargetWrap.style.display = "none";
+    }
     // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
     // pages expect it back outside as the sticky sibling. Re-place it every
     // time the page classes flip, or SPA navigation away from the repo view
@@ -3038,6 +3049,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       $("#theme").click();
       return true;
     }
+    if (action === "open-help") {
+      openHelpKeybindings({
+        getRoute: () => STATE.route,
+        getLanguage: () => STATE.language,
+        currentRange,
+        setRoute,
+        setPageMode,
+        renderHelpPage,
+        setStatus,
+        cancelActiveSourceLoad,
+      });
+      return true;
+    }
     return false;
   }
 
@@ -3246,6 +3270,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     getRoute: () => STATE.route,
     setRoute,
     applyCommitRange: (range, pathFilter) => {
+      cancelInFlightRequests();
+      DIFF_VIEW.clearLoadQueue();
       STATE.from = range.from;
       STATE.to = range.to;
       activeHistoryPathFilter = pathFilter || null;
@@ -3385,6 +3411,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     currentRange,
     setRange,
     setRoute,
+    loadRepo,
     renderStandaloneSource,
     getFrom: () => STATE.from,
     getTo: () => STATE.to,

@@ -98,12 +98,7 @@ function tabLabels(): string[] {
   ).map((button) => button.textContent || "");
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+import { escapeHtml } from "../core/html-escape";
 
 function testDeps(
   state: { route: AppRoute },

@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type {
   AnnotationDatabaseTab,
   AnnotationEntry,
@@ -6,9 +6,13 @@ import type {
   AnnotationSession,
   AnnotationsState,
 } from "../core/types";
-import { parseAnnotationLine } from "./annotations";
-import * as git from "./git";
-import { readServerRegistry } from "./server-registry";
+import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
+import {
+  ensureServerUrl,
+  requestJson,
+  resolveRepoRoot,
+  takeValue,
+} from "./cli-helpers";
 
 export type AnnotateCommand =
   | { kind: "help" }
@@ -232,33 +236,10 @@ location and renders your explanation directly under the annotated lines.
   not create.
 `;
 
-function takeValue(
-  argv: string[],
-  index: number,
-  flag: string,
-): { value: string; next: number } | { error: string } {
-  const value = argv[index + 1];
-  if (value === undefined) return { error: `${flag} requires a value` };
-  return { value, next: index + 1 };
-}
-
 function parsePosition(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : Number.NaN;
-}
-
-function parseDatabaseTab(
-  value: string | undefined,
-): AnnotationDatabaseTab | undefined {
-  return value === "data" ||
-    value === "query" ||
-    value === "schema" ||
-    value === "er" ||
-    value === "search" ||
-    value === "snapshot"
-    ? value
-    : undefined;
 }
 
 function parseFilter(value: string): { column: string; value: string } | null {
@@ -413,7 +394,7 @@ export function parseAnnotateArgs(argv: string[]): AnnotateParseResult {
     if (Number.isNaN(position))
       return { ok: false, error: "--position must be a positive integer" };
     const rawTab = options.get("--tab");
-    const tab = parseDatabaseTab(rawTab);
+    const tab = normalizeDatabaseTab(rawTab);
     if (rawTab !== undefined && tab === undefined)
       return {
         ok: false,
@@ -605,82 +586,17 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function resolveRepoRoot(cwdOption: string | undefined): string {
-  const base = cwdOption || process.cwd();
-  try {
-    return git.repoRoot(base) || realpathSync(base);
-  } catch {
-    console.error(`--cwd must point to an existing directory: ${base}`);
-    process.exit(1);
-  }
-}
-
-async function serverReachable(serverUrl: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${serverUrl}/_annotations`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// Reuse a running server for this repository when one is registered and
-// reachable. The CLI never starts a server itself — ask the user to run one.
-async function ensureServerUrl(
-  root: string,
-  override?: string,
-): Promise<string> {
-  if (override) {
-    const url = override.replace(/\/+$/, "");
-    if (await serverReachable(url)) return url;
-    console.error(`could not reach the code-viewer server at ${url}.`);
-    process.exit(1);
-  }
-  const registered = readServerRegistry(root);
-  if (registered) {
-    const url = registered.url.replace(/\/+$/, "");
-    if (await serverReachable(url)) return url;
-  }
-  console.error(
-    "no running code-viewer server for this repository.\n" +
-      `Start one manually (from ${root}):\n` +
-      "  code-viewer",
-  );
-  process.exit(1);
-}
-
-async function request(
+// /_annotations は server 側で text/plain の text() 系で 4xx/5xx を返すのが
+// 基本だが、将来 JSON {error:"..."} を返すパスが混じっても AI/human が
+// 読める detail に正規化したい。HTTP/エラー整形は cli-helpers の
+// requestJson に寄せ、ここでは action ラベルだけ渡す薄いラッパで吸収する。
+async function annotateRequest(
   serverUrl: string,
   method: "GET" | "POST",
+  action: string,
   body?: unknown,
 ): Promise<unknown> {
-  const url = `${serverUrl}/_annotations`;
-  const origin = new URL(serverUrl).origin;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers:
-        method === "POST"
-          ? {
-              "Content-Type": "application/json",
-              Origin: origin,
-              "X-Code-Viewer-Action": "1",
-            }
-          : {},
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
-    process.exit(1);
-  }
-  if (!res.ok) {
-    console.error(`server rejected the request: ${await res.text()}`);
-    process.exit(1);
-  }
-  return res.json();
+  return requestJson(serverUrl, "/_annotations", method, body, action);
 }
 
 function formatLine(line?: AnnotationLineRange): string {
@@ -745,10 +661,10 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   const root = resolveRepoRoot(cwd);
-  const serverUrl = await ensureServerUrl(root, server);
+  const serverUrl = await ensureServerUrl(root, server, "/_annotations");
 
   if (command.kind === "start") {
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate start", {
       action: "start",
       title: command.title,
     })) as { session: AnnotationSession };
@@ -760,7 +676,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   }
   if (command.kind === "add") {
     const body = await annotationBodyFromCommand(command);
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate add", {
       action: "add",
       session_id: command.session,
       session_title: command.sessionTitle,
@@ -840,25 +756,30 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
           : dataState
             ? "data"
             : undefined);
-    const result = (await request(serverUrl, "POST", {
-      action: "add",
-      session_id: command.session,
-      session_title: command.sessionTitle,
-      target: {
-        kind: "database",
-        db: command.db,
-        table: command.table,
-        tab: inferredTab,
-        data: dataState,
-        query: queryState,
-        search: searchState,
+    const result = (await annotateRequest(
+      serverUrl,
+      "POST",
+      "annotate add-db",
+      {
+        action: "add",
+        session_id: command.session,
+        session_title: command.sessionTitle,
+        target: {
+          kind: "database",
+          db: command.db,
+          table: command.table,
+          tab: inferredTab,
+          data: dataState,
+          query: queryState,
+          search: searchState,
+        },
+        title: command.title,
+        body,
+        before_id: command.before,
+        after_id: command.after,
+        position: command.position,
       },
-      title: command.title,
-      body,
-      before_id: command.before,
-      after_id: command.after,
-      position: command.position,
-    })) as {
+    )) as {
       session_id: string;
       session_title?: string;
       created_session?: boolean;
@@ -879,13 +800,17 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "list") {
-    const state = (await request(serverUrl, "GET")) as AnnotationsState;
+    const state = (await annotateRequest(
+      serverUrl,
+      "GET",
+      "annotate list",
+    )) as AnnotationsState;
     if (command.json) console.log(JSON.stringify(state, null, 2));
     else printList(state);
     return;
   }
   if (command.kind === "rename") {
-    await request(serverUrl, "POST", {
+    await annotateRequest(serverUrl, "POST", "annotate rename", {
       action: "rename",
       id: command.id,
       title: command.title,
@@ -905,7 +830,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       console.error("edit requires --title, --body, --body-file, or stdin");
       process.exit(1);
     }
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate edit", {
       action: "update",
       id: command.id,
       title: command.title,
@@ -917,7 +842,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "move") {
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate move", {
       action: "move",
       id: command.id,
       before_id: command.before,
@@ -930,10 +855,12 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "delete") {
-    const result = (await request(serverUrl, "POST", {
-      action: "delete",
-      id: command.id,
-    })) as { removed: string | null };
+    const result = (await annotateRequest(
+      serverUrl,
+      "POST",
+      "annotate delete",
+      { action: "delete", id: command.id },
+    )) as { removed: string | null };
     if (!result.removed) {
       console.error(`no annotation or session with id ${command.id}`);
       process.exit(1);
@@ -941,6 +868,8 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     console.log(`deleted ${result.removed} ${command.id}`);
     return;
   }
-  await request(serverUrl, "POST", { action: "clear" });
+  await annotateRequest(serverUrl, "POST", "annotate clear", {
+    action: "clear",
+  });
   console.log("cleared all annotations");
 }

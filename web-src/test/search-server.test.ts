@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildFileSearchList,
   buildRgArgs,
@@ -11,7 +13,12 @@ import {
   parseGitGrepOutput,
   parseRgOutput,
 } from "../server/search";
-import { sourceFixture } from "./source-fixture";
+import {
+  grepRepo,
+  listRepoFiles,
+  safeWorktreePath,
+} from "../server/search-service";
+import { runGit as git } from "./_git-fixture";
 
 describe("normalizeGrepMax", () => {
   test("defaults and clamps grep result limits", () => {
@@ -96,6 +103,7 @@ describe("buildRgArgs", () => {
       "--line-number",
       "--column",
       "--no-heading",
+      "--with-filename",
       "--color",
       "never",
       "--smart-case",
@@ -150,41 +158,71 @@ describe("grep output parsers", () => {
   });
 });
 
-describe("preview search endpoints", () => {
-  const server = sourceFixture(
-    readFileSync("web-src/server/preview.ts", "utf8"),
-  );
-
-  test("routes read-only file and grep search endpoints", () => {
-    expect(
-      server.includes(
-        'if (url.pathname === "/_files") return handleFiles(url)',
-      ),
-    ).toBe(true);
-    expect(
-      server.includes('if (url.pathname === "/_grep") return handleGrep(url)'),
-    ).toBe(true);
+describe("search-service shared behavior", () => {
+  let repo: string;
+  const env = () => ({
+    cwd: repo,
+    omitDirNames: [],
+    excludeNames: [".DS_Store"],
   });
 
-  test("grep endpoint uses safe caps and argument-array ripgrep", () => {
-    expect(server.includes("normalizeGrepMax(url.searchParams.get")).toBe(true);
-    expect(
-      server.includes(
-        "buildRgArgs(query, max, safePaths, regex, omitDirNames, excludeNames)",
-      ),
-    ).toBe(true);
-    expect(server.includes("scopeOmitDirNamesFromQuery(url)")).toBe(true);
-    expect(server.includes("scopeExcludeNamesFromQuery(url)")).toBe(true);
-    expect(
-      server.includes("parseGrepPaths(url, omitDirNames, excludeNames)"),
-    ).toBe(true);
-    expect(server.includes("url.searchParams.get('regex') === '1'")).toBe(true);
-    expect(
-      server.includes(
-        "if (regex) return { ref: 'worktree', engine: 'fallback', truncated: false, matches: [] }",
-      ),
-    ).toBe(true);
-    expect(server.includes("runSync(args, cwd, { timeout: 5000 })")).toBe(true);
-    expect(server.includes("safeWorktreePath(path)")).toBe(true);
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-search-service-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
+    writeFileSync(join(repo, "other_sample.ts"), "export const sample = 2;\n");
+    writeFileSync(join(repo, ".DS_Store"), "sample\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+  });
+
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("listRepoFiles returns searchable worktree files with generation", () => {
+    const result = listRepoFiles(env(), "worktree", 7);
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.ref).toBe("worktree");
+    expect(result.value.generation).toBe(7);
+    expect(result.value.files.map((file) => file.path).sort()).toEqual([
+      "other_sample.ts",
+      "sample_file.ts",
+    ]);
+  });
+
+  test("grepRepo honors a single paths[] filter in worktree search", () => {
+    const result = grepRepo(env(), {
+      query: "sample",
+      ref: "worktree",
+      paths: ["sample_file.ts"],
+      regex: false,
+      max: 10,
+    });
+    if (result.ok !== true) throw new Error(result.error);
+    expect(result.value.ref).toBe("worktree");
+    expect(result.value.matches.map((match) => match.path)).toEqual([
+      "sample_file.ts",
+    ]);
+  });
+
+  test("safeWorktreePath rejects git internals and accepts normal files", () => {
+    expect(safeWorktreePath(env(), ".git/config")).toBeNull();
+    expect(safeWorktreePath(env(), "sample_file.ts")).toBe(
+      realpathSync(join(repo, "sample_file.ts")),
+    );
+  });
+
+  test("grepRepo rejects unknown committed refs", () => {
+    const result = grepRepo(env(), {
+      query: "sample",
+      ref: "missing-ref",
+      paths: [],
+      regex: false,
+      max: 10,
+    });
+    expect(result).toEqual({ ok: false, error: "invalid target" });
   });
 });

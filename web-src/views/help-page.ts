@@ -1,6 +1,7 @@
 // Help page (keybindings reference), extracted from app.ts.
 
 import type { AppRoute } from "../core/routes";
+import { buildHelpKeybindingGroups } from "./help-keybindings";
 
 export type HelpPageDeps = {
   $: <T extends Element = HTMLElement>(sel: string) => T;
@@ -24,6 +25,7 @@ export type HelpSection =
   | "annotations"
   | "database"
   | "skills"
+  | "mcp"
   | "keybindings";
 
 type HelpBlock =
@@ -54,6 +56,7 @@ const HELP_SECTIONS: HelpSection[] = [
   "annotations",
   "database",
   "skills",
+  "mcp",
   "keybindings",
 ];
 
@@ -144,6 +147,21 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
               {
                 kind: "paragraph",
                 text: "Each row reports OK / WARN / ERROR with a remediation hint when relevant. The check groups are Runtime (Node / Bun / NODE_MODULE_VERSION), Package (version + execution origin including npx cache), SQLite driver, Snapshot store, Git, Discovery summary, Docker / Compose (CLI / v2 plugin / daemon / compose config dry-parse / compose ps health per discovered service), and Server. The most common hint is the npx cache fix for better-sqlite3 NODE_MODULE_VERSION mismatch (rm -rf ~/.npm/_npx then re-run with npx -y @youtyan/code-viewer@latest).",
+              },
+              {
+                kind: "paragraph",
+                text: 'From the terminal — and for AI agents or CI — the same report is available without a browser. `code-viewer doctor` prints a status summary; add `--json` for the full DoctorReport (matches the /_doctor endpoint). Exit code is 1 when worstStatus is "error", so it doubles as a CI gate.',
+              },
+              {
+                kind: "command",
+                title: "Doctor summary in the terminal",
+                command: "code-viewer doctor",
+              },
+              {
+                kind: "command",
+                title: "Doctor JSON for agents and CI",
+                command:
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
               },
             ],
           },
@@ -465,7 +483,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Search across all tables",
                 command:
-                  'code-viewer query search --db app.db --term "john@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
+                  'code-viewer query search --db app.db --term "sample@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
               },
               {
                 kind: "command",
@@ -483,13 +501,13 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Diff two snapshots",
                 command:
-                  'code-viewer query diff create --before snap-abc123 --after snap-def456 \\\n  --note "User registration test"\ncode-viewer query diff list --db app.db --json\ncode-viewer query diff delete --id diff-xyz789',
+                  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
               },
               {
                 kind: "command",
                 title: "Inspect a diff",
                 command:
-                  "code-viewer query diff tables --id diff-xyz789\ncode-viewer query diff rows --id diff-xyz789 --table users --type inserted --limit 50",
+                  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
               },
               {
                 kind: "command",
@@ -578,6 +596,98 @@ code-viewer annotate add-db --db app.db --tab query \\
           },
         ],
       },
+      mcp: {
+        nav: "MCP Server",
+        title: "MCP Server",
+        intro:
+          "While code-viewer is running, the same server also exposes a local, read-only MCP endpoint at /_mcp so AI agents can call status, file, search, and datastore tools directly over JSON-RPC instead of spawning code-viewer CLI subprocesses.",
+        groups: [
+          {
+            title: "Connect to the endpoint",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The endpoint speaks JSON-RPC 2.0 over the Streamable HTTP transport (initialize, ping, tools/list, tools/call). It accepts POST requests with an application/json body only, and is guarded by the same localhost / same-origin check as every other route.",
+              },
+              {
+                kind: "command",
+                title: "Endpoint URL (port from the printed startup URL)",
+                command: "http://127.0.0.1:<port>/_mcp",
+              },
+            ],
+          },
+          {
+            title: "Available tools",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "code_viewer_agent_help",
+                    "Index of every AI-facing CLI subcommand.",
+                  ],
+                  [
+                    "code_viewer_status",
+                    "Branch, remote, changed files, and recent commits.",
+                  ],
+                  [
+                    "code_viewer_file_show",
+                    "Read a file (optionally a line range) at any ref.",
+                  ],
+                  [
+                    "code_viewer_file_blame",
+                    "Per-line blame (sha / author / time / summary).",
+                  ],
+                  [
+                    "code_viewer_file_history",
+                    "Commit history for one path (follows renames).",
+                  ],
+                  [
+                    "code_viewer_file_diff",
+                    "Unified diff for one path (preview-capped by default).",
+                  ],
+                  [
+                    "code_viewer_search_files",
+                    "Rank repository paths by fuzzy or glob match.",
+                  ],
+                  [
+                    "code_viewer_search_code",
+                    "Grep the repository (rg / git grep / fallback).",
+                  ],
+                  [
+                    "code_viewer_datastore_sources",
+                    "Discover read-only datastore source ids.",
+                  ],
+                  [
+                    "code_viewer_datastore_schemas",
+                    "List schemas for one SQL datastore.",
+                  ],
+                  [
+                    "code_viewer_datastore_schema",
+                    "Inspect tables, indexes, FKs, and columns.",
+                  ],
+                  [
+                    "code_viewer_datastore_columns",
+                    "Inspect columns for one SQL table.",
+                  ],
+                  [
+                    "code_viewer_datastore_ddl",
+                    "Inspect the CREATE statement and triggers.",
+                  ],
+                  [
+                    "code_viewer_datastore_query",
+                    "Run a read-only SELECT / PRAGMA / EXPLAIN / WITH.",
+                  ],
+                  [
+                    "code_viewer_datastore_history",
+                    "Inspect saved query history.",
+                  ],
+                ],
+              },
+            ],
+          },
+        ],
+      },
       keybindings: {
         nav: "Keybindings",
         title: "Keyboard Shortcuts",
@@ -585,57 +695,23 @@ code-viewer annotate add-db --db app.db --tab query \\
           "Use these shortcuts to move between panels and navigate files without leaving the keyboard.",
         groups: [
           {
-            title: "Global",
+            title: "Line selection",
             blocks: [
               {
                 kind: "table",
                 rows: [
-                  ["Ctrl+K", "Open file palette"],
-                  ["Ctrl+G", "Open grep palette"],
-                  ["/", "Focus file filter"],
-                  ["t", "Toggle theme"],
-                  ["[ / ]", "Previous / next annotation"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Panels",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+H", "Focus sidebar"],
-                  ["Ctrl+L", "Focus main panel"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Sidebar",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "Move selection down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move selection by half a page"],
-                  ["gg / Shift+G", "Move to top / bottom"],
-                  ["Enter", "Open selected item"],
-                  ["h / l", "Collapse / expand directory"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "Main Panel",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "Move code cursor down / up"],
-                  ["Ctrl+D / Ctrl+U", "Move code cursor by half a page"],
-                  ["gg / Shift+G", "Move code cursor to top / bottom"],
-                  ["gp / gc", "Switch to Preview / Code tab"],
+                  [
+                    "Drag on line numbers",
+                    "Highlight a range; the floating copy pill prepares @path#L1-L9",
+                  ],
+                  [
+                    "Click the pill",
+                    "Copy @path#L1-L9 to the clipboard for pasting into Claude Code / Codex",
+                  ],
+                  [
+                    "Shift+Click the pill",
+                    "Copy @path#L1-L9 plus a fenced code block of the selected lines — paste straight to an AI without re-fetching the file",
+                  ],
                 ],
               },
             ],
@@ -730,6 +806,21 @@ code-viewer annotate add-db --db app.db --tab query \\
               {
                 kind: "paragraph",
                 text: "各項目は OK / WARN / ERROR で表示され、必要に応じて対処手順のヒントが付きます。診断グループは Runtime (Node / Bun / NODE_MODULE_VERSION)、Package (バージョン + 実行元: npx cache / global / local / bunx)、SQLite driver、Snapshot store、Git、Discovery summary、Docker / Compose (CLI / v2 plugin / daemon / compose config dry parse / compose ps による各サービスのヘルス)、Server (待ち受けポート) の 8 つ。よくあるヒントは npx キャッシュ起因の better-sqlite3 NODE_MODULE_VERSION 不一致で、rm -rf ~/.npm/_npx の後に npx -y @youtyan/code-viewer@latest を再実行する手順を表示します。",
+              },
+              {
+                kind: "paragraph",
+                text: 'ターミナルからは `code-viewer doctor` で同じレポートを取得できます。AI エージェントや CI からは `--json` で /_doctor と同じ DoctorReport を受け取れます。worstStatus が "error" なら exit code 1 を返すので CI ガードに直接使えます。',
+              },
+              {
+                kind: "command",
+                title: "ターミナル用 doctor サマリー",
+                command: "code-viewer doctor",
+              },
+              {
+                kind: "command",
+                title: "AI / CI 用 doctor JSON",
+                command:
+                  "code-viewer doctor --json\ncode-viewer doctor --cwd /path/to/repo --port 64160 --json",
               },
             ],
           },
@@ -1051,7 +1142,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "テーブル横断の全文検索",
                 command:
-                  'code-viewer query search --db app.db --term "john@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
+                  'code-viewer query search --db app.db --term "sample@example.com" \\\n  --tables users,orders --include-non-text --max-hits 20',
               },
               {
                 kind: "command",
@@ -1069,13 +1160,13 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "2 つのスナップショットを diff",
                 command:
-                  'code-viewer query diff create --before snap-abc123 --after snap-def456 \\\n  --note "ユーザー登録テストの差分"\ncode-viewer query diff list --db app.db --json\ncode-viewer query diff delete --id diff-xyz789',
+                  "code-viewer query diff tables --before snap-abc123 --after snap-def456 --json",
               },
               {
                 kind: "command",
                 title: "diff の中身を確認",
                 command:
-                  "code-viewer query diff tables --id diff-xyz789\ncode-viewer query diff rows --id diff-xyz789 --table users --type inserted --limit 50",
+                  "code-viewer query diff rows --before snap-abc123 --after snap-def456 --table users --limit 50",
               },
               {
                 kind: "command",
@@ -1164,6 +1255,96 @@ code-viewer annotate add-db --db app.db --tab query \\
           },
         ],
       },
+      mcp: {
+        nav: "MCPサーバー",
+        title: "MCPサーバー",
+        intro:
+          "code-viewer を起動している間、同じサーバーがローカルの read-only な MCP エンドポイント (/_mcp) も公開します。AI エージェントは code-viewer の CLI をサブプロセスとして起動する代わりに、status / file / search / datastore の各ツールを JSON-RPC 経由で直接呼び出せます。",
+        groups: [
+          {
+            title: "エンドポイントへの接続",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "エンドポイントは JSON-RPC 2.0 の Streamable HTTP トランスポート (initialize / ping / tools/list / tools/call) で応答します。受け付けるのは application/json ボディの POST リクエストのみで、他のルートと同じ localhost / 同一オリジンチェックで保護されています。",
+              },
+              {
+                kind: "command",
+                title:
+                  "エンドポイント URL (port は起動時に表示される URL と同じ)",
+                command: "http://127.0.0.1:<port>/_mcp",
+              },
+            ],
+          },
+          {
+            title: "利用できるツール",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "code_viewer_agent_help",
+                    "AI 向け CLI サブコマンドの一覧索引。",
+                  ],
+                  [
+                    "code_viewer_status",
+                    "ブランチ、remote、変更ファイル、直近のコミット。",
+                  ],
+                  [
+                    "code_viewer_file_show",
+                    "任意の ref でファイル(または行範囲)を読む。",
+                  ],
+                  [
+                    "code_viewer_file_blame",
+                    "行単位の blame (sha / author / time / summary)。",
+                  ],
+                  [
+                    "code_viewer_file_history",
+                    "1ファイルのコミット履歴(リネーム追跡あり)。",
+                  ],
+                  [
+                    "code_viewer_file_diff",
+                    "1ファイルの unified diff(既定はプレビュー上限あり)。",
+                  ],
+                  [
+                    "code_viewer_search_files",
+                    "ファジー / glob マッチでリポジトリのパスを順位付け。",
+                  ],
+                  [
+                    "code_viewer_search_code",
+                    "リポジトリを grep する (rg / git grep / フォールバック)。",
+                  ],
+                  [
+                    "code_viewer_datastore_sources",
+                    "read-only なデータストアの source id を発見。",
+                  ],
+                  [
+                    "code_viewer_datastore_schemas",
+                    "SQL データストア1件のスキーマ一覧。",
+                  ],
+                  [
+                    "code_viewer_datastore_schema",
+                    "テーブル、インデックス、外部キー、カラムを調査。",
+                  ],
+                  [
+                    "code_viewer_datastore_columns",
+                    "SQL テーブル1件のカラムを調査。",
+                  ],
+                  ["code_viewer_datastore_ddl", "CREATE 文とトリガーを調査。"],
+                  [
+                    "code_viewer_datastore_query",
+                    "read-only な SELECT / PRAGMA / EXPLAIN / WITH を実行。",
+                  ],
+                  [
+                    "code_viewer_datastore_history",
+                    "保存済みのクエリ履歴を調査。",
+                  ],
+                ],
+              },
+            ],
+          },
+        ],
+      },
       keybindings: {
         nav: "キーバインド",
         title: "キーバインド",
@@ -1171,57 +1352,23 @@ code-viewer annotate add-db --db app.db --tab query \\
           "キーボードだけでパネル移動、ファイル選択、スクロールを行うためのショートカットです。",
         groups: [
           {
-            title: "グローバル",
+            title: "行選択",
             blocks: [
               {
                 kind: "table",
                 rows: [
-                  ["Ctrl+K", "ファイルパレットを開く"],
-                  ["Ctrl+G", "grep パレットを開く"],
-                  ["/", "ファイルフィルターへフォーカス"],
-                  ["t", "テーマ切り替え"],
-                  ["[ / ]", "前 / 次の注釈へ移動"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "パネル",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["Ctrl+H", "サイドバーへフォーカス"],
-                  ["Ctrl+L", "メインパネルへフォーカス"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "サイドバー",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "選択を下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "半ページ分選択を移動"],
-                  ["gg / Shift+G", "先頭 / 末尾へ移動"],
-                  ["Enter", "選択項目を開く"],
-                  ["h / l", "ディレクトリを閉じる / 開く"],
-                ],
-              },
-            ],
-          },
-          {
-            title: "メインパネル",
-            blocks: [
-              {
-                kind: "table",
-                rows: [
-                  ["j / k", "コードカーソルを下 / 上へ移動"],
-                  ["Ctrl+D / Ctrl+U", "コードカーソルを半ページ分移動"],
-                  ["gg / Shift+G", "コードカーソルを先頭 / 末尾へ移動"],
-                  ["gp / gc", "Preview / Code タブへ切り替え"],
+                  [
+                    "行番号でドラッグ",
+                    "範囲をハイライトし、フロートする Copy ピルが @path#L1-L9 を用意",
+                  ],
+                  [
+                    "ピルをクリック",
+                    "@path#L1-L9 をコピー（Claude Code / Codex への貼り付け用）",
+                  ],
+                  [
+                    "Shift+ピルをクリック",
+                    "@path#L1-L9 と選択行の実コード（フェンス付き）をまとめてコピー — AI へ直接貼れて、ファイル再取得不要",
+                  ],
                 ],
               },
             ],
@@ -1244,6 +1391,36 @@ export function helpSectionFromRoute(route: AppRoute): HelpSection {
     HELP_SECTIONS.includes(route.section as HelpSection)
     ? (route.section as HelpSection)
     : "overview";
+}
+
+export type OpenHelpKeybindingsDeps = Pick<
+  HelpPageDeps,
+  | "getRoute"
+  | "getLanguage"
+  | "currentRange"
+  | "setRoute"
+  | "setPageMode"
+  | "cancelActiveSourceLoad"
+> & {
+  renderHelpPage(): void;
+  setStatus(status: "live" | "refreshing" | "error" | null): void;
+};
+
+export function openHelpKeybindings(deps: OpenHelpKeybindingsDeps): void {
+  const route = deps.getRoute();
+  deps.cancelActiveSourceLoad("navigation");
+  deps.setRoute({
+    screen: "help",
+    lang:
+      route.screen === "help"
+        ? helpLanguageFromRoute(route)
+        : deps.getLanguage(),
+    section: "keybindings",
+    range: deps.currentRange(),
+  });
+  deps.setPageMode();
+  deps.renderHelpPage();
+  deps.setStatus("live");
 }
 
 function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
@@ -1320,6 +1497,16 @@ export function createHelpPage(deps: HelpPageDeps) {
     const section = helpSectionFromRoute(deps.getRoute());
     const content = HELP_CONTENT[lang];
     const sectionContent = content.sections[section];
+    const sectionGroups =
+      section === "keybindings"
+        ? [
+            ...buildHelpKeybindingGroups(lang).map((group) => ({
+              title: group.title,
+              blocks: [{ kind: "table" as const, rows: group.rows }],
+            })),
+            ...sectionContent.groups,
+          ]
+        : sectionContent.groups;
 
     const shell = document.createElement("section");
     shell.className = "gdp-help-shell";
@@ -1372,7 +1559,7 @@ export function createHelpPage(deps: HelpPageDeps) {
     const intro = document.createElement("p");
     intro.textContent = sectionContent.intro;
     article.append(h2, intro);
-    sectionContent.groups.forEach((group) => {
+    sectionGroups.forEach((group) => {
       const groupSection = document.createElement("section");
       groupSection.className = "gdp-help-group";
       const groupTitle = document.createElement("h3");
