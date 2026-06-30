@@ -25,6 +25,7 @@ export type HelpSection =
   | "annotations"
   | "database"
   | "skills"
+  | "mcp"
   | "keybindings";
 
 type HelpBlock =
@@ -55,6 +56,7 @@ const HELP_SECTIONS: HelpSection[] = [
   "annotations",
   "database",
   "skills",
+  "mcp",
   "keybindings",
 ];
 
@@ -589,6 +591,98 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "Show the agent guide",
                 command: "code-viewer annotate agent-help",
+              },
+            ],
+          },
+        ],
+      },
+      mcp: {
+        nav: "MCP Server",
+        title: "MCP Server",
+        intro:
+          "While code-viewer is running, the same server also exposes a local, read-only MCP endpoint at /_mcp so AI agents can call status, file, search, and datastore tools directly over JSON-RPC instead of spawning code-viewer CLI subprocesses.",
+        groups: [
+          {
+            title: "Connect to the endpoint",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "The endpoint speaks JSON-RPC 2.0 over the Streamable HTTP transport (initialize, ping, tools/list, tools/call). It accepts POST requests with an application/json body only, and is guarded by the same localhost / same-origin check as every other route.",
+              },
+              {
+                kind: "command",
+                title: "Endpoint URL (port from the printed startup URL)",
+                command: "http://127.0.0.1:<port>/_mcp",
+              },
+            ],
+          },
+          {
+            title: "Available tools",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "code_viewer_agent_help",
+                    "Index of every AI-facing CLI subcommand.",
+                  ],
+                  [
+                    "code_viewer_status",
+                    "Branch, remote, changed files, and recent commits.",
+                  ],
+                  [
+                    "code_viewer_file_show",
+                    "Read a file (optionally a line range) at any ref.",
+                  ],
+                  [
+                    "code_viewer_file_blame",
+                    "Per-line blame (sha / author / time / summary).",
+                  ],
+                  [
+                    "code_viewer_file_history",
+                    "Commit history for one path (follows renames).",
+                  ],
+                  [
+                    "code_viewer_file_diff",
+                    "Unified diff for one path (preview-capped by default).",
+                  ],
+                  [
+                    "code_viewer_search_files",
+                    "Rank repository paths by fuzzy or glob match.",
+                  ],
+                  [
+                    "code_viewer_search_code",
+                    "Grep the repository (rg / git grep / fallback).",
+                  ],
+                  [
+                    "code_viewer_datastore_sources",
+                    "Discover read-only datastore source ids.",
+                  ],
+                  [
+                    "code_viewer_datastore_schemas",
+                    "List schemas for one SQL datastore.",
+                  ],
+                  [
+                    "code_viewer_datastore_schema",
+                    "Inspect tables, indexes, FKs, and columns.",
+                  ],
+                  [
+                    "code_viewer_datastore_columns",
+                    "Inspect columns for one SQL table.",
+                  ],
+                  [
+                    "code_viewer_datastore_ddl",
+                    "Inspect the CREATE statement and triggers.",
+                  ],
+                  [
+                    "code_viewer_datastore_query",
+                    "Run a read-only SELECT / PRAGMA / EXPLAIN / WITH.",
+                  ],
+                  [
+                    "code_viewer_datastore_history",
+                    "Inspect saved query history.",
+                  ],
+                ],
               },
             ],
           },
@@ -1156,6 +1250,96 @@ code-viewer annotate add-db --db app.db --tab query \\
                 kind: "command",
                 title: "AI 向けガイドを表示",
                 command: "code-viewer annotate agent-help",
+              },
+            ],
+          },
+        ],
+      },
+      mcp: {
+        nav: "MCPサーバー",
+        title: "MCPサーバー",
+        intro:
+          "code-viewer を起動している間、同じサーバーがローカルの read-only な MCP エンドポイント (/_mcp) も公開します。AI エージェントは code-viewer の CLI をサブプロセスとして起動する代わりに、status / file / search / datastore の各ツールを JSON-RPC 経由で直接呼び出せます。",
+        groups: [
+          {
+            title: "エンドポイントへの接続",
+            blocks: [
+              {
+                kind: "paragraph",
+                text: "エンドポイントは JSON-RPC 2.0 の Streamable HTTP トランスポート (initialize / ping / tools/list / tools/call) で応答します。受け付けるのは application/json ボディの POST リクエストのみで、他のルートと同じ localhost / 同一オリジンチェックで保護されています。",
+              },
+              {
+                kind: "command",
+                title:
+                  "エンドポイント URL (port は起動時に表示される URL と同じ)",
+                command: "http://127.0.0.1:<port>/_mcp",
+              },
+            ],
+          },
+          {
+            title: "利用できるツール",
+            blocks: [
+              {
+                kind: "table",
+                rows: [
+                  [
+                    "code_viewer_agent_help",
+                    "AI 向け CLI サブコマンドの一覧索引。",
+                  ],
+                  [
+                    "code_viewer_status",
+                    "ブランチ、remote、変更ファイル、直近のコミット。",
+                  ],
+                  [
+                    "code_viewer_file_show",
+                    "任意の ref でファイル(または行範囲)を読む。",
+                  ],
+                  [
+                    "code_viewer_file_blame",
+                    "行単位の blame (sha / author / time / summary)。",
+                  ],
+                  [
+                    "code_viewer_file_history",
+                    "1ファイルのコミット履歴(リネーム追跡あり)。",
+                  ],
+                  [
+                    "code_viewer_file_diff",
+                    "1ファイルの unified diff(既定はプレビュー上限あり)。",
+                  ],
+                  [
+                    "code_viewer_search_files",
+                    "ファジー / glob マッチでリポジトリのパスを順位付け。",
+                  ],
+                  [
+                    "code_viewer_search_code",
+                    "リポジトリを grep する (rg / git grep / フォールバック)。",
+                  ],
+                  [
+                    "code_viewer_datastore_sources",
+                    "read-only なデータストアの source id を発見。",
+                  ],
+                  [
+                    "code_viewer_datastore_schemas",
+                    "SQL データストア1件のスキーマ一覧。",
+                  ],
+                  [
+                    "code_viewer_datastore_schema",
+                    "テーブル、インデックス、外部キー、カラムを調査。",
+                  ],
+                  [
+                    "code_viewer_datastore_columns",
+                    "SQL テーブル1件のカラムを調査。",
+                  ],
+                  ["code_viewer_datastore_ddl", "CREATE 文とトリガーを調査。"],
+                  [
+                    "code_viewer_datastore_query",
+                    "read-only な SELECT / PRAGMA / EXPLAIN / WITH を実行。",
+                  ],
+                  [
+                    "code_viewer_datastore_history",
+                    "保存済みのクエリ履歴を調査。",
+                  ],
+                ],
               },
             ],
           },

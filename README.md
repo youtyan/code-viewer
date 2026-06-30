@@ -52,6 +52,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   actions.
 - Upload files into worktree folders. Uploads are enabled by default for
   worktree targets; toggle them off from Viewer Settings.
+- Expose a local, read-only MCP endpoint (`/_mcp`) on the running server so
+  AI agents can call status, file, search, and datastore tools directly
+  over JSON-RPC instead of spawning CLI subprocesses.
 
 ## Usage
 
@@ -596,10 +599,10 @@ agent's context window); raise it up to the server-side cap when needed.
 
 After `search` locates a path, `code-viewer file` drills into it
 from git refs or the worktree. The CLI reuses the same read paths the
-browser uses for the Blame, History, and Source tabs, so output matches
-the on-screen views. **No running code-viewer server is required** —
-these commands run locally, which makes them safe to use before the
-server has started (or from CI).
+browser uses for the Blame, History, and Diff tabs and the source viewer,
+so output matches the on-screen views. **No running code-viewer server is
+required** — these commands run locally, which makes them safe to use
+before the server has started (or from CI).
 
 ```sh
 # "Who wrote this line?" — porcelain blame for a path, JSON DTO output.
@@ -617,6 +620,12 @@ code-viewer file history --path src/sample.ts --query "author:tester" --json
 code-viewer file show --path src/sample.ts --json
 code-viewer file show --path src/sample.ts --start 100 --end 150 --json
 code-viewer file show --path src/sample.ts --ref main --json
+
+# Unified diff for one path. Defaults to HEAD..worktree and a preview cap
+# (hunks/lines); pass --full for the entire diff.
+code-viewer file diff --path src/sample.ts --json
+code-viewer file diff --path src/sample.ts --from HEAD~1 --to HEAD --full --json
+code-viewer file diff --path new_sample.ts --untracked --json
 ```
 
 Default (non-`--json`) output is tab-separated and easy to grep:
@@ -627,9 +636,31 @@ Default (non-`--json`) output is tab-separated and easy to grep:
   A path with zero commits prints `no history` to stderr and exits 0.
 - `show` — the worktree file (or sliced lines) by default. Pass `--ref`
   for a committed snapshot. Empty slices succeed.
+- `diff` — the unified diff text. An empty (or worktree == worktree)
+  range prints nothing on stdout and exits 0.
 
 Run `code-viewer file agent-help` for the full AI-agent guide
 including the JSON contract for each subcommand.
+
+### Doctor CLI
+
+The same diagnostic report behind the Environment Doctor sheet (see
+Features above) is available from the terminal without a browser, so AI
+agents and CI can introspect the runtime, SQLite driver, Git, Docker
+discovery, and snapshot store status directly.
+
+```sh
+# Human-readable status summary.
+code-viewer doctor
+
+# Full DoctorReport JSON (matches the /_doctor endpoint).
+code-viewer doctor --json
+code-viewer doctor --cwd /path/to/repo --port 64160 --json
+```
+
+The exit code is `1` iff the worst check status is `"error"` (never on
+`"warn"`), so it doubles as a CI gate. Run `code-viewer doctor agent-help`
+for the full AI-agent guide.
 
 ## AI Code Annotations
 
@@ -731,6 +762,41 @@ npx -y @youtyan/code-viewer skill install --agent all           # claude, codex,
 (`~/.claude/skills/`, `~/.codex/skills/`, …) instead of the current project,
 and `--cwd <dir>` to target a specific repository. Running the same command
 again updates an existing installation in place.
+
+## MCP Server
+
+While `code-viewer` is running, the same server also exposes a local MCP
+(Model Context Protocol) endpoint at `/_mcp` — for example
+`http://127.0.0.1:<port>/_mcp`, where `<port>` is the port printed at
+startup. It speaks JSON-RPC 2.0 over the Streamable HTTP transport
+(`initialize`, `ping`, `tools/list`, `tools/call`; POST only,
+`application/json`) and is guarded by the same localhost/same-origin check
+as every other route, so MCP clients can call it directly instead of
+spawning `code-viewer` CLI subprocesses.
+
+All tools are read-only:
+
+| Tool | What it does |
+| --- | --- |
+| `code_viewer_agent_help` | Index of every AI-facing CLI subcommand. |
+| `code_viewer_status` | Branch, remote, changed files, and recent commits. |
+| `code_viewer_file_show` | Read a file (optionally a line range) at any ref. |
+| `code_viewer_file_blame` | Per-line blame (sha / author / time / summary). |
+| `code_viewer_file_history` | Commit history for one path (follows renames). |
+| `code_viewer_file_diff` | Unified diff for one path (preview-capped by default). |
+| `code_viewer_search_files` | Rank repository paths by fuzzy or glob match. |
+| `code_viewer_search_code` | Grep the repository (`rg` / `git grep` / fallback). |
+| `code_viewer_datastore_sources` | Discover read-only datastore source ids. |
+| `code_viewer_datastore_schemas` | List schemas for one SQL datastore. |
+| `code_viewer_datastore_schema` | Inspect tables, indexes, FKs, and columns. |
+| `code_viewer_datastore_columns` | Inspect columns for one SQL table. |
+| `code_viewer_datastore_ddl` | Inspect the `CREATE` statement and triggers. |
+| `code_viewer_datastore_query` | Run a read-only `SELECT` / `PRAGMA` / `EXPLAIN` / `WITH`. |
+| `code_viewer_datastore_history` | Inspect saved query history. |
+
+Point any MCP-compatible client (Claude Code, Codex, etc.) at the endpoint
+URL above as a Streamable HTTP MCP server; no separate install step or
+extra process is needed beyond `code-viewer` already running.
 
 ## Development
 
