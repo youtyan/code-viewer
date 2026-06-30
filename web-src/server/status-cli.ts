@@ -202,9 +202,23 @@ export function parseStatusArgs(argv: string[]): StatusParseResult {
   };
 }
 
-type StatusGroup = {
+export type StatusGroup = {
   files: GitFileMeta[];
   totals: { files: number; additions: number; deletions: number };
+};
+
+// JSON output shape AI agents consume (mirrors the CLI's `--json` payload).
+// Keep the field set 1:1 with STATUS_AGENT_HELP so the CLI guide and the
+// MCP tool guide stay in sync without duplicate documentation.
+export type StatusReport = {
+  repoRoot: string;
+  branch: string | null;
+  remoteWebUrl: string | null;
+  changed: StatusGroup;
+  staged: StatusGroup;
+  recentCommits: GitHistoryCommit[];
+  recentCommitsError?: string;
+  nextCommands: string[];
 };
 
 function sumTotals(files: GitFileMeta[]): StatusGroup["totals"] {
@@ -344,6 +358,70 @@ function formatRecentText(commits: GitHistoryCommit[]): string[] {
   return lines;
 }
 
+// Pure assembly of the StatusReport that the CLI's --json output and the
+// MCP `code_viewer_status` tool both emit. Reading from git/registry is
+// allowed; throwing / process.exit / console.* are NOT — the caller
+// decides how to surface results so this stays reusable.
+export function buildStatusReport(opts: {
+  root: string;
+  ref: string;
+  limit: number;
+}): StatusReport {
+  const { root, ref, limit } = opts;
+  // `changed` = worktree vs HEAD (staged + unstaged + untracked). We pin
+  // the explicit "HEAD" arg so the snapshot answers "what has moved
+  // since the last commit?", which is the orient question. With no ref
+  // arg, git diff is worktree-vs-index — that would silently miss
+  // staged-only changes from the summary.
+  const stagedFiles = fileMeta(["--cached"], root, false);
+  const changedFiles = mergeMissingByPath(
+    fileMeta(["HEAD"], root, true),
+    stagedFiles,
+  );
+  const changed = buildGroup(changedFiles);
+  const staged = buildGroup(stagedFiles);
+  const history = commitHistory(root, { ref, skip: 0, limit });
+  const branch = currentBranch(root);
+  const remote = remoteWebUrl(root);
+  const registry = readServerRegistry(root);
+  const serverUrl = registry?.url ?? null;
+  const nextCommands = buildNextCommands(changed, staged, serverUrl);
+  return {
+    repoRoot: root,
+    branch,
+    remoteWebUrl: remote,
+    changed,
+    staged,
+    recentCommits: history.commits,
+    ...(history.error ? { recentCommitsError: history.error } : {}),
+    nextCommands,
+  };
+}
+
+// Pure text formatting from a StatusReport. Same source-of-truth as
+// buildStatusReport so the CLI text and any future MCP text-mode share one
+// layout; tests pin both shapes here.
+export function formatStatusReportText(report: StatusReport): string {
+  const lines: string[] = [];
+  lines.push(`repo:   ${report.repoRoot}`);
+  lines.push(`branch: ${report.branch ?? "(detached)"}`);
+  lines.push(`remote: ${report.remoteWebUrl ?? "(none)"}`);
+  lines.push("");
+  for (const l of formatGroupText("changed (worktree vs HEAD)", report.changed))
+    lines.push(l);
+  lines.push("");
+  for (const l of formatGroupText("staged (index vs HEAD)", report.staged))
+    lines.push(l);
+  lines.push("");
+  for (const l of formatRecentText(report.recentCommits)) lines.push(l);
+  if (report.recentCommitsError)
+    lines.push(`  # error: ${report.recentCommitsError}`);
+  lines.push("");
+  lines.push("next steps:");
+  for (const cmd of report.nextCommands) lines.push(`  ${cmd}`);
+  return lines.join("\n");
+}
+
 export function runStatusCli(argv: string[]): void {
   const parsed = parseStatusArgs(argv);
   if (parsed.ok === false) {
@@ -362,62 +440,16 @@ export function runStatusCli(argv: string[]): void {
   }
 
   const root = resolveRepoRoot(cwd);
-  // `changed` = worktree vs HEAD (staged + unstaged + untracked). We pin
-  // the explicit "HEAD" arg so the snapshot answers "what has moved
-  // since the last commit?", which is the orient question. With no ref
-  // arg, git diff is worktree-vs-index — that would silently miss
-  // staged-only changes from the summary.
-  const stagedFiles = fileMeta(["--cached"], root, false);
-  const changedFiles = mergeMissingByPath(
-    fileMeta(["HEAD"], root, true),
-    stagedFiles,
-  );
-  const changed = buildGroup(changedFiles);
-  const staged = buildGroup(stagedFiles);
-  const history = commitHistory(root, {
+  const report = buildStatusReport({
+    root,
     ref: command.ref,
-    skip: 0,
     limit: command.limit,
   });
 
-  const branch = currentBranch(root);
-  const remote = remoteWebUrl(root);
-  const registry = readServerRegistry(root);
-  const serverUrl = registry?.url ?? null;
-  const nextCommands = buildNextCommands(changed, staged, serverUrl);
-
   if (command.json) {
-    const payload = {
-      repoRoot: root,
-      branch,
-      remoteWebUrl: remote,
-      changed,
-      staged,
-      recentCommits: history.commits,
-      ...(history.error ? { recentCommitsError: history.error } : {}),
-      nextCommands,
-    };
-    console.log(JSON.stringify(payload, null, 2));
+    console.log(JSON.stringify(report, null, 2));
     return;
   }
 
-  // Default text. Each section is preceded by a blank line so AI can
-  // split on /\n\n+/ without grepping for delimiters.
-  const lines: string[] = [];
-  lines.push(`repo:   ${root}`);
-  lines.push(`branch: ${branch ?? "(detached)"}`);
-  lines.push(`remote: ${remote ?? "(none)"}`);
-  lines.push("");
-  for (const l of formatGroupText("changed (worktree vs HEAD)", changed))
-    lines.push(l);
-  lines.push("");
-  for (const l of formatGroupText("staged (index vs HEAD)", staged))
-    lines.push(l);
-  lines.push("");
-  for (const l of formatRecentText(history.commits)) lines.push(l);
-  if (history.error) lines.push(`  # error: ${history.error}`);
-  lines.push("");
-  lines.push("next steps:");
-  for (const cmd of nextCommands) lines.push(`  ${cmd}`);
-  console.log(lines.join("\n"));
+  console.log(formatStatusReportText(report));
 }

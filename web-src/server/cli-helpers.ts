@@ -71,16 +71,31 @@ export function validateRepoRelativePathValue(
   return undefined;
 }
 
+// `--cwd` 指定 (なければ process.cwd()) から repo root を解決する non-throwing 版。
+// CLI runner は exit するが、MCP tool のような長寿命プロセスは exit させたくない
+// ので、エラーを Result として返す入口だけ別途用意する。エラーメッセージは
+// `resolveRepoRoot` の文言と一字一句揃え、CLI 出力の安定を保つ。
+export function resolveRepoRootSafe(
+  cwdOption: string | undefined,
+): { ok: true; root: string } | { ok: false; error: string } {
+  const base = cwdOption || process.cwd();
+  try {
+    return { ok: true, root: git.repoRoot(base) || realpathSync(base) };
+  } catch {
+    return {
+      ok: false,
+      error: `--cwd must point to an existing directory: ${base}`,
+    };
+  }
+}
+
 // `--cwd` 指定 (なければ process.cwd()) から repo root を返す。
 // repo 外なら realpath にフォールバックし、それすら無効なら exit 1。
 export function resolveRepoRoot(cwdOption: string | undefined): string {
-  const base = cwdOption || process.cwd();
-  try {
-    return git.repoRoot(base) || realpathSync(base);
-  } catch {
-    console.error(`--cwd must point to an existing directory: ${base}`);
-    process.exit(1);
-  }
+  const result = resolveRepoRootSafe(cwdOption);
+  if (result.ok === true) return result.root;
+  console.error(result.error);
+  process.exit(1);
 }
 
 // 指定 URL に対して `<healthPath>` を 1.5s タイムアウトで HEAD-like fetch し、

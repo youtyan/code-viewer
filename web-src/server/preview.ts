@@ -54,6 +54,12 @@ import { startDevAssetReload } from "./dev-assets";
 import { handleDoctor } from "./doctor";
 import * as git from "./git";
 import {
+  buildMcpInstructions,
+  defaultMcpTools,
+  dispatchJsonRpc,
+  parseJsonRpcBody,
+} from "./mcp";
+import {
   buildLineOffsetIndexFromStream,
   collectByteRangeFromStream,
   collectBytesWithLineOffsetIndexFromStream,
@@ -2332,6 +2338,59 @@ function annotationSse(
   );
 }
 
+// MCP Streamable HTTP entry point. Single endpoint, JSON-RPC 2.0 in,
+// `application/json` out (we do not advertise SSE in this version). The
+// transport rules are intentionally narrow:
+//   - POST only. GET / other methods return 405 with an Allow header
+//     so MCP clients fall back gracefully instead of opening an SSE
+//     channel they can never read.
+//   - localhost / same-origin guard via requestAllowed (mirrors every
+//     other /_* route here).
+//   - Content-Type must be application/json. Anything else is 415.
+//   - Body size capped at 1 MiB; oversize is 413.
+//   - notifications/responses return HTTP 202 no body per MCP 2025-06-18.
+//   - All semantic errors travel as JSON-RPC error envelopes, NOT HTTP
+//     non-2xx, so clients can pair them with their pending request id.
+const MCP_MAX_BODY_BYTES = 1_048_576;
+const MCP_INSTRUCTIONS = buildMcpInstructions();
+
+async function handleMcp(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("method not allowed", {
+      status: 405,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        Allow: "POST",
+      },
+    });
+  }
+  const contentType = req.headers.get("content-type") || "";
+  if (!/^application\/json(?:;|$)/i.test(contentType)) {
+    return text("unsupported media type", 415);
+  }
+  const declared = Number(req.headers.get("content-length") || "0");
+  if (declared > MCP_MAX_BODY_BYTES) return text("payload too large", 413);
+  const raw = await req.text();
+  if (raw.length > MCP_MAX_BODY_BYTES) return text("payload too large", 413);
+
+  const parsed = parseJsonRpcBody(raw);
+  if (parsed.ok !== true) {
+    return json(parsed.response);
+  }
+  const dispatched = await dispatchJsonRpc(parsed.value, {
+    tools: defaultMcpTools({ cwd }),
+    instructions: MCP_INSTRUCTIONS,
+  });
+  if (dispatched.kind === "notification") {
+    return new Response(null, {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  return json(dispatched.body);
+}
+
 async function handleAnnotations(req: Request) {
   if (req.method === "GET") return json(await loadAnnotationsState(cwd));
   if (req.method !== "POST") return text("method not allowed", 405);
@@ -2587,6 +2646,7 @@ const server = await startServer({
       );
       if (stateResponse) return stateResponse;
     }
+    if (url.pathname === "/_mcp") return handleMcp(req);
     if (url.pathname === "/_annotations") return handleAnnotations(req);
     if (url.pathname === "/_refs") return json(git.refs(cwd));
     if (url.pathname === "/refresh" && req.method === "POST") {

@@ -1,0 +1,623 @@
+// Behavior tests for the MCP adapter (web-src/server/mcp.ts).
+//
+// Layered to keep diagnosis cheap:
+//   1. dispatchJsonRpc: pure-input → pure-output. Anchors the JSON-RPC
+//      envelope shape, initialize / tools/list / tools/call / ping /
+//      unknown / invalid handling without HTTP.
+//   2. defaultMcpTools: pure tool invocation against a tmp git fixture
+//      (no HTTP). Pins the StatusReport contract code_viewer_status
+//      returns.
+//   3. /_mcp via a real startServer: HTTP method guards, content-type
+//      guards, host/origin guards, body cap, end-to-end tools/call. This
+//      layer is what an MCP client actually hits.
+//
+// No string-presence "implementation contains foo" assertions — every
+// check verifies an observable JSON shape or HTTP behavior.
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildAgentHelpIndex } from "../server/agent-help";
+import {
+  defaultMcpTools,
+  dispatchJsonRpc,
+  JSONRPC_INVALID_PARAMS,
+  JSONRPC_INVALID_REQUEST,
+  JSONRPC_METHOD_NOT_FOUND,
+  JSONRPC_PARSE_ERROR,
+  MCP_PROTOCOL_VERSION,
+  type McpTool,
+  parseJsonRpcBody,
+} from "../server/mcp";
+import { runGit as git } from "./_git-fixture";
+
+const TOOLS: readonly McpTool[] = defaultMcpTools();
+const INSTRUCTIONS = "test instructions text";
+
+function call(message: unknown) {
+  return dispatchJsonRpc(message, { tools: TOOLS, instructions: INSTRUCTIONS });
+}
+
+// Sample-named registry stub so reading the server registry never returns
+// a pinned --server line (we want next steps to behave deterministically).
+let originalRegistryDir: string | undefined;
+let registryDirStub: string;
+beforeAll(() => {
+  registryDirStub = mkdtempSync(join(tmpdir(), "code-viewer-mcp-registry-"));
+  originalRegistryDir = process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+  process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = registryDirStub;
+});
+afterAll(() => {
+  if (originalRegistryDir === undefined) {
+    delete process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR;
+  } else {
+    process.env.CODE_VIEWER_TEST_SERVER_REGISTRY_DIR = originalRegistryDir;
+  }
+  rmSync(registryDirStub, { recursive: true, force: true });
+});
+
+describe("dispatchJsonRpc — initialize", () => {
+  test("returns protocolVersion, capabilities.tools, serverInfo, and instructions", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-06-18" },
+    });
+    expect(result.kind).toBe("response");
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.jsonrpc).toBe("2.0");
+    expect(result.body.id).toBe(1);
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      protocolVersion: string;
+      capabilities: { tools: { listChanged: boolean } };
+      serverInfo: { name: string; version: string };
+      instructions: string;
+    };
+    expect(payload.protocolVersion).toBe(MCP_PROTOCOL_VERSION);
+    expect(payload.capabilities.tools.listChanged).toBe(false);
+    expect(payload.serverInfo.name).toBe("code-viewer");
+    expect(typeof payload.serverInfo.version).toBe("string");
+    expect(payload.instructions).toBe(INSTRUCTIONS);
+  });
+
+  test("omits instructions when none were configured", async () => {
+    const result = await dispatchJsonRpc(
+      { jsonrpc: "2.0", id: 7, method: "initialize" },
+      { tools: TOOLS },
+    );
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as { instructions?: string };
+    expect(payload.instructions).toBeUndefined();
+  });
+});
+
+describe("dispatchJsonRpc — notifications", () => {
+  test("notifications/initialized produces no response (HTTP 202 hint)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    });
+    expect(result.kind).toBe("notification");
+  });
+
+  test("any request without an id is treated as a notification", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      method: "tools/list",
+    });
+    expect(result.kind).toBe("notification");
+  });
+
+  test("JSON-RPC response inputs produce no response (HTTP 202 hint)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: "client-response",
+      result: { ok: true },
+    });
+    expect(result.kind).toBe("notification");
+  });
+});
+
+describe("dispatchJsonRpc — tools/list", () => {
+  test("returns the tool inventory with name/title/description/inputSchema", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: "list-1",
+      method: "tools/list",
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      tools: Array<{
+        name: string;
+        title: string;
+        description: string;
+        inputSchema: { type: string; properties: Record<string, unknown> };
+      }>;
+    };
+    const names = payload.tools.map((t) => t.name);
+    expect(names.includes("code_viewer_agent_help")).toBe(true);
+    expect(names.includes("code_viewer_status")).toBe(true);
+    for (const tool of payload.tools) {
+      expect(typeof tool.title).toBe("string");
+      expect(tool.title.length > 0).toBe(true);
+      expect(typeof tool.description).toBe("string");
+      expect(tool.description.length > 0).toBe(true);
+      expect(tool.inputSchema.type).toBe("object");
+      expect(typeof tool.inputSchema.properties).toBe("object");
+    }
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_agent_help", () => {
+  test("returns the exact buildAgentHelpIndex() text wrapped as MCP text content", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 42,
+      method: "tools/call",
+      params: { name: "code_viewer_agent_help", arguments: {} },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    expect(payload.content.length).toBe(1);
+    expect(payload.content[0].type).toBe("text");
+    // Identity with the CLI's agent-help text — proves no drift.
+    expect(payload.content[0].text).toBe(buildAgentHelpIndex());
+  });
+});
+
+describe("dispatchJsonRpc — tools/call code_viewer_status (fixture repo)", () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-status-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+    // Add a worktree edit so changed/staged is populated.
+    writeFileSync(
+      join(repo, "sample_file.ts"),
+      "export const sample = 1;\nexport const extra = 2;\n",
+    );
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test("returns StatusReport JSON text identical to buildStatusReport shape", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: "status-1",
+      method: "tools/call",
+      params: {
+        name: "code_viewer_status",
+        arguments: { cwd: repo, ref: "HEAD", limit: 5 },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.branch).toBe("main");
+    expect(report.remoteWebUrl).toBeNull();
+    expect(report.changed.totals.files).toBe(1);
+    expect(report.changed.files[0].path).toBe("sample_file.ts");
+    expect(report.recentCommits.length).toBe(1);
+    expect(report.recentCommits[0].subject).toBe("sample initial commit");
+    expect(Array.isArray(report.nextCommands)).toBe(true);
+  });
+
+  test("uses the configured default cwd when cwd argument is omitted", async () => {
+    const result = await dispatchJsonRpc(
+      {
+        jsonrpc: "2.0",
+        id: "status-default-cwd",
+        method: "tools/call",
+        params: {
+          name: "code_viewer_status",
+          arguments: { ref: "HEAD", limit: 1 },
+        },
+      },
+      { tools: defaultMcpTools({ cwd: repo }) },
+    );
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(false);
+    const report = JSON.parse(payload.content[0].text);
+    expect(report.branch).toBe("main");
+    expect(report.recentCommits[0].subject).toBe("sample initial commit");
+  });
+
+  test("returns isError content (not JSON-RPC error) when cwd is invalid", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_status",
+        arguments: { cwd: "/no/such/path/sample" },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(
+      /must point to an existing directory/,
+    );
+  });
+
+  test("rejects unsafe ref values with isError true and a descriptive text", async () => {
+    for (const bad of [
+      { input: { ref: "" }, expect: /non-empty/ },
+      { input: { ref: "a\nb" }, expect: /single-line/ },
+      { input: { ref: "--inject" }, expect: /must not start with '-'/ },
+    ] as const) {
+      const result = await call({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_status",
+          arguments: { cwd: repo, ref: bad.input.ref },
+        },
+      });
+      if (result.kind !== "response") throw new Error("expected response");
+      const payload = result.body.result as {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+      expect(payload.isError).toBe(true);
+      expect(payload.content[0].text).toMatch(bad.expect);
+    }
+  });
+
+  test("rejects limit outside [1, hard_cap] with isError true", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "code_viewer_status",
+        arguments: { cwd: repo, limit: 0 },
+      },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/integer in \[1, /);
+  });
+});
+
+describe("dispatchJsonRpc — tools/call error paths", () => {
+  test("unknown tool name surfaces as isError true (not JSON-RPC error)", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "code_viewer_does_not_exist", arguments: {} },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error).toBeUndefined();
+    const payload = result.body.result as {
+      content: Array<{ type: string; text: string }>;
+      isError: boolean;
+    };
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/Unknown tool/);
+  });
+
+  test("tools/call missing name returns JSON-RPC -32602", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { arguments: {} },
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.result).toBeUndefined();
+    expect(result.body.error?.code).toBe(JSONRPC_INVALID_PARAMS);
+  });
+
+  test("tools/call without object params returns -32602", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: "string",
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error?.code).toBe(JSONRPC_INVALID_PARAMS);
+  });
+});
+
+describe("dispatchJsonRpc — protocol-level errors", () => {
+  test("unknown method returns JSON-RPC -32601 with the id echoed", async () => {
+    const result = await call({
+      jsonrpc: "2.0",
+      id: "unk",
+      method: "no/such/method",
+    });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.id).toBe("unk");
+    expect(result.body.error?.code).toBe(JSONRPC_METHOD_NOT_FOUND);
+  });
+
+  test("ping returns the empty result envelope", async () => {
+    const result = await call({ jsonrpc: "2.0", id: 99, method: "ping" });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.result).toEqual({});
+    expect(result.body.error).toBeUndefined();
+  });
+
+  test("non-object message returns -32600 with id=null", async () => {
+    const result = await call(["not", "an", "object"]);
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.id).toBeNull();
+    expect(result.body.error?.code).toBe(JSONRPC_INVALID_REQUEST);
+  });
+
+  test("wrong jsonrpc version returns -32600", async () => {
+    const result = await call({ jsonrpc: "1.0", id: 1, method: "ping" });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error?.code).toBe(JSONRPC_INVALID_REQUEST);
+  });
+
+  test("missing method returns -32600", async () => {
+    const result = await call({ jsonrpc: "2.0", id: 1 });
+    if (result.kind !== "response") throw new Error("expected response");
+    expect(result.body.error?.code).toBe(JSONRPC_INVALID_REQUEST);
+  });
+});
+
+describe("parseJsonRpcBody", () => {
+  test("empty body produces a -32700 envelope with id=null", () => {
+    const result = parseJsonRpcBody("");
+    expect(result.ok).toBe(false);
+    if (result.ok === true) throw new Error("expected error");
+    expect(result.response.id).toBeNull();
+    expect(result.response.error?.code).toBe(JSONRPC_PARSE_ERROR);
+  });
+
+  test("invalid JSON produces a -32700 envelope", () => {
+    const result = parseJsonRpcBody("{not json");
+    expect(result.ok).toBe(false);
+    if (result.ok === true) throw new Error("expected error");
+    expect(result.response.error?.code).toBe(JSONRPC_PARSE_ERROR);
+  });
+
+  test("valid JSON returns the parsed value verbatim", () => {
+    const result = parseJsonRpcBody('{"jsonrpc":"2.0","id":1,"method":"ping"}');
+    expect(result.ok).toBe(true);
+    if (result.ok !== true) throw new Error("expected ok");
+    expect(result.value).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ping",
+    });
+  });
+});
+
+// ---- HTTP-layer behavior tests against a real running preview server ----
+//
+// We import preview.ts side-effect free by using a child process. The
+// runtime layer is the same one production uses, so any guard
+// (requestAllowed / method check / content-type) is exercised end-to-end.
+
+describe("/_mcp HTTP route", () => {
+  let repo: string;
+  let serverPort: number;
+  let serverProc: ReturnType<typeof import("node:child_process").spawn> | null =
+    null;
+
+  beforeAll(async () => {
+    repo = mkdtempSync(join(tmpdir(), "code-viewer-mcp-http-"));
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "sample-author"]);
+    git(repo, ["config", "user.name", "sample-author"]);
+    writeFileSync(join(repo, "sample_file.ts"), "export const sample = 1;\n");
+    git(repo, ["add", "sample_file.ts"]);
+    git(repo, ["commit", "-m", "sample initial commit"]);
+
+    const { spawn } = await import("node:child_process");
+    const repoRoot = join(import.meta.dir, "..", "..");
+    serverProc = spawn(
+      process.execPath,
+      ["run", "web-src/server/preview.ts", "--cwd", repo, "--port", "0"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    const port = await new Promise<number>((resolve, reject) => {
+      let buf = "";
+      const onData = (chunk: Buffer) => {
+        buf += chunk.toString("utf8");
+        const m = buf.match(/http:\/\/127\.0\.0\.1:(\d+)/);
+        if (m) resolve(Number(m[1]));
+      };
+      serverProc?.stdout?.on("data", onData);
+      serverProc?.stderr?.on("data", onData);
+      serverProc?.once("exit", (code) =>
+        reject(new Error(`preview exited early: code=${code}; buf=${buf}`)),
+      );
+      setTimeout(
+        () => reject(new Error(`preview did not print port; buf=${buf}`)),
+        15000,
+      );
+    });
+    serverPort = port;
+  });
+
+  afterAll(async () => {
+    if (!serverProc) return;
+    serverProc.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      serverProc?.once("exit", () => resolve());
+      setTimeout(() => {
+        serverProc?.kill("SIGKILL");
+        resolve();
+      }, 2000);
+    });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  function origin() {
+    return `http://127.0.0.1:${serverPort}`;
+  }
+
+  test("GET /_mcp returns 405 with an Allow header", async () => {
+    const response = await fetch(`${origin()}/_mcp`);
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("POST");
+  });
+
+  test("POST with non-JSON content-type returns 415", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "{}",
+    });
+    expect(response.status).toBe(415);
+  });
+
+  test("POST initialize over /_mcp returns the MCP initialize result", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18" },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      jsonrpc: string;
+      id: number;
+      result: { protocolVersion: string; serverInfo: { name: string } };
+    };
+    expect(body.jsonrpc).toBe("2.0");
+    expect(body.id).toBe(1);
+    expect(body.result.protocolVersion).toBe(MCP_PROTOCOL_VERSION);
+    expect(body.result.serverInfo.name).toBe("code-viewer");
+  });
+
+  test("POST notifications/initialized returns HTTP 202 with no body", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      }),
+    });
+    expect(response.status).toBe(202);
+    expect(await response.text()).toBe("");
+  });
+
+  test("POST JSON-RPC response input returns HTTP 202 with no body", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "client-response",
+        result: { ok: true },
+      }),
+    });
+    expect(response.status).toBe(202);
+    expect(await response.text()).toBe("");
+  });
+
+  test("POST tools/call code_viewer_agent_help round-trip", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: { name: "code_viewer_agent_help", arguments: {} },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      id: number;
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(body.id).toBe(11);
+    expect(body.result.isError).toBe(false);
+    expect(body.result.content[0].type).toBe("text");
+    expect(body.result.content[0].text).toBe(buildAgentHelpIndex());
+  });
+
+  test("POST tools/call code_viewer_status uses the server --cwd by default", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: {
+          name: "code_viewer_status",
+          arguments: { ref: "HEAD", limit: 1 },
+        },
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError: boolean;
+      };
+    };
+    expect(body.result.isError).toBe(false);
+    const report = JSON.parse(body.result.content[0].text);
+    expect(report.branch).toBe("main");
+    expect(report.recentCommits[0].subject).toBe("sample initial commit");
+  });
+
+  test("disallowed Origin header is blocked by requestAllowed", async () => {
+    const response = await fetch(`${origin()}/_mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://evil.example",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(response.status).toBe(403);
+  });
+});
