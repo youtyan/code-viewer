@@ -62,6 +62,8 @@ browser's Database > Search tab, so the human can review the same workflow.
    resolved, so pasting them into a different shell never silently falls back
    to auto-discovery. Every `--db` value and the server URL are wrapped in
    POSIX single-quotes so paths or URLs with spaces or `'` paste safely.
+   Notice/comment metadata is collapsed to one line so copied command blocks
+   stay intact.
    `--json` and `--commands` are mutually exclusive.
 
    ```sh

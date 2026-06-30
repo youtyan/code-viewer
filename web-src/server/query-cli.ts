@@ -183,7 +183,8 @@ can review what you queried.
    pins the same --server <url> that was resolved for this invocation, so
    pasting them into a different shell does not silently fall back to
    auto-discovery (db ids and the server URL are single-quoted so paths or
-   URLs with spaces or quotes still work):
+   URLs with spaces or quotes still work). Comment metadata is collapsed to
+   one line so copied command blocks are not split by source names or errors:
    code-viewer query sources --commands
 2. Introspect schema/tables/columns/DDL without writing dialect-specific
    SQL. These wrap the same endpoints the browser uses, so you can answer
@@ -277,7 +278,7 @@ browser's Database > Search tab.
   in POSIX single-quotes). --json and --commands are mutually exclusive.
   truncated and dockerError, if present, are appended to stdout as
   comment-prefixed lines (default / --commands) or kept as JSON fields
-  (--json).
+  (--json). Comment metadata is collapsed to one line before printing.
 - schemas: human-readable schema-name-per-line (default), or pretty JSON of
   the full /_db/schemas response with --json. SQLite/MySQL/Redis/ES/S3
   return an empty list (no multi-schema concept).
@@ -948,8 +949,19 @@ function appendDiscoveryNotices(data: DbFilesResponse): void {
     );
   }
   if (data.dockerError) {
-    console.log(`# dockerError: ${data.dockerError}`);
+    console.log(`# dockerError: ${commentText(data.dockerError)}`);
   }
+}
+
+// sources の # comment 行に外部由来テキストを載せる時は、改行や制御文字で
+// comment block が崩れないよう 1 行に潰す。shell 引数の quote とは用途が別。
+function commentText(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    out += code < 32 || code === 127 ? " " : ch;
+  }
+  return out.replace(/ {2,}/g, " ").trim();
 }
 
 // 1 ソースぶんの "次に投げると良い調査コマンド" を生成する。
@@ -970,7 +982,7 @@ function buildSourceCommands(
   const quotedId = shellSingleQuote(file.id);
   const quotedServer = shellSingleQuote(serverUrl);
   const cli = `code-viewer query --server ${quotedServer}`;
-  lines.push(`# source ${ordinal}: ${file.id} (${file.kind})`);
+  lines.push(`# source ${ordinal}: ${commentText(file.id)} (${file.kind})`);
   if (
     file.kind === "redis" ||
     file.kind === "elasticsearch" ||

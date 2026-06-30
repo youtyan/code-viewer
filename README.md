@@ -301,7 +301,8 @@ code-viewer query sources --json
 # for non-SQL sources. Every emitted SQL command line pins --server '<url>'
 # to the same server URL this invocation resolved, so pasting them elsewhere
 # never silently re-runs auto-discovery. --json and --commands are mutually
-# exclusive.
+# exclusive. Notice/comment metadata is collapsed to one line so copied
+# command blocks stay intact.
 code-viewer query sources --commands
 
 # Introspect tables and columns without writing dialect-specific SQL.

@@ -1217,6 +1217,43 @@ describe("runQueryCli integration", () => {
     );
   });
 
+  test("query sources --commands keeps source notices single-line for pasted command blocks", async () => {
+    const payload = {
+      files: [
+        {
+          id: "sample\tdata.db",
+          path: "sample\tdata.db",
+          name: "sample\tdata.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      dockerError: "compose ps failed\nsecond line\twith tab",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--commands"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs.join("\n").split("\n");
+    expect(lines.includes("# source 1: sample data.db (sqlite)")).toBe(true);
+    expect(
+      lines.includes("# dockerError: compose ps failed second line with tab"),
+    ).toBe(true);
+    expect(lines.includes("second line\twith tab")).toBe(false);
+    expect(
+      lines.every(
+        (line) =>
+          line === "" ||
+          line.startsWith("#") ||
+          line.startsWith("code-viewer query"),
+      ),
+    ).toBe(true);
+  });
+
   test("query sources --commands on empty server explains why nothing is shown", async () => {
     const harness = installRunHarness([
       { body: JSON.stringify({ files: [] }) },
