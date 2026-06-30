@@ -465,7 +465,7 @@ async function handleSchema(
     return json(body);
   } catch (err) {
     linkedAbort.abort();
-    return handleError("database", "read schema", err);
+    return handleError("database", "read schema", err, signal);
   } finally {
     linkedAbort.cleanup();
   }
@@ -605,7 +605,7 @@ async function handleTable(
     };
     return json(body);
   } catch (err) {
-    return handleError("database", "read table", err);
+    return handleError("database", "read table", err, signal);
   }
 }
 
@@ -790,6 +790,10 @@ async function handleQuery(
     }
     return json(response);
   } catch (err) {
+    // クライアント起因の中断はサーバ障害として記録しない。
+    if (isAbortLikeError(err, req.signal)) {
+      return textError("query aborted", 503);
+    }
     if (isDockerComposeServiceUnavailableError(err)) {
       return handleError("database", "execute query", err);
     }
@@ -1007,7 +1011,7 @@ async function handleExport(
       },
     });
   } catch (err) {
-    return handleError("database", "export table", err);
+    return handleError("database", "export table", err, signal);
   }
 }
 
@@ -1040,7 +1044,7 @@ async function handleColumns(
       executedSql,
     });
   } catch (err) {
-    return handleError("database", "get columns", err);
+    return handleError("database", "get columns", err, signal);
   }
 }
 
@@ -1079,7 +1083,7 @@ async function handleDdl(
       executedSql,
     });
   } catch (err) {
-    return handleError("database", "get DDL", err);
+    return handleError("database", "get DDL", err, signal);
   }
 }
 

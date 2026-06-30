@@ -1,31 +1,39 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { abortError } from "../server/database/adapters/abort";
 import {
   extractErrorReason,
+  handleError,
   logResponseWithReason,
   MAX_LOGGED_ERROR_BODY,
 } from "../server/database/handle-shared";
 
-type ConsoleMethod = "log" | "warn";
+type ConsoleMethod = "log" | "warn" | "error";
 type CapturedLine = { kind: ConsoleMethod; line: string };
 
 let captured: CapturedLine[] = [];
 let originalLog: typeof console.log;
 let originalWarn: typeof console.warn;
+let originalError: typeof console.error;
 
 beforeAll(() => {
   originalLog = console.log;
   originalWarn = console.warn;
+  originalError = console.error;
   console.log = (...args: unknown[]) => {
     captured.push({ kind: "log", line: args.join(" ") });
   };
   console.warn = (...args: unknown[]) => {
     captured.push({ kind: "warn", line: args.join(" ") });
   };
+  console.error = (...args: unknown[]) => {
+    captured.push({ kind: "error", line: args.join(" ") });
+  };
 });
 
 afterAll(() => {
   console.log = originalLog;
   console.warn = originalWarn;
+  console.error = originalError;
 });
 
 function reset() {
@@ -194,5 +202,76 @@ describe("logResponseWithReason", () => {
     expect(
       (captured[0]?.line ?? "").includes(":: invalid schema parameter"),
     ).toBe(true);
+  });
+});
+
+describe("handleError abort handling", () => {
+  test("AbortError-named errors return 503 silently (no console.error)", async () => {
+    reset();
+    const err = new Error("operation aborted");
+    err.name = "AbortError";
+    const res = handleError("database", "read schema", err);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("read schema aborted");
+    // クライアント起因のキャンセルは warn 級のログを出さない。
+    expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
+  });
+
+  test("abortError() helper output is also classified as abort", async () => {
+    reset();
+    const res = handleError(
+      "database",
+      "execute query",
+      abortError("query aborted"),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("execute query aborted");
+    expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
+  });
+
+  test("aborted signal classifies even a plain Error as abort", async () => {
+    reset();
+    const controller = new AbortController();
+    controller.abort();
+    const res = handleError(
+      "database",
+      "read table",
+      new Error("some random failure"),
+      controller.signal,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("read table aborted");
+    expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
+  });
+
+  test("plain Error with no abort markers logs to console.error and returns 500", async () => {
+    reset();
+    const res = handleError("database", "read schema", new Error("boom"));
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("failed to read schema: boom");
+    const errs = captured.filter((c) => c.kind === "error");
+    expect(errs).toHaveLength(1);
+    expect(errs[0]?.line ?? "").toBe("[code-viewer] database error: boom");
+  });
+
+  test("Postgres-style 'transaction is aborted' message must NOT be classified as cancellation", async () => {
+    // database-review-guards.test.ts で isAbortLikeError レベルの境界は守られている
+    // が、handleError 経由でも誤検知しないことを再確認する (5xx に落ちる本物の
+    // DB エラーを 503 + silent で隠してしまうと運用上重大)。
+    reset();
+    const err = new Error("current transaction is aborted, commands ignored");
+    const res = handleError("database", "execute query", err);
+    expect(res.status).toBe(500);
+    expect(captured.filter((c) => c.kind === "error")).toHaveLength(1);
+  });
+
+  test("non-aborted signal + AbortError-named err still classified as abort (name wins)", async () => {
+    reset();
+    const controller = new AbortController(); // not aborted
+    const err = new Error("operation aborted");
+    err.name = "AbortError";
+    const res = handleError("database", "read schema", err, controller.signal);
+    expect(res.status).toBe(503);
+    expect(captured.filter((c) => c.kind === "error")).toHaveLength(0);
   });
 });
