@@ -26,6 +26,31 @@ describe("parseQueryArgs", () => {
     if (result.ok) expect(result.args.command.kind).toBe("agent-help");
   });
 
+  test("sources subcommand parses with and without --json (no other flags accepted)", () => {
+    const bare = parseQueryArgs(["sources"]);
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) throw new Error("parse failed");
+    expect(bare.args.command).toEqual({ kind: "sources", json: false });
+
+    const withJson = parseQueryArgs(["sources", "--json"]);
+    expect(withJson.ok).toBe(true);
+    if (!withJson.ok) throw new Error("parse failed");
+    expect(withJson.args.command).toEqual({ kind: "sources", json: true });
+
+    expect(parseQueryArgs(["sources", "extra"])).toEqual({
+      ok: false,
+      error: "sources does not accept positional arguments",
+    });
+    expect(parseQueryArgs(["sources", "--db", "app.db"])).toEqual({
+      ok: false,
+      error: "sources does not accept --db",
+    });
+    expect(parseQueryArgs(["sources", "--wait"])).toEqual({
+      ok: false,
+      error: "sources does not accept --wait",
+    });
+  });
+
   test("exec requires --db and --sql", () => {
     expect(parseQueryArgs(["exec"])).toEqual({
       ok: false,
@@ -578,7 +603,15 @@ describe("QUERY_HELP / QUERY_AGENT_HELP", () => {
     expect(/list with: code-viewer query list/.test(QUERY_AGENT_HELP)).toBe(
       false,
     );
-    expect(QUERY_AGENT_HELP).toMatch(/does not discover databases/);
+    // Source discovery is now a wired subcommand. The previous guard asserted
+    // that `query list` is described as NOT being a discovery path; that
+    // intent is now expressed as a positive guard: the agent guide must point
+    // at `code-viewer query sources` as the discovery entry point.
+    expect(QUERY_AGENT_HELP).toMatch(/code-viewer query sources/);
+    // Both helps must list `sources` as a real subcommand.
+    for (const text of [QUERY_HELP, QUERY_AGENT_HELP]) {
+      expect(text).toMatch(/code-viewer query sources/);
+    }
     // The output contract must document the search exit semantics so agents
     // know an empty result is a clean exit 0.
     expect(QUERY_AGENT_HELP).toMatch(
@@ -690,6 +723,129 @@ async function runAndCatchExit(argv: string[]): Promise<void> {
 
 describe("runQueryCli integration", () => {
   const SERVER = "http://localhost:65535";
+
+  // sources は ensureServerUrl の health probe と body の双方で /_db/files を
+  // 叩くので、harness では同じ endpoint を 2 回ぶん mock する点に注意。
+  test("query sources --json emits the /_db/files response verbatim", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 1024,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+        {
+          id: "docker:s3-svc/sample-bucket",
+          path: "docker:s3-svc/sample-bucket",
+          name: "sample-bucket (s3)",
+          sizeBytes: 0,
+          kind: "s3",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      // health probe (ensureServerUrl)
+      { body: JSON.stringify({ files: [] }) },
+      // body fetch
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources", "--json"]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[0].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[1].method).toBe("GET");
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(payload);
+  });
+
+  test("query sources (default) prints id/kind/name lines for each source", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+        {
+          id: "docker:pg-svc",
+          path: "docker:pg-svc",
+          name: "pg-svc (postgresql)",
+          sizeBytes: 0,
+          kind: "postgresql",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    const lines = harness.logs;
+    // 2 sources → 2 行。順序はサーバ応答順を保つ。
+    expect(lines).toEqual([
+      "app.db\tsqlite\tapp.db",
+      "docker:pg-svc\tpostgresql\tpg-svc (postgresql)",
+    ]);
+  });
+
+  test("query sources surfaces truncated / dockerError as stdout '#' notes (default mode)", async () => {
+    const payload = {
+      files: [
+        {
+          id: "app.db",
+          path: "app.db",
+          name: "app.db",
+          sizeBytes: 100,
+          kind: "sqlite",
+        },
+      ],
+      truncated: true,
+      dockerError: "compose ps failed: docker daemon unreachable",
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.errs).toEqual([]);
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/^app\.db\tsqlite\tapp\.db$/m);
+    expect(out).toMatch(/^# truncated:/m);
+    expect(out).toMatch(
+      /^# dockerError: compose ps failed: docker daemon unreachable$/m,
+    );
+  });
+
+  test("query sources (default) on empty server prints a no-sources notice and exits 0", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ files: [] }) },
+    ]);
+
+    await runAndCatchExit(["--server", SERVER, "sources"]);
+
+    expect(harness.exits).toEqual([]);
+    expect(harness.logs).toEqual(["no datastore sources discovered"]);
+  });
 
   test("query list --schema forwards db and schema in the history URL", async () => {
     const harness = installRunHarness([

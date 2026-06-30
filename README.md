@@ -292,6 +292,11 @@ snapshot store. The same operations are available in the browser's
 Datastores tab (Query History, Search, and Snapshot tabs).
 
 ```sh
+# Discover datastore ids the running server has detected (SQLite files plus
+# any PostgreSQL / MySQL / Redis / Elasticsearch / S3 services from a nearby
+# docker-compose). Use the printed id as --db on every other command.
+code-viewer query sources --json
+
 code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
     --title "Sample users" --body "Checking user data shape."
 

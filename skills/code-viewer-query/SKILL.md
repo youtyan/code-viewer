@@ -36,10 +36,23 @@ browser's Database > Search tab, so the human can review the same workflow.
 
 ## Workflow: Run a query
 
-1. Identify the database path or datastore id from the browser's Database tab,
-   current route, project fixtures, or the user's instruction.
+1. Discover the datastore ids the running server has detected. This is the
+   AI-friendly equivalent of opening the browser's Database tab and reading
+   the sidebar — it lists every SQLite file plus PostgreSQL / MySQL / Redis
+   / Elasticsearch / S3 service that any nearby `docker-compose` exposes.
+   Use the printed `id` as `--db` on every other command. Credentials and
+   internal config are stripped server-side.
 
-   To inspect saved query history, run:
+   ```sh
+   code-viewer query sources --json
+   ```
+
+   Default (no `--json`) output is one source per line as
+   `<id>\t<kind>\t<name>`, with any `truncated` or `dockerError` notice
+   appended as `# ...` comment lines so the AI can copy ids without
+   stripping JSON.
+
+2. To inspect saved query history (separate from source discovery), run:
 
    ```sh
    code-viewer query list --json
@@ -53,14 +66,14 @@ browser's Database > Search tab, so the human can review the same workflow.
    code-viewer query clear --db docker:pg-svc --schema analytics
    ```
 
-2. Execute a query:
+3. Execute a query against an id picked from step 1:
 
    ```sh
    code-viewer query exec --db data.db --sql "SELECT * FROM users LIMIT 10" \
        --title "Sample user data" --body "Checking what user records look like."
    ```
 
-3. The human sees results in the browser's Database > Query History panel.
+4. The human sees results in the browser's Database > Query History panel.
 
 ## Workflow: Find a value across all tables (global search)
 

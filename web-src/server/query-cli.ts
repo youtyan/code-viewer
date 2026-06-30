@@ -1,3 +1,4 @@
+import type { DbFilesResponse } from "../core/database/types";
 import { ensureServerUrl, resolveRepoRoot, takeValue } from "./cli-helpers";
 
 export type QueryCommand =
@@ -14,6 +15,9 @@ export type QueryCommand =
     }
   | { kind: "list"; json: boolean; db?: string; schema?: string }
   | { kind: "clear"; db?: string; schema?: string }
+  // /_db/files をそのまま薄く CLI 化したもの。AI agent が DB ID を発見する
+  // ためのエントリポイント。server には新 endpoint を作らず discovery を流用。
+  | { kind: "sources"; json: boolean }
   | {
       kind: "snapshot-create";
       db: string;
@@ -66,6 +70,7 @@ export type QueryParseResult =
 export const QUERY_HELP = `code-viewer query — execute read-only SQL queries and inspect snapshots
 
 Usage:
+  code-viewer query sources [--json]
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path> [--schema <name>]]
   code-viewer query clear [--db <path> [--schema <name>]]
@@ -83,6 +88,7 @@ Global options:
   --server <url>   code-viewer server URL (default: auto-discovered)
 
 Examples:
+  code-viewer query sources --json
   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
   code-viewer query list --db docker:pg-svc --schema analytics --json
   code-viewer query clear --db docker:pg-svc --schema analytics
@@ -115,16 +121,20 @@ can review what you queried.
 
 ## Workflow: SQL Query
 
-1. Identify which database file or datastore id to query from the browser's
-   Database tab, the current route, or project fixtures. code-viewer query
-   list shows saved query history; it does not discover databases.
-   For PostgreSQL multi-schema history, use --schema together with --db:
+1. Discover datastore IDs without opening the browser. This lists every
+   SQLite / PostgreSQL / MySQL / Redis / Elasticsearch / S3 source the
+   running server has discovered, with credentials stripped. Use the id
+   field as --db on the following commands:
+   code-viewer query sources --json
+2. (For saved query history, not discovery) code-viewer query list shows
+   what you have previously executed. For PostgreSQL multi-schema history,
+   use --schema together with --db:
    code-viewer query list --db docker:pg-svc --schema analytics --json
    code-viewer query clear --db docker:pg-svc --schema analytics
-2. Execute:
+3. Execute:
    code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
        --title "Sample user data" --body "Checking what user records look like."
-3. The human sees results in the browser's Database > Query History tab.
+4. The human sees results in the browser's Database > Query History tab.
 
 ## Workflow: Snapshot & Diff (for testing)
 
@@ -181,6 +191,10 @@ browser's Database > Search tab.
 
 ## Output contract
 
+- sources: human-readable id/kind/name lines on stdout (default), or pretty
+  JSON of the full /_db/files response with --json. truncated and
+  dockerError, if present, are appended to stdout as comment-prefixed lines
+  (default) or kept as JSON fields (--json).
 - exec / diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
@@ -302,6 +316,29 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
 
   if (subcommand === "agent-help") {
     return { ok: true, args: { command: { kind: "agent-help" } } };
+  }
+  if (subcommand === "sources") {
+    if (rest.length > 1) {
+      return {
+        ok: false,
+        error: "sources does not accept positional arguments",
+      };
+    }
+    const unusedOption = Array.from(options.keys())[0];
+    if (unusedOption) {
+      return { ok: false, error: `sources does not accept ${unusedOption}` };
+    }
+    const unusedFlag = Array.from(flags).find((flag) => flag !== "--json");
+    if (unusedFlag) {
+      return { ok: false, error: `sources does not accept ${unusedFlag}` };
+    }
+    return {
+      ok: true,
+      args: {
+        command: { kind: "sources", json: flags.has("--json") },
+        ...globalArgs,
+      },
+    };
   }
   if (subcommand === "exec") {
     const db = options.get("--db");
@@ -639,6 +676,7 @@ export async function runQueryCli(argv: string[]): Promise<void> {
   const root = resolveRepoRoot(cwd);
   const serverUrl = await ensureServerUrl(root, server, "/_db/files");
 
+  if (command.kind === "sources") return runSources(serverUrl, command);
   if (command.kind === "exec") return runExec(serverUrl, command);
   if (command.kind === "list") return runList(serverUrl, command);
   if (command.kind === "clear") return runClear(serverUrl, command);
@@ -653,6 +691,43 @@ export async function runQueryCli(argv: string[]): Promise<void> {
   if (command.kind === "diff-tables") return runDiffTables(serverUrl, command);
   if (command.kind === "diff-rows") return runDiffRows(serverUrl, command);
   if (command.kind === "search") return runSearch(serverUrl, command);
+}
+
+async function runSources(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "sources" }>,
+): Promise<void> {
+  // /_db/files をそのまま叩く。server 側で env/credentials は剥がされている。
+  const data = (await request(
+    serverUrl,
+    "/_db/files",
+    "GET",
+    undefined,
+    "list sources",
+  )) as DbFilesResponse;
+
+  if (command.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (!data.files.length) {
+    console.log("no datastore sources discovered");
+  } else {
+    for (const f of data.files) {
+      // AI が --db にコピペしやすい順: id / kind / name。tab 区切りで安定化。
+      console.log(`${f.id}\t${f.kind}\t${f.name}`);
+    }
+  }
+  // truncated / dockerError は stderr に出すと AI が拾い損ねるので
+  // stdout の末尾にコメント風で明示する。
+  if (data.truncated) {
+    console.log(
+      "# truncated: docker discovery hit the cap; some sources may be missing",
+    );
+  }
+  if (data.dockerError) {
+    console.log(`# dockerError: ${data.dockerError}`);
+  }
 }
 
 async function runExec(
