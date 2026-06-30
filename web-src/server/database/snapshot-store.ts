@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS snapshot_payloads (
   payload_json TEXT NOT NULL
 );
 
+-- deleteSnapshot の orphan cleanup (snapshot_payloads を残さない) は
+-- snapshot_rows.payload_hash で逆引きする。index が無いと
+-- snapshot_payloads 件数 × snapshot_rows 全件の相関スキャンになる。
+CREATE INDEX IF NOT EXISTS idx_snapshot_rows_payload_hash
+  ON snapshot_rows(payload_hash);
+
 `;
 
 let storeDb: SqliteDb | null = null;

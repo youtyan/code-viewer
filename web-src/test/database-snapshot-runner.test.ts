@@ -1,19 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { runSnapshot } from "../server/database/snapshot-runner";
 import {
   computeDiffTables,
   listSnapshots,
 } from "../server/database/snapshot-store";
 import type { SnapshotItem } from "../server/database/sources/types";
+import { withTempDir } from "./_test-helpers";
 
 function withTempProject<T>(run: (dir: string) => Promise<T>): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "code-viewer-snapshot-runner-"));
-  return run(dir).finally(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
+  return withTempDir("code-viewer-snapshot-runner-", run);
 }
 
 describe("database snapshot runner", () => {

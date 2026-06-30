@@ -1,13 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { terminateChild } from "../server/dev-process";
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
+import { deferred } from "./_test-helpers";
 
 describe("dev process shutdown", () => {
   test("terminates a child with SIGTERM without escalating after it exits", async () => {
