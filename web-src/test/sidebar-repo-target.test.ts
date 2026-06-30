@@ -158,6 +158,7 @@ describe("diff sidebar repository target", () => {
     ]);
 
     expect(wrap.hidden).toBe(true);
+    expect(wrap.style.display).toBe("none");
     expect(
       document.querySelector('#filelist li[data-path="sample.ts"]'),
     ).toBeTruthy();

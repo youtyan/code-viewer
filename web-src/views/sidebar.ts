@@ -1117,7 +1117,10 @@ export function createSidebar(deps: SidebarDeps) {
     if (!repoSidebar) {
       const repoTarget =
         document.querySelector<HTMLElement>("#repo-target-wrap");
-      if (repoTarget) repoTarget.hidden = true;
+      if (repoTarget) {
+        repoTarget.hidden = true;
+        repoTarget.style.display = "none";
+      }
     }
     const treeMode = STATE.sbView === "tree" || repoSidebar;
     ul.innerHTML = "";

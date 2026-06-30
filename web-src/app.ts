@@ -2296,7 +2296,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     const repoTargetWrap =
       document.querySelector<HTMLElement>("#repo-target-wrap");
-    if (!repoSidebarRoute && repoTargetWrap) repoTargetWrap.hidden = true;
+    if (!repoSidebarRoute && repoTargetWrap) {
+      repoTargetWrap.hidden = true;
+      repoTargetWrap.style.display = "none";
+    }
     // Repo pages park .sb-filter-wrap inside .sb-head (grid layout); other
     // pages expect it back outside as the sticky sibling. Re-place it every
     // time the page classes flip, or SPA navigation away from the repo view

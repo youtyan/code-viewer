@@ -148,8 +148,10 @@ export function createRepoView(deps: RepoViewDeps) {
     const input = document.querySelector<HTMLInputElement>("#repo-target");
     const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
     if (!input || !wrap) return;
-    input.value = ref || "worktree";
-    wrap.hidden = activeRepoTreeRef() == null;
+    const activeRef = activeRepoTreeRef();
+    input.value = activeRef || ref || "worktree";
+    wrap.hidden = activeRef == null;
+    wrap.style.display = activeRef == null ? "none" : "";
     syncSidebarHeaderHeight();
   }
 
