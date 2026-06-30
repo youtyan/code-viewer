@@ -96,6 +96,48 @@ describe("parseQueryArgs", () => {
     });
   });
 
+  test("list and clear accept --schema only when scoped by --db", () => {
+    const list = parseQueryArgs([
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+    expect(list.ok).toBe(true);
+    if (!list.ok) throw new Error("parse failed");
+    expect(list.args.command).toEqual({
+      kind: "list",
+      json: true,
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+
+    const clear = parseQueryArgs([
+      "clear",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+    expect(clear.ok).toBe(true);
+    if (!clear.ok) throw new Error("parse failed");
+    expect(clear.args.command).toEqual({
+      kind: "clear",
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+    expect(parseQueryArgs(["list", "--schema", "analytics"])).toEqual({
+      ok: false,
+      error: "list --schema requires --db <path>",
+    });
+    expect(parseQueryArgs(["clear", "--schema", "analytics"])).toEqual({
+      ok: false,
+      error: "clear --schema requires --db <path>",
+    });
+  });
+
   test("snapshot create requires --db, splits --tables on commas, --note is optional", () => {
     expect(parseQueryArgs(["snapshot", "create"])).toEqual({
       ok: false,
@@ -648,6 +690,59 @@ async function runAndCatchExit(argv: string[]): Promise<void> {
 
 describe("runQueryCli integration", () => {
   const SERVER = "http://localhost:65535";
+
+  test("query list --schema forwards db and schema in the history URL", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ version: 1, entries: [] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "list",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(
+      `${SERVER}/_db/history?db=docker%3Apg-svc&schema=analytics`,
+    );
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      version: 1,
+      entries: [],
+    });
+  });
+
+  test("query clear --schema forwards db and schema in the POST body", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ ok: true }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "clear",
+      "--db",
+      "docker:pg-svc",
+      "--schema",
+      "analytics",
+    ]);
+
+    expect(harness.requests).toHaveLength(2);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/history/clear`);
+    expect(harness.requests[1].method).toBe("POST");
+    expect(harness.requests[1].body).toEqual({
+      db: "docker:pg-svc",
+      schema: "analytics",
+    });
+    expect(harness.logs.join("\n")).toBe("cleared query history");
+  });
 
   test("snapshot create (no --wait) prints the message + snapshotId + poll hint", async () => {
     const harness = installRunHarness([

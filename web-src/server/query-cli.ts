@@ -12,8 +12,8 @@ export type QueryCommand =
       save: boolean;
       maxRows?: number;
     }
-  | { kind: "list"; json: boolean; db?: string }
-  | { kind: "clear"; db?: string }
+  | { kind: "list"; json: boolean; db?: string; schema?: string }
+  | { kind: "clear"; db?: string; schema?: string }
   | {
       kind: "snapshot-create";
       db: string;
@@ -67,8 +67,8 @@ export const QUERY_HELP = `code-viewer query — execute read-only SQL queries a
 
 Usage:
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
-  code-viewer query list [--json] [--db <path>]
-  code-viewer query clear [--db <path>]
+  code-viewer query list [--json] [--db <path> [--schema <name>]]
+  code-viewer query clear [--db <path> [--schema <name>]]
   code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>] [--schema <name>] [--wait] [--timeout <sec>] [--json]
   code-viewer query snapshot list [--json] [--db <path>] [--schema <name>]
   code-viewer query snapshot delete --id <snapshot-id>
@@ -84,6 +84,8 @@ Global options:
 
 Examples:
   code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10"
+  code-viewer query list --db docker:pg-svc --schema analytics --json
+  code-viewer query clear --db docker:pg-svc --schema analytics
   code-viewer query snapshot create --db app.db --tables users,orders --note "Before migration"
   code-viewer query snapshot list --db app.db --json
   code-viewer query diff tables --before snap-abc123 --after snap-def456
@@ -116,6 +118,9 @@ can review what you queried.
 1. Identify which database file or datastore id to query from the browser's
    Database tab, the current route, or project fixtures. code-viewer query
    list shows saved query history; it does not discover databases.
+   For PostgreSQL multi-schema history, use --schema together with --db:
+   code-viewer query list --db docker:pg-svc --schema analytics --json
+   code-viewer query clear --db docker:pg-svc --schema analytics
 2. Execute:
    code-viewer query exec --db data.sqlite3 --sql "SELECT * FROM users LIMIT 10" \\
        --title "Sample user data" --body "Checking what user records look like."
@@ -325,23 +330,32 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
     };
   }
   if (subcommand === "list") {
+    const db = options.get("--db");
+    const schema = options.get("--schema");
+    if (schema && !db)
+      return { ok: false, error: "list --schema requires --db <path>" };
     return {
       ok: true,
       args: {
         command: {
           kind: "list",
           json: flags.has("--json"),
-          db: options.get("--db"),
+          db,
+          schema,
         },
         ...globalArgs,
       },
     };
   }
   if (subcommand === "clear") {
+    const db = options.get("--db");
+    const schema = options.get("--schema");
+    if (schema && !db)
+      return { ok: false, error: "clear --schema requires --db <path>" };
     return {
       ok: true,
       args: {
-        command: { kind: "clear", db: options.get("--db") },
+        command: { kind: "clear", db, schema },
         ...globalArgs,
       },
     };
@@ -686,10 +700,14 @@ async function runList(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "list" }>,
 ): Promise<void> {
-  const params = command.db ? `?db=${encodeURIComponent(command.db)}` : "";
+  const searchParams = new URLSearchParams();
+  if (command.db) searchParams.set("db", command.db);
+  if (command.schema) searchParams.set("schema", command.schema);
+  const params = searchParams.toString();
+  const path = params ? `/_db/history?${params}` : "/_db/history";
   const state = (await request(
     serverUrl,
-    `/_db/history${params}`,
+    path,
     "GET",
     undefined,
     "list query history",
@@ -724,6 +742,7 @@ async function runClear(
 ): Promise<void> {
   const reqBody: Record<string, unknown> = {};
   if (command.db) reqBody.db = command.db;
+  if (command.schema) reqBody.schema = command.schema;
   await request(
     serverUrl,
     "/_db/history/clear",

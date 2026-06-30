@@ -45,6 +45,14 @@ browser's Database > Search tab, so the human can review the same workflow.
    code-viewer query list --json
    ```
 
+   For PostgreSQL multi-schema query history, pass `--schema <name>` with
+   `--db` so list/clear stays scoped to that schema:
+
+   ```sh
+   code-viewer query list --db docker:pg-svc --schema analytics --json
+   code-viewer query clear --db docker:pg-svc --schema analytics
+   ```
+
 2. Execute a query:
 
    ```sh

@@ -301,6 +301,9 @@ code-viewer query exec --db app.db --sql "SELECT count(*) FROM orders" \
 # Show saved query history
 code-viewer query list --db app.db --json
 code-viewer query clear --db app.db
+# PostgreSQL multi-schema query history: keep list/clear scoped to one schema.
+code-viewer query list --db docker:pg-svc --schema analytics --json
+code-viewer query clear --db docker:pg-svc --schema analytics
 
 # Locate a value across every table (default: text-like columns only).
 # Blocks until the scan finishes or --timeout (default 60s) expires.
