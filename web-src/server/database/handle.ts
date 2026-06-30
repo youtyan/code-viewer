@@ -756,6 +756,103 @@ async function inferEmptyQueryColumns(
   }
 }
 
+export const DB_QUERY_DEFAULT_MAX_ROWS = 1000;
+export const DB_QUERY_HARD_CAP_MAX_ROWS = 10000;
+
+function clampDbQueryMaxRows(value: number | undefined | null): number {
+  return Math.min(
+    DB_QUERY_HARD_CAP_MAX_ROWS,
+    Math.max(1, value || DB_QUERY_DEFAULT_MAX_ROWS),
+  );
+}
+
+// Shared read-only execution for /_db/query and MCP. HTTP-only history/SSE
+// handling remains in handleQuery.
+export async function createDbQueryResponse(
+  cwd: string,
+  opts: {
+    db: string | null | undefined;
+    sql: string | null | undefined;
+    schema?: string | null;
+    maxRows?: number;
+  },
+  omitDirNames?: string[],
+  signal?: AbortSignal,
+): Promise<DbServiceResult<DbQueryResponse>> {
+  if (!opts.db || !opts.sql) {
+    return { ok: false, response: textError("missing db or sql", 400) };
+  }
+  const r = await resolveDb(cwd, opts.db, omitDirNames, opts.schema, signal);
+  if (r instanceof Response) return { ok: false, response: r };
+  const maxRows = clampDbQueryMaxRows(opts.maxRows);
+  const start = Date.now();
+  try {
+    const adapter = await getAdapter(r, cwd, signal);
+    const { result, executedSql } = await captureSql(() =>
+      asAsync(adapter).readonlyQuery(
+        opts.sql ?? "",
+        undefined,
+        maxRows,
+        signal,
+      ),
+    );
+    const elapsed = Date.now() - start;
+    const serializedRows = serializeDbRows(result.rows);
+    const inferredColumns =
+      result.columns.length === 0 && result.rows.length === 0
+        ? await inferEmptyQueryColumns(adapter, opts.sql, r.schema, signal)
+        : [];
+    const columns =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.name)
+        : result.columns;
+    const columnTypes =
+      inferredColumns.length > 0
+        ? inferredColumns.map((col) => col.type)
+        : result.columnTypes;
+    const response: DbQueryResponse = {
+      dbId: opts.db,
+      ...(r.schema ? { schema: r.schema } : {}),
+      columns,
+      columnTypes,
+      rows: serializedRows,
+      rowCount: result.rowCount,
+      truncated: result.rowCount >= maxRows,
+      elapsedMs: elapsed,
+      executedSql,
+    };
+    return { ok: true, value: response };
+  } catch (err) {
+    // クライアント起因の中断はサーバ障害として記録しない。
+    if (isAbortLikeError(err, signal)) {
+      return { ok: false, response: textError("query aborted", 503) };
+    }
+    if (isDockerComposeServiceUnavailableError(err)) {
+      return {
+        ok: false,
+        response: handleError("database", "execute query", err),
+      };
+    }
+    console.error(
+      "[code-viewer] database error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    const elapsed = Date.now() - start;
+    const errorResponse: DbQueryResponse = {
+      dbId: opts.db,
+      ...(r.schema ? { schema: r.schema } : {}),
+      columns: [],
+      columnTypes: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      elapsedMs: elapsed,
+      error: err instanceof Error ? err.message : String(err),
+    };
+    return { ok: false, response: json(errorResponse, 400) };
+  }
+}
+
 async function handleQuery(
   cwd: string,
   req: Request,
@@ -774,111 +871,47 @@ async function handleQuery(
     source?: "cli" | "browser";
   }>(req);
   if (body instanceof Response) return body;
-  if (!body.db || !body.sql) return textError("missing db or sql", 400);
-  const r = await resolveDb(
+  const result = await createDbQueryResponse(
     cwd,
-    body.db,
+    { db: body.db, sql: body.sql, schema: body.schema, maxRows: body.maxRows },
     omitDirNames,
-    body.schema,
     req.signal,
   );
-  if (r instanceof Response) return r;
-  const maxRows = Math.min(10000, Math.max(1, body.maxRows || 1000));
-  const start = Date.now();
-  try {
-    const adapter = await getAdapter(r, cwd, req.signal);
-    const { result, executedSql } = await captureSql(() =>
-      asAsync(adapter).readonlyQuery(
-        body.sql ?? "",
-        undefined,
-        maxRows,
-        req.signal,
-      ),
-    );
-    const elapsed = Date.now() - start;
-    const serializedRows = serializeDbRows(result.rows);
-    const inferredColumns =
-      result.columns.length === 0 && result.rows.length === 0
-        ? await inferEmptyQueryColumns(adapter, body.sql, r.schema, req.signal)
-        : [];
-    const columns =
-      inferredColumns.length > 0
-        ? inferredColumns.map((col) => col.name)
-        : result.columns;
-    const columnTypes =
-      inferredColumns.length > 0
-        ? inferredColumns.map((col) => col.type)
-        : result.columnTypes;
-    const response: DbQueryResponse = {
+  if (result.ok !== true) return result.response;
+  const response = result.value;
+  if (body.saveHistory && body.db && body.sql) {
+    const entry: QueryHistoryEntry = {
+      id: makeHistoryId(),
       dbId: body.db,
-      ...(r.schema ? { schema: r.schema } : {}),
-      columns,
-      columnTypes,
-      rows: serializedRows,
-      rowCount: result.rowCount,
-      truncated: result.rowCount >= maxRows,
-      elapsedMs: elapsed,
-      executedSql,
+      ...(response.schema ? { schema: response.schema } : {}),
+      sql: body.sql,
+      title: body.title,
+      body: body.body,
+      columns: response.columns,
+      rowsPreview: response.rows,
+      rowCount: response.rowCount,
+      savedRows: response.rows.length,
+      truncated: response.truncated,
+      elapsedMs: response.elapsedMs,
+      executedAt: new Date().toISOString(),
+      executedBy: body.executedBy || "user",
+      source: body.source || "browser",
     };
-    if (body.saveHistory) {
-      const entry: QueryHistoryEntry = {
-        id: makeHistoryId(),
+    await updateQueryHistoryAsync(cwd, (state) => ({
+      state: addQueryHistoryEntry(state, entry),
+      result: undefined,
+    }));
+    sendSse?.(
+      "db-query",
+      JSON.stringify({
+        action: "add",
         dbId: body.db,
-        ...(r.schema ? { schema: r.schema } : {}),
-        sql: body.sql,
-        title: body.title,
-        body: body.body,
-        columns,
-        rowsPreview: serializedRows,
-        rowCount: result.rowCount,
-        savedRows: serializedRows.length,
-        truncated: result.rowCount >= maxRows,
-        elapsedMs: elapsed,
-        executedAt: new Date().toISOString(),
-        executedBy: body.executedBy || "user",
-        source: body.source || "browser",
-      };
-      await updateQueryHistoryAsync(cwd, (state) => ({
-        state: addQueryHistoryEntry(state, entry),
-        result: undefined,
-      }));
-      sendSse?.(
-        "db-query",
-        JSON.stringify({
-          action: "add",
-          dbId: body.db,
-          schema: r.schema,
-          id: entry.id,
-        }),
-      );
-    }
-    return json(response);
-  } catch (err) {
-    // クライアント起因の中断はサーバ障害として記録しない。
-    if (isAbortLikeError(err, req.signal)) {
-      return textError("query aborted", 503);
-    }
-    if (isDockerComposeServiceUnavailableError(err)) {
-      return handleError("database", "execute query", err);
-    }
-    console.error(
-      "[code-viewer] database error:",
-      err instanceof Error ? err.message : String(err),
+        schema: response.schema,
+        id: entry.id,
+      }),
     );
-    const elapsed = Date.now() - start;
-    const response: DbQueryResponse = {
-      dbId: body.db,
-      ...(r.schema ? { schema: r.schema } : {}),
-      columns: [],
-      columnTypes: [],
-      rows: [],
-      rowCount: 0,
-      truncated: false,
-      elapsedMs: elapsed,
-      error: err instanceof Error ? err.message : String(err),
-    };
-    return json(response, 400);
   }
+  return json(response);
 }
 
 async function handleHistory(cwd: string, url: URL): Promise<Response> {

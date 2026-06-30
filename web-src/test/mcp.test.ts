@@ -163,6 +163,7 @@ describe("dispatchJsonRpc — tools/list", () => {
     expect(names.includes("code_viewer_datastore_schema")).toBe(true);
     expect(names.includes("code_viewer_datastore_columns")).toBe(true);
     expect(names.includes("code_viewer_datastore_ddl")).toBe(true);
+    expect(names.includes("code_viewer_datastore_query")).toBe(true);
     for (const tool of payload.tools) {
       expect(typeof tool.title).toBe("string");
       expect(tool.title.length > 0).toBe(true);
@@ -479,6 +480,102 @@ describe("dispatchJsonRpc — tools/call datastore tools (fixture sqlite)", () =
   test("datastore tools return isError=true for invalid db ids", async () => {
     const payload = await callDatastore("code_viewer_datastore_schema", {
       db: "../escape.db",
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/invalid database path/);
+  });
+
+  test("code_viewer_datastore_query runs SELECT and returns the DbQueryResponse shape", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "SELECT sample_id, sample_label FROM sample_items ORDER BY sample_id",
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    expect(body.columns).toEqual(["sample_id", "sample_label"]);
+    expect(body.rowCount).toBe(2);
+    expect(body.truncated).toBe(false);
+    expect(body.rows.length).toBe(2);
+    expect(body.rows[0]).toEqual([1, "alpha"]);
+    expect(body.rows[1]).toEqual([2, "beta"]);
+    expect(typeof body.elapsedMs).toBe("number");
+    expect(Array.isArray(body.executedSql)).toBe(true);
+    // saveHistory must be off in MCP — error field stays absent on success.
+    expect(body.error).toBeUndefined();
+  });
+
+  test("code_viewer_datastore_query reports truncated=true when maxRows is below the row count", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "SELECT sample_id FROM sample_items ORDER BY sample_id",
+      maxRows: 1,
+    });
+    expect(payload.isError).toBe(false);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.rowCount).toBe(1);
+    expect(body.rows.length).toBe(1);
+    expect(body.truncated).toBe(true);
+  });
+
+  test("code_viewer_datastore_query rejects write keywords with the DbQueryResponse error shape", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "INSERT INTO sample_items (sample_label) VALUES ('gamma')",
+    });
+    expect(payload.isError).toBe(true);
+    const body = JSON.parse(payload.content[0].text);
+    expect(body.dbId).toBe(dbFile);
+    expect(body.rows).toEqual([]);
+    expect(body.rowCount).toBe(0);
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toMatch(/SELECT, PRAGMA, EXPLAIN, and WITH/);
+  });
+
+  test("code_viewer_datastore_query rejects a SELECT that hides a blocked keyword", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "SELECT * FROM sample_items; DROP TABLE sample_items;",
+    });
+    expect(payload.isError).toBe(true);
+    const body = JSON.parse(payload.content[0].text);
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toMatch(/disallowed statement keyword/);
+  });
+
+  test("code_viewer_datastore_query rejects a missing sql argument", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/sql must be a string/);
+  });
+
+  test("code_viewer_datastore_query rejects an empty sql argument", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "   \n  ",
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(/non-empty/);
+  });
+
+  test("code_viewer_datastore_query rejects maxRows outside [1, 10000]", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: dbFile,
+      sql: "SELECT 1",
+      maxRows: 0,
+    });
+    expect(payload.isError).toBe(true);
+    expect(payload.content[0].text).toMatch(
+      /maxRows must be an integer in \[1, 10000\]/,
+    );
+  });
+
+  test("code_viewer_datastore_query reports invalid_database_path for an unsafe db id", async () => {
+    const payload = await callDatastore("code_viewer_datastore_query", {
+      db: "../escape.db",
+      sql: "SELECT 1",
     });
     expect(payload.isError).toBe(true);
     expect(payload.content[0].text).toMatch(/invalid database path/);

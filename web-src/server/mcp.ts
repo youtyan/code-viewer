@@ -32,8 +32,11 @@ import {
   createDbColumnsResponse,
   createDbDdlResponse,
   createDbFilesResponse,
+  createDbQueryResponse,
   createDbSchemaResponse,
   createDbSchemasResponse,
+  DB_QUERY_DEFAULT_MAX_ROWS,
+  DB_QUERY_HARD_CAP_MAX_ROWS,
   type DbServiceResult,
 } from "./database/handle";
 import { buildFileShowReport, type FileShowCommand } from "./file-cli";
@@ -458,6 +461,47 @@ export function defaultMcpTools(
       },
       run(input) {
         return runDatastoreDdlTool(input, options);
+      },
+    },
+    {
+      name: "code_viewer_datastore_query",
+      title: "code-viewer datastore query",
+      description:
+        "Executes a read-only SQL query against one SQL datastore and returns the same JSON payload `code-viewer query exec --json` and `/_db/query` emit: dbId, schema, columns, columnTypes, rows, rowCount, truncated, elapsedMs, executedSql (success) or the same shape with `error` (failure). Only SELECT / PRAGMA / EXPLAIN / WITH are accepted; any INSERT / UPDATE / DELETE / DROP / ALTER / CREATE / ATTACH / DETACH / REPLACE / VACUUM / REINDEX / LOAD_EXTENSION keyword is rejected. History is never saved.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          db: {
+            type: "string",
+            description:
+              "Datastore id from code_viewer_datastore_sources, for example a repo-relative SQLite path or docker:<service>.",
+          },
+          sql: {
+            type: "string",
+            description:
+              "SQL statement to run. Must start with SELECT, PRAGMA, EXPLAIN, or WITH; write keywords are rejected by the adapter.",
+          },
+          schema: {
+            type: "string",
+            description: "Optional schema name for PostgreSQL sources.",
+          },
+          maxRows: {
+            type: "integer",
+            minimum: 1,
+            maximum: DB_QUERY_HARD_CAP_MAX_ROWS,
+            description: `Maximum rows to return. Clamped to [1, ${DB_QUERY_HARD_CAP_MAX_ROWS}]. Default ${DB_QUERY_DEFAULT_MAX_ROWS}. \`truncated: true\` in the response means more rows were available.`,
+          },
+          cwd: {
+            type: "string",
+            description:
+              "Repository to inspect. Absolute path. Defaults to the directory the code-viewer server was started in.",
+          },
+        },
+        required: ["db", "sql"],
+        additionalProperties: false,
+      },
+      run(input) {
+        return runDatastoreQueryTool(input, options);
       },
     },
   ];
@@ -1028,6 +1072,66 @@ async function runDatastoreDdlTool(
   }
 }
 
+async function runDatastoreQueryTool(
+  input: unknown,
+  options: DefaultMcpToolsOptions,
+): Promise<McpToolRunReturn> {
+  const params = isPlainObject(input) ? input : {};
+  const dbParsed = validateMcpDbId(params.db);
+  if (dbParsed.ok !== true) {
+    return { text: dbParsed.error, isError: true };
+  }
+  const sqlRaw = params.sql;
+  if (typeof sqlRaw !== "string") {
+    return { text: "sql must be a string", isError: true };
+  }
+  if (!sqlRaw.trim()) {
+    return { text: "sql must be a non-empty string", isError: true };
+  }
+  if (sqlRaw.includes("\0")) {
+    return { text: "sql must not contain NUL", isError: true };
+  }
+  const schemaParsed = validateMcpOptionalSingleLine(params.schema, "schema");
+  if (schemaParsed.ok !== true) {
+    return { text: schemaParsed.error, isError: true };
+  }
+  const cwdParsed = validateMcpCwd(params.cwd);
+  if (cwdParsed.ok !== true) {
+    return { text: cwdParsed.error, isError: true };
+  }
+  const maxRowsParsed = validateMcpIntegerLimit(
+    params.maxRows,
+    DB_QUERY_DEFAULT_MAX_ROWS,
+    1,
+    DB_QUERY_HARD_CAP_MAX_ROWS,
+    "maxRows",
+  );
+  if (maxRowsParsed.ok !== true) {
+    return { text: maxRowsParsed.error, isError: true };
+  }
+  const resolved = resolveRepoRootSafe(cwdParsed.value ?? options.cwd);
+  if (resolved.ok !== true) {
+    return { text: resolved.error, isError: true };
+  }
+
+  try {
+    const result = await createDbQueryResponse(
+      resolved.root,
+      {
+        db: dbParsed.value,
+        sql: sqlRaw,
+        schema: schemaParsed.value,
+        maxRows: maxRowsParsed.value,
+      },
+      options.omitDirNames ?? [],
+    );
+    return dbServiceResultToMcpToolReturn("datastore query", result);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { text: `datastore query failed: ${detail}`, isError: true };
+  }
+}
+
 function validateMcpDbId(
   raw: unknown,
 ): { ok: true; value: string } | { ok: false; error: string } {
@@ -1109,6 +1213,7 @@ export function buildMcpInstructions(): string {
     "  - code_viewer_datastore_schema: inspect tables, indexes, FKs, and columns.",
     "  - code_viewer_datastore_columns: inspect columns for one SQL table.",
     "  - code_viewer_datastore_ddl: inspect CREATE statement and triggers.",
+    "  - code_viewer_datastore_query: run read-only SELECT / PRAGMA / EXPLAIN / WITH.",
     "",
     "The CLI subcommands referenced by code_viewer_agent_help are:",
   ];
