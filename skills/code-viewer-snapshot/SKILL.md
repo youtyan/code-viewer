@@ -77,6 +77,12 @@ pins `--server '<url>'` and single-quotes db/schema, so copying it never
 silently falls back to auto-discovery. The same string is available as
 the `pollCommand` field in `--json` ack output.
 
+`snapshot list --json` enriches each `snapshots[]` element with paste-safe
+`deleteCommand` and `noteCommand` fields. Each pins `--server '<url>'` and
+single-quotes the snapshot id; `noteCommand` also quotes the current note
+as-is so you can paste the line and edit the value to update. Use these
+when you want to drop or re-label snapshots without rebuilding the call.
+
 ### 5. View the diff
 
 Compare table-level summary (which tables changed and how many rows):

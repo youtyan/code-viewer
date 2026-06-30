@@ -234,7 +234,11 @@ no separate stored diff entity, so you always pass both snapshot ids.
    code-viewer query snapshot create --db app.db --tables users,orders \\
        --note "After running user registration test" --wait --json
 
-4. (If you skipped --wait) list snapshots to get IDs:
+4. (If you skipped --wait) list snapshots to get IDs. snapshot list --json
+   enriches each snapshots[] element with paste-safe deleteCommand and
+   noteCommand fields, so you can drop or edit an entry without rebuilding
+   the call (noteCommand quotes the current note as-is — paste and edit the
+   value to update):
    code-viewer query snapshot list --db app.db --json
 
 5. View the diff (per-table summary, then per-row detail). diff tables
@@ -312,6 +316,13 @@ browser's Database > Search tab.
   executedSql to log the exact SQL the server ran.
 - diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list: human-readable table (default), or pretty JSON with --json.
+  In --json each snapshots[] element gains additive deleteCommand and
+  noteCommand fields — paste-safe "code-viewer query --server '<url>'
+  snapshot delete --id '<id>'" and "... snapshot note --id '<id>' --note
+  '<current note>'" strings — so AI/human can drop or edit a snapshot
+  without rebuilding the call. The note value in noteCommand is the
+  snapshot's current note quoted as-is; paste it and edit the value to
+  update. Default mode prints no command hints.
 - diff tables: human-readable lines (default) plus a paste-safe
   "# diff rows: code-viewer query --server '<url>' diff rows --before '<id>'
   --after '<id>' --table '<table>' --json" comment line right below each table,
@@ -1376,6 +1387,29 @@ function buildDdlCommand(
   return `${cli} ddl --db ${shellSingleQuote(db)}${schemaArg} --table ${shellSingleQuote(table)} --json`;
 }
 
+// snapshot list --json の各 entry から、個別 snapshot 操作 (delete / note 更新)
+// に進むための paste-safe コマンド。snapshot poll / diff rows / columns / ddl と
+// 同形 (--server pin + 全引数 single-quote)。snapshot id に空白や ' を含むケース
+// でも POSIX '\'' 展開で bash/zsh にそのまま貼れる。
+function buildSnapshotDeleteCommand(serverUrl: string, id: string): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  return `${cli} snapshot delete --id ${shellSingleQuote(id)}`;
+}
+
+// note の値は snapshot list 応答の note を実値として shellSingleQuote する。
+// 他 builder の規約 (response の実値を quote、placeholder を埋め込まない) と
+// 揃える。paste して value 部分を書き換えれば編集が完結する。既存 note が
+// 空文字 "" の場合は --note '' になり parser (snapshot note --note は "" を
+// 許容) と互換。
+function buildSnapshotNoteCommand(
+  serverUrl: string,
+  id: string,
+  note: string,
+): string {
+  const cli = `code-viewer query --server ${shellSingleQuote(serverUrl)}`;
+  return `${cli} snapshot note --id ${shellSingleQuote(id)} --note ${shellSingleQuote(note)}`;
+}
+
 async function runSnapshotCreate(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
@@ -1540,7 +1574,21 @@ async function runSnapshotList(
     }>;
   };
   if (command.json) {
-    console.log(JSON.stringify(body, null, 2));
+    // diff tables / schema --json と同じ additive enrich pattern。各 snapshot
+    // 要素に paste-safe な deleteCommand / noteCommand を加えて、AI/human が
+    // id を toString で組み直さずに次操作へ進めるようにする。top-level
+    // (snapshots 以外、将来 cursor 等が増えても) と各 snapshot の既存フィールド
+    // (id / dbId / schema / kind / note / createdAt / tables / status /
+    // errorMessage) は素通し。default mode の出力は変えない。
+    const enriched = {
+      ...body,
+      snapshots: body.snapshots.map((s) => ({
+        ...s,
+        deleteCommand: buildSnapshotDeleteCommand(serverUrl, s.id),
+        noteCommand: buildSnapshotNoteCommand(serverUrl, s.id, s.note),
+      })),
+    };
+    console.log(JSON.stringify(enriched, null, 2));
     return;
   }
   if (!body.snapshots.length) {

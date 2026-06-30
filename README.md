@@ -351,6 +351,10 @@ code-viewer query snapshot create --db app.db --tables users,orders \
 # polling snapshot list separately.
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test" --wait --json
+# `snapshot list --json` enriches each snapshots[] element with paste-safe
+# `deleteCommand` and `noteCommand` fields. Each pins --server '<url>' and
+# single-quotes the snapshot id; `noteCommand` quotes the current note as-is
+# so AI/human can paste and edit the value to update.
 code-viewer query snapshot list --db app.db --json
 # PostgreSQL multi-schema: pin both create and list to the same schema so
 # the before/after pair and --wait polling stay scoped to that schema.

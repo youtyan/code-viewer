@@ -2195,6 +2195,158 @@ describe("runQueryCli integration", () => {
     expect(out).toMatch(/\[done\]/);
     expect(out).toMatch(/\(2 tables\)/);
     expect(out).toMatch(/before/);
+    // default mode は要約行だけ。enrich 用 command hint は --json 専用で、
+    // default の stdout には漏らさない (AI-parseable な行を守る)。
+    expect(/deleteCommand/.test(out)).toBe(false);
+    expect(/noteCommand/.test(out)).toBe(false);
+    expect(/code-viewer query --server/.test(out)).toBe(false);
+  });
+
+  test("snapshot list --json enriches each snapshots[] element with paste-safe delete/note commands", async () => {
+    // 複数 snapshot で id / note の組み合わせを変えて、各 entry が独立して
+    // enrich されることを確認する。top-level (snapshots 以外) と既存フィールド
+    // (dbId / schema / kind / note / createdAt / tables / status / errorMessage)
+    // は素通し。
+    const payload = {
+      version: 1,
+      snapshots: [
+        {
+          id: "snap-1",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "before sample run",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table", "sample_archive"],
+          status: "done",
+        },
+        {
+          id: "snap-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          kind: "postgresql",
+          note: "",
+          createdAt: "2026-06-30T12:05:00Z",
+          tables: ["events"],
+          status: "error",
+          errorMessage: "table not found",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({
+      version: 1,
+      snapshots: [
+        {
+          id: "snap-1",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "before sample run",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table", "sample_archive"],
+          status: "done",
+          deleteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap-1'",
+          noteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap-1' --note 'before sample run'",
+        },
+        {
+          id: "snap-2",
+          dbId: "docker:pg-svc",
+          schema: "analytics",
+          kind: "postgresql",
+          note: "",
+          createdAt: "2026-06-30T12:05:00Z",
+          tables: ["events"],
+          status: "error",
+          errorMessage: "table not found",
+          deleteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap-2'",
+          // 空文字 note は --note '' になる。snapshot note parser は空文字を
+          // 許容するので paste したそのままが parser を通る。
+          noteCommand:
+            "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap-2' --note ''",
+        },
+      ],
+    });
+  });
+
+  test("snapshot list --json single-quotes ids and notes containing spaces and single quotes", async () => {
+    // POSIX '...' の '\'' 展開で、id にも note text にも空白や ' が含まれる
+    // ケースで paste-safe になることを behavior で確認する。
+    const payload = {
+      snapshots: [
+        {
+          id: "snap with 'quote'",
+          dbId: "app.db",
+          kind: "sqlite",
+          note: "sample's edit note",
+          createdAt: "2026-06-30T12:00:00Z",
+          tables: ["sample_table"],
+          status: "done",
+        },
+      ],
+    };
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify(payload) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    const parsed = JSON.parse(harness.logs[0]);
+    expect(parsed.snapshots[0].deleteCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' snapshot delete --id 'snap with '\\''quote'\\'''",
+    );
+    expect(parsed.snapshots[0].noteCommand).toBe(
+      "code-viewer query --server 'http://localhost:65535' snapshot note --id 'snap with '\\''quote'\\''' --note 'sample'\\''s edit note'",
+    );
+  });
+
+  test("snapshot list --json on empty result keeps the top-level shape and emits no command hints", async () => {
+    // empty result でも JSON 分岐は素通し (no snapshots) + enrich は空配列。
+    // 余計な command hint を吐かないことを保証する。
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      { body: JSON.stringify({ snapshots: [] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "list",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs[0])).toEqual({ snapshots: [] });
+    expect(/deleteCommand/.test(harness.logs.join("\n"))).toBe(false);
+    expect(/noteCommand/.test(harness.logs.join("\n"))).toBe(false);
   });
 
   test("diff tables (--json) enriches each tables[] element with a paste-safe diffRowsCommand", async () => {
