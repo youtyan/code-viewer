@@ -222,4 +222,49 @@ describe("preview CLI", () => {
       }
     },
   );
+
+  runOrSkip("--help lists every wired annotate/query subcommand", async () => {
+    const proc = spawn(
+      process.execPath,
+      ["run", "web-src/server/preview.ts", "--help"],
+      {
+        cwd: join(import.meta.dir, "..", ".."),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise<number | null>((resolve) => {
+      proc.once("exit", (code) => resolve(code));
+    });
+    const exitCode = await waitForExit(exited, 5000);
+
+    if (exitCode === "timeout") {
+      proc.kill("SIGKILL");
+      throw new Error("--help did not exit");
+    }
+    if (exitCode !== 0) {
+      throw new Error(
+        `--help exited with ${exitCode}; stderr=${stderr}; stdout=${stdout}`,
+      );
+    }
+
+    expect(stdout).toMatch(
+      /code-viewer annotate <start\|add\|add-db\|rename\|edit\|move\|list\|delete\|clear>/,
+    );
+    expect(stdout).toMatch(
+      /code-viewer query <sources\|schemas\|schema\|columns\|ddl\|exec\|list\|clear\|snapshot\|diff\|search>/,
+    );
+    expect(/annotate <start\|add\|list\|delete\|clear>/.test(stdout)).toBe(
+      false,
+    );
+    expect(/query <run/.test(stdout)).toBe(false);
+    expect(stdout).toMatch(/^Usage:$/m);
+  });
 });

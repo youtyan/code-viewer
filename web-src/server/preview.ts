@@ -197,8 +197,8 @@ function parseCli() {
 
 Usage:
   code-viewer [--cwd <repo>] [--port <port>] [--open] [git-diff-args...]
-  code-viewer annotate <start|add|list|delete|clear> [options]
-  code-viewer query <run|list|clear|snapshot|diff|...> [options]
+  code-viewer annotate <start|add|add-db|rename|edit|move|list|delete|clear> [options]
+  code-viewer query <sources|schemas|schema|columns|ddl|exec|list|clear|snapshot|diff|search> [options]
   code-viewer skill install [--agent <list>] [--global]
   code-viewer doctor [--cwd <path>] [--port <N>] [--json]
   code-viewer help
@@ -211,6 +211,7 @@ Examples:
   code-viewer HEAD~1 HEAD
   code-viewer --staged
   code-viewer annotate --help
+  code-viewer query --help
   code-viewer doctor --json
 `);
       process.exit(0);
