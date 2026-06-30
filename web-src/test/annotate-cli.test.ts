@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { parseAnnotateArgs } from "../server/annotate-cli";
+import { afterEach, describe, expect, test } from "bun:test";
+import { parseAnnotateArgs, runAnnotateCli } from "../server/annotate-cli";
 
 describe("parseAnnotateArgs", () => {
   test("no arguments or --help shows help", () => {
@@ -349,5 +349,206 @@ describe("parseAnnotateArgs", () => {
   test("unknown commands and options fail", () => {
     expect(parseAnnotateArgs(["frobnicate"]).ok).toBe(false);
     expect(parseAnnotateArgs(["list", "--wat"]).ok).toBe(false);
+  });
+});
+
+// --- runAnnotateCli integration tests (fetch mocked) ---
+
+type AnnotateRequestRecord = {
+  url: string;
+  method: string;
+  body: unknown;
+};
+
+const SERVER = "http://localhost:65535";
+const originalFetch = globalThis.fetch;
+let originalExit: typeof process.exit | null = null;
+let originalLog: typeof console.log | null = null;
+let originalErr: typeof console.error | null = null;
+
+function installAnnotateRunHarness(
+  responses: Array<{ status?: number; contentType?: string; body: string }>,
+): {
+  requests: AnnotateRequestRecord[];
+  logs: string[];
+  errs: string[];
+  exits: number[];
+} {
+  const requests: AnnotateRequestRecord[] = [];
+  const logs: string[] = [];
+  const errs: string[] = [];
+  const exits: number[] = [];
+  let index = 0;
+
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: async (input: string | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const bodyText = init?.body as string | undefined;
+      const body = bodyText ? JSON.parse(bodyText) : undefined;
+      requests.push({ url, method: init?.method ?? "GET", body });
+      const next = responses[index++];
+      if (!next) throw new Error(`unexpected extra fetch: ${url}`);
+      return new Response(next.body, {
+        status: next.status ?? 200,
+        headers: {
+          "Content-Type": next.contentType ?? "application/json",
+        },
+      });
+    },
+  });
+
+  originalExit = process.exit;
+  process.exit = ((code?: number) => {
+    exits.push(typeof code === "number" ? code : 0);
+    throw new AnnotateExitMarker(code ?? 0);
+  }) as typeof process.exit;
+
+  originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(
+      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
+    );
+  };
+
+  originalErr = console.error;
+  console.error = (...args: unknown[]) => {
+    errs.push(
+      args.map((a) => (typeof a === "string" ? a : String(a))).join(" "),
+    );
+  };
+
+  return { requests, logs, errs, exits };
+}
+
+class AnnotateExitMarker extends Error {
+  constructor(public code: number) {
+    super(`process.exit(${code})`);
+  }
+}
+
+afterEach(() => {
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: originalFetch,
+  });
+  if (originalExit) process.exit = originalExit;
+  if (originalLog) console.log = originalLog;
+  if (originalErr) console.error = originalErr;
+});
+
+async function runAnnotateAndCatchExit(argv: string[]): Promise<void> {
+  try {
+    await runAnnotateCli(argv);
+  } catch (err) {
+    if (err instanceof AnnotateExitMarker) return;
+    throw err;
+  }
+}
+
+describe("runAnnotateCli server error handling", () => {
+  test("non-2xx application/json bodies with {error:string} surface the error text only", async () => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "sample failure", extra: "hidden" }),
+      },
+    ]);
+
+    await runAnnotateAndCatchExit(["--server", SERVER, "list", "--json"]);
+
+    expect(harness.exits).toEqual([1]);
+    const err = harness.errs.join("\n");
+    expect(err).toMatch(/^annotate list failed \(400\): sample failure$/m);
+    expect(/extra|hidden/.test(err)).toBe(false);
+    expect(harness.logs).toEqual([]);
+  });
+
+  test("non-2xx application/json bodies without {error} fall back to the raw body text", async () => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      {
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ reason: "no error field" }),
+      },
+    ]);
+
+    await runAnnotateAndCatchExit(["--server", SERVER, "list", "--json"]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /^annotate list failed \(400\): \{"reason":"no error field"\}$/m,
+    );
+  });
+
+  test("non-2xx text/plain bodies keep the plain error text", async () => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "annotation target missing",
+      },
+    ]);
+
+    await runAnnotateAndCatchExit([
+      "--server",
+      SERVER,
+      "add",
+      "--file",
+      "src/app.ts",
+      "--body",
+      "sample note",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /^annotate add failed \(400\): annotation target missing$/m,
+    );
+  });
+
+  test("add-db request failures use the add-db command label", async () => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      {
+        status: 400,
+        contentType: "text/plain",
+        body: "database target missing",
+      },
+    ]);
+
+    await runAnnotateAndCatchExit([
+      "--server",
+      SERVER,
+      "add-db",
+      "--db",
+      "app.db",
+      "--body",
+      "sample database note",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /^annotate add-db failed \(400\): database target missing$/m,
+    );
+  });
+
+  test("non-2xx responses with empty bodies fall back to HTTP <status>", async () => {
+    const harness = installAnnotateRunHarness([
+      { body: JSON.stringify({ sessions: [] }) },
+      { status: 500, contentType: "application/json", body: "" },
+    ]);
+
+    await runAnnotateAndCatchExit(["--server", SERVER, "clear"]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /^annotate clear failed \(500\): HTTP 500$/m,
+    );
   });
 });

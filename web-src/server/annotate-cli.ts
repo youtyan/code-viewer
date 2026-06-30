@@ -7,7 +7,12 @@ import type {
   AnnotationsState,
 } from "../core/types";
 import { normalizeDatabaseTab, parseAnnotationLine } from "./annotations";
-import { ensureServerUrl, resolveRepoRoot, takeValue } from "./cli-helpers";
+import {
+  ensureServerUrl,
+  requestJson,
+  resolveRepoRoot,
+  takeValue,
+} from "./cli-helpers";
 
 export type AnnotateCommand =
   | { kind: "help" }
@@ -581,36 +586,17 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function request(
+// /_annotations は server 側で text/plain の text() 系で 4xx/5xx を返すのが
+// 基本だが、将来 JSON {error:"..."} を返すパスが混じっても AI/human が
+// 読める detail に正規化したい。HTTP/エラー整形は cli-helpers の
+// requestJson に寄せ、ここでは action ラベルだけ渡す薄いラッパで吸収する。
+async function annotateRequest(
   serverUrl: string,
   method: "GET" | "POST",
+  action: string,
   body?: unknown,
 ): Promise<unknown> {
-  const url = `${serverUrl}/_annotations`;
-  const origin = new URL(serverUrl).origin;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers:
-        method === "POST"
-          ? {
-              "Content-Type": "application/json",
-              Origin: origin,
-              "X-Code-Viewer-Action": "1",
-            }
-          : {},
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
-    process.exit(1);
-  }
-  if (!res.ok) {
-    console.error(`server rejected the request: ${await res.text()}`);
-    process.exit(1);
-  }
-  return res.json();
+  return requestJson(serverUrl, "/_annotations", method, body, action);
 }
 
 function formatLine(line?: AnnotationLineRange): string {
@@ -678,7 +664,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   const serverUrl = await ensureServerUrl(root, server, "/_annotations");
 
   if (command.kind === "start") {
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate start", {
       action: "start",
       title: command.title,
     })) as { session: AnnotationSession };
@@ -690,7 +676,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
   }
   if (command.kind === "add") {
     const body = await annotationBodyFromCommand(command);
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate add", {
       action: "add",
       session_id: command.session,
       session_title: command.sessionTitle,
@@ -770,25 +756,30 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
           : dataState
             ? "data"
             : undefined);
-    const result = (await request(serverUrl, "POST", {
-      action: "add",
-      session_id: command.session,
-      session_title: command.sessionTitle,
-      target: {
-        kind: "database",
-        db: command.db,
-        table: command.table,
-        tab: inferredTab,
-        data: dataState,
-        query: queryState,
-        search: searchState,
+    const result = (await annotateRequest(
+      serverUrl,
+      "POST",
+      "annotate add-db",
+      {
+        action: "add",
+        session_id: command.session,
+        session_title: command.sessionTitle,
+        target: {
+          kind: "database",
+          db: command.db,
+          table: command.table,
+          tab: inferredTab,
+          data: dataState,
+          query: queryState,
+          search: searchState,
+        },
+        title: command.title,
+        body,
+        before_id: command.before,
+        after_id: command.after,
+        position: command.position,
       },
-      title: command.title,
-      body,
-      before_id: command.before,
-      after_id: command.after,
-      position: command.position,
-    })) as {
+    )) as {
       session_id: string;
       session_title?: string;
       created_session?: boolean;
@@ -809,13 +800,17 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "list") {
-    const state = (await request(serverUrl, "GET")) as AnnotationsState;
+    const state = (await annotateRequest(
+      serverUrl,
+      "GET",
+      "annotate list",
+    )) as AnnotationsState;
     if (command.json) console.log(JSON.stringify(state, null, 2));
     else printList(state);
     return;
   }
   if (command.kind === "rename") {
-    await request(serverUrl, "POST", {
+    await annotateRequest(serverUrl, "POST", "annotate rename", {
       action: "rename",
       id: command.id,
       title: command.title,
@@ -835,7 +830,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
       console.error("edit requires --title, --body, --body-file, or stdin");
       process.exit(1);
     }
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate edit", {
       action: "update",
       id: command.id,
       title: command.title,
@@ -847,7 +842,7 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "move") {
-    const result = (await request(serverUrl, "POST", {
+    const result = (await annotateRequest(serverUrl, "POST", "annotate move", {
       action: "move",
       id: command.id,
       before_id: command.before,
@@ -860,10 +855,12 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     return;
   }
   if (command.kind === "delete") {
-    const result = (await request(serverUrl, "POST", {
-      action: "delete",
-      id: command.id,
-    })) as { removed: string | null };
+    const result = (await annotateRequest(
+      serverUrl,
+      "POST",
+      "annotate delete",
+      { action: "delete", id: command.id },
+    )) as { removed: string | null };
     if (!result.removed) {
       console.error(`no annotation or session with id ${command.id}`);
       process.exit(1);
@@ -871,6 +868,8 @@ export async function runAnnotateCli(argv: string[]): Promise<void> {
     console.log(`deleted ${result.removed} ${command.id}`);
     return;
   }
-  await request(serverUrl, "POST", { action: "clear" });
+  await annotateRequest(serverUrl, "POST", "annotate clear", {
+    action: "clear",
+  });
   console.log("cleared all annotations");
 }

@@ -4,7 +4,12 @@ import type {
   DbSchemaResponse,
   DbSchemasResponse,
 } from "../core/database/types";
-import { ensureServerUrl, resolveRepoRoot, takeValue } from "./cli-helpers";
+import {
+  ensureServerUrl,
+  requestJson,
+  resolveRepoRoot,
+  takeValue,
+} from "./cli-helpers";
 
 export type QueryCommand =
   | { kind: "help" }
@@ -792,77 +797,6 @@ function parseDiffSubcommand(
   return { ok: false, error: `unknown diff subcommand: ${action}` };
 }
 
-// サーバが 4xx / 5xx を返したときは text/plain で body を返す経路がある
-// (handle.ts の textError 等)。`res.json()` を盲目的に呼ぶと SyntaxError で
-// クラッシュして本当のエラー理由が消える。Content-Type で振り分けて
-// text を保持し、失敗時は action 名とともに stderr に出して exit 1。
-// 成功時のみ JSON parse 済みの data を返す。
-async function request(
-  serverUrl: string,
-  path: string,
-  method: "GET" | "POST",
-  body: unknown,
-  action: string,
-): Promise<unknown> {
-  const url = `${serverUrl}${path}`;
-  const origin = new URL(serverUrl).origin;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      headers:
-        method === "POST"
-          ? {
-              "Content-Type": "application/json",
-              Origin: origin,
-              "X-Code-Viewer-Action": "1",
-            }
-          : {},
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    console.error(`could not reach the code-viewer server at ${serverUrl}.`);
-    process.exit(1);
-  }
-  const ctype = (res.headers.get("content-type") || "").toLowerCase();
-  const isJson = ctype.includes("json");
-  if (!res.ok) {
-    const text = await res.text();
-    const detail = extractErrorDetail(text, isJson, res.status);
-    console.error(`${action} failed (${res.status}): ${detail}`);
-    process.exit(1);
-  }
-  if (!isJson) {
-    // unexpected for 2xx — surface as opaque text
-    return await res.text();
-  }
-  return await res.json();
-}
-
-function extractErrorDetail(
-  rawBody: string,
-  isJson: boolean,
-  status: number,
-): string {
-  const trimmed = rawBody.trim();
-  if (!trimmed) return `HTTP ${status}`;
-  if (!isJson) return trimmed;
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      typeof (parsed as { error?: unknown }).error === "string"
-    ) {
-      return (parsed as { error: string }).error;
-    }
-  } catch {
-    // Fall back to the raw body for malformed JSON.
-  }
-  return trimmed;
-}
-
 export async function runQueryCli(argv: string[]): Promise<void> {
   const parsed = parseQueryArgs(argv);
   if (parsed.ok === false) {
@@ -908,7 +842,7 @@ async function runSources(
   command: Extract<QueryCommand, { kind: "sources" }>,
 ): Promise<void> {
   // /_db/files をそのまま叩く。server 側で env/credentials は剥がされている。
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     "/_db/files",
     "GET",
@@ -957,7 +891,7 @@ async function runSchemas(
   command: Extract<QueryCommand, { kind: "schemas" }>,
 ): Promise<void> {
   const path = buildIntrospectPath("/_db/schemas", { db: command.db });
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     path,
     "GET",
@@ -986,7 +920,7 @@ async function runSchema(
     schema: command.schema,
     includeColumns: command.withColumns ? "1" : undefined,
   });
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     path,
     "GET",
@@ -1016,7 +950,7 @@ async function runColumns(
     schema: command.schema,
     table: command.table,
   });
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     path,
     "GET",
@@ -1054,7 +988,7 @@ async function runDdl(
     schema: command.schema,
     table: command.table,
   });
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     path,
     "GET",
@@ -1098,7 +1032,7 @@ async function runExec(
   if (command.title) reqBody.title = command.title;
   if (command.body) reqBody.body = command.body;
   if (command.maxRows) reqBody.maxRows = command.maxRows;
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     "/_db/query",
     "POST",
@@ -1137,7 +1071,7 @@ async function runList(
   if (command.schema) searchParams.set("schema", command.schema);
   const params = searchParams.toString();
   const path = params ? `/_db/history?${params}` : "/_db/history";
-  const state = (await request(
+  const state = (await requestJson(
     serverUrl,
     path,
     "GET",
@@ -1175,7 +1109,7 @@ async function runClear(
   const reqBody: Record<string, unknown> = {};
   if (command.db) reqBody.db = command.db;
   if (command.schema) reqBody.schema = command.schema;
-  await request(
+  await requestJson(
     serverUrl,
     "/_db/history/clear",
     "POST",
@@ -1219,7 +1153,7 @@ async function runSnapshotCreate(
   if (command.schema) reqBody.schema = command.schema;
   // server は snapshot id 確定までは ack を保留してくれるので、ここで返る
   // snapshotId は metadata row 作成済みであることが保証されている。
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     "/_db/snapshot/create",
     "POST",
@@ -1290,7 +1224,7 @@ async function waitForSnapshotDone(
       );
       process.exit(1);
     }
-    const listBody = (await request(
+    const listBody = (await requestJson(
       serverUrl,
       buildSnapshotListPath({ db: command.db, schema: command.schema }),
       "GET",
@@ -1341,7 +1275,7 @@ async function runSnapshotList(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-list" }>,
 ): Promise<void> {
-  const body = (await request(
+  const body = (await requestJson(
     serverUrl,
     buildSnapshotListPath({ db: command.db, schema: command.schema }),
     "GET",
@@ -1382,7 +1316,7 @@ async function runSnapshotDelete(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-delete" }>,
 ): Promise<void> {
-  await request(
+  await requestJson(
     serverUrl,
     "/_db/snapshot/delete",
     "POST",
@@ -1396,7 +1330,7 @@ async function runSnapshotNote(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-note" }>,
 ): Promise<void> {
-  await request(
+  await requestJson(
     serverUrl,
     "/_db/snapshot/update-note",
     "POST",
@@ -1411,7 +1345,7 @@ async function runDiffTables(
   command: Extract<QueryCommand, { kind: "diff-tables" }>,
 ): Promise<void> {
   const qs = `?before=${encodeURIComponent(command.before)}&after=${encodeURIComponent(command.after)}`;
-  const body = (await request(
+  const body = (await requestJson(
     serverUrl,
     `/_db/snapshot/diff/tables${qs}`,
     "GET",
@@ -1459,7 +1393,7 @@ async function runDiffRows(
   if (command.offset !== undefined) qs.set("offset", String(command.offset));
   // diff rows は構造化データなので AI 向けには常に JSON 出力するのが扱いやすい。
   // --json は indent 有無の hint としてだけ使う (圧縮 vs 整形)。
-  const data = (await request(
+  const data = (await requestJson(
     serverUrl,
     `/_db/snapshot/diff/rows?${qs.toString()}`,
     "GET",
@@ -1537,7 +1471,7 @@ async function runSearch(
   if (command.maxHits !== undefined)
     startBody.maxHitsPerTable = command.maxHits;
 
-  const startRes = (await request(
+  const startRes = (await requestJson(
     serverUrl,
     "/_db/search/start",
     "POST",
@@ -1561,7 +1495,7 @@ async function runSearch(
       );
       process.exit(1);
     }
-    status = (await request(
+    status = (await requestJson(
       serverUrl,
       `/_db/search/status?id=${encodeURIComponent(jobId)}`,
       "GET",
