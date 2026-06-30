@@ -6,8 +6,11 @@ import {
   expect,
   test,
 } from "bun:test";
+import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createSidebar } from "../views/sidebar";
+
+const styleCss = readFileSync("web/style.css", "utf8");
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -46,6 +49,24 @@ function installSidebarDom() {
       <ul id="filelist"></ul>
     </aside>
   `;
+}
+
+function installStyleCss() {
+  const style = document.createElement("style");
+  style.textContent = styleCss;
+  document.head.appendChild(style);
+}
+
+function repoTargetDisplayForBodyClass(className: string) {
+  document.body.innerHTML = "";
+  document.head.innerHTML = "";
+  document.body.className = className;
+  installSidebarDom();
+  installStyleCss();
+  const wrap = document.querySelector<HTMLElement>("#repo-target-wrap");
+  if (!wrap) throw new Error("missing repo target wrap");
+  wrap.hidden = false;
+  return getComputedStyle(wrap).display;
 }
 
 function createSidebarForTest() {
@@ -140,5 +161,14 @@ describe("diff sidebar repository target", () => {
     expect(
       document.querySelector('#filelist li[data-path="sample.ts"]'),
     ).toBeTruthy();
+  });
+
+  test("keeps the repository target visually hidden outside repository pages", () => {
+    expect(repoTargetDisplayForBodyClass("gdp-repo-page")).toBe("flex");
+    expect(repoTargetDisplayForBodyClass("")).toBe("none");
+    expect(repoTargetDisplayForBodyClass("gdp-repo-blob-page")).toBe("none");
+    expect(
+      repoTargetDisplayForBodyClass("gdp-file-detail-page gdp-repo-blob-page"),
+    ).toBe("flex");
   });
 });

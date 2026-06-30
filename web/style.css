@@ -528,7 +528,10 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
-.ref-selector[hidden] { display: none !important; }
+.ref-selector[hidden],
+#repo-target-wrap {
+  display: none !important;
+}
 [data-theme="dark"] .ref-selector {
   border-color: var(--border);
   background: var(--bg-soft);
@@ -574,8 +577,9 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   border-color: transparent;
   box-shadow: none;
 }
-body:not(.gdp-repo-page):not(.gdp-repo-blob-page) #repo-target-wrap {
-  display: none !important;
+body.gdp-repo-page #repo-target-wrap:not([hidden]),
+body.gdp-file-detail-page.gdp-repo-blob-page #repo-target-wrap:not([hidden]) {
+  display: flex !important;
 }
 .ref-dots {
   color: var(--fg-subtle);
