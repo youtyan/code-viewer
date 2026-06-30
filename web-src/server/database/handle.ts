@@ -1452,6 +1452,18 @@ async function handleSnapshotCreate(
   };
   let activeSnapshotId: string | undefined;
 
+  // ack response に snapshotId を含めるため、id が確定する onSnapshotId 発火
+  // までは response を保留する。id が出る前に runSnapshot が throw した場合
+  // (createSnapshot 失敗等) は reject 側に流して 500 を返す。
+  // id 取得後の進行中エラーは別経路 (SSE / snapshot list status) で観測可能なので
+  // ack 後の IIFE の error は HTTP には伝播しない。
+  let resolveIdAck!: (id: string) => void;
+  let rejectIdAck!: (err: unknown) => void;
+  const idAck = new Promise<string>((resolve, reject) => {
+    resolveIdAck = resolve;
+    rejectIdAck = reject;
+  });
+
   (async () => {
     try {
       const snapshotId = await runSnapshot(
@@ -1482,6 +1494,7 @@ async function handleSnapshotCreate(
             activeSnapshotId = id;
             snapshotJob.snapshotId = id;
             snapshotJobs.set(id, snapshotJob);
+            resolveIdAck(id);
             sendSse?.(
               "db-snapshot",
               JSON.stringify({
@@ -1512,6 +1525,8 @@ async function handleSnapshotCreate(
           err instanceof Error ? err.message : String(err),
         );
       }
+      // id 確定前に死んだ場合は ack も失敗にする (id 確定後の Promise は no-op)。
+      rejectIdAck(err);
       sendSse?.(
         "db-snapshot",
         JSON.stringify({
@@ -1539,7 +1554,14 @@ async function handleSnapshotCreate(
     }
   })();
 
-  return json({ ok: true, message: "snapshot started" });
+  let snapshotId: string;
+  try {
+    snapshotId = await idAck;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return textError(`failed to start snapshot: ${message}`, 500);
+  }
+  return json({ ok: true, message: "snapshot started", snapshotId });
 }
 
 async function handleSnapshotCancel(req: Request, url: URL): Promise<Response> {

@@ -310,6 +310,11 @@ code-viewer query search --db app.db --term "needle@example.com" \
 
 code-viewer query snapshot create --db app.db --tables users,orders \
     --note "Before user registration test"
+# Block until the snapshot finishes (default --timeout 120s) and emit the
+# final meta as JSON — handy when an AI agent needs the snapshot id without
+# polling snapshot list separately.
+code-viewer query snapshot create --db app.db --tables users,orders \
+    --note "Before user registration test" --wait --json
 code-viewer query snapshot list --db app.db --json
 code-viewer query snapshot note --id snap-abc123 --note "Updated context"
 code-viewer query snapshot delete --id snap-abc123

@@ -19,6 +19,9 @@ export type QueryCommand =
       db: string;
       tables?: string[];
       note: string;
+      wait: boolean;
+      timeoutSec: number;
+      json: boolean;
     }
   | { kind: "snapshot-list"; db?: string; json: boolean }
   | { kind: "snapshot-delete"; id: string }
@@ -65,7 +68,7 @@ Usage:
   code-viewer query exec --db <path> --sql <sql> [--title <text>] [--body <markdown>] [--no-save] [--max-rows <n>]
   code-viewer query list [--json] [--db <path>]
   code-viewer query clear [--db <path>]
-  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>]
+  code-viewer query snapshot create --db <path> [--tables t1,t2,...] [--note <text>] [--wait] [--timeout <sec>] [--json]
   code-viewer query snapshot list [--json] [--db <path>]
   code-viewer query snapshot delete --id <snapshot-id>
   code-viewer query snapshot note --id <snapshot-id> --note <text>
@@ -123,17 +126,19 @@ Use this to verify that a feature test correctly modifies the expected DB tables
 Snapshot diffs are computed on demand from the (before, after) pair — there is
 no separate stored diff entity, so you always pass both snapshot ids.
 
-1. Take a "before" snapshot:
+1. Take a "before" snapshot. With --wait the CLI blocks until the snapshot
+   finishes and exits 0 on done, 1 on error/timeout; the JSON response is
+   the final snapshot meta, so use its id field without polling snapshot list:
    code-viewer query snapshot create --db app.db --tables users,orders \\
-       --note "Before running user registration test"
+       --note "Before running user registration test" --wait --json
 
 2. (The human or test runner performs the action.)
 
-3. Take an "after" snapshot:
+3. Take an "after" snapshot the same way (--wait + --json):
    code-viewer query snapshot create --db app.db --tables users,orders \\
-       --note "After running user registration test"
+       --note "After running user registration test" --wait --json
 
-4. List snapshots to get IDs:
+4. (If you skipped --wait) list snapshots to get IDs:
    code-viewer query snapshot list --db app.db --json
 
 5. View the diff (per-table summary, then per-row detail):
@@ -162,9 +167,11 @@ browser's Database > Search tab.
 
 - exec / diff-rows: pretty JSON on stdout, exit 0 on success.
 - snapshot list / diff tables: human-readable table (default), or pretty JSON with --json.
-- snapshot create: prints "snapshot started" immediately. The server runs the
-  scan in the background and emits "db-snapshot" SSE events; use snapshot list
-  to confirm completion before diffing.
+- snapshot create: prints "snapshot started" immediately with the snapshotId.
+  Add --wait to block until the snapshot finishes (default --timeout 120s);
+  done → exit 0 with final meta (use its id field), error/timeout → stderr + exit 1.
+  Without --wait the scan continues in the background (SSE event "db-snapshot");
+  use snapshot list to confirm completion before diffing.
 - snapshot delete / note / clear: prints a single status line.
 - search: blocks until done; prints hit lines (default) or full status JSON
   (--json) on stdout. Empty result is a clean exit 0.
@@ -182,7 +189,7 @@ browser's Database > Search tab.
 - For snapshots, always specify --tables to avoid scanning unnecessary tables.
 - Write meaningful --note values — the human uses them to understand context.
 - After snapshot create, briefly wait or re-poll snapshot list before diffing;
-  the scan is asynchronous.
+  the scan is asynchronous. Pass --wait to skip the poll entirely.
 - For search, prefer --tables when you already know which tables to scan, and
   --max-hits to keep large hit sets bounded. Without --include-non-text the
   server only scans text-like columns (faster, cheaper).
@@ -208,9 +215,15 @@ const VALUE_FLAGS = new Set([
   "--timeout",
 ]);
 
-const BOOL_FLAGS = new Set(["--json", "--no-save", "--include-non-text"]);
+const BOOL_FLAGS = new Set([
+  "--json",
+  "--no-save",
+  "--include-non-text",
+  "--wait",
+]);
 
 const DEFAULT_SEARCH_TIMEOUT_SEC = 60;
+const DEFAULT_SNAPSHOT_WAIT_TIMEOUT_SEC = 120;
 
 function parseCommaList(raw: string | undefined): string[] | undefined {
   if (raw === undefined) return undefined;
@@ -396,10 +409,26 @@ function parseSnapshotSubcommand(
       return { ok: false, error: "snapshot create requires --db <path>" };
     const tables = parseCommaList(options.get("--tables"));
     const note = options.get("--note") ?? "";
+    const timeoutRaw = options.get("--timeout");
+    const timeoutSec =
+      timeoutRaw === undefined
+        ? DEFAULT_SNAPSHOT_WAIT_TIMEOUT_SEC
+        : parsePositiveInt(timeoutRaw);
+    if (timeoutSec === undefined) {
+      return { ok: false, error: "--timeout must be a positive integer (sec)" };
+    }
     return {
       ok: true,
       args: {
-        command: { kind: "snapshot-create", db, tables, note },
+        command: {
+          kind: "snapshot-create",
+          db,
+          tables,
+          note,
+          wait: flags.has("--wait"),
+          timeoutSec,
+          json: flags.has("--json"),
+        },
         ...globalArgs,
       },
     };
@@ -691,6 +720,18 @@ async function runClear(
   console.log("cleared query history");
 }
 
+type SnapshotMetaOut = {
+  id: string;
+  dbId: string;
+  schema?: string;
+  kind: string;
+  note: string;
+  createdAt: string;
+  tables: string[];
+  status: "running" | "done" | "error";
+  errorMessage?: string;
+};
+
 async function runSnapshotCreate(
   serverUrl: string,
   command: Extract<QueryCommand, { kind: "snapshot-create" }>,
@@ -700,8 +741,8 @@ async function runSnapshotCreate(
     note: command.note,
   };
   if (command.tables) reqBody.tables = command.tables;
-  // server は非同期で snapshot を回すので、ここでは ack のみ返ってくる。
-  // AI agent 向けに後続 ID 取得手順を一緒に出す。
+  // server は snapshot id 確定までは ack を保留してくれるので、ここで返る
+  // snapshotId は metadata row 作成済みであることが保証されている。
   const data = (await request(
     serverUrl,
     "/_db/snapshot/create",
@@ -710,9 +751,113 @@ async function runSnapshotCreate(
     "snapshot create",
   )) as Record<string, unknown>;
   const message = typeof data.message === "string" ? data.message : "ok";
+  const snapshotId =
+    typeof data.snapshotId === "string" ? data.snapshotId : undefined;
+
+  if (!command.wait) {
+    if (command.json) {
+      console.log(
+        JSON.stringify({ ok: true, message, snapshotId: snapshotId ?? null }),
+      );
+      return;
+    }
+    const idSuffix = snapshotId ? ` [id=${snapshotId}]` : "";
+    console.log(
+      `${message}${idSuffix}. Poll with: code-viewer query snapshot list --db ${command.db} --json`,
+    );
+    return;
+  }
+
+  if (!snapshotId) {
+    // --wait は完了待ちなので、server から id が返って来ないと先に進めない。
+    // 古い server 相手なら no-wait を案内する。
+    console.error(
+      "snapshot create --wait: server did not return snapshotId (upgrade the running code-viewer server or omit --wait)",
+    );
+    process.exit(1);
+  }
+
+  const finalMeta = await waitForSnapshotDone(serverUrl, command, snapshotId);
+
+  if (finalMeta.status === "error") {
+    if (command.json) console.log(JSON.stringify(finalMeta, null, 2));
+    console.error(
+      `snapshot ${snapshotId} failed: ${finalMeta.errorMessage ?? "unknown error"}`,
+    );
+    process.exit(1);
+  }
+
+  if (command.json) {
+    console.log(JSON.stringify(finalMeta, null, 2));
+    return;
+  }
   console.log(
-    `${message}. Poll with: code-viewer query snapshot list --db ${command.db} --json`,
+    `snapshot ${snapshotId} done: ${finalMeta.tables.length} table(s)`,
   );
+}
+
+// snapshot id の最終 status (done|error) を取れるまで /_db/snapshot/list を
+// polling する。timeout 時は best-effort で cancel を投げて exit 1。
+async function waitForSnapshotDone(
+  serverUrl: string,
+  command: Extract<QueryCommand, { kind: "snapshot-create" }>,
+  snapshotId: string,
+): Promise<SnapshotMetaOut> {
+  const pollIntervalMs = snapshotPollIntervalMs();
+  const deadline = Date.now() + command.timeoutSec * 1000;
+  while (true) {
+    if (Date.now() >= deadline) {
+      await cancelSnapshotBestEffort(serverUrl, snapshotId);
+      console.error(
+        `snapshot create timed out after ${command.timeoutSec}s (cancelled ${snapshotId})`,
+      );
+      process.exit(1);
+    }
+    const listBody = (await request(
+      serverUrl,
+      `/_db/snapshot/list?db=${encodeURIComponent(command.db)}`,
+      "GET",
+      undefined,
+      "snapshot list",
+    )) as { snapshots: SnapshotMetaOut[] };
+    const meta = listBody.snapshots.find((s) => s.id === snapshotId);
+    if (!meta) {
+      console.error(
+        `snapshot create --wait: snapshot ${snapshotId} disappeared from list`,
+      );
+      process.exit(1);
+    }
+    if (meta.status !== "running") return meta;
+    await sleep(pollIntervalMs);
+  }
+}
+
+// snapshot 専用の poll interval (search とは別 env var で独立に上書き可能)。
+function snapshotPollIntervalMs(): number {
+  const raw = process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
+  if (raw === undefined) return 500;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 500;
+  return n;
+}
+
+async function cancelSnapshotBestEffort(
+  serverUrl: string,
+  snapshotId: string,
+): Promise<void> {
+  try {
+    await fetch(`${serverUrl}/_db/snapshot/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: new URL(serverUrl).origin,
+        "X-Code-Viewer-Action": "1",
+      },
+      body: JSON.stringify({ id: snapshotId }),
+    });
+  } catch {
+    // Timeout reporting is more useful than cancel failure details here.
+  }
 }
 
 async function runSnapshotList(

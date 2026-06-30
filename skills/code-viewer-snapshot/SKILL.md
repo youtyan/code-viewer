@@ -32,11 +32,22 @@ operation that should modify the database in a predictable way.
 Specify which database and tables to capture. Always use `--tables` to
 avoid scanning unnecessary tables.
 
+Add `--wait --json` so the CLI blocks until the snapshot finishes and
+returns the final metadata as JSON. This lets an AI agent grab the
+snapshot id from the `id` field without a separate
+`snapshot list` poll. Default `--timeout` is 120 seconds; on timeout the
+running snapshot is cancelled and the CLI exits 1.
+
 ```sh
 code-viewer query snapshot create --db app.db \
     --tables users,orders \
-    --note "Before running user registration test"
+    --note "Before running user registration test" \
+    --wait --json
 ```
+
+The ack-only form (no `--wait`) returns immediately with
+`{ ok, message, snapshotId }` and the scan runs in the background;
+use `snapshot list` to confirm completion before diffing.
 
 ### 2. Perform the operation
 
@@ -47,10 +58,14 @@ The human (or a test runner, migration script, etc.) modifies the database.
 ```sh
 code-viewer query snapshot create --db app.db \
     --tables users,orders \
-    --note "After running user registration test"
+    --note "After running user registration test" \
+    --wait --json
 ```
 
 ### 4. Get snapshot IDs
+
+`--wait --json` already prints the `id` for each created snapshot. If you
+took the snapshots without `--wait`, list them to find the IDs:
 
 ```sh
 code-viewer query snapshot list --db app.db
@@ -94,6 +109,9 @@ code-viewer query snapshot delete --id snap-abc123
   database size.
 - The diff is computed on demand, not stored — you can diff any two
   snapshots of the same database.
+- Prefer `--wait --json` when you want to chain the next command on the
+  resulting snapshot id. Tune `--timeout <sec>` (default 120) for very
+  large tables.
 
 ## Full reference
 

@@ -118,6 +118,9 @@ describe("parseQueryArgs", () => {
       db: "app.db",
       tables: ["users", "orders"],
       note: "before",
+      wait: false,
+      timeoutSec: 120,
+      json: false,
     });
   });
 
@@ -131,6 +134,54 @@ describe("parseQueryArgs", () => {
     >;
     expect(command.tables).toBeUndefined();
     expect(command.note).toBe("");
+    // defaults for the new wait-related flags
+    expect(command.wait).toBe(false);
+    expect(command.timeoutSec).toBe(120);
+    expect(command.json).toBe(false);
+  });
+
+  test("snapshot create --wait --json --timeout 30 maps cleanly to the SnapshotCreate command", () => {
+    const result = parseQueryArgs([
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      "users",
+      "--wait",
+      "--json",
+      "--timeout",
+      "30",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.command).toEqual({
+      kind: "snapshot-create",
+      db: "app.db",
+      tables: ["users"],
+      note: "",
+      wait: true,
+      timeoutSec: 30,
+      json: true,
+    });
+  });
+
+  test("snapshot create rejects non-positive --timeout at parse time", () => {
+    for (const bad of ["0", "-5"]) {
+      expect(
+        parseQueryArgs([
+          "snapshot",
+          "create",
+          "--db",
+          "app.db",
+          "--timeout",
+          bad,
+        ]),
+      ).toEqual({
+        ok: false,
+        error: "--timeout must be a positive integer (sec)",
+      });
+    }
   });
 
   test("snapshot list parses --db and --json", () => {
@@ -526,12 +577,18 @@ async function runAndCatchExit(argv: string[]): Promise<void> {
 describe("runQueryCli integration", () => {
   const SERVER = "http://localhost:65535";
 
-  test("snapshot create posts to /_db/snapshot/create and prints the poll hint", async () => {
+  test("snapshot create (no --wait) prints the message + snapshotId + poll hint", async () => {
     const harness = installRunHarness([
       // health probe
       { body: JSON.stringify({ files: [] }) },
-      // snapshot create ack
-      { body: JSON.stringify({ ok: true, message: "snapshot started" }) },
+      // snapshot create ack (new contract: server returns snapshotId)
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-no-wait-1",
+        }),
+      },
     ]);
 
     await runAndCatchExit([
@@ -556,11 +613,43 @@ describe("runQueryCli integration", () => {
       note: "n",
       tables: ["users", "orders"],
     });
-    expect(harness.logs.join("\n")).toMatch(/snapshot started/);
-    expect(harness.logs.join("\n")).toMatch(
+    const out = harness.logs.join("\n");
+    expect(out).toMatch(/snapshot started/);
+    expect(out).toMatch(/\[id=snap-no-wait-1\]/);
+    expect(out).toMatch(
       /Poll with: code-viewer query snapshot list --db app.db --json/,
     );
     expect(harness.exits).toEqual([]);
+  });
+
+  test("snapshot create --json (no --wait) emits structured ack", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-json-1",
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual({
+      ok: true,
+      message: "snapshot started",
+      snapshotId: "snap-json-1",
+    });
   });
 
   test("snapshot list (without --json) renders status / id / table count", async () => {
@@ -932,6 +1021,206 @@ describe("runQueryCli search integration", () => {
   });
 });
 
+describe("runQueryCli snapshot create --wait integration", () => {
+  const SERVER = "http://localhost:65535";
+  const originalPollEnv = process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
+
+  function withZeroPollInterval(): void {
+    process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = "0";
+  }
+  function restorePollEnv(): void {
+    if (originalPollEnv === undefined) {
+      delete process.env.CODE_VIEWER_SNAPSHOT_POLL_MS;
+    } else {
+      process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = originalPollEnv;
+    }
+  }
+  afterEach(restorePollEnv);
+
+  // 共通のスナップショット meta builder (テスト用 placeholder のみ)。
+  function meta(
+    status: "running" | "done" | "error",
+    overrides: Partial<{
+      id: string;
+      tables: string[];
+      errorMessage: string;
+    }> = {},
+  ) {
+    return {
+      id: overrides.id ?? "snap-wait-1",
+      dbId: "app.db",
+      kind: "sqlite",
+      note: "n",
+      createdAt: "2026-06-30T12:00:00Z",
+      tables: overrides.tables ?? ["users", "orders"],
+      status,
+      ...(overrides.errorMessage
+        ? { errorMessage: overrides.errorMessage }
+        : {}),
+    };
+  }
+
+  test("polls snapshot list until status=done, prints final meta as JSON when --json", async () => {
+    withZeroPollInterval();
+    const finalMeta = meta("done");
+    const harness = installRunHarness([
+      // health
+      { body: JSON.stringify({ files: [] }) },
+      // create ack with snapshotId
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-1",
+        }),
+      },
+      // list response 1: still running
+      { body: JSON.stringify({ snapshots: [meta("running")] }) },
+      // list response 2: done
+      { body: JSON.stringify({ snapshots: [finalMeta] }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--tables",
+      "users,orders",
+      "--note",
+      "n",
+      "--wait",
+      "--json",
+    ]);
+
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
+    expect(harness.requests[2].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=app.db`,
+    );
+    expect(harness.requests[2].method).toBe("GET");
+    expect(harness.requests[3].url).toBe(
+      `${SERVER}/_db/snapshot/list?db=app.db`,
+    );
+    expect(harness.exits).toEqual([]);
+    expect(JSON.parse(harness.logs.join("\n"))).toEqual(finalMeta);
+  });
+
+  test("status=error prints stderr and exits 1 (still emits final meta on --json)", async () => {
+    withZeroPollInterval();
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-err",
+        }),
+      },
+      {
+        body: JSON.stringify({
+          snapshots: [
+            meta("error", {
+              id: "snap-wait-err",
+              errorMessage: "table not found",
+            }),
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+      "--json",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot snap-wait-err failed: table not found/,
+    );
+    // --json は失敗時も meta を 1 度出してから exit 1 する契約。
+    expect(JSON.parse(harness.logs.join("\n")).status).toBe("error");
+  });
+
+  test("timeout cancels the snapshot via /_db/snapshot/cancel and exits 1", async () => {
+    // poll interval を --timeout 1s より十分長くすれば、1 回 list して sleep
+    // した後の次 iter で必ず deadline 突破 → cancel に入る (耐レース)。
+    process.env.CODE_VIEWER_SNAPSHOT_POLL_MS = "1500";
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          ok: true,
+          message: "snapshot started",
+          snapshotId: "snap-wait-timeout",
+        }),
+      },
+      {
+        body: JSON.stringify({
+          snapshots: [meta("running", { id: "snap-wait-timeout" })],
+        }),
+      },
+      // cancel ack
+      { body: JSON.stringify({ ok: true }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+      "--timeout",
+      "1",
+    ]);
+
+    // health + create + list (1 度走った後 sleep) + cancel = 4
+    expect(harness.requests).toHaveLength(4);
+    expect(harness.requests[3]).toEqual({
+      url: `${SERVER}/_db/snapshot/cancel`,
+      method: "POST",
+      body: { id: "snap-wait-timeout" },
+    });
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot create timed out after 1s \(cancelled snap-wait-timeout\)/,
+    );
+  }, 5000);
+
+  test("old server (no snapshotId in ack) with --wait fails fast with a clear error", async () => {
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      // 旧 server 互換: snapshotId 未返却
+      { body: JSON.stringify({ ok: true, message: "snapshot started" }) },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER,
+      "snapshot",
+      "create",
+      "--db",
+      "app.db",
+      "--wait",
+    ]);
+
+    expect(harness.exits).toEqual([1]);
+    expect(harness.errs.join("\n")).toMatch(
+      /snapshot create --wait: server did not return snapshotId/,
+    );
+  });
+});
+
 // Markdown 内のコードフェンス (```...```) からだけ抽出する。
 // 散文中の `code-viewer query ...` (バックティック付き) は人間向けの言及で
 // 構文契約の対象外なので無視する。`#` で始まる行はコメントなのでスキップ。
@@ -1026,7 +1315,11 @@ describe("bundled skill + README track the CLI contract", () => {
   // skill MD / README に書かれている `code-viewer query ...` 例を、実 CLI
   // parser に通す。flag rename / 削除済み subcommand / typo が docs に
   // 混入したら、文字列存在チェックではなく実 parser で落とす。
-  const docs = ["skills/code-viewer-query/SKILL.md", "README.md"] as const;
+  const docs = [
+    "skills/code-viewer-query/SKILL.md",
+    "skills/code-viewer-snapshot/SKILL.md",
+    "README.md",
+  ] as const;
 
   for (const doc of docs) {
     test(`${doc}: every documented "code-viewer query ..." example parses`, () => {
@@ -1045,7 +1338,14 @@ describe("bundled skill + README track the CLI contract", () => {
       }
       expect(failures).toEqual([]);
     });
+  }
 
+  const searchDocs = [
+    "skills/code-viewer-query/SKILL.md",
+    "README.md",
+  ] as const;
+
+  for (const doc of searchDocs) {
     test(`${doc}: documents the search subcommand`, () => {
       const text = readFileSync(join(REPO_ROOT, doc), "utf8");
       const invocations = extractDocumentedQueryInvocations(text);
