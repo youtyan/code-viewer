@@ -1064,23 +1064,24 @@ describe("runQueryCli integration", () => {
     expect(harness.exits).toEqual([]);
     expect(harness.errs).toEqual([]);
     const out = harness.logs.join("\n");
-    // 各 source heading は # で始まり ordinal が付く。db id は必ず single-quote。
+    // 各 source heading は # で始まり ordinal が付く。db id と server URL は
+    // 必ず single-quote。各 SQL 行は --server '<SERVER>' を pin する。
     expect(out).toMatch(/^# source 1: app\.db \(sqlite\)$/m);
     expect(out).toMatch(
-      /^code-viewer query schema --db 'app\.db' --with-columns --json$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'app\.db' --with-columns --json$/m,
     );
     expect(out).toMatch(
-      /^code-viewer query exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
     );
     // sqlite には schemas 行が出ない。
-    expect(/code-viewer query schemas --db 'app\.db'/.test(out)).toBe(false);
+    expect(/query schemas --db 'app\.db'/.test(out)).toBe(false);
 
     expect(out).toMatch(/^# source 2: docker:pg-svc \(postgresql\)$/m);
     expect(out).toMatch(
-      /^code-viewer query schemas --db 'docker:pg-svc' --json$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' schemas --db 'docker:pg-svc' --json$/m,
     );
     expect(out).toMatch(
-      /^code-viewer query schema --db 'docker:pg-svc' --with-columns --json$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'docker:pg-svc' --with-columns --json$/m,
     );
 
     expect(out).toMatch(/^# source 3: docker:s3-svc\/sample-bucket \(s3\)$/m);
@@ -1093,15 +1094,24 @@ describe("runQueryCli integration", () => {
 
     expect(out).toMatch(/^# source 4: docker:mysql-svc \(mysql\)$/m);
     expect(out).toMatch(
-      /^code-viewer query schema --db 'docker:mysql-svc' --with-columns --json$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'docker:mysql-svc' --with-columns --json$/m,
     );
     expect(out).toMatch(
-      /^code-viewer query exec --db 'docker:mysql-svc' --sql "SELECT 1" --no-save$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'docker:mysql-svc' --sql "SELECT 1" --no-save$/m,
     );
     // MySQL はこの server の /_db/schemas では multi-schema 扱いしない。
-    expect(/code-viewer query schemas --db 'docker:mysql-svc'/.test(out)).toBe(
-      false,
+    expect(/query schemas --db 'docker:mysql-svc'/.test(out)).toBe(false);
+    // 全 SQL 行で --server prefix が付いていることを regression guard。
+    // (auto-discovery に逸れて別 server / no server に流れない保証)
+    const sqlLines = out
+      .split("\n")
+      .filter((line) => line.startsWith("code-viewer query"));
+    // postgresql=3 + sqlite=2 + mysql=2 = 7 SQL 行が出る。s3 は出ない。
+    expect(sqlLines).toHaveLength(7);
+    const missingPrefix = sqlLines.filter(
+      (line) => !line.startsWith("code-viewer query --server '"),
     );
+    expect(missingPrefix).toEqual([]);
   });
 
   test("query sources --commands single-quotes ids containing spaces and quotes", async () => {
@@ -1126,13 +1136,54 @@ describe("runQueryCli integration", () => {
 
     expect(harness.exits).toEqual([]);
     const out = harness.logs.join("\n");
-    // heading は生 id (notice 用)、command は quote 済み。
+    // heading は生 id (notice 用)、command は quote 済み。--server prefix も付く。
     expect(out).toMatch(/^# source 1: sample's data\.db \(sqlite\)$/m);
     expect(out).toMatch(
-      /^code-viewer query schema --db 'sample'\\''s data\.db' --with-columns --json$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' schema --db 'sample'\\''s data\.db' --with-columns --json$/m,
     );
     expect(out).toMatch(
-      /^code-viewer query exec --db 'sample'\\''s data\.db' --sql "SELECT 1" --no-save$/m,
+      /^code-viewer query --server 'http:\/\/localhost:65535' exec --db 'sample'\\''s data\.db' --sql "SELECT 1" --no-save$/m,
+    );
+  });
+
+  test("query sources --commands single-quotes the server URL itself when it contains spaces", async () => {
+    // --server URL に空白を含むケース。ensureServerUrl は trailing slash を
+    // 剥がすだけで、内部 path はそのまま resolved serverUrl に渡される。
+    // shellSingleQuote が URL にも効いて貼り付け安全になることを検証する。
+    const SERVER_WITH_SPACE = "http://localhost:65535/with space/";
+    const harness = installRunHarness([
+      { body: JSON.stringify({ files: [] }) },
+      {
+        body: JSON.stringify({
+          files: [
+            {
+              id: "app.db",
+              path: "app.db",
+              name: "app.db",
+              sizeBytes: 1024,
+              kind: "sqlite",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await runAndCatchExit([
+      "--server",
+      SERVER_WITH_SPACE,
+      "sources",
+      "--commands",
+    ]);
+
+    expect(harness.exits).toEqual([]);
+    const out = harness.logs.join("\n");
+    // trailing slash は ensureServerUrl で剥がされ "http://localhost:65535/with space"
+    // が resolved serverUrl になる。space を含む URL も single-quote 内で literal。
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535\/with space' schema --db 'app\.db' --with-columns --json$/m,
+    );
+    expect(out).toMatch(
+      /^code-viewer query --server 'http:\/\/localhost:65535\/with space' exec --db 'app\.db' --sql "SELECT 1" --no-save$/m,
     );
   });
 

@@ -57,8 +57,11 @@ browser's Database > Search tab, so the human can review the same workflow.
    block of shell-pasteable next-step commands (`schema --with-columns
    --json`, an `exec` example with `SELECT 1 --no-save`, plus `schemas` for
    PostgreSQL). For Redis / Elasticsearch / S3 sources it prints a browser
-   Datastores pane hint instead of invalid SQL commands. Every `--db` value
-   is wrapped in POSIX single-quotes so paths with spaces or `'` paste safely.
+   Datastores pane hint instead of invalid SQL commands. Every emitted SQL
+   command line pins `--server '<url>'` to the same server URL this invocation
+   resolved, so pasting them into a different shell never silently falls back
+   to auto-discovery. Every `--db` value and the server URL are wrapped in
+   POSIX single-quotes so paths or URLs with spaces or `'` paste safely.
    `--json` and `--commands` are mutually exclusive.
 
    ```sh
