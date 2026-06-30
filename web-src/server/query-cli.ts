@@ -674,7 +674,7 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     return;
   }
   const root = resolveRepoRoot(cwd);
-  const serverUrl = await ensureServerUrl(root, server, "/_db/files");
+  const serverUrl = await ensureServerUrl(root, server, "/");
 
   if (command.kind === "sources") return runSources(serverUrl, command);
   if (command.kind === "exec") return runExec(serverUrl, command);

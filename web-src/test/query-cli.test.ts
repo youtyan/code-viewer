@@ -648,7 +648,7 @@ function installRunHarness(
   const errs: string[] = [];
   const exits: CapturedExit[] = [];
 
-  // 順番に消費する fake fetch。/_db/files の health probe を最初に消費する。
+  // 順番に消費する fake fetch。server health probe を最初に消費する。
   let index = 0;
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -724,8 +724,8 @@ async function runAndCatchExit(argv: string[]): Promise<void> {
 describe("runQueryCli integration", () => {
   const SERVER = "http://localhost:65535";
 
-  // sources は ensureServerUrl の health probe と body の双方で /_db/files を
-  // 叩くので、harness では同じ endpoint を 2 回ぶん mock する点に注意。
+  // sources は ensureServerUrl の cheap health probe と body の双方で fetch する。
+  // /_db/files discovery 自体は body fetch の 1 回だけに抑える。
   test("query sources --json emits the /_db/files response verbatim", async () => {
     const payload = {
       files: [
@@ -762,7 +762,7 @@ describe("runQueryCli integration", () => {
     await runAndCatchExit(["--server", SERVER, "sources", "--json"]);
 
     expect(harness.requests).toHaveLength(2);
-    expect(harness.requests[0].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
     expect(harness.requests[1].url).toBe(`${SERVER}/_db/files`);
     expect(harness.requests[1].method).toBe("GET");
     expect(harness.exits).toEqual([]);
@@ -928,7 +928,7 @@ describe("runQueryCli integration", () => {
     ]);
 
     expect(harness.requests).toHaveLength(2);
-    expect(harness.requests[0].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
     expect(harness.requests[1].url).toBe(`${SERVER}/_db/snapshot/create`);
     expect(harness.requests[1].method).toBe("POST");
     expect(harness.requests[1].body).toEqual({
@@ -1267,7 +1267,7 @@ describe("runQueryCli search integration", () => {
     ]);
 
     expect(harness.requests).toHaveLength(4);
-    expect(harness.requests[0].url).toBe(`${SERVER}/_db/files`);
+    expect(harness.requests[0].url).toBe(`${SERVER}/`);
     expect(harness.requests[1]).toEqual({
       url: `${SERVER}/_db/search/start`,
       method: "POST",
