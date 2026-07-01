@@ -1295,6 +1295,14 @@ body.gdp-history-page #topbar .ref-pickers {
   font-size: 12px;
   font-weight: 600;
 }
+.history-refresh-result {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
+}
 .history-filter-wrap {
   position: relative;
   padding: 7px 12px 9px;

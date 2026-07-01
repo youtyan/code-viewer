@@ -403,6 +403,7 @@ function installHistoryViewDom() {
   const sentinel = new FakeElement();
   const refreshButton = new FakeElement();
   const refreshLabel = new FakeElement();
+  const refreshResult = new FakeElement();
   const info = new FakeElement();
   const documentListeners: Record<string, Array<(event: unknown) => void>> = {};
   const head = new FakeElement();
@@ -420,6 +421,8 @@ function installHistoryViewDom() {
   body.className = "hci-body";
   refreshButton.className = "history-refresh";
   refreshLabel.className = "history-refresh-label";
+  refreshResult.className = "db-refresh-result history-refresh-result";
+  refreshResult.hidden = true;
   refreshButton.appendChild(refreshLabel);
   head.append(sha, author, date);
   info.append(head, subject, body);
@@ -430,7 +433,9 @@ function installHistoryViewDom() {
         ? info
         : selector === ".history-refresh"
           ? refreshButton
-          : null,
+          : selector === ".history-refresh-result"
+            ? refreshResult
+            : null,
     createElement: () => new FakeElement(),
     addEventListener: (event: string, listener: (event: unknown) => void) => {
       documentListeners[event] = [
@@ -462,6 +467,7 @@ function installHistoryViewDom() {
     sentinel,
     refreshButton,
     refreshLabel,
+    refreshResult,
     info,
     head,
     subject,
@@ -928,8 +934,15 @@ describe("history view lifecycle", () => {
   });
 
   test("refresh button forces the current history scope to reload", async () => {
-    const { panel, list, banner, status, sentinel, refreshButton } =
-      installHistoryViewDom();
+    const {
+      panel,
+      list,
+      banner,
+      status,
+      sentinel,
+      refreshButton,
+      refreshResult,
+    } = installHistoryViewDom();
     const commit = {
       sha: "abc123",
       parents: ["parent-a"],
@@ -982,6 +995,9 @@ describe("history view lifecycle", () => {
     ).toBe("更新");
     await waitFor(() => status.textContent === "新しいコミットはありません");
     expect(status.hidden).toBe(false);
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("新しいコミットはありません");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
     expect(
       list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
     ).toEqual([HISTORY_WORKTREE_COMMIT, commit.sha]);
@@ -993,8 +1009,15 @@ describe("history view lifecycle", () => {
   });
 
   test("refresh result announces a newer top commit and highlights its row", async () => {
-    const { panel, list, banner, status, sentinel, refreshButton } =
-      installHistoryViewDom();
+    const {
+      panel,
+      list,
+      banner,
+      status,
+      sentinel,
+      refreshButton,
+      refreshResult,
+    } = installHistoryViewDom();
     const firstCommit = {
       sha: "aaa1111aaaa",
       parents: ["parent-a"],
@@ -1053,6 +1076,9 @@ describe("history view lifecycle", () => {
 
     await waitFor(() => status.textContent === "更新: bbb2222 が最新です");
     expect(fetchCount).toBe(2);
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("更新: bbb2222 が最新です");
+    expect(refreshResult.classList.contains("changed")).toBe(true);
     const rows = list.querySelectorAll(".history-item");
     expect(rows.map((row) => row.dataset.sha)).toEqual([
       HISTORY_WORKTREE_COMMIT,
@@ -1062,9 +1088,146 @@ describe("history view lifecycle", () => {
     expect(rows[1].classList.contains("history-item-fresh")).toBe(true);
   });
 
+  test("stale refresh results do not overwrite after the commit filter changes", async () => {
+    const {
+      panel,
+      list,
+      banner,
+      status,
+      sentinel,
+      refreshButton,
+      refreshResult,
+      info,
+    } = installHistoryViewDom();
+    const filterInput = new FakeElement();
+    const filterClearButton = new FakeElement();
+    const firstCommit = {
+      sha: "aaa1111aaaa",
+      parents: ["parent-a"],
+      subject: "first",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    const staleCommit = {
+      sha: "ccc3333cccc",
+      parents: ["parent-c"],
+      subject: "stale",
+      body: "",
+      author: "Carol",
+      when: new Date().toISOString(),
+    };
+    const filteredCommit = {
+      sha: "bbb2222bbbb",
+      parents: ["parent-b"],
+      subject: "filtered",
+      body: "",
+      author: "Bob",
+      when: new Date().toISOString(),
+    };
+    const pendingRefresh = deferred<Response>();
+    const fetchedUrls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      const url = String(input);
+      fetchedUrls.push(url);
+      if (fetchedUrls.length === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ commits: [firstCommit], hasMore: false }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (fetchedUrls.length === 2) return pendingRefresh.promise;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ commits: [filteredCommit], hasMore: false }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory({
+      mount: {
+        panel: panel as unknown as HTMLElement,
+        list: list as unknown as HTMLOListElement,
+        banner: banner as unknown as HTMLElement,
+        status: status as unknown as HTMLElement,
+        sentinel: sentinel as unknown as HTMLElement,
+        filterInput: filterInput as unknown as HTMLInputElement,
+        filterClearButton: filterClearButton as unknown as HTMLButtonElement,
+        refreshButton: refreshButton as unknown as HTMLButtonElement,
+        refreshResult: refreshResult as unknown as HTMLElement,
+        commitInfo: info as unknown as HTMLElement,
+      },
+    });
+
+    refreshButton.click();
+    await waitFor(() => fetchedUrls.length === 2);
+
+    filterInput.value = "bbb";
+    filterInput.dispatch("input", { target: filterInput });
+    await waitFor(() => fetchedUrls.length === 3);
+    await waitFor(() =>
+      list
+        .querySelectorAll(".history-item")
+        .some((row) => row.dataset.sha === filteredCommit.sha),
+    );
+
+    pendingRefresh.resolve(
+      new Response(JSON.stringify({ commits: [staleCommit], hasMore: false }), {
+        status: 200,
+      }),
+    );
+    await waitFor(() => refreshButton.disabled === false);
+
+    const rows = list.querySelectorAll(".history-item");
+    expect(fetchedUrls.some((url) => url.includes("q=bbb"))).toBe(true);
+    expect(rows.map((row) => row.dataset.sha)).toEqual([
+      HISTORY_WORKTREE_COMMIT,
+      filteredCommit.sha,
+    ]);
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(
+      rows.some((row) => row.classList.contains("history-item-fresh")),
+    ).toBe(false);
+  });
+
   test("notePossibleUpdate flags the refresh button, and refreshing clears it", async () => {
-    const { panel, list, banner, status, sentinel, refreshButton } =
-      installHistoryViewDom();
+    const {
+      panel,
+      list,
+      banner,
+      status,
+      sentinel,
+      refreshButton,
+      refreshResult,
+    } = installHistoryViewDom();
     const commit = {
       sha: "abc123",
       parents: ["parent-a"],
@@ -1115,6 +1278,8 @@ describe("history view lifecycle", () => {
       refreshButton.querySelector(".history-refresh-label")?.textContent,
     ).toBe("更新");
     expect(status.hidden).toBe(true);
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
 
     view.notePossibleUpdate();
     expect(refreshButton.classList.contains("has-update")).toBe(true);
@@ -1127,6 +1292,8 @@ describe("history view lifecycle", () => {
     ).toBe("更新あり");
     expect(status.hidden).toBe(false);
     expect(status.textContent).toBe("新しい履歴がある可能性があります");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
 
     refreshButton.click();
     await waitFor(() => fetchCount === 2);
@@ -1138,6 +1305,8 @@ describe("history view lifecycle", () => {
     ).toBe("更新");
     expect(status.hidden).toBe(false);
     expect(status.textContent).toBe("新しいコミットはありません");
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("新しいコミットはありません");
   });
 
   test("notePossibleUpdate status takes priority over an empty commit list", async () => {

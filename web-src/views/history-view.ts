@@ -109,6 +109,7 @@ export type HistoryViewMount = {
   filterInput?: HTMLInputElement | null;
   filterClearButton?: HTMLButtonElement | null;
   refreshButton?: HTMLButtonElement | null;
+  refreshResult?: HTMLElement | null;
   commitInfo?: HTMLElement | null;
 };
 
@@ -147,6 +148,10 @@ export function buildHistoryPanelDom(
   refreshLabel.className = "history-refresh-label";
   refreshLabel.textContent = HISTORY_TEXT.en.refreshLabel;
   refreshButton.appendChild(refreshLabel);
+  const refreshResult = document.createElement("span");
+  refreshResult.className = "db-refresh-result history-refresh-result";
+  refreshResult.setAttribute("aria-live", "polite");
+  refreshResult.hidden = true;
 
   if (page) {
     const refMount = document.createElement("span");
@@ -156,7 +161,7 @@ export function buildHistoryPanelDom(
     refMount.dataset.title = "history ref";
     panelHead.appendChild(refMount);
   }
-  panelHead.appendChild(refreshButton);
+  panelHead.append(refreshButton, refreshResult);
 
   const filterWrap = document.createElement("div");
   filterWrap.className = "history-filter-wrap";
@@ -212,6 +217,7 @@ export function buildHistoryPanelDom(
     filterInput,
     filterClearButton,
     refreshButton,
+    refreshResult,
   };
 }
 
@@ -329,6 +335,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     ),
     refreshButton:
       document.querySelector<HTMLButtonElement>(".history-refresh"),
+    refreshResult: document.querySelector<HTMLElement>(
+      ".history-refresh-result",
+    ),
     commitInfo: document.querySelector<HTMLElement>("#history-commit-info"),
   };
   let activeMount = defaultMount;
@@ -389,6 +398,18 @@ export function createHistoryView(deps: HistoryViewDeps) {
     return null;
   }
 
+  function currentRefreshScopeKey(): string {
+    const scope = historyScopeFromRoute();
+    if (!scope) return "";
+    return [
+      scope.mode,
+      scope.logRef,
+      scope.routeRef,
+      scope.pathFilter,
+      query,
+    ].join("\0");
+  }
+
   function worktreeDiffRange() {
     return { from: "HEAD", to: "worktree" };
   }
@@ -413,6 +434,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function clearRefreshResult() {
     refreshStatus = { type: "none" };
     freshSha = "";
+    syncRefreshResult();
   }
 
   function setRefreshResult(previousTopSha: string, nextTopSha: string) {
@@ -559,6 +581,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function renderList() {
     syncRefreshButton(activeMount.refreshButton);
+    syncRefreshResult(activeMount.refreshResult);
     const now = new Date();
     const html: string[] = mode === "history" ? [worktreeRow()] : [];
     let lastGroup = "";
@@ -596,6 +619,18 @@ export function createHistoryView(deps: HistoryViewDeps) {
         ? text.refreshLabelPending
         : text.refreshLabel;
     }
+  }
+
+  function syncRefreshResult(result?: HTMLElement | null) {
+    const el = result ?? activeMount.refreshResult;
+    if (!el) return;
+    const message =
+      refreshStatus.type === "updated" || refreshStatus.type === "unchanged"
+        ? refreshStatusMessage()
+        : "";
+    el.textContent = message;
+    el.hidden = message.length === 0;
+    el.classList.toggle("changed", refreshStatus.type === "updated");
   }
 
   function syncFilterClearButton(button?: HTMLButtonElement | null) {
@@ -1079,13 +1114,17 @@ export function createHistoryView(deps: HistoryViewDeps) {
   async function handleRefreshClick() {
     const button = attachedRefreshButton;
     if (button?.disabled) return;
+    const refreshScopeKey = currentRefreshScopeKey();
     const previousTopSha = latestCommitSha();
+    clearRefreshResult();
     if (button) {
       button.disabled = true;
       button.classList.add("spinning");
     }
     try {
       await enterHistory({ mount: activeMount, force: true });
+      if (!refreshScopeKey || currentRefreshScopeKey() !== refreshScopeKey)
+        return;
       setRefreshResult(previousTopSha, latestCommitSha());
     } finally {
       if (button) {
@@ -1098,6 +1137,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function activateMount(mount: HistoryViewMount) {
     if (activeMount === mount && attachedList === mount.list) {
       syncRefreshButton(mount.refreshButton);
+      syncRefreshResult(mount.refreshResult);
       syncFilterClearButton(mount.filterClearButton);
       return;
     }
@@ -1154,6 +1194,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const refreshButton = mount.refreshButton ?? null;
     if (refreshButton) {
       syncRefreshButton(refreshButton);
+      syncRefreshResult(mount.refreshResult);
       refreshButton.addEventListener("click", handleRefreshClick);
       attachedRefreshButton = refreshButton;
     }
@@ -1195,6 +1236,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     onRefPicked,
     localize: () => {
       syncRefreshButton(activeMount.refreshButton);
+      syncRefreshResult(activeMount.refreshResult);
       syncFilterClearButton(activeMount.filterClearButton);
       renderList();
     },
@@ -1204,6 +1246,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     notePossibleUpdate: () => {
       refreshStatus = { type: "pending" };
       syncRefreshButton(activeMount.refreshButton);
+      syncRefreshResult(activeMount.refreshResult);
       syncRefreshStatusText();
     },
     isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
