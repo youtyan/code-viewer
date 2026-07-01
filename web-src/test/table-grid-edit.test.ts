@@ -507,6 +507,93 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
+  test("filtered empty state explains zero rows and clears filters", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return filters.length
+          ? { ...initialData(), rows: [], totalRows: 0 }
+          : initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(nameFilter, "Nobody");
+
+    await waitFor(() => fetchCalls.length === 1);
+    const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
+    await waitFor(() => empty.hidden === false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No rows match 1 active filter",
+    );
+    expect(
+      empty.querySelector(".db-pane-empty-hint")?.textContent || "",
+    ).toMatch(/current search or column filters/);
+    const clearAction = q<HTMLButtonElement>(empty, "button");
+    expect(clearAction.textContent).toBe("Clear filters");
+    expect(clearAction.disabled).toBe(false);
+
+    fetchCalls.length = 0;
+    clearAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([]);
+    expect(nameFilter.value).toBe("");
+    await waitFor(() => empty.hidden === true);
+    expect(clearAction.hidden).toBe(true);
+    expect(clearAction.disabled).toBe(true);
+    grid.destroy();
+  });
+
+  test("filtered empty state also covers global search", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return filters.length
+          ? { ...initialData(), rows: [], totalRows: 0 }
+          : initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Nobody");
+
+    await waitFor(() => fetchCalls.length === 1);
+    const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
+    await waitFor(() => empty.hidden === false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No rows match 1 active filter",
+    );
+
+    const clearAction = q<HTMLButtonElement>(empty, "button");
+    fetchCalls.length = 0;
+    clearAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([]);
+    expect(search.value).toBe("");
+    await waitFor(() => empty.hidden === true);
+    grid.destroy();
+  });
+
   test("refresh status shows active filters are kept while reloading", async () => {
     let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
     const fetchCalls: unknown[][] = [];

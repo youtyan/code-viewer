@@ -58,6 +58,9 @@ export type DbText = {
     exportAction: string;
     foreignKeyHint: string;
     relatedEmpty: string;
+    filteredEmptyTitle: (count: number) => string;
+    filteredEmptyHint: string;
+    filteredEmptyAction: string;
     statusRows: (n: string) => string;
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
@@ -386,6 +389,11 @@ const EN: DbText = {
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
+    filteredEmptyTitle: (count) =>
+      `No rows match ${count} active filter${count === 1 ? "" : "s"}`,
+    filteredEmptyHint:
+      "The table was loaded, but the current search or column filters hide every row.",
+    filteredEmptyAction: "Clear filters",
     statusRows: (n) => `${n} rows`,
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
@@ -712,6 +720,11 @@ const JA: DbText = {
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",
+    filteredEmptyTitle: (count) =>
+      `フィルタ ${count} 件に一致する行がありません`,
+    filteredEmptyHint:
+      "表は読み込めていますが、現在の検索/列フィルタですべての行が隠れています。",
+    filteredEmptyAction: "フィルタ解除",
     statusRows: (n) => `${n} 行`,
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,

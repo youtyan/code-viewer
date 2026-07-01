@@ -292,6 +292,28 @@ export function createTableGrid(
   const body = document.createElement("div");
   body.className = "db-grid-body";
 
+  const filteredEmpty = document.createElement("div");
+  filteredEmpty.className = "db-pane-empty";
+  filteredEmpty.hidden = true;
+  const filteredEmptyIcon = document.createElement("div");
+  filteredEmptyIcon.className = "db-pane-empty-icon";
+  filteredEmptyIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+  const filteredEmptyTitle = document.createElement("div");
+  filteredEmptyTitle.className = "db-pane-empty-title";
+  const filteredEmptyHint = document.createElement("div");
+  filteredEmptyHint.className = "db-pane-empty-hint";
+  const filteredEmptyAction = document.createElement("button");
+  filteredEmptyAction.type = "button";
+  filteredEmptyAction.className = "db-btn db-btn-sm";
+  filteredEmptyAction.hidden = true;
+  filteredEmptyAction.disabled = true;
+  filteredEmpty.append(
+    filteredEmptyIcon,
+    filteredEmptyTitle,
+    filteredEmptyHint,
+    filteredEmptyAction,
+  );
+
   const detailPanel = document.createElement("div");
   detailPanel.className = "db-grid-detail-panel";
   detailPanel.hidden = true;
@@ -302,7 +324,7 @@ export function createTableGrid(
   detailResize.addEventListener("mousedown", startDetailResize);
   detailPanel.appendChild(detailResize);
 
-  viewport.append(spacer, body);
+  viewport.append(spacer, body, filteredEmpty);
   el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
 
   // セル詳細フッタの高さ (関連パネルと同じ persist 経路)。embedded の埋め込み
@@ -639,6 +661,21 @@ export function createTableGrid(
     filterClear.setAttribute("aria-label", action);
   }
 
+  function syncFilteredEmptyState(): void {
+    const count = activeFilterCount();
+    const show = totalRows === 0 && count > 0;
+    filteredEmpty.hidden = !show;
+    filteredEmptyAction.hidden = !show;
+    filteredEmptyAction.disabled = !show;
+    if (!show) return;
+    const t = text().grid;
+    filteredEmptyTitle.textContent = t.filteredEmptyTitle(count);
+    filteredEmptyHint.textContent = t.filteredEmptyHint;
+    filteredEmptyAction.textContent = t.filteredEmptyAction;
+    filteredEmptyAction.title = t.clearFiltersAction(count);
+    filteredEmptyAction.setAttribute("aria-label", t.clearFiltersAction(count));
+  }
+
   function clearAllFilters(): void {
     globalSearchValue = "";
     filterInput.value = "";
@@ -650,6 +687,12 @@ export function createTableGrid(
       });
     syncFilterClearButton();
     syncRefreshButton();
+    syncFilteredEmptyState();
+  }
+
+  function clearFiltersAndReload(): void {
+    clearAllFilters();
+    invalidateData();
   }
 
   function resetSelectionAndDetail() {
@@ -1896,6 +1939,7 @@ export function createTableGrid(
           i < totalRows ? buildDataRow(i) : buildDraftRow(i - totalRows),
         );
       }
+      syncFilteredEmptyState();
 
       if (focusRestore) {
         const next = body.querySelector<HTMLInputElement>(
@@ -2057,8 +2101,11 @@ export function createTableGrid(
     }
   });
   filterClear.addEventListener("click", () => {
-    clearAllFilters();
-    invalidateData();
+    clearFiltersAndReload();
+  });
+  filteredEmptyAction.addEventListener("click", () => {
+    clearFiltersAndReload();
+    filterInput.focus?.();
   });
   refreshBtn.addEventListener("click", () => {
     void refreshCurrentTable();
@@ -2100,6 +2147,7 @@ export function createTableGrid(
     filterInput.placeholder = t.grid.searchPlaceholder;
     syncFilterClearButton();
     syncRefreshButton();
+    syncFilteredEmptyState();
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
     newRowBtn.textContent = t.edit.newRow;
