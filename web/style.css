@@ -507,12 +507,6 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   border-color: var(--success);
   color: var(--success);
 }
-#cancel-requests {
-  width: auto;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-}
 #cancel-requests.active {
   color: var(--danger);
   border-color: var(--danger);
@@ -4814,12 +4808,12 @@ body.gdp-file-detail-page #empty {
   #annotations-toggle,
   #viewer-settings,
   #doctor-btn,
+  #cancel-requests,
   #theme {
     width: 24px;
     height: 24px;
   }
-  #auto-update,
-  #cancel-requests {
+  #auto-update {
     padding: 0 6px;
   }
 }

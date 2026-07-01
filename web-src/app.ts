@@ -184,9 +184,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     const cancellable = state.cancellable > 0;
     cancelButton.disabled = !cancellable;
     cancelButton.classList.toggle("active", cancellable);
-    cancelButton.title = cancellable
+    const cancelTitle = cancellable
       ? `cancel ${state.cancellable} in-flight request${state.cancellable === 1 ? "" : "s"}`
       : "no in-flight requests";
+    cancelButton.title = cancelTitle;
+    cancelButton.setAttribute("aria-label", cancelTitle);
   }
 
   function cancelInFlightRequests(): void {
@@ -2781,6 +2783,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     );
     if (autoUpdateIcon) {
       autoUpdateIcon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    }
+    const cancelRequestsIcon = document.querySelector<HTMLElement>(
+      "#cancel-requests .goi-icon",
+    );
+    if (cancelRequestsIcon) {
+      cancelRequestsIcon.innerHTML = iconSvg("octicon-x", X_16_PATH);
     }
   }
 
