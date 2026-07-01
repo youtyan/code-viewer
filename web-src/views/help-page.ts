@@ -420,7 +420,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Data tab",
-                    "Paginated grid with sort, filter, cell copy, and CSV/JSON export (capped at 100k rows; export respects the current filter and sort). Toggle Edit mode in the prefs bar to enable inline editing — double-click a cell to edit, queue insert/delete via row actions, and commit the batch atomically. Edited rows/cells highlight in yellow until committed.",
+                    "Paginated grid with sort, filter, cell copy, CSV/JSON export (capped at 100k rows; export respects the current filter and sort), and a table-only reload action that keeps global search and column filters. Reload results are announced beside the button so row-count changes are visible. Toggle Edit mode in the prefs bar to enable inline editing — double-click a cell to edit, queue insert/delete via row actions, and commit the batch atomically. Edited rows/cells highlight in yellow until committed.",
                   ],
                   [
                     "Detail footer & related panel",
@@ -428,7 +428,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Schema tab",
-                    "Column definitions, indexes, foreign keys, triggers, and DDL.",
+                    "Column definitions, indexes, foreign keys, triggers, and DDL, with an in-tab refresh action for reloading the current table structure.",
                   ],
                   [
                     "Query editor",
@@ -1087,7 +1087,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Data タブ",
-                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSON エクスポート（最大10万行、現在のフィルター/ソートを反映）。設定バーで Edit モードを ON にするとインライン編集が可能 — セルをダブルクリックで編集、行操作で挿入/削除を予約、コミット単位で一括適用。未コミットの編集行/セルは黄色でハイライト。",
+                    "ページネーション付きグリッド。ソート、フィルター、セルコピー、CSV/JSON エクスポート（最大10万行、現在のフィルター/ソートを反映）、全体検索と列フィルターを保持した表だけの再読み込みに対応。再読み込み結果はボタン横に表示され、行数変化に気づけます。設定バーで Edit モードを ON にするとインライン編集が可能 — セルをダブルクリックで編集、行操作で挿入/削除を予約、コミット単位で一括適用。未コミットの編集行/セルは黄色でハイライト。",
                   ],
                   [
                     "詳細フッタ・関連パネル",
@@ -1095,7 +1095,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                   ],
                   [
                     "Schema タブ",
-                    "カラム定義、インデックス、外部キー、トリガー、DDL。",
+                    "カラム定義、インデックス、外部キー、トリガー、DDL。現在の表構造だけを再読み込みするタブ内更新にも対応。",
                   ],
                   [
                     "クエリエディター",
