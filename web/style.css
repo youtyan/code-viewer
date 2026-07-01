@@ -497,6 +497,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 }
 #auto-update {
   width: auto;
+  gap: 6px;
   padding: 0 8px;
   font-size: 11px;
   font-weight: 600;

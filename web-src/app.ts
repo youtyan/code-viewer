@@ -2776,6 +2776,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (copyAiContextIcon) {
       copyAiContextIcon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     }
+    const autoUpdateIcon = document.querySelector<HTMLElement>(
+      "#auto-update .goi-icon",
+    );
+    if (autoUpdateIcon) {
+      autoUpdateIcon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    }
   }
 
   // Static SVGs for the topbar ref-picker actions. Run once at
@@ -4142,11 +4148,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!btn) return;
     const text = uiText();
     btn.classList.toggle("active", STATE.autoUpdate);
-    btn.textContent = text.topbar.autoUpdate;
-    btn.title = STATE.autoUpdate
+    const autoUpdateTitle = STATE.autoUpdate
       ? text.topbar.autoUpdateOnTitle
       : text.topbar.autoUpdateOffTitle;
+    btn.title = autoUpdateTitle;
+    btn.setAttribute("aria-label", autoUpdateTitle);
     btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+    const label = btn.querySelector<HTMLElement>(".auto-update-label");
+    if (label) label.textContent = text.topbar.autoUpdate;
   }
 
   function setAutoUpdate(on: boolean) {
