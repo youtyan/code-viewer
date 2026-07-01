@@ -230,6 +230,23 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       /* noop */
     },
     isTestPath: () => false,
+    sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
+    openDirectoryInOsTitle: () => "open this folder in OS",
+    omittedDirectoryBadge: (reason) =>
+      reason === "heavy"
+        ? {
+            label: "skipped",
+            title:
+              "Tree expansion is skipped, but the directory detail can be opened",
+          }
+        : {
+            label: "private",
+            title: "This directory cannot be opened from the browser",
+          },
+    commitEntryBadge: (submodule) =>
+      submodule
+        ? { label: "SUB", title: "Git submodule pinned to a commit" }
+        : { label: "GIT", title: "Git commit entry" },
     $: <T extends Element = HTMLElement>(selector: string) =>
       document.querySelector(selector) as unknown as T,
     $$: <T extends Element = HTMLElement>(selector: string) =>
@@ -367,6 +384,11 @@ describe("sidebar toggle placement", () => {
       setStatus() {
         /* noop */
       },
+      emptyText: () => ({
+        noCommitSelectedTitle: "No commit selected",
+        noCommitSelectedBody:
+          "Select a commit from the list to see its changes.",
+      }),
     });
 
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");

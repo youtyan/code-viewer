@@ -10,6 +10,15 @@ import {
   annotationDisplayMs,
   annotationSpeechText,
 } from "../core/annotation-speech";
+import {
+  iconSvg,
+  NEXT_16_PATHS,
+  PAUSE_16_PATHS,
+  PLAY_16_PATH,
+  PREVIOUS_16_PATHS,
+  VOLUME_MUTED_16_PATHS,
+  VOLUME_UNMUTED_16_PATHS,
+} from "../core/icons";
 import type { AnnotationEntry } from "../core/types";
 
 export type AnnotationsPlayerDeps = {
@@ -25,6 +34,17 @@ export type AnnotationsPlayerDeps = {
   getRate(): number | undefined;
   setRate(rate: number): void;
 };
+
+function setIconButton(
+  button: HTMLButtonElement,
+  label: string,
+  iconClass: string,
+  paths: string | string[],
+) {
+  button.innerHTML = iconSvg(iconClass, paths);
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
 
 export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
   const bar = deps.$<HTMLElement>("#annotation-player");
@@ -92,12 +112,36 @@ export function createAnnotationsPlayer(deps: AnnotationsPlayerDeps) {
 
   function render(state: PlayerState) {
     bar.classList.toggle("playing", state.status === "playing");
-    toggleBtn.textContent = state.status === "playing" ? "⏸" : "▶";
+    setIconButton(
+      toggleBtn,
+      state.status === "playing"
+        ? "Pause annotation playback"
+        : "Play annotation playback",
+      state.status === "playing" ? "octicon-pause" : "octicon-play",
+      state.status === "playing" ? PAUSE_16_PATHS : PLAY_16_PATH,
+    );
+    setIconButton(
+      prevBtn,
+      "Previous annotation",
+      "octicon-skip-back",
+      PREVIOUS_16_PATHS,
+    );
+    setIconButton(
+      nextBtn,
+      "Next annotation",
+      "octicon-skip-forward",
+      NEXT_16_PATHS,
+    );
     progress.textContent =
       state.status === "idle" || state.index < 0
         ? `${state.total}`
         : `${state.index + 1}/${state.total}`;
-    muteBtn.textContent = state.muted ? "🔇" : "🔊";
+    setIconButton(
+      muteBtn,
+      state.muted ? "Unmute annotation playback" : "Mute annotation playback",
+      state.muted ? "octicon-volume-muted" : "octicon-volume-unmuted",
+      state.muted ? VOLUME_MUTED_16_PATHS : VOLUME_UNMUTED_16_PATHS,
+    );
     prevBtn.disabled = state.status === "idle";
     nextBtn.disabled = state.status === "idle";
   }

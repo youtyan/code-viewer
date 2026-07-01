@@ -7,6 +7,13 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
+import {
+  DOWNLOAD_16_PATHS,
+  iconSvg,
+  LINK_16_PATH,
+  SEARCH_16_PATH,
+  SYNC_16_PATH,
+} from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
@@ -104,6 +111,12 @@ export type TableGridCallbacks = {
   getEditable?: () => boolean;
   /** 保留中の変更をサーバへ適用する。失敗時は throw (メッセージを表示する)。 */
   applyMutations?: (mutations: RowMutation[]) => Promise<void>;
+  /** ユーザー操作のリロードが成功したとき、親ビューへ件数同期の機会を通知する。 */
+  onRefreshComplete?: (event: {
+    table: string;
+    totalRows: number;
+    filters: GridFilter[];
+  }) => void;
 };
 
 export type TableGridOptions = {
@@ -114,6 +127,7 @@ export type TableGridOptions = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
+  refresh: () => Promise<void>;
   showError: (message: string) => void;
   applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
   getState: () => AnnotationDatabaseDataState;
@@ -150,7 +164,8 @@ export function createTableGrid(
   filterBar.className = "db-grid-filter-bar";
   const filterIcon = document.createElement("span");
   filterIcon.className = "db-grid-filter-icon";
-  filterIcon.textContent = "🔍";
+  filterIcon.setAttribute("aria-hidden", "true");
+  filterIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
   const filterInput = document.createElement("input");
   filterInput.type = "search";
   filterInput.className = "db-grid-filter-input";
@@ -158,9 +173,25 @@ export function createTableGrid(
   filterInput.autocomplete = "off";
   const filterClear = document.createElement("button");
   filterClear.type = "button";
-  filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
-  filterClear.textContent = "×";
+  filterClear.className = "db-btn db-btn-sm db-grid-filter-clear";
+  filterClear.textContent = text().grid.clearFiltersLabel;
   filterClear.hidden = true;
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "db-btn db-btn-icon db-grid-refresh";
+  refreshBtn.title = text().grid.refreshAction;
+  refreshBtn.setAttribute("aria-label", text().grid.refreshAction);
+  refreshBtn.setAttribute("aria-busy", "false");
+  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  const refreshLabel = document.createElement("span");
+  refreshLabel.className = "db-grid-refresh-label";
+  refreshLabel.textContent = text().grid.refreshLabel;
+  refreshBtn.appendChild(refreshLabel);
+  const refreshResult = document.createElement("span");
+  refreshResult.className = "db-refresh-result db-grid-refresh-result";
+  refreshResult.setAttribute("aria-live", "polite");
+  refreshResult.hidden = true;
 
   // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
   // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
@@ -171,7 +202,7 @@ export function createTableGrid(
   exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
   exportBtn.title = text().grid.exportAction;
   exportBtn.setAttribute("aria-label", text().grid.exportAction);
-  exportBtn.textContent = "⬇";
+  exportBtn.innerHTML = iconSvg("octicon-download", DOWNLOAD_16_PATHS);
   const exportMenu = document.createElement("div");
   exportMenu.className = "db-grid-export-menu";
   exportMenu.hidden = true;
@@ -240,7 +271,17 @@ export function createTableGrid(
   editStatus.className = "db-grid-edit-status";
   editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
 
-  filterBar.append(filterIcon, filterInput, filterClear, editWrap, exportWrap);
+  const filterActions = document.createElement("div");
+  filterActions.className = "db-grid-filter-actions";
+  filterActions.append(refreshBtn, refreshResult, exportWrap);
+
+  filterBar.append(
+    filterIcon,
+    filterInput,
+    filterClear,
+    editWrap,
+    filterActions,
+  );
 
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
@@ -264,6 +305,37 @@ export function createTableGrid(
   const body = document.createElement("div");
   body.className = "db-grid-body";
 
+  const filteredEmpty = document.createElement("div");
+  filteredEmpty.className = "db-pane-empty";
+  filteredEmpty.hidden = true;
+  const filteredEmptyIcon = document.createElement("div");
+  filteredEmptyIcon.className = "db-pane-empty-icon";
+  filteredEmptyIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
+  const filteredEmptyTitle = document.createElement("div");
+  filteredEmptyTitle.className = "db-pane-empty-title";
+  const filteredEmptyHint = document.createElement("div");
+  filteredEmptyHint.className = "db-pane-empty-hint";
+  const filteredEmptyActions = document.createElement("div");
+  filteredEmptyActions.className = "db-pane-empty-actions";
+  filteredEmptyActions.hidden = true;
+  const filteredEmptyReloadAction = document.createElement("button");
+  filteredEmptyReloadAction.type = "button";
+  filteredEmptyReloadAction.className = "db-btn db-btn-primary db-btn-sm";
+  filteredEmptyReloadAction.hidden = true;
+  filteredEmptyReloadAction.disabled = true;
+  const filteredEmptyAction = document.createElement("button");
+  filteredEmptyAction.type = "button";
+  filteredEmptyAction.className = "db-btn db-btn-sm";
+  filteredEmptyAction.hidden = true;
+  filteredEmptyAction.disabled = true;
+  filteredEmptyActions.append(filteredEmptyReloadAction, filteredEmptyAction);
+  filteredEmpty.append(
+    filteredEmptyIcon,
+    filteredEmptyTitle,
+    filteredEmptyHint,
+    filteredEmptyActions,
+  );
+
   const detailPanel = document.createElement("div");
   detailPanel.className = "db-grid-detail-panel";
   detailPanel.hidden = true;
@@ -274,7 +346,7 @@ export function createTableGrid(
   detailResize.addEventListener("mousedown", startDetailResize);
   detailPanel.appendChild(detailResize);
 
-  viewport.append(spacer, body);
+  viewport.append(spacer, body, filteredEmpty);
   el.append(filterBar, headerWrap, filterRowWrap, viewport, detailPanel);
 
   // セル詳細フッタの高さ (関連パネルと同じ persist 経路)。embedded の埋め込み
@@ -397,6 +469,8 @@ export function createTableGrid(
   let loadController = new AbortController();
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
+  let isRefreshing = false;
+  let refreshResultState: { delta: number; totalRows: number } | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
@@ -408,7 +482,7 @@ export function createTableGrid(
   // 相対位置を計算するために参照する (CSS transform を regex で読むのは
   // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
   let renderStartRow = 0;
-  // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
+  // 現在のテーブルで外部キーを持つカラム名（ヘッダーのリンクアイコン表示用）。
   const fkColumns = new Set<string>();
 
   /* ---- Row editing (edit / insert / delete) ---- */
@@ -567,17 +641,139 @@ export function createTableGrid(
     renderViewport();
   }
 
-  function collectFilters(): GridFilter[] {
+  function collectColumnFilters(): GridFilter[] {
     const filters: GridFilter[] = [];
     for (const [col, val] of columnFilters) {
       if (val) filters.push({ column: col, value: val });
     }
-    if (globalSearchValue && filters.length === 0) {
+    return filters;
+  }
+
+  function collectFilters(): GridFilter[] {
+    const filters = collectColumnFilters();
+    if (globalSearchValue) {
       for (const col of columnNames) {
-        filters.push({ column: col, value: globalSearchValue });
+        if (
+          !filters.some(
+            (filter) =>
+              filter.column === col && filter.value === globalSearchValue,
+          )
+        ) {
+          filters.push({ column: col, value: globalSearchValue });
+        }
       }
     }
     return filters;
+  }
+
+  function activeFilterCount(): number {
+    return columnFilters.size + (globalSearchValue ? 1 : 0);
+  }
+
+  function syncRefreshButton(): void {
+    const count = activeFilterCount();
+    const t = text().grid;
+    refreshLabel.textContent = isRefreshing
+      ? t.refreshingLabel
+      : count > 0
+        ? t.refreshFilteredLabel
+        : t.refreshLabel;
+    const action =
+      count > 0 ? t.refreshActionWithFilters(count) : t.refreshAction;
+    refreshBtn.classList.toggle("has-filters", count > 0);
+    refreshBtn.title = action;
+    refreshBtn.setAttribute("aria-label", action);
+    refreshBtn.setAttribute("aria-busy", isRefreshing ? "true" : "false");
+  }
+
+  function syncRefreshResult(): void {
+    const result = refreshResultState;
+    refreshResult.hidden = !result;
+    refreshResult.classList.toggle("changed", !!result && result.delta !== 0);
+    if (!result) {
+      refreshResult.textContent = "";
+      return;
+    }
+    const t = text().grid;
+    const total = result.totalRows.toLocaleString();
+    refreshResult.textContent =
+      result.delta === 0
+        ? t.refreshResultUnchanged(total)
+        : t.refreshResultChanged(result.delta, total);
+  }
+
+  function clearRefreshResult(): void {
+    refreshResultState = null;
+    syncRefreshResult();
+  }
+
+  function setRefreshResult(
+    previousTotalRows: number,
+    nextTotalRows: number,
+  ): void {
+    refreshResultState = {
+      delta: nextTotalRows - previousTotalRows,
+      totalRows: nextTotalRows,
+    };
+    syncRefreshResult();
+  }
+
+  function syncFilterClearButton(): void {
+    const count = activeFilterCount();
+    const t = text().grid;
+    filterClear.hidden = count === 0;
+    filterClear.textContent = t.clearFiltersLabel;
+    const action = t.clearFiltersAction(count);
+    filterClear.title = action;
+    filterClear.setAttribute("aria-label", action);
+  }
+
+  function syncFilteredEmptyState(): void {
+    const count = activeFilterCount();
+    const show = totalRows === 0 && count > 0;
+    filteredEmpty.hidden = !show;
+    filteredEmptyActions.hidden = !show;
+    filteredEmptyReloadAction.hidden = !show;
+    filteredEmptyReloadAction.disabled = !show || isRefreshing;
+    filteredEmptyAction.hidden = !show;
+    filteredEmptyAction.disabled = !show;
+    if (!show) return;
+    const t = text().grid;
+    const reloadAction = t.refreshActionWithFilters(count);
+    filteredEmptyTitle.textContent = t.filteredEmptyTitle(count);
+    filteredEmptyHint.textContent = t.filteredEmptyHint;
+    filteredEmptyReloadAction.textContent = isRefreshing
+      ? t.refreshingLabel
+      : t.refreshFilteredLabel;
+    filteredEmptyReloadAction.title = reloadAction;
+    filteredEmptyReloadAction.setAttribute("aria-label", reloadAction);
+    filteredEmptyReloadAction.setAttribute(
+      "aria-busy",
+      isRefreshing ? "true" : "false",
+    );
+    filteredEmptyAction.textContent = t.filteredEmptyAction;
+    filteredEmptyAction.title = t.clearFiltersAction(count);
+    filteredEmptyAction.setAttribute("aria-label", t.clearFiltersAction(count));
+  }
+
+  function clearAllFilters(): void {
+    globalSearchValue = "";
+    filterInput.value = "";
+    columnFilters.clear();
+    clearRefreshResult();
+    filterRow
+      .querySelectorAll<HTMLInputElement>(".db-grid-col-filter")
+      .forEach((input) => {
+        input.value = "";
+      });
+    syncFilterClearButton();
+    syncRefreshButton();
+    syncFilteredEmptyState();
+  }
+
+  function clearFiltersAndReload(): void {
+    clearAllFilters();
+    invalidateData();
   }
 
   function resetSelectionAndDetail() {
@@ -602,10 +798,63 @@ export function createTableGrid(
   function invalidateData(): Promise<void> {
     pageCache = new Map();
     pendingPages = new Map();
+    clearRefreshResult();
     startNewLoadGeneration();
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
     return ensurePage(0);
+  }
+
+  async function refreshCurrentTable(): Promise<void> {
+    if (!currentTable || refreshBtn.disabled) return;
+    const refreshTable = currentTable;
+    const previousTotalRows = totalRows;
+    const refreshFilterKey = JSON.stringify(collectFilters());
+    const scrollTop = viewport.scrollTop;
+    const pageStart =
+      Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("spinning");
+    isRefreshing = true;
+    clearRefreshResult();
+    syncRefreshButton();
+    syncFilteredEmptyState();
+    updateStatus();
+    if (filterTimer) {
+      clearTimeout(filterTimer);
+      filterTimer = null;
+    }
+    pageCache = new Map();
+    pendingPages = new Map();
+    startNewLoadGeneration();
+    const refreshGeneration = loadGeneration;
+    resetSelectionAndDetail();
+    viewport.scrollTop = scrollTop;
+    renderViewport();
+    try {
+      await ensurePage(pageStart);
+    } finally {
+      const endedInError = statusEl?.classList.contains("db-pane-error");
+      isRefreshing = false;
+      refreshBtn.classList.remove("spinning");
+      refreshBtn.disabled = false;
+      syncRefreshButton();
+      syncFilteredEmptyState();
+      if (!endedInError) {
+        if (
+          loadGeneration === refreshGeneration &&
+          JSON.stringify(collectFilters()) === refreshFilterKey
+        ) {
+          setRefreshResult(previousTotalRows, totalRows);
+          callbacks.onRefreshComplete?.({
+            table: refreshTable,
+            totalRows,
+            filters: collectFilters(),
+          });
+        }
+        updateStatus();
+      }
+    }
   }
 
   function clear() {
@@ -616,10 +865,13 @@ export function createTableGrid(
     columnNames = [];
     totalRows = 0;
     sort = null;
+    isRefreshing = false;
     columnFilters.clear();
     globalSearchValue = "";
+    clearRefreshResult();
     filterInput.value = "";
-    filterClear.hidden = true;
+    syncFilterClearButton();
+    syncRefreshButton();
     filterRow.innerHTML = "";
     pageCache = new Map();
     pendingPages = new Map();
@@ -757,7 +1009,8 @@ export function createTableGrid(
     header.className = "db-related-header";
     const title = document.createElement("span");
     title.className = "db-related-title";
-    title.textContent = "🔗";
+    title.setAttribute("aria-hidden", "true");
+    title.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
     // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
     relatedCrumbEl = document.createElement("span");
     relatedCrumbEl.className = "db-related-crumbs";
@@ -1140,7 +1393,7 @@ export function createTableGrid(
         cell.classList.add("db-grid-header-fk");
         const fkIcon = document.createElement("span");
         fkIcon.className = "db-grid-header-fk-icon";
-        fkIcon.textContent = "🔗";
+        fkIcon.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
         fkIcon.title = text().grid.foreignKeyHint;
         label.appendChild(fkIcon);
       }
@@ -1243,6 +1496,9 @@ export function createTableGrid(
         } else {
           columnFilters.delete(col.name);
         }
+        clearRefreshResult();
+        syncFilterClearButton();
+        syncRefreshButton();
         scheduleFilter();
       });
       input.addEventListener("keydown", (e) => {
@@ -1250,6 +1506,9 @@ export function createTableGrid(
         if (e.key === "Escape") {
           input.value = "";
           columnFilters.delete(col.name);
+          clearRefreshResult();
+          syncFilterClearButton();
+          syncRefreshButton();
           scheduleFilter();
         }
       });
@@ -1261,6 +1520,7 @@ export function createTableGrid(
   function scheduleFilter() {
     if (filterTimer) clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
+      filterTimer = null;
       invalidateData();
     }, FILTER_DEBOUNCE_MS);
   }
@@ -1784,6 +2044,7 @@ export function createTableGrid(
           i < totalRows ? buildDataRow(i) : buildDraftRow(i - totalRows),
         );
       }
+      syncFilteredEmptyState();
 
       if (focusRestore) {
         const next = body.querySelector<HTMLInputElement>(
@@ -1842,8 +2103,9 @@ export function createTableGrid(
     const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)
       parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
-    const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
-    if (activeFilterCount > 0) parts.push(t.statusFilters(activeFilterCount));
+    const filterCount = activeFilterCount();
+    if (filterCount > 0) parts.push(t.statusFilters(filterCount));
+    if (isRefreshing) parts.push(t.statusRefreshing(filterCount));
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;
@@ -1853,6 +2115,7 @@ export function createTableGrid(
         statusEl.firstChild,
       );
     }
+    syncRefreshResult();
   }
 
   function showError(message: string) {
@@ -1895,13 +2158,14 @@ export function createTableGrid(
     if (state.search !== undefined) {
       globalSearchValue = state.search;
       filterInput.value = state.search;
-      filterClear.hidden = !globalSearchValue;
     }
     columnFilters.clear();
     for (const filter of state.filters || []) {
       if (filter.column && filter.value)
         columnFilters.set(filter.column, filter.value);
     }
+    syncFilterClearButton();
+    syncRefreshButton();
     sort = state.sort || null;
     const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
     renderHeader();
@@ -1915,9 +2179,7 @@ export function createTableGrid(
   }
 
   function getState(): AnnotationDatabaseDataState {
-    const filters = collectFilters().filter(
-      (filter) => filter.value !== globalSearchValue,
-    );
+    const filters = collectColumnFilters();
     return {
       ...(globalSearchValue ? { search: globalSearchValue } : {}),
       ...(filters.length ? { filters } : {}),
@@ -1928,7 +2190,9 @@ export function createTableGrid(
 
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
-    filterClear.hidden = !globalSearchValue;
+    clearRefreshResult();
+    syncFilterClearButton();
+    syncRefreshButton();
     scheduleFilter();
   });
   filterInput.addEventListener("keydown", (e) => {
@@ -1936,15 +2200,24 @@ export function createTableGrid(
     if (e.key === "Escape") {
       filterInput.value = "";
       globalSearchValue = "";
-      filterClear.hidden = true;
+      clearRefreshResult();
+      syncFilterClearButton();
+      syncRefreshButton();
       scheduleFilter();
     }
   });
   filterClear.addEventListener("click", () => {
-    filterInput.value = "";
-    globalSearchValue = "";
-    filterClear.hidden = true;
-    invalidateData();
+    clearFiltersAndReload();
+  });
+  filteredEmptyAction.addEventListener("click", () => {
+    clearFiltersAndReload();
+    filterInput.focus?.();
+  });
+  filteredEmptyReloadAction.addEventListener("click", () => {
+    void refreshCurrentTable();
+  });
+  refreshBtn.addEventListener("click", () => {
+    void refreshCurrentTable();
   });
 
   const onViewportScroll = () => {
@@ -1981,6 +2254,10 @@ export function createTableGrid(
   function localize() {
     const t = text();
     filterInput.placeholder = t.grid.searchPlaceholder;
+    syncFilterClearButton();
+    syncRefreshButton();
+    syncRefreshResult();
+    syncFilteredEmptyState();
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
     newRowBtn.textContent = t.edit.newRow;
@@ -1997,7 +2274,7 @@ export function createTableGrid(
   }
 
   // FK 列 (outgoing) と、他から参照されている列 (incoming = 通常 PK) の
-  // 両方にヘッダ 🔗 を付け、セルクリックで関連パネルを開けるようにする。
+  // 両方にヘッダのリンクアイコンを付け、セルクリックで関連パネルを開けるようにする。
   // 設定トグル (Rails FK 推測) を切り替えたときも呼ばれる。
   function rebuildFkColumnsForCurrentTable() {
     fkColumns.clear();
@@ -2297,7 +2574,7 @@ export function createTableGrid(
   });
 
   // 外部から FK セットの再計算を要求するエントリ。例: Rails 規約による
-  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダの 🔗 と
+  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダのリンクアイコンと
   // セルクリック判定だけ更新する。
   function refreshForeignKeys() {
     rebuildFkColumnsForCurrentTable();
@@ -2311,6 +2588,7 @@ export function createTableGrid(
   return {
     el,
     load,
+    refresh: refreshCurrentTable,
     showError,
     applyState,
     getState,

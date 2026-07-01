@@ -15,6 +15,12 @@ export type DbText = {
     schemaTab: string;
     selectDatastore: string;
     selectSchema: string;
+    refreshDatastores: string;
+    refreshDatastoresShort: string;
+    refreshDatastoresBusy: string;
+    refreshDatastoresTitle: string;
+    refreshDatastoresUnchanged: string;
+    refreshDatastoresChanged: (added: number, removed: number) => string;
     toolbar: string;
     query: string;
     queryTitle: string;
@@ -30,6 +36,8 @@ export type DbText = {
     closeTab: (label: string) => string;
     loadingSchema: string;
     noDatastores: string;
+    noDatastoresHint: string;
+    noDatastoreTab: string;
     dockerLimitReached: string;
     // Rails 命名規約 (<name>_id → <names>.id) からの仮想 FK 推測トグル。
     inferFkLabel: string;
@@ -42,12 +50,25 @@ export type DbText = {
   grid: {
     searchPlaceholder: string;
     columnFilterPlaceholder: (column: string) => string;
+    clearFiltersLabel: string;
+    clearFiltersAction: (count: number) => string;
+    refreshLabel: string;
+    refreshFilteredLabel: string;
+    refreshingLabel: string;
+    refreshAction: string;
+    refreshActionWithFilters: (count: number) => string;
+    refreshResultChanged: (delta: number, total: string) => string;
+    refreshResultUnchanged: (total: string) => string;
     exportAction: string;
     foreignKeyHint: string;
     relatedEmpty: string;
+    filteredEmptyTitle: (count: number) => string;
+    filteredEmptyHint: string;
+    filteredEmptyAction: string;
     statusRows: (n: string) => string;
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
+    statusRefreshing: (filters: number) => string;
   };
   // 行編集 / 新規追加 / 削除。
   edit: {
@@ -73,6 +94,9 @@ export type DbText = {
     indexes: string;
     triggers: string;
     ddl: string;
+    refreshLabel: string;
+    refreshAction: string;
+    refreshingLabel: string;
     copyDdl: string;
     copied: string;
     colName: string;
@@ -114,6 +138,8 @@ export type DbText = {
   history: {
     refresh: string;
     refreshTitle: string;
+    refreshResultAdded: (count: number) => string;
+    refreshResultUnchanged: string;
     clearAll: string;
     clearTitle: string;
     selectPlaceholder: string;
@@ -124,6 +150,10 @@ export type DbText = {
     delete: string;
     confirmDelete: string;
     confirmClear: string;
+    executorAi: string;
+    executorUser: string;
+    rowsLabel: (rows: number, truncated: boolean) => string;
+    elapsedLabel: (ms: number) => string;
     truncatedRows: (saved: number, total: number) => string;
   };
   // セッションログペイン (session 限定。SQL 実行 / 編集コミットの成否を記録)。
@@ -318,6 +348,18 @@ const EN: DbText = {
     schemaTab: "Schema",
     selectDatastore: "Select datastore",
     selectSchema: "Select PostgreSQL schema",
+    refreshDatastores: "Refresh datastores",
+    refreshDatastoresShort: "Refresh",
+    refreshDatastoresBusy: "Refreshing...",
+    refreshDatastoresTitle: "Refresh the datastore list",
+    refreshDatastoresUnchanged: "No datastore changes",
+    refreshDatastoresChanged: (added, removed) =>
+      [
+        added > 0 ? `+${added} datastore${added === 1 ? "" : "s"}` : "",
+        removed > 0 ? `-${removed} datastore${removed === 1 ? "" : "s"}` : "",
+      ]
+        .filter(Boolean)
+        .join(" / "),
     toolbar: "Datastore tools",
     query: "Query",
     queryTitle: "Query Editor",
@@ -334,6 +376,9 @@ const EN: DbText = {
     closeTab: (label) => `Close ${label}`,
     loadingSchema: "Loading schema…",
     noDatastores: "No datastores found",
+    noDatastoresHint:
+      "Start a database service or add a SQLite file, then refresh this list.",
+    noDatastoreTab: "No datastore",
     dockerLimitReached:
       "Docker discovery reached the service limit; some compose services may be hidden.",
     inferFkLabel: "Rails FK inference",
@@ -344,12 +389,38 @@ const EN: DbText = {
   grid: {
     searchPlaceholder: "Search all columns…",
     columnFilterPlaceholder: (column) => `${column}…`,
+    clearFiltersLabel: "Clear filters",
+    clearFiltersAction: (count) =>
+      `Clear ${count} active filter${count === 1 ? "" : "s"}`,
+    refreshLabel: "Reload table",
+    refreshFilteredLabel: "Reload filtered rows",
+    refreshingLabel: "Reloading...",
+    refreshAction: "Reload this table, keeping search and column filters",
+    refreshActionWithFilters: (count) =>
+      `Reload this table, keeping ${count} active filter${
+        count === 1 ? "" : "s"
+      }`,
+    refreshResultChanged: (delta, total) => {
+      const abs = Math.abs(delta).toLocaleString();
+      const sign = delta > 0 ? "+" : "-";
+      return `Rows ${sign}${abs} (${total} now)`;
+    },
+    refreshResultUnchanged: (total) => `Rows unchanged (${total})`,
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
+    filteredEmptyTitle: (count) =>
+      `No rows match ${count} active filter${count === 1 ? "" : "s"}`,
+    filteredEmptyHint:
+      "The table was loaded, but the current search or column filters hide every row.",
+    filteredEmptyAction: "Clear filters",
     statusRows: (n) => `${n} rows`,
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
+    statusRefreshing: (filters) =>
+      filters > 0
+        ? `Reloading with ${filters} active filter${filters === 1 ? "" : "s"}…`
+        : "Reloading current table…",
   },
   edit: {
     editMode: "Edit",
@@ -374,6 +445,9 @@ const EN: DbText = {
     indexes: "Indexes",
     triggers: "Triggers",
     ddl: "DDL",
+    refreshLabel: "Refresh schema",
+    refreshAction: "Refresh this table schema",
+    refreshingLabel: "Refreshing...",
     copyDdl: "Copy DDL",
     copied: "Copied!",
     colName: "Column",
@@ -411,8 +485,10 @@ const EN: DbText = {
     statusExplain: (ms) => `Explain (${ms}ms)`,
   },
   history: {
-    refresh: "Refresh",
-    refreshTitle: "Refresh history",
+    refresh: "Refresh history",
+    refreshTitle: "Refresh query history",
+    refreshResultAdded: (count) => `+${count} queries`,
+    refreshResultUnchanged: "No new queries",
     clearAll: "Clear All",
     clearTitle: "Delete all query history",
     selectPlaceholder: "Select a query to view details",
@@ -423,6 +499,10 @@ const EN: DbText = {
     delete: "Delete",
     confirmDelete: "Confirm delete",
     confirmClear: "Confirm clear",
+    executorAi: "AI",
+    executorUser: "User",
+    rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} rows`,
+    elapsedLabel: (ms) => `${ms}ms`,
     truncatedRows: (saved, total) => `Showing ${saved} of ${total} rows`,
   },
   sessionLog: {
@@ -617,6 +697,18 @@ const JA: DbText = {
     schemaTab: "スキーマ",
     selectDatastore: "データストアを選択",
     selectSchema: "PostgreSQL スキーマを選択",
+    refreshDatastores: "データストアを更新",
+    refreshDatastoresShort: "更新",
+    refreshDatastoresBusy: "更新中...",
+    refreshDatastoresTitle: "データストア一覧を更新",
+    refreshDatastoresUnchanged: "データストアに変化なし",
+    refreshDatastoresChanged: (added, removed) =>
+      [
+        added > 0 ? `+${added} データストア` : "",
+        removed > 0 ? `-${removed} データストア` : "",
+      ]
+        .filter(Boolean)
+        .join(" / "),
     toolbar: "データストアツール",
     query: "クエリ",
     queryTitle: "クエリエディタ",
@@ -633,6 +725,9 @@ const JA: DbText = {
     closeTab: (label) => `${label} を閉じる`,
     loadingSchema: "スキーマを読み込み中…",
     noDatastores: "データストアが見つかりません",
+    noDatastoresHint:
+      "DB サービスを起動するか SQLite ファイルを追加してから、一覧を更新してください。",
+    noDatastoreTab: "未検出",
     dockerLimitReached:
       "Docker のサービス数が上限に達しました。一部の compose サービスは表示されていない可能性があります。",
     inferFkLabel: "Rails FK 推測",
@@ -644,12 +739,35 @@ const JA: DbText = {
   grid: {
     searchPlaceholder: "全カラムを検索…",
     columnFilterPlaceholder: (column) => `${column}…`,
+    clearFiltersLabel: "フィルタ解除",
+    clearFiltersAction: (count) => `有効なフィルタ ${count} 件を解除`,
+    refreshLabel: "表を再読込",
+    refreshFilteredLabel: "絞り込み再読込",
+    refreshingLabel: "更新中...",
+    refreshAction: "検索/列フィルタを保持して、この表だけ再読み込み",
+    refreshActionWithFilters: (count) =>
+      `有効なフィルタ ${count} 件を保持して、この表だけ再読み込み`,
+    refreshResultChanged: (delta, total) => {
+      const abs = Math.abs(delta).toLocaleString();
+      const sign = delta > 0 ? "+" : "-";
+      return `行数 ${sign}${abs} (現在 ${total})`;
+    },
+    refreshResultUnchanged: (total) => `行数変化なし (${total})`,
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",
+    filteredEmptyTitle: (count) =>
+      `フィルタ ${count} 件に一致する行がありません`,
+    filteredEmptyHint:
+      "表は読み込めていますが、現在の検索/列フィルタですべての行が隠れています。",
+    filteredEmptyAction: "フィルタ解除",
     statusRows: (n) => `${n} 行`,
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,
+    statusRefreshing: (filters) =>
+      filters > 0
+        ? `フィルタ ${filters} 件を保持して再読み込み中…`
+        : "この表を再読み込み中…",
   },
   edit: {
     editMode: "編集",
@@ -674,6 +792,9 @@ const JA: DbText = {
     indexes: "インデックス",
     triggers: "トリガー",
     ddl: "DDL",
+    refreshLabel: "スキーマを更新",
+    refreshAction: "この表のスキーマを再読み込み",
+    refreshingLabel: "更新中...",
     copyDdl: "DDL をコピー",
     copied: "コピーしました",
     colName: "カラム",
@@ -711,8 +832,10 @@ const JA: DbText = {
     statusExplain: (ms) => `Explain (${ms}ms)`,
   },
   history: {
-    refresh: "更新",
-    refreshTitle: "履歴を更新",
+    refresh: "クエリ履歴を更新",
+    refreshTitle: "クエリ履歴を再読み込み",
+    refreshResultAdded: (count) => `+${count} 件`,
+    refreshResultUnchanged: "新しいクエリはありません",
     clearAll: "すべて削除",
     clearTitle: "クエリ履歴をすべて削除",
     selectPlaceholder: "クエリを選択すると詳細が表示されます",
@@ -723,6 +846,10 @@ const JA: DbText = {
     delete: "削除",
     confirmDelete: "削除を確認",
     confirmClear: "全削除を確認",
+    executorAi: "AI",
+    executorUser: "ユーザー",
+    rowsLabel: (rows, truncated) => `${rows}${truncated ? "+" : ""} 行`,
+    elapsedLabel: (ms) => `${ms}ms`,
     truncatedRows: (saved, total) => `全 ${total} 行中 ${saved} 行を表示`,
   },
   sessionLog: {

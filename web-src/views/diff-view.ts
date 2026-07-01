@@ -3,6 +3,7 @@
 // re-anchoring, idle syntax highlight, and the diff meta header.
 // Extracted from app.ts.
 
+import { summarizeDiffFileKinds } from "../core/diff-file-kinds";
 import { filePathClipboardText } from "../core/file-path-copy";
 import {
   CHEVRON_DOWN_16_PATH,
@@ -64,11 +65,30 @@ export type DiffViewDeps = {
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
   invalidateRepoSidebar(): void;
+  diffText(): DiffViewText;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
   getDiffRoot?(): HTMLElement;
   getEmptyPane?(): HTMLElement;
   isEmbeddedDiffMode?(): boolean;
+};
+
+export type DiffViewText = {
+  files(count: number): string;
+  updated(time: string): string;
+  updatedTitle: string;
+  kindAdded: string;
+  kindDeleted: string;
+  kindRenamed: string;
+  kindHeavy: string;
+  kindBinary: string;
+  kindMedia: string;
+  viewedProgress(viewed: number, total: number): string;
+  viewedProgressTitle: string;
+  nextUnviewed: string;
+  nextUnviewedTitle: string;
+  allViewed: string;
+  allViewedTitle: string;
 };
 
 type LoadQueueItem = {
@@ -145,6 +165,7 @@ export function createDiffView(deps: DiffViewDeps) {
     getServerGeneration,
     setServerGeneration,
     invalidateRepoSidebar,
+    diffText,
     getDiffRoot,
     getEmptyPane,
     isEmbeddedDiffMode,
@@ -220,7 +241,9 @@ export function createDiffView(deps: DiffViewDeps) {
   ) {
     if (!button) return;
     button.setAttribute("aria-pressed", expanded ? "true" : "false");
-    button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
+    const label = expanded ? "Collapse expanded lines" : "Expand all lines";
+    button.title = label;
+    button.setAttribute("aria-label", label);
     button.innerHTML = expanded
       ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS)
       : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
@@ -234,34 +257,171 @@ export function createDiffView(deps: DiffViewDeps) {
     el.title = branch ? `Current branch: ${branch}` : "";
   }
 
+  let metaFilesForViewedProgress: FileMeta[] = [];
+
+  function viewedProgressFor(files: FileMeta[]) {
+    const total = files.length;
+    const viewed = files.filter((file) =>
+      STATE.viewedFiles.has(file.path),
+    ).length;
+    return { viewed, total };
+  }
+
+  function applyViewedProgressChipState(
+    chip: HTMLElement,
+    viewed: number,
+    total: number,
+  ) {
+    chip.textContent = diffText().viewedProgress(viewed, total);
+    chip.classList.toggle("chip-viewed-empty", viewed === 0);
+    chip.classList.toggle("chip-viewed-partial", viewed > 0 && viewed < total);
+    chip.classList.toggle("chip-viewed-done", total > 0 && viewed === total);
+  }
+
+  function syncViewedProgressChip() {
+    const chip = document.querySelector<HTMLElement>("#meta .chip-viewed");
+    if (chip) {
+      const { viewed, total } = viewedProgressFor(metaFilesForViewedProgress);
+      if (total <= 0) chip.remove();
+      else applyViewedProgressChipState(chip, viewed, total);
+    }
+    syncNextUnviewedButton();
+  }
+
+  function applyNextUnviewedButtonState(
+    button: HTMLButtonElement,
+    hasUnviewed: boolean,
+  ) {
+    const text = diffText();
+    button.disabled = !hasUnviewed;
+    button.textContent = hasUnviewed ? text.nextUnviewed : text.allViewed;
+    button.title = hasUnviewed ? text.nextUnviewedTitle : text.allViewedTitle;
+  }
+
+  function syncNextUnviewedButton() {
+    const button = document.querySelector<HTMLButtonElement>(
+      "#meta .chip-next-unviewed",
+    );
+    if (!button) return;
+    const { total } = viewedProgressFor(metaFilesForViewedProgress);
+    if (total <= 0) {
+      button.remove();
+      return;
+    }
+    // DOM-derived (not just totals) so a live search filter that hides every
+    // remaining unviewed row correctly disables the button too. Safe here:
+    // this only runs from applyViewedState(), which itself already requires
+    // #filelist li rows to exist (renderShell renders the sidebar before
+    // calling applyViewedState - see the ordering note on renderMeta above).
+    applyNextUnviewedButtonState(button, nextUnviewedFilePath() !== null);
+  }
+
+  // Next unviewed file lookup walks the same "currently visible" sidebar
+  // rows sidebar-next/sidebar-previous use (app.ts), so it automatically
+  // respects the live search filter and hide-tests state without needing
+  // its own copy of that filtering logic. A row counts as viewed if either
+  // STATE.viewedFiles or its own DOM ".viewed" class says so - the DOM class
+  // is what the user actually sees, so it wins if the two ever disagree.
+  function nextUnviewedFilePath(): string | null {
+    if (isRepositorySidebarMode()) return null;
+    const items = $$<HTMLElement>(
+      "#filelist li[data-path]:not(.hidden):not(.hidden-by-tests)",
+    );
+    if (items.length === 0) return null;
+    const currentIndex = items.findIndex((li) =>
+      li.classList.contains("active"),
+    );
+    for (let offset = 1; offset <= items.length; offset++) {
+      const idx = (currentIndex + offset + items.length) % items.length;
+      const li = items[idx];
+      const path = li.dataset.path || "";
+      const viewed =
+        STATE.viewedFiles.has(path) || li.classList.contains("viewed");
+      if (path && !viewed) return path;
+    }
+    return null;
+  }
+
+  function scrollToNextUnviewedFile(): boolean {
+    const path = nextUnviewedFilePath();
+    if (!path) return false;
+    scrollToFile(path, undefined, { reveal: true });
+    return true;
+  }
+
   function renderMeta(meta: DiffMeta | null) {
     const el = $("#meta");
     if (!meta) {
       el.textContent = "";
+      metaFilesForViewedProgress = [];
       return;
     }
     setProjectName(meta.project || "");
     setProjectBranch(meta.branch || "");
+    metaFilesForViewedProgress = meta.files || [];
     el.innerHTML = "";
+    const text = diffText();
     if (meta.totals) {
-      const t = document.createElement("span");
-      t.className = "num";
-      t.innerHTML =
-        '<span class="add">+' +
-        meta.totals.additions +
-        "</span> " +
-        '<span class="del">−' +
-        meta.totals.deletions +
-        "</span> " +
-        "<span>" +
-        meta.totals.files +
-        " files</span>";
-      el.appendChild(t);
+      const files = document.createElement("span");
+      files.className = "chip chip-files";
+      files.textContent = text.files(meta.totals.files);
+      el.appendChild(files);
+      const add = document.createElement("span");
+      add.className = "chip chip-add";
+      add.textContent = `+${meta.totals.additions}`;
+      el.appendChild(add);
+      const del = document.createElement("span");
+      del.className = "chip chip-del";
+      del.textContent = `−${meta.totals.deletions}`;
+      el.appendChild(del);
+    }
+    const kinds = summarizeDiffFileKinds(meta.files);
+    const kindChip = (className: string, label: string, count: number) => {
+      if (count <= 0) return;
+      const chip = document.createElement("span");
+      chip.className = `chip ${className}`;
+      chip.textContent = `${count} ${label}`;
+      el.appendChild(chip);
+    };
+    kindChip("chip-added", text.kindAdded, kinds.added);
+    kindChip("chip-deleted", text.kindDeleted, kinds.deleted);
+    kindChip("chip-renamed", text.kindRenamed, kinds.renamed);
+    kindChip("chip-heavy", text.kindHeavy, kinds.heavy);
+    kindChip("chip-binary", text.kindBinary, kinds.binary);
+    kindChip("chip-media", text.kindMedia, kinds.media);
+    const viewedProgress = viewedProgressFor(metaFilesForViewedProgress);
+    if (viewedProgress.total > 0) {
+      const viewed = document.createElement("span");
+      viewed.className = "chip chip-viewed";
+      viewed.title = text.viewedProgressTitle;
+      applyViewedProgressChipState(
+        viewed,
+        viewedProgress.viewed,
+        viewedProgress.total,
+      );
+      el.appendChild(viewed);
+      const nextUnviewed = document.createElement("button");
+      nextUnviewed.type = "button";
+      nextUnviewed.className = "chip chip-next-unviewed";
+      // renderShell() calls renderMeta() before renderSidebar(), so #filelist
+      // rows for this file list do not exist yet - approximate with totals
+      // here. syncNextUnviewedButton() (run after applyViewedState(), always
+      // after renderSidebar()) refines this with the DOM-aware check.
+      applyNextUnviewedButtonState(
+        nextUnviewed,
+        viewedProgress.viewed < viewedProgress.total,
+      );
+      nextUnviewed.addEventListener("click", () => {
+        scrollToNextUnviewedFile();
+      });
+      el.appendChild(nextUnviewed);
     }
     const u = document.createElement("span");
-    u.className = "updated-at";
-    u.title = "last updated";
-    u.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+    u.className = "chip chip-updated";
+    u.title = text.updatedTitle;
+    u.textContent = text.updated(
+      new Date().toLocaleTimeString([], { hour12: false }),
+    );
     el.appendChild(u);
   }
 
@@ -354,13 +514,17 @@ export function createDiffView(deps: DiffViewDeps) {
     { passive: true },
   );
 
-  function scrollToFile(path: string, line?: SourceLineTarget) {
+  function scrollToFile(
+    path: string,
+    line?: SourceLineTarget,
+    options?: { reveal?: boolean },
+  ) {
     const card = document.querySelector<DiffCardElement>(
       diffCardSelector(path),
     );
     if (!card) return;
     if (line) REANCHOR_UNTIL = performance.now() + 4000;
-    markActive(path);
+    markActive(path, { reveal: options?.reveal });
     SUPPRESS_SPY_UNTIL = performance.now() + 1500;
     const onEnd = () => {
       SUPPRESS_SPY_UNTIL = 0;
@@ -388,6 +552,7 @@ export function createDiffView(deps: DiffViewDeps) {
       const viewed = STATE.viewedFiles.has(path);
       syncViewedCardDisplay(card, viewed);
     });
+    syncViewedProgressChip();
   }
 
   let CLIENT_REQ_SEQ = 0;
@@ -653,6 +818,11 @@ export function createDiffView(deps: DiffViewDeps) {
         setupScrollSpy();
         scrollSpyInstalled = true;
       }
+      // renderMeta() above already rebuilt #meta from raw totals (see the
+      // note in renderMeta), ignoring any live sidebar filter. #filelist
+      // rows are untouched on this path, so re-check them here instead of
+      // the full applyViewedState() sweep.
+      syncViewedProgressChip();
       return {
         structureChanged: false,
         invalidatedCards,
@@ -1071,7 +1241,9 @@ export function createDiffView(deps: DiffViewDeps) {
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-toggle");
     if (button) {
       button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      button.title = collapsed ? "Expand file" : "Collapse file";
+      const toggleLabel = collapsed ? "Expand file" : "Collapse file";
+      button.title = toggleLabel;
+      button.setAttribute("aria-label", toggleLabel);
     }
     const unfold = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (unfold) unfold.disabled = collapsed;
@@ -1193,6 +1365,7 @@ export function createDiffView(deps: DiffViewDeps) {
       toggle.type = "button";
       toggle.className = "gdp-file-header-icon gdp-file-toggle";
       toggle.title = "Collapse file";
+      toggle.setAttribute("aria-label", "Collapse file");
       toggle.setAttribute("aria-expanded", "true");
       toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
       toggle.addEventListener("click", (e) => {
@@ -1218,6 +1391,7 @@ export function createDiffView(deps: DiffViewDeps) {
       copy.type = "button";
       copy.className = "gdp-file-header-icon gdp-copy-path";
       copy.title = "copy file path";
+      copy.setAttribute("aria-label", "copy file path");
       copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
       copy.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -1633,6 +1807,7 @@ export function createDiffView(deps: DiffViewDeps) {
     addExpandHunksUI,
     scheduleIdleHighlight,
     scrollToFile,
+    scrollToNextUnviewedFile,
     prefetchByPath,
     applyDiffRouteFocus,
     clearDiffLineFocus,

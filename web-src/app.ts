@@ -28,7 +28,9 @@ import {
   MOON_16_PATH,
   OPEN_EXTERNAL_16_PATH,
   PULSE_16_PATH,
+  SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
+  X_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
 import {
@@ -66,7 +68,7 @@ import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
-import { createDoctorView } from "./views/doctor-view";
+import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
@@ -86,6 +88,7 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
@@ -166,15 +169,26 @@ window.GdpExpandLogic = GdpExpandLogic;
   function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
     const loadBar = document.querySelector<HTMLElement>("#load-bar");
     if (loadBar) loadBar.classList.toggle("active", state.inFlight > 0);
+    const text = uiText().global;
+    const statusEl = document.querySelector<HTMLElement>("#status");
+    if (statusEl) {
+      statusEl.title =
+        state.inFlight > 0
+          ? text.statusInFlightTitle(state.inFlight, state.cancellable)
+          : (statusEl.querySelector<HTMLElement>(".status-label")
+              ?.textContent ?? "");
+    }
     const cancelButton =
       document.querySelector<HTMLButtonElement>("#cancel-requests");
     if (!cancelButton) return;
     const cancellable = state.cancellable > 0;
     cancelButton.disabled = !cancellable;
     cancelButton.classList.toggle("active", cancellable);
-    cancelButton.title = cancellable
-      ? `cancel ${state.cancellable} in-flight request${state.cancellable === 1 ? "" : "s"}`
-      : "no in-flight requests";
+    const cancelTitle = cancellable
+      ? text.cancelRequestsActiveTitle(state.cancellable)
+      : text.cancelRequestsInactiveTitle;
+    cancelButton.title = cancelTitle;
+    cancelButton.setAttribute("aria-label", cancelTitle);
   }
 
   function cancelInFlightRequests(): void {
@@ -857,12 +871,35 @@ window.GdpExpandLogic = GdpExpandLogic;
       REPO_SIDEBAR_REF = ref;
     },
     isTestPath: (path: string) => TEST_RE.test(path),
+    sidebarToggleTitle: (hidden) =>
+      hidden ? uiText().sidebar.show : uiText().sidebar.hide,
+    openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
+    omittedDirectoryBadge: (reason) => {
+      const text = uiText().sidebar;
+      return reason === "heavy"
+        ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
+        : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
+    },
+    commitEntryBadge: (submodule) => {
+      const text = uiText().sidebar;
+      return submodule
+        ? {
+            label: text.commitEntrySubmoduleLabel,
+            title: text.commitEntrySubmoduleTitle,
+          }
+        : {
+            label: text.commitEntryGitlinkLabel,
+            title: text.commitEntryGitlinkTitle,
+          };
+    },
   });
   const {
     renderSidebar,
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,
+    syncSidebarFilterClearButton,
+    clearSidebarFilter,
     markActive,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,
@@ -1016,6 +1053,37 @@ window.GdpExpandLogic = GdpExpandLogic;
     pushUndo: (undo: UndoActionResponse) => {
       UNDO_STACK.unshift(undo);
     },
+    newFolderButtonTitle: () => uiText().repo.newFolder,
+    openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
+    moveFolderToTrashTitle: () => uiText().repo.moveFolderToTrash,
+    uploadButtonLabel: () => uiText().repo.uploadButton,
+    dropFilesIntoCopy: (target) => uiText().repo.dropFilesInto(target),
+    uploadFailedMessage: () => uiText().repo.uploadFailed,
+    emptyDirectoryLabel: () => uiText().repo.emptyDirectory,
+    uploadConfirmText: (count, target) => {
+      const text = uiText().repo;
+      return {
+        title: text.uploadConfirmTitle,
+        body: text.uploadConfirmBody(count, target),
+        confirmLabel: text.uploadConfirmLabel,
+      };
+    },
+    sortColumnLabels: () => {
+      const text = uiText().repo;
+      return {
+        name: text.sortName,
+        updated: text.sortUpdated,
+        size: text.sortSize,
+      };
+    },
+    repositoryFallback: () => uiText().repo.repositoryFallback,
+    repositoryRootFallback: () => uiText().repo.repositoryRootFallback,
+    commitEntryMeta: (submodule) => {
+      const text = uiText().repo;
+      return submodule
+        ? { label: text.submoduleLabel, title: text.submoduleTitle }
+        : { label: text.gitlinkLabel, title: text.gitlinkTitle };
+    },
   });
   const {
     loadRepo,
@@ -1057,10 +1125,20 @@ window.GdpExpandLogic = GdpExpandLogic;
         theme: string;
         product: string;
         copyAiContext: string;
+        copyAiContextLabel: string;
         copyAiContextCopied: string;
         copyAiContextCopiedWithCode: (lines: number) => string;
         copyAiContextFailed: string;
         copyAiContextEmpty: string;
+        statusLive: string;
+        statusLoading: string;
+        statusError: string;
+        statusIdle: string;
+        statusInFlightTitle: (count: number, cancellable: number) => string;
+        cancelRequestsActiveTitle: (count: number) => string;
+        cancelRequestsInactiveTitle: string;
+        brandHome: string;
+        menuViews: string;
       };
       topbar: {
         resetRange: string;
@@ -1069,6 +1147,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         unified: string;
         split: string;
         ignoreWs: string;
+        ignoreWsLabel: string;
         syntaxLoading: string;
         syntaxOn: string;
         syntaxOff: string;
@@ -1077,9 +1156,37 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: string;
         syntaxOffTitle: string;
         hideTests: string;
+        hideTestsLabel: string;
         autoUpdate: string;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
+      };
+      diff: {
+        files: (count: number) => string;
+        updated: (time: string) => string;
+        updatedTitle: string;
+        kindAdded: string;
+        kindDeleted: string;
+        kindRenamed: string;
+        kindHeavy: string;
+        kindBinary: string;
+        kindMedia: string;
+        viewedProgress: (viewed: number, total: number) => string;
+        viewedProgressTitle: string;
+        nextUnviewed: string;
+        nextUnviewedTitle: string;
+        allViewed: string;
+        allViewedTitle: string;
+        noChangesTitle: string;
+        noChangesBody: string;
+        noChangesReload: string;
+        noChangesReloadTitle: string;
+        noChangesHistory: string;
+        noChangesHistoryTitle: string;
+        emptyDiffTitle: string;
+        emptyDiffBody: string;
+        noCommitSelectedTitle: string;
+        noCommitSelectedBody: string;
       };
       changeBanner: {
         text: string;
@@ -1100,14 +1207,56 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: string;
         tree: string;
         flat: string;
+        treeTitle: string;
+        flatTitle: string;
         filter: string;
         filterTitle: string;
+        filterClear: string;
+        filterClearTitle: string;
         hide: string;
+        show: string;
+        repoTarget: string;
+        openDirectoryInOs: string;
+        omittedHeavyLabel: string;
+        omittedHeavyTitle: string;
+        omittedPrivateLabel: string;
+        omittedPrivateTitle: string;
+        commitEntryGitlinkLabel: string;
+        commitEntryGitlinkTitle: string;
+        commitEntrySubmoduleLabel: string;
+        commitEntrySubmoduleTitle: string;
+      };
+      repo: {
+        newFolder: string;
+        moveFolderToTrash: string;
+        uploadButton: string;
+        dropFilesInto: (target: string) => string;
+        uploadFailed: string;
+        emptyDirectory: string;
+        uploadConfirmTitle: string;
+        uploadConfirmBody: (count: number, target: string) => string;
+        uploadConfirmLabel: string;
+        sortName: string;
+        sortUpdated: string;
+        sortSize: string;
+        repositoryFallback: string;
+        repositoryRootFallback: string;
+        gitlinkLabel: string;
+        gitlinkTitle: string;
+        submoduleLabel: string;
+        submoduleTitle: string;
       };
       history: {
         title: string;
         filter: string;
         filterTitle: string;
+        refreshTitle: string;
+      };
+      quickHelp: {
+        buttonTitle: string;
+        panelTitle: string;
+        close: string;
+        viewAll: string;
       };
       settings: {
         title: string;
@@ -1169,11 +1318,25 @@ window.GdpExpandLogic = GdpExpandLogic;
         theme: "toggle theme",
         product: "code viewer",
         copyAiContext: "Copy AI context (Shift+Click to include code)",
+        copyAiContextLabel: "AI context",
         copyAiContextCopied: "Copied AI context",
         copyAiContextCopiedWithCode: (lines) =>
           `Copied AI context + code (${lines} line${lines === 1 ? "" : "s"})`,
         copyAiContextFailed: "Copy failed",
         copyAiContextEmpty: "Nothing to copy here",
+        statusLive: "Live",
+        statusLoading: "Loading",
+        statusError: "Error",
+        statusIdle: "Idle",
+        statusInFlightTitle: (count, cancellable) =>
+          `${count} request${count === 1 ? "" : "s"} in flight${
+            cancellable > 0 ? " (cancellable)" : ""
+          }`,
+        cancelRequestsActiveTitle: (count) =>
+          `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
+        cancelRequestsInactiveTitle: "no in-flight requests",
+        brandHome: "Repository home",
+        menuViews: "Views",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1182,6 +1345,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         unified: "unified",
         split: "split",
         ignoreWs: "ignore whitespace changes (-w)",
+        ignoreWsLabel: "ws",
         syntaxLoading: "loading...",
         syntaxOn: "syntax on",
         syntaxOff: "syntax off",
@@ -1190,9 +1354,38 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "failed to load syntax highlighter",
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
+        hideTestsLabel: "no test",
         autoUpdate: "auto",
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
+      },
+      diff: {
+        files: (count) => `${count} file${count === 1 ? "" : "s"}`,
+        updated: (time) => `updated ${time}`,
+        updatedTitle: "last updated",
+        kindAdded: "added",
+        kindDeleted: "deleted",
+        kindRenamed: "renamed",
+        kindHeavy: "heavy",
+        kindBinary: "binary",
+        kindMedia: "media",
+        viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
+        viewedProgressTitle: "review progress",
+        nextUnviewed: "next unviewed",
+        nextUnviewedTitle: "Jump to the next unviewed file (n)",
+        allViewed: "all viewed",
+        allViewedTitle: "All visible files are viewed",
+        noChangesTitle: "No changes",
+        noChangesBody: "The working tree is clean against this ref.",
+        noChangesReload: "Reload diff",
+        noChangesReloadTitle: "Reload this diff range",
+        noChangesHistory: "Open history",
+        noChangesHistoryTitle: "Open commit history for this range",
+        emptyDiffTitle: "Empty diff",
+        emptyDiffBody: "This commit has no changes against its first parent.",
+        noCommitSelectedTitle: "No commit selected",
+        noCommitSelectedBody:
+          "Select a commit from the list to see its changes.",
       },
       changeBanner: {
         text: "Files changed",
@@ -1214,16 +1407,60 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "view",
         tree: "tree",
         flat: "flat",
+        treeTitle: "tree view",
+        flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
           "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+        filterClear: "Clear",
+        filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
+        show: "show sidebar",
+        repoTarget: "repository target",
+        openDirectoryInOs: "open this folder in OS",
+        omittedHeavyLabel: "skipped",
+        omittedHeavyTitle:
+          "Tree expansion is skipped, but the directory detail can be opened",
+        omittedPrivateLabel: "private",
+        omittedPrivateTitle: "This directory cannot be opened from the browser",
+        commitEntryGitlinkLabel: "GIT",
+        commitEntryGitlinkTitle: "Git commit entry",
+        commitEntrySubmoduleLabel: "SUB",
+        commitEntrySubmoduleTitle: "Git submodule pinned to a commit",
+      },
+      repo: {
+        newFolder: "new folder",
+        moveFolderToTrash: "move folder to Trash",
+        uploadButton: "Upload files",
+        dropFilesInto: (target) => `Drop files into ${target}`,
+        uploadFailed: "Upload failed",
+        emptyDirectory: "No files in this directory.",
+        uploadConfirmTitle: "Upload files?",
+        uploadConfirmBody: (count, target) =>
+          `Upload ${count} file${count === 1 ? "" : "s"} into ${target}?`,
+        uploadConfirmLabel: "Upload",
+        sortName: "Name",
+        sortUpdated: "Updated",
+        sortSize: "Size",
+        repositoryFallback: "repository",
+        repositoryRootFallback: "repository root",
+        gitlinkLabel: "gitlink",
+        gitlinkTitle: "Git commit entry is not directly browsable at this ref",
+        submoduleLabel: "submodule",
+        submoduleTitle: "Git submodule pinned to a commit",
       },
       history: {
         title: "Commits",
         filter: "Filter commits...",
         filterTitle:
           "Filter commits by message, SHA, author:name, or path:file.",
+        refreshTitle: "Refresh commit history",
+      },
+      quickHelp: {
+        buttonTitle: "quick help (shortcuts)",
+        panelTitle: "Quick Help",
+        close: "close quick help",
+        viewAll: "View all keybindings →",
       },
       settings: {
         title: "Viewer Settings",
@@ -1293,30 +1530,71 @@ window.GdpExpandLogic = GdpExpandLogic;
         product: "code viewer",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
+        copyAiContextLabel: "AI文脈",
         copyAiContextCopied: "コピーしました",
         copyAiContextCopiedWithCode: (lines) =>
           `コピーしました（コード付き・${lines}行）`,
         copyAiContextFailed: "コピーに失敗しました",
         copyAiContextEmpty: "コピーする内容がありません",
+        statusLive: "稼働中",
+        statusLoading: "更新中",
+        statusError: "エラー",
+        statusIdle: "待機中",
+        statusInFlightTitle: (count, cancellable) =>
+          `${count}件のリクエストを実行中${cancellable > 0 ? "（キャンセル可能）" : ""}`,
+        cancelRequestsActiveTitle: (count) =>
+          `実行中のリクエストを${count}件キャンセル`,
+        cancelRequestsInactiveTitle: "実行中のリクエストはありません",
+        brandHome: "リポジトリホーム",
+        menuViews: "ビュー切り替え",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
         reload: "diff を再読み込み (R)",
         layout: "レイアウト",
-        unified: "unified",
-        split: "split",
+        unified: "統合",
+        split: "分割",
         ignoreWs: "空白差分を無視 (-w)",
+        ignoreWsLabel: "空白",
         syntaxLoading: "読み込み中...",
-        syntaxOn: "syntax on",
-        syntaxOff: "syntax off",
+        syntaxOn: "構文あり",
+        syntaxOff: "構文なし",
         syntaxOnTitle: "シンタックスハイライト有効",
         syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
         syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
+        hideTestsLabel: "テスト非表示",
         autoUpdate: "自動",
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
+      },
+      diff: {
+        files: (count) => `${count}ファイル`,
+        updated: (time) => `更新 ${time}`,
+        updatedTitle: "最終更新",
+        kindAdded: "追加",
+        kindDeleted: "削除",
+        kindRenamed: "名前変更",
+        kindHeavy: "大容量",
+        kindBinary: "バイナリ",
+        kindMedia: "メディア",
+        viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
+        viewedProgressTitle: "確認進捗",
+        nextUnviewed: "次の未確認",
+        nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
+        allViewed: "すべて確認済み",
+        allViewedTitle: "表示中のファイルはすべて確認済みです",
+        noChangesTitle: "変更はありません",
+        noChangesBody: "この参照との差分はありません。",
+        noChangesReload: "diff を更新",
+        noChangesReloadTitle: "この差分範囲を再読み込み",
+        noChangesHistory: "履歴を開く",
+        noChangesHistoryTitle: "この範囲のコミット履歴を開く",
+        emptyDiffTitle: "空の差分",
+        emptyDiffBody: "このコミットは最初の親との差分がありません。",
+        noCommitSelectedTitle: "コミット未選択",
+        noCommitSelectedBody: "一覧からコミットを選ぶと変更内容を表示します。",
       },
       changeBanner: {
         text: "ファイルに変更がありました",
@@ -1338,16 +1616,64 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "表示",
         tree: "ツリー",
         flat: "一覧",
+        treeTitle: "ツリー表示",
+        flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
           "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+        filterClear: "解除",
+        filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
+        show: "サイドバーを表示",
+        repoTarget: "リポジトリの対象",
+        openDirectoryInOs: "このフォルダをOSで開く",
+        omittedHeavyLabel: "省略",
+        omittedHeavyTitle:
+          "ツリー展開は省略されていますが、詳細パネルでは開けます",
+        omittedPrivateLabel: "非公開",
+        omittedPrivateTitle: "このディレクトリはブラウザから開けません",
+        commitEntryGitlinkLabel: "GIT",
+        commitEntryGitlinkTitle:
+          "Git のコミットに固定された参照です。フォルダではないため直接は開けません。",
+        commitEntrySubmoduleLabel: "SUB",
+        commitEntrySubmoduleTitle:
+          "Git サブモジュール: 特定のコミットに固定されています。フォルダではないため直接は開けません。",
+      },
+      repo: {
+        newFolder: "新規フォルダ",
+        moveFolderToTrash: "フォルダをゴミ箱へ移動",
+        uploadButton: "ファイルをアップロード",
+        dropFilesInto: (target) => `${target} にファイルをドロップ`,
+        uploadFailed: "アップロードに失敗しました",
+        emptyDirectory: "このディレクトリにファイルはありません。",
+        uploadConfirmTitle: "ファイルをアップロードしますか？",
+        uploadConfirmBody: (count, target) =>
+          `${target} に ${count} 件のファイルをアップロードしますか？`,
+        uploadConfirmLabel: "アップロード",
+        sortName: "名前",
+        sortUpdated: "更新日時",
+        sortSize: "サイズ",
+        repositoryFallback: "リポジトリ",
+        repositoryRootFallback: "リポジトリのルート",
+        gitlinkLabel: "固定コミット",
+        gitlinkTitle:
+          "特定のコミットに固定された参照です。この ref では直接開けません。",
+        submoduleLabel: "サブモジュール",
+        submoduleTitle:
+          "Git サブモジュール: 特定のコミットに固定されています。直接は開けません。",
       },
       history: {
         title: "コミット",
         filter: "コミットを絞り込み...",
         filterTitle:
           "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。",
+        refreshTitle: "コミット履歴を更新",
+      },
+      quickHelp: {
+        buttonTitle: "クイックヘルプ(ショートカット)",
+        panelTitle: "クイックヘルプ",
+        close: "クイックヘルプを閉じる",
+        viewAll: "すべてのキーバインドを見る →",
       },
       settings: {
         title: "ビューア設定",
@@ -1437,6 +1763,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     setElementText(".global-help-link[data-route='help']", text.nav.help);
     setElementText(".product-label", text.global.product);
+    document
+      .querySelector<HTMLAnchorElement>(".brand")
+      ?.setAttribute("aria-label", text.global.brandHome);
+    document
+      .querySelector<HTMLElement>(".app-menu")
+      ?.setAttribute("aria-label", text.global.menuViews);
 
     const annotationsToggle = document.querySelector<HTMLButtonElement>(
       "#annotations-toggle",
@@ -1456,17 +1788,43 @@ window.GdpExpandLogic = GdpExpandLogic;
       theme.title = text.global.theme;
       theme.setAttribute("aria-label", text.global.theme);
     }
+    const quickHelpBtn =
+      document.querySelector<HTMLButtonElement>("#quick-help-btn");
+    if (quickHelpBtn) {
+      quickHelpBtn.title = text.quickHelp.buttonTitle;
+      quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
+    }
+    QUICK_HELP?.localize();
+    const doctorTitle = doctorText(STATE.language).title;
+    const doctorBtn = document.querySelector<HTMLButtonElement>("#doctor-btn");
+    if (doctorBtn) {
+      doctorBtn.title = doctorTitle;
+      doctorBtn.setAttribute("aria-label", doctorTitle);
+    }
+    document
+      .querySelector<HTMLElement>("#doctor-sheet")
+      ?.setAttribute("aria-label", doctorTitle);
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
       copyAiContext.title = text.global.copyAiContext;
       copyAiContext.setAttribute("aria-label", text.global.copyAiContext);
+      const copyAiContextLabel =
+        copyAiContext.querySelector<HTMLElement>(".ai-context-label");
+      if (copyAiContextLabel)
+        copyAiContextLabel.textContent = text.global.copyAiContextLabel;
     }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
-    if (refReset) refReset.title = text.topbar.resetRange;
+    if (refReset) {
+      refReset.title = text.topbar.resetRange;
+      refReset.setAttribute("aria-label", text.topbar.resetRange);
+    }
     const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
-    if (reload) reload.title = text.topbar.reload;
+    if (reload) {
+      reload.title = text.topbar.reload;
+      reload.setAttribute("aria-label", text.topbar.reload);
+    }
     const layoutGroup = document.querySelector<HTMLElement>("#topbar .seg");
     layoutGroup?.setAttribute("aria-label", text.topbar.layout);
     setElementText(
@@ -1478,9 +1836,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       text.topbar.split,
     );
     const ignoreWs = document.querySelector<HTMLButtonElement>("#ignore-ws");
-    if (ignoreWs) ignoreWs.title = text.topbar.ignoreWs;
+    if (ignoreWs) {
+      ignoreWs.title = text.topbar.ignoreWs;
+      ignoreWs.textContent = text.topbar.ignoreWsLabel;
+    }
     const hideTests = document.querySelector<HTMLButtonElement>("#hide-tests");
-    if (hideTests) hideTests.title = text.topbar.hideTests;
+    if (hideTests) {
+      hideTests.title = text.topbar.hideTests;
+      hideTests.textContent = text.topbar.hideTestsLabel;
+    }
     applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
@@ -1503,16 +1867,39 @@ window.GdpExpandLogic = GdpExpandLogic;
     sbView?.setAttribute("aria-label", text.sidebar.view);
     setElementText('.sb-view-seg button[data-view="tree"]', text.sidebar.tree);
     setElementText('.sb-view-seg button[data-view="flat"]', text.sidebar.flat);
+    const sbViewTree = document.querySelector<HTMLButtonElement>(
+      '.sb-view-seg button[data-view="tree"]',
+    );
+    if (sbViewTree) sbViewTree.title = text.sidebar.treeTitle;
+    const sbViewFlat = document.querySelector<HTMLButtonElement>(
+      '.sb-view-seg button[data-view="flat"]',
+    );
+    if (sbViewFlat) sbViewFlat.title = text.sidebar.flatTitle;
     const filter = document.querySelector<HTMLInputElement>("#sb-filter");
     if (filter) {
       filter.placeholder = text.sidebar.filter;
       filter.title = text.sidebar.filterTitle;
     }
+    const filterClear =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    if (filterClear) {
+      filterClear.textContent = text.sidebar.filterClear;
+      filterClear.title = text.sidebar.filterClearTitle;
+      filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
+    }
+    const repoTarget = document.querySelector<HTMLInputElement>("#repo-target");
+    if (repoTarget) {
+      repoTarget.title = text.sidebar.repoTarget;
+      repoTarget.setAttribute("aria-label", text.sidebar.repoTarget);
+    }
     const sidebarToggle =
       document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (sidebarToggle) {
-      sidebarToggle.title = text.sidebar.hide;
-      sidebarToggle.setAttribute("aria-label", text.sidebar.hide);
+      const sidebarToggleTitle = STATE.sidebarHidden
+        ? text.sidebar.show
+        : text.sidebar.hide;
+      sidebarToggle.title = sidebarToggleTitle;
+      sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
     }
     setElementText(".sidebar-toggle-label", text.sidebar.files);
 
@@ -1525,6 +1912,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       historyFilter.placeholder = text.history.filter;
       historyFilter.title = text.history.filterTitle;
     }
+    document
+      .querySelectorAll<HTMLButtonElement>(".history-refresh")
+      .forEach((button) => {
+        button.title = text.history.refreshTitle;
+        button.setAttribute("aria-label", text.history.refreshTitle);
+      });
+    relocalizeHistory?.();
 
     setElementText(".scope-settings-head strong", text.settings.title);
     const settingsClose = document.querySelector<HTMLButtonElement>(
@@ -1635,9 +2029,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     relocalizeDatabase?.();
   }
 
-  // createDatabaseView 後に登録される DB ビューア再ローカライズ関数。
+  // createHistoryView / createDatabaseView 後に登録されるビュー再ローカライズ関数。
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
+  let relocalizeHistory: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
+
+  // createQuickHelp 後に代入される (同じ遅延参照パターン)。
+  let QUICK_HELP: ReturnType<typeof createQuickHelp> | null = null;
 
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
     const next = normalizeViewerLanguage(language);
@@ -1667,6 +2065,19 @@ window.GdpExpandLogic = GdpExpandLogic;
     const el = $("#status");
     el.classList.remove("live", "refreshing", "error");
     if (s) el.classList.add(s);
+    const text = uiText();
+    const label =
+      s === "live"
+        ? text.global.statusLive
+        : s === "refreshing"
+          ? text.global.statusLoading
+          : s === "error"
+            ? text.global.statusError
+            : text.global.statusIdle;
+    const labelEl = el.querySelector<HTMLElement>(".status-label");
+    if (labelEl) labelEl.textContent = label;
+    el.setAttribute("aria-label", label);
+    updateNetworkActivity();
   }
 
   function applyTheme() {
@@ -2053,7 +2464,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.readOnly = true;
     input.autocomplete = "off";
     input.placeholder = options.placeholder;
-    if (options.title) input.title = options.title;
+    if (options.title) {
+      input.title = options.title;
+      input.setAttribute("aria-label", options.title);
+    }
     if (options.value != null) input.value = options.value;
 
     const caret = document.createElement("span");
@@ -2202,6 +2616,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
         createFileBreadcrumb: (path, ref) =>
           DIFF_VIEW.createFileBreadcrumb(path, ref),
+        emptyText: () => uiText().diff,
       },
       historyRoute,
     );
@@ -2221,6 +2636,13 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   function withAnnotationSessionParam(rawUrl: string): string {
     return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
+  }
+
+  function urlForRoute(route: AppRoute): string {
+    return withDoctorOverlay(
+      withAnnotationSessionParam(buildRoute(route)),
+      parseDoctorOverlay(window.location.pathname, window.location.search),
+    );
   }
 
   function historyStateForRoute(route: AppRoute): unknown {
@@ -2334,10 +2756,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
-    const url = withDoctorOverlay(
-      withAnnotationSessionParam(buildRoute(nextRoute)),
-      parseDoctorOverlay(window.location.pathname, window.location.search),
-    );
+    const url = urlForRoute(nextRoute);
     const state = historyStateForRoute(nextRoute);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
@@ -2660,6 +3079,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_GENERATION = generation;
     },
     invalidateRepoSidebar,
+    diffText: () => uiText().diff,
     getDiffRoot: () => activeFileHistoryDiffHost || $("#diff"),
     getEmptyPane: () => activeFileHistoryEmptyHost || $("#empty"),
     isEmbeddedDiffMode: () => !!activeFileHistoryDiffHost,
@@ -2720,11 +3140,34 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (themeButton) {
       themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
     }
-    const copyAiContextButton =
-      document.querySelector<HTMLButtonElement>("#copy-ai-context");
-    if (copyAiContextButton) {
-      copyAiContextButton.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    const copyAiContextIcon = document.querySelector<HTMLElement>(
+      "#copy-ai-context .goi-icon",
+    );
+    if (copyAiContextIcon) {
+      copyAiContextIcon.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
     }
+    const autoUpdateIcon = document.querySelector<HTMLElement>(
+      "#auto-update .goi-icon",
+    );
+    if (autoUpdateIcon) {
+      autoUpdateIcon.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+    }
+    const cancelRequestsIcon = document.querySelector<HTMLElement>(
+      "#cancel-requests .goi-icon",
+    );
+    if (cancelRequestsIcon) {
+      cancelRequestsIcon.innerHTML = iconSvg("octicon-x", X_16_PATH);
+    }
+  }
+
+  // Static SVGs for the topbar ref-picker actions. Run once at
+  // init, same as setGlobalHeaderIcons(); title/aria-label stay in sync
+  // with the active language via localizeViewerChrome() instead.
+  function setRefActionIcons() {
+    const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
+    if (refReset) refReset.innerHTML = iconSvg("octicon-x", X_16_PATH);
+    const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
+    if (reload) reload.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
   }
 
   // ----- wiring -----
@@ -2736,6 +3179,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
   setGlobalHeaderIcons();
+  setRefActionIcons();
   // Sidebar view toggle (tree / flat)
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
@@ -2777,11 +3221,22 @@ window.GdpExpandLogic = GdpExpandLogic;
         };
       }
     }
+    const databaseQuerySql =
+      STATE.route.screen === "database" && STATE.route.tab === "query"
+        ? document.querySelector<HTMLTextAreaElement>(
+            ".db-container:not([hidden]) .db-query-editor:not([hidden]) .db-query-textarea",
+          )?.value
+        : undefined;
     const text = aiContextClipboardText({
       route: STATE.route,
       diffFrom: STATE.from,
       diffTo: STATE.to,
       selectionCode,
+      diffMeta: window._lastMeta
+        ? visibleDiffMetaForBrief(window._lastMeta)
+        : null,
+      viewedFiles: STATE.viewedFiles,
+      databaseQuerySql,
     });
     const finish = (
       ok: boolean,
@@ -3069,7 +3524,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   const sbFilter = $<HTMLInputElement>("#sb-filter");
   if (sbFilter) {
-    sbFilter.addEventListener("input", () => scheduleApplyFilter());
+    sbFilter.addEventListener("input", () => {
+      syncSidebarFilterClearButton();
+      scheduleApplyFilter();
+    });
     sbFilter.addEventListener("keydown", (e) => {
       if (isImeComposing(e)) return;
       if (e.key === "Enter") {
@@ -3083,6 +3541,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       } else if (e.key === "Escape") {
         if (sbFilter.value) {
           sbFilter.value = "";
+          syncSidebarFilterClearButton();
           flushSidebarFilter();
           applyFilter();
         } else {
@@ -3090,6 +3549,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
       }
     });
+  }
+  const sbFilterClear =
+    document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+  if (sbFilterClear) {
+    syncSidebarFilterClearButton();
+    sbFilterClear.addEventListener("click", clearSidebarFilter);
   }
   function focusFileFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
@@ -3289,17 +3754,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       );
       return true;
     }
+    if (action === "next-unviewed-file") {
+      if (DIFF_VIEW.scrollToNextUnviewedFile()) scheduleMainSurfaceFocus();
+      return true;
+    }
     if (action === "open-help") {
-      openHelpKeybindings({
-        getRoute: () => STATE.route,
-        getLanguage: () => STATE.language,
-        currentRange,
-        setRoute,
-        setPageMode,
-        renderHelpPage,
-        setStatus,
-        cancelActiveSourceLoad,
-      });
+      QUICK_HELP?.toggle();
       return true;
     }
     return false;
@@ -3367,6 +3827,137 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRoute(STATE.route, true);
   }
 
+  function normalizedHistoryRefForEmptyDiff(): string {
+    const candidate =
+      STATE.to && STATE.to !== "worktree" ? STATE.to : STATE.from || "HEAD";
+    return candidate && candidate !== "worktree" && !candidate.startsWith("--")
+      ? candidate
+      : "HEAD";
+  }
+
+  function emptyDiffHistoryRoute(): AppRoute {
+    return {
+      screen: "history",
+      ref: normalizedHistoryRefForEmptyDiff(),
+      range: currentRange(),
+    };
+  }
+
+  function setEmptyActionContent(
+    action: HTMLElement,
+    iconName: string,
+    iconPath: string,
+    label: string,
+    title: string,
+  ): void {
+    action.title = title;
+    action.setAttribute("aria-label", title);
+    action.replaceChildren();
+    const icon = document.createElement("span");
+    icon.className = "empty-action-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = iconSvg(iconName, iconPath);
+    const text = document.createElement("span");
+    text.className = "empty-action-label";
+    text.textContent = label;
+    action.append(icon, text);
+  }
+
+  function navigateToEmptyDiffHistory(event: MouseEvent): void {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    event.preventDefault();
+    const route = emptyDiffHistoryRoute();
+    history.pushState(historyStateForRoute(route), "", urlForRoute(route));
+    window.scrollTo(0, 0);
+    applyRouteFromLocation();
+  }
+
+  function ensureEmptyDiffActions(empty: HTMLElement): HTMLElement {
+    let actions = empty.querySelector<HTMLElement>(".empty-actions");
+    if (actions) return actions;
+    actions = document.createElement("div");
+    actions.className = "empty-actions";
+    actions.hidden = true;
+
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.className = "empty-action empty-action-primary";
+    reload.dataset.emptyAction = "reload";
+    reload.addEventListener("click", () => reloadDiffFromUi(reload));
+
+    const historyLink = document.createElement("a");
+    historyLink.className = "empty-action";
+    historyLink.dataset.emptyAction = "history";
+    historyLink.addEventListener("click", navigateToEmptyDiffHistory);
+
+    actions.append(reload, historyLink);
+    empty.appendChild(actions);
+    return actions;
+  }
+
+  function syncEmptyDiffPane(empty: HTMLElement, onHistory: boolean): void {
+    empty.classList.toggle("empty-with-actions", !onHistory);
+    const text = uiText().diff;
+    const h2 = empty.querySelector("h2");
+    if (h2)
+      h2.textContent = onHistory ? text.emptyDiffTitle : text.noChangesTitle;
+    const p = empty.querySelector("p");
+    if (p) p.textContent = onHistory ? text.emptyDiffBody : text.noChangesBody;
+
+    const existingActions = empty.querySelector<HTMLElement>(".empty-actions");
+    if (onHistory) {
+      if (existingActions) existingActions.hidden = true;
+      return;
+    }
+
+    const actions = ensureEmptyDiffActions(empty);
+    const reload = actions.querySelector<HTMLElement>(
+      '[data-empty-action="reload"]',
+    );
+    const historyLink = actions.querySelector<HTMLAnchorElement>(
+      '[data-empty-action="history"]',
+    );
+    if (reload)
+      setEmptyActionContent(
+        reload,
+        "octicon-sync",
+        SYNC_16_PATH,
+        text.noChangesReload,
+        text.noChangesReloadTitle,
+      );
+    if (historyLink) {
+      const route = emptyDiffHistoryRoute();
+      historyLink.href = urlForRoute(route);
+      setEmptyActionContent(
+        historyLink,
+        "octicon-git-branch",
+        GIT_BRANCH_16_PATH,
+        text.noChangesHistory,
+        text.noChangesHistoryTitle,
+      );
+    }
+    actions.hidden = false;
+  }
+
+  function reloadDiffFromUi(trigger?: HTMLElement | null): void {
+    const topbarButton = $("#reload-prom");
+    topbarButton.classList.add("spinning");
+    if (trigger && trigger !== topbarButton) {
+      trigger.classList.add("spinning");
+      trigger.setAttribute("aria-busy", "true");
+    }
+    load().finally(() => {
+      setTimeout(() => {
+        topbarButton.classList.remove("spinning");
+        if (trigger && trigger !== topbarButton) {
+          trigger.classList.remove("spinning");
+          trigger.setAttribute("aria-busy", "false");
+        }
+      }, 200);
+    });
+  }
+
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
@@ -3403,13 +3994,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (empty) {
         const onHistory =
           STATE.route.screen === "history" || isFileHistoryRoute(STATE.route);
-        const h2 = empty.querySelector("h2");
-        if (h2) h2.textContent = onHistory ? "Empty diff" : "No changes";
-        const p = empty.querySelector("p");
-        if (p)
-          p.textContent = onHistory
-            ? "This commit has no changes against its first parent."
-            : "The working tree is clean against this ref.";
+        syncEmptyDiffPane(empty, onHistory);
       }
     }
     const routeAtRequest = STATE.route;
@@ -3535,11 +4120,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         DIFF_VIEW.clearLoadQueue();
         if (activeFileHistoryEmptyHost) {
           activeFileHistoryEmptyHost.classList.remove("hidden");
+          const text = uiText().diff;
           const h2 = activeFileHistoryEmptyHost.querySelector("h2");
-          if (h2) h2.textContent = "No commit selected";
+          if (h2) h2.textContent = text.noCommitSelectedTitle;
           const p = activeFileHistoryEmptyHost.querySelector("p");
-          if (p)
-            p.textContent = "Select a commit from the list to see its changes.";
+          if (p) p.textContent = text.noCommitSelectedBody;
         }
         setStatus("live");
         return;
@@ -3559,11 +4144,31 @@ window.GdpExpandLogic = GdpExpandLogic;
         clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
         placeSidebarToggle,
         setStatus,
+        emptyText: () => uiText().diff,
       });
     },
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,
     trackLoad,
+  });
+  relocalizeHistory = () => HISTORY_VIEW.localize();
+
+  QUICK_HELP = createQuickHelp({
+    $,
+    getLanguage: () => STATE.language,
+    getText: () => uiText().quickHelp,
+    openFullKeybindings: () => {
+      openHelpKeybindings({
+        getRoute: () => STATE.route,
+        getLanguage: () => STATE.language,
+        currentRange,
+        setRoute,
+        setPageMode,
+        renderHelpPage,
+        setStatus,
+        cancelActiveSourceLoad,
+      });
+    },
   });
 
   const DOCTOR_VIEW = createDoctorView({
@@ -3849,13 +4454,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // Manual reload button
   // Prominent reload button (next to ref-picker)
-  $("#reload-prom").addEventListener("click", () => {
-    const btn = $("#reload-prom");
-    btn.classList.add("spinning");
-    load().finally(() => {
-      setTimeout(() => btn.classList.remove("spinning"), 200);
-    });
-  });
+  $("#reload-prom").addEventListener("click", () => reloadDiffFromUi());
 
   // Hide-tests toggle: ファイル名に test|spec が含まれるエントリをフィルタ。
   // Diff viewer 専用。Repository ビュー（gdp-repo-page / gdp-repo-blob-page）には
@@ -3882,24 +4481,33 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyHideTestsToMeta();
   }
 
-  function applyHideTestsToMeta() {
-    const meta = window._lastMeta;
-    if (!meta || !meta.totals) return;
+  function visibleDiffMetaForBrief(meta: DiffMeta): DiffMeta {
+    if (!meta.totals) return meta;
     const effective = STATE.hideTests && !isRepositorySidebarMode();
-    if (!effective) {
-      renderMeta(meta);
-      return;
-    }
+    if (!effective) return meta;
     let additions = 0;
     let deletions = 0;
-    let files = 0;
-    for (const f of STATE.files) {
+    const visibleFiles: FileMeta[] = [];
+    for (const f of meta.files) {
       if (TEST_RE.test(f.path || "")) continue;
       additions += f.additions || 0;
       deletions += f.deletions || 0;
-      files += 1;
+      visibleFiles.push(f);
     }
-    renderMeta({ ...meta, totals: { files, additions, deletions } });
+    return {
+      ...meta,
+      files: visibleFiles,
+      totals: { files: visibleFiles.length, additions, deletions },
+    };
+  }
+
+  function applyHideTestsToMeta() {
+    const meta = window._lastMeta;
+    if (!meta?.totals) return;
+    renderMeta(visibleDiffMetaForBrief(meta));
+    // renderMeta() above rebuilds #meta from raw totals, so re-sync the
+    // next-unviewed button against the live sidebar filter/viewed state.
+    applyViewedState();
   }
   applyHideTests();
   $("#hide-tests").addEventListener("click", () => {
@@ -4063,11 +4671,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (!btn) return;
     const text = uiText();
     btn.classList.toggle("active", STATE.autoUpdate);
-    btn.textContent = text.topbar.autoUpdate;
-    btn.title = STATE.autoUpdate
+    const autoUpdateTitle = STATE.autoUpdate
       ? text.topbar.autoUpdateOnTitle
       : text.topbar.autoUpdateOffTitle;
+    btn.title = autoUpdateTitle;
+    btn.setAttribute("aria-label", autoUpdateTitle);
     btn.setAttribute("aria-pressed", STATE.autoUpdate ? "true" : "false");
+    const label = btn.querySelector<HTMLElement>(".auto-update-label");
+    if (label) label.textContent = text.topbar.autoUpdate;
   }
 
   function setAutoUpdate(on: boolean) {
@@ -4278,6 +4889,7 @@ window.GdpExpandLogic = GdpExpandLogic;
           /* ignore parse errors */
         }
       }
+      if (isHistoryPanelRoute(STATE.route)) HISTORY_VIEW.notePossibleUpdate();
       scheduleSseLoad(paths);
     });
     es.addEventListener("watch-limit", (event) => {

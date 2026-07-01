@@ -3,6 +3,7 @@ import type {
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
+import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
 
 export type QueryHistoryViewCallbacks = {
@@ -14,10 +15,18 @@ export type QueryHistoryViewCallbacks = {
 
 export type QueryHistoryView = {
   el: HTMLElement;
-  refresh: (options?: { force?: boolean }) => Promise<void>;
+  refresh: (options?: {
+    force?: boolean;
+    announceResult?: boolean;
+  }) => Promise<void>;
   clear: () => void;
   localize: () => void;
 };
+
+type RefreshResult =
+  | { type: "none" }
+  | { type: "added"; count: number }
+  | { type: "unchanged" };
 
 export function createQueryHistoryView(
   callbacks: QueryHistoryViewCallbacks,
@@ -30,10 +39,17 @@ export function createQueryHistoryView(
   toolbar.className = "db-query-history-toolbar";
 
   const refreshBtn = document.createElement("button");
-  refreshBtn.className = "db-query-history-action";
+  refreshBtn.className = "db-query-history-action db-query-history-refresh";
   refreshBtn.type = "button";
-  refreshBtn.textContent = text().history.refresh;
-  refreshBtn.title = text().history.refreshTitle;
+  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  const refreshLabel = document.createElement("span");
+  refreshLabel.className = "db-query-history-action-label";
+  refreshBtn.appendChild(refreshLabel);
+
+  const refreshResult = document.createElement("span");
+  refreshResult.className = "db-refresh-result db-query-history-refresh-result";
+  refreshResult.setAttribute("aria-live", "polite");
+  refreshResult.hidden = true;
 
   const clearBtn = document.createElement("button");
   clearBtn.className = "db-query-history-action db-query-history-danger";
@@ -41,7 +57,7 @@ export function createQueryHistoryView(
   clearBtn.textContent = text().history.clearAll;
   clearBtn.title = text().history.clearTitle;
 
-  toolbar.append(refreshBtn, clearBtn);
+  toolbar.append(refreshBtn, refreshResult, clearBtn);
 
   const body = document.createElement("div");
   body.className = "db-query-history-body-split";
@@ -71,6 +87,66 @@ export function createQueryHistoryView(
   let inFlightRefresh: { key: string; promise: Promise<void> } | null = null;
   const entryRowsById = new Map<string, HTMLElement>();
   let selectedEntryRow: HTMLElement | null = null;
+  let refreshResultState: RefreshResult = { type: "none" };
+
+  function syncRefreshButtonLabel(): void {
+    refreshLabel.textContent = text().history.refresh;
+    refreshBtn.title = text().history.refreshTitle;
+    refreshBtn.setAttribute("aria-label", text().history.refreshTitle);
+  }
+
+  function setRefreshBusy(isBusy: boolean): void {
+    refreshBtn.disabled = isBusy;
+    refreshBtn.classList.toggle("spinning", isBusy);
+    refreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
+
+  function refreshResultText(): string {
+    switch (refreshResultState.type) {
+      case "none":
+        return "";
+      case "added":
+        return text().history.refreshResultAdded(refreshResultState.count);
+      case "unchanged":
+        return text().history.refreshResultUnchanged;
+      default: {
+        const exhaustive: never = refreshResultState;
+        return exhaustive;
+      }
+    }
+  }
+
+  function syncRefreshResult(): void {
+    const message = refreshResultText();
+    refreshResult.textContent = message;
+    refreshResult.hidden = message.length === 0;
+    refreshResult.classList.toggle(
+      "changed",
+      refreshResultState.type === "added",
+    );
+  }
+
+  function clearRefreshResult(): void {
+    refreshResultState = { type: "none" };
+    syncRefreshResult();
+  }
+
+  function setRefreshResult(
+    previousEntries: QueryHistoryEntry[],
+    nextEntries: QueryHistoryEntry[],
+  ): void {
+    const previousIds = new Set(previousEntries.map((entry) => entry.id));
+    const added = nextEntries.filter(
+      (entry) => !previousIds.has(entry.id),
+    ).length;
+    refreshResultState =
+      added > 0 ? { type: "added", count: added } : { type: "unchanged" };
+    syncRefreshResult();
+  }
+
+  syncRefreshButtonLabel();
+  setRefreshBusy(false);
+  syncRefreshResult();
 
   function currentRefreshParams(): { key: string; params: string } {
     const dbId = callbacks.getDbId();
@@ -103,7 +179,9 @@ export function createQueryHistoryView(
     return false;
   }
 
-  async function refresh(options: { force?: boolean } = {}) {
+  async function refresh(
+    options: { force?: boolean; announceResult?: boolean } = {},
+  ) {
     const { key: refreshKey, params } = currentRefreshParams();
     const now = Date.now();
     if (inFlightRefresh?.key === refreshKey) {
@@ -116,12 +194,16 @@ export function createQueryHistoryView(
     ) {
       return;
     }
+    const previousEntries = options.announceResult ? [...entries] : null;
+    if (options.announceResult) clearRefreshResult();
+    setRefreshBusy(true);
     const promise = (async () => {
       const res = await fetch(`/_db/history${params}`);
       if (!res.ok) return;
       const state = (await res.json()) as QueryHistoryState;
       if (currentRefreshParams().key !== refreshKey) return;
       entries = state.entries;
+      if (previousEntries) setRefreshResult(previousEntries, entries);
       lastRefreshKey = refreshKey;
       lastRefreshAt = Date.now();
       if (
@@ -138,7 +220,10 @@ export function createQueryHistoryView(
     try {
       await promise;
     } finally {
-      if (inFlightRefresh?.promise === promise) inFlightRefresh = null;
+      if (inFlightRefresh?.promise === promise) {
+        inFlightRefresh = null;
+        setRefreshBusy(false);
+      }
     }
   }
 
@@ -180,6 +265,8 @@ export function createQueryHistoryView(
 
   function renderDetail(entry: QueryHistoryEntry) {
     detailCol.innerHTML = "";
+
+    const meta = renderEntryMeta(entry, "detail");
 
     const actions = document.createElement("div");
     actions.className = "db-query-history-detail-actions";
@@ -228,7 +315,7 @@ export function createQueryHistoryView(
     sqlBlock.className = "db-query-history-sql";
     sqlBlock.textContent = entry.sql;
 
-    detailCol.append(actions, sqlBlock);
+    detailCol.append(meta, actions, sqlBlock);
 
     if (entry.body) {
       const bodyBlock = document.createElement("div");
@@ -262,25 +349,7 @@ export function createQueryHistoryView(
     item.dataset.id = entry.id;
     entryRowsById.set(entry.id, item);
 
-    const meta = document.createElement("div");
-    meta.className = "db-query-history-entry-meta";
-
-    const byIcon = document.createElement("span");
-    byIcon.className = "db-query-history-by";
-    byIcon.textContent = entry.executedBy === "ai" ? "[AI]" : "[User]";
-
-    const time = document.createElement("span");
-    time.className = "db-query-history-time";
-    time.textContent = formatTime(entry.executedAt);
-    time.title = entry.executedAt;
-
-    const stats = document.createElement("span");
-    stats.className = "db-query-history-stats";
-    const truncMark = entry.truncated ? "+" : "";
-    stats.textContent = `${entry.rowCount}${truncMark} rows, ${entry.elapsedMs}ms`;
-
-    meta.append(byIcon, time, stats);
-
+    const meta = renderEntryMeta(entry, "entry");
     const title = document.createElement("div");
     title.className = "db-query-history-entry-title";
     title.textContent =
@@ -292,6 +361,40 @@ export function createQueryHistoryView(
     item.addEventListener("click", () => selectEntry(entry));
 
     return item;
+  }
+
+  function renderEntryMeta(
+    entry: QueryHistoryEntry,
+    mode: "entry" | "detail",
+  ): HTMLElement {
+    const meta = document.createElement("div");
+    meta.className =
+      mode === "detail"
+        ? "db-query-history-detail-meta"
+        : "db-query-history-entry-meta";
+
+    const byIcon = document.createElement("span");
+    byIcon.className = "db-query-history-by";
+    const executor =
+      entry.executedBy === "ai"
+        ? text().history.executorAi
+        : text().history.executorUser;
+    byIcon.textContent = mode === "detail" ? executor : `[${executor}]`;
+
+    const time = document.createElement("span");
+    time.className = "db-query-history-time";
+    time.textContent = formatTime(entry.executedAt);
+    time.title = entry.executedAt;
+
+    const stats = document.createElement("span");
+    stats.className = "db-query-history-stats";
+    stats.textContent = `${text().history.rowsLabel(
+      entry.rowCount,
+      entry.truncated,
+    )}, ${text().history.elapsedLabel(entry.elapsedMs)}`;
+
+    meta.append(byIcon, time, stats);
+    return meta;
   }
 
   function renderPreviewTable(entry: QueryHistoryEntry): HTMLElement {
@@ -411,6 +514,7 @@ export function createQueryHistoryView(
         ),
       });
       entries = [];
+      clearRefreshResult();
       render();
     } catch {
       /* ignore */
@@ -418,7 +522,7 @@ export function createQueryHistoryView(
   });
 
   refreshBtn.addEventListener("click", () => {
-    refresh({ force: true });
+    refresh({ force: true, announceResult: true });
   });
 
   function clear(): void {
@@ -426,6 +530,7 @@ export function createQueryHistoryView(
     expandedIds.clear();
     lastRefreshKey = null;
     lastRefreshAt = 0;
+    clearRefreshResult();
     if (clearConfirmTimer) {
       clearTimeout(clearConfirmTimer);
       clearConfirmTimer = null;
@@ -437,8 +542,8 @@ export function createQueryHistoryView(
   }
 
   function localize(): void {
-    refreshBtn.textContent = text().history.refresh;
-    refreshBtn.title = text().history.refreshTitle;
+    syncRefreshButtonLabel();
+    syncRefreshResult();
     if (clearBtn.dataset.confirm !== "1") {
       clearBtn.textContent = text().history.clearAll;
     }

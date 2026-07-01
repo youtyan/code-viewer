@@ -10,6 +10,7 @@ import {
 import {
   COPY_16_PATHS,
   FILE_16_PATH,
+  GIT_BRANCH_16_PATH,
   iconSvg,
   PLUS_16_PATH,
   TRASH_16_PATH,
@@ -76,6 +77,24 @@ export type RepoViewDeps = {
   getProjectName(): string;
   clearLoadQueue(): void;
   syncSidebarHeaderHeight(): void;
+  newFolderButtonTitle(): string;
+  openDirectoryInOsTitle(): string;
+  moveFolderToTrashTitle(): string;
+  uploadButtonLabel(): string;
+  dropFilesIntoCopy(target: string): string;
+  uploadFailedMessage(): string;
+  emptyDirectoryLabel(): string;
+  uploadConfirmText(
+    count: number,
+    target: string,
+  ): { title: string; body: string; confirmLabel: string };
+  sortColumnLabels(): { name: string; updated: string; size: string };
+  repositoryFallback(): string;
+  repositoryRootFallback(): string;
+  commitEntryMeta(submodule: RepoTreeEntry["submodule"]): {
+    label: string;
+    title: string;
+  };
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
     route: AppRoute;
@@ -119,6 +138,18 @@ export function createRepoView(deps: RepoViewDeps) {
     getSidebarRowByPath,
     getSidebarVirtualActivePath,
     pushUndo,
+    newFolderButtonTitle,
+    openDirectoryInOsTitle,
+    moveFolderToTrashTitle,
+    uploadButtonLabel,
+    dropFilesIntoCopy,
+    uploadFailedMessage,
+    emptyDirectoryLabel,
+    uploadConfirmText,
+    sortColumnLabels,
+    repositoryFallback,
+    repositoryRootFallback,
+    commitEntryMeta,
   } = deps;
 
   type RepoSortKey = "name" | "updated" | "size";
@@ -176,6 +207,24 @@ export function createRepoView(deps: RepoViewDeps) {
 
   function fileEntryIcon(): string {
     return iconSvg("octicon-file", FILE_16_PATH);
+  }
+
+  function commitEntryIcon(): string {
+    return iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
+  }
+
+  function isWorktreeRef(ref: string): boolean {
+    return canTrashWorktreeRef(ref);
+  }
+
+  function canBrowseRepoEntry(
+    entry: { type?: string; submodule?: true },
+    ref: string,
+  ): boolean {
+    return (
+      entry.type === "tree" ||
+      (entry.type === "commit" && isWorktreeRef(ref) && !entry.submodule)
+    );
   }
 
   function closeRepoContextMenu() {
@@ -402,8 +451,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-trash-path";
-    button.title = "move folder to Trash";
-    button.setAttribute("aria-label", "move folder to Trash");
+    const trashTitle = moveFolderToTrashTitle();
+    button.title = trashTitle;
+    button.setAttribute("aria-label", trashTitle);
     button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -419,8 +469,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-create-dir";
-    button.title = "new folder";
-    button.setAttribute("aria-label", "new folder");
+    const newFolderTitle = newFolderButtonTitle();
+    button.title = newFolderTitle;
+    button.setAttribute("aria-label", newFolderTitle);
     button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -437,7 +488,9 @@ export function createRepoView(deps: RepoViewDeps) {
 
     const copy = document.createElement("div");
     copy.className = "gdp-upload-copy";
-    copy.textContent = `Drop files into ${path || getProjectName() || "repository"}`;
+    copy.textContent = dropFilesIntoCopy(
+      path || getProjectName() || repositoryFallback(),
+    );
 
     const input = document.createElement("input");
     input.type = "file";
@@ -447,12 +500,12 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-btn gdp-btn-sm";
-    button.textContent = "Upload files";
+    button.textContent = uploadButtonLabel();
     button.addEventListener("click", () => input.click());
     const error = document.createElement("div");
     error.className = "gdp-upload-error";
 
-    const fail = (message = "Upload failed") => {
+    const fail = (message = uploadFailedMessage()) => {
       error.textContent = message;
       dropPanel.classList.add("failed");
       setTimeout(() => dropPanel.classList.remove("failed"), 1600);
@@ -464,7 +517,9 @@ export function createRepoView(deps: RepoViewDeps) {
         error.textContent = "";
       } catch (uploadError) {
         fail(
-          uploadError instanceof Error ? uploadError.message : "Upload failed",
+          uploadError instanceof Error
+            ? uploadError.message
+            : uploadFailedMessage(),
         );
       } finally {
         input.value = "";
@@ -487,7 +542,9 @@ export function createRepoView(deps: RepoViewDeps) {
         error.textContent = "";
       } catch (uploadError) {
         fail(
-          uploadError instanceof Error ? uploadError.message : "Upload failed",
+          uploadError instanceof Error
+            ? uploadError.message
+            : uploadFailedMessage(),
         );
       }
     });
@@ -513,7 +570,7 @@ export function createRepoView(deps: RepoViewDeps) {
     root.className = path
       ? "gdp-file-breadcrumb-part"
       : "gdp-file-breadcrumb-current";
-    root.textContent = getProjectName() || "repository";
+    root.textContent = getProjectName() || repositoryFallback();
     root.addEventListener("click", () => {
       setRoute(repoRoute(target, ""));
       loadRepo();
@@ -568,7 +625,7 @@ export function createRepoView(deps: RepoViewDeps) {
       createOpenPathButton(
         meta.path || "",
         "directory",
-        "open this folder in OS",
+        openDirectoryInOsTitle(),
       ),
     );
     toolbar.appendChild(pathHeader);
@@ -632,23 +689,39 @@ export function createRepoView(deps: RepoViewDeps) {
         });
         list.appendChild(row);
       }
-      sortedRepoEntries(meta.entries).forEach((entry) => {
+      sortedRepoEntries(meta.entries, meta.ref).forEach((entry) => {
+        const browsable = canBrowseRepoEntry(entry, meta.ref);
+        // commit 型で非 browsable (submodule または非 worktree ref) は、見た目は
+        // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
+        // 専用クラスで区別する (cursor/アイコン色/meta chip 化はCSS側)。
+        const nonBrowsableCommit = entry.type === "commit" && !browsable;
         const row = document.createElement("button");
         row.type = "button";
-        row.className = `gdp-repo-row ${entry.type}`;
+        row.className = nonBrowsableCommit
+          ? `gdp-repo-row ${entry.type} gdp-repo-row-gitlink`
+          : `gdp-repo-row ${entry.type}`;
         const icon = document.createElement("span");
-        icon.className =
-          entry.type === "tree" ? "dir-icon" : "d2h-icon-wrapper";
-        if (entry.type === "tree") setFolderIcon(icon, true);
-        else icon.innerHTML = fileEntryIcon();
+        icon.className = browsable
+          ? "dir-icon"
+          : nonBrowsableCommit
+            ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
+            : "d2h-icon-wrapper";
+        if (browsable) setFolderIcon(icon, true);
+        else
+          icon.innerHTML =
+            entry.type === "commit" ? commitEntryIcon() : fileEntryIcon();
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
-        const metaBlock = createRepoEntryMeta(entry);
+        if (nonBrowsableCommit) {
+          row.title = commitEntryMeta(entry.submodule).title;
+          row.setAttribute("aria-disabled", "true");
+        }
+        const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
         row.append(icon, name, metaBlock, size);
         row.addEventListener("click", () => {
-          if (entry.type === "tree") {
+          if (browsable) {
             setRoute(repoRoute(meta.ref, entry.path));
             loadRepo();
           } else if (entry.type === "blob") {
@@ -670,7 +743,7 @@ export function createRepoView(deps: RepoViewDeps) {
       if (!meta.entries.length) {
         const empty = document.createElement("div");
         empty.className = "gdp-repo-empty";
-        empty.textContent = "No files in this directory.";
+        empty.textContent = emptyDirectoryLabel();
         list.appendChild(empty);
       }
     };
@@ -767,7 +840,10 @@ export function createRepoView(deps: RepoViewDeps) {
               order: index + 1,
               path: entry.path,
               display_path: entry.path,
-              type: entry.type,
+              type: canBrowseRepoEntry(entry, normalizedRef)
+                ? "tree"
+                : entry.type,
+              submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
             }) satisfies SidebarItem,
@@ -832,12 +908,22 @@ export function createRepoView(deps: RepoViewDeps) {
       });
   }
 
-  function createRepoEntryMeta(entry: RepoTreeEntry): HTMLElement {
+  function createRepoEntryMeta(
+    entry: RepoTreeEntry,
+    browsable: boolean,
+  ): HTMLElement {
     const meta = document.createElement("span");
     meta.className = "meta";
+    if (entry.type === "commit" && !browsable) {
+      meta.classList.add("gdp-repo-row-gitlink-badge");
+      const badge = commitEntryMeta(entry.submodule);
+      meta.textContent = badge.label;
+      meta.title = badge.title;
+      return meta;
+    }
     const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
     const created = formatFileDate(entry.created_at);
-    if (entry.type === "tree" && updated) {
+    if (browsable && updated) {
       meta.textContent = updated;
       if (created) meta.title = `Created ${created}`;
       return meta;
@@ -868,12 +954,17 @@ export function createRepoView(deps: RepoViewDeps) {
     return Number.isNaN(time) ? -1 : time;
   }
 
-  function sortedRepoEntries(entries: RepoTreeEntry[]): RepoTreeEntry[] {
+  function sortedRepoEntries(
+    entries: RepoTreeEntry[],
+    ref = "worktree",
+  ): RepoTreeEntry[] {
     const direction = REPO_SORT.direction === "asc" ? 1 : -1;
     return [...entries].sort((a, b) => {
-      if (REPO_SORT.key === "name" && a.type !== b.type) {
-        if (a.type === "tree") return -1;
-        if (b.type === "tree") return 1;
+      const aBrowsable = canBrowseRepoEntry(a, ref);
+      const bBrowsable = canBrowseRepoEntry(b, ref);
+      if (REPO_SORT.key === "name" && aBrowsable !== bBrowsable) {
+        if (aBrowsable) return -1;
+        if (bBrowsable) return 1;
       }
       let result = 0;
       if (REPO_SORT.key === "updated") {
@@ -902,10 +993,11 @@ export function createRepoView(deps: RepoViewDeps) {
     const spacer = document.createElement("span");
     spacer.className = "gdp-repo-sort-spacer";
     header.appendChild(spacer);
+    const sortLabels = sortColumnLabels();
     const columns: Array<{ key: RepoSortKey; label: string }> = [
-      { key: "name", label: "Name" },
-      { key: "updated", label: "Updated" },
-      { key: "size", label: "Size" },
+      { key: "name", label: sortLabels.name },
+      { key: "updated", label: sortLabels.updated },
+      { key: "size", label: sortLabels.size },
     ];
     columns.forEach((column) => {
       const button = document.createElement("button");
@@ -1046,11 +1138,12 @@ export function createRepoView(deps: RepoViewDeps) {
   async function uploadFiles(path: string, files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) return;
-    const label = path || getProjectName() || "repository root";
+    const label = path || getProjectName() || repositoryRootFallback();
+    const confirmText = uploadConfirmText(list.length, label);
     const ok = await showConfirmDialog({
-      title: "Upload files?",
-      body: `Upload ${list.length} file${list.length === 1 ? "" : "s"} into ${label}?`,
-      confirmLabel: "Upload",
+      title: confirmText.title,
+      body: confirmText.body,
+      confirmLabel: confirmText.confirmLabel,
     });
     if (!ok) return;
 

@@ -3,7 +3,7 @@
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { q } from "./_test-helpers";
+import { type Deferred, deferred, q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -390,6 +390,613 @@ describe("table-grid edit mode", () => {
     // edit controls (新規行 / コミット / 破棄) も継続表示。
     const wrap = q<HTMLElement>(grid.el, ".db-grid-edit-controls");
     expect(wrap.hidden).toBe(false);
+    grid.destroy();
+  });
+
+  test("refresh button refetches the current table with active column filters", async () => {
+    const fetchCalls: Array<{ table: string; filters: unknown[] }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push({ table, filters });
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+    const searchIcon = q<HTMLElement>(grid.el, ".db-grid-filter-icon");
+    expect(searchIcon.getAttribute("aria-hidden")).toBe("true");
+    expect(searchIcon.querySelector("svg.octicon-search")).toBeTruthy();
+    const exportButton = q<HTMLButtonElement>(
+      grid.el,
+      ".db-grid-export-toggle",
+    );
+    expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
+    expect(exportButton.textContent).toBe("");
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    expect(refreshButton.textContent).toMatch(/Reload table/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping search and column filters",
+    );
+    expect(refreshButton.getAttribute("aria-label")).toBe(
+      "Reload this table, keeping search and column filters",
+    );
+    expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    const filterActions = q<HTMLElement>(grid.el, ".db-grid-filter-actions");
+    expect(filterActions.parentElement).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-filter-bar"),
+    );
+    expect(filterActions.children).toHaveLength(3);
+    expect(filterActions.children[0]).toBe(refreshButton);
+    expect(filterActions.children[1]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-refresh-result"),
+    );
+    expect(filterActions.children[2]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-export"),
+    );
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    expect(nameFilter).toBeTruthy();
+    setInput(nameFilter, "Ali");
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping 1 active filter",
+    );
+    expect(refreshButton.getAttribute("aria-label")).toBe(
+      "Reload this table, keeping 1 active filter",
+    );
+    await waitFor(() => fetchCalls.length === 1);
+
+    fetchCalls.length = 0;
+    refreshButton.click();
+    await waitFor(() => fetchCalls.length === 1);
+
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [{ column: "name", value: "Ali" }],
+    });
+    expect(nameFilter.value).toBe("Ali");
+
+    setInput(nameFilter, "Alice");
+    fetchCalls.length = 0;
+    refreshButton.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [{ column: "name", value: "Alice" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(fetchCalls).toHaveLength(1);
+    grid.destroy();
+  });
+
+  test("refresh keeps global search together with column filters", async () => {
+    const fetchCalls: Array<{ table: string; filters: unknown[] }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push({ table, filters });
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(search, "active");
+    setInput(nameFilter, "Ali");
+
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping 2 active filters",
+    );
+
+    refreshButton.click();
+    await waitFor(() => fetchCalls.length === 1);
+
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [
+        { column: "name", value: "Ali" },
+        { column: "id", value: "active" },
+        { column: "name", value: "active" },
+      ],
+    });
+    expect(search.value).toBe("active");
+    expect(nameFilter.value).toBe("Ali");
+    expect(grid.getState()).toEqual({
+      search: "active",
+      filters: [{ column: "name", value: "Ali" }],
+    });
+    grid.destroy();
+  });
+
+  test("clear filters button is labeled and clears column filters", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    const clearFilters = q<HTMLButtonElement>(grid.el, ".db-grid-filter-clear");
+    expect(clearFilters.hidden).toBe(true);
+
+    setInput(nameFilter, "Ali");
+    expect(clearFilters.hidden).toBe(false);
+    expect(clearFilters.textContent).toBe("Clear filters");
+    expect(clearFilters.title).toBe("Clear 1 active filter");
+    expect(clearFilters.getAttribute("aria-label")).toBe(
+      "Clear 1 active filter",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    fetchCalls.length = 0;
+    clearFilters.click();
+
+    await waitFor(() => fetchCalls.length === 1);
+    expect(nameFilter.value).toBe("");
+    expect(clearFilters.hidden).toBe(true);
+    expect(fetchCalls[0]).toEqual([]);
+    grid.destroy();
+  });
+
+  test("filtered empty state explains zero rows and clears filters", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return filters.length
+          ? { ...initialData(), rows: [], totalRows: 0 }
+          : initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(nameFilter, "Nobody");
+
+    await waitFor(() => fetchCalls.length === 1);
+    const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
+    await waitFor(() => empty.hidden === false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No rows match 1 active filter",
+    );
+    expect(
+      empty.querySelector(".db-pane-empty-hint")?.textContent || "",
+    ).toMatch(/current search or column filters/);
+    const actions = empty.querySelectorAll<HTMLButtonElement>("button");
+    expect(actions).toHaveLength(2);
+    const reloadAction = actions[0];
+    const clearAction = actions[1];
+    expect(reloadAction.textContent).toBe("Reload filtered rows");
+    expect(reloadAction.title).toBe(
+      "Reload this table, keeping 1 active filter",
+    );
+    expect(reloadAction.getAttribute("aria-busy")).toBe("false");
+    expect(reloadAction.disabled).toBe(false);
+    expect(clearAction.textContent).toBe("Clear filters");
+    expect(clearAction.disabled).toBe(false);
+
+    fetchCalls.length = 0;
+    reloadAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([{ column: "name", value: "Nobody" }]);
+    expect(nameFilter.value).toBe("Nobody");
+    expect(empty.hidden).toBe(false);
+
+    fetchCalls.length = 0;
+    clearAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([]);
+    expect(nameFilter.value).toBe("");
+    await waitFor(() => empty.hidden === true);
+    expect(reloadAction.hidden).toBe(true);
+    expect(reloadAction.disabled).toBe(true);
+    expect(clearAction.hidden).toBe(true);
+    expect(clearAction.disabled).toBe(true);
+    grid.destroy();
+  });
+
+  test("filtered empty state also covers global search", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return filters.length
+          ? { ...initialData(), rows: [], totalRows: 0 }
+          : initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Nobody");
+
+    await waitFor(() => fetchCalls.length === 1);
+    const empty = q<HTMLElement>(grid.el, ".db-grid-viewport .db-pane-empty");
+    await waitFor(() => empty.hidden === false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No rows match 1 active filter",
+    );
+
+    const clearAction = empty.querySelectorAll<HTMLButtonElement>("button")[1];
+    fetchCalls.length = 0;
+    clearAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([]);
+    expect(search.value).toBe("");
+    await waitFor(() => empty.hidden === true);
+    grid.destroy();
+  });
+
+  test("refresh status shows active filters are kept while reloading", async () => {
+    let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
+    const fetchCalls: unknown[][] = [];
+    const refreshEvents: Array<{
+      table: string;
+      totalRows: number;
+      filters: unknown[];
+    }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return await new Promise<DbTableDataResponse>((resolve) => {
+          resolveFetch = resolve;
+        });
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(nameFilter, "Ali");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => fetchCalls.length === 1);
+    const status = q<HTMLElement>(grid.el, ".db-grid-status");
+    expect(status.textContent || "").toMatch(/Reloading with 1 active filter/);
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.getAttribute("aria-live")).toBe("polite");
+    expect(refreshButton.textContent).toMatch(/Reloading/);
+    expect(refreshButton.getAttribute("aria-busy")).toBe("true");
+    expect(fetchCalls[0]).toEqual([{ column: "name", value: "Ali" }]);
+
+    resolveFetch?.(initialData());
+    await waitFor(() => !(status.textContent || "").includes("Reloading"));
+    expect(status.textContent || "").toMatch(/1 filter\(s\)/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("Rows unchanged (2)");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
+    expect(refreshEvents).toEqual([
+      {
+        table: "users",
+        totalRows: 2,
+        filters: [{ column: "name", value: "Ali" }],
+      },
+    ]);
+    grid.destroy();
+  });
+
+  test("refresh result announces row count changes and clears on filter edits", async () => {
+    const data = initialData();
+    let nextData = data;
+    const grid = createTableGrid({
+      fetchPage: async () => nextData,
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    expect(refreshResult.hidden).toBe(true);
+
+    nextData = {
+      ...data,
+      rows: [...data.rows, [3, "Carol"]],
+      totalRows: 3,
+    };
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.hidden === false);
+    expect(refreshResult.textContent).toBe("Rows +1 (3 now)");
+    expect(refreshResult.classList.contains("changed")).toBe(true);
+    expect(
+      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+    ).toMatch(/3 rows/);
+
+    nextData = {
+      ...data,
+      rows: [[1, "Alice"]],
+      totalRows: 1,
+    };
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.textContent === "Rows -2 (1 now)");
+    expect(refreshResult.classList.contains("changed")).toBe(true);
+    expect(
+      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+    ).toMatch(/1 rows/);
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh result localizes with the grid language", async () => {
+    let language: "en" | "ja" = "en";
+    const data = initialData();
+    const grid = createTableGrid({
+      fetchPage: async () => ({
+        ...data,
+        rows: [...data.rows, [3, "Carol"]],
+        totalRows: 3,
+      }),
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText(language),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.textContent === "Rows +1 (3 now)");
+    language = "ja";
+    grid.localize();
+    expect(refreshResult.textContent).toBe("行数 +1 (現在 3)");
+    grid.destroy();
+  });
+
+  test("refresh result clears when an edit commit reloads the table", async () => {
+    const data = initialData();
+    let nextData = data;
+    let commits = 0;
+    const grid = createTableGrid({
+      fetchPage: async () => nextData,
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => {
+        commits++;
+        nextData = {
+          ...data,
+          rows: [...data.rows, [3, "Carol"]],
+          totalRows: 3,
+        };
+      },
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => refreshResult.textContent === "Rows unchanged (2)");
+
+    await grid.setEditMode(true);
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-newrow").click();
+    await tick();
+    const draftRow = q<HTMLElement>(grid.el, ".db-grid-row-draft");
+    const draftInputs = draftRow.querySelectorAll<HTMLInputElement>(
+      ".db-grid-cell-input",
+    );
+    setInput(draftInputs[1], "Carol");
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-commit").click();
+
+    await waitFor(() => commits === 1);
+    await waitFor(() =>
+      /3 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh result is skipped when filters change during reload", async () => {
+    let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
+    let fetches = 0;
+    const refreshEvents: unknown[] = [];
+    const fetchPromise = new Promise<DbTableDataResponse>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const grid = createTableGrid({
+      fetchPage: async () => {
+        fetches++;
+        return await fetchPromise;
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => fetches === 1);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    resolveFetch?.({
+      ...initialData(),
+      rows: [...initialData().rows, [3, "Carol"]],
+      totalRows: 3,
+    });
+
+    await waitFor(
+      () =>
+        q<HTMLButtonElement>(grid.el, ".db-grid-refresh").getAttribute(
+          "aria-busy",
+        ) === "false",
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshEvents).toEqual([]);
+    grid.destroy();
+  });
+
+  test("refresh result is skipped after filter debounce starts a newer load", async () => {
+    const requests: Array<{
+      filters: unknown[];
+      request: Deferred<DbTableDataResponse>;
+    }> = [];
+    const refreshEvents: unknown[] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        const request = deferred<DbTableDataResponse>();
+        requests.push({ filters, request });
+        return await request.promise;
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+      onRefreshComplete: (event) => refreshEvents.push(event),
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => requests.length === 1);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    await waitFor(() => requests.length === 2, 1000);
+
+    requests[0].request.resolve({
+      ...initialData(),
+      rows: [...initialData().rows, [3, "Carol"]],
+      totalRows: 3,
+    });
+    await waitFor(
+      () =>
+        q<HTMLButtonElement>(grid.el, ".db-grid-refresh").getAttribute(
+          "aria-busy",
+        ) === "false",
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    expect(refreshEvents).toEqual([]);
+
+    requests[1].request.resolve({
+      ...initialData(),
+      rows: [[3, "Carol"]],
+      totalRows: 1,
+    });
+    await waitFor(() =>
+      /1 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh failure keeps the error status visible", async () => {
+    const grid = createTableGrid({
+      fetchPage: async () => {
+        throw new Error("sample reload failed");
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() =>
+      q<HTMLElement>(grid.el, ".db-grid-status").classList.contains(
+        "db-pane-error",
+      ),
+    );
+    const status = q<HTMLElement>(grid.el, ".db-grid-status");
+    expect(status.textContent || "").toMatch(/sample reload failed/);
+    expect((status.textContent || "").includes("Reloading")).toBe(false);
     grid.destroy();
   });
 });

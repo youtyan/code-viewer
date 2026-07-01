@@ -3,6 +3,7 @@ import type {
   DbForeignKey,
   DbIndexInfo,
 } from "../../core/database/types";
+import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
 
 export type TriggerDisplayInfo = {
@@ -33,15 +34,19 @@ export type SchemaView = {
   ) => void;
   clear: () => void;
   localize: () => void;
+  setRefreshBusy: (busy: boolean) => void;
 };
 
 export function createSchemaView(
-  deps: { getText?: () => DbText } = {},
+  deps: { getText?: () => DbText; onRefresh?: () => void | Promise<void> } = {},
 ): SchemaView {
   const text = (): DbText => deps.getText?.() ?? dbText("en");
   const el = document.createElement("div");
   el.className = "db-schema-view";
   el.hidden = true;
+  let refreshBusy = false;
+  let refreshBtn: HTMLButtonElement | null = null;
+  let refreshLabel: HTMLSpanElement | null = null;
 
   // 言語切替時に同じデータで再描画するため、直近の render 引数を保持する。
   let lastArgs: {
@@ -54,6 +59,22 @@ export function createSchemaView(
       ddl?: string;
     };
   } | null = null;
+
+  function syncRefreshButton(): void {
+    if (!refreshBtn || !refreshLabel) return;
+    const t = text().schema;
+    refreshBtn.title = t.refreshAction;
+    refreshBtn.setAttribute("aria-label", t.refreshAction);
+    refreshBtn.setAttribute("aria-busy", refreshBusy ? "true" : "false");
+    refreshBtn.disabled = refreshBusy;
+    refreshBtn.classList.toggle("spinning", refreshBusy);
+    refreshLabel.textContent = refreshBusy ? t.refreshingLabel : t.refreshLabel;
+  }
+
+  function setRefreshBusy(busy: boolean): void {
+    refreshBusy = busy;
+    syncRefreshButton();
+  }
 
   function render(
     table: string,
@@ -72,7 +93,29 @@ export function createSchemaView(
 
     const header = document.createElement("div");
     header.className = "db-schema-header";
-    header.textContent = `Schema: ${table}`;
+    const headerTitle = document.createElement("span");
+    headerTitle.className = "db-schema-header-title";
+    headerTitle.textContent = `Schema: ${table}`;
+    header.appendChild(headerTitle);
+    if (deps.onRefresh) {
+      refreshBtn = document.createElement("button");
+      refreshBtn.type = "button";
+      refreshBtn.className =
+        "db-btn db-btn-icon db-grid-refresh db-schema-refresh";
+      refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+      refreshLabel = document.createElement("span");
+      refreshLabel.className = "db-grid-refresh-label";
+      refreshBtn.appendChild(refreshLabel);
+      refreshBtn.addEventListener("click", () => {
+        if (refreshBusy) return;
+        void deps.onRefresh?.();
+      });
+      header.appendChild(refreshBtn);
+      syncRefreshButton();
+    } else {
+      refreshBtn = null;
+      refreshLabel = null;
+    }
     el.appendChild(header);
 
     /* ---- Columns ---- */
@@ -270,6 +313,9 @@ export function createSchemaView(
     el.hidden = true;
     el.innerHTML = "";
     lastArgs = null;
+    refreshBtn = null;
+    refreshLabel = null;
+    refreshBusy = false;
   }
 
   function localize(): void {
@@ -277,5 +323,5 @@ export function createSchemaView(
     render(lastArgs.table, lastArgs.columns, lastArgs.indexes, lastArgs.extra);
   }
 
-  return { el, render, clear, localize };
+  return { el, render, clear, localize, setRefreshBusy };
 }

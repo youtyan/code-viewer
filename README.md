@@ -251,8 +251,10 @@ Open Datastores in the global navigation to access:
   the database.
 - **Table browser** — paginated data grid with column sort, text filter, cell
   copy, and CSV/JSON export (capped at 100,000 rows; export respects current
-  filter/sort). Double-click a cell to edit inline when Edit mode is on; the
-  whole pending edit batch commits atomically.
+  filter/sort). Reload just the current table from the search bar while
+  keeping global search and column filters, with a result chip that calls out
+  row-count changes. Double-click a cell to edit inline when Edit mode is on;
+  the whole pending edit batch commits atomically.
 - **Detail footer and related panel** — click any cell to open a resizable
   detail footer; foreign-key cells open a related panel showing the
   referenced or referencing rows, with multi-step drill-down breadcrumbs.
@@ -276,8 +278,9 @@ Open Datastores in the global navigation to access:
 - **ER diagram** — auto-generated entity-relationship diagram showing
   foreign-key relationships between tables.
 - **Schema view** — table columns (with column comments when the database
-  defines them), indexes, foreign keys, triggers, and DDL. Tables themselves
-  surface a comment column on the database table list.
+  defines them), indexes, foreign keys, triggers, and DDL, with an in-tab
+  schema refresh action. Tables themselves surface a comment column on the
+  database table list.
 - **Global search** — full-text search across all tables and text columns of
   a database.
 - **Snapshots and diffs** — take point-in-time snapshots of selected tables

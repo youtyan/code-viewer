@@ -1,5 +1,7 @@
+import { summarizeDiffFileKinds } from "./diff-file-kinds";
 import { fileReferenceClipboardText } from "./file-path-copy";
 import type { AppRoute, SourceLineTarget } from "./routes";
+import type { DiffMeta } from "./types";
 
 // Selections at/above this size start to feel like "pasting a whole file"
 // into an AI prompt - the pill/header copy UI flags them so a Shift+Click
@@ -26,7 +28,22 @@ export type AiContextScreenSnapshot = {
   diffFrom: string;
   diffTo: string;
   selectionCode?: AiContextSelectionCode;
+  diffMeta?: DiffMeta | null;
+  viewedFiles?: ReadonlySet<string>;
+  // Current SQL draft (query tab, database screen only). Read from the DOM
+  // by the click handler - no fetch involved.
+  databaseQuerySql?: string;
 };
+
+// Keeps the database "brief" a single pasteable line even for long/multi-line
+// SQL drafts: collapses whitespace, then hard-truncates with "...".
+const DATABASE_QUERY_SQL_MAX_CHARS = 200;
+
+function truncateOneLine(text: string, maxChars: number): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  return `${collapsed.slice(0, maxChars)}...`;
+}
 
 function lineRange(line: SourceLineTarget): { start: number; end: number } {
   return typeof line === "number"
@@ -87,17 +104,25 @@ function referenceLine(
   return `${withSuffix}\n\n\`\`\`${lang}\n${lines.join("\n")}\n\`\`\``;
 }
 
-function historyLine(route: Extract<AppRoute, { screen: "history" }>): string {
-  if (!route.commit) return "";
-  const ref =
-    route.ref && route.ref !== "worktree" && route.ref !== "HEAD"
-      ? ` (ref: ${route.ref})`
-      : "";
-  return `commit: ${route.commit}${ref}`;
+function historyLine(
+  route: Extract<AppRoute, { screen: "history" }>,
+  diffFrom: string,
+  diffTo: string,
+): string {
+  if (route.commit) {
+    const ref =
+      route.ref && route.ref !== "worktree" && route.ref !== "HEAD"
+        ? ` (ref: ${route.ref})`
+        : "";
+    return `commit: ${route.commit}${ref}`;
+  }
+  // No commit selected: fall back to the live diff range being shown.
+  return `History: ${diffFrom}..${diffTo}${commitOrRefSuffix(route)}`;
 }
 
 function databaseLine(
   route: Extract<AppRoute, { screen: "database" }>,
+  querySql?: string,
 ): string {
   const parts: string[] = [];
   if (route.db) parts.push(`db=${route.db}`);
@@ -107,7 +132,47 @@ function databaseLine(
   if (route.diffBefore && route.diffAfter) {
     parts.push(`snapshot=${route.diffBefore}..${route.diffAfter}`);
   }
-  return parts.length > 0 ? `database: ${parts.join(", ")}` : "";
+  if (route.tab === "query" && querySql) {
+    const sql = truncateOneLine(querySql, DATABASE_QUERY_SQL_MAX_CHARS);
+    if (sql) parts.push(`sql=${sql}`);
+  }
+  // Always identify the screen, even with no route fields set yet (bare
+  // Datastores landing page) - never an empty "nothing to copy" result.
+  return parts.length > 0 ? `database: ${parts.join(", ")}` : "database";
+}
+
+// A one-line "AI review brief" for the diff overview: range + totals + kind
+// counts (added/deleted/renamed/heavy/binary/media). Counts only - no file
+// paths or code, so it stays cheap to paste even on large diffs.
+function diffOverviewLine(
+  from: string,
+  to: string,
+  meta: DiffMeta | null | undefined,
+  viewedFiles?: ReadonlySet<string>,
+): string {
+  const base = `Diff: ${from}..${to}`;
+  if (!meta?.totals) return base;
+  const parts = [
+    `${meta.totals.files} file${meta.totals.files === 1 ? "" : "s"}`,
+    `+${meta.totals.additions}/-${meta.totals.deletions}`,
+  ];
+  const viewedTotal = meta.files.length;
+  if (viewedFiles && viewedTotal > 0) {
+    const viewed = meta.files.filter((file) =>
+      viewedFiles.has(file.path),
+    ).length;
+    parts.push(`${viewed}/${viewedTotal} viewed`);
+  }
+  const kinds = summarizeDiffFileKinds(meta.files);
+  const kindParts: string[] = [];
+  if (kinds.added) kindParts.push(`${kinds.added} added`);
+  if (kinds.deleted) kindParts.push(`${kinds.deleted} deleted`);
+  if (kinds.renamed) kindParts.push(`${kinds.renamed} renamed`);
+  if (kinds.heavy) kindParts.push(`${kinds.heavy} heavy`);
+  if (kinds.binary) kindParts.push(`${kinds.binary} binary`);
+  if (kinds.media) kindParts.push(`${kinds.media} media`);
+  if (kindParts.length > 0) parts.push(kindParts.join(", "));
+  return `${base} (${parts.join(", ")})`;
 }
 
 // A short, pasteable reference for the current screen, close to what the
@@ -118,10 +183,17 @@ export function aiContextClipboardText(
   snapshot: AiContextScreenSnapshot,
 ): string {
   const { route } = snapshot;
-  if (route.screen === "database") return databaseLine(route);
-  if (route.screen === "history") return historyLine(route);
+  if (route.screen === "database")
+    return databaseLine(route, snapshot.databaseQuerySql);
+  if (route.screen === "history")
+    return historyLine(route, snapshot.diffFrom, snapshot.diffTo);
   if (route.screen === "diff" && !route.path) {
-    return `Diff: ${snapshot.diffFrom}..${snapshot.diffTo}`;
+    return diffOverviewLine(
+      snapshot.diffFrom,
+      snapshot.diffTo,
+      snapshot.diffMeta,
+      snapshot.viewedFiles,
+    );
   }
   return referenceLine(route, snapshot.selectionCode);
 }

@@ -1,4 +1,6 @@
+import { GIT_BRANCH_16_PATH, iconSvg } from "../core/icons";
 import type { AppRoute, SourceFileTarget } from "../core/routes";
+import type { EmptyDiffPaneText } from "./empty-diff-pane";
 import {
   createFileShellSticky,
   type FileShellMountDeps,
@@ -15,7 +17,10 @@ export type FileHistoryRoute = Extract<AppRoute, { screen: "file" }> & {
   view: "history";
 };
 
-export type FileHistoryShellDeps = FileShellMountDeps & FileShellStickyDeps;
+export type FileHistoryShellDeps = FileShellMountDeps &
+  FileShellStickyDeps & {
+    emptyText(): EmptyDiffPaneText;
+  };
 
 export type FileHistoryShellMount = HistoryViewMount & {
   diffHost: HTMLElement;
@@ -53,15 +58,16 @@ export function renderFileHistoryShell(
   const diffPane = document.createElement("main");
   diffPane.className = "gdp-file-history-diff-pane";
   const commitInfo = buildHistoryCommitInfoDom({ variant: "file" });
+  const emptyText = deps.emptyText();
   const empty = document.createElement("div");
   empty.className = "empty gdp-file-history-empty hidden";
   const emptyIcon = document.createElement("div");
-  emptyIcon.className = "emoji";
-  emptyIcon.textContent = "✨";
+  emptyIcon.className = "empty-icon";
+  emptyIcon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
   const emptyTitle = document.createElement("h2");
-  emptyTitle.textContent = "No commit selected";
+  emptyTitle.textContent = emptyText.noCommitSelectedTitle;
   const emptyBody = document.createElement("p");
-  emptyBody.textContent = "Select a commit from the list to see its changes.";
+  emptyBody.textContent = emptyText.noCommitSelectedBody;
   empty.append(emptyIcon, emptyTitle, emptyBody);
   const diffHost = document.createElement("div");
   diffHost.className = "gdp-file-history-diff";

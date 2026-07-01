@@ -2,6 +2,7 @@
 // filtering, folder icons, keyboard navigation, and sidebar chrome
 // (width / font size / hide toggle). Extracted from app.ts.
 
+import { classifyDiffFileKind } from "../core/diff-file-kinds";
 import { compileFileFilter } from "../core/file-filter";
 import { nextVisibleFileIndex } from "../core/file-navigation";
 import {
@@ -9,6 +10,7 @@ import {
   EXPAND_ALL_16_PATHS,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
+  GIT_BRANCH_16_PATH,
   iconSvg,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
@@ -68,6 +70,16 @@ export type SidebarDeps = {
   getRepoSidebarRef(): string | null;
   setRepoSidebarRef(ref: string | null): void;
   isTestPath(path: string): boolean;
+  sidebarToggleTitle(hidden: boolean): string;
+  openDirectoryInOsTitle(): string;
+  omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
+    label: string;
+    title: string;
+  };
+  commitEntryBadge(submodule: SidebarItem["submodule"]): {
+    label: string;
+    title: string;
+  };
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
 };
@@ -96,6 +108,10 @@ export function createSidebar(deps: SidebarDeps) {
     getRepoSidebarRef,
     setRepoSidebarRef,
     isTestPath,
+    sidebarToggleTitle,
+    openDirectoryInOsTitle,
+    omittedDirectoryBadge,
+    commitEntryBadge,
   } = deps;
 
   type TreeNode = {
@@ -230,11 +246,9 @@ export function createSidebar(deps: SidebarDeps) {
     if (!button) button = createSidebarToggleButton();
     bindSidebarToggleButton(button);
     button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
-    button.title = STATE.sidebarHidden ? "show sidebar" : "hide sidebar";
-    button.setAttribute(
-      "aria-label",
-      STATE.sidebarHidden ? "show sidebar" : "hide sidebar",
-    );
+    const toggleTitle = sidebarToggleTitle(STATE.sidebarHidden);
+    button.title = toggleTitle;
+    button.setAttribute("aria-label", toggleTitle);
     syncSidebarToggleIcon(button);
     return button;
   }
@@ -432,17 +446,14 @@ export function createSidebar(deps: SidebarDeps) {
             (dir.children_omitted_reason === "heavy"
               ? "dir-omitted-heavy"
               : "dir-omitted-internal");
-          omitted.textContent =
-            dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-          omitted.title =
-            dir.children_omitted_reason === "heavy"
-              ? "Tree expansion is skipped, but the directory detail can be opened"
-              : "This directory cannot be opened from the browser";
+          const badge = omittedDirectoryBadge(dir.children_omitted_reason);
+          omitted.textContent = badge.label;
+          omitted.title = badge.title;
           label.appendChild(omitted);
         }
         li.appendChild(label);
         li.appendChild(
-          createOpenPathButton(dir.path, "directory", "open this folder in OS"),
+          createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
         );
         const collapsed = STATE.collapsedDirs.has(dir.path);
         if (collapsed) li.classList.add("collapsed");
@@ -493,41 +504,7 @@ export function createSidebar(deps: SidebarDeps) {
         ul.appendChild(childUl);
       } else {
         const f = item.file;
-        const li = document.createElement("li");
-        li.className = "tree-file";
-        li.tabIndex = -1;
-        li.dataset.path = f.path;
-        li.dataset.type = "blob";
-        li.classList.toggle(
-          "viewed",
-          !onFileClick && STATE.viewedFiles.has(f.path),
-        );
-        li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-        const spacer = document.createElement("span");
-        spacer.className = "chev-spacer";
-        li.appendChild(spacer);
-        if (f.status) {
-          li.appendChild(fileBadge(f.status));
-        } else {
-          const icon = document.createElement("span");
-          icon.className = "d2h-icon-wrapper";
-          icon.innerHTML = fileEntryIcon();
-          li.appendChild(icon);
-        }
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = f.path.split("/").pop();
-        name.title = f.path;
-        li.appendChild(name);
-        li.addEventListener("click", () => {
-          if (onFileClick) onFileClick(f);
-          else scrollToFile(f.path);
-          scheduleMainSurfaceFocus();
-        });
-        if (!onFileClick)
-          li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
-            passive: true,
-          });
+        const li = createTreeFileRow(f, depth, onFileClick);
         ul.appendChild(li);
       }
     }
@@ -628,7 +605,13 @@ export function createSidebar(deps: SidebarDeps) {
               order: dir.minOrder + (index + 1) / 100000,
               path: entry.path,
               display_path: entry.path,
-              type: entry.type,
+              type:
+                meta.ref === "worktree" &&
+                entry.type === "commit" &&
+                !entry.submodule
+                  ? "tree"
+                  : entry.type,
+              submodule: entry.submodule,
               children_omitted: entry.children_omitted,
               children_omitted_reason: entry.children_omitted_reason,
             }) satisfies SidebarItem,
@@ -695,17 +678,14 @@ export function createSidebar(deps: SidebarDeps) {
         (dir.children_omitted_reason === "heavy"
           ? "dir-omitted-heavy"
           : "dir-omitted-internal");
-      omitted.textContent =
-        dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-      omitted.title =
-        dir.children_omitted_reason === "heavy"
-          ? "Tree expansion is skipped, but the directory detail can be opened"
-          : "This directory cannot be opened from the browser";
+      const badge = omittedDirectoryBadge(dir.children_omitted_reason);
+      omitted.textContent = badge.label;
+      omitted.title = badge.title;
       label.appendChild(omitted);
     }
     li.appendChild(label);
     li.appendChild(
-      createOpenPathButton(dir.path, "directory", "open this folder in OS"),
+      createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
     );
     const updateIcon = () => {
       setFolderIcon(dirIcon, li.classList.contains("collapsed"));
@@ -786,6 +766,34 @@ export function createSidebar(deps: SidebarDeps) {
     return li;
   }
 
+  // Small opt-in marker next to the status badge for files worth a second
+  // look before diving in: a large/huge diff, or a binary/media file. Mirrors
+  // the size-tag colors already used on the diff card header.
+  function fileKindTag(f: SidebarItem): HTMLElement | null {
+    if (f.type === "commit") {
+      const badge = commitEntryBadge(f.submodule);
+      const tag = document.createElement("span");
+      tag.className = `kind-tag ${f.submodule ? "submodule" : "gitlink"}`;
+      tag.textContent = badge.label;
+      tag.title = badge.title;
+      return tag;
+    }
+    const kind = classifyDiffFileKind(f);
+    if (!kind.heavy && !kind.binary && !kind.media) return null;
+    const tag = document.createElement("span");
+    const isBinaryLike = kind.binary || kind.media;
+    tag.className = `kind-tag ${isBinaryLike ? "binary" : "heavy"}`;
+    tag.textContent = isBinaryLike ? "B" : "!";
+    tag.title = isBinaryLike ? "binary/media file" : "large diff";
+    return tag;
+  }
+
+  function sidebarEntryIcon(f: SidebarItem): string {
+    return f.type === "commit"
+      ? iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH)
+      : fileEntryIcon();
+  }
+
   function createTreeFileRow(
     f: SidebarItem,
     depth: number,
@@ -795,7 +803,10 @@ export function createSidebar(deps: SidebarDeps) {
     li.className = "tree-file";
     li.tabIndex = -1;
     li.dataset.path = f.path;
-    li.dataset.type = "blob";
+    li.dataset.type = f.type || "blob";
+    if (f.type === "commit") {
+      li.title = commitEntryBadge(f.submodule).title;
+    }
     li.classList.toggle(
       "viewed",
       !onFileClick && STATE.viewedFiles.has(f.path),
@@ -813,7 +824,7 @@ export function createSidebar(deps: SidebarDeps) {
     } else {
       const icon = document.createElement("span");
       icon.className = "d2h-icon-wrapper";
-      icon.innerHTML = fileEntryIcon();
+      icon.innerHTML = sidebarEntryIcon(f);
       li.appendChild(icon);
     }
     const name = document.createElement("span");
@@ -821,6 +832,8 @@ export function createSidebar(deps: SidebarDeps) {
     name.textContent = f.path.split("/").pop();
     name.title = f.path;
     li.appendChild(name);
+    const kindTag = fileKindTag(f);
+    if (kindTag) li.appendChild(kindTag);
     li.addEventListener("click", () => {
       if (onFileClick) onFileClick(f);
       else scrollToFile(f.path);
@@ -1078,6 +1091,10 @@ export function createSidebar(deps: SidebarDeps) {
       li.tabIndex = -1;
       li.dataset.index = String(i);
       li.dataset.path = f.path;
+      li.dataset.type = f.type || "blob";
+      if (f.type === "commit") {
+        li.title = commitEntryBadge(f.submodule).title;
+      }
       li.classList.toggle(
         "viewed",
         !onFileClick && STATE.viewedFiles.has(f.path),
@@ -1087,7 +1104,7 @@ export function createSidebar(deps: SidebarDeps) {
       } else {
         const icon = document.createElement("span");
         icon.className = "d2h-icon-wrapper";
-        icon.innerHTML = fileEntryIcon();
+        icon.innerHTML = sidebarEntryIcon(f);
         li.appendChild(icon);
       }
       const name = document.createElement("span");
@@ -1095,6 +1112,8 @@ export function createSidebar(deps: SidebarDeps) {
       name.textContent = f.path;
       name.title = f.path;
       li.appendChild(name);
+      const kindTag = fileKindTag(f);
+      if (kindTag) li.appendChild(kindTag);
       li.addEventListener("click", () => {
         if (onFileClick) onFileClick(f);
         else scrollToFile(f.path);
@@ -1274,6 +1293,7 @@ export function createSidebar(deps: SidebarDeps) {
 
   function applyFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
+    syncSidebarFilterClearButton();
     if ($("#filelist").classList.contains("tree-virtual")) {
       rerenderVirtualSidebar();
       return;
@@ -1355,6 +1375,24 @@ export function createSidebar(deps: SidebarDeps) {
     cancelAnimationFrame(SIDEBAR_FILTER_RAF);
     SIDEBAR_FILTER_RAF = 0;
     applyFilter();
+  }
+
+  function syncSidebarFilterClearButton() {
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    const button =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    if (!input || !button) return;
+    button.hidden = input.value.length === 0;
+  }
+
+  function clearSidebarFilter() {
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    if (!input?.value) return;
+    input.value = "";
+    syncSidebarFilterClearButton();
+    flushSidebarFilter();
+    applyFilter();
+    input.focus();
   }
 
   function applySidebarWidth(w: number, options: { persist?: boolean } = {}) {
@@ -1761,6 +1799,8 @@ export function createSidebar(deps: SidebarDeps) {
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,
+    syncSidebarFilterClearButton,
+    clearSidebarFilter,
     markActive,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,

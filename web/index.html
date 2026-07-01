@@ -34,13 +34,14 @@
       <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
       <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
-      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"></button>
+      <button id="copy-ai-context" class="global-icon-action ai-context-action" title="Copy AI context" aria-label="Copy AI context"><span class="goi-icon" aria-hidden="true"></span><span class="ai-context-label"></span></button>
       <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
-      <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
-      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="cancel in-flight requests" disabled>stop</button>
+      <button id="auto-update" class="global-icon-action active" title="auto update on file change" aria-label="auto update on file change"><span class="goi-icon" aria-hidden="true"></span><span class="auto-update-label"></span></button>
+      <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="no in-flight requests" disabled><span class="goi-icon" aria-hidden="true"></span></button>
       <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
-      <span id="status" class="status"></span>
+      <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
       <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
+      <button id="quick-help-btn" class="global-icon-action quick-help-btn" title="quick help (shortcuts)" aria-label="quick help (shortcuts)">?</button>
       <a class="global-help-link" data-route="help" href="/help">Help</a>
       <span class="product-label" aria-hidden="true">code viewer</span>
     </div>
@@ -51,8 +52,8 @@
       <span data-ref-selector-mount data-ref-id="ref-from" data-placeholder="from..."></span>
       <span class="ref-dots">…</span>
       <span data-ref-selector-mount data-ref-id="ref-to" data-placeholder="to..."></span>
-      <button id="ref-reset" title="reset to HEAD .. worktree">×</button>
-      <button id="reload-prom" title="reload diff (R)">↻</button>
+      <button id="ref-reset" title="reset to HEAD .. worktree" aria-label="reset to HEAD .. worktree"></button>
+      <button id="reload-prom" title="reload diff (R)" aria-label="reload diff (R)"></button>
     </div>
     <div class="spacer"></div>
     <div class="controls">
@@ -119,6 +120,7 @@
     </div>
     <div class="sb-filter-wrap">
       <input id="sb-filter" type="search" placeholder="filter files…  /  ⌘K" title="Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help." autocomplete="off" />
+      <button id="sb-filter-clear" type="button" class="sb-filter-clear" title="Clear file filter" aria-label="Clear file filter" hidden>Clear</button>
     </div>
     <ul id="filelist"></ul>
     <div id="sidebar-resizer" aria-hidden="true"></div>
@@ -202,6 +204,17 @@
     </div>
   </div>
 
+  <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
+    <div class="quick-help-head">
+      <strong id="quick-help-title">Quick Help</strong>
+      <button id="quick-help-close" type="button" aria-label="close quick help">×</button>
+    </div>
+    <div id="quick-help-groups"></div>
+    <div class="quick-help-foot">
+      <a id="quick-help-full-link" href="/help?section=keybindings">View all keybindings →</a>
+    </div>
+  </div>
+
   <aside id="annotation-panel" hidden>
     <div id="annotation-panel-resizer" aria-hidden="true"></div>
     <div class="annotation-panel-head">
@@ -214,11 +227,11 @@
       <button id="annotation-panel-close" type="button">close</button>
     </div>
     <div id="annotation-player" hidden>
-      <button id="annotation-player-toggle" type="button" title="Play / Pause">▶</button>
-      <button id="annotation-player-prev" type="button" title="Previous">‹</button>
-      <button id="annotation-player-next" type="button" title="Next">›</button>
+      <button id="annotation-player-toggle" type="button" title="Play annotation playback" aria-label="Play annotation playback"></button>
+      <button id="annotation-player-prev" type="button" title="Previous annotation" aria-label="Previous annotation"></button>
+      <button id="annotation-player-next" type="button" title="Next annotation" aria-label="Next annotation"></button>
       <span id="annotation-player-progress"></span>
-      <button id="annotation-player-mute" type="button" title="Mute">🔊</button>
+      <button id="annotation-player-mute" type="button" title="Mute annotation playback" aria-label="Mute annotation playback"></button>
       <select id="annotation-player-rate" title="Speed" aria-label="Playback speed">
         <option value="0.5">0.5x</option>
         <option value="0.75">0.75x</option>
@@ -238,8 +251,8 @@
         <span id="annotation-detail-session"></span>
         <span id="annotation-detail-time"></span>
         <span id="annotation-detail-step"></span>
-        <button id="annotation-detail-prev" type="button" title="previous annotation">‹</button>
-        <button id="annotation-detail-next" type="button" title="next annotation">›</button>
+        <button id="annotation-detail-prev" class="annotation-icon-btn" type="button" title="previous annotation" aria-label="previous annotation"></button>
+        <button id="annotation-detail-next" class="annotation-icon-btn" type="button" title="next annotation" aria-label="next annotation"></button>
         <button id="annotation-detail-close" type="button">close</button>
       </div>
       <a id="annotation-detail-location" href="#"></a>
@@ -261,7 +274,21 @@
   <main id="content">
     <section id="history-commit-info" hidden></section>
     <div id="empty" class="empty hidden">
-      <div class="emoji">✨</div>
+      <div class="empty-icon" aria-hidden="true">
+        <svg
+          class="octicon octicon-git-branch"
+          viewBox="0 0 16 16"
+          width="16"
+          height="16"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fill="currentColor"
+            d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"
+          ></path>
+        </svg>
+      </div>
       <h2>No changes</h2>
       <p>The working tree is clean against this ref.</p>
     </div>

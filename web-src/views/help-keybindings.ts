@@ -73,8 +73,8 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
       {
         selectors: [{ action: "open-help" }],
         description: {
-          en: "Open this help (keybindings)",
-          ja: "このヘルプ（キーバインド）を開く",
+          en: "Open quick help",
+          ja: "クイックヘルプを開く",
         },
       },
       {
@@ -99,6 +99,13 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
         description: {
           en: "Previous / next annotation",
           ja: "前 / 次の注釈へ移動",
+        },
+      },
+      {
+        selectors: [{ action: "next-unviewed-file" }],
+        description: {
+          en: "Jump to the next unviewed file",
+          ja: "次の未確認ファイルへ移動",
         },
       },
       {
@@ -362,8 +369,16 @@ function buildRow(
 export function buildHelpKeybindingGroups(
   language: HelpKeybindingLanguage,
   bindings: KeyBinding[] = DEFAULT_KEY_BINDINGS,
+  // English group title allowlist (language-neutral key) for callers that
+  // only want a subset, e.g. a compact quick-help panel.
+  onlyTitlesEn?: string[],
 ): HelpKeybindingTableGroup[] {
-  return HELP_KEYBINDING_GROUPS.map((group) => ({
+  const groups = onlyTitlesEn
+    ? HELP_KEYBINDING_GROUPS.filter((group) =>
+        onlyTitlesEn.includes(group.title.en),
+      )
+    : HELP_KEYBINDING_GROUPS;
+  return groups.map((group) => ({
     title: group.title[language],
     rows: group.rows.map((row) => buildRow(row, language, bindings)),
   }));

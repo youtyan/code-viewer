@@ -161,6 +161,35 @@ function makeRepoView(
     syncSidebarHeaderHeight() {
       /* noop */
     },
+    newFolderButtonTitle: () => "new folder",
+    openDirectoryInOsTitle: () => "open this folder in OS",
+    moveFolderToTrashTitle: () => "move folder to Trash",
+    uploadButtonLabel: () => "Upload files",
+    dropFilesIntoCopy: (target) => `Drop files into ${target}`,
+    uploadFailedMessage: () => "Upload failed",
+    emptyDirectoryLabel: () => "No files in this directory.",
+    uploadConfirmText: (count, target) => ({
+      title: "Upload files?",
+      body: `Upload ${count} file(s) into ${target}?`,
+      confirmLabel: "Upload",
+    }),
+    sortColumnLabels: () => ({
+      name: "Name",
+      updated: "Updated",
+      size: "Size",
+    }),
+    repositoryFallback: () => "repository",
+    repositoryRootFallback: () => "repository root",
+    commitEntryMeta: (submodule) =>
+      submodule
+        ? {
+            label: "submodule",
+            title: "Git submodule pinned to a commit",
+          }
+        : {
+            label: "gitlink",
+            title: "Git commit entry is not directly browsable at this ref",
+          },
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },

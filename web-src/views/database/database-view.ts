@@ -8,6 +8,7 @@ import type {
   DbQueryResponse,
   DbSchemaResponse,
   DbSchemasResponse,
+  DbTableCountResponse,
   DbTableDataResponse,
   QueryHistoryState,
   RowMutation,
@@ -15,6 +16,7 @@ import type {
   TabsResponse,
   TabsState,
 } from "../../core/database/types";
+import { SEARCH_16_PATH, SYNC_16_PATH } from "../../core/icons";
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
@@ -24,7 +26,7 @@ import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { type DbLang, type DbText, dbText } from "./i18n";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 import { localizePrefToggle, makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
@@ -74,6 +76,7 @@ type DatabasePaneDeps = DatabaseViewDeps & {
   ): void;
   onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
+  refreshDatastores(): Promise<void>;
   // セッション限定ログ。全 tabPane が同じインスタンスを共有し、フッターの
   // 「ログ」タブに集約表示される。SQL 実行 / 編集コミットの成否を push する。
   sessionLog: SessionLogStore;
@@ -93,6 +96,7 @@ export type DatabaseView = {
   handleSse: (event?: string, data?: string) => void;
   /** 言語切替時に DB ビューア配下の文言を再適用する。 */
   localize: () => void;
+  refresh: () => Promise<void>;
   // ビューア設定パネルなど外部から db-ui pref を読み書きするための公開 API。
   // ensureDbUiState はバックグラウンドで保証されている前提 (DatabaseView が
   // mount された後に呼ばれる)。
@@ -333,11 +337,14 @@ function createTabPane(
     return value;
   }
   let lastFiles: DbFileInfo[] = [];
+  let noDatastoresAvailable = false;
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
   const tableSelectGuard = createAbortGuard();
   let historyRefreshPending: ReturnType<typeof setTimeout> | null = null;
+  let isRefreshingDatastores = false;
+  let datastoreRefreshResult: { added: number; removed: number } | null = null;
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -352,9 +359,31 @@ function createTabPane(
     schemaSelect.title = paneText().nav.selectSchema;
   });
 
+  const dbRefreshBtn = makeIconButton({
+    label: paneText().nav.refreshDatastores,
+    title: paneText().nav.refreshDatastoresTitle,
+    pathD: SYNC_16_PATH,
+    onClick: () => {
+      void refreshDatastoreList();
+    },
+  });
+  dbRefreshBtn.classList.add("db-refresh-btn");
+  const dbRefreshLabel = document.createElement("span");
+  dbRefreshLabel.className = "db-refresh-label";
+  dbRefreshBtn.appendChild(dbRefreshLabel);
+  const dbRefreshResult = document.createElement("span");
+  dbRefreshResult.className = "db-refresh-result";
+  dbRefreshResult.hidden = true;
+  dbRefreshResult.setAttribute("aria-live", "polite");
+  syncDbRefreshButton();
+
+  const dbSelectRow = document.createElement("div");
+  dbSelectRow.className = "db-select-row";
+  dbSelectRow.append(dbSelect, dbRefreshBtn, dbRefreshResult);
+
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
-  dbToolbar.append(dbSelect, schemaSelect);
+  dbToolbar.append(dbSelectRow, schemaSelect);
 
   const tabBar = document.createElement("div");
   tabBar.className = "db-tab-bar";
@@ -442,7 +471,7 @@ function createTabPane(
   const searchBtn = makeIconButton({
     label: "Search",
     title: "Search across tables",
-    pathD: ICON_PATH_SEARCH,
+    pathD: SEARCH_16_PATH,
     onClick: () => setActiveTab("search"),
   });
 
@@ -466,6 +495,12 @@ function createTabPane(
   });
   reloc(() => {
     const t = paneText().nav;
+    localizeIconButton(
+      dbRefreshBtn,
+      t.refreshDatastores,
+      t.refreshDatastoresTitle,
+    );
+    syncDbRefreshButton();
     localizeIconButton(queryBtn, t.query, t.queryTitle);
     localizeIconButton(erBtn, t.er, t.erTitle);
     localizeIconButton(searchBtn, t.search, t.searchTitle);
@@ -551,6 +586,12 @@ function createTabPane(
     // 編集 UI を出す。これらは adapter.applyMutations + /_db/mutate に対応。
     getEditable: () => isSqlKind(currentDbInfo?.kind),
     applyMutations: (mutations) => applyRowMutations(mutations),
+    onRefreshComplete: ({ table, filters }) => {
+      if (filters.length === 0) {
+        return;
+      }
+      void refreshTableRowCount(table);
+    },
   });
 
   // 編集モードのトグル (#16): table-grid 内の Edit ボタンを廃止し、サイドバー
@@ -590,7 +631,10 @@ function createTabPane(
   // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
   if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft, { silent: true });
 
-  const schemaView = createSchemaView({ getText: () => paneText() });
+  const schemaView = createSchemaView({
+    getText: () => paneText(),
+    onRefresh: () => refreshCurrentSchemaView(),
+  });
   const erDiagram = createErDiagram({ getText: () => paneText() });
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
@@ -703,6 +747,31 @@ function createTabPane(
     s3Explorer.sidebarSlot,
   );
 
+  const noDatastoresPane = document.createElement("div");
+  noDatastoresPane.className = "db-no-datastores";
+  noDatastoresPane.hidden = true;
+
+  function renderNoDatastoresEmpty(): void {
+    const t = paneText().nav;
+    setPaneEmpty(noDatastoresPane, t.noDatastores, {
+      hint: t.noDatastoresHint,
+      iconPath: ICON_PATH_SNAPSHOT,
+    });
+    const actionRow = document.createElement("div");
+    actionRow.className = "db-no-datastores-actions";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "db-btn db-btn-primary db-no-datastores-action";
+    refresh.textContent = t.refreshDatastores;
+    refresh.addEventListener("click", () => {
+      void refreshDatastoreList();
+    });
+    actionRow.appendChild(refresh);
+    noDatastoresPane
+      .querySelector<HTMLElement>(".db-pane-empty")
+      ?.appendChild(actionRow);
+  }
+
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
@@ -716,6 +785,7 @@ function createTabPane(
     redisExplorer.el,
     esExplorer.el,
     s3Explorer.el,
+    noDatastoresPane,
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
@@ -859,6 +929,7 @@ function createTabPane(
       currentTab,
       userPrefersHistoryOpen,
     );
+    noDatastoresPane.hidden = !noDatastoresAvailable;
     toolsSection.hidden = visibility.toolsHidden;
     // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
     prefsBar.hidden = visibility.toolsHidden;
@@ -885,6 +956,28 @@ function createTabPane(
     // なる (報告された SQL ビューの「テーブル一覧がすごい離れる」回帰)。
     explorerSidebarHost.hidden =
       visibility.redisHidden && visibility.esHidden && visibility.s3Hidden;
+    if (noDatastoresAvailable) {
+      toolsSection.hidden = true;
+      prefsBar.hidden = true;
+      historyDock.hidden = true;
+      historyResizer.hidden = true;
+      historyPane.hidden = true;
+      tableList.el.hidden = true;
+      tabBar.hidden = true;
+      grid.el.hidden = true;
+      queryEditor.el.hidden = true;
+      schemaView.el.hidden = true;
+      erDiagram.el.hidden = true;
+      globalSearchView.el.hidden = true;
+      snapshotView.el.hidden = true;
+      redisExplorer.el.hidden = true;
+      esExplorer.el.hidden = true;
+      s3Explorer.el.hidden = true;
+      redisExplorer.sidebarSlot.hidden = true;
+      esExplorer.sidebarSlot.hidden = true;
+      s3Explorer.sidebarSlot.hidden = true;
+      explorerSidebarHost.hidden = true;
+    }
     if (!sqlMode) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
@@ -1058,6 +1151,61 @@ function createTabPane(
     });
   }
 
+  function syncCachedTableRowCount(
+    table: string,
+    rowCount: number | null,
+  ): void {
+    if (!schemaCache) return;
+    let changed = false;
+    const tables = schemaCache.tables.map((entry) => {
+      if (entry.name !== table || entry.rowCount === rowCount) return entry;
+      changed = true;
+      return { ...entry, rowCount };
+    });
+    if (!changed) return;
+    schemaCache = { ...schemaCache, tables };
+    tableList.updateRowCount(table, rowCount);
+  }
+
+  async function fetchTableRowCount(
+    table: string,
+    dbId: string,
+    schema: string | null,
+  ): Promise<DbTableCountResponse> {
+    const params = new URLSearchParams({ db: dbId, table });
+    if (schema) params.set("schema", schema);
+    return logSqlFetch<DbTableCountResponse>({
+      url: `/_db/table-count?${params}`,
+      kind: "query",
+      label: `_db/table-count ${table}`,
+      errorPrefix: "failed to fetch table count",
+      rowCountOf: (r) => r.rowCount ?? undefined,
+    });
+  }
+
+  async function refreshTableRowCount(table: string): Promise<void> {
+    const dbId = currentDbInfo?.id;
+    if (!dbId) return;
+    const schema = currentSchema;
+    const generation = loadGeneration;
+    try {
+      const data = await fetchTableRowCount(table, dbId, schema);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentSchema !== schema ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      syncCachedTableRowCount(table, data.rowCount);
+    } catch (err) {
+      if (!isAbortError(err)) {
+        console.warn(`failed to refresh table count: ${errorMessage(err)}`);
+      }
+    }
+  }
+
   /**
    * テーブルページを取得する。eq はベース WHERE（完全一致）として常に適用され、
    * その上にグリッド標準の filters / sort を重ねられる（FK 関連表示で使う）。
@@ -1072,8 +1220,11 @@ function createTabPane(
     eq: Array<{ column: string; value: string }> = [],
   ): Promise<DbTableDataResponse> {
     if (!currentDbInfo) throw new Error("no database selected");
+    const requestDbId = currentDbInfo.id;
+    const requestSchema = currentSchema;
+    const requestGeneration = loadGeneration;
     const params = new URLSearchParams({
-      db: currentDbInfo.id,
+      db: requestDbId,
       table,
       offset: String(offset),
       limit: String(limit),
@@ -1089,7 +1240,7 @@ function createTabPane(
     if (eq.length > 0) {
       params.set("eq", JSON.stringify(eq));
     }
-    return logSqlFetch<DbTableDataResponse>({
+    const data = await logSqlFetch<DbTableDataResponse>({
       url: `/_db/table?${params}`,
       init: signal ? { signal } : undefined,
       kind: "query",
@@ -1098,6 +1249,17 @@ function createTabPane(
       errorPrefix: "failed to fetch table",
       rowCountOf: (r) => r.rows.length,
     });
+    if (
+      filters.length === 0 &&
+      eq.length === 0 &&
+      currentDbInfo?.id === requestDbId &&
+      currentSchema === requestSchema &&
+      currentTable === table &&
+      requestGeneration === loadGeneration
+    ) {
+      syncCachedTableRowCount(table, data.totalRows);
+    }
+    return data;
   }
 
   function fetchRelatedPage(
@@ -1520,6 +1682,61 @@ function createTabPane(
     schemaView.render(table, columns, schemaCache?.indexes || []);
   }
 
+  async function refreshCurrentSchemaView(): Promise<void> {
+    if (!currentDbInfo || !currentTable) return;
+    const generation = loadGeneration;
+    const dbId = currentDbInfo.id;
+    const table = currentTable;
+    schemaView.setRefreshBusy(true);
+    try {
+      const schema = await fetchSchema(dbId);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      currentSchema = schema.schema || currentSchema;
+      schemaCache = schema;
+      tableList.render(schema.tables);
+      const nextTable = schema.tables.some((entry) => entry.name === table)
+        ? table
+        : schema.tables[0]?.name;
+      if (!nextTable) {
+        currentTable = null;
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        cb.onStateChange();
+        return;
+      }
+      currentTable = nextTable;
+      tableList.setActive(nextTable);
+      const columns = await fetchColumns(nextTable);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentTable !== nextTable
+      ) {
+        return;
+      }
+      schemaView.render(nextTable, columns, schema.indexes || []);
+      cb.onStateChange();
+    } catch (err) {
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        isAbortError(err)
+      ) {
+        return;
+      }
+      setTableListStatus(errorMessage(err), { error: true });
+    } finally {
+      schemaView.setRefreshBusy(false);
+    }
+  }
+
   async function showDdl(table: string) {
     if (!currentDbInfo) return;
     setActiveTab("schema");
@@ -1575,6 +1792,70 @@ function createTabPane(
     void handleSchemaSelectChange();
   });
 
+  function syncDbRefreshButton(): void {
+    const text = paneText().nav;
+    dbRefreshLabel.textContent = isRefreshingDatastores
+      ? text.refreshDatastoresBusy
+      : text.refreshDatastoresShort;
+    dbRefreshBtn.setAttribute(
+      "aria-busy",
+      isRefreshingDatastores ? "true" : "false",
+    );
+    syncDatastoreRefreshResult();
+  }
+
+  function syncDatastoreRefreshResult(): void {
+    const result = datastoreRefreshResult;
+    dbRefreshResult.hidden = !result;
+    dbRefreshResult.classList.toggle(
+      "changed",
+      !!result && (result.added > 0 || result.removed > 0),
+    );
+    if (!result) return;
+    const text = paneText().nav;
+    dbRefreshResult.textContent =
+      result.added > 0 || result.removed > 0
+        ? text.refreshDatastoresChanged(result.added, result.removed)
+        : text.refreshDatastoresUnchanged;
+  }
+
+  function diffDatastoreFiles(
+    before: DbFileInfo[],
+    after: DbFileInfo[],
+  ): { added: number; removed: number } {
+    const beforeIds = new Set(before.map((file) => file.id));
+    const afterIds = new Set(after.map((file) => file.id));
+    let added = 0;
+    let removed = 0;
+    for (const id of afterIds) {
+      if (!beforeIds.has(id)) added++;
+    }
+    for (const id of beforeIds) {
+      if (!afterIds.has(id)) removed++;
+    }
+    return { added, removed };
+  }
+
+  async function refreshDatastoreList(): Promise<void> {
+    if (dbRefreshBtn.disabled) return;
+    const beforeFiles = [...lastFiles];
+    isRefreshingDatastores = true;
+    dbRefreshBtn.disabled = true;
+    dbRefreshBtn.classList.add("spinning");
+    syncDbRefreshButton();
+    try {
+      await outerDeps.refreshDatastores();
+      datastoreRefreshResult = cb.isActive()
+        ? diffDatastoreFiles(beforeFiles, lastFiles)
+        : null;
+    } finally {
+      isRefreshingDatastores = false;
+      dbRefreshBtn.classList.remove("spinning");
+      dbRefreshBtn.disabled = false;
+      syncDbRefreshButton();
+    }
+  }
+
   async function handleSchemaSelectChange(): Promise<void> {
     if (!currentDbInfo || !isPostgresKind(currentDbInfo.kind)) return;
     const schema = schemaSelect.value || null;
@@ -1608,6 +1889,8 @@ function createTabPane(
   async function handleDbSelectChange(): Promise<void> {
     const dbId = dbSelect.value;
     if (!dbId) return;
+    datastoreRefreshResult = null;
+    syncDatastoreRefreshResult();
     const generation = ++loadGeneration;
     const file = lastFiles.find((f) => f.id === dbId);
     const option = dbSelect.selectedOptions[0];
@@ -1655,6 +1938,7 @@ function createTabPane(
     if (generation !== loadGeneration) return;
     const files = filesResponse.files;
     lastFiles = files;
+    noDatastoresAvailable = files.length === 0;
     if (filesResponse.truncated) {
       showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
@@ -1667,6 +1951,20 @@ function createTabPane(
       opt.textContent = paneText().nav.noDatastores;
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
+      currentDbInfo = null;
+      currentSchema = null;
+      currentTable = null;
+      schemaCache = null;
+      renderSchemaOptions([], null);
+      tableList.render([]);
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      redisExplorer.clear();
+      esExplorer.clear();
+      s3Explorer.clear();
+      renderNoDatastoresEmpty();
+      applyVisibility();
       cb.onStateChange();
       return;
     }
@@ -1893,6 +2191,7 @@ function createTabPane(
   }
 
   function getLabel(): string {
+    if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
     if (!currentDbInfo) return labelFromDbId(initial.dbId);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
     // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
@@ -1942,6 +2241,7 @@ function createTabPane(
   // 各サブコンポーネントは順次 localize() 対応していく。
   function localizePane() {
     for (const fn of paneLocalizers) fn();
+    if (noDatastoresAvailable) renderNoDatastoresEmpty();
     grid.localize();
     schemaView.localize();
     erDiagram.localize();
@@ -1975,9 +2275,6 @@ const ICON_PATH_QUERY =
 
 const ICON_PATH_ER =
   "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";
-
-const ICON_PATH_SEARCH =
-  "M10.68 11.74a6 6 0 0 1-7.917-8.984 6 6 0 0 1 8.997 7.905l3.05 3.05a.75.75 0 1 1-1.06 1.06l-3.07-3.03ZM11.5 7a4.499 4.499 0 1 1-8.997 0A4.499 4.499 0 0 1 11.5 7Z";
 
 const ICON_PATH_SNAPSHOT =
   "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";
@@ -2699,6 +2996,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         setDbUiPref,
         onDbUiPrefChange,
         loadSqlHistory,
+        refreshDatastores,
         sessionLog,
       },
       {
@@ -3075,6 +3373,38 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     await enterQueue;
   }
 
+  async function refreshDatastores(): Promise<void> {
+    const seq = lifecycleSeq;
+    enterQueue = enterQueue
+      .catch(() => undefined)
+      .then(() => doRefreshDatastores(seq));
+    await enterQueue;
+  }
+
+  async function doRefreshDatastores(seq: number): Promise<void> {
+    if (seq !== lifecycleSeq) return;
+    dbFilesCache = null;
+    if (!mounted || !activeTabId) return;
+    const id = activeTabId;
+    const entry = tabsById.get(id);
+    if (!entry) return;
+    const pendingInitialEnter = ensureInitialEnter(id);
+    if (pendingInitialEnter) await pendingInitialEnter;
+    if (!mounted || activeTabId !== id) return;
+    const state = entry.pane.getState();
+    await entry.pane.enter(
+      state.dbId ?? undefined,
+      state.schema ?? undefined,
+      state.table ?? undefined,
+      state.view,
+      { autoSelectFirst: state.dbId !== null },
+    );
+    if (!mounted || activeTabId !== id) return;
+    refreshChipLabel(id);
+    syncActiveRoute();
+    scheduleSave();
+  }
+
   function leave(): void {
     if (!mounted) return;
     lifecycleSeq++;
@@ -3153,6 +3483,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     leave,
     handleSse,
     localize,
+    refresh: refreshDatastores,
     getDbUiPref,
     setDbUiPref,
     onDbUiPrefChange,

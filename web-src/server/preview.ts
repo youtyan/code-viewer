@@ -868,6 +868,15 @@ function attachTreeEntryMetadata(
 ): git.GitTreeEntry {
   if (entry.type === "tree")
     return { ...entry, ...directoryMetadata(target, entry.path) };
+  // A browsable worktree commit entry (nested repo dir without a registered
+  // submodule) opens like a directory in the client - give it the same
+  // directory metadata so its listing shows an updated date, not "-".
+  if (
+    entry.type === "commit" &&
+    !entry.submodule &&
+    (target === "worktree" || target === "")
+  )
+    return { ...entry, ...directoryMetadata(target, entry.path) };
   if (entry.type !== "blob") return entry;
   return { ...entry, ...fileMetadataForTarget(target, entry.path) };
 }

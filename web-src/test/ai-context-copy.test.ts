@@ -4,8 +4,14 @@ import {
   resolveSelectionTarget,
 } from "../core/ai-context-copy";
 import type { AppRoute } from "../core/routes";
+import type { FileMeta } from "../core/types";
+import { makeDiffMeta } from "./_test-helpers";
 
 const RANGE = { from: "HEAD", to: "worktree" };
+
+function file(path: string, overrides?: Partial<FileMeta>): FileMeta {
+  return { path, load_url: `/x?path=${path}`, status: "M", ...overrides };
+}
 
 describe("aiContextClipboardText", () => {
   test("returns a bare @path when a file screen has no line selection", () => {
@@ -221,6 +227,124 @@ describe("aiContextClipboardText", () => {
     ).toBe("Diff: HEAD..worktree");
   });
 
+  test("includes files/totals in the diff overview brief when diffMeta is present", () => {
+    const route: AppRoute = { screen: "diff", range: RANGE };
+    const meta = makeDiffMeta([
+      file("a.ts", { additions: 10, deletions: 3 }),
+      file("b.ts", { additions: 2, deletions: 0 }),
+    ]);
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        diffMeta: meta,
+      }),
+    ).toBe("Diff: HEAD..worktree (2 files, +12/-3)");
+  });
+
+  test("includes viewed progress as a count in the diff overview brief when viewedFiles is present", () => {
+    const route: AppRoute = { screen: "diff", range: RANGE };
+    const meta = makeDiffMeta([
+      file("a.ts", { additions: 10, deletions: 3 }),
+      file("b.ts", { additions: 2, deletions: 0 }),
+    ]);
+    const text = aiContextClipboardText({
+      route,
+      diffFrom: "HEAD",
+      diffTo: "worktree",
+      diffMeta: meta,
+      viewedFiles: new Set(["a.ts"]),
+    });
+    expect(text).toBe("Diff: HEAD..worktree (2 files, +12/-3, 1/2 viewed)");
+    expect(text.includes("a.ts")).toBe(false);
+    expect(text.includes("b.ts")).toBe(false);
+  });
+
+  test("omits the viewed progress when viewedFiles is not provided", () => {
+    const route: AppRoute = { screen: "diff", range: RANGE };
+    const meta = makeDiffMeta([file("a.ts", { additions: 10 })]);
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        diffMeta: meta,
+      }),
+    ).toBe("Diff: HEAD..worktree (1 file, +10/-0)");
+  });
+
+  test("includes non-zero kind counts (added/deleted/renamed/heavy/binary/media) in the diff overview brief", () => {
+    const route: AppRoute = { screen: "diff", range: RANGE };
+    const meta = makeDiffMeta([
+      file("new.ts", { status: "A", additions: 20 }),
+      file("old.ts", { status: "D", deletions: 15 }),
+      file("moved.ts", { status: "R" }),
+      file("huge.ts", { size_class: "huge", additions: 900, deletions: 900 }),
+      file("archive.zip", { size_class: "binary" }),
+      file("logo.png", { media_kind: "image" }),
+    ]);
+    const text = aiContextClipboardText({
+      route,
+      diffFrom: "HEAD",
+      diffTo: "worktree",
+      diffMeta: meta,
+    });
+    expect(text).toBe(
+      "Diff: HEAD..worktree (6 files, +920/-915, 1 added, 1 deleted, 1 renamed, 1 heavy, 1 binary, 1 media)",
+    );
+    expect(text.includes("new.ts")).toBe(false);
+    expect(text.includes("logo.png")).toBe(false);
+  });
+
+  test("omits the brief details when diffMeta has no totals", () => {
+    const route: AppRoute = { screen: "diff", range: RANGE };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        diffMeta: { files: [file("a.ts", { additions: 1 })] },
+      }),
+    ).toBe("Diff: HEAD..worktree");
+  });
+
+  test("does not add the diff overview brief when a file is selected, even if diffMeta is present", () => {
+    const route: AppRoute = {
+      screen: "diff",
+      range: RANGE,
+      path: "web-src/app.ts",
+    };
+    const meta = makeDiffMeta([file("web-src/app.ts", { additions: 5 })]);
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        diffMeta: meta,
+      }),
+    ).toBe("@web-src/app.ts");
+  });
+
+  test("does not add the diff overview brief to a Shift+Click code selection, even if diffMeta is present", () => {
+    const route: AppRoute = {
+      screen: "diff",
+      range: RANGE,
+      path: "web-src/app.ts",
+      line: { start: 5, end: 6 },
+    };
+    const meta = makeDiffMeta([file("web-src/app.ts", { additions: 5 })]);
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        selectionCode: { lines: ["a", "b"], lang: "typescript" },
+        diffMeta: meta,
+      }),
+    ).toBe("@web-src/app.ts#5-6\n\n```typescript\na\nb\n```");
+  });
+
   test("prefers the file reference over the Diff: summary when a file is selected", () => {
     const route: AppRoute = {
       screen: "diff",
@@ -256,11 +380,22 @@ describe("aiContextClipboardText", () => {
     ).toBe("commit: abc1234 (ref: release-1.0)");
   });
 
-  test("returns an empty string for a history screen with no commit selected", () => {
+  test("falls back to the live diff range for a history screen with no commit selected", () => {
     const route: AppRoute = { screen: "history", ref: "HEAD", range: RANGE };
     expect(
       aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
-    ).toBe("");
+    ).toBe("History: HEAD..worktree");
+  });
+
+  test("appends a ref suffix for a history screen with no commit on a non-default ref", () => {
+    const route: AppRoute = {
+      screen: "history",
+      ref: "release-1.0",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
+    ).toBe("History: HEAD..worktree (ref: release-1.0)");
   });
 
   test("includes db/schema/table/tab for a database screen", () => {
@@ -319,11 +454,84 @@ describe("aiContextClipboardText", () => {
     ).toBe("database: db=sample_db");
   });
 
-  test("returns an empty string for a database screen with no route fields set", () => {
+  test("identifies the screen for a bare Datastores landing route with no fields set", () => {
     const route: AppRoute = { screen: "database", range: RANGE };
     expect(
       aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
-    ).toBe("");
+    ).toBe("database");
+  });
+
+  test("includes the current SQL draft for a database screen on the query tab", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT * FROM sample_table",
+      }),
+    ).toBe("database: db=sample_db, tab=query, sql=SELECT * FROM sample_table");
+  });
+
+  test("collapses newlines/whitespace in the SQL draft into a single line", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT *\n  FROM sample_table\n  WHERE  1=1",
+      }),
+    ).toBe(
+      "database: db=sample_db, tab=query, sql=SELECT * FROM sample_table WHERE 1=1",
+    );
+  });
+
+  test("truncates a long SQL draft with an ASCII ellipsis instead of pasting it in full", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    const longSql = `SELECT * FROM sample_table WHERE ${"sample_col = 1 AND ".repeat(20)}1=1`;
+    const text = aiContextClipboardText({
+      route,
+      diffFrom: "HEAD",
+      diffTo: "worktree",
+      databaseQuerySql: longSql,
+    });
+    const sqlPart = text.slice(text.indexOf("sql=") + "sql=".length);
+    expect(sqlPart.endsWith("...")).toBe(true);
+    expect(sqlPart.length <= 203).toBe(true);
+    expect(longSql.length > 203).toBe(true);
+  });
+
+  test("omits the SQL draft when not on the query tab, even if one is provided", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "data",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT * FROM sample_table",
+      }),
+    ).toBe("database: db=sample_db, tab=data");
   });
 
   test("returns an empty string for screens with no path/selection concept (e.g. help)", () => {

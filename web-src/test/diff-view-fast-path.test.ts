@@ -11,10 +11,12 @@ import type { AppRoute } from "../core/routes";
 import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
   createDiffView,
+  type DiffViewDeps,
+  type DiffViewText,
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
-import { deferred, waitFor } from "./_test-helpers";
+import { deferred, makeDiffMeta, waitFor } from "./_test-helpers";
 
 beforeAll(() => {
   GlobalRegistrator.register();
@@ -59,6 +61,9 @@ function makeFile(
   deletions: number,
   loadUrl: string,
   key?: string,
+  overrides?: Partial<
+    Pick<FileMeta, "status" | "size_class" | "media_kind" | "binary">
+  >,
 ): FileMeta {
   const file: FileMeta = {
     path,
@@ -67,29 +72,40 @@ function makeFile(
     deletions,
     size_class: "small",
     load_url: loadUrl,
+    ...overrides,
   };
   if (key !== undefined) file.key = key;
   return file;
 }
 
 function makeMeta(files: FileMeta[]): DiffMeta {
-  return {
-    files,
-    totals: {
-      files: files.length,
-      additions: files.reduce((sum, file) => sum + (file.additions || 0), 0),
-      deletions: files.reduce((sum, file) => sum + (file.deletions || 0), 0),
-    },
-    generation: 1,
-  };
+  return makeDiffMeta(files, { generation: 1 });
 }
 
-function createDiffViewForShellTest() {
+const defaultDiffText: DiffViewText = {
+  files: (count) => `${count} file${count === 1 ? "" : "s"}`,
+  updated: (time) => `updated ${time}`,
+  updatedTitle: "last updated",
+  kindAdded: "added",
+  kindDeleted: "deleted",
+  kindRenamed: "renamed",
+  kindHeavy: "heavy",
+  kindBinary: "binary",
+  kindMedia: "media",
+  viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
+  viewedProgressTitle: "review progress",
+  nextUnviewed: "next unviewed",
+  nextUnviewedTitle: "Jump to the next unviewed file (n)",
+  allViewed: "all viewed",
+  allViewedTitle: "All visible files are viewed",
+};
+
+function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
   const route: AppRoute = {
     screen: "diff",
     range: { from: "base", to: "head" },
   };
-  const state = {
+  const state: DiffViewDeps["STATE"] = {
     route,
     files: [] as FileMeta[],
     layout: "line-by-line",
@@ -100,6 +116,10 @@ function createDiffViewForShellTest() {
   };
   let serverGeneration = 1;
   let sidebarRenders = 0;
+  const markActiveCalls: Array<{
+    path: string;
+    options?: { reveal?: boolean };
+  }> = [];
   const view = createDiffView({
     STATE: state,
     setRoute() {
@@ -126,8 +146,8 @@ function createDiffViewForShellTest() {
     applyFilter() {
       /* noop */
     },
-    markActive() {
-      /* noop */
+    markActive(path, options) {
+      markActiveCalls.push({ path, options });
     },
     renderSidebar() {
       sidebarRenders++;
@@ -158,6 +178,7 @@ function createDiffViewForShellTest() {
     invalidateRepoSidebar() {
       /* noop */
     },
+    diffText: () => text,
     $: <T extends Element = HTMLElement>(sel: string): T => {
       const found = document.querySelector<T>(sel);
       if (!found) throw new Error(`missing ${sel}`);
@@ -166,7 +187,40 @@ function createDiffViewForShellTest() {
     $$: <T extends Element = HTMLElement>(sel: string): T[] =>
       Array.from(document.querySelectorAll<T>(sel)),
   });
-  return { view, sidebarRenders: () => sidebarRenders };
+  return {
+    view,
+    state,
+    sidebarRenders: () => sidebarRenders,
+    markActiveCalls: () => markActiveCalls,
+  };
+}
+
+function installSidebarFileRow(
+  path: string,
+  options: {
+    active?: boolean;
+    viewed?: boolean;
+    hidden?: boolean;
+    hiddenByTests?: boolean;
+    // Skip when a prior renderShell() call already created the matching
+    // .gdp-file-shell card - a second one here would break isDiffShellDomIntact.
+    skipCard?: boolean;
+  } = {},
+) {
+  const li = document.createElement("li");
+  li.dataset.path = path;
+  if (options.active) li.classList.add("active");
+  if (options.viewed) li.classList.add("viewed");
+  if (options.hidden) li.classList.add("hidden");
+  if (options.hiddenByTests) li.classList.add("hidden-by-tests");
+  document.querySelector("#filelist")?.appendChild(li);
+
+  if (options.skipCard) return { li, card: null };
+  const card = document.createElement("div");
+  card.className = "gdp-file-shell";
+  card.dataset.path = path;
+  document.querySelector("#diff")?.appendChild(card);
+  return { li, card };
 }
 
 describe("diff view fast path", () => {
@@ -204,6 +258,53 @@ describe("diff view fast path", () => {
     expect(shouldRenderDiffSidebar(true, true)).toBe(false);
     expect(shouldRenderDiffSidebar(true, false)).toBe(true);
     expect(shouldRenderDiffSidebar(false, true)).toBe(true);
+  });
+
+  test("renders viewed progress from the displayed diff files", () => {
+    setupDiffDom();
+    const { view, state } = createDiffViewForShellTest();
+    state.viewedFiles.add("src/b.ts");
+
+    view.renderMeta(
+      makeMeta([
+        makeFile("src/a.ts", 2, 1, "/file_diff?path=src%2Fa.ts"),
+        makeFile("src/b.ts", 4, 0, "/file_diff?path=src%2Fb.ts"),
+      ]),
+    );
+
+    expect(
+      document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
+    ).toBe("1/2 viewed");
+  });
+
+  test("updates viewed progress when a file is marked viewed", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+    view.renderMeta(
+      makeMeta([
+        makeFile("src/a.ts", 2, 1, "/file_diff?path=src%2Fa.ts"),
+        makeFile("src/b.ts", 4, 0, "/file_diff?path=src%2Fb.ts"),
+      ]),
+    );
+
+    expect(
+      document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
+    ).toBe("0/2 viewed");
+
+    view.setFileViewed("src/a.ts", true);
+    expect(
+      document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
+    ).toBe("1/2 viewed");
+
+    view.setFileViewed("src/b.ts", true);
+    expect(
+      document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
+    ).toBe("2/2 viewed");
+
+    view.setFileViewed("src/a.ts", false);
+    expect(
+      document.querySelector<HTMLElement>("#meta .chip-viewed")?.textContent,
+    ).toBe("1/2 viewed");
   });
 
   test("resets a reused loaded card when full-path render changes its diff signature", () => {
@@ -472,5 +573,383 @@ describe("diff view fast path", () => {
       HTMLElement.prototype.getBoundingClientRect = originalRect;
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("diff view meta stat strip", () => {
+  test("renders files/additions/deletions as separate compact chips", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(
+      makeMeta([makeFile("a.ts", 10, 3, "/a"), makeFile("b.ts", 2, 0, "/b")]),
+    );
+
+    const meta = document.querySelector("#meta");
+    expect(meta?.querySelector(".chip-files")?.textContent).toBe("2 files");
+    expect(meta?.querySelector(".chip-add")?.textContent).toBe("+12");
+    expect(meta?.querySelector(".chip-del")?.textContent).toBe("−3");
+  });
+
+  test("uses the singular form for a single-file diff", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(makeMeta([makeFile("a.ts", 1, 0, "/a")]));
+
+    expect(document.querySelector("#meta .chip-files")?.textContent).toBe(
+      "1 file",
+    );
+  });
+
+  test("renders the diff meta strip with injected labels", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest({
+      ...defaultDiffText,
+      files: (count) => `${count}ファイル`,
+      updated: (time) => `更新 ${time}`,
+      updatedTitle: "最終更新",
+      kindAdded: "追加",
+      kindDeleted: "削除",
+      kindRenamed: "名前変更",
+      kindHeavy: "大容量",
+      kindBinary: "バイナリ",
+      kindMedia: "メディア",
+      viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
+      viewedProgressTitle: "確認進捗",
+      nextUnviewed: "次の未確認",
+      nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
+    });
+
+    view.renderMeta(
+      makeMeta([
+        makeFile("new.ts", 2, 0, "/new", undefined, { status: "A" }),
+        makeFile("old.ts", 0, 1, "/old", undefined, { status: "D" }),
+        makeFile("moved.ts", 1, 1, "/moved", undefined, { status: "R" }),
+        makeFile("huge.ts", 1, 1, "/huge", undefined, {
+          size_class: "huge",
+        }),
+        makeFile("archive.zip", 0, 0, "/zip", undefined, {
+          size_class: "binary",
+        }),
+        makeFile("logo.png", 0, 0, "/png", undefined, {
+          media_kind: "image",
+        }),
+      ]),
+    );
+
+    const meta = document.querySelector("#meta");
+    expect(meta?.querySelector(".chip-files")?.textContent).toBe("6ファイル");
+    expect(meta?.querySelector(".chip-added")?.textContent).toBe("1 追加");
+    expect(meta?.querySelector(".chip-deleted")?.textContent).toBe("1 削除");
+    expect(meta?.querySelector(".chip-renamed")?.textContent).toBe(
+      "1 名前変更",
+    );
+    expect(meta?.querySelector(".chip-heavy")?.textContent).toBe("1 大容量");
+    expect(meta?.querySelector(".chip-binary")?.textContent).toBe("1 バイナリ");
+    expect(meta?.querySelector(".chip-media")?.textContent).toBe("1 メディア");
+    expect(meta?.querySelector(".chip-viewed")?.textContent).toBe(
+      "0/6 確認済み",
+    );
+    expect(meta?.querySelector(".chip-viewed")?.getAttribute("title")).toBe(
+      "確認進捗",
+    );
+    expect(meta?.querySelector(".chip-next-unviewed")?.textContent).toBe(
+      "次の未確認",
+    );
+    expect(
+      meta?.querySelector(".chip-next-unviewed")?.getAttribute("title"),
+    ).toBe("次の未確認ファイルへ移動 (n)");
+    expect(meta?.querySelector(".chip-updated")?.textContent).toMatch(/^更新 /);
+    expect(meta?.querySelector(".chip-updated")?.getAttribute("title")).toBe(
+      "最終更新",
+    );
+  });
+
+  test("clears #meta when meta is null", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(null);
+
+    expect(document.querySelector("#meta")?.textContent).toBe("");
+  });
+
+  test("omits added/deleted/renamed/heavy/binary/media chips when every file is a plain modification", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(makeMeta([makeFile("a.ts", 10, 3, "/a")]));
+
+    const meta = document.querySelector("#meta");
+    expect(meta?.querySelector(".chip-added")).toBeNull();
+    expect(meta?.querySelector(".chip-deleted")).toBeNull();
+    expect(meta?.querySelector(".chip-renamed")).toBeNull();
+    expect(meta?.querySelector(".chip-heavy")).toBeNull();
+    expect(meta?.querySelector(".chip-binary")).toBeNull();
+    expect(meta?.querySelector(".chip-media")).toBeNull();
+  });
+
+  test("renders non-zero added/deleted/renamed/heavy/binary/media chips", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(
+      makeMeta([
+        makeFile("new.ts", 20, 0, "/new", undefined, { status: "A" }),
+        makeFile("old.ts", 0, 15, "/old", undefined, { status: "D" }),
+        makeFile("moved.ts", 1, 1, "/moved", undefined, { status: "R" }),
+        makeFile("huge.ts", 900, 900, "/huge", undefined, {
+          size_class: "huge",
+        }),
+        makeFile("archive.zip", 0, 0, "/zip", undefined, {
+          size_class: "binary",
+        }),
+        makeFile("logo.png", 0, 0, "/png", undefined, {
+          media_kind: "image",
+        }),
+      ]),
+    );
+
+    const meta = document.querySelector("#meta");
+    expect(meta?.querySelector(".chip-added")?.textContent).toBe("1 added");
+    expect(meta?.querySelector(".chip-deleted")?.textContent).toBe("1 deleted");
+    expect(meta?.querySelector(".chip-renamed")?.textContent).toBe("1 renamed");
+    expect(meta?.querySelector(".chip-heavy")?.textContent).toBe("1 heavy");
+    expect(meta?.querySelector(".chip-binary")?.textContent).toBe("1 binary");
+    expect(meta?.querySelector(".chip-media")?.textContent).toBe("1 media");
+  });
+});
+
+describe("diff view next-unviewed-file navigation", () => {
+  test("renders an actionable next-unviewed button while files remain unviewed", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(
+      makeMeta([makeFile("a.ts", 1, 0, "/a"), makeFile("b.ts", 1, 0, "/b")]),
+    );
+
+    const button = document.querySelector<HTMLButtonElement>(
+      "#meta .chip-next-unviewed",
+    );
+    expect(button?.disabled).toBe(false);
+    expect(button?.textContent).toBe("next unviewed");
+  });
+
+  test("disables the next-unviewed button once every file is viewed", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(makeMeta([makeFile("a.ts", 1, 0, "/a")]));
+    view.setFileViewed("a.ts", true);
+
+    const button = document.querySelector<HTMLButtonElement>(
+      "#meta .chip-next-unviewed",
+    );
+    expect(button?.disabled).toBe(true);
+    expect(button?.textContent).toBe("all viewed");
+  });
+
+  test("omits the next-unviewed button when there is nothing to track", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(makeMeta([]));
+
+    expect(document.querySelector("#meta .chip-next-unviewed")).toBeNull();
+  });
+
+  test("scrolls to the next unviewed file after the active one and reveals it in the sidebar", () => {
+    setupDiffDom();
+    const { view, state, markActiveCalls } = createDiffViewForShellTest();
+    state.viewedFiles.add("a.ts");
+
+    installSidebarFileRow("a.ts", { active: true, viewed: true });
+    installSidebarFileRow("b.ts");
+    installSidebarFileRow("c.ts");
+
+    expect(view.scrollToNextUnviewedFile()).toBe(true);
+
+    expect(markActiveCalls()).toEqual([
+      { path: "b.ts", options: { reveal: true } },
+    ]);
+  });
+
+  test("wraps around to the start once the search reaches the end of the list", () => {
+    setupDiffDom();
+    const { view, state, markActiveCalls } = createDiffViewForShellTest();
+    state.viewedFiles.add("b.ts");
+
+    installSidebarFileRow("a.ts");
+    installSidebarFileRow("b.ts", { active: true, viewed: true });
+
+    expect(view.scrollToNextUnviewedFile()).toBe(true);
+
+    expect(markActiveCalls()).toEqual([
+      { path: "a.ts", options: { reveal: true } },
+    ]);
+  });
+
+  test("skips rows hidden by the search filter or the hide-tests toggle", () => {
+    setupDiffDom();
+    const { view, state } = createDiffViewForShellTest();
+    state.viewedFiles.add("a.ts");
+
+    installSidebarFileRow("a.ts", { active: true, viewed: true });
+    installSidebarFileRow("a.test.ts", { hiddenByTests: true });
+    installSidebarFileRow("filtered-out.ts", { hidden: true });
+    installSidebarFileRow("b.ts");
+
+    const path = document.querySelector<HTMLElement>(
+      "#filelist li:not(.hidden):not(.hidden-by-tests):not(.active)",
+    )?.dataset.path;
+    expect(path).toBe("b.ts");
+    expect(view.scrollToNextUnviewedFile()).toBe(true);
+  });
+
+  test("returns false and leaves the button disabled once every visible file is viewed", () => {
+    setupDiffDom();
+    const { view, state } = createDiffViewForShellTest();
+    state.viewedFiles.add("a.ts");
+    state.viewedFiles.add("b.ts");
+
+    installSidebarFileRow("a.ts", { active: true, viewed: true });
+    installSidebarFileRow("b.ts", { viewed: true });
+
+    expect(view.scrollToNextUnviewedFile()).toBe(false);
+  });
+
+  test("treats a DOM-marked viewed row as viewed even if STATE.viewedFiles disagrees", () => {
+    setupDiffDom();
+    const { view, markActiveCalls } = createDiffViewForShellTest();
+    // Regression: the sidebar row shows .viewed but STATE.viewedFiles was
+    // never told about it. The visible DOM state must win so a file the
+    // user can see is checked off is never re-offered as "next unviewed".
+    installSidebarFileRow("a.ts", { viewed: true });
+    installSidebarFileRow("b.ts");
+
+    expect(view.scrollToNextUnviewedFile()).toBe(true);
+
+    expect(markActiveCalls()).toEqual([
+      { path: "b.ts", options: { reveal: true } },
+    ]);
+  });
+
+  test("disables the next-unviewed button once a search filter hides every remaining unviewed row", () => {
+    setupDiffDom();
+    const { view, state } = createDiffViewForShellTest();
+    state.viewedFiles.add("a.ts");
+
+    view.renderMeta(
+      makeMeta([makeFile("a.ts", 1, 0, "/a"), makeFile("b.ts", 1, 0, "/b")]),
+    );
+    installSidebarFileRow("a.ts", { active: true, viewed: true });
+    installSidebarFileRow("b.ts", { hidden: true });
+
+    view.applyViewedState();
+
+    const button = document.querySelector<HTMLButtonElement>(
+      "#meta .chip-next-unviewed",
+    );
+    expect(button?.disabled).toBe(true);
+    expect(view.scrollToNextUnviewedFile()).toBe(false);
+  });
+
+  test("re-enables the next-unviewed button once the filter no longer hides the remaining row", () => {
+    setupDiffDom();
+    const { view, state } = createDiffViewForShellTest();
+    state.viewedFiles.add("a.ts");
+
+    view.renderMeta(
+      makeMeta([makeFile("a.ts", 1, 0, "/a"), makeFile("b.ts", 1, 0, "/b")]),
+    );
+    installSidebarFileRow("a.ts", { active: true, viewed: true });
+    installSidebarFileRow("b.ts", { hidden: true });
+    view.applyViewedState();
+    expect(
+      document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
+        ?.disabled,
+    ).toBe(true);
+
+    document
+      .querySelector<HTMLElement>('#filelist li[data-path="b.ts"]')
+      ?.classList.remove("hidden");
+    view.applyViewedState();
+
+    expect(
+      document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
+        ?.disabled,
+    ).toBe(false);
+  });
+
+  test("disables the next-unviewed button after a filter-preserving renderShell refresh hides every row", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+    const meta = makeMeta([
+      makeFile("a.ts", 1, 0, "/a"),
+      makeFile("b.ts", 1, 0, "/b"),
+    ]);
+
+    // Full path: creates the .gdp-file-shell cards. #filelist rows are
+    // built by the real sidebar module in production; stand them in here
+    // (skipCard - renderShell() already created the matching cards).
+    view.renderShell(meta, null);
+    installSidebarFileRow("a.ts", { active: true, skipCard: true });
+    installSidebarFileRow("b.ts", { skipCard: true });
+
+    // A live search filter hides every row (mirrors sidebar applyFilter()).
+    document
+      .querySelectorAll<HTMLElement>("#filelist li[data-path]")
+      .forEach((li) => {
+        li.classList.add("hidden");
+      });
+
+    // Same file list and intact cards, so this refresh takes the fast path
+    // inside renderShell(). renderMeta() still runs first and would recreate
+    // the button as enabled from raw totals alone.
+    view.renderShell(meta, null);
+
+    const button = document.querySelector<HTMLButtonElement>(
+      "#meta .chip-next-unviewed",
+    );
+    expect(button?.disabled).toBe(true);
+  });
+
+  test("re-syncs the next-unviewed button when renderMeta re-runs standalone after renderShell (app.ts applyHideTestsToMeta pattern)", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+    const meta = makeMeta([
+      makeFile("a.ts", 1, 0, "/a"),
+      makeFile("b.ts", 1, 0, "/b"),
+    ]);
+
+    view.renderShell(meta, null);
+    installSidebarFileRow("a.ts", { active: true, skipCard: true });
+    installSidebarFileRow("b.ts", { skipCard: true });
+    document
+      .querySelectorAll<HTMLElement>("#filelist li[data-path]")
+      .forEach((li) => {
+        li.classList.add("hidden");
+      });
+
+    // app.ts function applyHideTestsToMeta() calls renderMeta() on its own,
+    // outside renderShell, every time load() resolves or hide-tests toggles.
+    // That alone cannot see the live sidebar filter, so the button comes
+    // back enabled here - this is the bug app.ts must correct afterward.
+    view.renderMeta(meta);
+    expect(
+      document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
+        ?.disabled,
+    ).toBe(false);
+
+    // app.ts fix: call applyViewedState() right after that standalone
+    // renderMeta() call.
+    view.applyViewedState();
+
+    expect(
+      document.querySelector<HTMLButtonElement>("#meta .chip-next-unviewed")
+        ?.disabled,
+    ).toBe(true);
   });
 });

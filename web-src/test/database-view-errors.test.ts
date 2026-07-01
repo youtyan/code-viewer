@@ -261,6 +261,13 @@ class FakeElement {
     }
   }
 
+  async input() {
+    const event = { target: this };
+    for (const listener of this.listeners.input || []) {
+      await listener(event);
+    }
+  }
+
   focus() {
     /* noop */
   }
@@ -547,6 +554,310 @@ describe("database view SQL error rendering", () => {
 
     expect(document.querySelector(".db-pane-error")).toBeNull();
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    await leaveView(view);
+  });
+
+  test("datastore refresh button bypasses the file list cache", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    let resolveRefreshFiles: (() => void) | null = null;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        if (filesFetches === 2) {
+          return new Promise<Response>((resolve) => {
+            resolveRefreshFiles = () =>
+              resolve(
+                jsonResponse({
+                  files: [
+                    ...baseFilesResponse().files,
+                    {
+                      id: "app.sqlite",
+                      path: "app.sqlite",
+                      name: "app.sqlite",
+                      sizeBytes: 4096,
+                      kind: "sqlite",
+                    },
+                  ],
+                }),
+              );
+          });
+        }
+        return jsonResponse(baseFilesResponse());
+      }
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+
+    const refresh = document.querySelector(
+      ".db-refresh-btn",
+    ) as unknown as FakeElement;
+    const label = refresh.querySelector(
+      ".db-refresh-label",
+    ) as unknown as FakeElement;
+    const result = document.querySelector(
+      ".db-refresh-result",
+    ) as unknown as FakeElement;
+    expect(refresh).toBeTruthy();
+    expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh");
+    expect(result.hidden).toBe(true);
+
+    const refreshClick = refresh.click();
+    await waitUntil(() => filesFetches === 2);
+    expect(refresh.disabled).toBe(true);
+    expect(refresh.classList.contains("spinning")).toBe(true);
+    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(label.textContent).toBe("Refreshing...");
+
+    resolveRefreshFiles?.();
+    await refreshClick;
+    await waitUntil(() => refresh.attributes["aria-busy"] === "false");
+
+    expect(filesFetches).toBe(2);
+    expect(refresh.disabled).toBe(false);
+    expect(refresh.classList.contains("spinning")).toBe(false);
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh");
+    expect(result.hidden).toBe(false);
+    expect(result.textContent).toBe("+1 datastore");
+    expect(result.classList.contains("changed")).toBe(true);
+    expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    await leaveView(view);
+  });
+
+  test("shows an actionable empty state when no datastores are found", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        return jsonResponse({ files: [] });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    const empty = document.querySelector(
+      ".db-no-datastores",
+    ) as unknown as FakeElement;
+    expect(empty).toBeTruthy();
+    expect(empty.hidden).toBe(false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No datastores found",
+    );
+    expect(
+      empty
+        .querySelector(".db-pane-empty-hint")
+        ?.textContent.includes("Start a database service"),
+    ).toBe(true);
+    expect(restoredTabLabels()).toEqual(["No datastore"]);
+
+    const action = empty.querySelector(
+      ".db-no-datastores-action",
+    ) as unknown as FakeElement;
+    expect(action.textContent).toBe("Refresh datastores");
+    const click = action.click();
+    await waitUntil(() => filesFetches === 2);
+    await click;
+
+    expect(filesFetches).toBe(2);
+    await leaveView(view);
+  });
+
+  test("syncs table list row count after an unfiltered grid reload", async () => {
+    installDatabaseDom();
+    let tableFetches = 0;
+    let nextTotalRows = 1;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table")) {
+        tableFetches++;
+        return jsonResponse({
+          ...baseTableResponse(),
+          rows: Array.from({ length: nextTotalRows }, (_, i) => [i + 1]),
+          totalRows: nextTotalRows,
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("1");
+
+    nextTotalRows = 3;
+    const refresh = document.querySelector(
+      ".db-grid-refresh",
+    ) as unknown as FakeElement;
+    await refresh.click();
+    await waitUntil(() => tableFetches === 2);
+
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
+    await leaveView(view);
+  });
+
+  test("syncs full table row count after a filtered grid reload", async () => {
+    installDatabaseDom();
+    let tableFetches = 0;
+    let countFetches = 0;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [{ name: "users", type: "table", rowCount: 3 }],
+        });
+      if (url.startsWith("/_db/table-count")) {
+        countFetches++;
+        return jsonResponse({
+          dbId: "docker:db",
+          table: "users",
+          rowCount: 4,
+        });
+      }
+      if (url.startsWith("/_db/table")) {
+        tableFetches++;
+        const hasFilters = new URL(url, "http://localhost").searchParams.has(
+          "filters",
+        );
+        const totalRows = hasFilters ? (tableFetches >= 3 ? 2 : 1) : 3;
+        return jsonResponse({
+          ...baseTableResponse(),
+          rows: Array.from({ length: totalRows }, (_, i) => [i + 1]),
+          totalRows,
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
+
+    const filter = document.querySelector(
+      ".db-grid-filter-input",
+    ) as unknown as FakeElement;
+    filter.value = "sample";
+    await filter.input();
+    await waitUntil(() => tableFetches === 2);
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("3");
+
+    const refresh = document.querySelector(
+      ".db-grid-refresh",
+    ) as unknown as FakeElement;
+    await refresh.click();
+    await waitUntil(() => countFetches === 1);
+
+    expect(document.querySelector(".db-table-count")?.textContent).toBe("4");
+    await leaveView(view);
+  });
+
+  test("schema refresh button reloads the current table structure", async () => {
+    installDatabaseDom();
+    let schemaFetches = 0;
+    let resolveRefreshSchema: (() => void) | null = null;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema")) {
+        schemaFetches++;
+        if (schemaFetches === 2) {
+          return new Promise<Response>((resolve) => {
+            resolveRefreshSchema = () =>
+              resolve(
+                jsonResponse({
+                  ...baseSchemaResponse(),
+                  indexes: [
+                    {
+                      table: "users",
+                      name: "users_name_idx",
+                      columns: ["name"],
+                      unique: false,
+                    },
+                  ],
+                  columnsMap: {
+                    users: [
+                      { name: "id", type: "integer", primaryKey: true },
+                      { name: "name", type: "text", primaryKey: false },
+                    ],
+                  },
+                }),
+              );
+          });
+        }
+        return jsonResponse(baseSchemaResponse());
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", undefined, "users", "schema");
+
+    const refresh = document.querySelector(
+      ".db-schema-refresh",
+    ) as unknown as FakeElement;
+    const label = refresh.querySelector(
+      ".db-grid-refresh-label",
+    ) as unknown as FakeElement;
+    expect(refresh).toBeTruthy();
+    expect(refresh.attributes["aria-label"]).toBe("Refresh this table schema");
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh schema");
+
+    refresh.click();
+    await waitUntil(() => schemaFetches === 2);
+    expect(refresh.disabled).toBe(true);
+    expect(refresh.classList.contains("spinning")).toBe(true);
+    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(label.textContent).toBe("Refreshing...");
+
+    resolveRefreshSchema?.();
+    await waitUntil(() => {
+      const doneRefresh = document.querySelector(
+        ".db-schema-refresh",
+      ) as unknown as FakeElement | null;
+      return doneRefresh?.attributes["aria-busy"] === "false";
+    });
+
+    const doneRefresh = document.querySelector(
+      ".db-schema-refresh",
+    ) as unknown as FakeElement;
+    const doneLabel = doneRefresh.querySelector(
+      ".db-grid-refresh-label",
+    ) as unknown as FakeElement;
+    const schemaText = document.querySelector(".db-schema-view")?.textContent;
+    expect(schemaFetches).toBe(2);
+    expect(doneRefresh.disabled).toBe(false);
+    expect(doneRefresh.classList.contains("spinning")).toBe(false);
+    expect(doneLabel.textContent).toBe("Refresh schema");
+    expect(schemaText || "").toMatch(/name/);
+    expect(schemaText || "").toMatch(/users_name_idx/);
     await leaveView(view);
   });
 
@@ -1232,6 +1543,82 @@ describe("database view SQL error rendering", () => {
     await entering;
 
     expect(document.querySelector(".db-pane-error")).toBeNull();
+    await leaveView(view);
+  });
+
+  test("does not let a stale table response overwrite row counts", async () => {
+    installDatabaseDom();
+    const tableRequests: Array<{
+      table: string | null;
+      resolve: (res: Response) => void;
+    }> = [];
+
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse({
+          ...baseSchemaResponse(),
+          tables: [
+            { name: "users", type: "table", rowCount: 1 },
+            { name: "bookings", type: "table", rowCount: 1 },
+          ],
+          columnsMap: {
+            users: [{ name: "id", type: "integer", primaryKey: true }],
+            bookings: [{ name: "id", type: "integer", primaryKey: true }],
+          },
+        });
+      if (url.startsWith("/_db/table")) {
+        const table = new URL(url, "http://localhost").searchParams.get(
+          "table",
+        );
+        return new Promise<Response>((resolve) => {
+          tableRequests.push({ table, resolve });
+        });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    const entering = view.enter("docker:db", undefined, "users");
+    await waitUntil(() => tableRequests.length > 0);
+
+    const bookingsRow = Array.from(
+      document.querySelectorAll(".db-table-item"),
+    ).find(
+      (row) => (row as unknown as FakeElement).dataset.table === "bookings",
+    ) as unknown as FakeElement | undefined;
+    expect(bookingsRow).toBeTruthy();
+
+    const clicking = bookingsRow?.click();
+    await waitUntil(() => tableRequests.length > 1);
+
+    tableRequests[1].resolve(
+      jsonResponse({
+        ...baseTableResponse(),
+        table: "bookings",
+        rows: Array.from({ length: 7 }, (_, i) => [i + 1]),
+        totalRows: 7,
+      }),
+    );
+    await clicking;
+
+    tableRequests[0].resolve(
+      jsonResponse({
+        ...baseTableResponse(),
+        table: "users",
+        rows: Array.from({ length: 99 }, (_, i) => [i + 1]),
+        totalRows: 99,
+      }),
+    );
+    await entering;
+
+    const counts = Array.from(document.querySelectorAll(".db-table-count")).map(
+      (count) => count.textContent,
+    );
+    expect(counts).toEqual(["1", "7"]);
     await leaveView(view);
   });
 

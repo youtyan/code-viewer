@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createSidebar } from "../views/sidebar";
+import { createSidebar, type SidebarDeps } from "../views/sidebar";
 
 const styleCss = readFileSync("web/style.css", "utf8");
 
@@ -45,6 +45,7 @@ function installSidebarDom() {
       </div>
       <div class="sb-filter-wrap">
         <input id="sb-filter" value="" />
+        <button id="sb-filter-clear" type="button" hidden>Clear</button>
       </div>
       <ul id="filelist"></ul>
     </aside>
@@ -69,7 +70,14 @@ function repoTargetDisplayForBodyClass(className: string) {
   return getComputedStyle(wrap).display;
 }
 
-function createSidebarForTest() {
+function createSidebarForTest(
+  overrides: Partial<
+    Pick<
+      SidebarDeps,
+      "omittedDirectoryBadge" | "openDirectoryInOsTitle" | "commitEntryBadge"
+    >
+  > = {},
+) {
   const state = {
     sbView: "tree" as const,
     sbWidth: 280,
@@ -108,8 +116,14 @@ function createSidebarForTest() {
     appendScopeParams() {
       /* noop */
     },
-    createOpenPathButton() {
-      return document.createElement("button");
+    createOpenPathButton(_path, _kind, title) {
+      const button = document.createElement("button");
+      button.className = "gdp-open-path";
+      if (title) {
+        button.title = title;
+        button.setAttribute("aria-label", title);
+      }
+      return button;
     },
     normalizeViewerFontSize: () => "regular",
     getSidebarFontSize: () => "regular",
@@ -131,6 +145,28 @@ function createSidebarForTest() {
       /* noop */
     },
     isTestPath: () => false,
+    sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
+    openDirectoryInOsTitle:
+      overrides.openDirectoryInOsTitle ?? (() => "open this folder in OS"),
+    omittedDirectoryBadge:
+      overrides.omittedDirectoryBadge ??
+      ((reason) =>
+        reason === "heavy"
+          ? {
+              label: "skipped",
+              title:
+                "Tree expansion is skipped, but the directory detail can be opened",
+            }
+          : {
+              label: "private",
+              title: "This directory cannot be opened from the browser",
+            }),
+    commitEntryBadge:
+      overrides.commitEntryBadge ??
+      ((submodule) =>
+        submodule
+          ? { label: "SUB", title: "Git submodule pinned to a commit" }
+          : { label: "GIT", title: "Git commit entry" }),
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`missing ${selector}`);
@@ -175,5 +211,403 @@ describe("diff sidebar repository target", () => {
     expect(
       repoTargetDisplayForBodyClass("gdp-file-detail-page gdp-repo-blob-page"),
     ).toBe("flex");
+  });
+
+  test("clears the file filter and restores hidden sidebar rows", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "src/alpha.ts", status: "M" },
+      { path: "src/beta.ts", status: "M" },
+    ]);
+
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    const clearButton =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    const alpha = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="src/alpha.ts"]',
+    );
+    const beta = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="src/beta.ts"]',
+    );
+    if (!input || !clearButton || !alpha || !beta)
+      throw new Error("missing sidebar filter test elements");
+
+    sidebar.syncSidebarFilterClearButton();
+    expect(clearButton.hidden).toBe(true);
+
+    input.value = "beta";
+    sidebar.applyFilter();
+
+    expect(clearButton.hidden).toBe(false);
+    expect(alpha.classList.contains("hidden")).toBe(true);
+    expect(beta.classList.contains("hidden")).toBe(false);
+
+    sidebar.clearSidebarFilter();
+
+    expect(input.value).toBe("");
+    expect(clearButton.hidden).toBe(true);
+    expect(alpha.classList.contains("hidden")).toBe(false);
+    expect(beta.classList.contains("hidden")).toBe(false);
+    expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("diff sidebar file kind indicators", () => {
+  test("shows a heavy indicator for a large/huge diff file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "big.ts", status: "M", size_class: "large" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="big.ts"] .kind-tag',
+    );
+    expect(tag?.classList.contains("heavy")).toBe(true);
+    expect(tag?.classList.contains("binary")).toBe(false);
+  });
+
+  test("shows a binary indicator for a binary file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "archive.zip", status: "M", size_class: "binary" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="archive.zip"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+    expect(tag?.classList.contains("heavy")).toBe(false);
+  });
+
+  test("shows a binary indicator for a media file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "logo.png", status: "M", media_kind: "image" },
+    ]);
+
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="logo.png"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+  });
+
+  test("omits the indicator for an ordinary small text diff", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "small.ts", status: "M", size_class: "small" },
+    ]);
+
+    expect(
+      document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
+    ).toBeNull();
+  });
+
+  test("shows a submodule indicator for a commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "vendor/tooling", type: "commit", submodule: true },
+    ]);
+
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/tooling"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.submodule");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe("Git submodule pinned to a commit");
+    expect(tag?.textContent).toBe("SUB");
+    expect(tag?.title).toBe("Git submodule pinned to a commit");
+  });
+
+  test("shows a gitlink indicator for a non-submodule commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([{ path: "vendor/nested-repo", type: "commit" }]);
+
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/nested-repo"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.gitlink");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.title).toBe("Git commit entry");
+    expect(tag?.textContent).toBe("GIT");
+    expect(tag?.title).toBe("Git commit entry");
+  });
+});
+
+describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => {
+  test("shows a heavy indicator for a large/huge diff file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "big.ts", status: "M", size_class: "large" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="big.ts"] .kind-tag',
+    );
+    expect(tag?.classList.contains("heavy")).toBe(true);
+    expect(tag?.classList.contains("binary")).toBe(false);
+  });
+
+  test("shows a binary indicator for a binary file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "archive.zip", status: "M", size_class: "binary" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="archive.zip"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+    expect(tag?.classList.contains("heavy")).toBe(false);
+  });
+
+  test("shows a binary indicator for a media file", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "logo.png", status: "M", media_kind: "image" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const tag = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="logo.png"] .kind-tag',
+    );
+    expect(tag?.classList.contains("binary")).toBe(true);
+  });
+
+  test("omits the indicator for an ordinary small text diff", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "small.ts", status: "M", size_class: "small" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    expect(
+      document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
+    ).toBeNull();
+  });
+
+  test("shows a submodule indicator for a commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "vendor/tooling", type: "commit", submodule: true }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/tooling"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.submodule");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe("Git submodule pinned to a commit");
+    expect(tag?.textContent).toBe("SUB");
+    expect(tag?.title).toBe("Git submodule pinned to a commit");
+  });
+
+  test("shows a gitlink indicator for a non-submodule commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "vendor/nested-repo", type: "commit" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/nested-repo"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.gitlink");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.title).toBe("Git commit entry");
+    expect(tag?.textContent).toBe("GIT");
+    expect(tag?.title).toBe("Git commit entry");
+  });
+});
+
+describe("repository directory open-in-OS button localization", () => {
+  test("uses the injected label instead of a hardcoded English string", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest({
+      openDirectoryInOsTitle: () => "サンプルのラベル",
+    });
+
+    sidebar.renderSidebar([{ path: "src", type: "tree" }], () => {
+      /* noop: presence forces the virtual repo-mode tree */
+    });
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const button = document.querySelector<HTMLButtonElement>(
+      '#filelist li[data-dirpath="src"] .gdp-open-path',
+    );
+    expect(button?.title).toBe("サンプルのラベル");
+    expect(button?.getAttribute("aria-label")).toBe("サンプルのラベル");
+  });
+});
+
+describe("repository omitted directory badge localization", () => {
+  test("uses injected labels and titles for omitted directory badges", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest({
+      omittedDirectoryBadge: (reason) =>
+        reason === "heavy"
+          ? { label: "サンプル省略", title: "サンプル省略タイトル" }
+          : { label: "サンプル非公開", title: "サンプル非公開タイトル" },
+    });
+
+    sidebar.renderSidebar(
+      [
+        {
+          path: "large-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "heavy",
+        },
+        {
+          path: "internal-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "internal",
+        },
+      ],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    const heavy = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="large-dir"] .dir-omitted',
+    );
+    const internal = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="internal-dir"] .dir-omitted',
+    );
+
+    expect(heavy?.textContent).toBe("サンプル省略");
+    expect(heavy?.title).toBe("サンプル省略タイトル");
+    expect(internal?.textContent).toBe("サンプル非公開");
+    expect(internal?.title).toBe("サンプル非公開タイトル");
+  });
+
+  test("marks omitted directory rows and only opens browseable ones", () => {
+    installSidebarDom();
+    const clicked: Array<{
+      path: string;
+      type?: string;
+      children_omitted?: true;
+      children_omitted_reason?: string;
+    }> = [];
+    const sidebar = createSidebarForTest({
+      omittedDirectoryBadge: (reason) => ({
+        label: `${reason}-badge`,
+        title: `${reason}-title`,
+      }),
+    });
+
+    sidebar.renderSidebar(
+      [
+        {
+          path: "large-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "heavy",
+        },
+        {
+          path: "internal-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "internal",
+        },
+      ],
+      (file) => clicked.push(file),
+    );
+
+    const heavy = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="large-dir"]',
+    );
+    const internal = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="internal-dir"]',
+    );
+    const heavyBadge = heavy?.querySelector<HTMLElement>(".dir-omitted");
+    const internalBadge = internal?.querySelector<HTMLElement>(".dir-omitted");
+
+    expect(heavy?.classList.contains("children-omitted")).toBe(true);
+    expect(heavy?.classList.contains("children-omitted-heavy")).toBe(true);
+    expect(heavy?.dataset.childrenOmittedReason).toBe("heavy");
+    expect(heavy?.querySelector(".chev-spacer")).toBeTruthy();
+    expect(heavy?.querySelector(".chev")).toBeNull();
+    expect(heavyBadge?.classList.contains("dir-omitted-heavy")).toBe(true);
+    expect(heavyBadge?.textContent).toBe("heavy-badge");
+    expect(heavyBadge?.title).toBe("heavy-title");
+
+    expect(internal?.classList.contains("children-omitted")).toBe(true);
+    expect(internal?.classList.contains("children-omitted-internal")).toBe(
+      true,
+    );
+    expect(internal?.dataset.childrenOmittedReason).toBe("internal");
+    expect(internal?.querySelector(".chev-spacer")).toBeTruthy();
+    expect(internal?.querySelector(".chev")).toBeNull();
+    expect(internalBadge?.classList.contains("dir-omitted-internal")).toBe(
+      true,
+    );
+    expect(internalBadge?.textContent).toBe("internal-badge");
+    expect(internalBadge?.title).toBe("internal-title");
+
+    heavy?.click();
+    internal?.click();
+
+    expect(clicked).toEqual([
+      {
+        path: "large-dir",
+        display_path: "large-dir",
+        type: "tree",
+        children_omitted: true,
+        children_omitted_reason: "heavy",
+      },
+    ]);
   });
 });

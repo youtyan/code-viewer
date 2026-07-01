@@ -285,4 +285,27 @@ describe("keymap action resolution", () => {
       }),
     ).toBe(null);
   });
+
+  test("jumps to the next unviewed file with n in every scope, blocked while editable or the palette is open", () => {
+    expect(action("n", "main")).toBe("next-unviewed-file");
+    expect(action("n", "sidebar")).toBe("next-unviewed-file");
+    expect(action("n", "global")).toBe("next-unviewed-file");
+    expect(
+      resolveKeymapAction(key("n"), { scope: "main", editable: true }),
+    ).toBe(null);
+    expect(
+      resolveKeymapAction(key("n"), {
+        scope: "main",
+        editable: false,
+        paletteOpen: true,
+      }),
+    ).toBe(null);
+    expect(
+      resolveKeymapAction(key("n"), {
+        scope: "main",
+        editable: false,
+        composing: true,
+      }),
+    ).toBe(null);
+  });
 });

@@ -223,6 +223,88 @@ describe("preview CLI", () => {
     },
   );
 
+  runOrSkip(
+    "/_tree gives a browsable non-submodule worktree commit entry directory metadata",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "code-viewer-gitlink-preview-"));
+      tmpRoots.push(root);
+      mkdirSync(join(root, "nested-repo"));
+      writeFileSync(
+        join(root, "nested-repo", ".git"),
+        "gitdir: ../.git/modules/nested-repo\n",
+      );
+      mkdirSync(join(root, "submodule-dir"));
+      writeFileSync(
+        join(root, "submodule-dir", ".git"),
+        "gitdir: ../.git/modules/submodule-dir\n",
+      );
+      writeFileSync(
+        join(root, ".gitmodules"),
+        [
+          '[submodule "submodule-dir"]',
+          "\tpath = submodule-dir",
+          "\turl = ../sample.git",
+          "",
+        ].join("\n"),
+      );
+
+      const proc = spawn(
+        process.execPath,
+        ["run", "web-src/server/preview.ts", "--port", "0", "--cwd", root],
+        {
+          cwd: join(import.meta.dir, "..", ".."),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        proc.once("exit", (code) => resolve(code));
+      });
+
+      let cleanupTimedOut = false;
+      try {
+        const url = await Promise.race([
+          waitForPreviewUrl(proc),
+          sleep(5000).then(() => {
+            throw new Error("preview did not start");
+          }),
+        ]);
+
+        const response = await fetchWithTimeout(
+          new URL("/_tree?ref=worktree", url).toString(),
+          1000,
+        );
+        const body = (await response.json()) as {
+          entries: Array<{
+            path: string;
+            type: string;
+            submodule?: boolean;
+            updated_at?: string;
+          }>;
+        };
+        const nested = body.entries.find(
+          (entry) => entry.path === "nested-repo",
+        );
+        const submodule = body.entries.find(
+          (entry) => entry.path === "submodule-dir",
+        );
+
+        expect(nested?.type).toBe("commit");
+        expect(nested?.submodule).toBe(undefined);
+        expect(typeof nested?.updated_at).toBe("string");
+
+        expect(submodule?.type).toBe("commit");
+        expect(submodule?.submodule).toBe(true);
+        expect(submodule?.updated_at).toBe(undefined);
+      } finally {
+        proc.kill("SIGKILL");
+        cleanupTimedOut = (await waitForExit(exited, 3000)) === "timeout";
+      }
+      if (cleanupTimedOut) {
+        throw new Error("preview process did not exit after SIGKILL");
+      }
+    },
+  );
+
   runOrSkip("--help lists every wired annotate/query subcommand", async () => {
     const proc = spawn(
       process.execPath,

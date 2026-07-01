@@ -84,6 +84,15 @@ export type DbTableDataResponse = {
   executedSql?: string[];
 };
 
+export type DbTableCountResponse = {
+  dbId: string;
+  schema?: string;
+  table: string;
+  rowCount: number | null;
+  /** サーバがこの件数取得のために発行した SQL。 */
+  executedSql?: string[];
+};
+
 // --- Row writes (edit / insert / delete) ---
 
 // クライアントが書き込みのために送る 1 セルの値。value はユーザー入力の
