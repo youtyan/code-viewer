@@ -25,7 +25,7 @@ import { createElasticsearchExplorer } from "./elasticsearch-explorer";
 import { createErDiagram } from "./er-diagram";
 import { createGlobalSearchView } from "./global-search-view";
 import { type DbLang, type DbText, dbText } from "./i18n";
-import { setPaneStatus } from "./pane-status";
+import { setPaneEmpty, setPaneStatus } from "./pane-status";
 import { localizePrefToggle, makePrefToggle } from "./pref-toggle";
 import { createQueryEditor } from "./query-editor";
 import { createQueryHistoryView } from "./query-history-view";
@@ -336,6 +336,7 @@ function createTabPane(
     return value;
   }
   let lastFiles: DbFileInfo[] = [];
+  let noDatastoresAvailable = false;
   let currentSchema: string | null = initial.schema ?? null;
   let currentTable: string | null = initial.table ?? null;
   let loadGeneration = 0;
@@ -734,6 +735,31 @@ function createTabPane(
     s3Explorer.sidebarSlot,
   );
 
+  const noDatastoresPane = document.createElement("div");
+  noDatastoresPane.className = "db-no-datastores";
+  noDatastoresPane.hidden = true;
+
+  function renderNoDatastoresEmpty(): void {
+    const t = paneText().nav;
+    setPaneEmpty(noDatastoresPane, t.noDatastores, {
+      hint: t.noDatastoresHint,
+      iconPath: ICON_PATH_SNAPSHOT,
+    });
+    const actionRow = document.createElement("div");
+    actionRow.className = "db-no-datastores-actions";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "db-btn db-btn-primary db-no-datastores-action";
+    refresh.textContent = t.refreshDatastores;
+    refresh.addEventListener("click", () => {
+      void refreshDatastoreList();
+    });
+    actionRow.appendChild(refresh);
+    noDatastoresPane
+      .querySelector<HTMLElement>(".db-pane-empty")
+      ?.appendChild(actionRow);
+  }
+
   const mainContent = document.createElement("div");
   mainContent.className = "db-main-content";
   mainContent.append(
@@ -747,6 +773,7 @@ function createTabPane(
     redisExplorer.el,
     esExplorer.el,
     s3Explorer.el,
+    noDatastoresPane,
   );
   queryEditor.el.hidden = true;
   globalSearchView.el.hidden = true;
@@ -890,6 +917,7 @@ function createTabPane(
       currentTab,
       userPrefersHistoryOpen,
     );
+    noDatastoresPane.hidden = !noDatastoresAvailable;
     toolsSection.hidden = visibility.toolsHidden;
     // prefs バー (Rails FK 推測トグル) は toolsSection と同じ SQL kind 限定。
     prefsBar.hidden = visibility.toolsHidden;
@@ -916,6 +944,28 @@ function createTabPane(
     // なる (報告された SQL ビューの「テーブル一覧がすごい離れる」回帰)。
     explorerSidebarHost.hidden =
       visibility.redisHidden && visibility.esHidden && visibility.s3Hidden;
+    if (noDatastoresAvailable) {
+      toolsSection.hidden = true;
+      prefsBar.hidden = true;
+      historyDock.hidden = true;
+      historyResizer.hidden = true;
+      historyPane.hidden = true;
+      tableList.el.hidden = true;
+      tabBar.hidden = true;
+      grid.el.hidden = true;
+      queryEditor.el.hidden = true;
+      schemaView.el.hidden = true;
+      erDiagram.el.hidden = true;
+      globalSearchView.el.hidden = true;
+      snapshotView.el.hidden = true;
+      redisExplorer.el.hidden = true;
+      esExplorer.el.hidden = true;
+      s3Explorer.el.hidden = true;
+      redisExplorer.sidebarSlot.hidden = true;
+      esExplorer.sidebarSlot.hidden = true;
+      s3Explorer.sidebarSlot.hidden = true;
+      explorerSidebarHost.hidden = true;
+    }
     if (!sqlMode) {
       queryBtn.classList.remove("active");
       erBtn.classList.remove("active");
@@ -1768,6 +1818,7 @@ function createTabPane(
     if (generation !== loadGeneration) return;
     const files = filesResponse.files;
     lastFiles = files;
+    noDatastoresAvailable = files.length === 0;
     if (filesResponse.truncated) {
       showDockerNotice(paneText().nav.dockerLimitReached);
     } else {
@@ -1780,6 +1831,20 @@ function createTabPane(
       opt.textContent = paneText().nav.noDatastores;
       dbSelect.appendChild(opt);
       dbSelect.disabled = true;
+      currentDbInfo = null;
+      currentSchema = null;
+      currentTable = null;
+      schemaCache = null;
+      renderSchemaOptions([], null);
+      tableList.render([]);
+      grid.clear();
+      schemaView.clear();
+      erDiagram.clear();
+      redisExplorer.clear();
+      esExplorer.clear();
+      s3Explorer.clear();
+      renderNoDatastoresEmpty();
+      applyVisibility();
       cb.onStateChange();
       return;
     }
@@ -2006,6 +2071,7 @@ function createTabPane(
   }
 
   function getLabel(): string {
+    if (noDatastoresAvailable) return paneText().nav.noDatastoreTab;
     if (!currentDbInfo) return labelFromDbId(initial.dbId);
     const suffix = currentSchema ? ` / ${currentSchema}` : "";
     // 既存 sidebar select の表示と揃える: docker は service 名、sqlite は path basename。
@@ -2055,6 +2121,7 @@ function createTabPane(
   // 各サブコンポーネントは順次 localize() 対応していく。
   function localizePane() {
     for (const fn of paneLocalizers) fn();
+    if (noDatastoresAvailable) renderNoDatastoresEmpty();
     grid.localize();
     schemaView.localize();
     erDiagram.localize();

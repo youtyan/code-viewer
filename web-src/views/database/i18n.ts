@@ -34,6 +34,8 @@ export type DbText = {
     closeTab: (label: string) => string;
     loadingSchema: string;
     noDatastores: string;
+    noDatastoresHint: string;
+    noDatastoreTab: string;
     dockerLimitReached: string;
     // Rails 命名規約 (<name>_id → <names>.id) からの仮想 FK 推測トグル。
     inferFkLabel: string;
@@ -352,6 +354,9 @@ const EN: DbText = {
     closeTab: (label) => `Close ${label}`,
     loadingSchema: "Loading schema…",
     noDatastores: "No datastores found",
+    noDatastoresHint:
+      "Start a database service or add a SQLite file, then refresh this list.",
+    noDatastoreTab: "No datastore",
     dockerLimitReached:
       "Docker discovery reached the service limit; some compose services may be hidden.",
     inferFkLabel: "Rails FK inference",
@@ -668,6 +673,9 @@ const JA: DbText = {
     closeTab: (label) => `${label} を閉じる`,
     loadingSchema: "スキーマを読み込み中…",
     noDatastores: "データストアが見つかりません",
+    noDatastoresHint:
+      "DB サービスを起動するか SQLite ファイルを追加してから、一覧を更新してください。",
+    noDatastoreTab: "未検出",
     dockerLimitReached:
       "Docker のサービス数が上限に達しました。一部の compose サービスは表示されていない可能性があります。",
     inferFkLabel: "Rails FK 推測",

@@ -6890,6 +6890,18 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   overflow: hidden;
   background: var(--bg);
 }
+.db-no-datastores {
+  flex: 1;
+  min-height: 0;
+}
+.db-no-datastores[hidden] {
+  display: none !important;
+}
+.db-no-datastores-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
 
 /* ---------- Tab bar ---------- */
 .db-tab-bar {

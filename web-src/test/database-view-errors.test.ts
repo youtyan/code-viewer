@@ -609,6 +609,50 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  test("shows an actionable empty state when no datastores are found", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        return jsonResponse({ files: [] });
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter();
+
+    const empty = document.querySelector(
+      ".db-no-datastores",
+    ) as unknown as FakeElement;
+    expect(empty).toBeTruthy();
+    expect(empty.hidden).toBe(false);
+    expect(empty.querySelector(".db-pane-empty-title")?.textContent).toBe(
+      "No datastores found",
+    );
+    expect(
+      empty
+        .querySelector(".db-pane-empty-hint")
+        ?.textContent.includes("Start a database service"),
+    ).toBe(true);
+    expect(restoredTabLabels()).toEqual(["No datastore"]);
+
+    const action = empty.querySelector(
+      ".db-no-datastores-action",
+    ) as unknown as FakeElement;
+    expect(action.textContent).toBe("Refresh datastores");
+    const click = action.click();
+    await waitUntil(() => filesFetches === 2);
+    await click;
+
+    expect(filesFetches).toBe(2);
+    await leaveView(view);
+  });
+
   test("schema refresh button reloads the current table structure", async () => {
     installDatabaseDom();
     let schemaFetches = 0;
