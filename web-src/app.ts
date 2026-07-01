@@ -873,6 +873,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     sidebarToggleTitle: (hidden) =>
       hidden ? uiText().sidebar.show : uiText().sidebar.hide,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
+    omittedDirectoryBadge: (reason) => {
+      const text = uiText().sidebar;
+      return reason === "heavy"
+        ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
+        : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
+    },
   });
   const {
     renderSidebar,
@@ -1159,6 +1165,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: string;
         repoTarget: string;
         openDirectoryInOs: string;
+        omittedHeavyLabel: string;
+        omittedHeavyTitle: string;
+        omittedPrivateLabel: string;
+        omittedPrivateTitle: string;
       };
       repo: {
         newFolder: string;
@@ -1309,6 +1319,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: "show sidebar",
         repoTarget: "repository target",
         openDirectoryInOs: "open this folder in OS",
+        omittedHeavyLabel: "skipped",
+        omittedHeavyTitle:
+          "Tree expansion is skipped, but the directory detail can be opened",
+        omittedPrivateLabel: "private",
+        omittedPrivateTitle: "This directory cannot be opened from the browser",
       },
       repo: {
         newFolder: "new folder",
@@ -1467,6 +1482,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         show: "サイドバーを表示",
         repoTarget: "リポジトリの対象",
         openDirectoryInOs: "このフォルダをOSで開く",
+        omittedHeavyLabel: "省略",
+        omittedHeavyTitle:
+          "ツリー展開は省略されていますが、詳細パネルでは開けます",
+        omittedPrivateLabel: "非公開",
+        omittedPrivateTitle: "このディレクトリはブラウザから開けません",
       },
       repo: {
         newFolder: "新規フォルダ",

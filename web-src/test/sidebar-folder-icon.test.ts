@@ -70,9 +70,13 @@ describe("sidebar folder icons", () => {
     expect(appSource.includes("omitted.className = 'dir-omitted ' +")).toBe(
       true,
     );
+    // The omitted-directory badge label/title are localized via
+    // SidebarDeps.omittedDirectoryBadge() instead of hardcoded English
+    // strings; see the DOM-behavior coverage in sidebar-repo-target.test.ts
+    // > "omitted directory badge localization".
     expect(
       appSource.includes(
-        "omitted.textContent = dir.children_omitted_reason === 'heavy' ? 'skipped' : 'private'",
+        "const badge = omittedDirectoryBadge(dir.children_omitted_reason)",
       ),
     ).toBe(true);
     expect(

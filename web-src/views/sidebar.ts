@@ -72,6 +72,10 @@ export type SidebarDeps = {
   isTestPath(path: string): boolean;
   sidebarToggleTitle(hidden: boolean): string;
   openDirectoryInOsTitle(): string;
+  omittedDirectoryBadge(reason: RepoTreeEntry["children_omitted_reason"]): {
+    label: string;
+    title: string;
+  };
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
 };
@@ -102,6 +106,7 @@ export function createSidebar(deps: SidebarDeps) {
     isTestPath,
     sidebarToggleTitle,
     openDirectoryInOsTitle,
+    omittedDirectoryBadge,
   } = deps;
 
   type TreeNode = {
@@ -436,12 +441,9 @@ export function createSidebar(deps: SidebarDeps) {
             (dir.children_omitted_reason === "heavy"
               ? "dir-omitted-heavy"
               : "dir-omitted-internal");
-          omitted.textContent =
-            dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-          omitted.title =
-            dir.children_omitted_reason === "heavy"
-              ? "Tree expansion is skipped, but the directory detail can be opened"
-              : "This directory cannot be opened from the browser";
+          const badge = omittedDirectoryBadge(dir.children_omitted_reason);
+          omitted.textContent = badge.label;
+          omitted.title = badge.title;
           label.appendChild(omitted);
         }
         li.appendChild(label);
@@ -671,12 +673,9 @@ export function createSidebar(deps: SidebarDeps) {
         (dir.children_omitted_reason === "heavy"
           ? "dir-omitted-heavy"
           : "dir-omitted-internal");
-      omitted.textContent =
-        dir.children_omitted_reason === "heavy" ? "skipped" : "private";
-      omitted.title =
-        dir.children_omitted_reason === "heavy"
-          ? "Tree expansion is skipped, but the directory detail can be opened"
-          : "This directory cannot be opened from the browser";
+      const badge = omittedDirectoryBadge(dir.children_omitted_reason);
+      omitted.textContent = badge.label;
+      omitted.title = badge.title;
       label.appendChild(omitted);
     }
     li.appendChild(label);

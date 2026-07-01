@@ -232,6 +232,17 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
     isTestPath: () => false,
     sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
     openDirectoryInOsTitle: () => "open this folder in OS",
+    omittedDirectoryBadge: (reason) =>
+      reason === "heavy"
+        ? {
+            label: "skipped",
+            title:
+              "Tree expansion is skipped, but the directory detail can be opened",
+          }
+        : {
+            label: "private",
+            title: "This directory cannot be opened from the browser",
+          },
     $: <T extends Element = HTMLElement>(selector: string) =>
       document.querySelector(selector) as unknown as T,
     $$: <T extends Element = HTMLElement>(selector: string) =>

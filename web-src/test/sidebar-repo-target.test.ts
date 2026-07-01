@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { readFileSync } from "node:fs";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createSidebar } from "../views/sidebar";
+import { createSidebar, type SidebarDeps } from "../views/sidebar";
 
 const styleCss = readFileSync("web/style.css", "utf8");
 
@@ -70,7 +70,9 @@ function repoTargetDisplayForBodyClass(className: string) {
 }
 
 function createSidebarForTest(
-  overrides: { openDirectoryInOsTitle?: () => string } = {},
+  overrides: Partial<
+    Pick<SidebarDeps, "omittedDirectoryBadge" | "openDirectoryInOsTitle">
+  > = {},
 ) {
   const state = {
     sbView: "tree" as const,
@@ -142,6 +144,19 @@ function createSidebarForTest(
     sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
     openDirectoryInOsTitle:
       overrides.openDirectoryInOsTitle ?? (() => "open this folder in OS"),
+    omittedDirectoryBadge:
+      overrides.omittedDirectoryBadge ??
+      ((reason) =>
+        reason === "heavy"
+          ? {
+              label: "skipped",
+              title:
+                "Tree expansion is skipped, but the directory detail can be opened",
+            }
+          : {
+              label: "private",
+              title: "This directory cannot be opened from the browser",
+            }),
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`missing ${selector}`);
@@ -384,5 +399,49 @@ describe("repository directory open-in-OS button localization", () => {
     );
     expect(button?.title).toBe("サンプルのラベル");
     expect(button?.getAttribute("aria-label")).toBe("サンプルのラベル");
+  });
+});
+
+describe("repository omitted directory badge localization", () => {
+  test("uses injected labels and titles for omitted directory badges", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest({
+      omittedDirectoryBadge: (reason) =>
+        reason === "heavy"
+          ? { label: "サンプル省略", title: "サンプル省略タイトル" }
+          : { label: "サンプル非公開", title: "サンプル非公開タイトル" },
+    });
+
+    sidebar.renderSidebar(
+      [
+        {
+          path: "large-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "heavy",
+        },
+        {
+          path: "internal-dir",
+          type: "tree",
+          children_omitted: true,
+          children_omitted_reason: "internal",
+        },
+      ],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    const heavy = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="large-dir"] .dir-omitted',
+    );
+    const internal = document.querySelector<HTMLElement>(
+      '#filelist li[data-dirpath="internal-dir"] .dir-omitted',
+    );
+
+    expect(heavy?.textContent).toBe("サンプル省略");
+    expect(heavy?.title).toBe("サンプル省略タイトル");
+    expect(internal?.textContent).toBe("サンプル非公開");
+    expect(internal?.title).toBe("サンプル非公開タイトル");
   });
 });
