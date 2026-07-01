@@ -28,7 +28,9 @@ import {
   MOON_16_PATH,
   OPEN_EXTERNAL_16_PATH,
   PULSE_16_PATH,
+  SYNC_16_PATH,
   TRIANGLE_DOWN_16_PATH,
+  X_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
 import {
@@ -1493,9 +1495,15 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
-    if (refReset) refReset.title = text.topbar.resetRange;
+    if (refReset) {
+      refReset.title = text.topbar.resetRange;
+      refReset.setAttribute("aria-label", text.topbar.resetRange);
+    }
     const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
-    if (reload) reload.title = text.topbar.reload;
+    if (reload) {
+      reload.title = text.topbar.reload;
+      reload.setAttribute("aria-label", text.topbar.reload);
+    }
     const layoutGroup = document.querySelector<HTMLElement>("#topbar .seg");
     layoutGroup?.setAttribute("aria-label", text.topbar.layout);
     setElementText(
@@ -2770,6 +2778,16 @@ window.GdpExpandLogic = GdpExpandLogic;
     }
   }
 
+  // Static SVGs for the topbar ref-picker actions. Run once at
+  // init, same as setGlobalHeaderIcons(); title/aria-label stay in sync
+  // with the active language via localizeViewerChrome() instead.
+  function setRefActionIcons() {
+    const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
+    if (refReset) refReset.innerHTML = iconSvg("octicon-x", X_16_PATH);
+    const reload = document.querySelector<HTMLButtonElement>("#reload-prom");
+    if (reload) reload.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  }
+
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
@@ -2779,6 +2797,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
   setGlobalHeaderIcons();
+  setRefActionIcons();
   // Sidebar view toggle (tree / flat)
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
