@@ -1,3 +1,4 @@
+import { GIT_BRANCH_16_PATH, iconSvg } from "../core/icons";
 import type { AppRoute, SourceFileTarget } from "../core/routes";
 import type { EmptyDiffPaneText } from "./empty-diff-pane";
 import {
@@ -61,8 +62,8 @@ export function renderFileHistoryShell(
   const empty = document.createElement("div");
   empty.className = "empty gdp-file-history-empty hidden";
   const emptyIcon = document.createElement("div");
-  emptyIcon.className = "emoji";
-  emptyIcon.textContent = "✨";
+  emptyIcon.className = "empty-icon";
+  emptyIcon.innerHTML = iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
   const emptyTitle = document.createElement("h2");
   emptyTitle.textContent = emptyText.noCommitSelectedTitle;
   const emptyBody = document.createElement("p");

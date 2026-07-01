@@ -67,6 +67,11 @@ describe("file history shell", () => {
     expect(mount.emptyHost.querySelector("p")?.textContent).toBe(
       "一覧からコミットを選ぶと変更内容を表示します。",
     );
+    expect(
+      mount.emptyHost.querySelector(".empty-icon svg.octicon-git-branch"),
+    ).toBeTruthy();
+    expect(mount.emptyHost.querySelector(".emoji")).toBeNull();
+    expect((mount.emptyHost.textContent || "").includes("✨")).toBe(false);
     expect(document.querySelector("#diff .gdp-standalone-file-history")).toBe(
       mount.emptyHost.closest(".gdp-standalone-file-history"),
     );

@@ -2605,7 +2605,22 @@ body:not(.gdp-file-detail-page):not(.gdp-history-page) #diff::after {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 80px 16px; color: var(--fg-muted); text-align: center;
 }
-.empty .emoji { font-size: 40px; margin-bottom: 8px; }
+.empty .empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.empty .empty-icon .octicon {
+  width: 22px;
+  height: 22px;
+}
 .empty h2 { color: var(--fg); margin: 0 0 4px; font-size: 18px; font-weight: 600; }
 .empty.hidden { display: none; }
 
