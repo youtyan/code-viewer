@@ -9,6 +9,7 @@ function textElement(text = "") {
 function emptyElement() {
   const h2 = textElement("Previous heading");
   const p = textElement("Previous text");
+  const actions = { hidden: false };
   const removedClasses: string[] = [];
   return {
     el: {
@@ -20,11 +21,13 @@ function emptyElement() {
       querySelector(selector: string) {
         if (selector === "h2") return h2;
         if (selector === "p") return p;
+        if (selector === ".empty-actions") return actions;
         return null;
       },
     } as unknown as HTMLElement,
     h2,
     p,
+    actions,
     removedClasses,
   };
 }
@@ -87,11 +90,12 @@ describe("history empty diff pane", () => {
     expect(repoInvalidated).toBe(1);
     expect(loadQueueCleared).toBe(1);
     expect(togglePlaced).toBe(1);
-    expect(empty.removedClasses).toEqual(["hidden"]);
+    expect(empty.removedClasses).toEqual(["hidden", "empty-with-actions"]);
     expect(empty.h2.textContent).toBe("No commit selected");
     expect(empty.p.textContent).toBe(
       "Select a commit from the list to see its changes.",
     );
+    expect(empty.actions.hidden).toBe(true);
     expect(statuses).toEqual(["live"]);
   });
 

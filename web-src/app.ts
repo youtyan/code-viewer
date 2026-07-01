@@ -1179,6 +1179,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         allViewedTitle: string;
         noChangesTitle: string;
         noChangesBody: string;
+        noChangesReload: string;
+        noChangesReloadTitle: string;
+        noChangesHistory: string;
+        noChangesHistoryTitle: string;
         emptyDiffTitle: string;
         emptyDiffBody: string;
         noCommitSelectedTitle: string;
@@ -1373,6 +1377,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         allViewedTitle: "All visible files are viewed",
         noChangesTitle: "No changes",
         noChangesBody: "The working tree is clean against this ref.",
+        noChangesReload: "Reload diff",
+        noChangesReloadTitle: "Reload this diff range",
+        noChangesHistory: "Open history",
+        noChangesHistoryTitle: "Open commit history for this range",
         emptyDiffTitle: "Empty diff",
         emptyDiffBody: "This commit has no changes against its first parent.",
         noCommitSelectedTitle: "No commit selected",
@@ -1579,6 +1587,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         allViewedTitle: "表示中のファイルはすべて確認済みです",
         noChangesTitle: "変更はありません",
         noChangesBody: "この参照との差分はありません。",
+        noChangesReload: "diff を更新",
+        noChangesReloadTitle: "この差分範囲を再読み込み",
+        noChangesHistory: "履歴を開く",
+        noChangesHistoryTitle: "この範囲のコミット履歴を開く",
         emptyDiffTitle: "空の差分",
         emptyDiffBody: "このコミットは最初の親との差分がありません。",
         noCommitSelectedTitle: "コミット未選択",
@@ -2626,6 +2638,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     return ANNOTATIONS_UI ? ANNOTATIONS_UI.withSessionParam(rawUrl) : rawUrl;
   }
 
+  function urlForRoute(route: AppRoute): string {
+    return withDoctorOverlay(
+      withAnnotationSessionParam(buildRoute(route)),
+      parseDoctorOverlay(window.location.pathname, window.location.search),
+    );
+  }
+
   function historyStateForRoute(route: AppRoute): unknown {
     return route.screen === "file"
       ? {
@@ -2737,10 +2756,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     ) {
       STATE.repoRef = nextRoute.ref || "worktree";
     }
-    const url = withDoctorOverlay(
-      withAnnotationSessionParam(buildRoute(nextRoute)),
-      parseDoctorOverlay(window.location.pathname, window.location.search),
-    );
+    const url = urlForRoute(nextRoute);
     const state = historyStateForRoute(nextRoute);
     if (replace) history.replaceState(state, "", url);
     else history.pushState(state, "", url);
@@ -3811,6 +3827,137 @@ window.GdpExpandLogic = GdpExpandLogic;
     setRoute(STATE.route, true);
   }
 
+  function normalizedHistoryRefForEmptyDiff(): string {
+    const candidate =
+      STATE.to && STATE.to !== "worktree" ? STATE.to : STATE.from || "HEAD";
+    return candidate && candidate !== "worktree" && !candidate.startsWith("--")
+      ? candidate
+      : "HEAD";
+  }
+
+  function emptyDiffHistoryRoute(): AppRoute {
+    return {
+      screen: "history",
+      ref: normalizedHistoryRefForEmptyDiff(),
+      range: currentRange(),
+    };
+  }
+
+  function setEmptyActionContent(
+    action: HTMLElement,
+    iconName: string,
+    iconPath: string,
+    label: string,
+    title: string,
+  ): void {
+    action.title = title;
+    action.setAttribute("aria-label", title);
+    action.replaceChildren();
+    const icon = document.createElement("span");
+    icon.className = "empty-action-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = iconSvg(iconName, iconPath);
+    const text = document.createElement("span");
+    text.className = "empty-action-label";
+    text.textContent = label;
+    action.append(icon, text);
+  }
+
+  function navigateToEmptyDiffHistory(event: MouseEvent): void {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
+    event.preventDefault();
+    const route = emptyDiffHistoryRoute();
+    history.pushState(historyStateForRoute(route), "", urlForRoute(route));
+    window.scrollTo(0, 0);
+    applyRouteFromLocation();
+  }
+
+  function ensureEmptyDiffActions(empty: HTMLElement): HTMLElement {
+    let actions = empty.querySelector<HTMLElement>(".empty-actions");
+    if (actions) return actions;
+    actions = document.createElement("div");
+    actions.className = "empty-actions";
+    actions.hidden = true;
+
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.className = "empty-action empty-action-primary";
+    reload.dataset.emptyAction = "reload";
+    reload.addEventListener("click", () => reloadDiffFromUi(reload));
+
+    const historyLink = document.createElement("a");
+    historyLink.className = "empty-action";
+    historyLink.dataset.emptyAction = "history";
+    historyLink.addEventListener("click", navigateToEmptyDiffHistory);
+
+    actions.append(reload, historyLink);
+    empty.appendChild(actions);
+    return actions;
+  }
+
+  function syncEmptyDiffPane(empty: HTMLElement, onHistory: boolean): void {
+    empty.classList.toggle("empty-with-actions", !onHistory);
+    const text = uiText().diff;
+    const h2 = empty.querySelector("h2");
+    if (h2)
+      h2.textContent = onHistory ? text.emptyDiffTitle : text.noChangesTitle;
+    const p = empty.querySelector("p");
+    if (p) p.textContent = onHistory ? text.emptyDiffBody : text.noChangesBody;
+
+    const existingActions = empty.querySelector<HTMLElement>(".empty-actions");
+    if (onHistory) {
+      if (existingActions) existingActions.hidden = true;
+      return;
+    }
+
+    const actions = ensureEmptyDiffActions(empty);
+    const reload = actions.querySelector<HTMLElement>(
+      '[data-empty-action="reload"]',
+    );
+    const historyLink = actions.querySelector<HTMLAnchorElement>(
+      '[data-empty-action="history"]',
+    );
+    if (reload)
+      setEmptyActionContent(
+        reload,
+        "octicon-sync",
+        SYNC_16_PATH,
+        text.noChangesReload,
+        text.noChangesReloadTitle,
+      );
+    if (historyLink) {
+      const route = emptyDiffHistoryRoute();
+      historyLink.href = urlForRoute(route);
+      setEmptyActionContent(
+        historyLink,
+        "octicon-git-branch",
+        GIT_BRANCH_16_PATH,
+        text.noChangesHistory,
+        text.noChangesHistoryTitle,
+      );
+    }
+    actions.hidden = false;
+  }
+
+  function reloadDiffFromUi(trigger?: HTMLElement | null): void {
+    const topbarButton = $("#reload-prom");
+    topbarButton.classList.add("spinning");
+    if (trigger && trigger !== topbarButton) {
+      trigger.classList.add("spinning");
+      trigger.setAttribute("aria-busy", "true");
+    }
+    load().finally(() => {
+      setTimeout(() => {
+        topbarButton.classList.remove("spinning");
+        if (trigger && trigger !== topbarButton) {
+          trigger.classList.remove("spinning");
+          trigger.setAttribute("aria-busy", "false");
+        }
+      }, 200);
+    });
+  }
+
   function load(
     options: { force?: boolean; changedPaths?: Set<string> | null } = {},
   ): Promise<RenderResult | null> {
@@ -3847,15 +3994,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (empty) {
         const onHistory =
           STATE.route.screen === "history" || isFileHistoryRoute(STATE.route);
-        const text = uiText().diff;
-        const h2 = empty.querySelector("h2");
-        if (h2)
-          h2.textContent = onHistory
-            ? text.emptyDiffTitle
-            : text.noChangesTitle;
-        const p = empty.querySelector("p");
-        if (p)
-          p.textContent = onHistory ? text.emptyDiffBody : text.noChangesBody;
+        syncEmptyDiffPane(empty, onHistory);
       }
     }
     const routeAtRequest = STATE.route;
@@ -4315,13 +4454,7 @@ window.GdpExpandLogic = GdpExpandLogic;
 
   // Manual reload button
   // Prominent reload button (next to ref-picker)
-  $("#reload-prom").addEventListener("click", () => {
-    const btn = $("#reload-prom");
-    btn.classList.add("spinning");
-    load().finally(() => {
-      setTimeout(() => btn.classList.remove("spinning"), 200);
-    });
-  });
+  $("#reload-prom").addEventListener("click", () => reloadDiffFromUi());
 
   // Hide-tests toggle: ファイル名に test|spec が含まれるエントリをフィルタ。
   // Diff viewer 専用。Repository ビュー（gdp-repo-page / gdp-repo-blob-page）には
