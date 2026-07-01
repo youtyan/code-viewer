@@ -419,26 +419,34 @@ describe("table-grid edit mode", () => {
     expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
     expect(exportButton.textContent).toBe("");
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
-    expect(refreshButton.textContent).toMatch(/Reload data/);
+    expect(refreshButton.textContent).toMatch(/Reload table/);
     expect(refreshButton.title).toBe(
-      "Reload only this table, keeping search and column filters",
+      "Reload this table, keeping search and column filters",
     );
     expect(refreshButton.getAttribute("aria-label")).toBe(
-      "Reload only this table, keeping search and column filters",
+      "Reload this table, keeping search and column filters",
     );
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    const filterActions = q<HTMLElement>(grid.el, ".db-grid-filter-actions");
+    expect(filterActions.parentElement).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-filter-bar"),
+    );
+    expect(filterActions.children[0]).toBe(refreshButton);
+    expect(filterActions.children[1]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-export"),
+    );
 
     const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
       ".db-grid-col-filter",
     )[1];
     expect(nameFilter).toBeTruthy();
     setInput(nameFilter, "Ali");
-    expect(refreshButton.textContent).toMatch(/Reload filtered data/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
     expect(refreshButton.title).toBe(
-      "Reload only this table, keeping 1 active filter",
+      "Reload this table, keeping 1 active filter",
     );
     expect(refreshButton.getAttribute("aria-label")).toBe(
-      "Reload only this table, keeping 1 active filter",
+      "Reload this table, keeping 1 active filter",
     );
     await waitFor(() => fetchCalls.length === 1);
 
@@ -544,9 +552,9 @@ describe("table-grid edit mode", () => {
     expect(actions).toHaveLength(2);
     const reloadAction = actions[0];
     const clearAction = actions[1];
-    expect(reloadAction.textContent).toBe("Reload filtered data");
+    expect(reloadAction.textContent).toBe("Reload filtered rows");
     expect(reloadAction.title).toBe(
-      "Reload only this table, keeping 1 active filter",
+      "Reload this table, keeping 1 active filter",
     );
     expect(reloadAction.getAttribute("aria-busy")).toBe("false");
     expect(reloadAction.disabled).toBe(false);
@@ -649,7 +657,7 @@ describe("table-grid edit mode", () => {
     resolveFetch?.(initialData());
     await waitFor(() => !(status.textContent || "").includes("Reloading"));
     expect(status.textContent || "").toMatch(/1 filter\(s\)/);
-    expect(refreshButton.textContent).toMatch(/Reload filtered data/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
     grid.destroy();
   });

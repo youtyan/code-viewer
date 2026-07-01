@@ -261,13 +261,16 @@ export function createTableGrid(
   editStatus.className = "db-grid-edit-status";
   editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
 
+  const filterActions = document.createElement("div");
+  filterActions.className = "db-grid-filter-actions";
+  filterActions.append(refreshBtn, exportWrap);
+
   filterBar.append(
     filterIcon,
     filterInput,
     filterClear,
     editWrap,
-    refreshBtn,
-    exportWrap,
+    filterActions,
   );
 
   const headerWrap = document.createElement("div");
