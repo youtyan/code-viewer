@@ -3142,6 +3142,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         };
       }
     }
+    const databaseQuerySql =
+      STATE.route.screen === "database" && STATE.route.tab === "query"
+        ? document.querySelector<HTMLTextAreaElement>(
+            ".db-container:not([hidden]) .db-query-editor:not([hidden]) .db-query-textarea",
+          )?.value
+        : undefined;
     const text = aiContextClipboardText({
       route: STATE.route,
       diffFrom: STATE.from,
@@ -3151,6 +3157,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? visibleDiffMetaForBrief(window._lastMeta)
         : null,
       viewedFiles: STATE.viewedFiles,
+      databaseQuerySql,
     });
     const finish = (
       ok: boolean,

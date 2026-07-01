@@ -380,11 +380,22 @@ describe("aiContextClipboardText", () => {
     ).toBe("commit: abc1234 (ref: release-1.0)");
   });
 
-  test("returns an empty string for a history screen with no commit selected", () => {
+  test("falls back to the live diff range for a history screen with no commit selected", () => {
     const route: AppRoute = { screen: "history", ref: "HEAD", range: RANGE };
     expect(
       aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
-    ).toBe("");
+    ).toBe("History: HEAD..worktree");
+  });
+
+  test("appends a ref suffix for a history screen with no commit on a non-default ref", () => {
+    const route: AppRoute = {
+      screen: "history",
+      ref: "release-1.0",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
+    ).toBe("History: HEAD..worktree (ref: release-1.0)");
   });
 
   test("includes db/schema/table/tab for a database screen", () => {
@@ -443,11 +454,84 @@ describe("aiContextClipboardText", () => {
     ).toBe("database: db=sample_db");
   });
 
-  test("returns an empty string for a database screen with no route fields set", () => {
+  test("identifies the screen for a bare Datastores landing route with no fields set", () => {
     const route: AppRoute = { screen: "database", range: RANGE };
     expect(
       aiContextClipboardText({ route, diffFrom: "HEAD", diffTo: "worktree" }),
-    ).toBe("");
+    ).toBe("database");
+  });
+
+  test("includes the current SQL draft for a database screen on the query tab", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT * FROM sample_table",
+      }),
+    ).toBe("database: db=sample_db, tab=query, sql=SELECT * FROM sample_table");
+  });
+
+  test("collapses newlines/whitespace in the SQL draft into a single line", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT *\n  FROM sample_table\n  WHERE  1=1",
+      }),
+    ).toBe(
+      "database: db=sample_db, tab=query, sql=SELECT * FROM sample_table WHERE 1=1",
+    );
+  });
+
+  test("truncates a long SQL draft with an ASCII ellipsis instead of pasting it in full", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "query",
+      range: RANGE,
+    };
+    const longSql = `SELECT * FROM sample_table WHERE ${"sample_col = 1 AND ".repeat(20)}1=1`;
+    const text = aiContextClipboardText({
+      route,
+      diffFrom: "HEAD",
+      diffTo: "worktree",
+      databaseQuerySql: longSql,
+    });
+    const sqlPart = text.slice(text.indexOf("sql=") + "sql=".length);
+    expect(sqlPart.endsWith("...")).toBe(true);
+    expect(sqlPart.length <= 203).toBe(true);
+    expect(longSql.length > 203).toBe(true);
+  });
+
+  test("omits the SQL draft when not on the query tab, even if one is provided", () => {
+    const route: AppRoute = {
+      screen: "database",
+      db: "sample_db",
+      tab: "data",
+      range: RANGE,
+    };
+    expect(
+      aiContextClipboardText({
+        route,
+        diffFrom: "HEAD",
+        diffTo: "worktree",
+        databaseQuerySql: "SELECT * FROM sample_table",
+      }),
+    ).toBe("database: db=sample_db, tab=data");
   });
 
   test("returns an empty string for screens with no path/selection concept (e.g. help)", () => {

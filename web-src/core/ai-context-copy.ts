@@ -30,7 +30,20 @@ export type AiContextScreenSnapshot = {
   selectionCode?: AiContextSelectionCode;
   diffMeta?: DiffMeta | null;
   viewedFiles?: ReadonlySet<string>;
+  // Current SQL draft (query tab, database screen only). Read from the DOM
+  // by the click handler - no fetch involved.
+  databaseQuerySql?: string;
 };
+
+// Keeps the database "brief" a single pasteable line even for long/multi-line
+// SQL drafts: collapses whitespace, then hard-truncates with "...".
+const DATABASE_QUERY_SQL_MAX_CHARS = 200;
+
+function truncateOneLine(text: string, maxChars: number): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  return `${collapsed.slice(0, maxChars)}...`;
+}
 
 function lineRange(line: SourceLineTarget): { start: number; end: number } {
   return typeof line === "number"
@@ -91,17 +104,25 @@ function referenceLine(
   return `${withSuffix}\n\n\`\`\`${lang}\n${lines.join("\n")}\n\`\`\``;
 }
 
-function historyLine(route: Extract<AppRoute, { screen: "history" }>): string {
-  if (!route.commit) return "";
-  const ref =
-    route.ref && route.ref !== "worktree" && route.ref !== "HEAD"
-      ? ` (ref: ${route.ref})`
-      : "";
-  return `commit: ${route.commit}${ref}`;
+function historyLine(
+  route: Extract<AppRoute, { screen: "history" }>,
+  diffFrom: string,
+  diffTo: string,
+): string {
+  if (route.commit) {
+    const ref =
+      route.ref && route.ref !== "worktree" && route.ref !== "HEAD"
+        ? ` (ref: ${route.ref})`
+        : "";
+    return `commit: ${route.commit}${ref}`;
+  }
+  // No commit selected: fall back to the live diff range being shown.
+  return `History: ${diffFrom}..${diffTo}${commitOrRefSuffix(route)}`;
 }
 
 function databaseLine(
   route: Extract<AppRoute, { screen: "database" }>,
+  querySql?: string,
 ): string {
   const parts: string[] = [];
   if (route.db) parts.push(`db=${route.db}`);
@@ -111,7 +132,13 @@ function databaseLine(
   if (route.diffBefore && route.diffAfter) {
     parts.push(`snapshot=${route.diffBefore}..${route.diffAfter}`);
   }
-  return parts.length > 0 ? `database: ${parts.join(", ")}` : "";
+  if (route.tab === "query" && querySql) {
+    const sql = truncateOneLine(querySql, DATABASE_QUERY_SQL_MAX_CHARS);
+    if (sql) parts.push(`sql=${sql}`);
+  }
+  // Always identify the screen, even with no route fields set yet (bare
+  // Datastores landing page) - never an empty "nothing to copy" result.
+  return parts.length > 0 ? `database: ${parts.join(", ")}` : "database";
 }
 
 // A one-line "AI review brief" for the diff overview: range + totals + kind
@@ -156,8 +183,10 @@ export function aiContextClipboardText(
   snapshot: AiContextScreenSnapshot,
 ): string {
   const { route } = snapshot;
-  if (route.screen === "database") return databaseLine(route);
-  if (route.screen === "history") return historyLine(route);
+  if (route.screen === "database")
+    return databaseLine(route, snapshot.databaseQuerySql);
+  if (route.screen === "history")
+    return historyLine(route, snapshot.diffFrom, snapshot.diffTo);
   if (route.screen === "diff" && !route.path) {
     return diffOverviewLine(
       snapshot.diffFrom,
