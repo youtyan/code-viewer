@@ -3,7 +3,7 @@
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { q } from "./_test-helpers";
+import { q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -390,6 +390,53 @@ describe("table-grid edit mode", () => {
     // edit controls (新規行 / コミット / 破棄) も継続表示。
     const wrap = q<HTMLElement>(grid.el, ".db-grid-edit-controls");
     expect(wrap.hidden).toBe(false);
+    grid.destroy();
+  });
+
+  test("refresh button refetches the current table with active column filters", async () => {
+    const fetchCalls: Array<{ table: string; filters: unknown[] }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push({ table, filters });
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    expect(nameFilter).toBeTruthy();
+    setInput(nameFilter, "Ali");
+    await waitFor(() => fetchCalls.length === 1);
+
+    fetchCalls.length = 0;
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => fetchCalls.length === 1);
+
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [{ column: "name", value: "Ali" }],
+    });
+    expect(nameFilter.value).toBe("Ali");
+
+    setInput(nameFilter, "Alice");
+    fetchCalls.length = 0;
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [{ column: "name", value: "Alice" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(fetchCalls).toHaveLength(1);
     grid.destroy();
   });
 });

@@ -7380,6 +7380,13 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 .db-grid-filter-clear:hover {
   color: var(--danger);
 }
+.db-grid-refresh[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.db-grid-refresh.spinning {
+  animation: gdp-spin 0.7s linear infinite;
+}
 
 /* ---------- Data Grid: Column Filter Row ---------- */
 .db-grid-filter-row-wrap {

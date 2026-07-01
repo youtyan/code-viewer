@@ -7,6 +7,7 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
+import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
@@ -114,6 +115,7 @@ export type TableGridOptions = {
 export type TableGrid = {
   el: HTMLElement;
   load: (table: string, initialData?: DbTableDataResponse) => void;
+  refresh: () => Promise<void>;
   showError: (message: string) => void;
   applyState: (state: AnnotationDatabaseDataState) => Promise<void>;
   getState: () => AnnotationDatabaseDataState;
@@ -161,6 +163,13 @@ export function createTableGrid(
   filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
   filterClear.textContent = "×";
   filterClear.hidden = true;
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "db-btn db-btn-icon db-grid-refresh";
+  refreshBtn.title = text().grid.refreshAction;
+  refreshBtn.setAttribute("aria-label", text().grid.refreshAction);
+  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
 
   // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
   // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
@@ -240,7 +249,14 @@ export function createTableGrid(
   editStatus.className = "db-grid-edit-status";
   editWrap.append(newRowBtn, commitBtn, discardBtn, editStatus);
 
-  filterBar.append(filterIcon, filterInput, filterClear, editWrap, exportWrap);
+  filterBar.append(
+    filterIcon,
+    filterInput,
+    filterClear,
+    editWrap,
+    refreshBtn,
+    exportWrap,
+  );
 
   const headerWrap = document.createElement("div");
   headerWrap.className = "db-grid-header-wrap";
@@ -606,6 +622,31 @@ export function createTableGrid(
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
     return ensurePage(0);
+  }
+
+  async function refreshCurrentTable(): Promise<void> {
+    if (!currentTable || refreshBtn.disabled) return;
+    const scrollTop = viewport.scrollTop;
+    const pageStart =
+      Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("spinning");
+    if (filterTimer) {
+      clearTimeout(filterTimer);
+      filterTimer = null;
+    }
+    pageCache = new Map();
+    pendingPages = new Map();
+    startNewLoadGeneration();
+    resetSelectionAndDetail();
+    viewport.scrollTop = scrollTop;
+    renderViewport();
+    try {
+      await ensurePage(pageStart);
+    } finally {
+      refreshBtn.classList.remove("spinning");
+      refreshBtn.disabled = false;
+    }
   }
 
   function clear() {
@@ -1261,6 +1302,7 @@ export function createTableGrid(
   function scheduleFilter() {
     if (filterTimer) clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
+      filterTimer = null;
       invalidateData();
     }, FILTER_DEBOUNCE_MS);
   }
@@ -1946,6 +1988,9 @@ export function createTableGrid(
     filterClear.hidden = true;
     invalidateData();
   });
+  refreshBtn.addEventListener("click", () => {
+    void refreshCurrentTable();
+  });
 
   const onViewportScroll = () => {
     headerWrap.scrollLeft = viewport.scrollLeft;
@@ -1981,6 +2026,8 @@ export function createTableGrid(
   function localize() {
     const t = text();
     filterInput.placeholder = t.grid.searchPlaceholder;
+    refreshBtn.title = t.grid.refreshAction;
+    refreshBtn.setAttribute("aria-label", t.grid.refreshAction);
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
     newRowBtn.textContent = t.edit.newRow;
@@ -2311,6 +2358,7 @@ export function createTableGrid(
   return {
     el,
     load,
+    refresh: refreshCurrentTable,
     showError,
     applyState,
     getState,
