@@ -424,6 +424,7 @@ export function createTableGrid(
   let loadController = new AbortController();
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
+  let isRefreshing = false;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
@@ -642,6 +643,8 @@ export function createTableGrid(
       Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
+    isRefreshing = true;
+    updateStatus();
     if (filterTimer) {
       clearTimeout(filterTimer);
       filterTimer = null;
@@ -655,8 +658,11 @@ export function createTableGrid(
     try {
       await ensurePage(pageStart);
     } finally {
+      const endedInError = statusEl?.classList.contains("db-pane-error");
+      isRefreshing = false;
       refreshBtn.classList.remove("spinning");
       refreshBtn.disabled = false;
+      if (!endedInError) updateStatus();
     }
   }
 
@@ -668,6 +674,7 @@ export function createTableGrid(
     columnNames = [];
     totalRows = 0;
     sort = null;
+    isRefreshing = false;
     columnFilters.clear();
     globalSearchValue = "";
     filterInput.value = "";
@@ -1898,6 +1905,7 @@ export function createTableGrid(
       parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
     const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
     if (activeFilterCount > 0) parts.push(t.statusFilters(activeFilterCount));
+    if (isRefreshing) parts.push(t.statusRefreshing(activeFilterCount));
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;

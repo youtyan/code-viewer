@@ -456,4 +456,69 @@ describe("table-grid edit mode", () => {
     expect(fetchCalls).toHaveLength(1);
     grid.destroy();
   });
+
+  test("refresh status shows active filters are kept while reloading", async () => {
+    let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return await new Promise<DbTableDataResponse>((resolve) => {
+          resolveFetch = resolve;
+        });
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(nameFilter, "Ali");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => fetchCalls.length === 1);
+    const status = q<HTMLElement>(grid.el, ".db-grid-status");
+    expect(status.textContent || "").toMatch(/Reloading with 1 active filter/);
+    expect(fetchCalls[0]).toEqual([{ column: "name", value: "Ali" }]);
+
+    resolveFetch?.(initialData());
+    await waitFor(() => !(status.textContent || "").includes("Reloading"));
+    expect(status.textContent || "").toMatch(/1 filter\(s\)/);
+    grid.destroy();
+  });
+
+  test("refresh failure keeps the error status visible", async () => {
+    const grid = createTableGrid({
+      fetchPage: async () => {
+        throw new Error("sample reload failed");
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() =>
+      q<HTMLElement>(grid.el, ".db-grid-status").classList.contains(
+        "db-pane-error",
+      ),
+    );
+    const status = q<HTMLElement>(grid.el, ".db-grid-status");
+    expect(status.textContent || "").toMatch(/sample reload failed/);
+    expect((status.textContent || "").includes("Reloading")).toBe(false);
+    grid.destroy();
+  });
 });

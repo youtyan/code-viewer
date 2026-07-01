@@ -52,6 +52,7 @@ export type DbText = {
     statusRows: (n: string) => string;
     statusSort: (column: string, dir: string) => string;
     statusFilters: (n: number) => string;
+    statusRefreshing: (filters: number) => string;
   };
   // 行編集 / 新規追加 / 削除。
   edit: {
@@ -358,6 +359,10 @@ const EN: DbText = {
     statusRows: (n) => `${n} rows`,
     statusSort: (column, dir) => `Sort: ${column} ${dir}`,
     statusFilters: (n) => `${n} filter(s)`,
+    statusRefreshing: (filters) =>
+      filters > 0
+        ? `Reloading with ${filters} active filter${filters === 1 ? "" : "s"}…`
+        : "Reloading current table…",
   },
   edit: {
     editMode: "Edit",
@@ -662,6 +667,10 @@ const JA: DbText = {
     statusRows: (n) => `${n} 行`,
     statusSort: (column, dir) => `並び替え: ${column} ${dir}`,
     statusFilters: (n) => `フィルタ ${n} 件`,
+    statusRefreshing: (filters) =>
+      filters > 0
+        ? `フィルタ ${filters} 件を保持して再読み込み中…`
+        : "この表を再読み込み中…",
   },
   edit: {
     editMode: "編集",
