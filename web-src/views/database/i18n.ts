@@ -350,8 +350,8 @@ const EN: DbText = {
   grid: {
     searchPlaceholder: "Search all columns…",
     columnFilterPlaceholder: (column) => `${column}…`,
-    refreshLabel: "Reload",
-    refreshAction: "Reload this table, keeping filters",
+    refreshLabel: "Reload table",
+    refreshAction: "Reload this table, keeping search and column filters",
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
@@ -654,8 +654,8 @@ const JA: DbText = {
   grid: {
     searchPlaceholder: "全カラムを検索…",
     columnFilterPlaceholder: (column) => `${column}…`,
-    refreshLabel: "更新",
-    refreshAction: "検索/フィルタを保持して、このテーブルを再読み込み",
+    refreshLabel: "この表を更新",
+    refreshAction: "検索/列フィルタを保持して、この表を再読み込み",
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",

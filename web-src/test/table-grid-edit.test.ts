@@ -419,10 +419,12 @@ describe("table-grid edit mode", () => {
     expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
     expect(exportButton.textContent).toBe("");
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
-    expect(refreshButton.textContent).toMatch(/Reload/);
-    expect(refreshButton.title).toBe("Reload this table, keeping filters");
+    expect(refreshButton.textContent).toMatch(/Reload table/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping search and column filters",
+    );
     expect(refreshButton.getAttribute("aria-label")).toBe(
-      "Reload this table, keeping filters",
+      "Reload this table, keeping search and column filters",
     );
 
     const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
