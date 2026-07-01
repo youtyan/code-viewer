@@ -77,6 +77,9 @@ export type RepoViewDeps = {
   getProjectName(): string;
   clearLoadQueue(): void;
   syncSidebarHeaderHeight(): void;
+  newFolderButtonTitle(): string;
+  openDirectoryInOsTitle(): string;
+  moveFolderToTrashTitle(): string;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
     route: AppRoute;
@@ -120,6 +123,9 @@ export function createRepoView(deps: RepoViewDeps) {
     getSidebarRowByPath,
     getSidebarVirtualActivePath,
     pushUndo,
+    newFolderButtonTitle,
+    openDirectoryInOsTitle,
+    moveFolderToTrashTitle,
   } = deps;
 
   type RepoSortKey = "name" | "updated" | "size";
@@ -421,8 +427,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-trash-path";
-    button.title = "move folder to Trash";
-    button.setAttribute("aria-label", "move folder to Trash");
+    const trashTitle = moveFolderToTrashTitle();
+    button.title = trashTitle;
+    button.setAttribute("aria-label", trashTitle);
     button.innerHTML = iconSvg("octicon-trash", TRASH_16_PATH);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -438,8 +445,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-file-header-icon gdp-create-dir";
-    button.title = "new folder";
-    button.setAttribute("aria-label", "new folder");
+    const newFolderTitle = newFolderButtonTitle();
+    button.title = newFolderTitle;
+    button.setAttribute("aria-label", newFolderTitle);
     button.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
     button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -587,7 +595,7 @@ export function createRepoView(deps: RepoViewDeps) {
       createOpenPathButton(
         meta.path || "",
         "directory",
-        "open this folder in OS",
+        openDirectoryInOsTitle(),
       ),
     );
     toolbar.appendChild(pathHeader);

@@ -870,6 +870,9 @@ window.GdpExpandLogic = GdpExpandLogic;
       REPO_SIDEBAR_REF = ref;
     },
     isTestPath: (path: string) => TEST_RE.test(path),
+    sidebarToggleTitle: (hidden) =>
+      hidden ? uiText().sidebar.show : uiText().sidebar.hide,
+    openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
   });
   const {
     renderSidebar,
@@ -1029,6 +1032,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     pushUndo: (undo: UndoActionResponse) => {
       UNDO_STACK.unshift(undo);
     },
+    newFolderButtonTitle: () => uiText().repo.newFolder,
+    openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
+    moveFolderToTrashTitle: () => uiText().repo.moveFolderToTrash,
   });
   const {
     loadRepo,
@@ -1123,9 +1129,18 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: string;
         tree: string;
         flat: string;
+        treeTitle: string;
+        flatTitle: string;
         filter: string;
         filterTitle: string;
         hide: string;
+        show: string;
+        repoTarget: string;
+        openDirectoryInOs: string;
+      };
+      repo: {
+        newFolder: string;
+        moveFolderToTrash: string;
       };
       history: {
         title: string;
@@ -1251,10 +1266,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "view",
         tree: "tree",
         flat: "flat",
+        treeTitle: "tree view",
+        flatTitle: "flat list",
         filter: "Filter files…  /  ⌘K",
         filterTitle:
           "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
         hide: "hide sidebar",
+        show: "show sidebar",
+        repoTarget: "repository target",
+        openDirectoryInOs: "open this folder in OS",
+      },
+      repo: {
+        newFolder: "new folder",
+        moveFolderToTrash: "move folder to Trash",
       },
       history: {
         title: "Commits",
@@ -1387,10 +1411,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         view: "表示",
         tree: "ツリー",
         flat: "一覧",
+        treeTitle: "ツリー表示",
+        flatTitle: "一覧表示",
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
           "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
         hide: "サイドバーを隠す",
+        show: "サイドバーを表示",
+        repoTarget: "リポジトリの対象",
+        openDirectoryInOs: "このフォルダをOSで開く",
+      },
+      repo: {
+        newFolder: "新規フォルダ",
+        moveFolderToTrash: "フォルダをゴミ箱へ移動",
       },
       history: {
         title: "コミット",
@@ -1577,16 +1610,32 @@ window.GdpExpandLogic = GdpExpandLogic;
     sbView?.setAttribute("aria-label", text.sidebar.view);
     setElementText('.sb-view-seg button[data-view="tree"]', text.sidebar.tree);
     setElementText('.sb-view-seg button[data-view="flat"]', text.sidebar.flat);
+    const sbViewTree = document.querySelector<HTMLButtonElement>(
+      '.sb-view-seg button[data-view="tree"]',
+    );
+    if (sbViewTree) sbViewTree.title = text.sidebar.treeTitle;
+    const sbViewFlat = document.querySelector<HTMLButtonElement>(
+      '.sb-view-seg button[data-view="flat"]',
+    );
+    if (sbViewFlat) sbViewFlat.title = text.sidebar.flatTitle;
     const filter = document.querySelector<HTMLInputElement>("#sb-filter");
     if (filter) {
       filter.placeholder = text.sidebar.filter;
       filter.title = text.sidebar.filterTitle;
     }
+    const repoTarget = document.querySelector<HTMLInputElement>("#repo-target");
+    if (repoTarget) {
+      repoTarget.title = text.sidebar.repoTarget;
+      repoTarget.setAttribute("aria-label", text.sidebar.repoTarget);
+    }
     const sidebarToggle =
       document.querySelector<HTMLButtonElement>("#sidebar-toggle");
     if (sidebarToggle) {
-      sidebarToggle.title = text.sidebar.hide;
-      sidebarToggle.setAttribute("aria-label", text.sidebar.hide);
+      const sidebarToggleTitle = STATE.sidebarHidden
+        ? text.sidebar.show
+        : text.sidebar.hide;
+      sidebarToggle.title = sidebarToggleTitle;
+      sidebarToggle.setAttribute("aria-label", sidebarToggleTitle);
     }
     setElementText(".sidebar-toggle-label", text.sidebar.files);
 
@@ -2140,7 +2189,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     input.readOnly = true;
     input.autocomplete = "off";
     input.placeholder = options.placeholder;
-    if (options.title) input.title = options.title;
+    if (options.title) {
+      input.title = options.title;
+      input.setAttribute("aria-label", options.title);
+    }
     if (options.value != null) input.value = options.value;
 
     const caret = document.createElement("span");

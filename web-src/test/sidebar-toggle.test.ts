@@ -230,6 +230,8 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
       /* noop */
     },
     isTestPath: () => false,
+    sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
+    openDirectoryInOsTitle: () => "open this folder in OS",
     $: <T extends Element = HTMLElement>(selector: string) =>
       document.querySelector(selector) as unknown as T,
     $$: <T extends Element = HTMLElement>(selector: string) =>

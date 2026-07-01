@@ -69,7 +69,9 @@ function repoTargetDisplayForBodyClass(className: string) {
   return getComputedStyle(wrap).display;
 }
 
-function createSidebarForTest() {
+function createSidebarForTest(
+  overrides: { openDirectoryInOsTitle?: () => string } = {},
+) {
   const state = {
     sbView: "tree" as const,
     sbWidth: 280,
@@ -108,8 +110,14 @@ function createSidebarForTest() {
     appendScopeParams() {
       /* noop */
     },
-    createOpenPathButton() {
-      return document.createElement("button");
+    createOpenPathButton(_path, _kind, title) {
+      const button = document.createElement("button");
+      button.className = "gdp-open-path";
+      if (title) {
+        button.title = title;
+        button.setAttribute("aria-label", title);
+      }
+      return button;
     },
     normalizeViewerFontSize: () => "regular",
     getSidebarFontSize: () => "regular",
@@ -131,6 +139,9 @@ function createSidebarForTest() {
       /* noop */
     },
     isTestPath: () => false,
+    sidebarToggleTitle: (hidden) => (hidden ? "show sidebar" : "hide sidebar"),
+    openDirectoryInOsTitle:
+      overrides.openDirectoryInOsTitle ?? (() => "open this folder in OS"),
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`missing ${selector}`);
@@ -353,5 +364,25 @@ describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => 
     expect(row?.title).toBe("Git submodule pinned to a commit");
     expect(tag?.textContent).toBe("SUB");
     expect(tag?.title).toBe("Git submodule pinned to a commit");
+  });
+});
+
+describe("repository directory open-in-OS button localization", () => {
+  test("uses the injected label instead of a hardcoded English string", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest({
+      openDirectoryInOsTitle: () => "サンプルのラベル",
+    });
+
+    sidebar.renderSidebar([{ path: "src", type: "tree" }], () => {
+      /* noop: presence forces the virtual repo-mode tree */
+    });
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const button = document.querySelector<HTMLButtonElement>(
+      '#filelist li[data-dirpath="src"] .gdp-open-path',
+    );
+    expect(button?.title).toBe("サンプルのラベル");
+    expect(button?.getAttribute("aria-label")).toBe("サンプルのラベル");
   });
 });

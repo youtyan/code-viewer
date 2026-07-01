@@ -125,6 +125,9 @@ function makeRepoView(route: AppRoute) {
     syncSidebarHeaderHeight() {
       /* noop */
     },
+    newFolderButtonTitle: () => "new folder",
+    openDirectoryInOsTitle: () => "open this folder in OS",
+    moveFolderToTrashTitle: () => "move folder to Trash",
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const element = document.querySelector<T>(selector);
       if (!element) throw new Error(`missing ${selector}`);

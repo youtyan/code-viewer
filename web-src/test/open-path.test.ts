@@ -118,9 +118,14 @@ describe("open path in OS action", () => {
   });
 
   test("UI adds open actions to directory-oriented surfaces", () => {
+    // The directory-row button's label is localized via
+    // SidebarDeps.openDirectoryInOsTitle() instead of a hardcoded English
+    // string; see the DOM-behavior coverage in
+    // sidebar-repo-target.test.ts > "repository directory open-in-OS button
+    // localization".
     expect(
       app.includes(
-        "createOpenPathButton(dir.path, 'directory', 'open this folder in OS')",
+        "createOpenPathButton(dir.path, 'directory', openDirectoryInOsTitle())",
       ),
     ).toBe(true);
     expect(

@@ -161,6 +161,9 @@ function makeRepoView(
     syncSidebarHeaderHeight() {
       /* noop */
     },
+    newFolderButtonTitle: () => "new folder",
+    openDirectoryInOsTitle: () => "open this folder in OS",
+    moveFolderToTrashTitle: () => "move folder to Trash",
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },

@@ -70,6 +70,8 @@ export type SidebarDeps = {
   getRepoSidebarRef(): string | null;
   setRepoSidebarRef(ref: string | null): void;
   isTestPath(path: string): boolean;
+  sidebarToggleTitle(hidden: boolean): string;
+  openDirectoryInOsTitle(): string;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
 };
@@ -98,6 +100,8 @@ export function createSidebar(deps: SidebarDeps) {
     getRepoSidebarRef,
     setRepoSidebarRef,
     isTestPath,
+    sidebarToggleTitle,
+    openDirectoryInOsTitle,
   } = deps;
 
   type TreeNode = {
@@ -232,11 +236,9 @@ export function createSidebar(deps: SidebarDeps) {
     if (!button) button = createSidebarToggleButton();
     bindSidebarToggleButton(button);
     button.setAttribute("aria-pressed", STATE.sidebarHidden ? "true" : "false");
-    button.title = STATE.sidebarHidden ? "show sidebar" : "hide sidebar";
-    button.setAttribute(
-      "aria-label",
-      STATE.sidebarHidden ? "show sidebar" : "hide sidebar",
-    );
+    const toggleTitle = sidebarToggleTitle(STATE.sidebarHidden);
+    button.title = toggleTitle;
+    button.setAttribute("aria-label", toggleTitle);
     syncSidebarToggleIcon(button);
     return button;
   }
@@ -444,7 +446,7 @@ export function createSidebar(deps: SidebarDeps) {
         }
         li.appendChild(label);
         li.appendChild(
-          createOpenPathButton(dir.path, "directory", "open this folder in OS"),
+          createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
         );
         const collapsed = STATE.collapsedDirs.has(dir.path);
         if (collapsed) li.classList.add("collapsed");
@@ -679,7 +681,7 @@ export function createSidebar(deps: SidebarDeps) {
     }
     li.appendChild(label);
     li.appendChild(
-      createOpenPathButton(dir.path, "directory", "open this folder in OS"),
+      createOpenPathButton(dir.path, "directory", openDirectoryInOsTitle()),
     );
     const updateIcon = () => {
       setFolderIcon(dirIcon, li.classList.contains("collapsed"));
