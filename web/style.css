@@ -6759,6 +6759,10 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   color: var(--accent);
   font-weight: 600;
 }
+.db-grid-refresh-result {
+  align-self: center;
+  line-height: 1;
+}
 
 /* explorer (redis/es/s3) の第1階層セレクタ (Databases / Indices / Bucket+View)
    を抱える sidebar 内 host。kind が SQL のときは中身が全て hidden になるため

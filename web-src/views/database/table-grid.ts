@@ -182,6 +182,10 @@ export function createTableGrid(
   refreshLabel.className = "db-grid-refresh-label";
   refreshLabel.textContent = text().grid.refreshLabel;
   refreshBtn.appendChild(refreshLabel);
+  const refreshResult = document.createElement("span");
+  refreshResult.className = "db-refresh-result db-grid-refresh-result";
+  refreshResult.setAttribute("aria-live", "polite");
+  refreshResult.hidden = true;
 
   // エクスポートは検索バー右端のアイコン+メニューに集約する。これにより
   // 「どのグリッドのエクスポートか」が見た目で分かる（メイン/関連で別々）。
@@ -263,7 +267,7 @@ export function createTableGrid(
 
   const filterActions = document.createElement("div");
   filterActions.className = "db-grid-filter-actions";
-  filterActions.append(refreshBtn, exportWrap);
+  filterActions.append(refreshBtn, refreshResult, exportWrap);
 
   filterBar.append(
     filterIcon,
@@ -460,6 +464,7 @@ export function createTableGrid(
   let rafId = 0;
   let statusEl: HTMLElement | null = null;
   let isRefreshing = false;
+  let refreshResultState: { delta: number; totalRows: number } | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedRowIndex = -1;
   // 詳細フッタ or 関連パネルに「いまどのセルの値を出してるか」を覚えておく。
@@ -663,6 +668,38 @@ export function createTableGrid(
     refreshBtn.setAttribute("aria-busy", isRefreshing ? "true" : "false");
   }
 
+  function syncRefreshResult(): void {
+    const result = refreshResultState;
+    refreshResult.hidden = !result;
+    refreshResult.classList.toggle("changed", !!result && result.delta !== 0);
+    if (!result) {
+      refreshResult.textContent = "";
+      return;
+    }
+    const t = text().grid;
+    const total = result.totalRows.toLocaleString();
+    refreshResult.textContent =
+      result.delta === 0
+        ? t.refreshResultUnchanged(total)
+        : t.refreshResultChanged(result.delta, total);
+  }
+
+  function clearRefreshResult(): void {
+    refreshResultState = null;
+    syncRefreshResult();
+  }
+
+  function setRefreshResult(
+    previousTotalRows: number,
+    nextTotalRows: number,
+  ): void {
+    refreshResultState = {
+      delta: nextTotalRows - previousTotalRows,
+      totalRows: nextTotalRows,
+    };
+    syncRefreshResult();
+  }
+
   function syncFilterClearButton(): void {
     const count = activeFilterCount();
     const t = text().grid;
@@ -705,6 +742,7 @@ export function createTableGrid(
     globalSearchValue = "";
     filterInput.value = "";
     columnFilters.clear();
+    clearRefreshResult();
     filterRow
       .querySelectorAll<HTMLInputElement>(".db-grid-col-filter")
       .forEach((input) => {
@@ -742,6 +780,7 @@ export function createTableGrid(
   function invalidateData(): Promise<void> {
     pageCache = new Map();
     pendingPages = new Map();
+    clearRefreshResult();
     startNewLoadGeneration();
     viewport.scrollTop = 0;
     resetSelectionAndDetail();
@@ -750,12 +789,15 @@ export function createTableGrid(
 
   async function refreshCurrentTable(): Promise<void> {
     if (!currentTable || refreshBtn.disabled) return;
+    const previousTotalRows = totalRows;
+    const refreshFilterKey = JSON.stringify(collectFilters());
     const scrollTop = viewport.scrollTop;
     const pageStart =
       Math.floor(scrollTop / ROW_HEIGHT / PAGE_SIZE) * PAGE_SIZE;
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
     isRefreshing = true;
+    clearRefreshResult();
     syncRefreshButton();
     syncFilteredEmptyState();
     updateStatus();
@@ -766,6 +808,7 @@ export function createTableGrid(
     pageCache = new Map();
     pendingPages = new Map();
     startNewLoadGeneration();
+    const refreshGeneration = loadGeneration;
     resetSelectionAndDetail();
     viewport.scrollTop = scrollTop;
     renderViewport();
@@ -778,7 +821,15 @@ export function createTableGrid(
       refreshBtn.disabled = false;
       syncRefreshButton();
       syncFilteredEmptyState();
-      if (!endedInError) updateStatus();
+      if (!endedInError) {
+        if (
+          loadGeneration === refreshGeneration &&
+          JSON.stringify(collectFilters()) === refreshFilterKey
+        ) {
+          setRefreshResult(previousTotalRows, totalRows);
+        }
+        updateStatus();
+      }
     }
   }
 
@@ -793,6 +844,7 @@ export function createTableGrid(
     isRefreshing = false;
     columnFilters.clear();
     globalSearchValue = "";
+    clearRefreshResult();
     filterInput.value = "";
     syncFilterClearButton();
     syncRefreshButton();
@@ -1420,6 +1472,7 @@ export function createTableGrid(
         } else {
           columnFilters.delete(col.name);
         }
+        clearRefreshResult();
         syncFilterClearButton();
         syncRefreshButton();
         scheduleFilter();
@@ -1429,6 +1482,7 @@ export function createTableGrid(
         if (e.key === "Escape") {
           input.value = "";
           columnFilters.delete(col.name);
+          clearRefreshResult();
           syncFilterClearButton();
           syncRefreshButton();
           scheduleFilter();
@@ -2037,6 +2091,7 @@ export function createTableGrid(
         statusEl.firstChild,
       );
     }
+    syncRefreshResult();
   }
 
   function showError(message: string) {
@@ -2113,6 +2168,7 @@ export function createTableGrid(
 
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
+    clearRefreshResult();
     syncFilterClearButton();
     syncRefreshButton();
     scheduleFilter();
@@ -2122,6 +2178,7 @@ export function createTableGrid(
     if (e.key === "Escape") {
       filterInput.value = "";
       globalSearchValue = "";
+      clearRefreshResult();
       syncFilterClearButton();
       syncRefreshButton();
       scheduleFilter();
@@ -2177,6 +2234,7 @@ export function createTableGrid(
     filterInput.placeholder = t.grid.searchPlaceholder;
     syncFilterClearButton();
     syncRefreshButton();
+    syncRefreshResult();
     syncFilteredEmptyState();
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);

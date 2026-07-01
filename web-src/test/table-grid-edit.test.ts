@@ -3,7 +3,7 @@
 // 渡されることを確認する (文字列存在ではなく挙動の検証)。
 import { afterAll, describe, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { q, waitFor } from "./_test-helpers";
+import { type Deferred, deferred, q, waitFor } from "./_test-helpers";
 
 GlobalRegistrator.register();
 
@@ -431,8 +431,12 @@ describe("table-grid edit mode", () => {
     expect(filterActions.parentElement).toBe(
       q<HTMLElement>(grid.el, ".db-grid-filter-bar"),
     );
+    expect(filterActions.children).toHaveLength(3);
     expect(filterActions.children[0]).toBe(refreshButton);
     expect(filterActions.children[1]).toBe(
+      q<HTMLElement>(grid.el, ".db-grid-refresh-result"),
+    );
+    expect(filterActions.children[2]).toBe(
       q<HTMLElement>(grid.el, ".db-grid-export"),
     );
 
@@ -650,6 +654,9 @@ describe("table-grid edit mode", () => {
     const status = q<HTMLElement>(grid.el, ".db-grid-status");
     expect(status.textContent || "").toMatch(/Reloading with 1 active filter/);
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.getAttribute("aria-live")).toBe("polite");
     expect(refreshButton.textContent).toMatch(/Reloading/);
     expect(refreshButton.getAttribute("aria-busy")).toBe("true");
     expect(fetchCalls[0]).toEqual([{ column: "name", value: "Ali" }]);
@@ -659,6 +666,240 @@ describe("table-grid edit mode", () => {
     expect(status.textContent || "").toMatch(/1 filter\(s\)/);
     expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("Rows unchanged (2)");
+    expect(refreshResult.classList.contains("changed")).toBe(false);
+    grid.destroy();
+  });
+
+  test("refresh result announces row count changes and clears on filter edits", async () => {
+    const data = initialData();
+    let nextData = data;
+    const grid = createTableGrid({
+      fetchPage: async () => nextData,
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    expect(refreshResult.hidden).toBe(true);
+
+    nextData = {
+      ...data,
+      rows: [...data.rows, [3, "Carol"]],
+      totalRows: 3,
+    };
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.hidden === false);
+    expect(refreshResult.textContent).toBe("Rows +1 (3 now)");
+    expect(refreshResult.classList.contains("changed")).toBe(true);
+    expect(
+      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+    ).toMatch(/3 rows/);
+
+    nextData = {
+      ...data,
+      rows: [[1, "Alice"]],
+      totalRows: 1,
+    };
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.textContent === "Rows -2 (1 now)");
+    expect(refreshResult.classList.contains("changed")).toBe(true);
+    expect(
+      q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+    ).toMatch(/1 rows/);
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh result localizes with the grid language", async () => {
+    let language: "en" | "ja" = "en";
+    const data = initialData();
+    const grid = createTableGrid({
+      fetchPage: async () => ({
+        ...data,
+        rows: [...data.rows, [3, "Carol"]],
+        totalRows: 3,
+      }),
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText(language),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+
+    await waitFor(() => refreshResult.textContent === "Rows +1 (3 now)");
+    language = "ja";
+    grid.localize();
+    expect(refreshResult.textContent).toBe("行数 +1 (現在 3)");
+    grid.destroy();
+  });
+
+  test("refresh result clears when an edit commit reloads the table", async () => {
+    const data = initialData();
+    let nextData = data;
+    let commits = 0;
+    const grid = createTableGrid({
+      fetchPage: async () => nextData,
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => {
+        commits++;
+        nextData = {
+          ...data,
+          rows: [...data.rows, [3, "Carol"]],
+          totalRows: 3,
+        };
+      },
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", data);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => refreshResult.textContent === "Rows unchanged (2)");
+
+    await grid.setEditMode(true);
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-newrow").click();
+    await tick();
+    const draftRow = q<HTMLElement>(grid.el, ".db-grid-row-draft");
+    const draftInputs = draftRow.querySelectorAll<HTMLInputElement>(
+      ".db-grid-cell-input",
+    );
+    setInput(draftInputs[1], "Carol");
+    q<HTMLButtonElement>(grid.el, ".db-grid-edit-commit").click();
+
+    await waitFor(() => commits === 1);
+    await waitFor(() =>
+      /3 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh result is skipped when filters change during reload", async () => {
+    let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
+    let fetches = 0;
+    const fetchPromise = new Promise<DbTableDataResponse>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const grid = createTableGrid({
+      fetchPage: async () => {
+        fetches++;
+        return await fetchPromise;
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => fetches === 1);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    resolveFetch?.({
+      ...initialData(),
+      rows: [...initialData().rows, [3, "Carol"]],
+      totalRows: 3,
+    });
+
+    await waitFor(
+      () =>
+        q<HTMLButtonElement>(grid.el, ".db-grid-refresh").getAttribute(
+          "aria-busy",
+        ) === "false",
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+    grid.destroy();
+  });
+
+  test("refresh result is skipped after filter debounce starts a newer load", async () => {
+    const requests: Array<{
+      filters: unknown[];
+      request: Deferred<DbTableDataResponse>;
+    }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        const request = deferred<DbTableDataResponse>();
+        requests.push({ filters, request });
+        return await request.promise;
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    q<HTMLButtonElement>(grid.el, ".db-grid-refresh").click();
+    await waitFor(() => requests.length === 1);
+
+    const refreshResult = q<HTMLElement>(grid.el, ".db-grid-refresh-result");
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    setInput(search, "Carol");
+    await waitFor(() => requests.length === 2, 1000);
+
+    requests[0].request.resolve({
+      ...initialData(),
+      rows: [...initialData().rows, [3, "Carol"]],
+      totalRows: 3,
+    });
+    await waitFor(
+      () =>
+        q<HTMLButtonElement>(grid.el, ".db-grid-refresh").getAttribute(
+          "aria-busy",
+        ) === "false",
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
+
+    requests[1].request.resolve({
+      ...initialData(),
+      rows: [[3, "Carol"]],
+      totalRows: 1,
+    });
+    await waitFor(() =>
+      /1 rows/.test(
+        q<HTMLElement>(grid.el, ".db-grid-status").textContent || "",
+      ),
+    );
+    expect(refreshResult.hidden).toBe(true);
+    expect(refreshResult.textContent).toBe("");
     grid.destroy();
   });
 

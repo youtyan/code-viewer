@@ -57,6 +57,8 @@ export type DbText = {
     refreshingLabel: string;
     refreshAction: string;
     refreshActionWithFilters: (count: number) => string;
+    refreshResultChanged: (delta: number, total: string) => string;
+    refreshResultUnchanged: (total: string) => string;
     exportAction: string;
     foreignKeyHint: string;
     relatedEmpty: string;
@@ -398,6 +400,12 @@ const EN: DbText = {
       `Reload this table, keeping ${count} active filter${
         count === 1 ? "" : "s"
       }`,
+    refreshResultChanged: (delta, total) => {
+      const abs = Math.abs(delta).toLocaleString();
+      const sign = delta > 0 ? "+" : "-";
+      return `Rows ${sign}${abs} (${total} now)`;
+    },
+    refreshResultUnchanged: (total) => `Rows unchanged (${total})`,
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
@@ -739,6 +747,12 @@ const JA: DbText = {
     refreshAction: "検索/列フィルタを保持して、この表だけ再読み込み",
     refreshActionWithFilters: (count) =>
       `有効なフィルタ ${count} 件を保持して、この表だけ再読み込み`,
+    refreshResultChanged: (delta, total) => {
+      const abs = Math.abs(delta).toLocaleString();
+      const sign = delta > 0 ? "+" : "-";
+      return `行数 ${sign}${abs} (現在 ${total})`;
+    },
+    refreshResultUnchanged: (total) => `行数変化なし (${total})`,
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",
