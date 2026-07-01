@@ -9884,6 +9884,15 @@ body.db-resizing {
   font-size: var(--db-font-sm);
   line-height: 1.5;
 }
+.db-pane-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.db-pane-empty-actions[hidden] {
+  display: none;
+}
 
 /* ---------- Elasticsearch explorer ---------- */
 .es-explorer {

@@ -302,16 +302,25 @@ export function createTableGrid(
   filteredEmptyTitle.className = "db-pane-empty-title";
   const filteredEmptyHint = document.createElement("div");
   filteredEmptyHint.className = "db-pane-empty-hint";
+  const filteredEmptyActions = document.createElement("div");
+  filteredEmptyActions.className = "db-pane-empty-actions";
+  filteredEmptyActions.hidden = true;
+  const filteredEmptyReloadAction = document.createElement("button");
+  filteredEmptyReloadAction.type = "button";
+  filteredEmptyReloadAction.className = "db-btn db-btn-primary db-btn-sm";
+  filteredEmptyReloadAction.hidden = true;
+  filteredEmptyReloadAction.disabled = true;
   const filteredEmptyAction = document.createElement("button");
   filteredEmptyAction.type = "button";
   filteredEmptyAction.className = "db-btn db-btn-sm";
   filteredEmptyAction.hidden = true;
   filteredEmptyAction.disabled = true;
+  filteredEmptyActions.append(filteredEmptyReloadAction, filteredEmptyAction);
   filteredEmpty.append(
     filteredEmptyIcon,
     filteredEmptyTitle,
     filteredEmptyHint,
-    filteredEmptyAction,
+    filteredEmptyActions,
   );
 
   const detailPanel = document.createElement("div");
@@ -665,12 +674,25 @@ export function createTableGrid(
     const count = activeFilterCount();
     const show = totalRows === 0 && count > 0;
     filteredEmpty.hidden = !show;
+    filteredEmptyActions.hidden = !show;
+    filteredEmptyReloadAction.hidden = !show;
+    filteredEmptyReloadAction.disabled = !show || isRefreshing;
     filteredEmptyAction.hidden = !show;
     filteredEmptyAction.disabled = !show;
     if (!show) return;
     const t = text().grid;
+    const reloadAction = t.refreshActionWithFilters(count);
     filteredEmptyTitle.textContent = t.filteredEmptyTitle(count);
     filteredEmptyHint.textContent = t.filteredEmptyHint;
+    filteredEmptyReloadAction.textContent = isRefreshing
+      ? t.refreshingLabel
+      : t.refreshFilteredLabel;
+    filteredEmptyReloadAction.title = reloadAction;
+    filteredEmptyReloadAction.setAttribute("aria-label", reloadAction);
+    filteredEmptyReloadAction.setAttribute(
+      "aria-busy",
+      isRefreshing ? "true" : "false",
+    );
     filteredEmptyAction.textContent = t.filteredEmptyAction;
     filteredEmptyAction.title = t.clearFiltersAction(count);
     filteredEmptyAction.setAttribute("aria-label", t.clearFiltersAction(count));
@@ -732,6 +754,7 @@ export function createTableGrid(
     refreshBtn.classList.add("spinning");
     isRefreshing = true;
     syncRefreshButton();
+    syncFilteredEmptyState();
     updateStatus();
     if (filterTimer) {
       clearTimeout(filterTimer);
@@ -751,6 +774,7 @@ export function createTableGrid(
       refreshBtn.classList.remove("spinning");
       refreshBtn.disabled = false;
       syncRefreshButton();
+      syncFilteredEmptyState();
       if (!endedInError) updateStatus();
     }
   }
@@ -2106,6 +2130,9 @@ export function createTableGrid(
   filteredEmptyAction.addEventListener("click", () => {
     clearFiltersAndReload();
     filterInput.focus?.();
+  });
+  filteredEmptyReloadAction.addEventListener("click", () => {
+    void refreshCurrentTable();
   });
   refreshBtn.addEventListener("click", () => {
     void refreshCurrentTable();

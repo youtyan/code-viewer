@@ -540,9 +540,25 @@ describe("table-grid edit mode", () => {
     expect(
       empty.querySelector(".db-pane-empty-hint")?.textContent || "",
     ).toMatch(/current search or column filters/);
-    const clearAction = q<HTMLButtonElement>(empty, "button");
+    const actions = empty.querySelectorAll<HTMLButtonElement>("button");
+    expect(actions).toHaveLength(2);
+    const reloadAction = actions[0];
+    const clearAction = actions[1];
+    expect(reloadAction.textContent).toBe("Reload filtered data");
+    expect(reloadAction.title).toBe(
+      "Reload only this table, keeping 1 active filter",
+    );
+    expect(reloadAction.getAttribute("aria-busy")).toBe("false");
+    expect(reloadAction.disabled).toBe(false);
     expect(clearAction.textContent).toBe("Clear filters");
     expect(clearAction.disabled).toBe(false);
+
+    fetchCalls.length = 0;
+    reloadAction.click();
+    await waitFor(() => fetchCalls.length === 1);
+    expect(fetchCalls[0]).toEqual([{ column: "name", value: "Nobody" }]);
+    expect(nameFilter.value).toBe("Nobody");
+    expect(empty.hidden).toBe(false);
 
     fetchCalls.length = 0;
     clearAction.click();
@@ -550,6 +566,8 @@ describe("table-grid edit mode", () => {
     expect(fetchCalls[0]).toEqual([]);
     expect(nameFilter.value).toBe("");
     await waitFor(() => empty.hidden === true);
+    expect(reloadAction.hidden).toBe(true);
+    expect(reloadAction.disabled).toBe(true);
     expect(clearAction.hidden).toBe(true);
     expect(clearAction.disabled).toBe(true);
     grid.destroy();
@@ -584,7 +602,7 @@ describe("table-grid edit mode", () => {
       "No rows match 1 active filter",
     );
 
-    const clearAction = q<HTMLButtonElement>(empty, "button");
+    const clearAction = empty.querySelectorAll<HTMLButtonElement>("button")[1];
     fetchCalls.length = 0;
     clearAction.click();
     await waitFor(() => fetchCalls.length === 1);
