@@ -419,12 +419,12 @@ describe("table-grid edit mode", () => {
     expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
     expect(exportButton.textContent).toBe("");
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
-    expect(refreshButton.textContent).toMatch(/Reload table/);
+    expect(refreshButton.textContent).toMatch(/Reload data/);
     expect(refreshButton.title).toBe(
-      "Reload this table, keeping search and column filters",
+      "Reload only this table, keeping search and column filters",
     );
     expect(refreshButton.getAttribute("aria-label")).toBe(
-      "Reload this table, keeping search and column filters",
+      "Reload only this table, keeping search and column filters",
     );
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
 
@@ -433,12 +433,12 @@ describe("table-grid edit mode", () => {
     )[1];
     expect(nameFilter).toBeTruthy();
     setInput(nameFilter, "Ali");
-    expect(refreshButton.textContent).toMatch(/Reload filtered table/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered data/);
     expect(refreshButton.title).toBe(
-      "Reload this table, keeping 1 active filter",
+      "Reload only this table, keeping 1 active filter",
     );
     expect(refreshButton.getAttribute("aria-label")).toBe(
-      "Reload this table, keeping 1 active filter",
+      "Reload only this table, keeping 1 active filter",
     );
     await waitFor(() => fetchCalls.length === 1);
 
@@ -544,7 +544,7 @@ describe("table-grid edit mode", () => {
     resolveFetch?.(initialData());
     await waitFor(() => !(status.textContent || "").includes("Reloading"));
     expect(status.textContent || "").toMatch(/1 filter\(s\)/);
-    expect(refreshButton.textContent).toMatch(/Reload filtered table/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered data/);
     expect(refreshButton.getAttribute("aria-busy")).toBe("false");
     grid.destroy();
   });

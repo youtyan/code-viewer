@@ -375,12 +375,12 @@ const EN: DbText = {
     clearFiltersLabel: "Clear filters",
     clearFiltersAction: (count) =>
       `Clear ${count} active filter${count === 1 ? "" : "s"}`,
-    refreshLabel: "Reload table",
-    refreshFilteredLabel: "Reload filtered table",
+    refreshLabel: "Reload data",
+    refreshFilteredLabel: "Reload filtered data",
     refreshingLabel: "Reloading...",
-    refreshAction: "Reload this table, keeping search and column filters",
+    refreshAction: "Reload only this table, keeping search and column filters",
     refreshActionWithFilters: (count) =>
-      `Reload this table, keeping ${count} active filter${
+      `Reload only this table, keeping ${count} active filter${
         count === 1 ? "" : "s"
       }`,
     exportAction: "Export",
@@ -703,12 +703,12 @@ const JA: DbText = {
     columnFilterPlaceholder: (column) => `${column}…`,
     clearFiltersLabel: "フィルタ解除",
     clearFiltersAction: (count) => `有効なフィルタ ${count} 件を解除`,
-    refreshLabel: "この表を更新",
-    refreshFilteredLabel: "絞り込みを保持して更新",
+    refreshLabel: "表だけ更新",
+    refreshFilteredLabel: "絞り込みのまま更新",
     refreshingLabel: "更新中...",
-    refreshAction: "検索/列フィルタを保持して、この表を再読み込み",
+    refreshAction: "検索/列フィルタを保持して、この表のデータだけ再読み込み",
     refreshActionWithFilters: (count) =>
-      `有効なフィルタ ${count} 件を保持して、この表を再読み込み`,
+      `有効なフィルタ ${count} 件を保持して、この表のデータだけ再読み込み`,
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",
