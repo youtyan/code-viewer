@@ -221,7 +221,9 @@ export function createDiffView(deps: DiffViewDeps) {
   ) {
     if (!button) return;
     button.setAttribute("aria-pressed", expanded ? "true" : "false");
-    button.title = expanded ? "Collapse expanded lines" : "Expand all lines";
+    const label = expanded ? "Collapse expanded lines" : "Expand all lines";
+    button.title = label;
+    button.setAttribute("aria-label", label);
     button.innerHTML = expanded
       ? iconSvg("octicon-fold", COLLAPSE_ALL_16_PATHS)
       : iconSvg("octicon-unfold", EXPAND_ALL_16_PATHS);
@@ -1217,7 +1219,9 @@ export function createDiffView(deps: DiffViewDeps) {
     const button = card.querySelector<HTMLButtonElement>(".gdp-file-toggle");
     if (button) {
       button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      button.title = collapsed ? "Expand file" : "Collapse file";
+      const toggleLabel = collapsed ? "Expand file" : "Collapse file";
+      button.title = toggleLabel;
+      button.setAttribute("aria-label", toggleLabel);
     }
     const unfold = card.querySelector<HTMLButtonElement>(".gdp-file-unfold");
     if (unfold) unfold.disabled = collapsed;
@@ -1339,6 +1343,7 @@ export function createDiffView(deps: DiffViewDeps) {
       toggle.type = "button";
       toggle.className = "gdp-file-header-icon gdp-file-toggle";
       toggle.title = "Collapse file";
+      toggle.setAttribute("aria-label", "Collapse file");
       toggle.setAttribute("aria-expanded", "true");
       toggle.innerHTML = iconSvg("octicon-chevron-down", CHEVRON_DOWN_16_PATH);
       toggle.addEventListener("click", (e) => {
@@ -1364,6 +1369,7 @@ export function createDiffView(deps: DiffViewDeps) {
       copy.type = "button";
       copy.className = "gdp-file-header-icon gdp-copy-path";
       copy.title = "copy file path";
+      copy.setAttribute("aria-label", "copy file path");
       copy.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
       copy.addEventListener("click", async (e) => {
         e.stopPropagation();
