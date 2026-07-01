@@ -243,6 +243,10 @@ function createSidebarForTest(state: { sidebarHidden: boolean }) {
             label: "private",
             title: "This directory cannot be opened from the browser",
           },
+    commitEntryBadge: (submodule) =>
+      submodule
+        ? { label: "SUB", title: "Git submodule pinned to a commit" }
+        : { label: "GIT", title: "Git commit entry" },
     $: <T extends Element = HTMLElement>(selector: string) =>
       document.querySelector(selector) as unknown as T,
     $$: <T extends Element = HTMLElement>(selector: string) =>

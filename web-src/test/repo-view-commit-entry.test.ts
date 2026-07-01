@@ -47,7 +47,10 @@ function setupDom() {
 function makeRepoView(
   route: AppRoute,
   overrides: Partial<
-    Pick<RepoViewDeps, "emptyDirectoryLabel" | "sortColumnLabels">
+    Pick<
+      RepoViewDeps,
+      "emptyDirectoryLabel" | "sortColumnLabels" | "commitEntryMeta"
+    >
   > = {},
 ) {
   const state: RepoViewDeps["STATE"] = {
@@ -149,6 +152,16 @@ function makeRepoView(
     }),
     repositoryFallback: () => "repository",
     repositoryRootFallback: () => "repository root",
+    commitEntryMeta: (submodule) =>
+      submodule
+        ? {
+            label: "submodule",
+            title: "Git submodule pinned to a commit",
+          }
+        : {
+            label: "gitlink",
+            title: "Git commit entry is not directly browsable at this ref",
+          },
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const element = document.querySelector<T>(selector);
       if (!element) throw new Error(`missing ${selector}`);
@@ -419,5 +432,45 @@ describe("repo view localized labels", () => {
     expect(document.querySelector(".gdp-repo-empty")?.textContent).toBe(
       "サンプル空ディレクトリ",
     );
+  });
+
+  test("commit entry metadata uses injected labels", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "HEAD",
+      path: "",
+      project: "sample-repo",
+      entries: [
+        {
+          name: "nested-repo",
+          path: "nested-repo",
+          type: "commit",
+        },
+      ],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view } = makeRepoView(
+      {
+        screen: "repo",
+        ref: "HEAD",
+        path: "",
+        range,
+      },
+      {
+        commitEntryMeta: () => ({
+          label: "固定コミット",
+          title: "サンプル固定コミット説明",
+        }),
+      },
+    );
+
+    await view.loadRepo();
+
+    const row = document.querySelector<HTMLElement>(".gdp-repo-row.commit");
+    const meta = row?.querySelector<HTMLElement>(".meta");
+    expect(row?.title).toBe("サンプル固定コミット説明");
+    expect(meta?.textContent).toBe("固定コミット");
+    expect(meta?.title).toBe("サンプル固定コミット説明");
   });
 });

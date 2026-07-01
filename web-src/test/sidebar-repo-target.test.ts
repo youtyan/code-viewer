@@ -71,7 +71,10 @@ function repoTargetDisplayForBodyClass(className: string) {
 
 function createSidebarForTest(
   overrides: Partial<
-    Pick<SidebarDeps, "omittedDirectoryBadge" | "openDirectoryInOsTitle">
+    Pick<
+      SidebarDeps,
+      "omittedDirectoryBadge" | "openDirectoryInOsTitle" | "commitEntryBadge"
+    >
   > = {},
 ) {
   const state = {
@@ -157,6 +160,12 @@ function createSidebarForTest(
               label: "private",
               title: "This directory cannot be opened from the browser",
             }),
+    commitEntryBadge:
+      overrides.commitEntryBadge ??
+      ((submodule) =>
+        submodule
+          ? { label: "SUB", title: "Git submodule pinned to a commit" }
+          : { label: "GIT", title: "Git commit entry" }),
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`missing ${selector}`);
@@ -281,6 +290,22 @@ describe("diff sidebar file kind indicators", () => {
     expect(tag?.textContent).toBe("SUB");
     expect(tag?.title).toBe("Git submodule pinned to a commit");
   });
+
+  test("shows a gitlink indicator for a non-submodule commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([{ path: "vendor/nested-repo", type: "commit" }]);
+
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/nested-repo"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.gitlink");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.title).toBe("Git commit entry");
+    expect(tag?.textContent).toBe("GIT");
+    expect(tag?.title).toBe("Git commit entry");
+  });
 });
 
 describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => {
@@ -379,6 +404,28 @@ describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => 
     expect(row?.title).toBe("Git submodule pinned to a commit");
     expect(tag?.textContent).toBe("SUB");
     expect(tag?.title).toBe("Git submodule pinned to a commit");
+  });
+
+  test("shows a gitlink indicator for a non-submodule commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "vendor/nested-repo", type: "commit" }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/nested-repo"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.gitlink");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.title).toBe("Git commit entry");
+    expect(tag?.textContent).toBe("GIT");
+    expect(tag?.title).toBe("Git commit entry");
   });
 });
 

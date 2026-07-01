@@ -76,6 +76,10 @@ export type SidebarDeps = {
     label: string;
     title: string;
   };
+  commitEntryBadge(submodule: SidebarItem["submodule"]): {
+    label: string;
+    title: string;
+  };
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
 };
@@ -107,6 +111,7 @@ export function createSidebar(deps: SidebarDeps) {
     sidebarToggleTitle,
     openDirectoryInOsTitle,
     omittedDirectoryBadge,
+    commitEntryBadge,
   } = deps;
 
   type TreeNode = {
@@ -766,12 +771,11 @@ export function createSidebar(deps: SidebarDeps) {
   // the size-tag colors already used on the diff card header.
   function fileKindTag(f: SidebarItem): HTMLElement | null {
     if (f.type === "commit") {
+      const badge = commitEntryBadge(f.submodule);
       const tag = document.createElement("span");
       tag.className = `kind-tag ${f.submodule ? "submodule" : "gitlink"}`;
-      tag.textContent = f.submodule ? "SUB" : "GIT";
-      tag.title = f.submodule
-        ? "Git submodule pinned to a commit"
-        : "Git commit entry";
+      tag.textContent = badge.label;
+      tag.title = badge.title;
       return tag;
     }
     const kind = classifyDiffFileKind(f);
@@ -801,9 +805,7 @@ export function createSidebar(deps: SidebarDeps) {
     li.dataset.path = f.path;
     li.dataset.type = f.type || "blob";
     if (f.type === "commit") {
-      li.title = f.submodule
-        ? "Git submodule pinned to a commit"
-        : "Git commit entry";
+      li.title = commitEntryBadge(f.submodule).title;
     }
     li.classList.toggle(
       "viewed",
@@ -1091,9 +1093,7 @@ export function createSidebar(deps: SidebarDeps) {
       li.dataset.path = f.path;
       li.dataset.type = f.type || "blob";
       if (f.type === "commit") {
-        li.title = f.submodule
-          ? "Git submodule pinned to a commit"
-          : "Git commit entry";
+        li.title = commitEntryBadge(f.submodule).title;
       }
       li.classList.toggle(
         "viewed",

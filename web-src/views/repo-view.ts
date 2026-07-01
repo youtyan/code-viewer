@@ -91,6 +91,10 @@ export type RepoViewDeps = {
   sortColumnLabels(): { name: string; updated: string; size: string };
   repositoryFallback(): string;
   repositoryRootFallback(): string;
+  commitEntryMeta(submodule: RepoTreeEntry["submodule"]): {
+    label: string;
+    title: string;
+  };
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
     route: AppRoute;
@@ -145,6 +149,7 @@ export function createRepoView(deps: RepoViewDeps) {
     sortColumnLabels,
     repositoryFallback,
     repositoryRootFallback,
+    commitEntryMeta,
   } = deps;
 
   type RepoSortKey = "name" | "updated" | "size";
@@ -699,9 +704,7 @@ export function createRepoView(deps: RepoViewDeps) {
         name.className = "name";
         name.textContent = entry.name;
         if (entry.type === "commit" && !browsable) {
-          row.title = entry.submodule
-            ? "Git submodule pinned to a commit"
-            : "Git commit entry is not directly browsable at this ref";
+          row.title = commitEntryMeta(entry.submodule).title;
         }
         const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
@@ -901,10 +904,9 @@ export function createRepoView(deps: RepoViewDeps) {
     const meta = document.createElement("span");
     meta.className = "meta";
     if (entry.type === "commit" && !browsable) {
-      meta.textContent = entry.submodule ? "submodule" : "gitlink";
-      meta.title = entry.submodule
-        ? "Git submodule pinned to a commit"
-        : "Git commit entry is not directly browsable at this ref";
+      const badge = commitEntryMeta(entry.submodule);
+      meta.textContent = badge.label;
+      meta.title = badge.title;
       return meta;
     }
     const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);

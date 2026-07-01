@@ -880,6 +880,18 @@ window.GdpExpandLogic = GdpExpandLogic;
         ? { label: text.omittedHeavyLabel, title: text.omittedHeavyTitle }
         : { label: text.omittedPrivateLabel, title: text.omittedPrivateTitle };
     },
+    commitEntryBadge: (submodule) => {
+      const text = uiText().sidebar;
+      return submodule
+        ? {
+            label: text.commitEntrySubmoduleLabel,
+            title: text.commitEntrySubmoduleTitle,
+          }
+        : {
+            label: text.commitEntryGitlinkLabel,
+            title: text.commitEntryGitlinkTitle,
+          };
+    },
   });
   const {
     renderSidebar,
@@ -1064,6 +1076,12 @@ window.GdpExpandLogic = GdpExpandLogic;
     },
     repositoryFallback: () => uiText().repo.repositoryFallback,
     repositoryRootFallback: () => uiText().repo.repositoryRootFallback,
+    commitEntryMeta: (submodule) => {
+      const text = uiText().repo;
+      return submodule
+        ? { label: text.submoduleLabel, title: text.submoduleTitle }
+        : { label: text.gitlinkLabel, title: text.gitlinkTitle };
+    },
   });
   const {
     loadRepo,
@@ -1195,6 +1213,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         omittedHeavyTitle: string;
         omittedPrivateLabel: string;
         omittedPrivateTitle: string;
+        commitEntryGitlinkLabel: string;
+        commitEntryGitlinkTitle: string;
+        commitEntrySubmoduleLabel: string;
+        commitEntrySubmoduleTitle: string;
       };
       repo: {
         newFolder: string;
@@ -1211,6 +1233,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         sortSize: string;
         repositoryFallback: string;
         repositoryRootFallback: string;
+        gitlinkLabel: string;
+        gitlinkTitle: string;
+        submoduleLabel: string;
+        submoduleTitle: string;
       };
       history: {
         title: string;
@@ -1383,6 +1409,10 @@ window.GdpExpandLogic = GdpExpandLogic;
           "Tree expansion is skipped, but the directory detail can be opened",
         omittedPrivateLabel: "private",
         omittedPrivateTitle: "This directory cannot be opened from the browser",
+        commitEntryGitlinkLabel: "GIT",
+        commitEntryGitlinkTitle: "Git commit entry",
+        commitEntrySubmoduleLabel: "SUB",
+        commitEntrySubmoduleTitle: "Git submodule pinned to a commit",
       },
       repo: {
         newFolder: "new folder",
@@ -1400,6 +1430,10 @@ window.GdpExpandLogic = GdpExpandLogic;
         sortSize: "Size",
         repositoryFallback: "repository",
         repositoryRootFallback: "repository root",
+        gitlinkLabel: "gitlink",
+        gitlinkTitle: "Git commit entry is not directly browsable at this ref",
+        submoduleLabel: "submodule",
+        submoduleTitle: "Git submodule pinned to a commit",
       },
       history: {
         title: "Commits",
@@ -1578,6 +1612,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           "ツリー展開は省略されていますが、詳細パネルでは開けます",
         omittedPrivateLabel: "非公開",
         omittedPrivateTitle: "このディレクトリはブラウザから開けません",
+        commitEntryGitlinkLabel: "GIT",
+        commitEntryGitlinkTitle:
+          "Git のコミットに固定された参照です。フォルダではないため直接は開けません。",
+        commitEntrySubmoduleLabel: "SUB",
+        commitEntrySubmoduleTitle:
+          "Git サブモジュール: 特定のコミットに固定されています。フォルダではないため直接は開けません。",
       },
       repo: {
         newFolder: "新規フォルダ",
@@ -1595,6 +1635,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         sortSize: "サイズ",
         repositoryFallback: "リポジトリ",
         repositoryRootFallback: "リポジトリのルート",
+        gitlinkLabel: "固定コミット",
+        gitlinkTitle:
+          "特定のコミットに固定された参照です。この ref では直接開けません。",
+        submoduleLabel: "サブモジュール",
+        submoduleTitle:
+          "Git サブモジュール: 特定のコミットに固定されています。直接は開けません。",
       },
       history: {
         title: "コミット",

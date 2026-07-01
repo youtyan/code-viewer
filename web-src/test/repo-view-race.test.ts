@@ -180,6 +180,16 @@ function makeRepoView(
     }),
     repositoryFallback: () => "repository",
     repositoryRootFallback: () => "repository root",
+    commitEntryMeta: (submodule) =>
+      submodule
+        ? {
+            label: "submodule",
+            title: "Git submodule pinned to a commit",
+          }
+        : {
+            label: "gitlink",
+            title: "Git commit entry is not directly browsable at this ref",
+          },
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },
