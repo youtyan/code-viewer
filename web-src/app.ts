@@ -68,7 +68,7 @@ import { createBlameView } from "./views/blame-view";
 import { createDatabaseView } from "./views/database/database-view";
 import { createDiffLineSelect } from "./views/diff-line-select";
 import { createDiffView, type RenderResult } from "./views/diff-view";
-import { createDoctorView } from "./views/doctor-view";
+import { createDoctorView, doctorText } from "./views/doctor-view";
 import { showEmptyHistoryDiffPane } from "./views/empty-diff-pane";
 import {
   removeFileHistoryShell as removeRenderedFileHistoryShell,
@@ -168,13 +168,12 @@ window.GdpExpandLogic = GdpExpandLogic;
   function updateNetworkActivity(state = NETWORK_ACTIVITY.getState()): void {
     const loadBar = document.querySelector<HTMLElement>("#load-bar");
     if (loadBar) loadBar.classList.toggle("active", state.inFlight > 0);
+    const text = uiText().global;
     const statusEl = document.querySelector<HTMLElement>("#status");
     if (statusEl) {
       statusEl.title =
         state.inFlight > 0
-          ? `${state.inFlight} request${state.inFlight === 1 ? "" : "s"} in flight${
-              state.cancellable > 0 ? " (cancellable)" : ""
-            }`
+          ? text.statusInFlightTitle(state.inFlight, state.cancellable)
           : (statusEl.querySelector<HTMLElement>(".status-label")
               ?.textContent ?? "");
     }
@@ -185,8 +184,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     cancelButton.disabled = !cancellable;
     cancelButton.classList.toggle("active", cancellable);
     const cancelTitle = cancellable
-      ? `cancel ${state.cancellable} in-flight request${state.cancellable === 1 ? "" : "s"}`
-      : "no in-flight requests";
+      ? text.cancelRequestsActiveTitle(state.cancellable)
+      : text.cancelRequestsInactiveTitle;
     cancelButton.title = cancelTitle;
     cancelButton.setAttribute("aria-label", cancelTitle);
   }
@@ -1080,6 +1079,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusLoading: string;
         statusError: string;
         statusIdle: string;
+        statusInFlightTitle: (count: number, cancellable: number) => string;
+        cancelRequestsActiveTitle: (count: number) => string;
+        cancelRequestsInactiveTitle: string;
       };
       topbar: {
         resetRange: string;
@@ -1198,6 +1200,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusLoading: "Loading",
         statusError: "Error",
         statusIdle: "Idle",
+        statusInFlightTitle: (count, cancellable) =>
+          `${count} request${count === 1 ? "" : "s"} in flight${
+            cancellable > 0 ? " (cancellable)" : ""
+          }`,
+        cancelRequestsActiveTitle: (count) =>
+          `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
+        cancelRequestsInactiveTitle: "no in-flight requests",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1327,6 +1336,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusLoading: "更新中",
         statusError: "エラー",
         statusIdle: "待機中",
+        statusInFlightTitle: (count, cancellable) =>
+          `${count}件のリクエストを実行中${cancellable > 0 ? "（キャンセル可能）" : ""}`,
+        cancelRequestsActiveTitle: (count) =>
+          `実行中のリクエストを${count}件キャンセル`,
+        cancelRequestsInactiveTitle: "実行中のリクエストはありません",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1485,6 +1499,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       theme.title = text.global.theme;
       theme.setAttribute("aria-label", text.global.theme);
     }
+    const doctorTitle = doctorText(STATE.language).title;
+    const doctorBtn = document.querySelector<HTMLButtonElement>("#doctor-btn");
+    if (doctorBtn) {
+      doctorBtn.title = doctorTitle;
+      doctorBtn.setAttribute("aria-label", doctorTitle);
+    }
+    document
+      .querySelector<HTMLElement>("#doctor-sheet")
+      ?.setAttribute("aria-label", doctorTitle);
     const copyAiContext =
       document.querySelector<HTMLButtonElement>("#copy-ai-context");
     if (copyAiContext) {
