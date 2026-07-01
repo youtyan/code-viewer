@@ -7444,11 +7444,34 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 .db-grid-filter-clear:hover {
   color: var(--danger);
 }
+.db-grid-refresh {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.db-grid-refresh:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.db-grid-refresh svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
 .db-grid-refresh[disabled] {
   cursor: default;
   opacity: 0.7;
 }
-.db-grid-refresh.spinning {
+.db-grid-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
 }
 
