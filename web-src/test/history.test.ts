@@ -1114,6 +1114,7 @@ describe("history view lifecycle", () => {
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
     ).toBe("更新");
+    expect(status.hidden).toBe(true);
 
     view.notePossibleUpdate();
     expect(refreshButton.classList.contains("has-update")).toBe(true);
@@ -1124,6 +1125,8 @@ describe("history view lifecycle", () => {
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
     ).toBe("更新あり");
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toBe("新しい履歴がある可能性があります");
 
     refreshButton.click();
     await waitFor(() => fetchCount === 2);
@@ -1133,6 +1136,52 @@ describe("history view lifecycle", () => {
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
     ).toBe("更新");
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toBe("新しいコミットはありません");
+  });
+
+  test("notePossibleUpdate status takes priority over an empty commit list", async () => {
+    const { panel, list, banner, status, sentinel, refreshButton } =
+      installHistoryViewDom();
+    globalThis.fetch = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ commits: [], hasMore: false }), {
+          status: 200,
+        }),
+      )) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toBe("no commits");
+
+    view.notePossibleUpdate();
+    expect(refreshButton.classList.contains("has-update")).toBe(true);
+    expect(status.hidden).toBe(false);
+    expect(status.textContent).toBe("新しい履歴がある可能性があります");
   });
 
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {

@@ -28,12 +28,19 @@ export type HistoryText = {
   refreshLabelPending: string;
   refreshTitle: string;
   refreshTitlePending: string;
+  refreshPendingStatus: string;
   refreshResultUpdated: (sha: string) => string;
   refreshResultUnchanged: string;
   refreshResultUnchangedInView: string;
   filterClearLabel: string;
   filterClearTitle: string;
 };
+
+type HistoryRefreshStatus =
+  | { type: "none" }
+  | { type: "pending" }
+  | { type: "updated"; sha: string }
+  | { type: "unchanged"; scoped: boolean };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
   en: {
@@ -44,6 +51,7 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshLabelPending: "Update",
     refreshTitle: "Refresh commit history",
     refreshTitlePending: "History may have changed. Refresh",
+    refreshPendingStatus: "History may have changed",
     refreshResultUpdated: (sha) => `Updated: ${sha} is now latest`,
     refreshResultUnchanged: "No new commits",
     refreshResultUnchangedInView: "No new commits in this view",
@@ -58,6 +66,7 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshLabelPending: "更新あり",
     refreshTitle: "コミット履歴を更新",
     refreshTitlePending: "新しい履歴がある可能性があります。更新",
+    refreshPendingStatus: "新しい履歴がある可能性があります",
     refreshResultUpdated: (sha) => `更新: ${sha} が最新です`,
     refreshResultUnchanged: "新しいコミットはありません",
     refreshResultUnchangedInView: "この表示では新しいコミットはありません",
@@ -334,12 +343,6 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let attachedRefreshButton: HTMLButtonElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: IntersectionObserver | null = null;
-  // Set when an SSE "update" event arrives while a history panel is on
-  // screen; cleared once the list actually refetches (button click or ref
-  // switch). Purely a visual hint — never triggers a fetch on its own, so it
-  // can't interact with the generation/trackLoad race-safety contract.
-  let hasPendingUpdate = false;
-
   let ref = "HEAD";
   let commits: HistoryCommit[] = [];
   let hasMore = false;
@@ -351,7 +354,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let mode: "history" | "file" = "history";
   let routeRef = "HEAD";
   let pathFilter = "";
-  let refreshStatusText = "";
+  let refreshStatus: HistoryRefreshStatus = { type: "none" };
   let freshSha = "";
 
   type HistoryScope = {
@@ -408,22 +411,47 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function clearRefreshResult() {
-    refreshStatusText = "";
+    refreshStatus = { type: "none" };
     freshSha = "";
   }
 
   function setRefreshResult(previousTopSha: string, nextTopSha: string) {
-    const text = historyText(deps.getLanguage());
     freshSha =
       previousTopSha && nextTopSha && previousTopSha !== nextTopSha
         ? nextTopSha
         : "";
-    refreshStatusText = freshSha
-      ? text.refreshResultUpdated(nextTopSha.slice(0, 7))
-      : query || pathFilter
-        ? text.refreshResultUnchangedInView
-        : text.refreshResultUnchanged;
+    refreshStatus = freshSha
+      ? { type: "updated", sha: nextTopSha.slice(0, 7) }
+      : { type: "unchanged", scoped: Boolean(query || pathFilter) };
     renderList();
+  }
+
+  function refreshStatusMessage(): string {
+    const text = historyText(deps.getLanguage());
+    switch (refreshStatus.type) {
+      case "pending":
+        return text.refreshPendingStatus;
+      case "updated":
+        return text.refreshResultUpdated(refreshStatus.sha);
+      case "unchanged":
+        return refreshStatus.scoped
+          ? text.refreshResultUnchangedInView
+          : text.refreshResultUnchanged;
+      case "none":
+        return "";
+      default: {
+        const exhaustive: never = refreshStatus;
+        return exhaustive;
+      }
+    }
+  }
+
+  function syncRefreshStatusText() {
+    setStatusText(
+      loading
+        ? "loading..."
+        : refreshStatusMessage() || (commits.length ? "" : "no commits"),
+    );
   }
 
   function commitInfoElement(): HTMLElement | null {
@@ -549,16 +577,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
       html.push(commitRow(commit));
     }
     list.innerHTML = html.join("");
-    setStatusText(
-      loading
-        ? "loading..."
-        : refreshStatusText || (commits.length ? "" : "no commits"),
-    );
+    syncRefreshStatusText();
   }
 
   function syncRefreshButton(button?: HTMLButtonElement | null) {
     if (!button) return;
     const text = historyText(deps.getLanguage());
+    const hasPendingUpdate = refreshStatus.type === "pending";
     const title = hasPendingUpdate
       ? text.refreshTitlePending
       : text.refreshTitle;
@@ -913,7 +938,6 @@ export function createHistoryView(deps: HistoryViewDeps) {
       selectionGeneration++;
       selectedSha = "";
       setBanner("");
-      hasPendingUpdate = false;
       clearRefreshResult();
       await updateCommitInfo(null);
       renderList();
@@ -1175,11 +1199,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
       renderList();
     },
     // Called from the SSE "update" listener when a history panel is on
-    // screen. Only toggles a CSS hint on the refresh button — no fetch, no
-    // generation bump, so it can't race with trackLoad/cancelInFlightRequests.
+    // screen. Only updates existing local UI hints — no fetch, no list redraw,
+    // no generation bump, so it can't race with trackLoad/cancelInFlightRequests.
     notePossibleUpdate: () => {
-      hasPendingUpdate = true;
+      refreshStatus = { type: "pending" };
       syncRefreshButton(activeMount.refreshButton);
+      syncRefreshStatusText();
     },
     isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
   };
