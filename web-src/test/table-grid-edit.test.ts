@@ -477,6 +477,56 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
+  test("refresh keeps global search together with column filters", async () => {
+    const fetchCalls: Array<{ table: string; filters: unknown[] }> = [];
+    const grid = createTableGrid({
+      fetchPage: async (table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push({ table, filters });
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const search = q<HTMLInputElement>(grid.el, ".db-grid-filter-input");
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    setInput(search, "active");
+    setInput(nameFilter, "Ali");
+
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    expect(refreshButton.textContent).toMatch(/Reload filtered rows/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping 2 active filters",
+    );
+
+    refreshButton.click();
+    await waitFor(() => fetchCalls.length === 1);
+
+    expect(fetchCalls[0]).toEqual({
+      table: "users",
+      filters: [
+        { column: "name", value: "Ali" },
+        { column: "id", value: "active" },
+        { column: "name", value: "active" },
+      ],
+    });
+    expect(search.value).toBe("active");
+    expect(nameFilter.value).toBe("Ali");
+    expect(grid.getState()).toEqual({
+      search: "active",
+      filters: [{ column: "name", value: "Ali" }],
+    });
+    grid.destroy();
+  });
+
   test("clear filters button is labeled and clears column filters", async () => {
     const fetchCalls: unknown[][] = [];
     const grid = createTableGrid({

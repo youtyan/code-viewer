@@ -641,14 +641,26 @@ export function createTableGrid(
     renderViewport();
   }
 
-  function collectFilters(): GridFilter[] {
+  function collectColumnFilters(): GridFilter[] {
     const filters: GridFilter[] = [];
     for (const [col, val] of columnFilters) {
       if (val) filters.push({ column: col, value: val });
     }
-    if (globalSearchValue && filters.length === 0) {
+    return filters;
+  }
+
+  function collectFilters(): GridFilter[] {
+    const filters = collectColumnFilters();
+    if (globalSearchValue) {
       for (const col of columnNames) {
-        filters.push({ column: col, value: globalSearchValue });
+        if (
+          !filters.some(
+            (filter) =>
+              filter.column === col && filter.value === globalSearchValue,
+          )
+        ) {
+          filters.push({ column: col, value: globalSearchValue });
+        }
       }
     }
     return filters;
@@ -2167,9 +2179,7 @@ export function createTableGrid(
   }
 
   function getState(): AnnotationDatabaseDataState {
-    const filters = collectFilters().filter(
-      (filter) => filter.value !== globalSearchValue,
-    );
+    const filters = collectColumnFilters();
     return {
       ...(globalSearchValue ? { search: globalSearchValue } : {}),
       ...(filters.length ? { filters } : {}),
