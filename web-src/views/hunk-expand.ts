@@ -397,6 +397,7 @@ export function createHunkExpand(deps: HunkExpandDeps) {
       const button = document.createElement("button");
       button.className = "gdp-expand-btn";
       button.title = spec.title;
+      button.setAttribute("aria-label", spec.title);
       button.innerHTML =
         '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">' +
         '<path fill="currentColor" d="' +
