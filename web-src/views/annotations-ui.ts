@@ -15,8 +15,10 @@
 import {
   COPY_16_PATHS,
   iconSvg,
+  NEXT_16_PATHS,
   PENCIL_16_PATH,
   PLUS_16_PATH,
+  PREVIOUS_16_PATHS,
   TRASH_16_PATH,
 } from "../core/icons";
 import {
@@ -158,6 +160,20 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   const annotationListCountEl = $("#annotation-list-count");
   const annotationCaptureDb = $<HTMLButtonElement>("#annotation-capture-db");
   annotationCaptureDb.innerHTML = iconSvg("octicon-plus", PLUS_16_PATH);
+  const annotationDetailPrev = $<HTMLButtonElement>("#annotation-detail-prev");
+  const annotationDetailNext = $<HTMLButtonElement>("#annotation-detail-next");
+  annotationDetailPrev.innerHTML = iconSvg(
+    "octicon-skip-back",
+    PREVIOUS_16_PATHS,
+  );
+  annotationDetailPrev.title = "previous annotation";
+  annotationDetailPrev.setAttribute("aria-label", "previous annotation");
+  annotationDetailNext.innerHTML = iconSvg(
+    "octicon-skip-forward",
+    NEXT_16_PATHS,
+  );
+  annotationDetailNext.title = "next annotation";
+  annotationDetailNext.setAttribute("aria-label", "next annotation");
 
   function updateDatabaseCaptureButton() {
     annotationCaptureDb.hidden = deps.getRoute().screen !== "database";
@@ -963,12 +979,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     edit.addEventListener("click", () => {
       openAnnotationEditForm(entry);
     });
-    const prev = $("#annotation-detail-prev");
-    head?.insertBefore(copyRef, prev);
-    head?.insertBefore(edit, prev);
-    $<HTMLButtonElement>("#annotation-detail-prev").disabled = index <= 0;
-    $<HTMLButtonElement>("#annotation-detail-next").disabled =
-      index >= session.entries.length - 1;
+    head?.insertBefore(copyRef, annotationDetailPrev);
+    head?.insertBefore(edit, annotationDetailPrev);
+    annotationDetailPrev.disabled = index <= 0;
+    annotationDetailNext.disabled = index >= session.entries.length - 1;
     annotationDetail.hidden = false;
     setAnnotationPanelOpen(true);
     updateActiveHighlights();
@@ -1273,10 +1287,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     void postAnnotationAction({ action: "clear" });
   });
   $("#annotation-detail-close").addEventListener("click", hideAnnotationDetail);
-  $("#annotation-detail-prev").addEventListener("click", () => {
+  annotationDetailPrev.addEventListener("click", () => {
     stepAnnotation(-1);
   });
-  $("#annotation-detail-next").addEventListener("click", () => {
+  annotationDetailNext.addEventListener("click", () => {
     stepAnnotation(1);
   });
   $("#annotation-detail-location").addEventListener("click", (e) => {

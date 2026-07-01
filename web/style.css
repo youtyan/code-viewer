@@ -5873,8 +5873,6 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--fg-subtle);
   white-space: nowrap;
 }
-#annotation-detail-prev,
-#annotation-detail-next,
 #annotation-detail-close {
   border: 1px solid var(--border);
   border-radius: 6px;
