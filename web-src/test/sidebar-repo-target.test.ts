@@ -235,6 +235,26 @@ describe("diff sidebar file kind indicators", () => {
       document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
     ).toBeNull();
   });
+
+  test("shows a submodule indicator for a commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "vendor/tooling", type: "commit", submodule: true },
+    ]);
+
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/tooling"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.submodule");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe("Git submodule pinned to a commit");
+    expect(tag?.textContent).toBe("SUB");
+    expect(tag?.title).toBe("Git submodule pinned to a commit");
+  });
 });
 
 describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => {
@@ -309,5 +329,29 @@ describe("virtual tree sidebar file kind indicators (createTreeFileRow)", () => 
     expect(
       document.querySelector('#filelist li[data-path="small.ts"] .kind-tag'),
     ).toBeNull();
+  });
+
+  test("shows a submodule indicator for a commit entry", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar(
+      [{ path: "vendor/tooling", type: "commit", submodule: true }],
+      () => {
+        /* noop: presence forces the virtual repo-mode tree */
+      },
+    );
+
+    expect(sidebar.isVirtualSidebarActive()).toBe(true);
+    const row = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="vendor/tooling"]',
+    );
+    const tag = row?.querySelector<HTMLElement>(".kind-tag.submodule");
+    expect(row?.dataset.type).toBe("commit");
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe("Git submodule pinned to a commit");
+    expect(tag?.textContent).toBe("SUB");
+    expect(tag?.title).toBe("Git submodule pinned to a commit");
   });
 });

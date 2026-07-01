@@ -10,6 +10,7 @@ import {
 import {
   COPY_16_PATHS,
   FILE_16_PATH,
+  GIT_BRANCH_16_PATH,
   iconSvg,
   PLUS_16_PATH,
   TRASH_16_PATH,
@@ -176,6 +177,10 @@ export function createRepoView(deps: RepoViewDeps) {
 
   function fileEntryIcon(): string {
     return iconSvg("octicon-file", FILE_16_PATH);
+  }
+
+  function commitEntryIcon(): string {
+    return iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH);
   }
 
   function isWorktreeRef(ref: string): boolean {
@@ -654,10 +659,17 @@ export function createRepoView(deps: RepoViewDeps) {
         const icon = document.createElement("span");
         icon.className = browsable ? "dir-icon" : "d2h-icon-wrapper";
         if (browsable) setFolderIcon(icon, true);
-        else icon.innerHTML = fileEntryIcon();
+        else
+          icon.innerHTML =
+            entry.type === "commit" ? commitEntryIcon() : fileEntryIcon();
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
+        if (entry.type === "commit" && !browsable) {
+          row.title = entry.submodule
+            ? "Git submodule pinned to a commit"
+            : "Git commit entry is not directly browsable at this ref";
+        }
         const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
         row.append(icon, name, metaBlock, size);
@@ -855,6 +867,13 @@ export function createRepoView(deps: RepoViewDeps) {
   ): HTMLElement {
     const meta = document.createElement("span");
     meta.className = "meta";
+    if (entry.type === "commit" && !browsable) {
+      meta.textContent = entry.submodule ? "submodule" : "gitlink";
+      meta.title = entry.submodule
+        ? "Git submodule pinned to a commit"
+        : "Git commit entry is not directly browsable at this ref";
+      return meta;
+    }
     const updated = formatFileDate(entry.updated_at || entry.commit_updated_at);
     const created = formatFileDate(entry.created_at);
     if (browsable && updated) {

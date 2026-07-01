@@ -2424,8 +2424,8 @@ body.gdp-help-page #content {
 [data-theme="dark"] .badge.R { background: rgba(163,113,247,0.20); color: var(--done); }
 
 /* Sidebar row marker for files worth a second look before diving in:
-   heavy diffs or binary/media files. Same semantics as the diff card
-   header's .size-tag, sized down for the dense file list rows. */
+   heavy diffs, binary/media files, or Git commit entries. Same semantics as
+   the diff card header's .size-tag, sized down for dense file list rows. */
 .kind-tag {
   width: 14px; height: 14px;
   display: inline-flex;
@@ -2439,8 +2439,21 @@ body.gdp-help-page #content {
 }
 .kind-tag.heavy { background: #fff8c5; color: var(--attn); }
 .kind-tag.binary { background: #ddf4ff; color: var(--accent-emph); }
+.kind-tag.submodule,
+.kind-tag.gitlink {
+  width: auto;
+  min-width: 22px;
+  padding: 0 4px;
+  background: #ddf4ff;
+  color: var(--accent-emph);
+}
 [data-theme="dark"] .kind-tag.heavy { background: rgba(210,153,34,0.15); color: var(--attn); }
 [data-theme="dark"] .kind-tag.binary { background: rgba(56,139,253,0.15); color: var(--accent-emph); }
+[data-theme="dark"] .kind-tag.submodule,
+[data-theme="dark"] .kind-tag.gitlink {
+  background: rgba(56,139,253,0.15);
+  color: var(--accent-emph);
+}
 
 /* ===== Main content area ===== */
 #content {

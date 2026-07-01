@@ -10,6 +10,7 @@ import {
   EXPAND_ALL_16_PATHS,
   FOLDER_ICON_PATHS,
   GEAR_16_PATH,
+  GIT_BRANCH_16_PATH,
   iconSvg,
   SIDEBAR_HIDE_16_PATHS,
   SIDEBAR_SHOW_16_PATHS,
@@ -494,43 +495,7 @@ export function createSidebar(deps: SidebarDeps) {
         ul.appendChild(childUl);
       } else {
         const f = item.file;
-        const li = document.createElement("li");
-        li.className = "tree-file";
-        li.tabIndex = -1;
-        li.dataset.path = f.path;
-        li.dataset.type = "blob";
-        li.classList.toggle(
-          "viewed",
-          !onFileClick && STATE.viewedFiles.has(f.path),
-        );
-        li.style.setProperty("--lvl-pad", `${12 + depth * 14}px`);
-        const spacer = document.createElement("span");
-        spacer.className = "chev-spacer";
-        li.appendChild(spacer);
-        if (f.status) {
-          li.appendChild(fileBadge(f.status));
-        } else {
-          const icon = document.createElement("span");
-          icon.className = "d2h-icon-wrapper";
-          icon.innerHTML = fileEntryIcon();
-          li.appendChild(icon);
-        }
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = f.path.split("/").pop();
-        name.title = f.path;
-        li.appendChild(name);
-        const kindTag = fileKindTag(f);
-        if (kindTag) li.appendChild(kindTag);
-        li.addEventListener("click", () => {
-          if (onFileClick) onFileClick(f);
-          else scrollToFile(f.path);
-          scheduleMainSurfaceFocus();
-        });
-        if (!onFileClick)
-          li.addEventListener("mouseenter", () => prefetchByPath(f.path), {
-            passive: true,
-          });
+        const li = createTreeFileRow(f, depth, onFileClick);
         ul.appendChild(li);
       }
     }
@@ -799,6 +764,15 @@ export function createSidebar(deps: SidebarDeps) {
   // look before diving in: a large/huge diff, or a binary/media file. Mirrors
   // the size-tag colors already used on the diff card header.
   function fileKindTag(f: SidebarItem): HTMLElement | null {
+    if (f.type === "commit") {
+      const tag = document.createElement("span");
+      tag.className = `kind-tag ${f.submodule ? "submodule" : "gitlink"}`;
+      tag.textContent = f.submodule ? "SUB" : "GIT";
+      tag.title = f.submodule
+        ? "Git submodule pinned to a commit"
+        : "Git commit entry";
+      return tag;
+    }
     const kind = classifyDiffFileKind(f);
     if (!kind.heavy && !kind.binary && !kind.media) return null;
     const tag = document.createElement("span");
@@ -807,6 +781,12 @@ export function createSidebar(deps: SidebarDeps) {
     tag.textContent = isBinaryLike ? "B" : "!";
     tag.title = isBinaryLike ? "binary/media file" : "large diff";
     return tag;
+  }
+
+  function sidebarEntryIcon(f: SidebarItem): string {
+    return f.type === "commit"
+      ? iconSvg("octicon-git-branch", GIT_BRANCH_16_PATH)
+      : fileEntryIcon();
   }
 
   function createTreeFileRow(
@@ -818,7 +798,12 @@ export function createSidebar(deps: SidebarDeps) {
     li.className = "tree-file";
     li.tabIndex = -1;
     li.dataset.path = f.path;
-    li.dataset.type = "blob";
+    li.dataset.type = f.type || "blob";
+    if (f.type === "commit") {
+      li.title = f.submodule
+        ? "Git submodule pinned to a commit"
+        : "Git commit entry";
+    }
     li.classList.toggle(
       "viewed",
       !onFileClick && STATE.viewedFiles.has(f.path),
@@ -836,7 +821,7 @@ export function createSidebar(deps: SidebarDeps) {
     } else {
       const icon = document.createElement("span");
       icon.className = "d2h-icon-wrapper";
-      icon.innerHTML = fileEntryIcon();
+      icon.innerHTML = sidebarEntryIcon(f);
       li.appendChild(icon);
     }
     const name = document.createElement("span");
@@ -1103,6 +1088,12 @@ export function createSidebar(deps: SidebarDeps) {
       li.tabIndex = -1;
       li.dataset.index = String(i);
       li.dataset.path = f.path;
+      li.dataset.type = f.type || "blob";
+      if (f.type === "commit") {
+        li.title = f.submodule
+          ? "Git submodule pinned to a commit"
+          : "Git commit entry";
+      }
       li.classList.toggle(
         "viewed",
         !onFileClick && STATE.viewedFiles.has(f.path),
@@ -1112,7 +1103,7 @@ export function createSidebar(deps: SidebarDeps) {
       } else {
         const icon = document.createElement("span");
         icon.className = "d2h-icon-wrapper";
-        icon.innerHTML = fileEntryIcon();
+        icon.innerHTML = sidebarEntryIcon(f);
         li.appendChild(icon);
       }
       const name = document.createElement("span");

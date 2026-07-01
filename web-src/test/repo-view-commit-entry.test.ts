@@ -225,6 +225,10 @@ describe("repo view commit entries", () => {
     );
     expect(row?.querySelector(".dir-icon")).toBeNull();
     expect(row?.querySelector(".d2h-icon-wrapper")).toBeTruthy();
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe("Git submodule pinned to a commit");
+    expect(row?.querySelector(".meta")?.textContent).toBe("submodule");
     expect(calls.renderedFiles[calls.renderedFiles.length - 1]?.[0]?.type).toBe(
       "commit",
     );
@@ -269,6 +273,12 @@ describe("repo view commit entries", () => {
     );
     expect(row?.querySelector(".dir-icon")).toBeNull();
     expect(row?.querySelector(".d2h-icon-wrapper")).toBeTruthy();
+    expect(row?.querySelector(".octicon-git-branch")).toBeTruthy();
+    expect(row?.querySelector(".octicon-file")).toBeNull();
+    expect(row?.title).toBe(
+      "Git commit entry is not directly browsable at this ref",
+    );
+    expect(row?.querySelector(".meta")?.textContent).toBe("gitlink");
     const latestSidebarFiles =
       calls.renderedFiles[calls.renderedFiles.length - 1] || [];
     expect(latestSidebarFiles[0]?.type).toBe("commit");
@@ -311,7 +321,7 @@ describe("repo view commit entries", () => {
     expect(meta?.textContent === "-" || !meta?.textContent).toBe(false);
   });
 
-  test("still shows '-' for a worktree submodule commit entry", async () => {
+  test("labels a worktree submodule commit entry", async () => {
     setupDom();
     const root: RepoTreeResponse = {
       ref: "worktree",
@@ -340,6 +350,7 @@ describe("repo view commit entries", () => {
     const meta = document.querySelector<HTMLElement>(
       ".gdp-repo-row.commit .meta",
     );
-    expect(meta?.textContent).toBe("-");
+    expect(meta?.textContent).toBe("submodule");
+    expect(meta?.title).toBe("Git submodule pinned to a commit");
   });
 });
