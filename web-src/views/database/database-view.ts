@@ -341,6 +341,7 @@ function createTabPane(
   let loadGeneration = 0;
   const tableSelectGuard = createAbortGuard();
   let historyRefreshPending: ReturnType<typeof setTimeout> | null = null;
+  let isRefreshingDatastores = false;
 
   const dbSelect = document.createElement("select");
   dbSelect.className = "db-file-select";
@@ -364,6 +365,10 @@ function createTabPane(
     },
   });
   dbRefreshBtn.classList.add("db-refresh-btn");
+  const dbRefreshLabel = document.createElement("span");
+  dbRefreshLabel.className = "db-refresh-label";
+  dbRefreshBtn.appendChild(dbRefreshLabel);
+  syncDbRefreshButton();
 
   const dbSelectRow = document.createElement("div");
   dbSelectRow.className = "db-select-row";
@@ -488,6 +493,7 @@ function createTabPane(
       t.refreshDatastores,
       t.refreshDatastoresTitle,
     );
+    syncDbRefreshButton();
     localizeIconButton(queryBtn, t.query, t.queryTitle);
     localizeIconButton(erBtn, t.er, t.erTitle);
     localizeIconButton(searchBtn, t.search, t.searchTitle);
@@ -1597,15 +1603,30 @@ function createTabPane(
     void handleSchemaSelectChange();
   });
 
+  function syncDbRefreshButton(): void {
+    const text = paneText().nav;
+    dbRefreshLabel.textContent = isRefreshingDatastores
+      ? text.refreshDatastoresBusy
+      : text.refreshDatastoresShort;
+    dbRefreshBtn.setAttribute(
+      "aria-busy",
+      isRefreshingDatastores ? "true" : "false",
+    );
+  }
+
   async function refreshDatastoreList(): Promise<void> {
     if (dbRefreshBtn.disabled) return;
+    isRefreshingDatastores = true;
     dbRefreshBtn.disabled = true;
     dbRefreshBtn.classList.add("spinning");
+    syncDbRefreshButton();
     try {
       await outerDeps.refreshDatastores();
     } finally {
+      isRefreshingDatastores = false;
       dbRefreshBtn.classList.remove("spinning");
       dbRefreshBtn.disabled = false;
+      syncDbRefreshButton();
     }
   }
 

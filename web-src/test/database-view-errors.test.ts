@@ -553,12 +553,19 @@ describe("database view SQL error rendering", () => {
   test("datastore refresh button bypasses the file list cache", async () => {
     installDatabaseDom();
     let filesFetches = 0;
+    let resolveRefreshFiles: (() => void) | null = null;
     mockFetch((url, init) => {
       if (url === "/_db/tabs" && init?.method === "PUT")
         return jsonResponse({ ok: true });
       if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
       if (url === "/_db/files") {
         filesFetches++;
+        if (filesFetches === 2) {
+          return new Promise<Response>((resolve) => {
+            resolveRefreshFiles = () =>
+              resolve(jsonResponse(baseFilesResponse()));
+          });
+        }
         return jsonResponse(baseFilesResponse());
       }
       if (url.startsWith("/_db/schema"))
@@ -574,12 +581,30 @@ describe("database view SQL error rendering", () => {
     const refresh = document.querySelector(
       ".db-refresh-btn",
     ) as unknown as FakeElement;
+    const label = refresh.querySelector(
+      ".db-refresh-label",
+    ) as unknown as FakeElement;
     expect(refresh).toBeTruthy();
     expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
-    await refresh.click();
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh");
+
+    const refreshClick = refresh.click();
     await waitUntil(() => filesFetches === 2);
+    expect(refresh.disabled).toBe(true);
+    expect(refresh.classList.contains("spinning")).toBe(true);
+    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(label.textContent).toBe("Refreshing...");
+
+    resolveRefreshFiles?.();
+    await refreshClick;
+    await waitUntil(() => refresh.attributes["aria-busy"] === "false");
 
     expect(filesFetches).toBe(2);
+    expect(refresh.disabled).toBe(false);
+    expect(refresh.classList.contains("spinning")).toBe(false);
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh");
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
     await leaveView(view);
   });
