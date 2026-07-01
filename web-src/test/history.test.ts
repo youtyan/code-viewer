@@ -980,9 +980,86 @@ describe("history view lifecycle", () => {
     expect(
       refreshButton.querySelector(".history-refresh-label")?.textContent,
     ).toBe("更新");
+    await waitFor(() => status.textContent === "新しいコミットはありません");
+    expect(status.hidden).toBe(false);
     expect(
       list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
     ).toEqual([HISTORY_WORKTREE_COMMIT, commit.sha]);
+    expect(
+      list
+        .querySelector(`.history-item[data-sha="${commit.sha}"]`)
+        ?.classList.contains("history-item-fresh"),
+    ).toBe(false);
+  });
+
+  test("refresh result announces a newer top commit and highlights its row", async () => {
+    const { panel, list, banner, status, sentinel, refreshButton } =
+      installHistoryViewDom();
+    const firstCommit = {
+      sha: "aaa1111aaaa",
+      parents: ["parent-a"],
+      subject: "first",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    const newerCommit = {
+      sha: "bbb2222bbbb",
+      parents: ["parent-b"],
+      subject: "second",
+      body: "",
+      author: "Bob",
+      when: new Date().toISOString(),
+    };
+    let fetchCount = 0;
+    globalThis.fetch = (() => {
+      fetchCount++;
+      const commit = fetchCount === 1 ? firstCommit : newerCommit;
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: [commit], hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    expect(status.hidden).toBe(true);
+
+    refreshButton.click();
+
+    await waitFor(() => status.textContent === "更新: bbb2222 が最新です");
+    expect(fetchCount).toBe(2);
+    const rows = list.querySelectorAll(".history-item");
+    expect(rows.map((row) => row.dataset.sha)).toEqual([
+      HISTORY_WORKTREE_COMMIT,
+      newerCommit.sha,
+    ]);
+    expect(rows[0].classList.contains("history-item-fresh")).toBe(false);
+    expect(rows[1].classList.contains("history-item-fresh")).toBe(true);
   });
 
   test("notePossibleUpdate flags the refresh button, and refreshing clears it", async () => {

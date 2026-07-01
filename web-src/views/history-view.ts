@@ -28,6 +28,9 @@ export type HistoryText = {
   refreshLabelPending: string;
   refreshTitle: string;
   refreshTitlePending: string;
+  refreshResultUpdated: (sha: string) => string;
+  refreshResultUnchanged: string;
+  refreshResultUnchangedInView: string;
 };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
@@ -39,6 +42,9 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshLabelPending: "Update",
     refreshTitle: "Refresh commit history",
     refreshTitlePending: "History may have changed. Refresh",
+    refreshResultUpdated: (sha) => `Updated: ${sha} is now latest`,
+    refreshResultUnchanged: "No new commits",
+    refreshResultUnchangedInView: "No new commits in this view",
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
@@ -48,6 +54,9 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshLabelPending: "更新あり",
     refreshTitle: "コミット履歴を更新",
     refreshTitlePending: "新しい履歴がある可能性があります。更新",
+    refreshResultUpdated: (sha) => `更新: ${sha} が最新です`,
+    refreshResultUnchanged: "新しいコミットはありません",
+    refreshResultUnchangedInView: "この表示では新しいコミットはありません",
   },
 };
 
@@ -319,6 +328,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let mode: "history" | "file" = "history";
   let routeRef = "HEAD";
   let pathFilter = "";
+  let refreshStatusText = "";
+  let freshSha = "";
 
   type HistoryScope = {
     mode: "history" | "file";
@@ -364,6 +375,32 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function setStatusText(message: string) {
     statusEl.textContent = message;
     statusEl.hidden = !message;
+  }
+
+  function latestCommitSha(): string {
+    return (
+      commits.find((commit) => commit.sha !== HISTORY_WORKTREE_COMMIT)?.sha ||
+      ""
+    );
+  }
+
+  function clearRefreshResult() {
+    refreshStatusText = "";
+    freshSha = "";
+  }
+
+  function setRefreshResult(previousTopSha: string, nextTopSha: string) {
+    const text = historyText(deps.getLanguage());
+    freshSha =
+      previousTopSha && nextTopSha && previousTopSha !== nextTopSha
+        ? nextTopSha
+        : "";
+    refreshStatusText = freshSha
+      ? text.refreshResultUpdated(nextTopSha.slice(0, 7))
+      : query || pathFilter
+        ? text.refreshResultUnchangedInView
+        : text.refreshResultUnchanged;
+    renderList();
   }
 
   function commitInfoElement(): HTMLElement | null {
@@ -443,8 +480,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function commitRow(commit: HistoryCommit): string {
     const active = commit.sha === selectedSha ? " active" : "";
+    const fresh = commit.sha === freshSha ? " history-item-fresh" : "";
     return (
-      `<li class="history-item${active}" data-sha="${deps.escapeHtml(commit.sha)}">` +
+      `<li class="history-item${active}${fresh}" data-sha="${deps.escapeHtml(commit.sha)}">` +
       `<span class="subject" title="${deps.escapeHtml(commit.subject)}">${deps.escapeHtml(commit.subject)}</span>` +
       `<span class="meta2">` +
       `<span class="sha">${deps.escapeHtml(commit.sha.slice(0, 7))}</span>` +
@@ -488,7 +526,11 @@ export function createHistoryView(deps: HistoryViewDeps) {
       html.push(commitRow(commit));
     }
     list.innerHTML = html.join("");
-    setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
+    setStatusText(
+      loading
+        ? "loading..."
+        : refreshStatusText || (commits.length ? "" : "no commits"),
+    );
   }
 
   function syncRefreshButton(button?: HTMLButtonElement | null) {
@@ -838,6 +880,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
       selectedSha = "";
       setBanner("");
       hasPendingUpdate = false;
+      clearRefreshResult();
       await updateCommitInfo(null);
       renderList();
       await loadNextPage();
@@ -917,6 +960,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     query = value;
     generation++;
     selectionGeneration++;
+    clearRefreshResult();
     commits = [];
     hasMore = false;
     loading = false;
@@ -962,12 +1006,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
   async function handleRefreshClick() {
     const button = attachedRefreshButton;
     if (button?.disabled) return;
+    const previousTopSha = latestCommitSha();
     if (button) {
       button.disabled = true;
       button.classList.add("spinning");
     }
     try {
       await enterHistory({ mount: activeMount, force: true });
+      setRefreshResult(previousTopSha, latestCommitSha());
     } finally {
       if (button) {
         button.classList.remove("spinning");

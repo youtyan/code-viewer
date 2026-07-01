@@ -1402,6 +1402,10 @@ body.gdp-history-page #topbar .ref-pickers {
   background: var(--bg-mute);
   border-left-color: var(--accent);
 }
+.history-item-fresh {
+  background: color-mix(in srgb, var(--accent-subtle) 55%, transparent);
+  border-left-color: var(--accent);
+}
 .history-item-worktree {
   background: color-mix(in srgb, var(--bg-soft) 72%, var(--bg-mute));
   color: var(--fg-muted);
