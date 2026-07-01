@@ -1140,6 +1140,29 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
       };
+      diff: {
+        files: (count: number) => string;
+        updated: (time: string) => string;
+        updatedTitle: string;
+        kindAdded: string;
+        kindDeleted: string;
+        kindRenamed: string;
+        kindHeavy: string;
+        kindBinary: string;
+        kindMedia: string;
+        viewedProgress: (viewed: number, total: number) => string;
+        viewedProgressTitle: string;
+        nextUnviewed: string;
+        nextUnviewedTitle: string;
+        allViewed: string;
+        allViewedTitle: string;
+        noChangesTitle: string;
+        noChangesBody: string;
+        emptyDiffTitle: string;
+        emptyDiffBody: string;
+        noCommitSelectedTitle: string;
+        noCommitSelectedBody: string;
+      };
       changeBanner: {
         text: string;
         reload: string;
@@ -1293,6 +1316,30 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdate: "auto",
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
+      },
+      diff: {
+        files: (count) => `${count} file${count === 1 ? "" : "s"}`,
+        updated: (time) => `updated ${time}`,
+        updatedTitle: "last updated",
+        kindAdded: "added",
+        kindDeleted: "deleted",
+        kindRenamed: "renamed",
+        kindHeavy: "heavy",
+        kindBinary: "binary",
+        kindMedia: "media",
+        viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
+        viewedProgressTitle: "review progress",
+        nextUnviewed: "next unviewed",
+        nextUnviewedTitle: "Jump to the next unviewed file (n)",
+        allViewed: "all viewed",
+        allViewedTitle: "All visible files are viewed",
+        noChangesTitle: "No changes",
+        noChangesBody: "The working tree is clean against this ref.",
+        emptyDiffTitle: "Empty diff",
+        emptyDiffBody: "This commit has no changes against its first parent.",
+        noCommitSelectedTitle: "No commit selected",
+        noCommitSelectedBody:
+          "Select a commit from the list to see its changes.",
       },
       changeBanner: {
         text: "Files changed",
@@ -1458,6 +1505,29 @@ window.GdpExpandLogic = GdpExpandLogic;
         autoUpdate: "自動",
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
+      },
+      diff: {
+        files: (count) => `${count}ファイル`,
+        updated: (time) => `更新 ${time}`,
+        updatedTitle: "最終更新",
+        kindAdded: "追加",
+        kindDeleted: "削除",
+        kindRenamed: "名前変更",
+        kindHeavy: "大容量",
+        kindBinary: "バイナリ",
+        kindMedia: "メディア",
+        viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
+        viewedProgressTitle: "確認進捗",
+        nextUnviewed: "次の未確認",
+        nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
+        allViewed: "すべて確認済み",
+        allViewedTitle: "表示中のファイルはすべて確認済みです",
+        noChangesTitle: "変更はありません",
+        noChangesBody: "この参照との差分はありません。",
+        emptyDiffTitle: "空の差分",
+        emptyDiffBody: "このコミットは最初の親との差分がありません。",
+        noCommitSelectedTitle: "コミット未選択",
+        noCommitSelectedBody: "一覧からコミットを選ぶと変更内容を表示します。",
       },
       changeBanner: {
         text: "ファイルに変更がありました",
@@ -2433,6 +2503,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         setPreferredSourceTab: (tab) => SOURCE_VIEW.setPreferredSourceTab(tab),
         createFileBreadcrumb: (path, ref) =>
           DIFF_VIEW.createFileBreadcrumb(path, ref),
+        emptyText: () => uiText().diff,
       },
       historyRoute,
     );
@@ -2891,6 +2962,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       SERVER_GENERATION = generation;
     },
     invalidateRepoSidebar,
+    diffText: () => uiText().diff,
     getDiffRoot: () => activeFileHistoryDiffHost || $("#diff"),
     getEmptyPane: () => activeFileHistoryEmptyHost || $("#empty"),
     isEmbeddedDiffMode: () => !!activeFileHistoryDiffHost,
@@ -3666,13 +3738,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       if (empty) {
         const onHistory =
           STATE.route.screen === "history" || isFileHistoryRoute(STATE.route);
+        const text = uiText().diff;
         const h2 = empty.querySelector("h2");
-        if (h2) h2.textContent = onHistory ? "Empty diff" : "No changes";
+        if (h2)
+          h2.textContent = onHistory
+            ? text.emptyDiffTitle
+            : text.noChangesTitle;
         const p = empty.querySelector("p");
         if (p)
-          p.textContent = onHistory
-            ? "This commit has no changes against its first parent."
-            : "The working tree is clean against this ref.";
+          p.textContent = onHistory ? text.emptyDiffBody : text.noChangesBody;
       }
     }
     const routeAtRequest = STATE.route;
@@ -3798,11 +3872,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         DIFF_VIEW.clearLoadQueue();
         if (activeFileHistoryEmptyHost) {
           activeFileHistoryEmptyHost.classList.remove("hidden");
+          const text = uiText().diff;
           const h2 = activeFileHistoryEmptyHost.querySelector("h2");
-          if (h2) h2.textContent = "No commit selected";
+          if (h2) h2.textContent = text.noCommitSelectedTitle;
           const p = activeFileHistoryEmptyHost.querySelector("p");
-          if (p)
-            p.textContent = "Select a commit from the list to see its changes.";
+          if (p) p.textContent = text.noCommitSelectedBody;
         }
         setStatus("live");
         return;
@@ -3822,6 +3896,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         clearLoadQueue: () => DIFF_VIEW.clearLoadQueue(),
         placeSidebarToggle,
         setStatus,
+        emptyText: () => uiText().diff,
       });
     },
     getSyntaxHighlight: () => STATE.syntaxHighlight,

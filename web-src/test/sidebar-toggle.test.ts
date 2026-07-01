@@ -380,6 +380,11 @@ describe("sidebar toggle placement", () => {
       setStatus() {
         /* noop */
       },
+      emptyText: () => ({
+        noCommitSelectedTitle: "No commit selected",
+        noCommitSelectedBody:
+          "Select a commit from the list to see its changes.",
+      }),
     });
 
     const toggle = document.querySelector<HTMLElement>("#sidebar-toggle");

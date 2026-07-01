@@ -65,11 +65,30 @@ export type DiffViewDeps = {
   getServerGeneration(): number;
   setServerGeneration(generation: number): void;
   invalidateRepoSidebar(): void;
+  diffText(): DiffViewText;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   $$: <T extends Element = HTMLElement>(sel: string) => T[];
   getDiffRoot?(): HTMLElement;
   getEmptyPane?(): HTMLElement;
   isEmbeddedDiffMode?(): boolean;
+};
+
+export type DiffViewText = {
+  files(count: number): string;
+  updated(time: string): string;
+  updatedTitle: string;
+  kindAdded: string;
+  kindDeleted: string;
+  kindRenamed: string;
+  kindHeavy: string;
+  kindBinary: string;
+  kindMedia: string;
+  viewedProgress(viewed: number, total: number): string;
+  viewedProgressTitle: string;
+  nextUnviewed: string;
+  nextUnviewedTitle: string;
+  allViewed: string;
+  allViewedTitle: string;
 };
 
 type LoadQueueItem = {
@@ -146,6 +165,7 @@ export function createDiffView(deps: DiffViewDeps) {
     getServerGeneration,
     setServerGeneration,
     invalidateRepoSidebar,
+    diffText,
     getDiffRoot,
     getEmptyPane,
     isEmbeddedDiffMode,
@@ -252,7 +272,7 @@ export function createDiffView(deps: DiffViewDeps) {
     viewed: number,
     total: number,
   ) {
-    chip.textContent = `${viewed}/${total} viewed`;
+    chip.textContent = diffText().viewedProgress(viewed, total);
     chip.classList.toggle("chip-viewed-empty", viewed === 0);
     chip.classList.toggle("chip-viewed-partial", viewed > 0 && viewed < total);
     chip.classList.toggle("chip-viewed-done", total > 0 && viewed === total);
@@ -272,11 +292,10 @@ export function createDiffView(deps: DiffViewDeps) {
     button: HTMLButtonElement,
     hasUnviewed: boolean,
   ) {
+    const text = diffText();
     button.disabled = !hasUnviewed;
-    button.textContent = hasUnviewed ? "next unviewed" : "all viewed";
-    button.title = hasUnviewed
-      ? "Jump to the next unviewed file (n)"
-      : "All visible files are viewed";
+    button.textContent = hasUnviewed ? text.nextUnviewed : text.allViewed;
+    button.title = hasUnviewed ? text.nextUnviewedTitle : text.allViewedTitle;
   }
 
   function syncNextUnviewedButton() {
@@ -341,10 +360,11 @@ export function createDiffView(deps: DiffViewDeps) {
     setProjectBranch(meta.branch || "");
     metaFilesForViewedProgress = meta.files || [];
     el.innerHTML = "";
+    const text = diffText();
     if (meta.totals) {
       const files = document.createElement("span");
       files.className = "chip chip-files";
-      files.textContent = `${meta.totals.files} file${meta.totals.files === 1 ? "" : "s"}`;
+      files.textContent = text.files(meta.totals.files);
       el.appendChild(files);
       const add = document.createElement("span");
       add.className = "chip chip-add";
@@ -363,17 +383,17 @@ export function createDiffView(deps: DiffViewDeps) {
       chip.textContent = `${count} ${label}`;
       el.appendChild(chip);
     };
-    kindChip("chip-added", "added", kinds.added);
-    kindChip("chip-deleted", "deleted", kinds.deleted);
-    kindChip("chip-renamed", "renamed", kinds.renamed);
-    kindChip("chip-heavy", "heavy", kinds.heavy);
-    kindChip("chip-binary", "binary", kinds.binary);
-    kindChip("chip-media", "media", kinds.media);
+    kindChip("chip-added", text.kindAdded, kinds.added);
+    kindChip("chip-deleted", text.kindDeleted, kinds.deleted);
+    kindChip("chip-renamed", text.kindRenamed, kinds.renamed);
+    kindChip("chip-heavy", text.kindHeavy, kinds.heavy);
+    kindChip("chip-binary", text.kindBinary, kinds.binary);
+    kindChip("chip-media", text.kindMedia, kinds.media);
     const viewedProgress = viewedProgressFor(metaFilesForViewedProgress);
     if (viewedProgress.total > 0) {
       const viewed = document.createElement("span");
       viewed.className = "chip chip-viewed";
-      viewed.title = "review progress";
+      viewed.title = text.viewedProgressTitle;
       applyViewedProgressChipState(
         viewed,
         viewedProgress.viewed,
@@ -398,8 +418,10 @@ export function createDiffView(deps: DiffViewDeps) {
     }
     const u = document.createElement("span");
     u.className = "chip chip-updated";
-    u.title = "last updated";
-    u.textContent = `updated ${new Date().toLocaleTimeString([], { hour12: false })}`;
+    u.title = text.updatedTitle;
+    u.textContent = text.updated(
+      new Date().toLocaleTimeString([], { hour12: false }),
+    );
     el.appendChild(u);
   }
 

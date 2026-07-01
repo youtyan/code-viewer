@@ -12,6 +12,7 @@ import type { DiffCardElement, DiffMeta, FileMeta } from "../core/types";
 import {
   createDiffView,
   type DiffViewDeps,
+  type DiffViewText,
   isDiffShellDomIntact,
   shouldRenderDiffSidebar,
 } from "../views/diff-view";
@@ -81,7 +82,25 @@ function makeMeta(files: FileMeta[]): DiffMeta {
   return makeDiffMeta(files, { generation: 1 });
 }
 
-function createDiffViewForShellTest() {
+const defaultDiffText: DiffViewText = {
+  files: (count) => `${count} file${count === 1 ? "" : "s"}`,
+  updated: (time) => `updated ${time}`,
+  updatedTitle: "last updated",
+  kindAdded: "added",
+  kindDeleted: "deleted",
+  kindRenamed: "renamed",
+  kindHeavy: "heavy",
+  kindBinary: "binary",
+  kindMedia: "media",
+  viewedProgress: (viewed, total) => `${viewed}/${total} viewed`,
+  viewedProgressTitle: "review progress",
+  nextUnviewed: "next unviewed",
+  nextUnviewedTitle: "Jump to the next unviewed file (n)",
+  allViewed: "all viewed",
+  allViewedTitle: "All visible files are viewed",
+};
+
+function createDiffViewForShellTest(text: DiffViewText = defaultDiffText) {
   const route: AppRoute = {
     screen: "diff",
     range: { from: "base", to: "head" },
@@ -159,6 +178,7 @@ function createDiffViewForShellTest() {
     invalidateRepoSidebar() {
       /* noop */
     },
+    diffText: () => text,
     $: <T extends Element = HTMLElement>(sel: string): T => {
       const found = document.querySelector<T>(sel);
       if (!found) throw new Error(`missing ${sel}`);
@@ -579,6 +599,70 @@ describe("diff view meta stat strip", () => {
 
     expect(document.querySelector("#meta .chip-files")?.textContent).toBe(
       "1 file",
+    );
+  });
+
+  test("renders the diff meta strip with injected labels", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest({
+      ...defaultDiffText,
+      files: (count) => `${count}ファイル`,
+      updated: (time) => `更新 ${time}`,
+      updatedTitle: "最終更新",
+      kindAdded: "追加",
+      kindDeleted: "削除",
+      kindRenamed: "名前変更",
+      kindHeavy: "大容量",
+      kindBinary: "バイナリ",
+      kindMedia: "メディア",
+      viewedProgress: (viewed, total) => `${viewed}/${total} 確認済み`,
+      viewedProgressTitle: "確認進捗",
+      nextUnviewed: "次の未確認",
+      nextUnviewedTitle: "次の未確認ファイルへ移動 (n)",
+    });
+
+    view.renderMeta(
+      makeMeta([
+        makeFile("new.ts", 2, 0, "/new", undefined, { status: "A" }),
+        makeFile("old.ts", 0, 1, "/old", undefined, { status: "D" }),
+        makeFile("moved.ts", 1, 1, "/moved", undefined, { status: "R" }),
+        makeFile("huge.ts", 1, 1, "/huge", undefined, {
+          size_class: "huge",
+        }),
+        makeFile("archive.zip", 0, 0, "/zip", undefined, {
+          size_class: "binary",
+        }),
+        makeFile("logo.png", 0, 0, "/png", undefined, {
+          media_kind: "image",
+        }),
+      ]),
+    );
+
+    const meta = document.querySelector("#meta");
+    expect(meta?.querySelector(".chip-files")?.textContent).toBe("6ファイル");
+    expect(meta?.querySelector(".chip-added")?.textContent).toBe("1 追加");
+    expect(meta?.querySelector(".chip-deleted")?.textContent).toBe("1 削除");
+    expect(meta?.querySelector(".chip-renamed")?.textContent).toBe(
+      "1 名前変更",
+    );
+    expect(meta?.querySelector(".chip-heavy")?.textContent).toBe("1 大容量");
+    expect(meta?.querySelector(".chip-binary")?.textContent).toBe("1 バイナリ");
+    expect(meta?.querySelector(".chip-media")?.textContent).toBe("1 メディア");
+    expect(meta?.querySelector(".chip-viewed")?.textContent).toBe(
+      "0/6 確認済み",
+    );
+    expect(meta?.querySelector(".chip-viewed")?.getAttribute("title")).toBe(
+      "確認進捗",
+    );
+    expect(meta?.querySelector(".chip-next-unviewed")?.textContent).toBe(
+      "次の未確認",
+    );
+    expect(
+      meta?.querySelector(".chip-next-unviewed")?.getAttribute("title"),
+    ).toBe("次の未確認ファイルへ移動 (n)");
+    expect(meta?.querySelector(".chip-updated")?.textContent).toMatch(/^更新 /);
+    expect(meta?.querySelector(".chip-updated")?.getAttribute("title")).toBe(
+      "最終更新",
     );
   });
 

@@ -11,6 +11,12 @@ export type EmptyDiffPaneDeps = {
   clearLoadQueue(): void;
   placeSidebarToggle(): void;
   setStatus(status: "live"): void;
+  emptyText(): EmptyDiffPaneText;
+};
+
+export type EmptyDiffPaneText = {
+  noCommitSelectedTitle: string;
+  noCommitSelectedBody: string;
 };
 
 export function showEmptyHistoryDiffPane(deps: EmptyDiffPaneDeps) {
@@ -24,10 +30,11 @@ export function showEmptyHistoryDiffPane(deps: EmptyDiffPaneDeps) {
   deps.clearLoadQueue();
   if (deps.empty) {
     deps.empty.classList.remove("hidden");
+    const text = deps.emptyText();
     const h2 = deps.empty.querySelector("h2");
-    if (h2) h2.textContent = "No commit selected";
+    if (h2) h2.textContent = text.noCommitSelectedTitle;
     const p = deps.empty.querySelector("p");
-    if (p) p.textContent = "Select a commit from the list to see its changes.";
+    if (p) p.textContent = text.noCommitSelectedBody;
   }
   deps.setStatus("live");
 }
