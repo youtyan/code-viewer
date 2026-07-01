@@ -112,4 +112,72 @@ describe("database table list", () => {
     expect(selected).toEqual([]);
     expect(copy?.classList.contains("copied")).toBe(true);
   });
+
+  test("clears the table filter from the input button and empty state", () => {
+    const selected: string[] = [];
+    const view = createTableList({
+      onSelectTable: (table) => selected.push(table),
+    });
+    document.body.appendChild(view.el);
+
+    view.render([
+      { name: "sample_users", type: "table", rowCount: 2 },
+      { name: "audit_logs", type: "table", rowCount: 5 },
+    ]);
+
+    const input = view.el.querySelector<HTMLInputElement>(".db-table-filter");
+    const clear = view.el.querySelector<HTMLButtonElement>(
+      ".db-table-filter-clear",
+    );
+    if (!input || !clear) throw new Error("missing table filter controls");
+
+    expect(clear.hidden).toBe(true);
+
+    input.value = "users";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(clear.hidden).toBe(false);
+    expect(view.el.querySelectorAll(".db-table-node")).toHaveLength(1);
+    expect(view.el.textContent || "").toMatch(/sample_users/);
+    expect((view.el.textContent || "").includes("audit_logs")).toBe(false);
+
+    clear.click();
+    expect(input.value).toBe("");
+    expect(clear.hidden).toBe(true);
+    expect(view.el.querySelectorAll(".db-table-node")).toHaveLength(2);
+    expect(document.activeElement).toBe(input);
+
+    view.el.querySelector<HTMLElement>(".db-table-item")?.click();
+    view.setActive("sample_users");
+    view.el
+      .querySelector<HTMLElement>(".db-table-arrow")
+      ?.dispatchEvent(new Event("click", { bubbles: true }));
+
+    input.value = "missing";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(view.el.querySelector(".db-table-list-empty")?.textContent).toMatch(
+      /No matching tables/,
+    );
+    const emptyClear = view.el.querySelector<HTMLButtonElement>(
+      ".db-table-list-empty-actions button",
+    );
+    expect(emptyClear?.textContent).toBe("Clear filter");
+    expect(emptyClear?.getAttribute("aria-label")).toBe("Clear table filter");
+
+    emptyClear?.click();
+
+    expect(input.value).toBe("");
+    expect(clear.hidden).toBe(true);
+    expect(view.el.querySelector(".db-table-list-empty")).toBeNull();
+    expect(view.el.querySelectorAll(".db-table-node")).toHaveLength(2);
+    expect(
+      view.el
+        .querySelector<HTMLElement>(".db-table-item")
+        ?.classList.contains("active"),
+    ).toBe(true);
+    expect(
+      view.el.querySelector<HTMLElement>(".db-table-children")?.hidden,
+    ).toBe(false);
+    expect(selected).toEqual(["sample_users"]);
+  });
 });

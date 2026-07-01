@@ -1,5 +1,5 @@
 import type { DbColumn, DbTableInfo } from "../../core/database/types";
-import { COPY_16_PATHS, iconSvg } from "../../core/icons";
+import { COPY_16_PATHS, iconSvg, X_16_PATH } from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 
 export type TableListCallbacks = {
@@ -32,7 +32,14 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
   filterInput.className = "db-table-filter";
   filterInput.type = "text";
   filterInput.placeholder = "Filter tables...";
-  filterWrap.appendChild(filterInput);
+  const filterClear = document.createElement("button");
+  filterClear.className = "db-table-filter-clear";
+  filterClear.type = "button";
+  filterClear.title = "Clear table filter";
+  filterClear.setAttribute("aria-label", "Clear table filter");
+  filterClear.innerHTML = iconSvg("octicon-x", X_16_PATH);
+  filterClear.hidden = true;
+  filterWrap.append(filterInput, filterClear);
 
   const el = document.createElement("div");
   el.className = "db-table-list";
@@ -219,8 +226,20 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     }
   }
 
+  function syncFilterClearButton(): void {
+    filterClear.hidden = filterInput.value.length === 0;
+  }
+
+  function clearFilter(): void {
+    if (!filterInput.value) return;
+    filterInput.value = "";
+    renderFiltered(allTables, "");
+    filterInput.focus();
+  }
+
   function renderFiltered(tables: DbTableInfo[], filter: string) {
     el.innerHTML = "";
+    syncFilterClearButton();
     const filtered = filter
       ? tables.filter((t) =>
           t.name.toLowerCase().includes(filter.toLowerCase()),
@@ -230,6 +249,19 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
       const empty = document.createElement("div");
       empty.className = "db-table-list-empty";
       empty.textContent = filter ? "No matching tables" : "No tables found";
+      if (filter) {
+        const actions = document.createElement("div");
+        actions.className = "db-pane-empty-actions db-table-list-empty-actions";
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "db-btn db-btn-sm";
+        clear.textContent = "Clear filter";
+        clear.title = "Clear table filter";
+        clear.setAttribute("aria-label", "Clear table filter");
+        clear.addEventListener("click", clearFilter);
+        actions.appendChild(clear);
+        empty.appendChild(actions);
+      }
       el.appendChild(empty);
       return;
     }
@@ -312,9 +344,12 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     renderFiltered(tables, "");
   }
 
-  filterInput.addEventListener("input", () => {
+  function handleFilterInput(): void {
     renderFiltered(allTables, filterInput.value);
-  });
+  }
+
+  filterInput.addEventListener("input", handleFilterInput);
+  filterClear.addEventListener("click", clearFilter);
 
   function setActive(table: string | null) {
     activeTable = table;
@@ -329,6 +364,8 @@ export function createTableList(callbacks: TableListCallbacks): TableList {
     expandedTables.clear();
     columnCache.clear();
     activeTable = null;
+    filterInput.removeEventListener("input", handleFilterInput);
+    filterClear.removeEventListener("click", clearFilter);
   }
 
   return { el: wrapper, render, setActive, dispose };
