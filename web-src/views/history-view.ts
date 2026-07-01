@@ -625,12 +625,15 @@ export function createHistoryView(deps: HistoryViewDeps) {
     const el = result ?? activeMount.refreshResult;
     if (!el) return;
     const message =
-      refreshStatus.type === "updated" || refreshStatus.type === "unchanged"
+      refreshStatus.type === "pending" ||
+      refreshStatus.type === "updated" ||
+      refreshStatus.type === "unchanged"
         ? refreshStatusMessage()
         : "";
     el.textContent = message;
     el.hidden = message.length === 0;
     el.classList.toggle("changed", refreshStatus.type === "updated");
+    el.classList.toggle("pending", refreshStatus.type === "pending");
   }
 
   function syncFilterClearButton(button?: HTMLButtonElement | null) {

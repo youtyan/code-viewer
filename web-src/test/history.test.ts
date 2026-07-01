@@ -1292,8 +1292,10 @@ describe("history view lifecycle", () => {
     ).toBe("更新あり");
     expect(status.hidden).toBe(false);
     expect(status.textContent).toBe("新しい履歴がある可能性があります");
-    expect(refreshResult.hidden).toBe(true);
-    expect(refreshResult.textContent).toBe("");
+    expect(refreshResult.hidden).toBe(false);
+    expect(refreshResult.textContent).toBe("新しい履歴がある可能性があります");
+    expect(refreshResult.classList.contains("pending")).toBe(true);
+    expect(refreshResult.classList.contains("changed")).toBe(false);
 
     refreshButton.click();
     await waitFor(() => fetchCount === 2);
@@ -1307,6 +1309,7 @@ describe("history view lifecycle", () => {
     expect(status.textContent).toBe("新しいコミットはありません");
     expect(refreshResult.hidden).toBe(false);
     expect(refreshResult.textContent).toBe("新しいコミットはありません");
+    expect(refreshResult.classList.contains("pending")).toBe(false);
   });
 
   test("notePossibleUpdate status takes priority over an empty commit list", async () => {

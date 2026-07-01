@@ -1303,6 +1303,10 @@ body.gdp-history-page #topbar .ref-pickers {
   white-space: nowrap;
   line-height: 1;
 }
+.history-refresh-result.pending {
+  color: var(--accent);
+  font-weight: 600;
+}
 .history-filter-wrap {
   position: relative;
   padding: 7px 12px 9px;
