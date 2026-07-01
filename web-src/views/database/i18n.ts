@@ -15,6 +15,8 @@ export type DbText = {
     schemaTab: string;
     selectDatastore: string;
     selectSchema: string;
+    refreshDatastores: string;
+    refreshDatastoresTitle: string;
     toolbar: string;
     query: string;
     queryTitle: string;
@@ -318,6 +320,8 @@ const EN: DbText = {
     schemaTab: "Schema",
     selectDatastore: "Select datastore",
     selectSchema: "Select PostgreSQL schema",
+    refreshDatastores: "Refresh datastores",
+    refreshDatastoresTitle: "Refresh the datastore list",
     toolbar: "Datastore tools",
     query: "Query",
     queryTitle: "Query Editor",
@@ -617,6 +621,8 @@ const JA: DbText = {
     schemaTab: "スキーマ",
     selectDatastore: "データストアを選択",
     selectSchema: "PostgreSQL スキーマを選択",
+    refreshDatastores: "データストアを更新",
+    refreshDatastoresTitle: "データストア一覧を更新",
     toolbar: "データストアツール",
     query: "クエリ",
     queryTitle: "クエリエディタ",

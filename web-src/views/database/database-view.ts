@@ -15,6 +15,7 @@ import type {
   TabsResponse,
   TabsState,
 } from "../../core/database/types";
+import { SYNC_16_PATH } from "../../core/icons";
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
@@ -74,6 +75,7 @@ type DatabasePaneDeps = DatabaseViewDeps & {
   ): void;
   onDbUiPrefChange(listener: (state: DbUiState) => void): () => void;
   loadSqlHistory(dbId: string | null, schema: string | null): Promise<string[]>;
+  refreshDatastores(): Promise<void>;
   // セッション限定ログ。全 tabPane が同じインスタンスを共有し、フッターの
   // 「ログ」タブに集約表示される。SQL 実行 / 編集コミットの成否を push する。
   sessionLog: SessionLogStore;
@@ -93,6 +95,7 @@ export type DatabaseView = {
   handleSse: (event?: string, data?: string) => void;
   /** 言語切替時に DB ビューア配下の文言を再適用する。 */
   localize: () => void;
+  refresh: () => Promise<void>;
   // ビューア設定パネルなど外部から db-ui pref を読み書きするための公開 API。
   // ensureDbUiState はバックグラウンドで保証されている前提 (DatabaseView が
   // mount された後に呼ばれる)。
@@ -352,9 +355,23 @@ function createTabPane(
     schemaSelect.title = paneText().nav.selectSchema;
   });
 
+  const dbRefreshBtn = makeIconButton({
+    label: paneText().nav.refreshDatastores,
+    title: paneText().nav.refreshDatastoresTitle,
+    pathD: SYNC_16_PATH,
+    onClick: () => {
+      void refreshDatastoreList();
+    },
+  });
+  dbRefreshBtn.classList.add("db-refresh-btn");
+
+  const dbSelectRow = document.createElement("div");
+  dbSelectRow.className = "db-select-row";
+  dbSelectRow.append(dbSelect, dbRefreshBtn);
+
   const dbToolbar = document.createElement("div");
   dbToolbar.className = "db-toolbar";
-  dbToolbar.append(dbSelect, schemaSelect);
+  dbToolbar.append(dbSelectRow, schemaSelect);
 
   const tabBar = document.createElement("div");
   tabBar.className = "db-tab-bar";
@@ -466,6 +483,11 @@ function createTabPane(
   });
   reloc(() => {
     const t = paneText().nav;
+    localizeIconButton(
+      dbRefreshBtn,
+      t.refreshDatastores,
+      t.refreshDatastoresTitle,
+    );
     localizeIconButton(queryBtn, t.query, t.queryTitle);
     localizeIconButton(erBtn, t.er, t.erTitle);
     localizeIconButton(searchBtn, t.search, t.searchTitle);
@@ -1574,6 +1596,18 @@ function createTabPane(
   schemaSelect.addEventListener("change", () => {
     void handleSchemaSelectChange();
   });
+
+  async function refreshDatastoreList(): Promise<void> {
+    if (dbRefreshBtn.disabled) return;
+    dbRefreshBtn.disabled = true;
+    dbRefreshBtn.classList.add("spinning");
+    try {
+      await outerDeps.refreshDatastores();
+    } finally {
+      dbRefreshBtn.classList.remove("spinning");
+      dbRefreshBtn.disabled = false;
+    }
+  }
 
   async function handleSchemaSelectChange(): Promise<void> {
     if (!currentDbInfo || !isPostgresKind(currentDbInfo.kind)) return;
@@ -2699,6 +2733,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
         setDbUiPref,
         onDbUiPrefChange,
         loadSqlHistory,
+        refreshDatastores,
         sessionLog,
       },
       {
@@ -3075,6 +3110,38 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     await enterQueue;
   }
 
+  async function refreshDatastores(): Promise<void> {
+    const seq = lifecycleSeq;
+    enterQueue = enterQueue
+      .catch(() => undefined)
+      .then(() => doRefreshDatastores(seq));
+    await enterQueue;
+  }
+
+  async function doRefreshDatastores(seq: number): Promise<void> {
+    if (seq !== lifecycleSeq) return;
+    dbFilesCache = null;
+    if (!mounted || !activeTabId) return;
+    const id = activeTabId;
+    const entry = tabsById.get(id);
+    if (!entry) return;
+    const pendingInitialEnter = ensureInitialEnter(id);
+    if (pendingInitialEnter) await pendingInitialEnter;
+    if (!mounted || activeTabId !== id) return;
+    const state = entry.pane.getState();
+    await entry.pane.enter(
+      state.dbId ?? undefined,
+      state.schema ?? undefined,
+      state.table ?? undefined,
+      state.view,
+      { autoSelectFirst: state.dbId !== null },
+    );
+    if (!mounted || activeTabId !== id) return;
+    refreshChipLabel(id);
+    syncActiveRoute();
+    scheduleSave();
+  }
+
   function leave(): void {
     if (!mounted) return;
     lifecycleSeq++;
@@ -3153,6 +3220,7 @@ export function createDatabaseView(deps: DatabaseViewDeps): DatabaseView {
     leave,
     handleSse,
     localize,
+    refresh: refreshDatastores,
     getDbUiPref,
     setDbUiPref,
     onDbUiPrefChange,

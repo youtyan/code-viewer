@@ -1215,6 +1215,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         title: string;
         filter: string;
         filterTitle: string;
+        refreshTitle: string;
       };
       settings: {
         title: string;
@@ -1398,6 +1399,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         filter: "Filter commits...",
         filterTitle:
           "Filter commits by message, SHA, author:name, or path:file.",
+        refreshTitle: "Refresh commit history",
       },
       settings: {
         title: "Viewer Settings",
@@ -1586,6 +1588,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         filter: "コミットを絞り込み...",
         filterTitle:
           "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。",
+        refreshTitle: "コミット履歴を更新",
       },
       settings: {
         title: "ビューア設定",
@@ -1810,6 +1813,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       historyFilter.placeholder = text.history.filter;
       historyFilter.title = text.history.filterTitle;
     }
+    document
+      .querySelectorAll<HTMLButtonElement>(".history-refresh")
+      .forEach((button) => {
+        button.title = text.history.refreshTitle;
+        button.setAttribute("aria-label", text.history.refreshTitle);
+      });
 
     setElementText(".scope-settings-head strong", text.settings.title);
     const settingsClose = document.querySelector<HTMLButtonElement>(

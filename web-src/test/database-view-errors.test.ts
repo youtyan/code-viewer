@@ -550,6 +550,40 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  test("datastore refresh button bypasses the file list cache", async () => {
+    installDatabaseDom();
+    let filesFetches = 0;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") {
+        filesFetches++;
+        return jsonResponse(baseFilesResponse());
+      }
+      if (url.startsWith("/_db/schema"))
+        return jsonResponse(baseSchemaResponse());
+      if (url.startsWith("/_db/table"))
+        return jsonResponse(baseTableResponse());
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db");
+
+    const refresh = document.querySelector(
+      ".db-refresh-btn",
+    ) as unknown as FakeElement;
+    expect(refresh).toBeTruthy();
+    expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
+    await refresh.click();
+    await waitUntil(() => filesFetches === 2);
+
+    expect(filesFetches).toBe(2);
+    expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
+    await leaveView(view);
+  });
+
   test("removes the database root from the document when suspended", async () => {
     installDatabaseDom();
     mockFetch((url, init) => {

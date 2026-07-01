@@ -1235,6 +1235,40 @@ body.gdp-history-page #topbar .ref-pickers {
   flex: 1 1 auto;
   min-width: 0;
 }
+.history-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.history-refresh:hover {
+  background: var(--bg);
+  color: var(--fg);
+}
+.history-refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.history-refresh[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.history-refresh.spinning {
+  animation: gdp-spin 0.7s linear infinite;
+}
+.history-refresh svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
 .history-filter-wrap {
   position: relative;
   padding: 7px 12px 9px;
@@ -6397,6 +6431,26 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
+}
+.db-select-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.db-select-row .db-file-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.db-refresh-btn {
+  flex: 0 0 auto;
+}
+.db-refresh-btn[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.db-refresh-btn.spinning {
+  animation: gdp-spin 0.7s linear infinite;
 }
 
 /* explorer (redis/es/s3) の第1階層セレクタ (Databases / Indices / Bucket+View)

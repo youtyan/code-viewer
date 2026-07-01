@@ -10,6 +10,7 @@ import {
   historyGroupLabel,
   shouldContinueAutoLoad,
 } from "../core/history";
+import { iconSvg, SYNC_16_PATH } from "../core/icons";
 import { isImeComposing } from "../core/keyboard";
 import { renderMarkdownPreview } from "../core/markdown-preview";
 import type { AppRoute } from "../core/routes";
@@ -23,6 +24,7 @@ export type HistoryText = {
   worktreeLabel: string;
   bodyExpandClose: string;
   bodyExpandMore: (remainingLines: number) => string;
+  refreshTitle: string;
 };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
@@ -30,11 +32,13 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     worktreeLabel: "Uncommitted changes (Working tree)",
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
+    refreshTitle: "Refresh commit history",
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
+    refreshTitle: "コミット履歴を更新",
   },
 };
 
@@ -70,6 +74,7 @@ export type HistoryViewMount = {
   status: HTMLElement;
   sentinel: HTMLElement;
   filterInput?: HTMLInputElement | null;
+  refreshButton?: HTMLButtonElement | null;
   commitInfo?: HTMLElement | null;
 };
 
@@ -97,6 +102,14 @@ export function buildHistoryPanelDom(
   title.className = "history-title";
   title.textContent = "Commits";
   panelHead.appendChild(title);
+
+  const refreshButton = document.createElement("button");
+  refreshButton.type = "button";
+  refreshButton.className = "history-refresh";
+  refreshButton.title = HISTORY_TEXT.en.refreshTitle;
+  refreshButton.setAttribute("aria-label", HISTORY_TEXT.en.refreshTitle);
+  refreshButton.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+
   if (page) {
     const refMount = document.createElement("span");
     refMount.dataset.refSelectorMount = "";
@@ -105,6 +118,7 @@ export function buildHistoryPanelDom(
     refMount.dataset.title = "history ref";
     panelHead.appendChild(refMount);
   }
+  panelHead.appendChild(refreshButton);
 
   const filterWrap = document.createElement("div");
   filterWrap.className = "history-filter-wrap";
@@ -140,7 +154,15 @@ export function buildHistoryPanelDom(
   status.setAttribute("role", "status");
 
   panel.append(panelHead, filterWrap, banner, list, sentinel, status);
-  return { panel, list, banner, status, sentinel, filterInput };
+  return {
+    panel,
+    list,
+    banner,
+    status,
+    sentinel,
+    filterInput,
+    refreshButton,
+  };
 }
 
 export type HistoryCommitInfoDomOptions = {
@@ -252,6 +274,8 @@ export function createHistoryView(deps: HistoryViewDeps) {
     status: deps.$<HTMLElement>("#history-status"),
     sentinel: deps.$<HTMLElement>("#history-sentinel"),
     filterInput: document.querySelector<HTMLInputElement>("#history-filter"),
+    refreshButton:
+      document.querySelector<HTMLButtonElement>(".history-refresh"),
     commitInfo: document.querySelector<HTMLElement>("#history-commit-info"),
   };
   let activeMount = defaultMount;
@@ -262,8 +286,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let sentinel = defaultMount.sentinel;
   let attachedList: HTMLOListElement | null = null;
   let attachedFilterInput: HTMLInputElement | null = null;
+  let attachedRefreshButton: HTMLButtonElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: IntersectionObserver | null = null;
+  // Set when an SSE "update" event arrives while a history panel is on
+  // screen; cleared once the list actually refetches (button click or ref
+  // switch). Purely a visual hint — never triggers a fetch on its own, so it
+  // can't interact with the generation/trackLoad race-safety contract.
+  const hasPendingUpdate = false;
 
   let ref = "HEAD";
   let commits: HistoryCommit[] = [];
@@ -426,6 +456,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   }
 
   function renderList() {
+    syncRefreshButton(activeMount.refreshButton);
     const now = new Date();
     const html: string[] = mode === "history" ? [worktreeRow()] : [];
     let lastGroup = "";
@@ -445,6 +476,14 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
     list.innerHTML = html.join("");
     setStatusText(loading ? "loading..." : commits.length ? "" : "no commits");
+  }
+
+  function syncRefreshButton(button?: HTMLButtonElement | null) {
+    if (!button) return;
+    const title = historyText(deps.getLanguage()).refreshTitle;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.classList.toggle("has-update", hasPendingUpdate);
   }
 
   async function updateCommitInfo(commit: HistoryCommit | null) {
@@ -897,8 +936,28 @@ export function createHistoryView(deps: HistoryViewDeps) {
     }
   }
 
+  async function handleRefreshClick() {
+    const button = attachedRefreshButton;
+    if (button?.disabled) return;
+    if (button) {
+      button.disabled = true;
+      button.classList.add("spinning");
+    }
+    try {
+      await enterHistory({ mount: activeMount, force: true });
+    } finally {
+      if (button) {
+        button.classList.remove("spinning");
+        button.disabled = false;
+      }
+    }
+  }
+
   function activateMount(mount: HistoryViewMount) {
-    if (activeMount === mount && attachedList === mount.list) return;
+    if (activeMount === mount && attachedList === mount.list) {
+      syncRefreshButton(mount.refreshButton);
+      return;
+    }
     if (attachedList) {
       attachedList.removeEventListener("click", handleListClick);
       attachedList = null;
@@ -908,6 +967,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
       attachedFilterInput.removeEventListener("change", handleFilterInput);
       attachedFilterInput.removeEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = null;
+    }
+    if (attachedRefreshButton) {
+      attachedRefreshButton.removeEventListener("click", handleRefreshClick);
+      attachedRefreshButton = null;
     }
     if (filterTimer) {
       clearTimeout(filterTimer);
@@ -931,6 +994,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
       input.addEventListener("change", handleFilterInput);
       input.addEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = input;
+    }
+    const refreshButton = mount.refreshButton ?? null;
+    if (refreshButton) {
+      syncRefreshButton(refreshButton);
+      refreshButton.addEventListener("click", handleRefreshClick);
+      attachedRefreshButton = refreshButton;
     }
     observer = new IntersectionObserver(
       (entries) => {
@@ -968,6 +1037,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
     enterHistory,
     leaveHistory,
     onRefPicked,
+    localize: () => {
+      syncRefreshButton(activeMount.refreshButton);
+      renderList();
+    },
     isWorktreeSelected: () => selectedSha === HISTORY_WORKTREE_COMMIT,
   };
 }

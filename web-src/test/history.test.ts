@@ -46,6 +46,14 @@ class FakeClassList {
     return this.classes.has(name);
   }
 
+  add(...names: string[]) {
+    for (const name of names) this.classes.add(name);
+  }
+
+  remove(...names: string[]) {
+    for (const name of names) this.classes.delete(name);
+  }
+
   toggle(name: string, force?: boolean) {
     const next = force ?? !this.classes.has(name);
     if (!next) {
@@ -64,6 +72,7 @@ class FakeElement {
   textContent = "";
   private htmlValue = "";
   hidden = false;
+  disabled = false;
   type = "";
   dataset: Record<string, string> = {};
   attributes: Record<string, string> = {};
@@ -391,6 +400,7 @@ function installHistoryViewDom() {
   const banner = new FakeElement();
   const status = new FakeElement();
   const sentinel = new FakeElement();
+  const refreshButton = new FakeElement();
   const info = new FakeElement();
   const documentListeners: Record<string, Array<(event: unknown) => void>> = {};
   const head = new FakeElement();
@@ -406,12 +416,17 @@ function installHistoryViewDom() {
   date.className = "hci-date";
   subject.className = "hci-subject";
   body.className = "hci-body";
+  refreshButton.className = "history-refresh";
   head.append(sha, author, date);
   info.append(head, subject, body);
 
   globalThis.document = {
     querySelector: (selector: string) =>
-      selector === "#history-commit-info" ? info : null,
+      selector === "#history-commit-info"
+        ? info
+        : selector === ".history-refresh"
+          ? refreshButton
+          : null,
     createElement: () => new FakeElement(),
     addEventListener: (event: string, listener: (event: unknown) => void) => {
       documentListeners[event] = [
@@ -441,6 +456,7 @@ function installHistoryViewDom() {
     banner,
     status,
     sentinel,
+    refreshButton,
     info,
     head,
     subject,
@@ -904,6 +920,61 @@ describe("history view lifecycle", () => {
     expect(
       list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
     ).toEqual([commit.sha]);
+  });
+
+  test("refresh button forces the current history scope to reload", async () => {
+    const { panel, list, banner, status, sentinel, refreshButton } =
+      installHistoryViewDom();
+    const commit = {
+      sha: "abc123",
+      parents: ["parent-a"],
+      subject: "first",
+      body: "",
+      author: "Alice",
+      when: new Date().toISOString(),
+    };
+    let fetchCount = 0;
+    globalThis.fetch = (() => {
+      fetchCount++;
+      return Promise.resolve(
+        new Response(JSON.stringify({ commits: [commit], hasMore: false }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const route: AppRoute = {
+      screen: "history",
+      ref: "HEAD",
+      range: { from: "HEAD", to: "worktree" },
+    };
+    const view = createHistoryView({
+      $: (selector) => {
+        if (selector === "#history-panel") return panel as unknown as never;
+        if (selector === "#history-list") return list as unknown as never;
+        if (selector === "#history-banner") return banner as unknown as never;
+        if (selector === "#history-status") return status as unknown as never;
+        if (selector === "#history-sentinel")
+          return sentinel as unknown as never;
+        throw new Error(`unexpected selector: ${selector}`);
+      },
+      escapeHtml: (value) => String(value),
+      getRoute: () => route,
+      setRoute: () => undefined,
+      applyCommitRange: async () => undefined,
+      showEmptyDiffPane: () => undefined,
+      getSyntaxHighlight: () => false,
+      getLanguage: () => "ja",
+      trackLoad: (promise) => promise,
+    });
+
+    await view.enterHistory();
+    refreshButton.click();
+
+    await waitFor(() => fetchCount === 2);
+    expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
+    expect(
+      list.querySelectorAll(".history-item").map((row) => row.dataset.sha),
+    ).toEqual([HISTORY_WORKTREE_COMMIT, commit.sha]);
   });
 
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {
