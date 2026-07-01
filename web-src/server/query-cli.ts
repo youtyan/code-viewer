@@ -26,6 +26,11 @@ import {
   shellSingleQuote,
   takeValue,
 } from "./cli-helpers";
+import {
+  configureExternalCommands,
+  type ExternalCommandOverride,
+  parseExternalCommandOverride,
+} from "./command-resolver";
 
 export { shellSingleQuote } from "./cli-helpers";
 
@@ -202,6 +207,7 @@ export type QueryArgs = {
   command: QueryCommand;
   cwd?: string;
   server?: string;
+  commandOverrides?: ExternalCommandOverride[];
 };
 
 export type QueryParseResult =
@@ -243,6 +249,8 @@ Usage:
 Global options:
   --cwd <dir>      repository directory (default: current directory)
   --server <url>   code-viewer server URL (default: auto-discovered)
+  --bin git=<p>    override the CLI-side git path used for server discovery.
+                  Server-side rg/docker paths are set when starting code-viewer.
 
 Examples:
   code-viewer query sources --json
@@ -732,6 +740,7 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   let server: string | undefined;
   const options = new Map<string, string>();
   const flags = new Set<string>();
+  const commandOverrides: ExternalCommandOverride[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -742,6 +751,15 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
       if ("error" in taken) return { ok: false, error: taken.error };
       if (arg === "--cwd") cwd = taken.value;
       else server = taken.value;
+      i = taken.next;
+    } else if (arg === "--bin") {
+      const taken = takeValue(argv, i, arg);
+      if ("error" in taken) return { ok: false, error: taken.error };
+      const parsed = parseExternalCommandOverride(taken.value, "--bin", [
+        "git",
+      ]);
+      if (parsed.ok === false) return { ok: false, error: parsed.error };
+      commandOverrides.push(parsed.override);
       i = taken.next;
     } else if (VALUE_FLAGS.has(arg)) {
       const taken = takeValue(argv, i, arg);
@@ -760,7 +778,11 @@ export function parseQueryArgs(argv: string[]): QueryParseResult {
   const subcommand = rest[0];
   if (!subcommand) return { ok: true, args: { command: { kind: "help" } } };
 
-  const globalArgs = { cwd, server };
+  const globalArgs = {
+    cwd,
+    server,
+    ...(commandOverrides.length ? { commandOverrides } : {}),
+  };
 
   if (subcommand === "agent-help") {
     return { ok: true, args: { command: { kind: "agent-help" } } };
@@ -1877,7 +1899,7 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     console.error('Run "code-viewer query --help" for usage.');
     process.exit(1);
   }
-  const { command, cwd, server } = parsed.args;
+  const { command, cwd, server, commandOverrides = [] } = parsed.args;
   if (command.kind === "help") {
     console.log(QUERY_HELP);
     return;
@@ -1886,7 +1908,16 @@ export async function runQueryCli(argv: string[]): Promise<void> {
     console.log(QUERY_AGENT_HELP);
     return;
   }
-  const root = resolveRepoRoot(cwd);
+  const commandConfig = configureExternalCommands({
+    cwd: cwd || process.cwd(),
+    cliOverrides: commandOverrides,
+    allowedNames: ["git"],
+  });
+  if (commandConfig.ok === false) {
+    console.error(commandConfig.error);
+    process.exit(1);
+  }
+  const root = server ? cwd || process.cwd() : resolveRepoRoot(cwd);
   const serverUrl = await ensureServerUrl(root, server, "/");
 
   if (command.kind === "sources") return runSources(serverUrl, command);

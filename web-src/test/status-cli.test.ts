@@ -102,6 +102,32 @@ describe("parseStatusArgs", () => {
     expect(result.args.cwd).toBe("/example/repo");
   });
 
+  test("--bin captures the git command override", () => {
+    const result = parseStatusArgs(["--bin", "git=/opt/bin/git", "--json"]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.commandOverrides).toEqual([
+      { name: "git", path: "/opt/bin/git" },
+    ]);
+    expect(result.args.command).toEqual({
+      kind: "run",
+      ref: "HEAD",
+      limit: STATUS_DEFAULT_LIMIT,
+      json: true,
+    });
+  });
+
+  test("--bin rejects unsupported command names", () => {
+    expect(parseStatusArgs(["--bin", "psql=/opt/bin/psql"])).toEqual({
+      ok: false,
+      error: "--bin unsupported command: psql",
+    });
+    expect(parseStatusArgs(["--bin", "docker=/opt/bin/docker"])).toEqual({
+      ok: false,
+      error: "--bin unsupported command: docker",
+    });
+  });
+
   test("--ref rejects empty / NUL / newline / leading-dash values", () => {
     expect(parseStatusArgs(["--ref", ""])).toEqual({
       ok: false,

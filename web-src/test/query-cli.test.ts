@@ -702,6 +702,8 @@ describe("parseQueryArgs", () => {
       "/tmp/x",
       "--server",
       "http://localhost:9999",
+      "--bin",
+      "git=/opt/bin/git",
       "snapshot",
       "list",
       "--db",
@@ -711,10 +713,26 @@ describe("parseQueryArgs", () => {
     if (!result.ok) throw new Error("parse failed");
     expect(result.args.cwd).toBe("/tmp/x");
     expect(result.args.server).toBe("http://localhost:9999");
+    expect(result.args.commandOverrides).toEqual([
+      { name: "git", path: "/opt/bin/git" },
+    ]);
     expect(result.args.command).toEqual({
       kind: "snapshot-list",
       db: "app.db",
       json: false,
+    });
+  });
+
+  test("--bin rejects unsupported command names", () => {
+    expect(parseQueryArgs(["--bin", "psql=/opt/bin/psql", "sources"])).toEqual({
+      ok: false,
+      error: "--bin unsupported command: psql",
+    });
+    expect(
+      parseQueryArgs(["--bin", "docker=/opt/bin/docker", "sources"]),
+    ).toEqual({
+      ok: false,
+      error: "--bin unsupported command: docker",
     });
   });
 });

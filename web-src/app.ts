@@ -4019,7 +4019,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         if (!isCurrentDiffRequest()) return null;
         const result = renderShell(data, options.changedPaths);
         applyHideTestsToMeta();
-        setStatus("live");
+        setStatus(data.error ? "error" : "live");
         return result;
       })
       .catch(() => {

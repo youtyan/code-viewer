@@ -558,6 +558,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 #meta .chip-deleted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 #meta .chip-renamed { color: var(--done); border-color: color-mix(in srgb, var(--done) 35%, var(--border)); }
 #meta .chip-heavy { color: var(--attn); border-color: color-mix(in srgb, var(--attn) 35%, var(--border)); }
+#meta .chip-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 #meta .chip-binary,
 #meta .chip-media { color: var(--fg-muted); }
 #meta .chip-viewed-empty { color: var(--fg-muted); }

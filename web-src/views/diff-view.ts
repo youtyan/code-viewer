@@ -361,6 +361,12 @@ export function createDiffView(deps: DiffViewDeps) {
     metaFilesForViewedProgress = meta.files || [];
     el.innerHTML = "";
     const text = diffText();
+    if (meta.error) {
+      const error = document.createElement("span");
+      error.className = "chip chip-error";
+      error.textContent = meta.error;
+      el.appendChild(error);
+    }
     if (meta.totals) {
       const files = document.createElement("span");
       files.className = "chip chip-files";

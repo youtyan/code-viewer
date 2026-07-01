@@ -7,6 +7,11 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
+import {
+  commandForExternal,
+  commandNotFoundDetail,
+  isCommandNotFoundResult,
+} from "./command-resolver";
 import { runBytesSync, runSync, spawnStream } from "./runtime";
 
 export type GitFileMeta = {
@@ -19,6 +24,16 @@ export type GitFileMeta = {
   deletions?: number;
   binary?: boolean;
   untracked?: boolean;
+};
+
+export type GitFileMetaResult = {
+  files: GitFileMeta[];
+  error?: string;
+};
+
+export type GitErrorResult = {
+  error: string;
+  status?: number;
 };
 
 // ai-dup-check: allow -- server git layer keeps its public DTO local to avoid a core/server dependency cycle.
@@ -71,6 +86,7 @@ export type GitBlameResult = {
   isUntracked?: boolean;
   isSynthetic?: boolean;
   error?: string;
+  status?: number;
 };
 
 export const BLAME_ZERO_SHA = "0000000000000000000000000000000000000000";
@@ -149,14 +165,44 @@ function run(
   args: string[],
   cwd: string,
 ): { code: number; stdout: string; stderr: string } {
-  return runSync(args, cwd);
+  return runSync(resolveGitArgs(args), cwd);
 }
 
 function runBytes(
   args: string[],
   cwd: string,
 ): { code: number; stdout: Uint8Array; stderr: string } {
-  return runBytesSync(args, cwd);
+  return runBytesSync(resolveGitArgs(args), cwd);
+}
+
+function resolveGitArgs(args: string[]): string[] {
+  if (args[0] !== "git") return args;
+  return [commandForExternal("git"), ...args.slice(1)];
+}
+
+export function gitCommand(): string {
+  return commandForExternal("git");
+}
+
+export function gitFailureMessage(
+  res: { code: number; stderr?: string },
+  fallback: string,
+): string {
+  if (isCommandNotFoundResult("git", res)) return commandNotFoundDetail("git");
+  return res.stderr?.trim() || fallback;
+}
+
+function gitFailureResult(
+  res: { code: number; stderr?: string },
+  fallback: string,
+): GitErrorResult {
+  if (!isCommandNotFoundResult("git", res)) {
+    return { error: fallback };
+  }
+  return {
+    error: commandNotFoundDetail("git"),
+    status: 503,
+  };
 }
 
 export function repoRoot(cwd: string): string | null {
@@ -164,9 +210,59 @@ export function repoRoot(cwd: string): string | null {
   return res.code === 0 ? res.stdout.trimEnd() : null;
 }
 
+export function repoRootResult(
+  cwd: string,
+):
+  | { kind: "root"; root: string }
+  | { kind: "outside" }
+  | { kind: "error"; error: string } {
+  const res = run(["git", "rev-parse", "--show-toplevel"], cwd);
+  if (res.code === 0) return { kind: "root", root: res.stdout.trimEnd() };
+  if (isCommandNotFoundResult("git", res)) {
+    return { kind: "error", error: commandNotFoundDetail("git") };
+  }
+  const stderr = res.stderr.trim();
+  if (/not a git repository/i.test(stderr)) return { kind: "outside" };
+  return { kind: "error", error: stderr || "git rev-parse failed" };
+}
+
 export function currentBranch(cwd: string): string | null {
   const res = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd);
   return res.code === 0 ? res.stdout.trimEnd() : null;
+}
+
+export function verifyCommit(
+  ref: string,
+  cwd: string,
+): { ok: true; sha: string } | { ok: false; error: string } {
+  const res = run(["git", "rev-parse", "--verify", `${ref}^{commit}`], cwd);
+  if (res.code === 0) return { ok: true, sha: res.stdout.trim() };
+  return { ok: false, error: gitFailureMessage(res, "unknown ref") };
+}
+
+export function statusPorcelainForPath(
+  path: string,
+  cwd: string,
+): { ok: true; stdout: string } | { ok: false; error: string } {
+  const res = run(
+    [
+      "git",
+      "-c",
+      "core.quotepath=false",
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=normal",
+      "--",
+      path,
+    ],
+    cwd,
+  );
+  if (res.code === 0) return { ok: true, stdout: res.stdout };
+  return {
+    ok: false,
+    error: gitFailureMessage(res, "git status failed"),
+  };
 }
 
 export function show(
@@ -193,7 +289,7 @@ export function catFileBlobStream(
   exited: Promise<number>;
   kill(signal?: string): void;
 } {
-  return spawnStream(["git", "cat-file", "blob", oid], cwd);
+  return spawnStream(resolveGitArgs(["git", "cat-file", "blob", oid]), cwd);
 }
 
 export function objectSize(
@@ -248,18 +344,36 @@ export function objectId(
 }
 
 export function verifyTreeRef(ref: string, cwd: string): boolean {
-  if (!ref || ref === "worktree") return false;
-  if (ref.startsWith("-")) return false;
-  const res = run(["git", "rev-parse", "--verify", `${ref}^{tree}`], cwd);
-  return res.code === 0;
+  return verifyTreeRefResult(ref, cwd).ok;
 }
 
-export function refs(cwd: string): {
+export function verifyTreeRefResult(
+  ref: string,
+  cwd: string,
+): { ok: true } | ({ ok: false } & GitErrorResult) {
+  if (!ref || ref === "worktree")
+    return { ok: false, error: "invalid target", status: 400 };
+  if (ref.startsWith("-"))
+    return { ok: false, error: "invalid target", status: 400 };
+  const res = run(["git", "rev-parse", "--verify", `${ref}^{tree}`], cwd);
+  if (res.code === 0) return { ok: true };
+  return { ok: false, ...gitFailureResult(res, "invalid target") };
+}
+
+export type GitRefs = {
   branches: GitBranchMeta[];
   tags: GitTagMeta[];
   commits: GitCommitMeta[];
   current: string;
-} {
+};
+
+export function refs(cwd: string): GitRefs {
+  return refsResult(cwd).refs;
+}
+
+export function refsResult(
+  cwd: string,
+): { refs: GitRefs } & Partial<GitErrorResult> {
   const out = {
     branches: [] as GitBranchMeta[],
     tags: [] as GitTagMeta[],
@@ -277,6 +391,9 @@ export function refs(cwd: string): {
     ],
     cwd,
   );
+  if (branches.code !== 0 && isCommandNotFoundResult("git", branches)) {
+    return { refs: out, ...gitFailureResult(branches, "git refs failed") };
+  }
   if (branches.code === 0) {
     for (const line of branches.stdout.split("\n")) {
       const [fullName, name, when] = line.split("\t");
@@ -299,6 +416,9 @@ export function refs(cwd: string): {
     ],
     cwd,
   );
+  if (tags.code !== 0 && isCommandNotFoundResult("git", tags)) {
+    return { refs: out, ...gitFailureResult(tags, "git refs failed") };
+  }
   if (tags.code === 0) {
     for (const line of tags.stdout.split("\n")) {
       const [name, when] = line.split("\t");
@@ -306,9 +426,16 @@ export function refs(cwd: string): {
       out.tags.push({ name, when });
     }
   }
-  out.commits = refCommits(cwd, "", DEFAULT_REF_COMMIT_LIMIT);
+  const commits = refCommitPageResult(cwd, {
+    query: "",
+    max: DEFAULT_REF_COMMIT_LIMIT,
+  });
+  if (commits.error) {
+    return { refs: out, error: commits.error, status: commits.status };
+  }
+  out.commits = commits.commits;
   out.current = currentBranch(cwd) || "";
-  return out;
+  return { refs: out };
 }
 
 function clampCommitLimit(max: number): number {
@@ -366,9 +493,15 @@ function mergeCommitResults(
   return merged;
 }
 
-function runCommitLog(cwd: string, args: string[]): GitCommitMeta[] {
+function runCommitLogResult(
+  cwd: string,
+  args: string[],
+): { commits: GitCommitMeta[] } & Partial<GitErrorResult> {
   const commits = run(args, cwd);
-  return commits.code === 0 ? parseCommitLog(commits.stdout) : [];
+  if (commits.code === 0) return { commits: parseCommitLog(commits.stdout) };
+  if (isCommandNotFoundResult("git", commits))
+    return { commits: [], ...gitFailureResult(commits, "git log failed") };
+  return { commits: [] };
 }
 
 export function refCommits(
@@ -376,13 +509,21 @@ export function refCommits(
   query = "",
   max = DEFAULT_REF_COMMIT_LIMIT,
 ): GitCommitMeta[] {
-  return refCommitPage(cwd, { query, max }).commits;
+  return refCommitPageResult(cwd, { query, max }).commits;
 }
 
 export function refCommitPage(
   cwd: string,
   options: { query?: string; max?: number; skip?: number } = {},
 ): { commits: GitCommitMeta[]; hasMore: boolean } {
+  const result = refCommitPageResult(cwd, options);
+  return { commits: result.commits, hasMore: result.hasMore };
+}
+
+export function refCommitPageResult(
+  cwd: string,
+  options: { query?: string; max?: number; skip?: number } = {},
+): { commits: GitCommitMeta[]; hasMore: boolean } & Partial<GitErrorResult> {
   const limit = clampCommitLimit(options.max ?? DEFAULT_REF_COMMIT_LIMIT);
   const skip = clampCommitSkip(options.skip ?? 0);
   const fetchLimit = limit + 1;
@@ -393,6 +534,13 @@ export function refCommitPage(
       ["git", "rev-parse", "--verify", `${trimmed}^{commit}`],
       cwd,
     );
+    if (verified.code !== 0 && isCommandNotFoundResult("git", verified)) {
+      return {
+        commits: [],
+        hasMore: false,
+        ...gitFailureResult(verified, "unknown ref"),
+      };
+    }
     const single = run(
       [
         "git",
@@ -406,34 +554,66 @@ export function refCommitPage(
       ],
       cwd,
     );
+    if (single.code !== 0 && isCommandNotFoundResult("git", single)) {
+      return {
+        commits: [],
+        hasMore: false,
+        ...gitFailureResult(single, "git log failed"),
+      };
+    }
     if (single.code === 0 && single.stdout.trim()) {
       hashMatches.push(...parseCommitLog(single.stdout));
     }
   }
   if (!trimmed) {
-    const commits = runCommitLog(cwd, commitLogArgs(fetchLimit, skip));
+    const result = runCommitLogResult(cwd, commitLogArgs(fetchLimit, skip));
+    if (result.error) {
+      return {
+        commits: [],
+        hasMore: false,
+        error: result.error,
+        status: result.status,
+      };
+    }
+    const commits = result.commits;
     return {
       commits: commits.slice(0, limit),
       hasMore: commits.length > limit,
     };
   }
-  const subjectMatches = runCommitLog(cwd, [
+  const subjectMatches = runCommitLogResult(cwd, [
     ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--grep=${trimmed}`,
   ]);
-  const authorMatches = runCommitLog(cwd, [
+  if (subjectMatches.error) {
+    return {
+      commits: [],
+      hasMore: false,
+      error: subjectMatches.error,
+      status: subjectMatches.status,
+    };
+  }
+  const authorMatches = runCommitLogResult(cwd, [
     ...commitLogArgs(fetchLimit, skip),
     "--regexp-ignore-case",
     "--fixed-strings",
     `--author=${trimmed}`,
   ]);
+  if (authorMatches.error) {
+    return {
+      commits: [],
+      hasMore: false,
+      error: authorMatches.error,
+      status: authorMatches.status,
+    };
+  }
   const merged = mergeCommitResults(
     fetchLimit,
     hashMatches,
-    subjectMatches,
-    authorMatches,
+    subjectMatches.commits,
+    authorMatches.commits,
   );
   return {
     commits: merged.slice(0, limit),
@@ -547,7 +727,12 @@ export function commitHistory(
     query?: string;
     path?: string;
   },
-): { commits: GitHistoryCommit[]; hasMore: boolean; error?: string } {
+): {
+  commits: GitHistoryCommit[];
+  hasMore: boolean;
+  error?: string;
+  status?: number;
+} {
   const ref = (options.ref || "HEAD").trim();
   if (!ref || ref.startsWith("-") || ref.includes("\0"))
     return { commits: [], hasMore: false, error: "invalid ref" };
@@ -556,7 +741,11 @@ export function commitHistory(
     cwd,
   );
   if (verified.code !== 0)
-    return { commits: [], hasMore: false, error: "unknown ref" };
+    return {
+      commits: [],
+      hasMore: false,
+      ...gitFailureResult(verified, "unknown ref"),
+    };
   const skip = Math.max(0, Math.floor(options.skip) || 0);
   const limit = Math.max(
     1,
@@ -590,7 +779,11 @@ export function commitHistory(
     cwd,
   );
   if (res.code !== 0)
-    return { commits: [], hasMore: false, error: "git log failed" };
+    return {
+      commits: [],
+      hasMore: false,
+      ...gitFailureResult(res, "git log failed"),
+    };
   let parsed = parseHistoryLog(res.stdout);
   // A hex-looking term also matches a commit by sha prefix; pin that commit
   // ahead of message matches on the first page.
@@ -615,7 +808,10 @@ export function commitHistory(
   return { commits: hasMore ? parsed.slice(0, limit) : parsed, hasMore };
 }
 
-export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
+export function nameStatusResult(
+  args: string[],
+  cwd: string,
+): GitFileMetaResult {
   const res = run(
     [
       "git",
@@ -631,7 +827,12 @@ export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
     ],
     cwd,
   );
-  if (res.code !== 0) return [];
+  if (res.code !== 0) {
+    return {
+      files: [],
+      error: gitFailureMessage(res, "git diff --name-status failed"),
+    };
+  }
   const parts = res.stdout.split("\0");
   const files: GitFileMeta[] = [];
   for (let i = 0; i < parts.length; ) {
@@ -653,10 +854,14 @@ export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
       if (path) files.push({ status: kind, path });
     }
   }
-  return files;
+  return { files };
 }
 
-export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
+export function nameStatus(args: string[], cwd: string): GitFileMeta[] {
+  return nameStatusResult(args, cwd).files;
+}
+
+export function numstatZResult(args: string[], cwd: string): GitFileMetaResult {
   const res = run(
     [
       "git",
@@ -672,7 +877,12 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
     ],
     cwd,
   );
-  if (res.code !== 0) return [];
+  if (res.code !== 0) {
+    return {
+      files: [],
+      error: gitFailureMessage(res, "git diff --numstat failed"),
+    };
+  }
   const parts = res.stdout.split("\0");
   const files: GitFileMeta[] = [];
   for (let i = 0; i < parts.length; ) {
@@ -693,7 +903,11 @@ export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
       files.push({ path: rest, additions, deletions, binary });
     }
   }
-  return files;
+  return { files };
+}
+
+export function numstatZ(args: string[], cwd: string): GitFileMeta[] {
+  return numstatZResult(args, cwd).files;
 }
 
 // Shared "does this path contain segment X?" predicate, case-insensitive.
@@ -785,6 +999,14 @@ export function blame(
   args.push("--", path);
   const res = run(args, cwd);
   if (res.code !== 0) {
+    if (isCommandNotFoundResult("git", res)) {
+      return {
+        lines: [],
+        commits: {},
+        error: commandNotFoundDetail("git"),
+        status: 503,
+      };
+    }
     if (normalized.base === "worktree") {
       // untracked / newly added file: synthesize an all-uncommitted blame.
       return syntheticUncommittedBlameFromWorktree(cwd, path);
@@ -1165,6 +1387,21 @@ export function listTree(
   };
 }
 
+export function listTreeResult(
+  ref: string,
+  path: string,
+  cwd: string,
+  options: {
+    recursive?: boolean;
+    omitDirNames?: string[];
+    excludeNames?: string[];
+  } = {},
+): { entries: GitTreeEntry[] } & Partial<GitErrorResult> {
+  const result = listTree(ref, path, cwd, options);
+  if (result.code === 0) return { entries: result.entries };
+  return { entries: [], ...gitFailureResult(result, "git ls-tree failed") };
+}
+
 export function untrackedMeta(cwd: string): GitFileMeta[] {
   return untracked(cwd).flatMap((path) => {
     const full = join(cwd, path);
@@ -1202,10 +1439,20 @@ export function fileMeta(
   cwd: string,
   includeUntracked = false,
 ): GitFileMeta[] {
-  const ns = nameStatus(args, cwd);
-  const nm = numstatZ(args, cwd);
-  const byPath = new Map(nm.map((file) => [file.path, file]));
-  const files: GitFileMeta[] = ns.map((file) => {
+  return fileMetaResult(args, cwd, includeUntracked).files;
+}
+
+export function fileMetaResult(
+  args: string[],
+  cwd: string,
+  includeUntracked = false,
+): GitFileMetaResult {
+  const ns = nameStatusResult(args, cwd);
+  if (ns.error) return { files: [], error: ns.error };
+  const nm = numstatZResult(args, cwd);
+  if (nm.error) return { files: [], error: nm.error };
+  const byPath = new Map(nm.files.map((file) => [file.path, file]));
+  const files: GitFileMeta[] = ns.files.map((file) => {
     const stats = byPath.get(file.path);
     return {
       ...file,
@@ -1214,16 +1461,18 @@ export function fileMeta(
       binary: stats?.binary || false,
     };
   });
-  return includeUntracked ? files.concat(untrackedMeta(cwd)) : files;
+  return {
+    files: includeUntracked ? files.concat(untrackedMeta(cwd)) : files,
+  };
 }
 
 export function fileDiffText(
   args: string[],
   path: string | string[],
   cwd: string,
-): { code: number; stdout: string; stderr: string } {
+): { code: number; stdout: string; stderr: string; status?: number } {
   const paths = Array.isArray(path) ? path : [path];
-  return run(
+  const res = run(
     [
       "git",
       "-c",
@@ -1238,14 +1487,18 @@ export function fileDiffText(
     ],
     cwd,
   );
+  if (isCommandNotFoundResult("git", res)) {
+    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
+  }
+  return res;
 }
 
 export function untrackedFileDiff(
   extras: string[],
   path: string,
   cwd: string,
-): { code: number; stdout: string; stderr: string } {
-  return run(
+): { code: number; stdout: string; stderr: string; status?: number } {
+  const res = run(
     [
       "git",
       "-c",
@@ -1260,6 +1513,10 @@ export function untrackedFileDiff(
     ],
     cwd,
   );
+  if (isCommandNotFoundResult("git", res)) {
+    return { ...res, stderr: commandNotFoundDetail("git"), status: 503 };
+  }
+  return res;
 }
 
 export function splitHunks(diffText: string): {

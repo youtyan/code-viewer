@@ -6,8 +6,11 @@ import {
   fileByteRangeResponseBody,
   fileReadableStream,
   readFileTextRange,
+  runBytesSync,
   runSync,
   type StartedServer,
+  spawnDetached,
+  spawnStream,
   startServer,
 } from "../server/runtime";
 
@@ -23,6 +26,50 @@ describe("server runtime compatibility helpers", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("ok");
     expect(result.stderr).toBe("");
+  });
+
+  test("sync runners return ENOENT diagnostics instead of hiding spawn errors", () => {
+    const missing = join(tmpRoot, "missing-command-for-sync-runtime");
+
+    const text = runSync([missing], process.cwd());
+    const bytes = runBytesSync([missing], process.cwd());
+
+    expect(text.code).toBe(1);
+    expect(text.stderr).toMatch(/enoent|no such file/i);
+    expect(bytes.code).toBe(1);
+    expect(bytes.stderr).toMatch(/enoent|no such file/i);
+  });
+
+  test("spawnStream resolves with a failure code when the command cannot be spawned", async () => {
+    const missing = join(tmpRoot, "missing-command-for-stream-runtime");
+    const child = spawnStream([missing], process.cwd());
+
+    const code = await Promise.race([
+      child.exited,
+      new Promise<number>((resolve) => setTimeout(() => resolve(99), 1000)),
+    ]);
+
+    expect(code).toBe(1);
+    await child.stream.cancel().catch(() => undefined);
+    child.kill();
+  });
+
+  test("spawnDetached reports a start failure without throwing", async () => {
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+
+    try {
+      spawnDetached([join(tmpRoot, "missing-command-for-detached-runtime")]);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(warnings.length).toBe(1);
+      expect(String(warnings[0]?.[0])).toMatch(/failed to start/);
+      expect(String(warnings[0]?.[1])).toMatch(/enoent|no such file/i);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   test("file stream can be consumed as a web ReadableStream", async () => {

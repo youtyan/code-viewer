@@ -602,6 +602,17 @@ describe("diff view meta stat strip", () => {
     );
   });
 
+  test("renders a diff metadata error as a visible chip", () => {
+    setupDiffDom();
+    const { view } = createDiffViewForShellTest();
+
+    view.renderMeta(makeDiffMeta([], { error: "git not found in PATH" }));
+
+    expect(document.querySelector("#meta .chip-error")?.textContent).toBe(
+      "git not found in PATH",
+    );
+  });
+
   test("renders the diff meta strip with injected labels", () => {
     setupDiffDom();
     const { view } = createDiffViewForShellTest({

@@ -8,7 +8,11 @@ import type {
 import { rawFileHeaders } from "../../raw-file-headers";
 import type { DockerDbInfo } from "../discovery";
 import type { ObjectSource } from "../sources/types";
-import { resolveRunningComposeContainerNameOrThrowAsync } from "./docker-utils";
+import {
+  dockerCommand,
+  resolveRunningComposeContainerNameOrThrowAsync,
+  throwIfDockerCommandUnavailableResult,
+} from "./docker-utils";
 import { spawnCollectAsync } from "./spawn-runner";
 
 type S3Config = {
@@ -505,7 +509,7 @@ async function dockerCurlFetch(opts: {
 }): Promise<Response> {
   const { args, input } = dockerCurlCommand(opts);
   if (spawnSyncImplIsTestOverride) {
-    const proc = spawnSyncImpl("docker", args, {
+    const proc = spawnSyncImpl(dockerCommand(), args, {
       encoding: "buffer",
       input,
       timeout: s3DockerCurlTimeoutMs,
@@ -514,8 +518,13 @@ async function dockerCurlFetch(opts: {
     if ((proc.status ?? 1) !== 0) {
       const stderr = new TextDecoder()
         .decode(proc.stderr || new Uint8Array())
+        .concat(proc.error ? `\n${proc.error.message}` : "")
         .replace(/\s+/g, " ")
         .trim();
+      throwIfDockerCommandUnavailableResult({
+        code: proc.status ?? 1,
+        stderr,
+      });
       throw new S3HttpError(
         503,
         `S3 HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,
@@ -529,19 +538,24 @@ async function dockerCurlFetch(opts: {
     throw new S3HttpError(503, "S3 HTTP transport aborted");
   }
   const proc = await spawnCollectAsync({
-    command: "docker",
+    command: dockerCommand(),
     args,
     input,
     timeoutMs: s3DockerCurlTimeoutMs,
     signal: opts.signal,
     abortMessage: "S3 HTTP transport aborted",
     timeoutMessage: `docker exec curl timed out after ${s3DockerCurlTimeoutMs}ms`,
+    rejectOnError: false,
   });
   if (proc.code !== 0) {
     const stderr = new TextDecoder()
       .decode(proc.stderr)
       .replace(/\s+/g, " ")
       .trim();
+    throwIfDockerCommandUnavailableResult({
+      code: proc.code,
+      stderr,
+    });
     throw new S3HttpError(
       503,
       `S3 HTTP transport failed via docker exec${stderr ? `: ${stderr.slice(0, 240)}` : ""}`,

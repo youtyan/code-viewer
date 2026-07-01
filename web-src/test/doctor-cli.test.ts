@@ -41,6 +41,33 @@ describe("parseDoctorCliArgs", () => {
     });
   });
 
+  test("parses --bin command overrides", () => {
+    const result = parseDoctorCliArgs([
+      "--bin",
+      "git=/opt/bin/git",
+      "--bin",
+      "docker=/opt/bin/docker",
+    ]);
+    expect(result.kind).toBe("run");
+    if (result.kind === "run") {
+      expect(result.args.commandOverrides).toEqual([
+        { name: "git", path: "/opt/bin/git" },
+        { name: "docker", path: "/opt/bin/docker" },
+      ]);
+    }
+  });
+
+  test("--bin rejects unsupported command names", () => {
+    expect(parseDoctorCliArgs(["--bin", "psql=/opt/bin/psql"])).toEqual({
+      kind: "error",
+      message: "--bin unsupported command: psql",
+    });
+    expect(parseDoctorCliArgs(["--bin", "rg=/opt/bin/rg"])).toEqual({
+      kind: "error",
+      message: "--bin unsupported command: rg",
+    });
+  });
+
   test("rejects --cwd / --port without a value", () => {
     expect(parseDoctorCliArgs(["--cwd"])).toEqual({
       kind: "error",

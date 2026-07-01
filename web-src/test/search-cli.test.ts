@@ -136,6 +136,48 @@ describe("parseSearchArgs", () => {
     }
   });
 
+  test("--bin captures command overrides", () => {
+    const result = parseSearchArgs([
+      "code",
+      "--term",
+      "TODO",
+      "--bin",
+      "git=/opt/bin/git",
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("parse failed");
+    expect(result.args.commandOverrides).toEqual([
+      { name: "git", path: "/opt/bin/git" },
+    ]);
+  });
+
+  test("--bin rejects unsupported command names", () => {
+    expect(
+      parseSearchArgs([
+        "code",
+        "--term",
+        "TODO",
+        "--bin",
+        "psql=/opt/bin/psql",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--bin unsupported command: psql",
+    });
+    expect(
+      parseSearchArgs([
+        "code",
+        "--term",
+        "TODO",
+        "--bin",
+        "docker=/opt/bin/docker",
+      ]),
+    ).toEqual({
+      ok: false,
+      error: "--bin unsupported command: docker",
+    });
+  });
+
   test("--max must be a positive integer", () => {
     expect(parseSearchArgs(["code", "--term", "x", "--max", "0"])).toEqual({
       ok: false,
