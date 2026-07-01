@@ -409,6 +409,15 @@ describe("table-grid edit mode", () => {
     });
     document.body.appendChild(grid.el);
     grid.load("users", initialData());
+    const searchIcon = q<HTMLElement>(grid.el, ".db-grid-filter-icon");
+    expect(searchIcon.getAttribute("aria-hidden")).toBe("true");
+    expect(searchIcon.querySelector("svg.octicon-search")).toBeTruthy();
+    const exportButton = q<HTMLButtonElement>(
+      grid.el,
+      ".db-grid-export-toggle",
+    );
+    expect(exportButton.querySelector("svg.octicon-download")).toBeTruthy();
+    expect(exportButton.textContent).toBe("");
     const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
     expect(refreshButton.textContent).toMatch(/Reload/);
     expect(refreshButton.title).toBe("Reload this table, keeping filters");

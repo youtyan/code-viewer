@@ -7424,8 +7424,18 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 
 .db-grid-filter-icon {
-  font-size: var(--db-font-md);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+}
+.db-grid-filter-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 
 .db-grid-filter-input {
@@ -7693,9 +7703,18 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 
 /* ---------- Foreign-key related data ---------- */
 .db-grid-header-fk-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: 4px;
-  font-size: 10px;
+  width: 12px;
+  height: 12px;
   opacity: 0.7;
+}
+.db-grid-header-fk-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
 }
 
 .db-grid-cell-fk {
@@ -7749,7 +7768,17 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 
 .db-related-title {
   flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+.db-related-title svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 
 .db-related-close {
@@ -7859,14 +7888,22 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 
 .db-grid-export-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg-muted);
-  font-size: var(--db-font-md);
-  line-height: 1;
-  padding: 3px 7px;
+  padding: 0;
   cursor: pointer;
+}
+.db-grid-export-toggle svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 .db-grid-export-toggle:hover {
   color: var(--fg);

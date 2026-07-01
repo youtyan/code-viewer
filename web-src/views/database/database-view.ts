@@ -15,7 +15,7 @@ import type {
   TabsResponse,
   TabsState,
 } from "../../core/database/types";
-import { SYNC_16_PATH } from "../../core/icons";
+import { SEARCH_16_PATH, SYNC_16_PATH } from "../../core/icons";
 import { makeId } from "../../core/id";
 import { isImeComposing } from "../../core/keyboard";
 import { type AppRoute, type DiffRange, parseRoute } from "../../core/routes";
@@ -459,7 +459,7 @@ function createTabPane(
   const searchBtn = makeIconButton({
     label: "Search",
     title: "Search across tables",
-    pathD: ICON_PATH_SEARCH,
+    pathD: SEARCH_16_PATH,
     onClick: () => setActiveTab("search"),
   });
 
@@ -2009,9 +2009,6 @@ const ICON_PATH_QUERY =
 
 const ICON_PATH_ER =
   "M1.5 1.75A.75.75 0 0 1 2.25 1h4.5a.75.75 0 0 1 .75.75v3.5h2v-1.5A.75.75 0 0 1 10.25 3h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75V6.5h-2v3h2v-.75A.75.75 0 0 1 10.25 8h3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-.75.75h-3.5a.75.75 0 0 1-.75-.75v-1.5h-2v3.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1-.75-.75v-3.5A.75.75 0 0 1 2.25 9h4.5a.75.75 0 0 1 .75.75v.75h-.5v-1H3v3h3V11h.5v-.75a.75.75 0 0 0-.75-.75H3V6.5h2.5V2.5H3Z";
-
-const ICON_PATH_SEARCH =
-  "M10.68 11.74a6 6 0 0 1-7.917-8.984 6 6 0 0 1 8.997 7.905l3.05 3.05a.75.75 0 1 1-1.06 1.06l-3.07-3.03ZM11.5 7a4.499 4.499 0 1 1-8.997 0A4.499 4.499 0 0 1 11.5 7Z";
 
 const ICON_PATH_SNAPSHOT =
   "M3.5 1.75A1.75 1.75 0 0 1 5.25 0h5.5A1.75 1.75 0 0 1 12.5 1.75v.5h1.75A1.75 1.75 0 0 1 16 4v9.25A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V4a1.75 1.75 0 0 1 1.75-1.75H3.5v-.5Zm1.5.5v.5h6v-.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25Zm-3.25 2a.25.25 0 0 0-.25.25v9.25c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4a.25.25 0 0 0-.25-.25H1.75ZM8 6a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z";

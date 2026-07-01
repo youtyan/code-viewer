@@ -7,7 +7,13 @@ import type {
   DbValue,
   RowMutation,
 } from "../../core/database/types";
-import { iconSvg, SYNC_16_PATH } from "../../core/icons";
+import {
+  DOWNLOAD_16_PATHS,
+  iconSvg,
+  LINK_16_PATH,
+  SEARCH_16_PATH,
+  SYNC_16_PATH,
+} from "../../core/icons";
 import { isImeComposing } from "../../core/keyboard";
 import type { AnnotationDatabaseDataState } from "../../core/types";
 import { showConfirmDialog } from "../ui-dialog";
@@ -152,7 +158,8 @@ export function createTableGrid(
   filterBar.className = "db-grid-filter-bar";
   const filterIcon = document.createElement("span");
   filterIcon.className = "db-grid-filter-icon";
-  filterIcon.textContent = "🔍";
+  filterIcon.setAttribute("aria-hidden", "true");
+  filterIcon.innerHTML = iconSvg("octicon-search", SEARCH_16_PATH);
   const filterInput = document.createElement("input");
   filterInput.type = "search";
   filterInput.className = "db-grid-filter-input";
@@ -184,7 +191,7 @@ export function createTableGrid(
   exportBtn.className = "db-btn db-btn-icon db-grid-export-toggle";
   exportBtn.title = text().grid.exportAction;
   exportBtn.setAttribute("aria-label", text().grid.exportAction);
-  exportBtn.textContent = "⬇";
+  exportBtn.innerHTML = iconSvg("octicon-download", DOWNLOAD_16_PATHS);
   const exportMenu = document.createElement("div");
   exportMenu.className = "db-grid-export-menu";
   exportMenu.hidden = true;
@@ -428,7 +435,7 @@ export function createTableGrid(
   // 相対位置を計算するために参照する (CSS transform を regex で読むのは
   // translate3d 等のフォーマット変更で簡単に壊れるので state を持つ)。
   let renderStartRow = 0;
-  // 現在のテーブルで外部キーを持つカラム名（ヘッダーの 🔗 表示用）。
+  // 現在のテーブルで外部キーを持つカラム名（ヘッダーのリンクアイコン表示用）。
   const fkColumns = new Set<string>();
 
   /* ---- Row editing (edit / insert / delete) ---- */
@@ -802,7 +809,8 @@ export function createTableGrid(
     header.className = "db-related-header";
     const title = document.createElement("span");
     title.className = "db-related-title";
-    title.textContent = "🔗";
+    title.setAttribute("aria-hidden", "true");
+    title.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
     // ドリル経路を示すパンくず。各セグメントのクリックでその階層へ戻る。
     relatedCrumbEl = document.createElement("span");
     relatedCrumbEl.className = "db-related-crumbs";
@@ -1185,7 +1193,7 @@ export function createTableGrid(
         cell.classList.add("db-grid-header-fk");
         const fkIcon = document.createElement("span");
         fkIcon.className = "db-grid-header-fk-icon";
-        fkIcon.textContent = "🔗";
+        fkIcon.innerHTML = iconSvg("octicon-link", LINK_16_PATH);
         fkIcon.title = text().grid.foreignKeyHint;
         label.appendChild(fkIcon);
       }
@@ -2049,7 +2057,7 @@ export function createTableGrid(
   }
 
   // FK 列 (outgoing) と、他から参照されている列 (incoming = 通常 PK) の
-  // 両方にヘッダ 🔗 を付け、セルクリックで関連パネルを開けるようにする。
+  // 両方にヘッダのリンクアイコンを付け、セルクリックで関連パネルを開けるようにする。
   // 設定トグル (Rails FK 推測) を切り替えたときも呼ばれる。
   function rebuildFkColumnsForCurrentTable() {
     fkColumns.clear();
@@ -2349,7 +2357,7 @@ export function createTableGrid(
   });
 
   // 外部から FK セットの再計算を要求するエントリ。例: Rails 規約による
-  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダの 🔗 と
+  // 仮想 FK のトグル切替時、データを再フェッチせずヘッダのリンクアイコンと
   // セルクリック判定だけ更新する。
   function refreshForeignKeys() {
     rebuildFkColumnsForCurrentTable();
