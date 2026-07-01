@@ -2,6 +2,7 @@
 // line numbers (unified: .line-num2, side-by-side: right pane) highlights the
 // rows and surfaces the line-ref copy pill with "@path#start-end".
 
+import { isEditableKeyTarget } from "../core/focus-scope";
 import { isImeComposing } from "../core/keyboard";
 import type { LineRefPill } from "./line-ref-pill";
 
@@ -94,9 +95,11 @@ export function createDiffLineSelect(deps: DiffLineSelectDeps) {
     deps.pill.show(next.path, start, end);
   }
 
-  function clear() {
+  function clear(): boolean {
+    const hadSelection = !!selection || !!drag;
     drag = null;
     applySelection(null);
+    return hadSelection;
   }
 
   const diff = document.querySelector<HTMLElement>("#diff");
@@ -139,7 +142,14 @@ export function createDiffLineSelect(deps: DiffLineSelectDeps) {
 
   document.addEventListener("keydown", (e) => {
     if (isImeComposing(e)) return;
-    if (e.key === "Escape" && selection && !drag) clear();
+    if (
+      e.key === "Escape" &&
+      selection &&
+      !drag &&
+      !isEditableKeyTarget(e.target as Element | null)
+    ) {
+      clear();
+    }
   });
 
   return { clear };

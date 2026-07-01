@@ -52,6 +52,7 @@
   --sidebar-w: 308px;
   --history-w: 320px;
   --sidebar-restore-rail-w: 44px;
+  --annotation-panel-w: 380px;
   /* shadows */
   --shadow-sm: 0 1px 0 rgba(31,35,40,0.04);
   --shadow-md: 0 3px 6px rgba(140,149,159,0.15);
@@ -397,6 +398,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
 }
 
 .global-actions {
+  position: relative;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -425,6 +427,7 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   font-size: 13px;
   transition: background 0.12s, border-color 0.12s;
 }
+.global-actions #theme svg,
 .global-icon-action svg {
   display: block;
 }
@@ -433,9 +436,54 @@ body[data-code-font-size="xlarge"] { --code-font-size: 15px; }
   background: var(--bg-mute);
   border-color: var(--border-strong);
 }
+.global-actions #theme:focus-visible,
 .global-icon-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+.global-icon-action.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.global-icon-action.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.global-icon-action.warn {
+  color: var(--attn);
+  border-color: var(--attn);
+}
+.goi-feedback {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 12px;
+  z-index: 70;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: gdp-banner-slide 0.15s ease;
+}
+.goi-feedback[hidden] {
+  display: none;
+}
+.goi-feedback.copied {
+  color: var(--success);
+  border-color: var(--success);
+}
+.goi-feedback.failed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.goi-feedback.warn {
+  color: var(--attn);
+  border-color: var(--attn);
 }
 #auto-update {
   width: auto;
@@ -2618,7 +2666,9 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   user-select: none;
 }
 
-/* Floating "copy @path#start-end" pill shown while lines are selected. */
+/* Floating "copy @path#start-end" pill shown while lines are selected. Root
+   is a plain div (see line-ref-pill.ts) hosting two buttons: the copy
+   action fills the capsule, the close (×) button overlays its corner. */
 #line-ref-pill {
   position: fixed;
   left: 50%;
@@ -2638,11 +2688,44 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
   box-shadow: 0 8px 28px rgba(31, 35, 40, 0.35);
 }
 #line-ref-pill:hover {
   filter: brightness(1.1);
+}
+#line-ref-pill-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#line-ref-pill-close {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+#line-ref-pill-close:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
 }
 #line-ref-pill svg {
   flex: 0 0 auto;
@@ -2659,6 +2742,21 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   font-family: "Monaspace Neon", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   font-weight: 400;
+}
+/* Line count badge shown for multi-line selections. Flips to a solid
+   warning chip (var(--attn)) once the selection is large enough that
+   Shift+Click would paste a sizeable chunk of code into the AI prompt. */
+#line-ref-pill .lrp-count {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 11px;
+  font-weight: 700;
+}
+#line-ref-pill .lrp-count-warn {
+  background: #fff;
+  color: var(--attn);
 }
 #line-ref-pill.copied {
   background: var(--success, #2ea043);
@@ -2860,9 +2958,20 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
 }
 .gdp-source-loading-content {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+.gdp-source-loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  animation: gdp-spin 0.8s linear infinite;
 }
 .gdp-source-loading-title {
   color: var(--fg);
@@ -2873,6 +2982,12 @@ table.d2h-diff-table td.d2h-code-side-linenumber {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.gdp-source-loading-slow-note {
+  flex-basis: 100%;
+  color: var(--fg-subtle);
+  font-size: 12px;
+  font-style: italic;
 }
 .gdp-source-cancel {
   margin-left: auto;
@@ -4806,13 +4921,31 @@ body.gdp-file-detail-page #empty {
   right: 0;
   top: var(--chrome-h);
   bottom: 0;
-  width: min(380px, calc(100vw - 32px));
+  width: min(var(--annotation-panel-w), calc(100vw - 32px));
   z-index: 45;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--bg);
   box-shadow: var(--shadow-md);
+}
+#annotation-panel-resizer {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+#annotation-panel-resizer:hover,
+body.gdp-annotation-resizing #annotation-panel-resizer {
+  background: var(--accent-muted);
+}
+body.gdp-annotation-resizing {
+  cursor: col-resize !important;
+  user-select: none;
 }
 #annotation-panel[hidden],
 #annotation-detail[hidden] {
@@ -4827,7 +4960,7 @@ body.gdp-database-page #annotation-panel {
 }
 /* Keep code readable next to the panel instead of underneath it. */
 body.annotation-panel-open #content {
-  margin-right: min(380px, calc(100vw - 32px));
+  margin-right: min(var(--annotation-panel-w), calc(100vw - 32px));
 }
 
 /* ---- Query History right-panel ---- */
@@ -5431,7 +5564,9 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   flex: 1;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
   column-gap: 4px;
+  row-gap: 1px;
   text-align: left;
   border: 0;
   background: none;
@@ -5442,7 +5577,7 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 }
 .annotation-entry-open::before {
   content: counter(annotation-step);
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   color: var(--fg-subtle);
   font-size: 11px;
   line-height: 1.6;
@@ -5468,6 +5603,13 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.annotation-entry-time {
+  grid-column: 2;
+  display: block;
+  font-size: 10px;
+  color: var(--fg-subtle);
   white-space: nowrap;
 }
 /* Per-row actions stay quiet until the row (or the panel item) is hovered,
@@ -5528,6 +5670,12 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
 #annotation-detail-step {
   font-size: 11px;
   color: var(--fg-subtle);
+}
+#annotation-detail-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
 }
 #annotation-detail-prev,
 #annotation-detail-next,

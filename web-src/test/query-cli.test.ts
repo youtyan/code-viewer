@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { buildRoute } from "../core/routes";
 import {
   parseQueryArgs,
   QUERY_AGENT_HELP,
@@ -3673,6 +3674,8 @@ describe("runQueryCli integration", () => {
     const payload = {
       beforeId: "snap-a",
       afterId: "snap-b",
+      dbId: "app.db",
+      schema: "public",
       tables: [
         {
           tableName: "sample_table",
@@ -3712,11 +3715,27 @@ describe("runQueryCli integration", () => {
     expect(harness.requests[1].url).toBe(
       `${SERVER}/_db/snapshot/diff/tables?before=snap-a&after=snap-b`,
     );
-    // top-level fields preserved; tables[] elements gain diffRowsCommand.
-    // server URL / before / after / table はすべて single-quoted。
+    // top-level fields preserved; gains a diffUrl (same routing the browser
+    // uses, via core/routes.ts buildRoute) and tables[] elements gain
+    // diffRowsCommand. server URL / before / after / table はすべて single-quoted。
+    const expectedDiffUrl = new URL(
+      buildRoute({
+        screen: "database",
+        db: "app.db",
+        schema: "public",
+        tab: "snapshot",
+        diffBefore: "snap-a",
+        diffAfter: "snap-b",
+        range: { from: "", to: "" },
+      }),
+      "http://localhost:65535",
+    ).toString();
     expect(JSON.parse(harness.logs[0])).toEqual({
       beforeId: "snap-a",
       afterId: "snap-b",
+      dbId: "app.db",
+      schema: "public",
+      diffUrl: expectedDiffUrl,
       tables: [
         {
           tableName: "sample_table",
@@ -3746,6 +3765,8 @@ describe("runQueryCli integration", () => {
     const payload = {
       beforeId: "snap-a",
       afterId: "snap-b",
+      dbId: "app.db",
+      schema: "public",
       tables: [
         {
           tableName: "sample_table",
@@ -3783,6 +3804,26 @@ describe("runQueryCli integration", () => {
 
     expect(harness.exits).toEqual([]);
     const out = harness.logs.join("\n");
+    // 冒頭に "# view in browser: ..." hint。同じ before/after をブラウザの
+    // Database > Snapshot タブでそのまま開ける (core/routes.ts buildRoute 経由)。
+    const expectedDiffUrl = new URL(
+      buildRoute({
+        screen: "database",
+        db: "app.db",
+        schema: "public",
+        tab: "snapshot",
+        diffBefore: "snap-a",
+        diffAfter: "snap-b",
+        range: { from: "", to: "" },
+      }),
+      "http://localhost:65535",
+    ).toString();
+    expect(out).toMatch(
+      new RegExp(
+        `^# view in browser: ${expectedDiffUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        "m",
+      ),
+    );
     // 既存 summary 行は保持。直下に "# diff rows: ..." hint を出す。
     expect(out).toMatch(/^sample_table {2}\+1 ~0 -0 =9$/m);
     expect(out).toMatch(
@@ -3841,13 +3882,15 @@ describe("runQueryCli integration", () => {
     );
   });
 
-  test("diff tables on empty result keeps the existing notice without hints", async () => {
+  test("diff tables on empty result keeps the existing notice plus a view-in-browser hint", async () => {
     const harness = installRunHarness([
       { body: JSON.stringify({ files: [] }) },
       {
         body: JSON.stringify({
           beforeId: "snap-a",
           afterId: "snap-b",
+          dbId: "app.db",
+          schema: "public",
           tables: [],
         }),
       },
@@ -3864,8 +3907,23 @@ describe("runQueryCli integration", () => {
       "snap-b",
     ]);
 
+    const expectedDiffUrl = new URL(
+      buildRoute({
+        screen: "database",
+        db: "app.db",
+        schema: "public",
+        tab: "snapshot",
+        diffBefore: "snap-a",
+        diffAfter: "snap-b",
+        range: { from: "", to: "" },
+      }),
+      "http://localhost:65535",
+    ).toString();
     expect(harness.exits).toEqual([]);
-    expect(harness.logs).toEqual(["no tables in diff"]);
+    expect(harness.logs).toEqual([
+      "no tables in diff",
+      `# view in browser: ${expectedDiffUrl}`,
+    ]);
   });
 
   test("non-2xx responses with text/plain bodies are surfaced as readable errors (not SyntaxError)", async () => {

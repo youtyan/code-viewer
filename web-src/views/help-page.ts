@@ -181,7 +181,7 @@ const HELP_CONTENT: Record<HelpLanguage, HelpContent> = {
                 rows: [
                   [
                     "settings.json",
-                    "Viewer Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/follow/mute/rate, and the last viewed diff range.",
+                    "Viewer Settings — diff layout, theme, language, sidebar/history widths, font sizes, syntax highlight, ignore-whitespace, hide-tests, scope overrides (omitted dirs / excluded names), upload toggle, annotation panel open/width/follow/mute/rate, and the last viewed diff range.",
                   ],
                   [
                     "view-state.json",
@@ -321,8 +321,12 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "Each annotation has a copy button that produces a paste-ready prompt block referencing the annotation URL, so you can hand it back to the originating agent.",
                   ],
                   [
+                    "Timestamps and width",
+                    "Session and entry rows show creation time. The panel can be resized, and its width is saved per project.",
+                  ],
+                  [
                     "Persistent state",
-                    "Open/closed, follow, mute, and rate are stored under .code-viewer/settings.json; annotations themselves live in .code-viewer/annotations.json.",
+                    "Open/closed, width, follow, mute, and rate are stored under .code-viewer/settings.json; annotations themselves live in .code-viewer/annotations.json.",
                   ],
                 ],
               },
@@ -702,15 +706,19 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "Drag on line numbers",
-                    "Highlight a range; the floating copy pill prepares @path#L1-L9",
+                    "Highlight a range; the floating copy pill prepares @path#1-9",
                   ],
                   [
                     "Click the pill",
-                    "Copy @path#L1-L9 to the clipboard for pasting into Claude Code / Codex",
+                    "Copy @path#1-9 to the clipboard for pasting into an AI agent",
                   ],
                   [
                     "Shift+Click the pill",
-                    "Copy @path#L1-L9 plus a fenced code block of the selected lines — paste straight to an AI without re-fetching the file",
+                    "Copy @path#1-9 plus a fenced code block of the selected lines — paste straight to an AI without re-fetching the file",
+                  ],
+                  [
+                    "x button / Escape",
+                    "Clear the selected range and hide the floating copy pill",
                   ],
                 ],
               },
@@ -840,7 +848,7 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "settings.json",
-                    "Viewer Settings — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
+                    "Viewer Settings — diff レイアウト、テーマ、言語、サイドバー/履歴幅、フォントサイズ、シンタックスハイライト、whitespace 無視、テスト非表示、scope 上書き（除外ディレクトリ / 除外名）、アップロード許可、注釈パネルの開閉/幅/follow/ミュート/再生速度、最後に表示した diff 範囲を保存します。",
                   ],
                   [
                     "view-state.json",
@@ -980,8 +988,12 @@ code-viewer annotate add-db --db app.db --tab query \\
                     "各注釈のコピーボタンが、注釈 URL を含む貼り付け可能なプロンプトを生成します。元のエージェントへそのまま戻せます。",
                   ],
                   [
+                    "日時と幅",
+                    "セッションと注釈の行には作成日時が出ます。パネル幅はリサイズでき、プロジェクト単位で保存されます。",
+                  ],
+                  [
                     "永続化",
-                    "パネルの開閉・follow・ミュート・速度は .code-viewer/settings.json に、注釈自体は .code-viewer/annotations.json に保存されます。",
+                    "パネルの開閉・幅・follow・ミュート・速度は .code-viewer/settings.json に、注釈自体は .code-viewer/annotations.json に保存されます。",
                   ],
                 ],
               },
@@ -1359,15 +1371,19 @@ code-viewer annotate add-db --db app.db --tab query \\
                 rows: [
                   [
                     "行番号でドラッグ",
-                    "範囲をハイライトし、フロートする Copy ピルが @path#L1-L9 を用意",
+                    "範囲をハイライトし、フロートする Copy ピルが @path#1-9 を用意",
                   ],
                   [
                     "ピルをクリック",
-                    "@path#L1-L9 をコピー（Claude Code / Codex への貼り付け用）",
+                    "@path#1-9 をコピー（AI エージェントへの貼り付け用）",
                   ],
                   [
                     "Shift+ピルをクリック",
-                    "@path#L1-L9 と選択行の実コード（フェンス付き）をまとめてコピー — AI へ直接貼れて、ファイル再取得不要",
+                    "@path#1-9 と選択行の実コード（フェンス付き）をまとめてコピー — AI へ直接貼れて、ファイル再取得不要",
+                  ],
+                  [
+                    "x ボタン / Escape",
+                    "選択範囲を解除し、フロートする Copy ピルを閉じる",
                   ],
                 ],
               },

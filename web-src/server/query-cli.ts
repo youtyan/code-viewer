@@ -18,6 +18,7 @@ import type {
   S3SearchMode,
   S3SortMode,
 } from "../core/database/types";
+import { buildRoute } from "../core/routes";
 import {
   ensureServerUrl,
   requestJson,
@@ -368,10 +369,13 @@ no separate stored diff entity, so you always pass both snapshot ids.
    code-viewer query snapshot list --db app.db --json
 
 5. View the diff (per-table summary, then per-row detail). diff tables
-   prints each per-table summary line plus a paste-safe "# diff rows: ..."
-   hint right below it, and --json adds a diffRowsCommand field to each
-   tables[] element, so you can drill into row detail without rebuilding
-   the command yourself:
+   prints a "# view in browser: <url>" hint up top (opens the same diff in
+   the human's browser, Database > Snapshot tab), then each per-table
+   summary line plus a paste-safe "# diff rows: ..." hint right below it.
+   --json adds the same browser link as a diffUrl field and a
+   diffRowsCommand field on each tables[] element, so you can hand the
+   human a direct link or drill into row detail without rebuilding the
+   command yourself:
    code-viewer query diff tables --before snap-abc123 --after snap-def456 --json
    code-viewer query diff rows  --before snap-abc123 --after snap-def456 \\
        --table users --json
@@ -558,10 +562,13 @@ object bytes (text-shaped objects are previewable via \`s3 text\`).
 - diff tables: human-readable lines (default) plus a paste-safe
   "# diff rows: code-viewer query --server '<url>' diff rows --before '<id>'
   --after '<id>' --table '<table>' --json" comment line right below each table,
-  so AI/human can drill into row detail without rebuilding the command. With
-  --json the full /_db/snapshot/diff/tables payload is emitted and each
-  tables[] element gains an additive diffRowsCommand field with the same
-  literal. server URL / snapshot ids / table names are POSIX single-quoted.
+  so AI/human can drill into row detail without rebuilding the command. A
+  "# view in browser: <url>" hint is printed once up top — opens the same
+  before/after comparison in the human's browser (Database > Snapshot tab).
+  With --json the full /_db/snapshot/diff/tables payload is emitted, the
+  top-level diffUrl field carries the same browser link, and each tables[]
+  element gains an additive diffRowsCommand field with the same literal.
+  server URL / snapshot ids / table names are POSIX single-quoted.
 - snapshot create: prints "snapshot started" immediately with the snapshotId.
   The no-wait output also includes a paste-safe poll command that pins
   --server '<url>' and single-quotes db/schema so AI/human paste does not
@@ -2750,6 +2757,29 @@ function buildSnapshotPollCommand(
   return `${cli} snapshot list --db ${shellSingleQuote(db)}${schemaArg} --json`;
 }
 
+// diff tables の結果を人間がブラウザで見るための URL。client 側のルーティング
+// (web-src/core/routes.ts buildRoute) をそのまま再利用するので、URL の形が
+// ブラウザの実際のルーティングと常に一致する (二重エンコード等のズレが出ない)。
+// range はデータベース画面では未使用だが AppRoute の型上必須なので空文字で埋める。
+function buildSnapshotDiffUrl(
+  serverUrl: string,
+  dbId: string,
+  schema: string,
+  beforeId: string,
+  afterId: string,
+): string {
+  const path = buildRoute({
+    screen: "database",
+    db: dbId,
+    schema,
+    tab: "snapshot",
+    diffBefore: beforeId,
+    diffAfter: afterId,
+    range: { from: "", to: "" },
+  });
+  return new URL(path, serverUrl).toString();
+}
+
 // diff tables の各行から row 詳細を見るための paste-safe な diff rows コマンド。
 // snapshot poll と同形 (--server pin + 全引数 single-quote)。table 名に空白や
 // ' が含まれても bash/zsh に貼れる。
@@ -3074,6 +3104,8 @@ async function runDiffTables(
   )) as {
     beforeId: string;
     afterId: string;
+    dbId: string;
+    schema: string;
     tables: Array<{
       tableName: string;
       insertedCount: number;
@@ -3087,8 +3119,16 @@ async function runDiffTables(
   // per-table の diffRowsCommand を additive に付与する。--json でも default
   // でも、AI/human が table 行から row 詳細へ 1 step で進めるようにする。
   // server URL / before / after / table はすべて shellSingleQuote 済み。
+  // diffUrl は人間がブラウザで同じ比較をそのまま開けるよう additive に乗せる。
   const enriched = {
     ...body,
+    diffUrl: buildSnapshotDiffUrl(
+      serverUrl,
+      body.dbId,
+      body.schema,
+      body.beforeId,
+      body.afterId,
+    ),
     tables: body.tables.map((t) => ({
       ...t,
       diffRowsCommand: buildDiffRowsCommand(
@@ -3105,8 +3145,10 @@ async function runDiffTables(
   }
   if (!enriched.tables.length) {
     console.log("no tables in diff");
+    console.log(`# view in browser: ${enriched.diffUrl}`);
     return;
   }
+  console.log(`# view in browser: ${enriched.diffUrl}`);
   for (const t of enriched.tables) {
     const cov = t.coverage === "both" ? "" : `  (${t.coverage})`;
     console.log(

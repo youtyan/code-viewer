@@ -162,6 +162,13 @@ function sanitizeSettings(raw: unknown): AppSettingsState {
   const annotationPanelOpen = optionalBoolean(raw.annotationPanelOpen);
   if (annotationPanelOpen !== undefined)
     out.annotationPanelOpen = annotationPanelOpen;
+  const annotationPanelWidth = optionalNumber(
+    raw.annotationPanelWidth,
+    260,
+    720,
+  );
+  if (annotationPanelWidth !== undefined)
+    out.annotationPanelWidth = annotationPanelWidth;
   const annotationFollow = optionalBoolean(raw.annotationFollow);
   if (annotationFollow !== undefined) out.annotationFollow = annotationFollow;
   const annotationMuted = optionalBoolean(raw.annotationMuted);

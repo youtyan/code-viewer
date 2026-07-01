@@ -12,7 +12,9 @@ import { deferred, waitFor } from "./_test-helpers";
 GlobalRegistrator.register();
 
 const { createBlameView } = await import("../views/blame-view");
-const { isBlobOrBlameFileRoute } = await import("../views/file-shell");
+const { createFileShellSticky, isBlobOrBlameFileRoute } = await import(
+  "../views/file-shell"
+);
 
 const RANGE: DiffRange = { from: "HEAD", to: "worktree" };
 const SHA = "1111111111111111111111111111111111111111";
@@ -408,6 +410,35 @@ describe("file view shell routing", () => {
     await waitFor(() => activeSourceTab() === "blame");
 
     expect(tabLabels()).toEqual(["Code", "Blame", "History"]);
+  });
+
+  test("file shell tabs can hide blame and history for metadata-only paths", () => {
+    const appliedRoutes: AppRoute[] = [];
+    const preferredTabs: SourceBlobTab[] = [];
+    const { sticky } = createFileShellSticky(
+      {
+        currentRange: () => RANGE,
+        setRoute(route: AppRoute) {
+          appliedRoutes.push(route);
+        },
+        setPreferredSourceTab(tab: SourceBlobTab) {
+          preferredTabs.push(tab);
+        },
+        createFileBreadcrumb(path: string) {
+          const span = document.createElement("span");
+          span.textContent = path;
+          return span;
+        },
+      },
+      { path: ".tool/settings.json", ref: "worktree" },
+      "code",
+      { includeFileTabs: false, previewable: false },
+    );
+    document.body.appendChild(sticky);
+
+    expect(tabLabels()).toEqual(["Code"]);
+    expect(appliedRoutes).toEqual([]);
+    expect(preferredTabs).toEqual([]);
   });
 
   test("blame ignores an older render response after a newer render wins", async () => {

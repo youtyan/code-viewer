@@ -195,6 +195,7 @@ export function createFileShellSticky(
   deps: FileShellStickyDeps,
   target: SourceFileTarget,
   activeTab: FileViewTab,
+  options: FileViewTabsOptions = {},
 ): {
   sticky: HTMLElement;
   header: HTMLElement;
@@ -212,7 +213,7 @@ export function createFileShellSticky(
   sticky.appendChild(header);
   const tabsHost = document.createElement("div");
   tabsHost.className = "gdp-file-detail-tabs";
-  tabsHost.appendChild(createFileViewTabs(deps, target, activeTab));
+  tabsHost.appendChild(createFileViewTabs(deps, target, activeTab, options));
   sticky.appendChild(tabsHost);
   return { sticky, header, tabsHost };
 }

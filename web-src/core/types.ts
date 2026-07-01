@@ -97,6 +97,7 @@ export type AppSettingsState = {
   autoUpdate?: boolean;
   queryHistoryPanelWidth?: number;
   annotationPanelOpen?: boolean;
+  annotationPanelWidth?: number;
   annotationFollow?: boolean;
   annotationMuted?: boolean;
   annotationRate?: number;

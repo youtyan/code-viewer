@@ -97,6 +97,12 @@ Each table summary line is followed by a paste-safe
 exact next command per table without rebuilding it. With `--json`, the same
 literal is exposed as a `diffRowsCommand` field on each `tables[]` element.
 
+The output also prints a `# view in browser: <url>` line — a direct link
+that opens this same before/after comparison in the human's browser
+(Database > Snapshot tab). Hand this to the human instead of describing
+the diff in prose. With `--json` the same link is the top-level `diffUrl`
+field.
+
 Drill into row-level changes for a specific table:
 
 ```sh

@@ -35,6 +35,7 @@ describe("state store", () => {
           theme: "dark",
           language: "ja",
           sidebarWidth: 9999,
+          annotationPanelWidth: 9999,
           annotationRate: 1.5,
           scopeOmitDirs: ["node_modules", "../bad", "dist"],
           range: { from: "HEAD~1", to: "worktree" },
@@ -46,6 +47,7 @@ describe("state store", () => {
         theme: "dark",
         language: "ja",
         sidebarWidth: 900,
+        annotationPanelWidth: 720,
         annotationRate: 1.5,
         scopeOmitDirs: ["dist", "node_modules"],
         range: { from: "HEAD~1", to: "worktree" },
@@ -54,6 +56,7 @@ describe("state store", () => {
       expect(
         await patchAppSettingsState(dir, {
           theme: null,
+          annotationPanelWidth: null,
           range: null,
         }),
       ).toEqual({

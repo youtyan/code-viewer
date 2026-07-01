@@ -31,12 +31,14 @@
       <a class="app-menu-item" data-route="database" href="/database">Datastores</a>
     </nav>
     <div class="global-actions">
-      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations">💬<span id="annotations-count" hidden></span></button>
+      <button id="annotations-toggle" class="global-icon-action" title="code annotations" aria-label="code annotations"><span class="goi-icon" aria-hidden="true"></span><span id="annotations-count" hidden></span></button>
       <button id="viewer-settings" class="global-icon-action" title="viewer settings" aria-label="viewer settings"></button>
-      <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor">🩺<span id="doctor-badge" class="doctor-badge" hidden></span></button>
+      <button id="doctor-btn" class="global-icon-action" title="environment doctor" aria-label="environment doctor"><span class="goi-icon" aria-hidden="true"></span><span id="doctor-badge" class="doctor-badge" hidden></span></button>
+      <button id="copy-ai-context" class="global-icon-action" title="Copy AI context" aria-label="Copy AI context"></button>
+      <span id="copy-ai-context-feedback" class="goi-feedback" role="status" hidden></span>
       <button id="auto-update" class="global-icon-action active" title="auto update on file change">auto</button>
       <button id="cancel-requests" class="global-icon-action" title="no in-flight requests" aria-label="cancel in-flight requests" disabled>stop</button>
-      <button id="theme" title="toggle theme">🌗</button>
+      <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
       <span id="status" class="status"></span>
       <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
       <a class="global-help-link" data-route="help" href="/help">Help</a>
@@ -201,6 +203,7 @@
   </div>
 
   <aside id="annotation-panel" hidden>
+    <div id="annotation-panel-resizer" aria-hidden="true"></div>
     <div class="annotation-panel-head">
       <strong>Code annotations</strong>
       <label class="annotation-follow-label" title="jump to new annotations as they arrive">
@@ -233,6 +236,7 @@
     <div id="annotation-detail" hidden>
       <div class="annotation-detail-head">
         <span id="annotation-detail-session"></span>
+        <span id="annotation-detail-time"></span>
         <span id="annotation-detail-step"></span>
         <button id="annotation-detail-prev" type="button" title="previous annotation">‹</button>
         <button id="annotation-detail-next" type="button" title="next annotation">›</button>

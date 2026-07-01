@@ -10,8 +10,8 @@ Requires Node.js 20 or newer when installed from npm. Development uses
 - Browse repository files and folders in a persistent sidebar with live
   worktree change updates over SSE.
 - View git diffs with unified or split layout, lazy loading, viewed-file
-  state, ignore-whitespace and hide-tests toggles, and per-line "reference
-  pills" that copy `@path#start-end` for AI agents.
+  state, ignore-whitespace and hide-tests toggles, and dismissible per-line
+  "reference pills" that copy `@path#start-end` for AI agents.
 - Browse commit history per branch and open any commit's changed files and
   diff, with shareable `/history?ref=<branch>&commit=<sha>` links.
 - Open per-file Blame and History tabs on a file detail page (GitHub-style):
@@ -20,8 +20,9 @@ Requires Node.js 20 or newer when installed from npm. Development uses
   same commit list and diff renderer used by `/history` inside the file's
   tab shell, filtered to that path. Both tabs keep the Repository sidebar
   visible.
-- Open files directly from the repository or diff view, including large
-  generated files (virtualized source viewer with copy/open-full-view).
+- Open files directly from the repository or diff view, including text-like
+  config/prompt files and large generated files (virtualized source viewer
+  with copy/open-full-view).
 - Preview Markdown with a table of contents, task lists, Mermaid diagrams
   (click to enlarge), and Shiki code highlighting.
 - Preview browser-safe media and show metadata for binary files that cannot
@@ -716,13 +717,15 @@ sharing it through git.
 
 In the browser, the annotation icon in the header opens the side panel. The
 current explanation is rendered at the top of the panel while the code stays
-visible next to it, with the annotated lines highlighted. The history below
-groups annotations by session; clicking an entry jumps back to its location,
-and entries and sessions can be deleted there too. The "follow" checkbox
-controls whether the tab jumps automatically when an agent adds a new
-annotation. A built-in player can speak the current annotation aloud with
-play/pause, previous/next, mute, and rate controls (TTS state is saved per
-project).
+visible next to it, with the annotated lines highlighted. The side panel is
+resizable and remembers its width per project. The history below groups
+annotations by session, shows when each session and entry was created, and
+keeps inline code notes out of the way while the panel is open. Clicking an
+entry jumps back to its location, and entries and sessions can be deleted
+there too. The "follow" checkbox controls whether the tab jumps automatically
+when an agent adds a new annotation. A built-in player can speak the current
+annotation aloud with play/pause, previous/next, mute, and rate controls (TTS
+state is saved per project).
 
 A copy button on each annotation produces a paste-ready prompt block that
 references the annotation by URL for sharing back into the originating agent.

@@ -28,7 +28,9 @@ export type KeymapAction =
   | "toggle-theme"
   | "annotation-next"
   | "annotation-previous"
-  | "open-help";
+  | "open-help"
+  | "copy-ai-context"
+  | "copy-ai-context-with-code";
 
 export type KeyEventLike = {
   key: string;
@@ -169,6 +171,8 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { action: "layout-split", key: "s" },
   { action: "toggle-theme", key: "t" },
   { action: "open-help", key: "?", shift: true },
+  { action: "copy-ai-context", key: "y" },
+  { action: "copy-ai-context-with-code", key: "y", shift: true },
 ];
 
 export function resolveKeymapAction(

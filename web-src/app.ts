@@ -1,4 +1,9 @@
 import {
+  AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD,
+  aiContextClipboardText,
+  resolveSelectionTarget,
+} from "./core/ai-context-copy";
+import {
   createCatchUpGate,
   shouldAutoLoadForRoute,
   shouldCatchUpDiff,
@@ -16,9 +21,13 @@ import {
 import { ensureTerraformHighlightLanguage } from "./core/highlight-languages";
 import {
   CHEVRON_DOWN_12_PATH,
+  COMMENT_DISCUSSION_16_PATH,
+  COPY_16_PATHS,
   GIT_BRANCH_16_PATH,
   iconSvg,
+  MOON_16_PATH,
   OPEN_EXTERNAL_16_PATH,
+  PULSE_16_PATH,
   TRIANGLE_DOWN_16_PATH,
 } from "./core/icons";
 import { isImeComposing } from "./core/keyboard";
@@ -37,6 +46,7 @@ import {
   type SourceLineTarget,
   withDoctorOverlay,
 } from "./core/routes";
+import { sourceInternalPathKind } from "./core/source-meta";
 import type {
   AppSettingsState,
   DiffCardElement,
@@ -71,7 +81,11 @@ import {
 } from "./views/help-page";
 import { createHistoryView, installHistoryPageDom } from "./views/history-view";
 import { createHunkExpand } from "./views/hunk-expand";
-import { createLineRefPill } from "./views/line-ref-pill";
+import {
+  createLineRefPill,
+  langFromPath,
+  readRenderedLines,
+} from "./views/line-ref-pill";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
@@ -671,7 +685,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     const routeBase =
       parsedRoute.screen === "unknown"
         ? { screen: "diff" as const, range: parsedRoute.range }
-        : parsedRoute;
+        : normalizeInternalFileRoute(parsedRoute);
     return routeBase.screen === "help" &&
       !new URLSearchParams(window.location.search).has("lang")
       ? { ...routeBase, lang: savedLanguage }
@@ -713,6 +727,10 @@ window.GdpExpandLogic = GdpExpandLogic;
     applySidebarHidden(STATE.sidebarHidden, { persist: false });
     applyHistoryWidth(STATE.historyWidth, false);
     applySidebarWidth(STATE.sbWidth, { persist: false });
+    ANNOTATIONS_UI?.applyAnnotationPanelWidth(
+      APP_SETTINGS.annotationPanelWidth ?? 380,
+      false,
+    );
     setLayout(STATE.layout, false);
     applyTheme();
     localizeViewerChrome();
@@ -755,11 +773,37 @@ window.GdpExpandLogic = GdpExpandLogic;
   let REPO_SIDEBAR_REF: string | null = null;
 
   // ---------- Line reference copy (@path#start-end) ----------
-  const LINE_REF_PILL = createLineRefPill();
+  const LINE_REF_PILL = createLineRefPill({
+    onClose: () => {
+      clearLineSelection();
+    },
+  });
   const DIFF_LINE_SELECT = createDiffLineSelect({ pill: LINE_REF_PILL });
 
   // The pill follows the line= route param of the file screen; on the diff screen
   // diff-line-select owns it (after-side drag selection).
+  function clearRenderedSourceLineTargets() {
+    document
+      .querySelectorAll<HTMLElement>(".gdp-source-line-target")
+      .forEach((row) => {
+        row.classList.remove("gdp-source-line-target");
+      });
+  }
+
+  function clearLineSelection() {
+    const route = STATE.route;
+    if (route.screen === "file" && route.line) {
+      const { line, ...rest } = route;
+      setRoute(rest, true);
+      return true;
+    }
+    if (route.screen === "diff") {
+      return DIFF_LINE_SELECT.clear();
+    }
+    LINE_REF_PILL.hide();
+    return false;
+  }
+
   function syncLineRefPill() {
     const route = STATE.route;
     if (route.screen === "diff") return;
@@ -769,7 +813,9 @@ window.GdpExpandLogic = GdpExpandLogic;
         typeof route.line === "number" ? route.line : route.line.start;
       const end = typeof route.line === "number" ? route.line : route.line.end;
       LINE_REF_PILL.show(route.path, start, end);
+      return;
     }
+    if (route.screen === "file") clearRenderedSourceLineTargets();
   }
 
   // ---------- Sidebar: extracted to sidebar.ts ----------
@@ -1010,6 +1056,11 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: string;
         theme: string;
         product: string;
+        copyAiContext: string;
+        copyAiContextCopied: string;
+        copyAiContextCopiedWithCode: (lines: number) => string;
+        copyAiContextFailed: string;
+        copyAiContextEmpty: string;
       };
       topbar: {
         resetRange: string;
@@ -1117,6 +1168,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "viewer settings",
         theme: "toggle theme",
         product: "code viewer",
+        copyAiContext: "Copy AI context (Shift+Click to include code)",
+        copyAiContextCopied: "Copied AI context",
+        copyAiContextCopiedWithCode: (lines) =>
+          `Copied AI context + code (${lines} line${lines === 1 ? "" : "s"})`,
+        copyAiContextFailed: "Copy failed",
+        copyAiContextEmpty: "Nothing to copy here",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1234,6 +1291,13 @@ window.GdpExpandLogic = GdpExpandLogic;
         settings: "ビューア設定",
         theme: "テーマ切り替え",
         product: "code viewer",
+        copyAiContext:
+          "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
+        copyAiContextCopied: "コピーしました",
+        copyAiContextCopiedWithCode: (lines) =>
+          `コピーしました（コード付き・${lines}行）`,
+        copyAiContextFailed: "コピーに失敗しました",
+        copyAiContextEmpty: "コピーする内容がありません",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1388,7 +1452,16 @@ window.GdpExpandLogic = GdpExpandLogic;
       viewerSettings.setAttribute("aria-label", text.global.settings);
     }
     const theme = document.querySelector<HTMLButtonElement>("#theme");
-    if (theme) theme.title = text.global.theme;
+    if (theme) {
+      theme.title = text.global.theme;
+      theme.setAttribute("aria-label", text.global.theme);
+    }
+    const copyAiContext =
+      document.querySelector<HTMLButtonElement>("#copy-ai-context");
+    if (copyAiContext) {
+      copyAiContext.title = text.global.copyAiContext;
+      copyAiContext.setAttribute("aria-label", text.global.copyAiContext);
+    }
 
     const refReset = document.querySelector<HTMLButtonElement>("#ref-reset");
     if (refReset) refReset.title = text.topbar.resetRange;
@@ -1670,6 +1743,27 @@ window.GdpExpandLogic = GdpExpandLogic;
       return null;
     });
     return highlightLoadPromise;
+  }
+
+  function routeCanUseSyntaxHighlighter(
+    route: AppRoute = STATE.route,
+  ): boolean {
+    if (!STATE.syntaxHighlight) return false;
+    // "history" also renders diff cards via the same load() pipeline as
+    // "diff" once a commit is selected (HISTORY_VIEW.applyCommitRange calls
+    // the shared load()), so it needs the highlighter just as much.
+    if (route.screen === "diff" || route.screen === "history") return true;
+    return (
+      route.screen === "file" && sourceInternalPathKind(route.path) === null
+    );
+  }
+
+  function ensureSyntaxHighlighterForRoute(): void {
+    if (!routeCanUseSyntaxHighlighter()) return;
+    loadSyntaxHighlighter().then((hljsRef) => {
+      if (!hljsRef) return;
+      rerenderLoadedDiffs();
+    });
   }
 
   function setLayout(layout: LayoutMode, persist = true) {
@@ -2050,6 +2144,18 @@ window.GdpExpandLogic = GdpExpandLogic;
   function isHistoryPanelRoute(route: AppRoute): boolean {
     return route.screen === "history" || isFileHistoryRoute(route);
   }
+  function normalizeInternalFileRoute(route: AppRoute): AppRoute {
+    if (route.screen !== "file") return route;
+    if (sourceInternalPathKind(route.path) === null) return route;
+    if (route.view === "blob" && !route.preview && !route.line) return route;
+    return {
+      screen: "file",
+      path: route.path,
+      ref: route.ref,
+      range: route.range,
+      view: "blob",
+    };
+  }
   function parkRangeForHistory() {
     if (preHistoryRange === null)
       preHistoryRange = { from: STATE.from, to: STATE.to };
@@ -2208,7 +2314,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     let nextRoute =
       route.screen === "unknown"
         ? { screen: "diff" as const, range: route.range }
-        : route;
+        : normalizeInternalFileRoute(route);
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute)) {
       if (preHistoryRange) nextRoute = { ...nextRoute, range: preHistoryRange };
       HISTORY_VIEW.leaveHistory();
@@ -2590,6 +2696,37 @@ window.GdpExpandLogic = GdpExpandLogic;
   // ---- media (image / video / audio) embedding for binary file diffs ----
   // ---- media embedding: extracted to media-embed.ts ----
 
+  // Static Octicon SVGs for the global header. Run once at init; none of
+  // these icons change with theme/language, unlike the badges that live
+  // alongside them (#annotations-count, #doctor-badge) which keep their own
+  // sibling <span> so this never clobbers them.
+  function setGlobalHeaderIcons() {
+    const annotationsIcon = document.querySelector<HTMLElement>(
+      "#annotations-toggle .goi-icon",
+    );
+    if (annotationsIcon) {
+      annotationsIcon.innerHTML = iconSvg(
+        "octicon-comment-discussion",
+        COMMENT_DISCUSSION_16_PATH,
+      );
+    }
+    const doctorIcon = document.querySelector<HTMLElement>(
+      "#doctor-btn .goi-icon",
+    );
+    if (doctorIcon) {
+      doctorIcon.innerHTML = iconSvg("octicon-pulse", PULSE_16_PATH);
+    }
+    const themeButton = document.querySelector<HTMLButtonElement>("#theme");
+    if (themeButton) {
+      themeButton.innerHTML = iconSvg("octicon-moon", MOON_16_PATH);
+    }
+    const copyAiContextButton =
+      document.querySelector<HTMLButtonElement>("#copy-ai-context");
+    if (copyAiContextButton) {
+      copyAiContextButton.innerHTML = iconSvg("octicon-copy", COPY_16_PATHS);
+    }
+  }
+
   // ----- wiring -----
   applySidebarFontSize();
   applyCodeFontSize();
@@ -2598,6 +2735,7 @@ window.GdpExpandLogic = GdpExpandLogic;
   installHistoryPageDom();
   hydrateRefSelectorMounts();
   setSidebarTreeActionIcons();
+  setGlobalHeaderIcons();
   // Sidebar view toggle (tree / flat)
   $$(".sb-view-seg button").forEach((b) => {
     b.addEventListener("click", () => {
@@ -2617,6 +2755,94 @@ window.GdpExpandLogic = GdpExpandLogic;
   $("#doctor-btn")?.addEventListener("click", (event) => {
     event.preventDefault();
     toggleDoctorSheet();
+  });
+  let copyAiContextFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  $("#copy-ai-context")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const feedback = document.querySelector<HTMLElement>(
+      "#copy-ai-context-feedback",
+    );
+    const selectionTarget = resolveSelectionTarget(STATE.route);
+    let selectionCode: { lines: string[]; lang?: string | null } | undefined;
+    if (event.shiftKey && selectionTarget) {
+      const renderedLines = readRenderedLines(
+        selectionTarget.path,
+        selectionTarget.start,
+        selectionTarget.end,
+      );
+      if (renderedLines.length > 0) {
+        selectionCode = {
+          lines: renderedLines,
+          lang: langFromPath(selectionTarget.path),
+        };
+      }
+    }
+    const text = aiContextClipboardText({
+      route: STATE.route,
+      diffFrom: STATE.from,
+      diffTo: STATE.to,
+      selectionCode,
+    });
+    const finish = (
+      ok: boolean,
+      withCode: boolean,
+      lineCount: number,
+      reason?: "empty",
+    ) => {
+      const label =
+        reason === "empty"
+          ? uiText().global.copyAiContextEmpty
+          : ok
+            ? withCode
+              ? uiText().global.copyAiContextCopiedWithCode(lineCount)
+              : uiText().global.copyAiContextCopied
+            : uiText().global.copyAiContextFailed;
+      const isLargeCopy =
+        ok &&
+        withCode &&
+        lineCount >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD;
+      // "empty" stays the neutral default look (no copied/failed/warn class).
+      // This is not an error; there was just nothing to put on the clipboard.
+      const stateClass =
+        reason === "empty"
+          ? ""
+          : ok
+            ? isLargeCopy
+              ? "warn"
+              : "copied"
+            : "failed";
+      button.classList.remove("copied", "failed", "warn");
+      if (stateClass) button.classList.add(stateClass);
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      if (feedback) {
+        feedback.textContent = label;
+        feedback.classList.remove("copied", "failed", "warn");
+        if (stateClass) feedback.classList.add(stateClass);
+        feedback.hidden = false;
+      }
+      if (copyAiContextFeedbackTimer) clearTimeout(copyAiContextFeedbackTimer);
+      copyAiContextFeedbackTimer = setTimeout(() => {
+        copyAiContextFeedbackTimer = null;
+        button.classList.remove("copied", "failed", "warn");
+        button.title = uiText().global.copyAiContext;
+        button.setAttribute("aria-label", uiText().global.copyAiContext);
+        if (feedback) {
+          feedback.hidden = true;
+          feedback.classList.remove("copied", "failed", "warn");
+        }
+      }, 1200);
+    };
+    if (!text) {
+      finish(false, false, 0, "empty");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      finish(true, !!selectionCode, selectionCode?.lines.length ?? 0);
+    } catch {
+      finish(false, false, 0);
+    }
   });
   $("#scope-settings-close")?.addEventListener("click", closeScopeSettings);
   $("#scope-omit-reset")?.addEventListener("click", resetScopeSettings);
@@ -3049,6 +3275,20 @@ window.GdpExpandLogic = GdpExpandLogic;
       $("#theme").click();
       return true;
     }
+    if (action === "copy-ai-context") {
+      $("#copy-ai-context")?.click();
+      return true;
+    }
+    if (action === "copy-ai-context-with-code") {
+      $("#copy-ai-context")?.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          shiftKey: true,
+        }),
+      );
+      return true;
+    }
     if (action === "open-help") {
       openHelpKeybindings({
         getRoute: () => STATE.route,
@@ -3077,6 +3317,14 @@ window.GdpExpandLogic = GdpExpandLogic;
     if ((e as VirtualSourcePagingKeyboardEvent).__gdpVirtualSourcePagingHandled)
       return;
     const targetEl = e.target as Element | null;
+    if (
+      e.key === "Escape" &&
+      !isEditableKeyTarget(targetEl) &&
+      clearLineSelection()
+    ) {
+      e.preventDefault();
+      return;
+    }
     if (
       (e.ctrlKey || e.metaKey) &&
       !e.shiftKey &&
@@ -3452,10 +3700,11 @@ window.GdpExpandLogic = GdpExpandLogic;
     const routeLanguage = viewerLanguageFromSearch(window.location.search);
     if (routeLanguage && routeLanguage !== STATE.language)
       setViewerLanguage(routeLanguage);
-    const nextRoute: AppRoute =
+    let nextRoute: AppRoute =
       parsedRoute.screen === "unknown"
         ? { screen: "diff", range: parsedRoute.range }
         : parsedRoute;
+    nextRoute = normalizeInternalFileRoute(nextRoute);
     if (previousRoute.screen === "database" && nextRoute.screen !== "database")
       DATABASE_VIEW.suspend();
     if (isHistoryPanelRoute(previousRoute) && !isHistoryPanelRoute(nextRoute))
@@ -3469,6 +3718,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         : nextRoute;
     STATE.from = STATE.route.range.from;
     STATE.to = STATE.route.range.to;
+    ensureSyntaxHighlighterForRoute();
     if (
       STATE.route.screen === "repo" ||
       (STATE.route.screen === "file" &&
@@ -3585,10 +3835,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (persist) patchSettings({ syntaxHighlight: on });
     setHighlightButton(on && getHljs() ? "loaded" : "idle");
     if (on) {
-      loadSyntaxHighlighter().then((hljsRef) => {
-        if (!hljsRef) return;
-        rerenderLoadedDiffs();
-      });
+      ensureSyntaxHighlighterForRoute();
     } else {
       rerenderLoadedDiffs();
     }
@@ -3684,6 +3931,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     getAnnotationPanelOpen: () => APP_SETTINGS.annotationPanelOpen === true,
     setAnnotationPanelOpenState: (open) =>
       patchSettings({ annotationPanelOpen: open }),
+    getAnnotationPanelWidth: () => APP_SETTINGS.annotationPanelWidth,
+    setAnnotationPanelWidth: (width) =>
+      patchSettings({ annotationPanelWidth: width }),
     getAnnotationFollow: () => APP_SETTINGS.annotationFollow !== false,
     setAnnotationFollow: (follow) =>
       patchSettings({ annotationFollow: follow }),
@@ -3713,6 +3963,37 @@ window.GdpExpandLogic = GdpExpandLogic;
       patchSettings({ range: currentRange() });
     },
   });
+  (function setupAnnotationPanelResizer() {
+    const panel = document.getElementById("annotation-panel");
+    const handle = document.getElementById("annotation-panel-resizer");
+    if (!panel || !handle) return;
+    // Right-fixed panel with a left-edge handle: dragging left (negative
+    // clientX delta) grows the panel, the same sign convention query-history
+    // uses for its own left-edge handle.
+    let dragging = false;
+    let startX = 0;
+    let startW = 0;
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startW = panel.offsetWidth;
+      document.body.classList.add("gdp-annotation-resizing");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      ANNOTATIONS_UI?.applyAnnotationPanelWidth(
+        startW - (e.clientX - startX),
+        false,
+      );
+    });
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("gdp-annotation-resizing");
+      ANNOTATIONS_UI?.applyAnnotationPanelWidth(panel.offsetWidth);
+    });
+  })();
   replaceUrlWithCurrentRoute();
 
   createAnnotationsPlayer({
@@ -3963,46 +4244,86 @@ window.GdpExpandLogic = GdpExpandLogic;
     }, 350);
   }
 
-  const es = new EventSource("/events");
   const catchUpGate = createCatchUpGate(() => Date.now(), 1000);
   let openedOnce = false;
-  es.addEventListener("update", (event) => {
-    const raw = (event as MessageEvent).data;
-    let paths: string[] | null = null;
-    if (raw && raw !== "tick") {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.paths)) paths = parsed.paths;
-      } catch {
-        /* ignore parse errors */
-      }
+  let eventSource: EventSource | null = null;
+  let eventSourceConnectTimer: number | null = null;
+
+  function shouldConnectEventSource(): boolean {
+    return document.visibilityState === "visible";
+  }
+
+  function disconnectEventSource(): void {
+    if (eventSourceConnectTimer !== null) {
+      window.clearTimeout(eventSourceConnectTimer);
+      eventSourceConnectTimer = null;
     }
-    scheduleSseLoad(paths);
-  });
-  es.addEventListener("watch-limit", (event) => {
-    const raw = (event as MessageEvent).data;
-    const limit = Number(raw);
-    if (Number.isFinite(limit) && limit > 0) showWatchLimitBanner(limit);
-  });
-  es.addEventListener("reload", () => location.reload());
-  es.addEventListener("annotation", (event) => {
-    ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
-  });
-  es.addEventListener("db-query", (event) => {
-    DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
-  });
-  es.addEventListener("db-snapshot", (event) => {
-    DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
-  });
-  es.addEventListener("error", () => setStatus("error"));
-  es.addEventListener("open", () => {
-    setStatus("live");
-    if (!openedOnce) {
-      openedOnce = true;
+    eventSource?.close();
+    eventSource = null;
+  }
+
+  function connectEventSource(): void {
+    if (!shouldConnectEventSource()) return;
+    if (eventSource) return;
+    const es = new EventSource("/events");
+    eventSource = es;
+    es.addEventListener("update", (event) => {
+      const raw = (event as MessageEvent).data;
+      let paths: string[] | null = null;
+      if (raw && raw !== "tick") {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.paths)) paths = parsed.paths;
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+      scheduleSseLoad(paths);
+    });
+    es.addEventListener("watch-limit", (event) => {
+      const raw = (event as MessageEvent).data;
+      const limit = Number(raw);
+      if (Number.isFinite(limit) && limit > 0) showWatchLimitBanner(limit);
+    });
+    es.addEventListener("reload", () => location.reload());
+    es.addEventListener("annotation", (event) => {
+      ANNOTATIONS_UI?.handleSse((event as MessageEvent).data);
+    });
+    es.addEventListener("db-query", (event) => {
+      DATABASE_VIEW.handleSse("db-query", (event as MessageEvent).data);
+    });
+    es.addEventListener("db-snapshot", (event) => {
+      DATABASE_VIEW.handleSse("db-snapshot", (event as MessageEvent).data);
+    });
+    es.addEventListener("error", () => setStatus("error"));
+    es.addEventListener("open", () => {
+      setStatus("live");
+      if (!openedOnce) {
+        openedOnce = true;
+        return;
+      }
+      catchUpDiff();
+    });
+  }
+
+  function scheduleEventSourceConnect(): void {
+    if (!shouldConnectEventSource()) return;
+    if (eventSource || eventSourceConnectTimer !== null) return;
+    const schedule = () => {
+      eventSourceConnectTimer = window.setTimeout(() => {
+        eventSourceConnectTimer = null;
+        connectEventSource();
+      }, 1000);
+    };
+    if (document.readyState === "complete") {
+      schedule();
       return;
     }
-    catchUpDiff();
-  });
+    window.addEventListener("load", schedule, { once: true });
+  }
+
+  scheduleEventSourceConnect();
+  window.addEventListener("pagehide", disconnectEventSource);
 
   function catchUpDiff() {
     const historyWorktreeSelected = HISTORY_VIEW.isWorktreeSelected();
@@ -4017,7 +4338,17 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) catchUpDiff();
+    if (document.hidden) {
+      disconnectEventSource();
+      return;
+    }
+    scheduleEventSourceConnect();
+    catchUpDiff();
+    void ANNOTATIONS_UI?.refreshAnnotations();
   });
-  window.addEventListener("focus", catchUpDiff);
+  window.addEventListener("focus", () => {
+    scheduleEventSourceConnect();
+    catchUpDiff();
+    void ANNOTATIONS_UI?.refreshAnnotations();
+  });
 })();
