@@ -211,6 +211,10 @@ describe("repo view commit entries", () => {
     );
     expect(row?.querySelector(".dir-icon")?.textContent).toBe("folder");
     expect(row?.querySelector(".d2h-icon-wrapper")).toBeNull();
+    // browsable な commit entry (worktree, non-submodule) は通常フォルダ扱いの
+    // ままで、非 browsable 用の区別 class / aria-disabled は付かない。
+    expect(row?.classList.contains("gdp-repo-row-gitlink")).toBe(false);
+    expect(row?.hasAttribute("aria-disabled")).toBe(false);
     expect(calls.renderedFiles[calls.renderedFiles.length - 1]?.[0]?.type).toBe(
       "tree",
     );
@@ -267,6 +271,20 @@ describe("repo view commit entries", () => {
     expect(row?.querySelector(".octicon-file")).toBeNull();
     expect(row?.title).toBe("Git submodule pinned to a commit");
     expect(row?.querySelector(".meta")?.textContent).toBe("submodule");
+    // 非 browsable な commit 行は、通常のファイル/フォルダ行と混同されないよう
+    // 専用 class + aria-disabled で区別される。
+    expect(row?.classList.contains("gdp-repo-row-gitlink")).toBe(true);
+    expect(row?.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      row
+        ?.querySelector(".d2h-icon-wrapper")
+        ?.classList.contains("gdp-repo-row-gitlink-icon"),
+    ).toBe(true);
+    expect(
+      row
+        ?.querySelector(".meta")
+        ?.classList.contains("gdp-repo-row-gitlink-badge"),
+    ).toBe(true);
     expect(calls.renderedFiles[calls.renderedFiles.length - 1]?.[0]?.type).toBe(
       "commit",
     );
@@ -317,6 +335,18 @@ describe("repo view commit entries", () => {
       "Git commit entry is not directly browsable at this ref",
     );
     expect(row?.querySelector(".meta")?.textContent).toBe("gitlink");
+    expect(row?.classList.contains("gdp-repo-row-gitlink")).toBe(true);
+    expect(row?.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      row
+        ?.querySelector(".d2h-icon-wrapper")
+        ?.classList.contains("gdp-repo-row-gitlink-icon"),
+    ).toBe(true);
+    expect(
+      row
+        ?.querySelector(".meta")
+        ?.classList.contains("gdp-repo-row-gitlink-badge"),
+    ).toBe(true);
     const latestSidebarFiles =
       calls.renderedFiles[calls.renderedFiles.length - 1] || [];
     expect(latestSidebarFiles[0]?.type).toBe("commit");

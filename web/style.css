@@ -4413,6 +4413,32 @@ body.gdp-file-detail-page #empty {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* commit 型で非 browsable (submodule / 非worktree ref) な行。フォルダ/ファイルと
+   混同されないよう、通常行と別の cursor / アイコン色 / meta chip で区別する。 */
+.gdp-repo-row-gitlink {
+  cursor: default;
+}
+.gdp-repo-row-gitlink:hover {
+  background: var(--bg);
+}
+.gdp-repo-row .d2h-icon-wrapper.gdp-repo-row-gitlink-icon {
+  color: var(--attn);
+  background: color-mix(in srgb, var(--attn) 12%, transparent);
+  border-radius: 4px;
+}
+.gdp-repo-row .meta.gdp-repo-row-gitlink-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  color: var(--attn);
+  background: color-mix(in srgb, var(--attn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--attn) 35%, var(--border));
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .gdp-context-menu {
   position: fixed;
   z-index: 1000;

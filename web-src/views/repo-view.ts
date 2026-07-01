@@ -691,11 +691,21 @@ export function createRepoView(deps: RepoViewDeps) {
       }
       sortedRepoEntries(meta.entries, meta.ref).forEach((entry) => {
         const browsable = canBrowseRepoEntry(entry, meta.ref);
+        // commit 型で非 browsable (submodule または非 worktree ref) は、見た目は
+        // フォルダ/ファイルに近いが実際には開けない。通常行と混同されないよう
+        // 専用クラスで区別する (cursor/アイコン色/meta chip 化はCSS側)。
+        const nonBrowsableCommit = entry.type === "commit" && !browsable;
         const row = document.createElement("button");
         row.type = "button";
-        row.className = `gdp-repo-row ${entry.type}`;
+        row.className = nonBrowsableCommit
+          ? `gdp-repo-row ${entry.type} gdp-repo-row-gitlink`
+          : `gdp-repo-row ${entry.type}`;
         const icon = document.createElement("span");
-        icon.className = browsable ? "dir-icon" : "d2h-icon-wrapper";
+        icon.className = browsable
+          ? "dir-icon"
+          : nonBrowsableCommit
+            ? "d2h-icon-wrapper gdp-repo-row-gitlink-icon"
+            : "d2h-icon-wrapper";
         if (browsable) setFolderIcon(icon, true);
         else
           icon.innerHTML =
@@ -703,8 +713,9 @@ export function createRepoView(deps: RepoViewDeps) {
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = entry.name;
-        if (entry.type === "commit" && !browsable) {
+        if (nonBrowsableCommit) {
           row.title = commitEntryMeta(entry.submodule).title;
+          row.setAttribute("aria-disabled", "true");
         }
         const metaBlock = createRepoEntryMeta(entry, browsable);
         const size = createRepoEntrySize(entry);
@@ -904,6 +915,7 @@ export function createRepoView(deps: RepoViewDeps) {
     const meta = document.createElement("span");
     meta.className = "meta";
     if (entry.type === "commit" && !browsable) {
+      meta.classList.add("gdp-repo-row-gitlink-badge");
       const badge = commitEntryMeta(entry.submodule);
       meta.textContent = badge.label;
       meta.title = badge.title;
