@@ -426,12 +426,20 @@ describe("table-grid edit mode", () => {
     expect(refreshButton.getAttribute("aria-label")).toBe(
       "Reload this table, keeping search and column filters",
     );
+    expect(refreshButton.getAttribute("aria-busy")).toBe("false");
 
     const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
       ".db-grid-col-filter",
     )[1];
     expect(nameFilter).toBeTruthy();
     setInput(nameFilter, "Ali");
+    expect(refreshButton.textContent).toMatch(/Reload filtered table/);
+    expect(refreshButton.title).toBe(
+      "Reload this table, keeping 1 active filter",
+    );
+    expect(refreshButton.getAttribute("aria-label")).toBe(
+      "Reload this table, keeping 1 active filter",
+    );
     await waitFor(() => fetchCalls.length === 1);
 
     fetchCalls.length = 0;
@@ -528,11 +536,16 @@ describe("table-grid edit mode", () => {
     await waitFor(() => fetchCalls.length === 1);
     const status = q<HTMLElement>(grid.el, ".db-grid-status");
     expect(status.textContent || "").toMatch(/Reloading with 1 active filter/);
+    const refreshButton = q<HTMLButtonElement>(grid.el, ".db-grid-refresh");
+    expect(refreshButton.textContent).toMatch(/Reloading/);
+    expect(refreshButton.getAttribute("aria-busy")).toBe("true");
     expect(fetchCalls[0]).toEqual([{ column: "name", value: "Ali" }]);
 
     resolveFetch?.(initialData());
     await waitFor(() => !(status.textContent || "").includes("Reloading"));
     expect(status.textContent || "").toMatch(/1 filter\(s\)/);
+    expect(refreshButton.textContent).toMatch(/Reload filtered table/);
+    expect(refreshButton.getAttribute("aria-busy")).toBe("false");
     grid.destroy();
   });
 

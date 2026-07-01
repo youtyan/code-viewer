@@ -7596,6 +7596,14 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
   border-color: var(--accent);
   background: var(--bg);
 }
+.db-grid-refresh.has-filters {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  color: var(--fg);
+}
+.db-grid-refresh.has-filters:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+}
 .db-grid-refresh svg {
   width: 16px;
   height: 16px;

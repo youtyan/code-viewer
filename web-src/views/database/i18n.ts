@@ -51,7 +51,10 @@ export type DbText = {
     clearFiltersLabel: string;
     clearFiltersAction: (count: number) => string;
     refreshLabel: string;
+    refreshFilteredLabel: string;
+    refreshingLabel: string;
     refreshAction: string;
+    refreshActionWithFilters: (count: number) => string;
     exportAction: string;
     foreignKeyHint: string;
     relatedEmpty: string;
@@ -373,7 +376,13 @@ const EN: DbText = {
     clearFiltersAction: (count) =>
       `Clear ${count} active filter${count === 1 ? "" : "s"}`,
     refreshLabel: "Reload table",
+    refreshFilteredLabel: "Reload filtered table",
+    refreshingLabel: "Reloading...",
     refreshAction: "Reload this table, keeping search and column filters",
+    refreshActionWithFilters: (count) =>
+      `Reload this table, keeping ${count} active filter${
+        count === 1 ? "" : "s"
+      }`,
     exportAction: "Export",
     foreignKeyHint: "Foreign key — click to view related rows",
     relatedEmpty: "No matching row in the referenced table",
@@ -695,7 +704,11 @@ const JA: DbText = {
     clearFiltersLabel: "フィルタ解除",
     clearFiltersAction: (count) => `有効なフィルタ ${count} 件を解除`,
     refreshLabel: "この表を更新",
+    refreshFilteredLabel: "絞り込みを保持して更新",
+    refreshingLabel: "更新中...",
     refreshAction: "検索/列フィルタを保持して、この表を再読み込み",
+    refreshActionWithFilters: (count) =>
+      `有効なフィルタ ${count} 件を保持して、この表を再読み込み`,
     exportAction: "エクスポート",
     foreignKeyHint: "外部キー: クリックして関連データを表示",
     relatedEmpty: "参照先に該当する行がありません",

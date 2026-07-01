@@ -176,6 +176,7 @@ export function createTableGrid(
   refreshBtn.className = "db-btn db-btn-icon db-grid-refresh";
   refreshBtn.title = text().grid.refreshAction;
   refreshBtn.setAttribute("aria-label", text().grid.refreshAction);
+  refreshBtn.setAttribute("aria-busy", "false");
   refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
   const refreshLabel = document.createElement("span");
   refreshLabel.className = "db-grid-refresh-label";
@@ -612,6 +613,22 @@ export function createTableGrid(
     return columnFilters.size + (globalSearchValue ? 1 : 0);
   }
 
+  function syncRefreshButton(): void {
+    const count = activeFilterCount();
+    const t = text().grid;
+    refreshLabel.textContent = isRefreshing
+      ? t.refreshingLabel
+      : count > 0
+        ? t.refreshFilteredLabel
+        : t.refreshLabel;
+    const action =
+      count > 0 ? t.refreshActionWithFilters(count) : t.refreshAction;
+    refreshBtn.classList.toggle("has-filters", count > 0);
+    refreshBtn.title = action;
+    refreshBtn.setAttribute("aria-label", action);
+    refreshBtn.setAttribute("aria-busy", isRefreshing ? "true" : "false");
+  }
+
   function syncFilterClearButton(): void {
     const count = activeFilterCount();
     const t = text().grid;
@@ -632,6 +649,7 @@ export function createTableGrid(
         input.value = "";
       });
     syncFilterClearButton();
+    syncRefreshButton();
   }
 
   function resetSelectionAndDetail() {
@@ -670,6 +688,7 @@ export function createTableGrid(
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
     isRefreshing = true;
+    syncRefreshButton();
     updateStatus();
     if (filterTimer) {
       clearTimeout(filterTimer);
@@ -688,6 +707,7 @@ export function createTableGrid(
       isRefreshing = false;
       refreshBtn.classList.remove("spinning");
       refreshBtn.disabled = false;
+      syncRefreshButton();
       if (!endedInError) updateStatus();
     }
   }
@@ -705,6 +725,7 @@ export function createTableGrid(
     globalSearchValue = "";
     filterInput.value = "";
     syncFilterClearButton();
+    syncRefreshButton();
     filterRow.innerHTML = "";
     pageCache = new Map();
     pendingPages = new Map();
@@ -1330,6 +1351,7 @@ export function createTableGrid(
           columnFilters.delete(col.name);
         }
         syncFilterClearButton();
+        syncRefreshButton();
         scheduleFilter();
       });
       input.addEventListener("keydown", (e) => {
@@ -1338,6 +1360,7 @@ export function createTableGrid(
           input.value = "";
           columnFilters.delete(col.name);
           syncFilterClearButton();
+          syncRefreshButton();
           scheduleFilter();
         }
       });
@@ -1992,6 +2015,7 @@ export function createTableGrid(
         columnFilters.set(filter.column, filter.value);
     }
     syncFilterClearButton();
+    syncRefreshButton();
     sort = state.sort || null;
     const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
     renderHeader();
@@ -2019,6 +2043,7 @@ export function createTableGrid(
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
     syncFilterClearButton();
+    syncRefreshButton();
     scheduleFilter();
   });
   filterInput.addEventListener("keydown", (e) => {
@@ -2027,6 +2052,7 @@ export function createTableGrid(
       filterInput.value = "";
       globalSearchValue = "";
       syncFilterClearButton();
+      syncRefreshButton();
       scheduleFilter();
     }
   });
@@ -2073,9 +2099,7 @@ export function createTableGrid(
     const t = text();
     filterInput.placeholder = t.grid.searchPlaceholder;
     syncFilterClearButton();
-    refreshBtn.title = t.grid.refreshAction;
-    refreshBtn.setAttribute("aria-label", t.grid.refreshAction);
-    refreshLabel.textContent = t.grid.refreshLabel;
+    syncRefreshButton();
     exportBtn.title = t.grid.exportAction;
     exportBtn.setAttribute("aria-label", t.grid.exportAction);
     newRowBtn.textContent = t.edit.newRow;
