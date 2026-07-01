@@ -167,8 +167,8 @@ export function createTableGrid(
   filterInput.autocomplete = "off";
   const filterClear = document.createElement("button");
   filterClear.type = "button";
-  filterClear.className = "db-btn db-btn-icon db-grid-filter-clear";
-  filterClear.textContent = "×";
+  filterClear.className = "db-btn db-btn-sm db-grid-filter-clear";
+  filterClear.textContent = text().grid.clearFiltersLabel;
   filterClear.hidden = true;
 
   const refreshBtn = document.createElement("button");
@@ -608,6 +608,32 @@ export function createTableGrid(
     return filters;
   }
 
+  function activeFilterCount(): number {
+    return columnFilters.size + (globalSearchValue ? 1 : 0);
+  }
+
+  function syncFilterClearButton(): void {
+    const count = activeFilterCount();
+    const t = text().grid;
+    filterClear.hidden = count === 0;
+    filterClear.textContent = t.clearFiltersLabel;
+    const action = t.clearFiltersAction(count);
+    filterClear.title = action;
+    filterClear.setAttribute("aria-label", action);
+  }
+
+  function clearAllFilters(): void {
+    globalSearchValue = "";
+    filterInput.value = "";
+    columnFilters.clear();
+    filterRow
+      .querySelectorAll<HTMLInputElement>(".db-grid-col-filter")
+      .forEach((input) => {
+        input.value = "";
+      });
+    syncFilterClearButton();
+  }
+
   function resetSelectionAndDetail() {
     selectedRowIndex = -1;
     detailPanel.hidden = true;
@@ -678,7 +704,7 @@ export function createTableGrid(
     columnFilters.clear();
     globalSearchValue = "";
     filterInput.value = "";
-    filterClear.hidden = true;
+    syncFilterClearButton();
     filterRow.innerHTML = "";
     pageCache = new Map();
     pendingPages = new Map();
@@ -1303,6 +1329,7 @@ export function createTableGrid(
         } else {
           columnFilters.delete(col.name);
         }
+        syncFilterClearButton();
         scheduleFilter();
       });
       input.addEventListener("keydown", (e) => {
@@ -1310,6 +1337,7 @@ export function createTableGrid(
         if (e.key === "Escape") {
           input.value = "";
           columnFilters.delete(col.name);
+          syncFilterClearButton();
           scheduleFilter();
         }
       });
@@ -1903,9 +1931,9 @@ export function createTableGrid(
     const parts: string[] = [t.statusRows(totalRows.toLocaleString())];
     if (sort)
       parts.push(t.statusSort(sort.column, sort.direction.toUpperCase()));
-    const activeFilterCount = columnFilters.size + (globalSearchValue ? 1 : 0);
-    if (activeFilterCount > 0) parts.push(t.statusFilters(activeFilterCount));
-    if (isRefreshing) parts.push(t.statusRefreshing(activeFilterCount));
+    const filterCount = activeFilterCount();
+    if (filterCount > 0) parts.push(t.statusFilters(filterCount));
+    if (isRefreshing) parts.push(t.statusRefreshing(filterCount));
     const textNode = statusEl.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = `${parts.join(" | ")} `;
@@ -1957,13 +1985,13 @@ export function createTableGrid(
     if (state.search !== undefined) {
       globalSearchValue = state.search;
       filterInput.value = state.search;
-      filterClear.hidden = !globalSearchValue;
     }
     columnFilters.clear();
     for (const filter of state.filters || []) {
       if (filter.column && filter.value)
         columnFilters.set(filter.column, filter.value);
     }
+    syncFilterClearButton();
     sort = state.sort || null;
     const targetRowIndex = state.row && state.row > 0 ? state.row - 1 : -1;
     renderHeader();
@@ -1990,7 +2018,7 @@ export function createTableGrid(
 
   filterInput.addEventListener("input", () => {
     globalSearchValue = filterInput.value.trim();
-    filterClear.hidden = !globalSearchValue;
+    syncFilterClearButton();
     scheduleFilter();
   });
   filterInput.addEventListener("keydown", (e) => {
@@ -1998,14 +2026,12 @@ export function createTableGrid(
     if (e.key === "Escape") {
       filterInput.value = "";
       globalSearchValue = "";
-      filterClear.hidden = true;
+      syncFilterClearButton();
       scheduleFilter();
     }
   });
   filterClear.addEventListener("click", () => {
-    filterInput.value = "";
-    globalSearchValue = "";
-    filterClear.hidden = true;
+    clearAllFilters();
     invalidateData();
   });
   refreshBtn.addEventListener("click", () => {
@@ -2046,6 +2072,7 @@ export function createTableGrid(
   function localize() {
     const t = text();
     filterInput.placeholder = t.grid.searchPlaceholder;
+    syncFilterClearButton();
     refreshBtn.title = t.grid.refreshAction;
     refreshBtn.setAttribute("aria-label", t.grid.refreshAction);
     refreshLabel.textContent = t.grid.refreshLabel;

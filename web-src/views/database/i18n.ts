@@ -48,6 +48,8 @@ export type DbText = {
   grid: {
     searchPlaceholder: string;
     columnFilterPlaceholder: (column: string) => string;
+    clearFiltersLabel: string;
+    clearFiltersAction: (count: number) => string;
     refreshLabel: string;
     refreshAction: string;
     exportAction: string;
@@ -367,6 +369,9 @@ const EN: DbText = {
   grid: {
     searchPlaceholder: "Search all columns…",
     columnFilterPlaceholder: (column) => `${column}…`,
+    clearFiltersLabel: "Clear filters",
+    clearFiltersAction: (count) =>
+      `Clear ${count} active filter${count === 1 ? "" : "s"}`,
     refreshLabel: "Reload table",
     refreshAction: "Reload this table, keeping search and column filters",
     exportAction: "Export",
@@ -687,6 +692,8 @@ const JA: DbText = {
   grid: {
     searchPlaceholder: "全カラムを検索…",
     columnFilterPlaceholder: (column) => `${column}…`,
+    clearFiltersLabel: "フィルタ解除",
+    clearFiltersAction: (count) => `有効なフィルタ ${count} 件を解除`,
     refreshLabel: "この表を更新",
     refreshAction: "検索/列フィルタを保持して、この表を再読み込み",
     exportAction: "エクスポート",

@@ -457,6 +457,48 @@ describe("table-grid edit mode", () => {
     grid.destroy();
   });
 
+  test("clear filters button is labeled and clears column filters", async () => {
+    const fetchCalls: unknown[][] = [];
+    const grid = createTableGrid({
+      fetchPage: async (_table, _offset, _limit, _sort, filters) => {
+        fetchCalls.push(filters);
+        return initialData();
+      },
+      getDbId: () => "app.db",
+      getColumnWidths: () => ({}),
+      setColumnWidths: () => undefined,
+      getText: () => dbText("en"),
+      getEditable: () => true,
+      applyMutations: async () => undefined,
+    });
+    document.body.appendChild(grid.el);
+    grid.load("users", initialData());
+
+    const nameFilter = grid.el.querySelectorAll<HTMLInputElement>(
+      ".db-grid-col-filter",
+    )[1];
+    const clearFilters = q<HTMLButtonElement>(grid.el, ".db-grid-filter-clear");
+    expect(clearFilters.hidden).toBe(true);
+
+    setInput(nameFilter, "Ali");
+    expect(clearFilters.hidden).toBe(false);
+    expect(clearFilters.textContent).toBe("Clear filters");
+    expect(clearFilters.title).toBe("Clear 1 active filter");
+    expect(clearFilters.getAttribute("aria-label")).toBe(
+      "Clear 1 active filter",
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    fetchCalls.length = 0;
+    clearFilters.click();
+
+    await waitFor(() => fetchCalls.length === 1);
+    expect(nameFilter.value).toBe("");
+    expect(clearFilters.hidden).toBe(true);
+    expect(fetchCalls[0]).toEqual([]);
+    grid.destroy();
+  });
+
   test("refresh status shows active filters are kept while reloading", async () => {
     let resolveFetch: ((data: DbTableDataResponse) => void) | null = null;
     const fetchCalls: unknown[][] = [];

@@ -7562,15 +7562,16 @@ html[data-theme="dark"] .db-schema-table tr.pk-row {
 }
 
 .db-grid-filter-clear {
-  border: none;
-  background: none;
+  flex: 0 0 auto;
+  height: 24px;
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg));
   color: var(--fg-muted);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
+  font-size: var(--db-font-sm);
+  padding: 0 8px;
 }
 .db-grid-filter-clear:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
   color: var(--danger);
 }
 .db-grid-refresh {
