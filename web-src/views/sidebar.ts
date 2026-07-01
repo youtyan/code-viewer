@@ -1293,6 +1293,7 @@ export function createSidebar(deps: SidebarDeps) {
 
   function applyFilter() {
     const input = $<HTMLInputElement>("#sb-filter");
+    syncSidebarFilterClearButton();
     if ($("#filelist").classList.contains("tree-virtual")) {
       rerenderVirtualSidebar();
       return;
@@ -1374,6 +1375,24 @@ export function createSidebar(deps: SidebarDeps) {
     cancelAnimationFrame(SIDEBAR_FILTER_RAF);
     SIDEBAR_FILTER_RAF = 0;
     applyFilter();
+  }
+
+  function syncSidebarFilterClearButton() {
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    const button =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    if (!input || !button) return;
+    button.hidden = input.value.length === 0;
+  }
+
+  function clearSidebarFilter() {
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    if (!input?.value) return;
+    input.value = "";
+    syncSidebarFilterClearButton();
+    flushSidebarFilter();
+    applyFilter();
+    input.focus();
   }
 
   function applySidebarWidth(w: number, options: { persist?: boolean } = {}) {
@@ -1780,6 +1799,8 @@ export function createSidebar(deps: SidebarDeps) {
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,
+    syncSidebarFilterClearButton,
+    clearSidebarFilter,
     markActive,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,

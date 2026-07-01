@@ -898,6 +898,8 @@ window.GdpExpandLogic = GdpExpandLogic;
     applyFilter,
     scheduleApplyFilter,
     flushSidebarFilter,
+    syncSidebarFilterClearButton,
+    clearSidebarFilter,
     markActive,
     rerenderVirtualSidebar,
     ensureVirtualSidebarDirLoaded,
@@ -1205,6 +1207,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         flatTitle: string;
         filter: string;
         filterTitle: string;
+        filterClear: string;
+        filterClearTitle: string;
         hide: string;
         show: string;
         repoTarget: string;
@@ -1400,6 +1404,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filter: "Filter files…  /  ⌘K",
         filterTitle:
           "Filter files. Use /pattern/ for regex. Press / to focus this field, Cmd/Ctrl+K for the full-file palette, Ctrl+G for grep, ? for help.",
+        filterClear: "Clear",
+        filterClearTitle: "Clear file filter",
         hide: "hide sidebar",
         show: "show sidebar",
         repoTarget: "repository target",
@@ -1603,6 +1609,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         filter: "ファイル絞り込み…  /  ⌘K",
         filterTitle:
           "ファイルを絞り込みます。/pattern/ は正規表現。/ でこの欄にフォーカス、Cmd/Ctrl+K で全ファイルパレット、Ctrl+G で grep、? でヘルプ。",
+        filterClear: "解除",
+        filterClearTitle: "ファイル絞り込みを解除",
         hide: "サイドバーを隠す",
         show: "サイドバーを表示",
         repoTarget: "リポジトリの対象",
@@ -1859,6 +1867,13 @@ window.GdpExpandLogic = GdpExpandLogic;
     if (filter) {
       filter.placeholder = text.sidebar.filter;
       filter.title = text.sidebar.filterTitle;
+    }
+    const filterClear =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    if (filterClear) {
+      filterClear.textContent = text.sidebar.filterClear;
+      filterClear.title = text.sidebar.filterClearTitle;
+      filterClear.setAttribute("aria-label", text.sidebar.filterClearTitle);
     }
     const repoTarget = document.querySelector<HTMLInputElement>("#repo-target");
     if (repoTarget) {
@@ -3493,7 +3508,10 @@ window.GdpExpandLogic = GdpExpandLogic;
   }
   const sbFilter = $<HTMLInputElement>("#sb-filter");
   if (sbFilter) {
-    sbFilter.addEventListener("input", () => scheduleApplyFilter());
+    sbFilter.addEventListener("input", () => {
+      syncSidebarFilterClearButton();
+      scheduleApplyFilter();
+    });
     sbFilter.addEventListener("keydown", (e) => {
       if (isImeComposing(e)) return;
       if (e.key === "Enter") {
@@ -3507,6 +3525,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       } else if (e.key === "Escape") {
         if (sbFilter.value) {
           sbFilter.value = "";
+          syncSidebarFilterClearButton();
           flushSidebarFilter();
           applyFilter();
         } else {
@@ -3514,6 +3533,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         }
       }
     });
+  }
+  const sbFilterClear =
+    document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+  if (sbFilterClear) {
+    syncSidebarFilterClearButton();
+    sbFilterClear.addEventListener("click", clearSidebarFilter);
   }
   function focusFileFilter() {
     const input = $<HTMLInputElement>("#sb-filter");

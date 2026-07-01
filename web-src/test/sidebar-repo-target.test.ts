@@ -45,6 +45,7 @@ function installSidebarDom() {
       </div>
       <div class="sb-filter-wrap">
         <input id="sb-filter" value="" />
+        <button id="sb-filter-clear" type="button" hidden>Clear</button>
       </div>
       <ul id="filelist"></ul>
     </aside>
@@ -210,6 +211,46 @@ describe("diff sidebar repository target", () => {
     expect(
       repoTargetDisplayForBodyClass("gdp-file-detail-page gdp-repo-blob-page"),
     ).toBe("flex");
+  });
+
+  test("clears the file filter and restores hidden sidebar rows", () => {
+    installSidebarDom();
+    const sidebar = createSidebarForTest();
+
+    sidebar.renderSidebar([
+      { path: "src/alpha.ts", status: "M" },
+      { path: "src/beta.ts", status: "M" },
+    ]);
+
+    const input = document.querySelector<HTMLInputElement>("#sb-filter");
+    const clearButton =
+      document.querySelector<HTMLButtonElement>("#sb-filter-clear");
+    const alpha = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="src/alpha.ts"]',
+    );
+    const beta = document.querySelector<HTMLElement>(
+      '#filelist li[data-path="src/beta.ts"]',
+    );
+    if (!input || !clearButton || !alpha || !beta)
+      throw new Error("missing sidebar filter test elements");
+
+    sidebar.syncSidebarFilterClearButton();
+    expect(clearButton.hidden).toBe(true);
+
+    input.value = "beta";
+    sidebar.applyFilter();
+
+    expect(clearButton.hidden).toBe(false);
+    expect(alpha.classList.contains("hidden")).toBe(true);
+    expect(beta.classList.contains("hidden")).toBe(false);
+
+    sidebar.clearSidebarFilter();
+
+    expect(input.value).toBe("");
+    expect(clearButton.hidden).toBe(true);
+    expect(alpha.classList.contains("hidden")).toBe(false);
+    expect(beta.classList.contains("hidden")).toBe(false);
+    expect(document.activeElement).toBe(input);
   });
 });
 
