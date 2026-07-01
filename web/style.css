@@ -5615,10 +5615,15 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-radius: 6px;
   background: var(--bg-soft);
   color: var(--fg-muted);
-  font-size: 12px;
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   cursor: pointer;
   line-height: 1;
+  flex: 0 0 auto;
 }
 #annotation-player-toggle:hover,
 #annotation-player-prev:hover,
@@ -5627,6 +5632,11 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   border-color: var(--border-strong);
   background: var(--bg-mute);
   color: var(--fg);
+}
+#annotation-player .octicon {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 #annotation-player-progress {
   margin-left: auto;
