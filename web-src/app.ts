@@ -1082,6 +1082,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         statusInFlightTitle: (count: number, cancellable: number) => string;
         cancelRequestsActiveTitle: (count: number) => string;
         cancelRequestsInactiveTitle: string;
+        brandHome: string;
+        menuViews: string;
       };
       topbar: {
         resetRange: string;
@@ -1207,6 +1209,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `cancel ${count} in-flight request${count === 1 ? "" : "s"}`,
         cancelRequestsInactiveTitle: "no in-flight requests",
+        brandHome: "Repository home",
+        menuViews: "Views",
       },
       topbar: {
         resetRange: "reset to HEAD .. worktree",
@@ -1341,6 +1345,8 @@ window.GdpExpandLogic = GdpExpandLogic;
         cancelRequestsActiveTitle: (count) =>
           `実行中のリクエストを${count}件キャンセル`,
         cancelRequestsInactiveTitle: "実行中のリクエストはありません",
+        brandHome: "リポジトリホーム",
+        menuViews: "ビュー切り替え",
       },
       topbar: {
         resetRange: "HEAD .. worktree に戻す",
@@ -1480,6 +1486,12 @@ window.GdpExpandLogic = GdpExpandLogic;
       });
     setElementText(".global-help-link[data-route='help']", text.nav.help);
     setElementText(".product-label", text.global.product);
+    document
+      .querySelector<HTMLAnchorElement>(".brand")
+      ?.setAttribute("aria-label", text.global.brandHome);
+    document
+      .querySelector<HTMLElement>(".app-menu")
+      ?.setAttribute("aria-label", text.global.menuViews);
 
     const annotationsToggle = document.querySelector<HTMLButtonElement>(
       "#annotations-toggle",
