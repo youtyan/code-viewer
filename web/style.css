@@ -6741,6 +6741,16 @@ body[data-sidebar-font-size="xlarge"] .db-container {
   line-height: 1;
   white-space: nowrap;
 }
+.db-refresh-result {
+  flex: 0 0 auto;
+  color: var(--fg-subtle);
+  font-size: var(--db-font-xs);
+  white-space: nowrap;
+}
+.db-refresh-result.changed {
+  color: var(--accent);
+  font-weight: 600;
+}
 
 /* explorer (redis/es/s3) の第1階層セレクタ (Databases / Indices / Bucket+View)
    を抱える sidebar 内 host。kind が SQL のときは中身が全て hidden になるため

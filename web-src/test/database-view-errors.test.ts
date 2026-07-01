@@ -563,7 +563,20 @@ describe("database view SQL error rendering", () => {
         if (filesFetches === 2) {
           return new Promise<Response>((resolve) => {
             resolveRefreshFiles = () =>
-              resolve(jsonResponse(baseFilesResponse()));
+              resolve(
+                jsonResponse({
+                  files: [
+                    ...baseFilesResponse().files,
+                    {
+                      id: "app.sqlite",
+                      path: "app.sqlite",
+                      name: "app.sqlite",
+                      sizeBytes: 4096,
+                      kind: "sqlite",
+                    },
+                  ],
+                }),
+              );
           });
         }
         return jsonResponse(baseFilesResponse());
@@ -584,10 +597,14 @@ describe("database view SQL error rendering", () => {
     const label = refresh.querySelector(
       ".db-refresh-label",
     ) as unknown as FakeElement;
+    const result = document.querySelector(
+      ".db-refresh-result",
+    ) as unknown as FakeElement;
     expect(refresh).toBeTruthy();
     expect(refresh.attributes["aria-label"]).toBe("Refresh datastores");
     expect(refresh.attributes["aria-busy"]).toBe("false");
     expect(label.textContent).toBe("Refresh");
+    expect(result.hidden).toBe(true);
 
     const refreshClick = refresh.click();
     await waitUntil(() => filesFetches === 2);
@@ -605,6 +622,9 @@ describe("database view SQL error rendering", () => {
     expect(refresh.classList.contains("spinning")).toBe(false);
     expect(refresh.attributes["aria-busy"]).toBe("false");
     expect(label.textContent).toBe("Refresh");
+    expect(result.hidden).toBe(false);
+    expect(result.textContent).toBe("+1 datastore");
+    expect(result.classList.contains("changed")).toBe(true);
     expect(document.querySelector(".db-table-name")?.textContent).toBe("users");
     await leaveView(view);
   });

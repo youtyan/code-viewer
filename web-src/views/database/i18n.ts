@@ -19,6 +19,8 @@ export type DbText = {
     refreshDatastoresShort: string;
     refreshDatastoresBusy: string;
     refreshDatastoresTitle: string;
+    refreshDatastoresUnchanged: string;
+    refreshDatastoresChanged: (added: number, removed: number) => string;
     toolbar: string;
     query: string;
     queryTitle: string;
@@ -346,6 +348,14 @@ const EN: DbText = {
     refreshDatastoresShort: "Refresh",
     refreshDatastoresBusy: "Refreshing...",
     refreshDatastoresTitle: "Refresh the datastore list",
+    refreshDatastoresUnchanged: "No datastore changes",
+    refreshDatastoresChanged: (added, removed) =>
+      [
+        added > 0 ? `+${added} datastore${added === 1 ? "" : "s"}` : "",
+        removed > 0 ? `-${removed} datastore${removed === 1 ? "" : "s"}` : "",
+      ]
+        .filter(Boolean)
+        .join(" / "),
     toolbar: "Datastore tools",
     query: "Query",
     queryTitle: "Query Editor",
@@ -679,6 +689,14 @@ const JA: DbText = {
     refreshDatastoresShort: "更新",
     refreshDatastoresBusy: "更新中...",
     refreshDatastoresTitle: "データストア一覧を更新",
+    refreshDatastoresUnchanged: "データストアに変化なし",
+    refreshDatastoresChanged: (added, removed) =>
+      [
+        added > 0 ? `+${added} データストア` : "",
+        removed > 0 ? `-${removed} データストア` : "",
+      ]
+        .filter(Boolean)
+        .join(" / "),
     toolbar: "データストアツール",
     query: "クエリ",
     queryTitle: "クエリエディタ",
