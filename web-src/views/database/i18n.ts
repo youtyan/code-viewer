@@ -419,8 +419,8 @@ const EN: DbText = {
     statusExplain: (ms) => `Explain (${ms}ms)`,
   },
   history: {
-    refresh: "Refresh",
-    refreshTitle: "Refresh history",
+    refresh: "Refresh history",
+    refreshTitle: "Refresh query history",
     clearAll: "Clear All",
     clearTitle: "Delete all query history",
     selectPlaceholder: "Select a query to view details",
@@ -723,8 +723,8 @@ const JA: DbText = {
     statusExplain: (ms) => `Explain (${ms}ms)`,
   },
   history: {
-    refresh: "更新",
-    refreshTitle: "履歴を更新",
+    refresh: "クエリ履歴を更新",
+    refreshTitle: "クエリ履歴を再読み込み",
     clearAll: "すべて削除",
     clearTitle: "クエリ履歴をすべて削除",
     selectPlaceholder: "クエリを選択すると詳細が表示されます",

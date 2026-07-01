@@ -3,6 +3,7 @@ import type {
   QueryHistoryEntry,
   QueryHistoryState,
 } from "../../core/database/types";
+import { iconSvg, SYNC_16_PATH } from "../../core/icons";
 import { type DbText, dbText } from "./i18n";
 
 export type QueryHistoryViewCallbacks = {
@@ -30,10 +31,12 @@ export function createQueryHistoryView(
   toolbar.className = "db-query-history-toolbar";
 
   const refreshBtn = document.createElement("button");
-  refreshBtn.className = "db-query-history-action";
+  refreshBtn.className = "db-query-history-action db-query-history-refresh";
   refreshBtn.type = "button";
-  refreshBtn.textContent = text().history.refresh;
-  refreshBtn.title = text().history.refreshTitle;
+  refreshBtn.innerHTML = iconSvg("octicon-sync", SYNC_16_PATH);
+  const refreshLabel = document.createElement("span");
+  refreshLabel.className = "db-query-history-action-label";
+  refreshBtn.appendChild(refreshLabel);
 
   const clearBtn = document.createElement("button");
   clearBtn.className = "db-query-history-action db-query-history-danger";
@@ -71,6 +74,21 @@ export function createQueryHistoryView(
   let inFlightRefresh: { key: string; promise: Promise<void> } | null = null;
   const entryRowsById = new Map<string, HTMLElement>();
   let selectedEntryRow: HTMLElement | null = null;
+
+  function syncRefreshButtonLabel(): void {
+    refreshLabel.textContent = text().history.refresh;
+    refreshBtn.title = text().history.refreshTitle;
+    refreshBtn.setAttribute("aria-label", text().history.refreshTitle);
+  }
+
+  function setRefreshBusy(isBusy: boolean): void {
+    refreshBtn.disabled = isBusy;
+    refreshBtn.classList.toggle("spinning", isBusy);
+    refreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
+
+  syncRefreshButtonLabel();
+  setRefreshBusy(false);
 
   function currentRefreshParams(): { key: string; params: string } {
     const dbId = callbacks.getDbId();
@@ -116,6 +134,7 @@ export function createQueryHistoryView(
     ) {
       return;
     }
+    setRefreshBusy(true);
     const promise = (async () => {
       const res = await fetch(`/_db/history${params}`);
       if (!res.ok) return;
@@ -138,7 +157,10 @@ export function createQueryHistoryView(
     try {
       await promise;
     } finally {
-      if (inFlightRefresh?.promise === promise) inFlightRefresh = null;
+      if (inFlightRefresh?.promise === promise) {
+        inFlightRefresh = null;
+        setRefreshBusy(false);
+      }
     }
   }
 
@@ -437,8 +459,7 @@ export function createQueryHistoryView(
   }
 
   function localize(): void {
-    refreshBtn.textContent = text().history.refresh;
-    refreshBtn.title = text().history.refreshTitle;
+    syncRefreshButtonLabel();
     if (clearBtn.dataset.confirm !== "1") {
       clearBtn.textContent = text().history.clearAll;
     }

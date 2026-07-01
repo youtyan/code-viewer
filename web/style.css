@@ -5607,9 +5607,24 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .db-query-history-action:hover {
   background: var(--bg-mute);
+}
+.db-query-history-action[disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.db-query-history-action svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.db-query-history-refresh.spinning svg {
+  animation: gdp-spin 0.7s linear infinite;
 }
 .db-query-history-danger {
   color: var(--danger, #d32f2f);
