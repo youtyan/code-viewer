@@ -1453,7 +1453,7 @@ function renderHelpCommand(block: Extract<HelpBlock, { kind: "command" }>) {
   return wrap;
 }
 
-function renderHelpTable(rows: Array<[string, string]>) {
+export function renderHelpTable(rows: Array<[string, string]>) {
   const table = document.createElement("table");
   rows.forEach(([keys, description]) => {
     const tr = document.createElement("tr");

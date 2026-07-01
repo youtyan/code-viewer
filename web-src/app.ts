@@ -88,6 +88,7 @@ import {
   langFromPath,
   readRenderedLines,
 } from "./views/line-ref-pill";
+import { createQuickHelp } from "./views/quick-help";
 import { createRefPicker } from "./views/ref-picker";
 import { createRepoView } from "./views/repo-view";
 import { createSearchPalette } from "./views/search-palette-ui";
@@ -1217,6 +1218,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterTitle: string;
         refreshTitle: string;
       };
+      quickHelp: {
+        buttonTitle: string;
+        panelTitle: string;
+        close: string;
+        viewAll: string;
+      };
       settings: {
         title: string;
         close: string;
@@ -1400,6 +1407,12 @@ window.GdpExpandLogic = GdpExpandLogic;
         filterTitle:
           "Filter commits by message, SHA, author:name, or path:file.",
         refreshTitle: "Refresh commit history",
+      },
+      quickHelp: {
+        buttonTitle: "quick help (shortcuts)",
+        panelTitle: "Quick Help",
+        close: "close quick help",
+        viewAll: "View all keybindings →",
       },
       settings: {
         title: "Viewer Settings",
@@ -1590,6 +1603,12 @@ window.GdpExpandLogic = GdpExpandLogic;
           "メッセージ、SHA、author:name、path:file でコミットを絞り込みます。",
         refreshTitle: "コミット履歴を更新",
       },
+      quickHelp: {
+        buttonTitle: "クイックヘルプ(ショートカット)",
+        panelTitle: "クイックヘルプ",
+        close: "クイックヘルプを閉じる",
+        viewAll: "すべてのキーバインドを見る →",
+      },
       settings: {
         title: "ビューア設定",
         close: "ビューア設定を閉じる",
@@ -1703,6 +1722,13 @@ window.GdpExpandLogic = GdpExpandLogic;
       theme.title = text.global.theme;
       theme.setAttribute("aria-label", text.global.theme);
     }
+    const quickHelpBtn =
+      document.querySelector<HTMLButtonElement>("#quick-help-btn");
+    if (quickHelpBtn) {
+      quickHelpBtn.title = text.quickHelp.buttonTitle;
+      quickHelpBtn.setAttribute("aria-label", text.quickHelp.buttonTitle);
+    }
+    QUICK_HELP?.localize();
     const doctorTitle = doctorText(STATE.language).title;
     const doctorBtn = document.querySelector<HTMLButtonElement>("#doctor-btn");
     if (doctorBtn) {
@@ -1932,6 +1958,9 @@ window.GdpExpandLogic = GdpExpandLogic;
   // createDatabaseView 後に登録される DB ビューア再ローカライズ関数。
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
   let relocalizeDatabase: (() => void) | null = null;
+
+  // createQuickHelp 後に代入される (同じ遅延参照パターン)。
+  let QUICK_HELP: ReturnType<typeof createQuickHelp> | null = null;
 
   function setViewerLanguage(language: ViewerLanguage, persist = true) {
     const next = normalizeViewerLanguage(language);
@@ -3634,16 +3663,7 @@ window.GdpExpandLogic = GdpExpandLogic;
       return true;
     }
     if (action === "open-help") {
-      openHelpKeybindings({
-        getRoute: () => STATE.route,
-        getLanguage: () => STATE.language,
-        currentRange,
-        setRoute,
-        setPageMode,
-        renderHelpPage,
-        setStatus,
-        cancelActiveSourceLoad,
-      });
+      QUICK_HELP?.toggle();
       return true;
     }
     return false;
@@ -3911,6 +3931,24 @@ window.GdpExpandLogic = GdpExpandLogic;
     getSyntaxHighlight: () => STATE.syntaxHighlight,
     getLanguage: () => STATE.language,
     trackLoad,
+  });
+
+  QUICK_HELP = createQuickHelp({
+    $,
+    getLanguage: () => STATE.language,
+    getText: () => uiText().quickHelp,
+    openFullKeybindings: () => {
+      openHelpKeybindings({
+        getRoute: () => STATE.route,
+        getLanguage: () => STATE.language,
+        currentRange,
+        setRoute,
+        setPageMode,
+        renderHelpPage,
+        setStatus,
+        cancelActiveSourceLoad,
+      });
+    },
   });
 
   const DOCTOR_VIEW = createDoctorView({

@@ -2021,6 +2021,70 @@ body.gdp-history-resizing * {
   background: var(--bg-mute);
 }
 
+.quick-help-btn {
+  font-weight: 700;
+}
+#quick-help-popover {
+  position: fixed;
+  right: 16px;
+  top: calc(var(--global-header-h) + 8px);
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  /* Transient popover: must sit above the annotation panel (45). */
+  z-index: 70;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+#quick-help-popover[hidden] { display: none; }
+.quick-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+#quick-help-close {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 20px;
+}
+#quick-help-popover .gdp-help-group {
+  margin: 0 0 14px;
+}
+#quick-help-popover .gdp-help-group h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+#quick-help-popover .gdp-help-group th {
+  width: auto;
+  white-space: nowrap;
+}
+.quick-help-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.quick-help-foot a {
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+.quick-help-foot a:hover {
+  text-decoration: underline;
+}
+
 body.gdp-help-page #topbar,
 body.gdp-help-page #sidebar,
 body.gdp-help-page #sidebar-resizer {

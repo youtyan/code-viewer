@@ -41,6 +41,7 @@
       <button id="theme" title="toggle theme" aria-label="toggle theme"></button>
       <span id="status" class="status" role="status" aria-live="polite"><span class="status-label"></span></span>
       <a id="repo-web-link" class="global-help-link" href="#" target="_blank" rel="noopener" hidden>GitHub</a>
+      <button id="quick-help-btn" class="global-icon-action quick-help-btn" title="quick help (shortcuts)" aria-label="quick help (shortcuts)">?</button>
       <a class="global-help-link" data-route="help" href="/help">Help</a>
       <span class="product-label" aria-hidden="true">code viewer</span>
     </div>
@@ -199,6 +200,17 @@
     <div class="scope-settings-footer">
       <p id="scope-settings-autosave-note" class="scope-settings-help"></p>
       <button id="scope-omit-reset" type="button">Restore defaults</button>
+    </div>
+  </div>
+
+  <div id="quick-help-popover" hidden role="dialog" aria-label="quick help" aria-modal="false">
+    <div class="quick-help-head">
+      <strong id="quick-help-title">Quick Help</strong>
+      <button id="quick-help-close" type="button" aria-label="close quick help">×</button>
+    </div>
+    <div id="quick-help-groups"></div>
+    <div class="quick-help-foot">
+      <a id="quick-help-full-link" href="/help?section=keybindings">View all keybindings →</a>
     </div>
   </div>
 
