@@ -7405,6 +7405,10 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 
 .db-schema-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 14px;
   font-weight: 600;
   color: var(--fg);
@@ -7414,6 +7418,15 @@ html[data-theme="dark"] .db-query-highlight span[style] {
 }
 .db-schema-header:first-child {
   margin-top: 0;
+}
+.db-schema-header-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-schema-refresh {
+  flex: 0 0 auto;
 }
 
 .db-schema-table {

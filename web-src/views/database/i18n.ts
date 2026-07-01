@@ -80,6 +80,9 @@ export type DbText = {
     indexes: string;
     triggers: string;
     ddl: string;
+    refreshLabel: string;
+    refreshAction: string;
+    refreshingLabel: string;
     copyDdl: string;
     copied: string;
     colName: string;
@@ -391,6 +394,9 @@ const EN: DbText = {
     indexes: "Indexes",
     triggers: "Triggers",
     ddl: "DDL",
+    refreshLabel: "Refresh schema",
+    refreshAction: "Refresh this table schema",
+    refreshingLabel: "Refreshing...",
     copyDdl: "Copy DDL",
     copied: "Copied!",
     colName: "Column",
@@ -701,6 +707,9 @@ const JA: DbText = {
     indexes: "インデックス",
     triggers: "トリガー",
     ddl: "DDL",
+    refreshLabel: "スキーマを更新",
+    refreshAction: "この表のスキーマを再読み込み",
+    refreshingLabel: "更新中...",
     copyDdl: "DDL をコピー",
     copied: "コピーしました",
     colName: "カラム",

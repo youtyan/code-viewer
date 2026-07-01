@@ -618,7 +618,10 @@ function createTabPane(
   // 呼ぶが、外側の scheduleSave は debounce で no-op になる)。
   if (initial.sqlDraft) queryEditor.setSql(initial.sqlDraft, { silent: true });
 
-  const schemaView = createSchemaView({ getText: () => paneText() });
+  const schemaView = createSchemaView({
+    getText: () => paneText(),
+    onRefresh: () => refreshCurrentSchemaView(),
+  });
   const erDiagram = createErDiagram({ getText: () => paneText() });
   const globalSearchView = createGlobalSearchView({
     getDbId: () => currentDbInfo?.id || null,
@@ -1546,6 +1549,61 @@ function createTabPane(
     if (!currentDbInfo) return;
     const columns = await fetchColumns(table);
     schemaView.render(table, columns, schemaCache?.indexes || []);
+  }
+
+  async function refreshCurrentSchemaView(): Promise<void> {
+    if (!currentDbInfo || !currentTable) return;
+    const generation = loadGeneration;
+    const dbId = currentDbInfo.id;
+    const table = currentTable;
+    schemaView.setRefreshBusy(true);
+    try {
+      const schema = await fetchSchema(dbId);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentTable !== table
+      ) {
+        return;
+      }
+      currentSchema = schema.schema || currentSchema;
+      schemaCache = schema;
+      tableList.render(schema.tables);
+      const nextTable = schema.tables.some((entry) => entry.name === table)
+        ? table
+        : schema.tables[0]?.name;
+      if (!nextTable) {
+        currentTable = null;
+        grid.clear();
+        schemaView.clear();
+        erDiagram.clear();
+        cb.onStateChange();
+        return;
+      }
+      currentTable = nextTable;
+      tableList.setActive(nextTable);
+      const columns = await fetchColumns(nextTable);
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        currentTable !== nextTable
+      ) {
+        return;
+      }
+      schemaView.render(nextTable, columns, schema.indexes || []);
+      cb.onStateChange();
+    } catch (err) {
+      if (
+        generation !== loadGeneration ||
+        currentDbInfo?.id !== dbId ||
+        isAbortError(err)
+      ) {
+        return;
+      }
+      setTableListStatus(errorMessage(err), { error: true });
+    } finally {
+      schemaView.setRefreshBusy(false);
+    }
   }
 
   async function showDdl(table: string) {

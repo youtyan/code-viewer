@@ -609,6 +609,91 @@ describe("database view SQL error rendering", () => {
     await leaveView(view);
   });
 
+  test("schema refresh button reloads the current table structure", async () => {
+    installDatabaseDom();
+    let schemaFetches = 0;
+    let resolveRefreshSchema: (() => void) | null = null;
+    mockFetch((url, init) => {
+      if (url === "/_db/tabs" && init?.method === "PUT")
+        return jsonResponse({ ok: true });
+      if (url === "/_db/tabs") return jsonResponse({ tabs: [] });
+      if (url === "/_db/files") return jsonResponse(baseFilesResponse());
+      if (url.startsWith("/_db/schema")) {
+        schemaFetches++;
+        if (schemaFetches === 2) {
+          return new Promise<Response>((resolve) => {
+            resolveRefreshSchema = () =>
+              resolve(
+                jsonResponse({
+                  ...baseSchemaResponse(),
+                  indexes: [
+                    {
+                      table: "users",
+                      name: "users_name_idx",
+                      columns: ["name"],
+                      unique: false,
+                    },
+                  ],
+                  columnsMap: {
+                    users: [
+                      { name: "id", type: "integer", primaryKey: true },
+                      { name: "name", type: "text", primaryKey: false },
+                    ],
+                  },
+                }),
+              );
+          });
+        }
+        return jsonResponse(baseSchemaResponse());
+      }
+      return new Response("unexpected request", { status: 500 });
+    });
+
+    const view = createViewForTest();
+    await view.enter("docker:db", undefined, "users", "schema");
+
+    const refresh = document.querySelector(
+      ".db-schema-refresh",
+    ) as unknown as FakeElement;
+    const label = refresh.querySelector(
+      ".db-grid-refresh-label",
+    ) as unknown as FakeElement;
+    expect(refresh).toBeTruthy();
+    expect(refresh.attributes["aria-label"]).toBe("Refresh this table schema");
+    expect(refresh.attributes["aria-busy"]).toBe("false");
+    expect(label.textContent).toBe("Refresh schema");
+
+    refresh.click();
+    await waitUntil(() => schemaFetches === 2);
+    expect(refresh.disabled).toBe(true);
+    expect(refresh.classList.contains("spinning")).toBe(true);
+    expect(refresh.attributes["aria-busy"]).toBe("true");
+    expect(label.textContent).toBe("Refreshing...");
+
+    resolveRefreshSchema?.();
+    await waitUntil(() => {
+      const doneRefresh = document.querySelector(
+        ".db-schema-refresh",
+      ) as unknown as FakeElement | null;
+      return doneRefresh?.attributes["aria-busy"] === "false";
+    });
+
+    const doneRefresh = document.querySelector(
+      ".db-schema-refresh",
+    ) as unknown as FakeElement;
+    const doneLabel = doneRefresh.querySelector(
+      ".db-grid-refresh-label",
+    ) as unknown as FakeElement;
+    const schemaText = document.querySelector(".db-schema-view")?.textContent;
+    expect(schemaFetches).toBe(2);
+    expect(doneRefresh.disabled).toBe(false);
+    expect(doneRefresh.classList.contains("spinning")).toBe(false);
+    expect(doneLabel.textContent).toBe("Refresh schema");
+    expect(schemaText || "").toMatch(/name/);
+    expect(schemaText || "").toMatch(/users_name_idx/);
+    await leaveView(view);
+  });
+
   test("removes the database root from the document when suspended", async () => {
     installDatabaseDom();
     mockFetch((url, init) => {
