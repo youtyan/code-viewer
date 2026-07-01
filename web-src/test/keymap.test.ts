@@ -214,6 +214,47 @@ describe("keymap action resolution", () => {
     ).toBe(null);
   });
 
+  test("copies AI context with y, and with code via Shift+Y, in every scope", () => {
+    expect(action("y", "main")).toBe("copy-ai-context");
+    expect(action("y", "sidebar")).toBe("copy-ai-context");
+    expect(action("y", "global")).toBe("copy-ai-context");
+    expect(action("y", "main", { shift: true })).toBe(
+      "copy-ai-context-with-code",
+    );
+    expect(action("y", "sidebar", { shift: true })).toBe(
+      "copy-ai-context-with-code",
+    );
+    expect(action("y", "global", { shift: true })).toBe(
+      "copy-ai-context-with-code",
+    );
+  });
+
+  test("blocks the copy-AI-context shortcut while editable, composing, or the palette is open", () => {
+    expect(
+      resolveKeymapAction(key("y"), { scope: "main", editable: true }),
+    ).toBe(null);
+    expect(
+      resolveKeymapAction(key("y", { shift: true }), {
+        scope: "main",
+        editable: true,
+      }),
+    ).toBe(null);
+    expect(
+      resolveKeymapAction(key("y"), {
+        scope: "main",
+        editable: false,
+        composing: true,
+      }),
+    ).toBe(null);
+    expect(
+      resolveKeymapAction(key("y"), {
+        scope: "main",
+        editable: false,
+        paletteOpen: true,
+      }),
+    ).toBe(null);
+  });
+
   test("switches source tabs with gp and gc in the main scope", () => {
     expect(
       resolveKeymapAction(key("p"), {

@@ -4,6 +4,7 @@
 // the same reference followed by a fenced code block carrying the actual
 // lines, so an AI can reason about the code without re-fetching.
 
+import { AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD } from "../core/ai-context-copy";
 import {
   fileReferenceClipboardText,
   fileReferenceWithCodeClipboardText,
@@ -14,6 +15,14 @@ import { EXT_TO_LANG } from "../core/source-meta";
 export type LineRefPill = {
   show(path: string, start: number, end: number): void;
   hide(): void;
+};
+
+export type LineRefPillDeps = {
+  // Called when the close button is clicked. The caller decides what
+  // "clear the selection" means for the current screen (e.g. drop the file
+  // route's line param, or clear a diff drag-selection). This module stays
+  // route-agnostic and only renders/hides the pill itself.
+  onClose: () => void;
 };
 
 const COPY_ICON =
@@ -95,13 +104,28 @@ export function readRenderedLines(
   return ordered;
 }
 
-export function createLineRefPill(): LineRefPill {
-  const pill = document.createElement("button");
+// Root is a <div>, not a <button>: it now hosts two independent buttons
+// (copy + close), and a button can't validly nest another button.
+export function createLineRefPill(deps: LineRefPillDeps): LineRefPill {
+  const pill = document.createElement("div");
   pill.id = "line-ref-pill";
-  pill.type = "button";
-  pill.title =
-    "選択行の参照をコピー（Claude Code / Codex に貼り付け用）。Shift+Click でコード本体も添付。";
   pill.hidden = true;
+
+  const copyButton = document.createElement("button");
+  copyButton.id = "line-ref-pill-copy";
+  copyButton.type = "button";
+  copyButton.title =
+    "選択行の参照をコピー（Claude Code / Codex に貼り付け用）。Shift+Click でコード本体も添付。";
+
+  const closeButton = document.createElement("button");
+  closeButton.id = "line-ref-pill-close";
+  closeButton.type = "button";
+  closeButton.title = "選択を解除";
+  closeButton.setAttribute("aria-label", "選択を解除");
+  closeButton.textContent = "×";
+
+  pill.appendChild(copyButton);
+  pill.appendChild(closeButton);
   document.body.appendChild(pill);
 
   let refText = "";
@@ -110,29 +134,46 @@ export function createLineRefPill(): LineRefPill {
   let currentEnd = 0;
   let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Lines spanned by the active selection. Only meaningful once `show()` has
+  // set currentStart/currentEnd; callers gate display on count > 1 so a
+  // single-line selection (self-evident from "@path#42") stays uncluttered.
+  function selectionLineCount(): number {
+    return currentEnd - currentStart + 1;
+  }
+
+  function countBadgeHtml(): string {
+    const count = selectionLineCount();
+    if (count <= 1) return "";
+    const warn = count >= AI_CONTEXT_LARGE_SELECTION_LINE_THRESHOLD;
+    return `<span class="lrp-count${warn ? " lrp-count-warn" : ""}">${count} lines</span>`;
+  }
+
   function render(state: "ready" | "copied" | "copied-code" | "failed") {
     pill.classList.toggle(
       "copied",
       state === "copied" || state === "copied-code",
     );
     if (state === "copied") {
-      pill.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied!</span>`;
+      copyButton.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied!</span>`;
       return;
     }
     if (state === "copied-code") {
-      pill.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied + code</span>`;
+      const count = selectionLineCount();
+      const suffix = count > 1 ? ` (${count} lines)` : "";
+      copyButton.innerHTML = `${CHECK_ICON}<span class="lrp-label">Copied + code${suffix}</span>`;
       return;
     }
     if (state === "failed") {
-      pill.innerHTML = `${COPY_ICON}<span class="lrp-label">copy failed</span>`;
+      copyButton.innerHTML = `${COPY_ICON}<span class="lrp-label">copy failed</span>`;
       return;
     }
-    pill.innerHTML =
+    copyButton.innerHTML =
       `${COPY_ICON}<span class="lrp-label">Copy</span>` +
-      `<span class="lrp-ref">${escapeHtml(refText)}</span>`;
+      `<span class="lrp-ref">${escapeHtml(refText)}</span>` +
+      countBadgeHtml();
   }
 
-  pill.addEventListener("click", async (event) => {
+  copyButton.addEventListener("click", async (event) => {
     if (!refText) return;
     const withCode = event.shiftKey;
     let payload = refText;
@@ -161,6 +202,10 @@ export function createLineRefPill(): LineRefPill {
       feedbackTimer = null;
       if (!pill.hidden) render("ready");
     }, 1200);
+  });
+
+  closeButton.addEventListener("click", () => {
+    deps.onClose();
   });
 
   return {

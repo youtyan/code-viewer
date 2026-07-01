@@ -65,6 +65,8 @@ export type AnnotationsUiDeps = {
   setRange(from: string, to: string): void;
   getAnnotationPanelOpen(): boolean;
   setAnnotationPanelOpenState(open: boolean): void;
+  getAnnotationPanelWidth(): number | undefined;
+  setAnnotationPanelWidth(width: number): void;
   getAnnotationFollow(): boolean;
   setAnnotationFollow(follow: boolean): void;
   leaveDatabaseView(): void;
@@ -92,6 +94,8 @@ export type AnnotationsUi = {
   openAnnotationEntry(entryId: string): Promise<void>;
   /** Show or hide the annotation panel. */
   setAnnotationPanelOpen(open: boolean): void;
+  /** Apply (and, by default, persist) the panel width in px. */
+  applyAnnotationPanelWidth(width: number, persist?: boolean): void;
   /** Entries of the active session, or [] when none is active. */
   getActiveSessionEntries(): AnnotationEntry[];
   /** Register a callback fired after refresh or active-session change. */
@@ -170,6 +174,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       document.body.classList.remove("query-history-panel-open");
     }
     deps.setAnnotationPanelOpenState(open);
+    applyInlineAnnotations();
   }
 
   function annotationLineTarget(
@@ -371,6 +376,10 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     // Inline rows are scoped to the selected session: showing every entry at
     // once buries the code, so nothing is inlined until a session is active.
     const session = ANNOTATIONS.sessions.find((s) => s.id === activeSessionId);
+    if (!annotationPanel.hidden) {
+      applyDatabaseAnnotations(undefined);
+      return;
+    }
     applyDatabaseAnnotations(session);
     if (!session) return;
     for (const entry of session.entries) {
@@ -625,7 +634,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
 
   // "2026-06-11T04:21:08.296Z" → "6/11 13:21" (local time). Same-day noise
   // like seconds is dropped; the full ISO string stays in the tooltip.
-  function sessionTimeLabel(createdAt: string): string {
+  // Shared by session headers and entry rows — both carry a created_at ISO
+  // string with the same shape.
+  function annotationTimeLabel(createdAt: string): string {
     const date = new Date(createdAt);
     if (Number.isNaN(date.getTime())) return "";
     const hm = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -657,6 +668,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   ) {
     $("#annotation-detail-session").textContent =
       activeSessionId || "Datastore annotations";
+    const detailTime = $("#annotation-detail-time");
+    detailTime.textContent = "";
+    detailTime.title = "";
     $("#annotation-detail-step").textContent = "new";
     const location = $<HTMLAnchorElement>("#annotation-detail-location");
     location.textContent = databaseAnnotationTitle(target);
@@ -778,7 +792,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
       title.title = session.created_at;
       const time = document.createElement("span");
       time.className = "annotation-session-time";
-      time.textContent = sessionTimeLabel(session.created_at);
+      time.textContent = annotationTimeLabel(session.created_at);
       time.title = session.created_at;
       title.addEventListener("click", () => {
         // Click toggles: selecting shows this session inline, re-clicking
@@ -842,6 +856,14 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
         summary.className = "annotation-entry-summary";
         summary.textContent = annotationEntrySummary(entry);
         open.append(location, summary);
+        const entryTimeLabel = annotationTimeLabel(entry.created_at);
+        if (entryTimeLabel) {
+          const time = document.createElement("span");
+          time.className = "annotation-entry-time";
+          time.textContent = entryTimeLabel;
+          time.title = entry.created_at;
+          open.appendChild(time);
+        }
         open.addEventListener("click", () => {
           void openAnnotationEntry(entry.id);
         });
@@ -902,6 +924,9 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
   ) {
     activeAnnotationId = entry.id;
     $("#annotation-detail-session").textContent = session.title;
+    const detailTime = $("#annotation-detail-time");
+    detailTime.textContent = annotationTimeLabel(entry.created_at);
+    detailTime.title = entry.created_at;
     $("#annotation-detail-step").textContent =
       `${index + 1}/${session.entries.length}`;
     const location = $<HTMLAnchorElement>("#annotation-detail-location");
@@ -1187,8 +1212,35 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     });
   }
 
-  // Restore the panel open/closed state across reloads.
+  const ANNOTATION_PANEL_DEFAULT_WIDTH = 380;
+  const ANNOTATION_PANEL_MIN_WIDTH = 260;
+  const ANNOTATION_PANEL_MAX_WIDTH = 720;
+
+  function annotationPanelMaxWidth() {
+    return Math.max(
+      ANNOTATION_PANEL_MIN_WIDTH,
+      Math.min(ANNOTATION_PANEL_MAX_WIDTH, window.innerWidth - 32),
+    );
+  }
+
+  function applyAnnotationPanelWidth(width: number, persist = true) {
+    const clamped = Math.max(
+      ANNOTATION_PANEL_MIN_WIDTH,
+      Math.min(annotationPanelMaxWidth(), width),
+    );
+    document.documentElement.style.setProperty(
+      "--annotation-panel-w",
+      `${clamped}px`,
+    );
+    if (persist) deps.setAnnotationPanelWidth(clamped);
+  }
+
+  // Restore the panel open/closed state and width across reloads.
   if (deps.getAnnotationPanelOpen()) setAnnotationPanelOpen(true);
+  applyAnnotationPanelWidth(
+    deps.getAnnotationPanelWidth() ?? ANNOTATION_PANEL_DEFAULT_WIDTH,
+    false,
+  );
   updateDatabaseCaptureButton();
 
   $("#annotations-toggle").addEventListener("click", () => {
@@ -1241,6 +1293,7 @@ export function createAnnotationsUi(deps: AnnotationsUiDeps): AnnotationsUi {
     restoreSessionFromUrl,
     openAnnotationEntry,
     setAnnotationPanelOpen,
+    applyAnnotationPanelWidth,
     getActiveSessionEntries() {
       const session = ANNOTATIONS.sessions.find(
         (s) => s.id === activeSessionId,

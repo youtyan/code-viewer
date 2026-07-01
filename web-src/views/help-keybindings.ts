@@ -83,6 +83,16 @@ const HELP_KEYBINDING_GROUPS: HelpKeybindingDisplayGroup[] = [
       },
       {
         selectors: [
+          { action: "copy-ai-context" },
+          { action: "copy-ai-context-with-code" },
+        ],
+        description: {
+          en: "Copy AI context (with code if a selection is active)",
+          ja: "AI 用コンテキストをコピー（選択行があればコード付き）",
+        },
+      },
+      {
+        selectors: [
           { action: "annotation-previous" },
           { action: "annotation-next" },
         ],

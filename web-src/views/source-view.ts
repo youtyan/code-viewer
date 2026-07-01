@@ -26,11 +26,13 @@ import {
   formatBytes,
   humanFileKind,
   isDockerfileName,
+  isLikelyTextBytes,
   isMakefileName,
   isPreviewableSource,
   normalizeSourceShikiLang,
   sourceDisplayKind,
   sourceFileName,
+  sourceInternalPathKind,
   sourcePreviewKind,
 } from "../core/source-meta";
 import type {
@@ -161,6 +163,10 @@ export function createSourceView(deps: SourceViewDeps) {
   const VIRTUAL_SOURCE_ROW_HEIGHT = 20;
 
   const VIRTUAL_SOURCE_HIGHLIGHT_MAX_LINE_LENGTH = 2000;
+
+  const UNKNOWN_TEXT_SNIFF_BYTES = 8192;
+
+  const SOURCE_LOADING_SLOW_THRESHOLD_MS = 3000;
 
   let sourceShikiLoadPromise: Promise<SourceShikiHighlighter | null> | null =
     null;
@@ -607,13 +613,17 @@ export function createSourceView(deps: SourceViewDeps) {
     view.className = "gdp-source-viewer loading";
     const content = document.createElement("div");
     content.className = "gdp-source-loading-content";
+    const spinner = document.createElement("span");
+    spinner.className = "gdp-source-loading-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    spinner.textContent = "";
     const title = document.createElement("strong");
     title.className = "gdp-source-loading-title";
     title.textContent = "Loading file";
     const message = document.createElement("div");
     message.className = "gdp-source-loading-message";
     message.textContent = `${target.path} at ${target.ref}`;
-    content.append(title, message);
+    content.append(spinner, title, message);
     if (onCancel) {
       const button = document.createElement("button");
       button.type = "button";
@@ -627,6 +637,32 @@ export function createSourceView(deps: SourceViewDeps) {
       content.appendChild(button);
     }
     view.appendChild(content);
+    const startedAt = Date.now();
+    // Loads usually finish in well under a second. If this exact loading
+    // view is still mounted past the threshold, that is no longer the
+    // common case, so say so explicitly instead of leaving the user
+    // guessing whether the app has silently hung.
+    window.setTimeout(() => {
+      if (!view.isConnected) return;
+      const slowNote = document.createElement("div");
+      slowNote.className = "gdp-source-loading-slow-note";
+      content.insertBefore(slowNote, onCancel ? content.lastChild : null);
+      let interval: number | null = null;
+      const updateSlowNote = () => {
+        if (!view.isConnected) {
+          if (interval !== null) window.clearInterval(interval);
+          return;
+        }
+        const elapsed = Math.max(
+          1,
+          Math.floor((Date.now() - startedAt) / 1000),
+        );
+        title.textContent = `Still loading file (${elapsed}s)`;
+        slowNote.textContent = `Taking longer than usual (${elapsed}s elapsed). You can cancel below.`;
+      };
+      updateSlowNote();
+      interval = window.setInterval(updateSlowNote, 1000);
+    }, SOURCE_LOADING_SLOW_THRESHOLD_MS);
     if (body) body.replaceWith(view);
     else card.appendChild(view);
   }
@@ -698,6 +734,41 @@ export function createSourceView(deps: SourceViewDeps) {
     else card.appendChild(view);
   }
 
+  function renderSourceInternalPath(
+    card: DiffCardElement,
+    target: SourceFileTarget,
+    kind: "code-viewer" | "git",
+  ) {
+    const body = card.querySelector<HTMLElement>(
+      ".gdp-file-detail-body, .d2h-files-diff, .d2h-file-diff, .gdp-media, .gdp-source-viewer",
+    );
+    const info = createSourceFileInfo(target, "internal metadata", {
+      loadMeta: false,
+    });
+    const extraChildren: Node[] = [info];
+    // Only the code-viewer state directory is servable raw. /_file returns
+    // 404 for .git/* paths because server/preview.ts blocks git-internal
+    // reads.
+    if (kind === "code-viewer") {
+      const link = document.createElement("a");
+      link.className = "gdp-btn gdp-btn-sm gdp-source-download";
+      link.href = buildRawFileUrl(target);
+      link.textContent = "Download raw";
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      extraChildren.push(link);
+    }
+    const view = renderUnsupportedPreview({
+      message:
+        kind === "code-viewer"
+          ? "This path is managed by code-viewer and is not previewed from the file viewer."
+          : "Git internal metadata is not previewed from the file viewer.",
+      extraChildren,
+    });
+    if (body) body.replaceWith(view);
+    else card.appendChild(view);
+  }
+
   function renderHtmlPreview(
     target: SourceFileTarget,
     html: string,
@@ -708,6 +779,7 @@ export function createSourceView(deps: SourceViewDeps) {
   function createSourceFileInfo(
     target: SourceFileTarget,
     kind: string,
+    options: { loadMeta?: boolean } = {},
   ): HTMLElement {
     const info = document.createElement("div");
     info.className = "gdp-source-file-info";
@@ -715,6 +787,7 @@ export function createSourceView(deps: SourceViewDeps) {
     type.className = "kind";
     type.textContent = humanFileKind(target.path, undefined, kind);
     info.appendChild(type);
+    if (options.loadMeta === false) return info;
     loadRawFileInfo(target).then((meta) => {
       type.textContent = humanFileKind(target.path, meta.type, kind);
       if (meta.size != null) {
@@ -1020,6 +1093,26 @@ export function createSourceView(deps: SourceViewDeps) {
       textValue.length >= VIRTUAL_SOURCE_SIZE_THRESHOLD ||
       lines.length >= VIRTUAL_SOURCE_LINE_THRESHOLD
     );
+  }
+
+  async function sourceLooksTextByContent(
+    target: SourceFileTarget,
+    meta: RawFileInfo,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (meta.size === 0) return true;
+    const end =
+      meta.size != null
+        ? Math.max(0, Math.min(meta.size, UNKNOWN_TEXT_SNIFF_BYTES) - 1)
+        : UNKNOWN_TEXT_SNIFF_BYTES - 1;
+    const response = await trackLoad(
+      fetch(buildRawFileUrl(target), {
+        headers: { Range: `bytes=0-${end}` },
+        signal,
+      }),
+    );
+    if (!response.ok && response.status !== 206) return false;
+    return isLikelyTextBytes(new Uint8Array(await response.arrayBuffer()));
   }
 
   function isVirtualSourceDisabled(): boolean {
@@ -2010,10 +2103,13 @@ export function createSourceView(deps: SourceViewDeps) {
     card.className =
       "gdp-file-shell loaded gdp-standalone-source gdp-source-mode";
     card.dataset.path = target.path;
+    const internalKind = sourceInternalPathKind(target.path);
     const wrapper = document.createElement("div");
     wrapper.className = "gdp-file-detail-wrapper";
     const activeTab: SourceBlobTab =
-      STATE.route.screen === "file" && STATE.route.preview ? "preview" : "code";
+      !internalKind && STATE.route.screen === "file" && STATE.route.preview
+        ? "preview"
+        : "code";
     const { sticky, header } = createFileShellSticky(
       {
         currentRange,
@@ -2023,6 +2119,7 @@ export function createSourceView(deps: SourceViewDeps) {
       },
       target,
       activeTab,
+      internalKind ? { includeFileTabs: false, previewable: false } : {},
     );
     const pathActions =
       header.querySelector<HTMLElement>(".gdp-file-detail-path") || header;
@@ -2042,14 +2139,16 @@ export function createSourceView(deps: SourceViewDeps) {
         }),
       );
     }
-    loadRawFileInfo(target).then((meta) => {
-      if (
-        req !== SOURCE_REQ_SEQ ||
-        !sourceTargetsEqual(sourceTargetFromRoute(), target)
-      )
-        return;
-      header.appendChild(createFileDetailMeta(target, meta));
-    });
+    if (!internalKind) {
+      loadRawFileInfo(target).then((meta) => {
+        if (
+          req !== SOURCE_REQ_SEQ ||
+          !sourceTargetsEqual(sourceTargetFromRoute(), target)
+        )
+          return;
+        header.appendChild(createFileDetailMeta(target, meta));
+      });
+    }
     if (!repoTarget) {
       const back = document.createElement("button");
       back.type = "button";
@@ -2076,11 +2175,29 @@ export function createSourceView(deps: SourceViewDeps) {
       card,
       repoTarget,
     );
+    if (internalKind) {
+      renderSourceInternalPath(card, target, internalKind);
+      return;
+    }
     const controller = new AbortController();
     ACTIVE_SOURCE_LOAD = { controller, req, target, card };
     renderSourceLoading(card, target, () => cancelActiveSourceLoad("user"));
     try {
-      const displayKind = sourceDisplayKind(target.path);
+      let displayKind = sourceDisplayKind(target.path);
+      let rawInfo: RawFileInfo | null = null;
+      if (displayKind === "unsupported") {
+        rawInfo = await loadRawFileInfo(target);
+        if (
+          req !== SOURCE_REQ_SEQ ||
+          !sourceTargetsEqual(sourceTargetFromRoute(), target)
+        )
+          return;
+        if (
+          await sourceLooksTextByContent(target, rawInfo, controller.signal)
+        ) {
+          displayKind = "text";
+        }
+      }
       if (displayKind === "unsupported") {
         if (
           req !== SOURCE_REQ_SEQ ||
@@ -2107,7 +2224,7 @@ export function createSourceView(deps: SourceViewDeps) {
         return;
       }
       if (displayKind === "text") {
-        const meta = await loadRawFileInfo(target);
+        const meta = rawInfo ?? (await loadRawFileInfo(target));
         if (
           req !== SOURCE_REQ_SEQ ||
           !sourceTargetsEqual(sourceTargetFromRoute(), target)

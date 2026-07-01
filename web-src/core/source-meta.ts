@@ -20,6 +20,17 @@ export function isPreviewableSource(path: string): boolean {
   return /\.(md|markdown|mdown|mkdn|mdx|html|htm)$/i.test(path);
 }
 
+export function sourceInternalPathKind(
+  path: string,
+): "code-viewer" | "git" | null {
+  for (const part of path.split(/[\\/]+/)) {
+    const lower = part.toLowerCase();
+    if (lower === ".code-viewer") return "code-viewer";
+    if (lower === ".git") return "git";
+  }
+  return null;
+}
+
 export function sourcePreviewKind(path: string): "markdown" | "html" | null {
   if (/\.(md|markdown|mdown|mkdn|mdx)$/i.test(path)) return "markdown";
   if (/\.(html|htm)$/i.test(path)) return "html";
@@ -176,6 +187,11 @@ const TEXT_SOURCE_EXTENSIONS = new Set([
   "conf",
   "env",
   "properties",
+  "rules",
+  "rule",
+  "prompt",
+  "prompts",
+  "instructions",
   "gitignore",
   "dockerignore",
   "editorconfig",
@@ -315,6 +331,26 @@ export function sourceDisplayKind(
   if (isDotenvName(name)) return "text";
   if (isDockerfileName(name) || isMakefileName(name)) return "text";
   return "unsupported";
+}
+
+export function isLikelyTextBytes(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return true;
+  if (bytes.includes(0)) return false;
+  let text = "";
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return false;
+  }
+  if (!text) return true;
+  let controlCount = 0;
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    const allowed =
+      code === 9 || code === 10 || code === 12 || code === 13 || code >= 32;
+    if (!allowed) controlCount++;
+  }
+  return controlCount / text.length <= 0.02;
 }
 
 export function formatBytes(bytes: number): string {
