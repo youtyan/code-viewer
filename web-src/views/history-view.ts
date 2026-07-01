@@ -31,6 +31,8 @@ export type HistoryText = {
   refreshResultUpdated: (sha: string) => string;
   refreshResultUnchanged: string;
   refreshResultUnchangedInView: string;
+  filterClearLabel: string;
+  filterClearTitle: string;
 };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
@@ -45,6 +47,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshResultUpdated: (sha) => `Updated: ${sha} is now latest`,
     refreshResultUnchanged: "No new commits",
     refreshResultUnchangedInView: "No new commits in this view",
+    filterClearLabel: "Clear",
+    filterClearTitle: "Clear commit filter",
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
@@ -57,6 +61,8 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     refreshResultUpdated: (sha) => `更新: ${sha} が最新です`,
     refreshResultUnchanged: "新しいコミットはありません",
     refreshResultUnchangedInView: "この表示では新しいコミットはありません",
+    filterClearLabel: "解除",
+    filterClearTitle: "コミットフィルタを解除",
   },
 };
 
@@ -92,6 +98,7 @@ export type HistoryViewMount = {
   status: HTMLElement;
   sentinel: HTMLElement;
   filterInput?: HTMLInputElement | null;
+  filterClearButton?: HTMLButtonElement | null;
   refreshButton?: HTMLButtonElement | null;
   commitInfo?: HTMLElement | null;
 };
@@ -152,7 +159,18 @@ export function buildHistoryPanelDom(
     ? "filter commits… (message, sha, author:name, path:file)"
     : "filter commits… (message, sha, author:name)";
   filterInput.autocomplete = "off";
-  filterWrap.appendChild(filterInput);
+  const filterClearButton = document.createElement("button");
+  filterClearButton.type = "button";
+  if (page) filterClearButton.id = "history-filter-clear";
+  filterClearButton.className = "history-filter-clear";
+  filterClearButton.hidden = true;
+  filterClearButton.textContent = HISTORY_TEXT.en.filterClearLabel;
+  filterClearButton.title = HISTORY_TEXT.en.filterClearTitle;
+  filterClearButton.setAttribute(
+    "aria-label",
+    HISTORY_TEXT.en.filterClearTitle,
+  );
+  filterWrap.append(filterInput, filterClearButton);
 
   const banner = document.createElement("div");
   if (page) banner.id = "history-banner";
@@ -183,6 +201,7 @@ export function buildHistoryPanelDom(
     status,
     sentinel,
     filterInput,
+    filterClearButton,
     refreshButton,
   };
 }
@@ -296,6 +315,9 @@ export function createHistoryView(deps: HistoryViewDeps) {
     status: deps.$<HTMLElement>("#history-status"),
     sentinel: deps.$<HTMLElement>("#history-sentinel"),
     filterInput: document.querySelector<HTMLInputElement>("#history-filter"),
+    filterClearButton: document.querySelector<HTMLButtonElement>(
+      "#history-filter-clear",
+    ),
     refreshButton:
       document.querySelector<HTMLButtonElement>(".history-refresh"),
     commitInfo: document.querySelector<HTMLElement>("#history-commit-info"),
@@ -308,6 +330,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   let sentinel = defaultMount.sentinel;
   let attachedList: HTMLOListElement | null = null;
   let attachedFilterInput: HTMLInputElement | null = null;
+  let attachedFilterClearButton: HTMLButtonElement | null = null;
   let attachedRefreshButton: HTMLButtonElement | null = null;
   let filterTimer: ReturnType<typeof setTimeout> | null = null;
   let observer: IntersectionObserver | null = null;
@@ -548,6 +571,17 @@ export function createHistoryView(deps: HistoryViewDeps) {
         ? text.refreshLabelPending
         : text.refreshLabel;
     }
+  }
+
+  function syncFilterClearButton(button?: HTMLButtonElement | null) {
+    const clearButton = button ?? activeMount.filterClearButton;
+    if (!clearButton) return;
+    const input = activeMount.filterInput ?? null;
+    const text = historyText(deps.getLanguage());
+    clearButton.textContent = text.filterClearLabel;
+    clearButton.title = text.filterClearTitle;
+    clearButton.setAttribute("aria-label", text.filterClearTitle);
+    clearButton.hidden = !(input?.value || "");
   }
 
   async function updateCommitInfo(commit: HistoryCommit | null) {
@@ -985,6 +1019,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function handleFilterInput(event?: Event) {
     const input = activeFilterInputFromEvent(event);
     if (!input) return;
+    syncFilterClearButton();
     if (filterTimer) clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
       filterTimer = null;
@@ -998,9 +1033,23 @@ export function createHistoryView(deps: HistoryViewDeps) {
     if (isImeComposing(e)) return;
     if (e.key === "Escape" && input.value) {
       input.value = "";
+      syncFilterClearButton();
       applyFilter("");
       e.stopPropagation();
     }
+  }
+
+  function handleFilterClearClick() {
+    const input = attachedFilterInput;
+    if (!input?.value) return;
+    if (filterTimer) {
+      clearTimeout(filterTimer);
+      filterTimer = null;
+    }
+    input.value = "";
+    syncFilterClearButton();
+    applyFilter("");
+    input.focus?.();
   }
 
   async function handleRefreshClick() {
@@ -1025,6 +1074,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
   function activateMount(mount: HistoryViewMount) {
     if (activeMount === mount && attachedList === mount.list) {
       syncRefreshButton(mount.refreshButton);
+      syncFilterClearButton(mount.filterClearButton);
       return;
     }
     if (attachedList) {
@@ -1036,6 +1086,13 @@ export function createHistoryView(deps: HistoryViewDeps) {
       attachedFilterInput.removeEventListener("change", handleFilterInput);
       attachedFilterInput.removeEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = null;
+    }
+    if (attachedFilterClearButton) {
+      attachedFilterClearButton.removeEventListener(
+        "click",
+        handleFilterClearClick,
+      );
+      attachedFilterClearButton = null;
     }
     if (attachedRefreshButton) {
       attachedRefreshButton.removeEventListener("click", handleRefreshClick);
@@ -1063,6 +1120,12 @@ export function createHistoryView(deps: HistoryViewDeps) {
       input.addEventListener("change", handleFilterInput);
       input.addEventListener("keydown", handleFilterKeydown);
       attachedFilterInput = input;
+    }
+    const filterClearButton = mount.filterClearButton ?? null;
+    if (filterClearButton) {
+      syncFilterClearButton(filterClearButton);
+      filterClearButton.addEventListener("click", handleFilterClearClick);
+      attachedFilterClearButton = filterClearButton;
     }
     const refreshButton = mount.refreshButton ?? null;
     if (refreshButton) {
@@ -1108,6 +1171,7 @@ export function createHistoryView(deps: HistoryViewDeps) {
     onRefPicked,
     localize: () => {
       syncRefreshButton(activeMount.refreshButton);
+      syncFilterClearButton(activeMount.filterClearButton);
       renderList();
     },
     // Called from the SSE "update" listener when a history panel is on

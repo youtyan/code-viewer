@@ -1242,6 +1242,7 @@ describe("history view lifecycle", () => {
     const fileStatus = new FakeElement();
     const fileSentinel = new FakeElement();
     const fileFilterInput = new FakeElement();
+    const fileFilterClearButton = new FakeElement();
     const commits = [
       {
         sha: "aaa111",
@@ -1310,11 +1311,14 @@ describe("history view lifecycle", () => {
         status: fileStatus as unknown as HTMLElement,
         sentinel: fileSentinel as unknown as HTMLElement,
         filterInput: fileFilterInput as unknown as HTMLInputElement,
+        filterClearButton:
+          fileFilterClearButton as unknown as HTMLButtonElement,
         commitInfo: info as unknown as HTMLElement,
       },
     });
 
     expect(fileList.querySelectorAll(".history-item").length).toBe(2);
+    expect(fileFilterClearButton.hidden).toBe(true);
 
     fileFilterInput.value = "bbb";
     fileFilterInput.dispatch("input", { target: fileFilterInput });
@@ -1323,5 +1327,21 @@ describe("history view lifecycle", () => {
     const rows = fileList.querySelectorAll(".history-item");
     expect(rows.map((row) => row.dataset.sha)).toEqual(["bbb222"]);
     expect(fetchedUrls.some((url) => url.includes("q=bbb"))).toBe(true);
+    expect(fileFilterClearButton.hidden).toBe(false);
+    expect(fileFilterClearButton.textContent).toBe("解除");
+    expect(fileFilterClearButton.attributes["aria-label"]).toBe(
+      "コミットフィルタを解除",
+    );
+
+    fileFilterClearButton.click();
+    await waitFor(
+      () => fileList.querySelectorAll(".history-item").length === 2,
+    );
+
+    expect(fileFilterInput.value).toBe("");
+    expect(fileFilterClearButton.hidden).toBe(true);
+    const latestUrl = fetchedUrls[fetchedUrls.length - 1] || "";
+    const latestParams = new URLSearchParams(latestUrl.split("?")[1] || "");
+    expect(latestParams.has("q")).toBe(false);
   });
 });

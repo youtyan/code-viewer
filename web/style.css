@@ -1337,9 +1337,40 @@ body.gdp-history-page #topbar .ref-pickers {
   font: inherit;
   font-size: 13px;
   line-height: 30px;
-  padding: 0 11px 0 34px;
+  padding: 0 60px 0 34px;
   outline: none;
   transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+}
+.history-filter-clear {
+  position: absolute;
+  z-index: 1;
+  right: 19px;
+  top: 23px;
+  transform: translateY(-50%);
+  height: 22px;
+  min-width: 42px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+}
+.history-filter-clear[hidden] {
+  display: none;
+}
+.history-filter-clear:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-muted) 42%, var(--bg));
+}
+.history-filter-clear:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 #history-filter:hover,
 .history-filter:hover {
@@ -1356,6 +1387,13 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-filter::placeholder {
   color: var(--fg-subtle);
   opacity: 1;
+}
+#history-filter::-webkit-search-decoration,
+#history-filter::-webkit-search-cancel-button,
+.history-filter::-webkit-search-decoration,
+.history-filter::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
 }
 .history-banner {
   margin: 8px 10px 0;
