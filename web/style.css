@@ -1236,6 +1236,7 @@ body.gdp-history-page #topbar .ref-pickers {
   min-width: 0;
 }
 .history-refresh {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1267,6 +1268,18 @@ body.gdp-history-page #topbar .ref-pickers {
 .history-refresh.has-update {
   color: var(--accent);
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
+}
+.history-refresh.has-update::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-soft);
 }
 .history-refresh svg {
   width: 16px;

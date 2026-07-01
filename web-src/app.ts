@@ -1891,6 +1891,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         button.title = text.history.refreshTitle;
         button.setAttribute("aria-label", text.history.refreshTitle);
       });
+    relocalizeHistory?.();
 
     setElementText(".scope-settings-head strong", text.settings.title);
     const settingsClose = document.querySelector<HTMLButtonElement>(
@@ -2001,8 +2002,9 @@ window.GdpExpandLogic = GdpExpandLogic;
     relocalizeDatabase?.();
   }
 
-  // createDatabaseView 後に登録される DB ビューア再ローカライズ関数。
+  // createHistoryView / createDatabaseView 後に登録されるビュー再ローカライズ関数。
   // localizeViewerChrome より後 (init / 言語切替) に呼ばれるため遅延参照する。
+  let relocalizeHistory: (() => void) | null = null;
   let relocalizeDatabase: (() => void) | null = null;
 
   // createQuickHelp 後に代入される (同じ遅延参照パターン)。
@@ -3985,6 +3987,7 @@ window.GdpExpandLogic = GdpExpandLogic;
     getLanguage: () => STATE.language,
     trackLoad,
   });
+  relocalizeHistory = () => HISTORY_VIEW.localize();
 
   QUICK_HELP = createQuickHelp({
     $,

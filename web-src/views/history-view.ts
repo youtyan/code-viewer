@@ -25,6 +25,7 @@ export type HistoryText = {
   bodyExpandClose: string;
   bodyExpandMore: (remainingLines: number) => string;
   refreshTitle: string;
+  refreshTitlePending: string;
 };
 
 const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
@@ -33,12 +34,14 @@ const HISTORY_TEXT: Record<HistoryLang, HistoryText> = {
     bodyExpandClose: "Collapse",
     bodyExpandMore: (n) => `Show more (${n} lines)`,
     refreshTitle: "Refresh commit history",
+    refreshTitlePending: "History may have changed. Refresh",
   },
   ja: {
     worktreeLabel: "未コミット変更 (Working tree)",
     bodyExpandClose: "閉じる",
     bodyExpandMore: (n) => `もっと見る (${n} 行)`,
     refreshTitle: "コミット履歴を更新",
+    refreshTitlePending: "新しい履歴がある可能性があります。更新",
   },
 };
 
@@ -480,7 +483,10 @@ export function createHistoryView(deps: HistoryViewDeps) {
 
   function syncRefreshButton(button?: HTMLButtonElement | null) {
     if (!button) return;
-    const title = historyText(deps.getLanguage()).refreshTitle;
+    const text = historyText(deps.getLanguage());
+    const title = hasPendingUpdate
+      ? text.refreshTitlePending
+      : text.refreshTitle;
     button.title = title;
     button.setAttribute("aria-label", title);
     button.classList.toggle("has-update", hasPendingUpdate);

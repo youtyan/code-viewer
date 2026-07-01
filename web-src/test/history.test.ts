@@ -69,6 +69,7 @@ class FakeElement {
   children: FakeElement[] = [];
   classList = new FakeClassList();
   id = "";
+  title = "";
   textContent = "";
   private htmlValue = "";
   hidden = false;
@@ -1024,13 +1025,21 @@ describe("history view lifecycle", () => {
 
     await view.enterHistory();
     expect(refreshButton.classList.contains("has-update")).toBe(false);
+    expect(refreshButton.title).toBe("コミット履歴を更新");
+    expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
 
     view.notePossibleUpdate();
     expect(refreshButton.classList.contains("has-update")).toBe(true);
+    expect(refreshButton.title).toBe("新しい履歴がある可能性があります。更新");
+    expect(refreshButton.attributes["aria-label"]).toBe(
+      "新しい履歴がある可能性があります。更新",
+    );
 
     refreshButton.click();
     await waitFor(() => fetchCount === 2);
     expect(refreshButton.classList.contains("has-update")).toBe(false);
+    expect(refreshButton.title).toBe("コミット履歴を更新");
+    expect(refreshButton.attributes["aria-label"]).toBe("コミット履歴を更新");
   });
 
   test("arrow keys select commits in file history mode without leaving the /file route", async () => {
