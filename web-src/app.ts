@@ -1126,6 +1126,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         unified: string;
         split: string;
         ignoreWs: string;
+        ignoreWsLabel: string;
         syntaxLoading: string;
         syntaxOn: string;
         syntaxOff: string;
@@ -1134,6 +1135,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: string;
         syntaxOffTitle: string;
         hideTests: string;
+        hideTestsLabel: string;
         autoUpdate: string;
         autoUpdateOnTitle: string;
         autoUpdateOffTitle: string;
@@ -1278,6 +1280,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         unified: "unified",
         split: "split",
         ignoreWs: "ignore whitespace changes (-w)",
+        ignoreWsLabel: "ws",
         syntaxLoading: "loading...",
         syntaxOn: "syntax on",
         syntaxOff: "syntax off",
@@ -1286,6 +1289,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         syntaxErrorTitle: "failed to load syntax highlighter",
         syntaxOffTitle: "syntax highlighting off",
         hideTests: "hide test files (test|spec)",
+        hideTestsLabel: "no test",
         autoUpdate: "auto",
         autoUpdateOnTitle: "auto update on file change",
         autoUpdateOffTitle: "auto update off — manual reload",
@@ -1416,7 +1420,7 @@ window.GdpExpandLogic = GdpExpandLogic;
         product: "code viewer",
         copyAiContext:
           "AI 用コンテキストをコピー（Shift+Click でコードも添付）",
-        copyAiContextLabel: "AI context",
+        copyAiContextLabel: "AI文脈",
         copyAiContextCopied: "コピーしました",
         copyAiContextCopiedWithCode: (lines) =>
           `コピーしました（コード付き・${lines}行）`,
@@ -1438,17 +1442,19 @@ window.GdpExpandLogic = GdpExpandLogic;
         resetRange: "HEAD .. worktree に戻す",
         reload: "diff を再読み込み (R)",
         layout: "レイアウト",
-        unified: "unified",
-        split: "split",
+        unified: "統合",
+        split: "分割",
         ignoreWs: "空白差分を無視 (-w)",
+        ignoreWsLabel: "空白",
         syntaxLoading: "読み込み中...",
-        syntaxOn: "syntax on",
-        syntaxOff: "syntax off",
+        syntaxOn: "構文あり",
+        syntaxOff: "構文なし",
         syntaxOnTitle: "シンタックスハイライト有効",
         syntaxLoadingTitle: "シンタックスハイライトを読み込み中",
         syntaxErrorTitle: "シンタックスハイライトの読み込みに失敗",
         syntaxOffTitle: "シンタックスハイライト無効",
         hideTests: "test/spec ファイルを隠す",
+        hideTestsLabel: "テスト非表示",
         autoUpdate: "自動",
         autoUpdateOnTitle: "ファイル変更時に自動更新",
         autoUpdateOffTitle: "自動更新オフ — 手動で再読み込み",
@@ -1665,9 +1671,15 @@ window.GdpExpandLogic = GdpExpandLogic;
       text.topbar.split,
     );
     const ignoreWs = document.querySelector<HTMLButtonElement>("#ignore-ws");
-    if (ignoreWs) ignoreWs.title = text.topbar.ignoreWs;
+    if (ignoreWs) {
+      ignoreWs.title = text.topbar.ignoreWs;
+      ignoreWs.textContent = text.topbar.ignoreWsLabel;
+    }
     const hideTests = document.querySelector<HTMLButtonElement>("#hide-tests");
-    if (hideTests) hideTests.title = text.topbar.hideTests;
+    if (hideTests) {
+      hideTests.title = text.topbar.hideTests;
+      hideTests.textContent = text.topbar.hideTestsLabel;
+    }
     applyAutoUpdateButton();
     setHighlightButton(STATE.syntaxHighlight && getHljs() ? "loaded" : "idle");
 
