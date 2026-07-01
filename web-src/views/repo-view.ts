@@ -80,6 +80,17 @@ export type RepoViewDeps = {
   newFolderButtonTitle(): string;
   openDirectoryInOsTitle(): string;
   moveFolderToTrashTitle(): string;
+  uploadButtonLabel(): string;
+  dropFilesIntoCopy(target: string): string;
+  uploadFailedMessage(): string;
+  emptyDirectoryLabel(): string;
+  uploadConfirmText(
+    count: number,
+    target: string,
+  ): { title: string; body: string; confirmLabel: string };
+  sortColumnLabels(): { name: string; updated: string; size: string };
+  repositoryFallback(): string;
+  repositoryRootFallback(): string;
   $: <T extends Element = HTMLElement>(sel: string) => T;
   STATE: {
     route: AppRoute;
@@ -126,6 +137,14 @@ export function createRepoView(deps: RepoViewDeps) {
     newFolderButtonTitle,
     openDirectoryInOsTitle,
     moveFolderToTrashTitle,
+    uploadButtonLabel,
+    dropFilesIntoCopy,
+    uploadFailedMessage,
+    emptyDirectoryLabel,
+    uploadConfirmText,
+    sortColumnLabels,
+    repositoryFallback,
+    repositoryRootFallback,
   } = deps;
 
   type RepoSortKey = "name" | "updated" | "size";
@@ -464,7 +483,9 @@ export function createRepoView(deps: RepoViewDeps) {
 
     const copy = document.createElement("div");
     copy.className = "gdp-upload-copy";
-    copy.textContent = `Drop files into ${path || getProjectName() || "repository"}`;
+    copy.textContent = dropFilesIntoCopy(
+      path || getProjectName() || repositoryFallback(),
+    );
 
     const input = document.createElement("input");
     input.type = "file";
@@ -474,12 +495,12 @@ export function createRepoView(deps: RepoViewDeps) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gdp-btn gdp-btn-sm";
-    button.textContent = "Upload files";
+    button.textContent = uploadButtonLabel();
     button.addEventListener("click", () => input.click());
     const error = document.createElement("div");
     error.className = "gdp-upload-error";
 
-    const fail = (message = "Upload failed") => {
+    const fail = (message = uploadFailedMessage()) => {
       error.textContent = message;
       dropPanel.classList.add("failed");
       setTimeout(() => dropPanel.classList.remove("failed"), 1600);
@@ -491,7 +512,9 @@ export function createRepoView(deps: RepoViewDeps) {
         error.textContent = "";
       } catch (uploadError) {
         fail(
-          uploadError instanceof Error ? uploadError.message : "Upload failed",
+          uploadError instanceof Error
+            ? uploadError.message
+            : uploadFailedMessage(),
         );
       } finally {
         input.value = "";
@@ -514,7 +537,9 @@ export function createRepoView(deps: RepoViewDeps) {
         error.textContent = "";
       } catch (uploadError) {
         fail(
-          uploadError instanceof Error ? uploadError.message : "Upload failed",
+          uploadError instanceof Error
+            ? uploadError.message
+            : uploadFailedMessage(),
         );
       }
     });
@@ -540,7 +565,7 @@ export function createRepoView(deps: RepoViewDeps) {
     root.className = path
       ? "gdp-file-breadcrumb-part"
       : "gdp-file-breadcrumb-current";
-    root.textContent = getProjectName() || "repository";
+    root.textContent = getProjectName() || repositoryFallback();
     root.addEventListener("click", () => {
       setRoute(repoRoute(target, ""));
       loadRepo();
@@ -704,7 +729,7 @@ export function createRepoView(deps: RepoViewDeps) {
       if (!meta.entries.length) {
         const empty = document.createElement("div");
         empty.className = "gdp-repo-empty";
-        empty.textContent = "No files in this directory.";
+        empty.textContent = emptyDirectoryLabel();
         list.appendChild(empty);
       }
     };
@@ -954,10 +979,11 @@ export function createRepoView(deps: RepoViewDeps) {
     const spacer = document.createElement("span");
     spacer.className = "gdp-repo-sort-spacer";
     header.appendChild(spacer);
+    const sortLabels = sortColumnLabels();
     const columns: Array<{ key: RepoSortKey; label: string }> = [
-      { key: "name", label: "Name" },
-      { key: "updated", label: "Updated" },
-      { key: "size", label: "Size" },
+      { key: "name", label: sortLabels.name },
+      { key: "updated", label: sortLabels.updated },
+      { key: "size", label: sortLabels.size },
     ];
     columns.forEach((column) => {
       const button = document.createElement("button");
@@ -1098,11 +1124,12 @@ export function createRepoView(deps: RepoViewDeps) {
   async function uploadFiles(path: string, files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) return;
-    const label = path || getProjectName() || "repository root";
+    const label = path || getProjectName() || repositoryRootFallback();
+    const confirmText = uploadConfirmText(list.length, label);
     const ok = await showConfirmDialog({
-      title: "Upload files?",
-      body: `Upload ${list.length} file${list.length === 1 ? "" : "s"} into ${label}?`,
-      confirmLabel: "Upload",
+      title: confirmText.title,
+      body: confirmText.body,
+      confirmLabel: confirmText.confirmLabel,
     });
     if (!ok) return;
 

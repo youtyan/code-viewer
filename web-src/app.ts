@@ -1035,6 +1035,28 @@ window.GdpExpandLogic = GdpExpandLogic;
     newFolderButtonTitle: () => uiText().repo.newFolder,
     openDirectoryInOsTitle: () => uiText().sidebar.openDirectoryInOs,
     moveFolderToTrashTitle: () => uiText().repo.moveFolderToTrash,
+    uploadButtonLabel: () => uiText().repo.uploadButton,
+    dropFilesIntoCopy: (target) => uiText().repo.dropFilesInto(target),
+    uploadFailedMessage: () => uiText().repo.uploadFailed,
+    emptyDirectoryLabel: () => uiText().repo.emptyDirectory,
+    uploadConfirmText: (count, target) => {
+      const text = uiText().repo;
+      return {
+        title: text.uploadConfirmTitle,
+        body: text.uploadConfirmBody(count, target),
+        confirmLabel: text.uploadConfirmLabel,
+      };
+    },
+    sortColumnLabels: () => {
+      const text = uiText().repo;
+      return {
+        name: text.sortName,
+        updated: text.sortUpdated,
+        size: text.sortSize,
+      };
+    },
+    repositoryFallback: () => uiText().repo.repositoryFallback,
+    repositoryRootFallback: () => uiText().repo.repositoryRootFallback,
   });
   const {
     loadRepo,
@@ -1141,6 +1163,18 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: string;
         moveFolderToTrash: string;
+        uploadButton: string;
+        dropFilesInto: (target: string) => string;
+        uploadFailed: string;
+        emptyDirectory: string;
+        uploadConfirmTitle: string;
+        uploadConfirmBody: (count: number, target: string) => string;
+        uploadConfirmLabel: string;
+        sortName: string;
+        sortUpdated: string;
+        sortSize: string;
+        repositoryFallback: string;
+        repositoryRootFallback: string;
       };
       history: {
         title: string;
@@ -1279,6 +1313,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: "new folder",
         moveFolderToTrash: "move folder to Trash",
+        uploadButton: "Upload files",
+        dropFilesInto: (target) => `Drop files into ${target}`,
+        uploadFailed: "Upload failed",
+        emptyDirectory: "No files in this directory.",
+        uploadConfirmTitle: "Upload files?",
+        uploadConfirmBody: (count, target) =>
+          `Upload ${count} file${count === 1 ? "" : "s"} into ${target}?`,
+        uploadConfirmLabel: "Upload",
+        sortName: "Name",
+        sortUpdated: "Updated",
+        sortSize: "Size",
+        repositoryFallback: "repository",
+        repositoryRootFallback: "repository root",
       },
       history: {
         title: "Commits",
@@ -1424,6 +1471,19 @@ window.GdpExpandLogic = GdpExpandLogic;
       repo: {
         newFolder: "新規フォルダ",
         moveFolderToTrash: "フォルダをゴミ箱へ移動",
+        uploadButton: "ファイルをアップロード",
+        dropFilesInto: (target) => `${target} にファイルをドロップ`,
+        uploadFailed: "アップロードに失敗しました",
+        emptyDirectory: "このディレクトリにファイルはありません。",
+        uploadConfirmTitle: "ファイルをアップロードしますか？",
+        uploadConfirmBody: (count, target) =>
+          `${target} に ${count} 件のファイルをアップロードしますか？`,
+        uploadConfirmLabel: "アップロード",
+        sortName: "名前",
+        sortUpdated: "更新日時",
+        sortSize: "サイズ",
+        repositoryFallback: "リポジトリ",
+        repositoryRootFallback: "リポジトリのルート",
       },
       history: {
         title: "コミット",

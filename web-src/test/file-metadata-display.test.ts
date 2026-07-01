@@ -79,8 +79,6 @@ describe("file metadata display", () => {
     expect(app.includes("function sortedRepoEntries")).toBe(true);
     expect(app.includes("function createRepoSortHeader")).toBe(true);
     expect(app.includes("button.dataset.repoSort = column.key")).toBe(true);
-    expect(app.includes("{ key: 'updated', label: 'Updated' }")).toBe(true);
-    expect(app.includes("{ key: 'size', label: 'Size' }")).toBe(true);
     expect(app.includes("REPO_SORT.direction === 'asc' ? 'desc' : 'asc'")).toBe(
       true,
     );

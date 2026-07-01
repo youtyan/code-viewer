@@ -44,7 +44,12 @@ function setupDom() {
   `;
 }
 
-function makeRepoView(route: AppRoute) {
+function makeRepoView(
+  route: AppRoute,
+  overrides: Partial<
+    Pick<RepoViewDeps, "emptyDirectoryLabel" | "sortColumnLabels">
+  > = {},
+) {
   const state: RepoViewDeps["STATE"] = {
     route,
     files: [],
@@ -128,11 +133,28 @@ function makeRepoView(route: AppRoute) {
     newFolderButtonTitle: () => "new folder",
     openDirectoryInOsTitle: () => "open this folder in OS",
     moveFolderToTrashTitle: () => "move folder to Trash",
+    uploadButtonLabel: () => "Upload files",
+    dropFilesIntoCopy: (target) => `Drop files into ${target}`,
+    uploadFailedMessage: () => "Upload failed",
+    emptyDirectoryLabel: () => "No files in this directory.",
+    uploadConfirmText: (count, target) => ({
+      title: "Upload files?",
+      body: `Upload ${count} file(s) into ${target}?`,
+      confirmLabel: "Upload",
+    }),
+    sortColumnLabels: () => ({
+      name: "Name",
+      updated: "Updated",
+      size: "Size",
+    }),
+    repositoryFallback: () => "repository",
+    repositoryRootFallback: () => "repository root",
     $: <T extends Element = HTMLElement>(selector: string): T => {
       const element = document.querySelector<T>(selector);
       if (!element) throw new Error(`missing ${selector}`);
       return element;
     },
+    ...overrides,
   });
   return { view, state, calls };
 }
@@ -355,5 +377,47 @@ describe("repo view commit entries", () => {
     );
     expect(meta?.textContent).toBe("submodule");
     expect(meta?.title).toBe("Git submodule pinned to a commit");
+  });
+});
+
+describe("repo view localized labels", () => {
+  test("sort headers and the empty-directory message use injected labels", async () => {
+    setupDom();
+    const root: RepoTreeResponse = {
+      ref: "worktree",
+      path: "",
+      project: "sample-repo",
+      entries: [],
+    };
+    globalThis.fetch = (async () => response(root)) as unknown as typeof fetch;
+
+    const { view } = makeRepoView(
+      {
+        screen: "repo",
+        ref: "worktree",
+        path: "",
+        range,
+      },
+      {
+        sortColumnLabels: () => ({
+          name: "サンプル名前",
+          updated: "サンプル更新日時",
+          size: "サンプルサイズ",
+        }),
+        emptyDirectoryLabel: () => "サンプル空ディレクトリ",
+      },
+    );
+
+    await view.loadRepo();
+
+    expect(
+      document.querySelector('[data-repo-sort="updated"]')?.textContent,
+    ).toBe("サンプル更新日時");
+    expect(document.querySelector('[data-repo-sort="size"]')?.textContent).toBe(
+      "サンプルサイズ",
+    );
+    expect(document.querySelector(".gdp-repo-empty")?.textContent).toBe(
+      "サンプル空ディレクトリ",
+    );
   });
 });

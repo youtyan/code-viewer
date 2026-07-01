@@ -164,6 +164,22 @@ function makeRepoView(
     newFolderButtonTitle: () => "new folder",
     openDirectoryInOsTitle: () => "open this folder in OS",
     moveFolderToTrashTitle: () => "move folder to Trash",
+    uploadButtonLabel: () => "Upload files",
+    dropFilesIntoCopy: (target) => `Drop files into ${target}`,
+    uploadFailedMessage: () => "Upload failed",
+    emptyDirectoryLabel: () => "No files in this directory.",
+    uploadConfirmText: (count, target) => ({
+      title: "Upload files?",
+      body: `Upload ${count} file(s) into ${target}?`,
+      confirmLabel: "Upload",
+    }),
+    sortColumnLabels: () => ({
+      name: "Name",
+      updated: "Updated",
+      size: "Size",
+    }),
+    repositoryFallback: () => "repository",
+    repositoryRootFallback: () => "repository root",
     $: () => {
       throw new Error("stale repository render touched the DOM");
     },
