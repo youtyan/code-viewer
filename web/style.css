@@ -5763,6 +5763,10 @@ html[data-theme="dark"] .db-session-log-sql span[style] {
   height: 14px;
   flex: 0 0 auto;
 }
+.db-query-history-refresh-result {
+  align-self: center;
+  line-height: 1;
+}
 .db-query-history-refresh.spinning svg {
   animation: gdp-spin 0.7s linear infinite;
 }

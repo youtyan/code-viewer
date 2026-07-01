@@ -58,6 +58,8 @@ describe("query history view", () => {
     expect(refresh.title).toBe("Refresh query history");
     expect(refresh.getAttribute("aria-label")).toBe("Refresh query history");
     expect(refresh.getAttribute("aria-busy")).toBe("false");
+    const result = q<HTMLElement>(view.el, ".db-query-history-refresh-result");
+    expect(result.hidden).toBe(true);
 
     refresh.click();
     expect(urls).toEqual(["/_db/history?db=sample.db&schema=public"]);
@@ -76,6 +78,66 @@ describe("query history view", () => {
     expect(refresh.disabled).toBe(false);
     expect(refresh.classList.contains("spinning")).toBe(false);
     expect(refresh.getAttribute("aria-busy")).toBe("false");
+    expect(result.hidden).toBe(false);
+    expect(result.textContent).toBe("No new queries");
+    expect(result.classList.contains("changed")).toBe(false);
+
+    view.clear();
+    expect(result.hidden).toBe(true);
+    expect(result.textContent).toBe("");
+  });
+
+  test("manual refresh announces newly added query history entries", async () => {
+    const firstEntry = {
+      id: "sample-entry-1",
+      dbId: "sample.db",
+      schema: "public",
+      sql: "SELECT id FROM sample_table",
+      columns: ["id"],
+      rowsPreview: [[1]],
+      rowCount: 1,
+      savedRows: 1,
+      truncated: false,
+      elapsedMs: 3,
+      executedAt: "2026-01-02T03:04:05",
+      executedBy: "user",
+      source: "browser",
+    };
+    const secondEntry = {
+      ...firstEntry,
+      id: "sample-entry-2",
+      sql: "SELECT name FROM sample_table",
+    };
+    const states = [
+      { entries: [firstEntry] },
+      { entries: [secondEntry, firstEntry] },
+    ];
+    globalThis.fetch = ((_input: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response(JSON.stringify(states.shift()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )) as typeof fetch;
+
+    const view = createQueryHistoryView({
+      getDbId: () => "sample.db",
+      getSchema: () => "public",
+      copySqlToQuery: () => undefined,
+      getText: () => dbText("en"),
+    });
+    document.body.appendChild(view.el);
+
+    await view.refresh({ force: true });
+    const result = q<HTMLElement>(view.el, ".db-query-history-refresh-result");
+    expect(result.hidden).toBe(true);
+
+    q<HTMLButtonElement>(view.el, ".db-query-history-refresh").click();
+    await flush();
+
+    expect(result.hidden).toBe(false);
+    expect(result.textContent).toBe("+1 queries");
+    expect(result.classList.contains("changed")).toBe(true);
   });
 
   test("selected query details show execution metadata", async () => {

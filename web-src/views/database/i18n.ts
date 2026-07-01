@@ -136,6 +136,8 @@ export type DbText = {
   history: {
     refresh: string;
     refreshTitle: string;
+    refreshResultAdded: (count: number) => string;
+    refreshResultUnchanged: string;
     clearAll: string;
     clearTitle: string;
     selectPlaceholder: string;
@@ -477,6 +479,8 @@ const EN: DbText = {
   history: {
     refresh: "Refresh history",
     refreshTitle: "Refresh query history",
+    refreshResultAdded: (count) => `+${count} queries`,
+    refreshResultUnchanged: "No new queries",
     clearAll: "Clear All",
     clearTitle: "Delete all query history",
     selectPlaceholder: "Select a query to view details",
@@ -816,6 +820,8 @@ const JA: DbText = {
   history: {
     refresh: "クエリ履歴を更新",
     refreshTitle: "クエリ履歴を再読み込み",
+    refreshResultAdded: (count) => `+${count} 件`,
+    refreshResultUnchanged: "新しいクエリはありません",
     clearAll: "すべて削除",
     clearTitle: "クエリ履歴をすべて削除",
     selectPlaceholder: "クエリを選択すると詳細が表示されます",

@@ -15,10 +15,18 @@ export type QueryHistoryViewCallbacks = {
 
 export type QueryHistoryView = {
   el: HTMLElement;
-  refresh: (options?: { force?: boolean }) => Promise<void>;
+  refresh: (options?: {
+    force?: boolean;
+    announceResult?: boolean;
+  }) => Promise<void>;
   clear: () => void;
   localize: () => void;
 };
+
+type RefreshResult =
+  | { type: "none" }
+  | { type: "added"; count: number }
+  | { type: "unchanged" };
 
 export function createQueryHistoryView(
   callbacks: QueryHistoryViewCallbacks,
@@ -38,13 +46,18 @@ export function createQueryHistoryView(
   refreshLabel.className = "db-query-history-action-label";
   refreshBtn.appendChild(refreshLabel);
 
+  const refreshResult = document.createElement("span");
+  refreshResult.className = "db-refresh-result db-query-history-refresh-result";
+  refreshResult.setAttribute("aria-live", "polite");
+  refreshResult.hidden = true;
+
   const clearBtn = document.createElement("button");
   clearBtn.className = "db-query-history-action db-query-history-danger";
   clearBtn.type = "button";
   clearBtn.textContent = text().history.clearAll;
   clearBtn.title = text().history.clearTitle;
 
-  toolbar.append(refreshBtn, clearBtn);
+  toolbar.append(refreshBtn, refreshResult, clearBtn);
 
   const body = document.createElement("div");
   body.className = "db-query-history-body-split";
@@ -74,6 +87,7 @@ export function createQueryHistoryView(
   let inFlightRefresh: { key: string; promise: Promise<void> } | null = null;
   const entryRowsById = new Map<string, HTMLElement>();
   let selectedEntryRow: HTMLElement | null = null;
+  let refreshResultState: RefreshResult = { type: "none" };
 
   function syncRefreshButtonLabel(): void {
     refreshLabel.textContent = text().history.refresh;
@@ -87,8 +101,52 @@ export function createQueryHistoryView(
     refreshBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
   }
 
+  function refreshResultText(): string {
+    switch (refreshResultState.type) {
+      case "none":
+        return "";
+      case "added":
+        return text().history.refreshResultAdded(refreshResultState.count);
+      case "unchanged":
+        return text().history.refreshResultUnchanged;
+      default: {
+        const exhaustive: never = refreshResultState;
+        return exhaustive;
+      }
+    }
+  }
+
+  function syncRefreshResult(): void {
+    const message = refreshResultText();
+    refreshResult.textContent = message;
+    refreshResult.hidden = message.length === 0;
+    refreshResult.classList.toggle(
+      "changed",
+      refreshResultState.type === "added",
+    );
+  }
+
+  function clearRefreshResult(): void {
+    refreshResultState = { type: "none" };
+    syncRefreshResult();
+  }
+
+  function setRefreshResult(
+    previousEntries: QueryHistoryEntry[],
+    nextEntries: QueryHistoryEntry[],
+  ): void {
+    const previousIds = new Set(previousEntries.map((entry) => entry.id));
+    const added = nextEntries.filter(
+      (entry) => !previousIds.has(entry.id),
+    ).length;
+    refreshResultState =
+      added > 0 ? { type: "added", count: added } : { type: "unchanged" };
+    syncRefreshResult();
+  }
+
   syncRefreshButtonLabel();
   setRefreshBusy(false);
+  syncRefreshResult();
 
   function currentRefreshParams(): { key: string; params: string } {
     const dbId = callbacks.getDbId();
@@ -121,7 +179,9 @@ export function createQueryHistoryView(
     return false;
   }
 
-  async function refresh(options: { force?: boolean } = {}) {
+  async function refresh(
+    options: { force?: boolean; announceResult?: boolean } = {},
+  ) {
     const { key: refreshKey, params } = currentRefreshParams();
     const now = Date.now();
     if (inFlightRefresh?.key === refreshKey) {
@@ -134,6 +194,8 @@ export function createQueryHistoryView(
     ) {
       return;
     }
+    const previousEntries = options.announceResult ? [...entries] : null;
+    if (options.announceResult) clearRefreshResult();
     setRefreshBusy(true);
     const promise = (async () => {
       const res = await fetch(`/_db/history${params}`);
@@ -141,6 +203,7 @@ export function createQueryHistoryView(
       const state = (await res.json()) as QueryHistoryState;
       if (currentRefreshParams().key !== refreshKey) return;
       entries = state.entries;
+      if (previousEntries) setRefreshResult(previousEntries, entries);
       lastRefreshKey = refreshKey;
       lastRefreshAt = Date.now();
       if (
@@ -451,6 +514,7 @@ export function createQueryHistoryView(
         ),
       });
       entries = [];
+      clearRefreshResult();
       render();
     } catch {
       /* ignore */
@@ -458,7 +522,7 @@ export function createQueryHistoryView(
   });
 
   refreshBtn.addEventListener("click", () => {
-    refresh({ force: true });
+    refresh({ force: true, announceResult: true });
   });
 
   function clear(): void {
@@ -466,6 +530,7 @@ export function createQueryHistoryView(
     expandedIds.clear();
     lastRefreshKey = null;
     lastRefreshAt = 0;
+    clearRefreshResult();
     if (clearConfirmTimer) {
       clearTimeout(clearConfirmTimer);
       clearConfirmTimer = null;
@@ -478,6 +543,7 @@ export function createQueryHistoryView(
 
   function localize(): void {
     syncRefreshButtonLabel();
+    syncRefreshResult();
     if (clearBtn.dataset.confirm !== "1") {
       clearBtn.textContent = text().history.clearAll;
     }
